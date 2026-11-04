@@ -22,16 +22,22 @@ from ...core.units import ureg, Q_, resolve_precision
 from .. import calibration as cal
 from ...core.types import Quantity
 from ...models.types import TransformerWorkload
+from ...physics.transformer import calc_attention_matmul_flops, calc_transformer_decode_flops
+from ...physics.memory import calc_kv_cache_size
 from ...hardware.types import HardwareNode
 from .base import BaseOptimizer, ForwardModel
+from ._decode import decode_step as _decode_step
+from ...core._validation import validate_at_least, validate_positive, validate_range
+
 
 class ServingModel(ForwardModel):
     """
     Analyzes the two-phase LLM serving lifecycle: Pre-fill vs. Decoding.
 
     LLM inference is not a single mathematical operation; it is a stateful
-    process with two distinct physical regimes (Compute-bound Pre-fill and
-    Memory-bound Decoding).
+    process with two phases. Prefill is modeled with a compute bound; decode
+    compares compute and memory bounds because the limiting resource depends
+    on batch size and context length.
 
     Literature Source:
     1. Pope et al. (2023), "Efficiently Scaling Transformer Inference."
@@ -42,20 +48,31 @@ class ServingModel(ForwardModel):
     Formula contract:
     - TTFT is prefill compute over new prompt tokens plus dispatch overhead and,
       for disaggregated serving, KV-transfer time.
-    - ITL is the decode lower bound: model weights plus KV cache streamed from
-      decode memory bandwidth, plus the configured framework layer tax.
+    - ITL is max(decode compute time, weight/KV memory time), plus the
+      configured framework layer tax. Efficiency derates compute only.
     - KV memory always covers the full sequence, even when prompt caching skips
       part of the prefill computation.
     """
+
     requires = ("workload", "hardware")
     produces = ServingResult
 
-    def solve(self, model: TransformerWorkload, hardware: HardwareNode, seq_len: int, batch_size: int = 1, precision: str = "fp16", efficiency: float = 0.5,
-              decode_hardware: Optional[HardwareNode] = None, network_bandwidth: Quantity = Q_("100 GB/s"),
-              draft_model: Optional[TransformerWorkload] = None, draft_acceptance_rate: float = 0.7,
-              cached_prefix_len: int = 0, prefill_chunk_tokens: Optional[int] = None) -> ServingResult:
-        """
-        Solves for LLM serving performance.
+    def solve(
+        self,
+        model: TransformerWorkload,
+        hardware: HardwareNode,
+        seq_len: int,
+        batch_size: int = 1,
+        precision: str = "fp16",
+        efficiency: float = 0.5,
+        decode_hardware: Optional[HardwareNode] = None,
+        network_bandwidth: Quantity = Q_("100 GB/s"),
+        draft_model: Optional[TransformerWorkload] = None,
+        draft_acceptance_rate: float = 0.7,
+        cached_prefix_len: int = 0,
+        prefill_chunk_tokens: Optional[int] = None,
+    ) -> ServingResult:
+        """Solve for LLM serving performance.
 
         Parameters
         ----------
@@ -64,24 +81,24 @@ class ServingModel(ForwardModel):
         hardware : HardwareNode
             The hardware node for serving (or pre-fill node in disaggregated serving).
         seq_len : int
-            Sequence length (context window).
+            Positive context length in tokens per request, including cached prefix.
         batch_size : int
-            Batch size.
+            Positive simultaneous requests sharing one decode iteration.
         precision : str
-            Numerical precision.
+            Weight and KV element precision, such as fp16 or int8.
         efficiency : float
-            Compute efficiency.
+            Dimensionless compute fraction in (0, 1]; memory uses peak bandwidth.
         decode_hardware : HardwareNode, optional
             If provided, models Disaggregated Serving where 'hardware' does pre-fill
             and 'decode_hardware' does decoding. KV-cache is transferred over the network.
         network_bandwidth : Quantity
-            Network bandwidth between pre-fill and decode nodes.
+            Positive transfer rate in bytes/time between prefill and decode nodes.
         draft_model : TransformerWorkload, optional
             If provided, models Speculative Decoding using this smaller draft model.
         draft_acceptance_rate : float
             Expected acceptance rate (0.0 to 1.0) of draft tokens per step.
         cached_prefix_len : int
-            Number of tokens with pre-computed KV-cache (prompt caching / prefix caching).
+            Nonnegative count of tokens with precomputed KV cache (prefix caching).
             When > 0, the prefill phase only processes (seq_len - cached_prefix_len) new
             tokens, reducing TTFT proportionally. The full KV-cache (including cached prefix)
             still occupies memory. Must be < seq_len.
@@ -95,27 +112,66 @@ class ServingModel(ForwardModel):
         Returns
         -------
         ServingResult
-            Serving performance metrics.
+            TTFT and ITL in time units, required memory, and constraint traces.
+            Feasibility checks modeled resident storage on each device;
+            it does not guarantee a serving engine can deploy the configuration.
+
+        Notes
+        -----
+        Equation: T_step = max(F_step / (eta * peak), (W + KV) / BW)
+        + T_layer. F_step includes linear work and both attention matrix
+        products; W is resident weight storage and KV covers all requests.
+        The helper shared with ContinuousBatchingModel implements this bound.
+
+        Assumptions: peak memory bandwidth, one weight read per decode step,
+        and ideal compute/memory overlap. Efficiency eta changes compute only.
+        The per-layer tax is a separate runtime assumption.
+        Excludes: runtime workspaces, allocator reserve, and tensor-parallel
+        collectives.
+        Speculation adds draft weights and KV storage; disaggregation checks
+        prefill and decode capacities independently. For K draft proposals,
+        target verification evaluates K+1 query positions, including the
+        bonus-token distribution, before amortizing by expected output tokens.
+        Prefill remains a
+        compute-time approximation, not a kernel schedule.
+
+        References
+        ----------
+        Williams, Waterman, and Patterson (2009), "Roofline: An Insightful
+        Visual Performance Model for Multicore Architectures."
+        https://doi.org/10.1145/1498765.1498785 (bibliography key: williams2009).
+        Pope et al. (2023), "Efficiently Scaling Transformer Inference."
+        https://arxiv.org/abs/2211.05102 (bibliography key: pope2023efficiently).
+        Leviathan et al. (2023), "Fast Inference from Transformers via
+        Speculative Decoding," Algorithm 1 (bibliography key: leviathan2023fast).
+        https://arxiv.org/abs/2211.17192.
+        These sources motivate the bounds; the layer tax and feasibility
+        conventions above are MLSysIM modeling choices.
+
+        Examples
+        --------
+        >>> from mlsysim import Hardware, Models
+        >>> from mlsysim.solvers import ServingModel
+        >>> result = ServingModel().solve(
+        ...     Models.Language.Llama3_8B, Hardware.Cloud.H100, seq_len=2048)
+        >>> bool(result.feasible and result.itl.m_as("ms") > 0)
+        True
         """
         precision, bpp = resolve_precision(precision)
 
         # 0. Input validation
-        if seq_len < 1:
-            raise ValueError(f"seq_len ({seq_len}) must be >= 1")
-        if batch_size < 1:
-            raise ValueError(f"batch_size ({batch_size}) must be >= 1")
-        if efficiency <= 0.0 or efficiency > 1.0:
-            raise ValueError(f"efficiency ({efficiency}) must be > 0 and <= 1")
-        if cached_prefix_len < 0:
-            raise ValueError(f"cached_prefix_len ({cached_prefix_len}) must be >= 0")
+        validate_at_least(seq_len, 1, f"seq_len ({seq_len})")
+        validate_at_least(batch_size, 1, f"batch_size ({batch_size})")
+        validate_range(efficiency, 1e-9, 1.0, "efficiency")
+        validate_at_least(cached_prefix_len, 0, "cached_prefix_len")
         if cached_prefix_len >= seq_len:
             raise ValueError(f"cached_prefix_len ({cached_prefix_len}) must be < seq_len ({seq_len})")
-        if draft_acceptance_rate < 0.0 or draft_acceptance_rate > 1.0:
-            raise ValueError(f"draft_acceptance_rate ({draft_acceptance_rate}) must be between 0 and 1")
-        if prefill_chunk_tokens is not None and prefill_chunk_tokens <= 0:
-            raise ValueError(f"prefill_chunk_tokens ({prefill_chunk_tokens}) must be positive")
-        if network_bandwidth.to("B/s").magnitude <= 0:
-            raise ValueError(f"network_bandwidth ({network_bandwidth:~P}) must be positive")
+        validate_range(draft_acceptance_rate, 0.0, 1.0, "draft_acceptance_rate")
+        if prefill_chunk_tokens is not None:
+            validate_at_least(prefill_chunk_tokens, 1, "prefill_chunk_tokens")
+        validate_positive(network_bandwidth.to("B/s"), "network_bandwidth")
+        validate_positive(hardware.memory.capacity, "prefill memory capacity")
+        validate_positive((decode_hardware or hardware).memory.capacity, "decode memory capacity")
 
         # 1. Pre-fill Phase (with optional prompt caching)
         # Prefer the precision-specific FLOP rate (e.g. FP16 tensor cores); fall back
@@ -126,20 +182,20 @@ class ServingModel(ForwardModel):
         # cached — at least one token must pass through prefill to produce output.
         new_tokens = max(1, seq_len - cached_prefix_len)
         # Linear layer FLOPs: 2 * params * tokens * batch (standard 2P approximation)
-        linear_flops = 2 * model.parameters.to(ureg.count).magnitude * new_tokens * batch_size
-        # Attention FLOPs: 2 * n_layers * n_heads * head_dim * seq_len^2 * batch_size
+        linear_flops = calc_transformer_decode_flops(model.parameters, new_tokens) * batch_size
+        # Both attention matrix products visit the supplied context.
         # This captures the O(S^2) self-attention cost, which dominates for long contexts.
         # getattr-with-fallback tolerates plain Workloads that lack transformer
         # geometry; the `or` guards convert an explicit None into the same default.
-        n_layers = getattr(model, 'layers', 1) or 1
-        n_heads = getattr(model, 'heads', 32) or 32
-        head_dim = (getattr(model, 'hidden_dim', 4096) or 4096) // n_heads
+        n_layers = getattr(model, "layers", 1) or 1
+        n_heads = getattr(model, "heads", 32) or 32
+        head_dim = getattr(model, "head_dim", None) or (getattr(model, "hidden_dim", 4096) or 4096) // n_heads
         # Upper-bound approximation: each new token attends over the final context.
         # The leading 4 = 2 FLOPs/MAC x 2 attention matmuls (QK^T scores and
         # attention-weighted V). When cached_prefix_len=0, new_tokens == seq_len
         # so this simplifies to S^2.
-        attention_flops = 4 * n_layers * n_heads * head_dim * new_tokens * seq_len * batch_size
-        prefill_ops = (linear_flops + attention_flops) * ureg.flop
+        attention_flops = calc_attention_matmul_flops(n_layers, n_heads * head_dim, new_tokens, seq_len, batch_size)
+        prefill_ops = linear_flops + attention_flops
         t_prefill_compute = (prefill_ops / (peak_flops_prefill * efficiency)).to("ms")
         prefill_chunks = 1
         prefill_chunk_time: Optional[Quantity] = None
@@ -154,11 +210,13 @@ class ServingModel(ForwardModel):
             tokens_remaining = new_tokens
             while tokens_remaining > 0:
                 chunk_tokens = min(prefill_chunk_tokens, tokens_remaining)
-                chunk_linear = 2 * model.parameters.to(ureg.count).magnitude * chunk_tokens * batch_size
+                chunk_linear = calc_transformer_decode_flops(model.parameters, chunk_tokens) * batch_size
                 # Conservative: every chunk's tokens attend over the full final
                 # context (seq_len), matching the upper-bound convention above.
-                chunk_attention = 4 * n_layers * n_heads * head_dim * chunk_tokens * seq_len * batch_size
-                chunk_ops = (chunk_linear + chunk_attention) * ureg.flop
+                chunk_attention = calc_attention_matmul_flops(
+                    n_layers, n_heads * head_dim, chunk_tokens, seq_len, batch_size
+                )
+                chunk_ops = chunk_linear + chunk_attention
                 chunk_time = (chunk_ops / (peak_flops_prefill * efficiency)).to("ms") + hardware.dispatch_tax
                 chunk_times.append(chunk_time)
                 tokens_remaining -= chunk_tokens
@@ -189,12 +247,18 @@ class ServingModel(ForwardModel):
         # kv_cache_bytes already includes batch_size from get_kv_cache_size().
         # Per-token ITL = step_time (each step produces 1 token per request).
         model_weights_bytes = model.size_in_bytes(bpp)
-        t_decode_per_token = ((model_weights_bytes + kv_cache_bytes) / decode_hw.memory.bandwidth).to("ms")
-
-        # 4. Framework Tax (Per-token decode also incurs launch overhead)
-        from ..calibration import FRAMEWORK_LAYER_TAX_MS
-        layer_tax = Q_(model.layers * FRAMEWORK_LAYER_TAX_MS, "ms")
-        t_decode_per_token += layer_tax
+        step = _decode_step(
+            model,
+            decode_hw,
+            batch_size=batch_size,
+            context_tokens=seq_len,
+            precision=precision,
+            bytes_per_element=bpp,
+            kv_bytes=kv_cache_bytes,
+            efficiency=efficiency,
+        )
+        t_decode_per_token = step.latency
+        draft_kv_cache = Q_("0 byte")
 
         # 5. Speculative Decoding
         # A small draft model proposes K tokens cheaply; the target model verifies
@@ -202,17 +266,36 @@ class ServingModel(ForwardModel):
         # memory-bound weight load over several accepted tokens per step.
         if draft_model:
             # Time to generate 1 token with draft model (uses draft model's own KV cache, not target's)
-            draft_weights_bytes = draft_model.size_in_bytes(bpp)
             draft_kv_cache = draft_model.get_kv_cache_size(seq_len=seq_len, batch_size=batch_size, precision=bpp)
-            t_draft_token = ((draft_weights_bytes + draft_kv_cache) / decode_hw.memory.bandwidth).to("ms")
+            t_draft_token = _decode_step(
+                draft_model,
+                decode_hw,
+                batch_size=batch_size,
+                context_tokens=seq_len,
+                precision=precision,
+                bytes_per_element=bpp,
+                kv_bytes=draft_kv_cache,
+                efficiency=efficiency,
+            ).latency
 
             # Speculative decoding batches K draft tokens (e.g., K=4)
             K = cal.SPECULATIVE_GAMMA
             t_draft_phase = t_draft_token * K
 
-            # Verification phase: Target model verifies K tokens in parallel (compute-bound or memory-bound)
-            # Simplification: verifying K tokens is roughly 1 forward pass of target model + small compute overhead
-            t_verify = t_decode_per_token # essentially memory bound by loading target weights once
+            # Verification evaluates K proposed tokens and the bonus-token
+            # distribution (Leviathan et al., Algorithm 1: p_1 ... p_(K+1)).
+            # One weight read, but K+1 queries worth of compute work.
+            t_verify = _decode_step(
+                model,
+                decode_hw,
+                batch_size=batch_size,
+                context_tokens=seq_len + K,
+                precision=precision,
+                bytes_per_element=bpp,
+                kv_bytes=kv_cache_bytes,
+                efficiency=efficiency,
+                query_tokens=K + 1,
+            ).latency
 
             # Expected tokens per step via geometric series (Leviathan et al., 2023):
             # E[accepted] = alpha*(1 - alpha^K)/(1 - alpha), plus 1 bonus token
@@ -226,17 +309,37 @@ class ServingModel(ForwardModel):
             t_decode_per_token = (t_draft_phase + t_verify) / expected_tokens
 
         # Memory-wall feasibility on the decode node: weights + full-sequence KV
-        # (+ draft weights when speculating — the draft lives alongside the target).
+        # (+ draft weights and KV when speculating on the decode device).
         total_memory_required = model_weights_bytes + kv_cache_bytes
         if draft_model:
-            total_memory_required += draft_model.size_in_bytes(bpp)
-        feasible = total_memory_required <= decode_hw.memory.capacity
+            total_memory_required += draft_model.size_in_bytes(bpp) + draft_kv_cache
+        decode_feasible = total_memory_required <= decode_hw.memory.capacity
+        prefill_memory_required = model_weights_bytes + kv_cache_bytes
+        prefill_feasible = prefill_memory_required <= hardware.memory.capacity
+        feasible = decode_feasible and prefill_feasible
 
-        constraint_trace = []
-        if feasible:
-            constraint_trace.append(f"Memory Wall: Passed. Required {total_memory_required.to('GB'):~P} (Weights: {model_weights_bytes.to('GB'):~P}, KV Cache: {kv_cache_bytes.to('GB'):~P}) <= Available {decode_hw.memory.capacity.to('GB'):~P} on {decode_hw.name}.")
+        constraint_trace = [
+            f"Decode roofline: {step.bottleneck}; compute={step.compute:~P}, "
+            f"memory={step.memory:~P}, layer overhead={step.overhead:~P}. "
+            "Terms describe the target step before speculative amortization.",
+        ]
+        if decode_hardware is not None:
+            status = "Passed" if prefill_feasible else "FAILED"
+            constraint_trace.append(
+                f"Prefill Memory Wall: {status}. Required {prefill_memory_required.to('GB'):~P} "
+                f"against capacity {hardware.memory.capacity.to('GB'):~P} on {hardware.name}; "
+                "prefill offload is not modeled."
+            )
+        if draft_model is not None:
+            constraint_trace.append(f"Draft KV cache included: {draft_kv_cache.to('GB'):~P}.")
+        if decode_feasible:
+            constraint_trace.append(
+                f"Memory Wall: Passed. Required {total_memory_required.to('GB'):~P} (Weights: {model_weights_bytes.to('GB'):~P}, KV Cache: {kv_cache_bytes.to('GB'):~P}) <= Available {decode_hw.memory.capacity.to('GB'):~P} on {decode_hw.name}."
+            )
         else:
-            constraint_trace.append(f"Memory Wall: FAILED. Required {total_memory_required.to('GB'):~P} (Weights: {model_weights_bytes.to('GB'):~P}, KV Cache: {kv_cache_bytes.to('GB'):~P}) > Available {decode_hw.memory.capacity.to('GB'):~P} on {decode_hw.name}.")
+            constraint_trace.append(
+                f"Memory Wall: FAILED. Required {total_memory_required.to('GB'):~P} (Weights: {model_weights_bytes.to('GB'):~P}, KV Cache: {kv_cache_bytes.to('GB'):~P}) > Available {decode_hw.memory.capacity.to('GB'):~P} on {decode_hw.name}."
+            )
         if prefill_chunk_tokens is not None and decode_stall_bound is not None:
             constraint_trace.append(
                 f"Serving Wall: Chunked prefill uses {prefill_chunks} chunks of up to {prefill_chunk_tokens} tokens; "
@@ -260,6 +363,7 @@ class ServingModel(ForwardModel):
             decode_stall_bound=decode_stall_bound,
         )
 
+
 class ServingCapacityModel(ForwardModel):
     """
     Sizes an LLM serving deployment from a QPS and tail-latency target.
@@ -269,6 +373,7 @@ class ServingCapacityModel(ForwardModel):
     and ``TailLatencyModel`` for queueing pressure. It is a capacity planner,
     not a request-level scheduler.
     """
+
     requires = ("workload", "hardware")
     produces = ServingCapacityResult
 
@@ -338,6 +443,39 @@ class ServingCapacityModel(ForwardModel):
             Replica count, capacity/utilization, latency decomposition, and
             the limiting ``bottleneck`` ('Memory', 'Capacity', 'Tail Latency',
             'Base Latency', or 'Feasible').
+
+        See Also
+        --------
+        ContinuousBatchingModel.solve : Paged per-replica token capacity.
+        ServingModel.solve : Request prefill and decode time.
+        TailLatencyModel.solve : Queue-wait approximation.
+
+        Notes
+        -----
+        Equation: request_time = TTFT + ``output_tokens*ITL``; replica capacity
+        is paged token throughput/output_tokens. Candidate P99 adds the queue
+        wait to request_time and accepts the first replica count meeting the SLA.
+
+        Assumptions: identical replicas, capped exponential request lengths,
+        Poisson arrivals, and the service-variability approximation in TailLatencyModel.
+        Mean request length sets fixed-context decode cost.
+        Excludes: routing overhead, growing decode contexts, admission transients,
+        and runtime workspace. Feasibility is conditional on these assumptions;
+        reaching max_replicas without meeting the SLA returns feasible=False.
+
+        References
+        ----------
+        Derivation: divide a token budget by tokens per request to obtain QPS,
+        then compose independent request service and queue-wait estimates.
+
+        Examples
+        --------
+        >>> from mlsysim import Hardware, Models
+        >>> from mlsysim.solvers import ServingCapacityModel
+        >>> r = ServingCapacityModel().solve(Models.Language.Llama3_8B, Hardware.Cloud.H100,
+        ...     qps=1, target_p99_latency_ms=100000, max_replicas=2)
+        >>> bool(r.feasible and r.required_replicas >= 1)
+        True
         """
         from ...core._validation import validate_at_least, validate_nonnegative, validate_positive, validate_range
 
@@ -474,6 +612,7 @@ class ServingCapacityModel(ForwardModel):
             bottleneck=bottleneck,
         )
 
+
 class ContinuousBatchingModel(ForwardModel):
     """
     Compares static KV reservation with PagedAttention under continuous batching.
@@ -514,6 +653,7 @@ class ContinuousBatchingModel(ForwardModel):
     2. Yu et al. (2022), "ORCA: A Distributed Serving System for
        Transformer-Based Generative Models."
     """
+
     requires = ("workload", "hardware")
     produces = ContinuousBatchingResult
 
@@ -543,11 +683,11 @@ class ContinuousBatchingModel(ForwardModel):
           (``calc_expected_paged_kv_tokens``), which grows with page size.
         - Both counts are capped by ``max_batch_size``. When the cap binds for
           both allocators, allocation policy cannot change throughput.
-        - **Throughput**: decode is memory-bound and streams the weights once
-          per step plus the KV tokens requests have actually filled (reserved
-          but empty slots are not read), ``t_step = (W + N * S_mean * k) / BW``
-          and tokens/s ``= N / t_step``. ``speedup_vs_static`` is the paged
-          throughput over the static throughput, each at its own ``N``.
+        - **Throughput**: each step streams weights plus filled KV tokens
+          (reserved but empty slots are not read). Step latency is the larger
+          of compute and memory time, plus the layer tax, using the same
+          accounting as ServingModel. Tokens/s is ``N / t_step``; paging's
+          throughput gain can saturate at the compute ceiling.
         - **TTFT** is the worst-case prefill of a full scheduler batch
           (``max_batch_size`` prompts of ``max_seq_len`` tokens): linear
           ``2*P*S`` plus attention ``4*L*H*d*S^2`` FLOPs, plus the dispatch tax.
@@ -568,13 +708,13 @@ class ContinuousBatchingModel(ForwardModel):
             fills ``max_seq_len``; with no length variance, static and paged
             allocation coincide up to page rounding.
         max_batch_size : int
-            Scheduler cap on concurrent requests.
+            Positive scheduler cap on concurrent requests.
         page_size : int
-            PagedAttention block size in tokens (vLLM default 16).
+            Positive PagedAttention block size in tokens; default 16.
         precision : str
             Numerical precision for weights and KV cache.
         efficiency : float
-            Software efficiency factor in (0, 1] applied to prefill FLOPS.
+            Software efficiency factor in (0, 1] applied to prefill and decode FLOPS.
 
         Returns
         -------
@@ -582,6 +722,41 @@ class ContinuousBatchingModel(ForwardModel):
             Paged and static concurrency and token throughput, internal
             fragmentation of each allocator (fractions), allocated KV, TTFT/ITL,
             and speedup vs static.
+
+        See Also
+        --------
+        mlsysim.physics.memory.calc_expected_paged_kv_tokens : Page rounding.
+        ServingModel.solve : Shared compute/memory decode accounting.
+
+        Notes
+        -----
+        Equation: static concurrency is ``floor(KV_budget/(k*S_max))``; paged
+        concurrency is floor(pool_blocks/E[blocks_per_request]). Both are
+        capped by max_batch_size. Throughput = active_requests/decode_step_time.
+
+        Assumptions: capped exponential request lengths, peak resident context
+        per admitted request, fixed-size pages, peak memory bandwidth, and the
+        shared decode Roofline including its layer tax.
+        Excludes: external fragmentation, scheduler traces, arrival transients,
+        workspace, tensor parallelism, and growing-context dynamics. Feasibility
+        means modeled weights plus allocated KV fit, not engine deployability.
+
+        References
+        ----------
+        Kwon et al. (2023), "Efficient Memory Management for Large Language
+        Model Serving with PagedAttention."
+        https://arxiv.org/abs/2309.06180 (bibliography key: kwon2023).
+        The capped-exponential occupancy distribution is a modeling assumption,
+        not a reproduction of vLLM scheduling.
+
+        Examples
+        --------
+        >>> from mlsysim import Hardware, Models
+        >>> from mlsysim.solvers import ContinuousBatchingModel
+        >>> r = ContinuousBatchingModel().solve(Models.Language.Llama3_8B, Hardware.Cloud.H100,
+        ...     max_seq_len=2048, mean_request_tokens=512, max_batch_size=8)
+        >>> bool(r.feasible and r.max_active_requests <= 8 and r.throughput_tokens_per_sec > 0)
+        True
         """
         from ...core._validation import validate_at_least, validate_range
         from ...physics import calc_expected_paged_kv_tokens
@@ -593,9 +768,7 @@ class ContinuousBatchingModel(ForwardModel):
         if mean_request_tokens is None:
             mean_request_tokens = max_seq_len
         if not 0 < mean_request_tokens <= max_seq_len:
-            raise ValueError(
-                f"mean_request_tokens ({mean_request_tokens}) must be in (0, max_seq_len={max_seq_len}]"
-            )
+            raise ValueError(f"mean_request_tokens ({mean_request_tokens}) must be in (0, max_seq_len={max_seq_len}]")
         mean_request_tokens = float(mean_request_tokens)
 
         precision, bpp = resolve_precision(precision)
@@ -603,12 +776,14 @@ class ContinuousBatchingModel(ForwardModel):
 
         # Worst-case TTFT: a full scheduler batch of max-length prompts (linear
         # term plus the attention O(S²) term).
-        n_layers = getattr(model, 'layers', 1) or 1
-        n_heads = getattr(model, 'heads', 32) or 32
-        head_dim = (getattr(model, 'hidden_dim', 4096) or 4096) // n_heads
-        linear_flops = 2 * model.parameters.to(ureg.count).magnitude * max_seq_len * max_batch_size
-        attention_flops = 4 * n_layers * n_heads * head_dim * max_seq_len**2 * max_batch_size
-        prefill_ops = (linear_flops + attention_flops) * ureg.flop
+        n_layers = getattr(model, "layers", 1) or 1
+        n_heads = getattr(model, "heads", 32) or 32
+        head_dim = getattr(model, "head_dim", None) or (getattr(model, "hidden_dim", 4096) or 4096) // n_heads
+        linear_flops = calc_transformer_decode_flops(model.parameters, max_seq_len) * max_batch_size
+        attention_flops = calc_attention_matmul_flops(
+            n_layers, n_heads * head_dim, max_seq_len, max_seq_len, max_batch_size
+        )
+        prefill_ops = linear_flops + attention_flops
         t_prefill = (prefill_ops / (peak_flops * efficiency)).to("ms") + hardware.dispatch_tax
 
         # KV budget is whatever HBM remains after the weights are pinned resident.
@@ -618,13 +793,21 @@ class ContinuousBatchingModel(ForwardModel):
         if max_memory_for_kv.magnitude <= 0:
             return ContinuousBatchingResult(
                 feasible=False,
-                constraint_trace=[f"Memory Wall: FAILED. Weights ({model_weights_bytes.to('GB'):~P}) exceed available {hardware.memory.capacity.to('GB'):~P} on {hardware.name}."],
-                throughput_tokens_per_sec=0.0, max_active_requests=0,
-                static_throughput_tokens_per_sec=0.0, static_max_active_requests=0,
+                constraint_trace=[
+                    f"Memory Wall: FAILED. Weights ({model_weights_bytes.to('GB'):~P}) exceed available {hardware.memory.capacity.to('GB'):~P} on {hardware.name}."
+                ],
+                throughput_tokens_per_sec=0.0,
+                max_active_requests=0,
+                static_throughput_tokens_per_sec=0.0,
+                static_max_active_requests=0,
                 mean_request_tokens=mean_request_tokens,
-                paged_internal_fragmentation=0.0, static_internal_fragmentation=0.0,
-                paged_kv_cache_size=Q_("0 GB"), static_kv_cache_size=Q_("0 GB"),
-                ttft=t_prefill, itl=Q_("1000000 ms"), speedup_vs_static=1.0,
+                paged_internal_fragmentation=0.0,
+                static_internal_fragmentation=0.0,
+                paged_kv_cache_size=Q_("0 GB"),
+                static_kv_cache_size=Q_("0 GB"),
+                ttft=t_prefill,
+                itl=Q_("1000000 ms"),
+                speedup_vs_static=1.0,
             )
 
         # KV bytes one token occupies (K and V across all layers, MLA-aware), and
@@ -651,9 +834,19 @@ class ContinuousBatchingModel(ForwardModel):
         active_requests = min(paged_capacity, max_batch_size)
 
         def decode_step(n_requests: int) -> Quantity:
-            # Memory-bound step: weights once, plus the KV tokens requests have filled.
+            # Reserved-but-empty KV slots are not read. Both allocators use
+            # the same roofline and layer tax as ServingModel.
             filled_kv = kv_bytes_per_token * (n_requests * mean_request_tokens)
-            return ((model_weights_bytes + filled_kv) / hardware.memory.bandwidth).to("ms")
+            return _decode_step(
+                model,
+                hardware,
+                batch_size=n_requests,
+                context_tokens=mean_request_tokens,
+                precision=precision,
+                bytes_per_element=bpp,
+                kv_bytes=filled_kv,
+                efficiency=efficiency,
+            ).latency
 
         # One step emits one token per active request, so tokens/s is the batch
         # size over the step time.
@@ -673,9 +866,13 @@ class ContinuousBatchingModel(ForwardModel):
         weights_gb = model_weights_bytes.to("GB")
         constraint_trace = []
         if active_requests > 0:
-            constraint_trace.append(f"Memory Wall: Passed. Paged allocation fits {active_requests} concurrent requests (Weights: {weights_gb:~P}, Max KV available: {max_memory_for_kv.to('GB'):~P}) on {hardware.name}.")
+            constraint_trace.append(
+                f"Memory Wall: Passed. Paged allocation fits {active_requests} concurrent requests (Weights: {weights_gb:~P}, Max KV available: {max_memory_for_kv.to('GB'):~P}) on {hardware.name}."
+            )
         else:
-            constraint_trace.append(f"Memory Wall: FAILED. Cannot fit even 1 request. Weights ({weights_gb:~P}) exceed or leave no room for KV cache in available {hardware.memory.capacity.to('GB'):~P} on {hardware.name}.")
+            constraint_trace.append(
+                f"Memory Wall: FAILED. Cannot fit even 1 request. Weights ({weights_gb:~P}) exceed or leave no room for KV cache in available {hardware.memory.capacity.to('GB'):~P} on {hardware.name}."
+            )
 
         if mean_request_tokens >= max_seq_len:
             lengths = f"every request fills max_seq_len={max_seq_len}"
@@ -711,6 +908,7 @@ class ContinuousBatchingModel(ForwardModel):
             speedup_vs_static=speedup,
         )
 
+
 class WeightStreamingModel(ForwardModel):
     """
     Analyzes Wafer-Scale inference (e.g., Cerebras CS-3) using Weight Streaming.
@@ -725,20 +923,77 @@ class WeightStreamingModel(ForwardModel):
     1. Lie et al. (2022), "Cerebras Architecture Deep Dive: First Look Inside
        the Hardware/Software Co-Design for Deep Learning."
     """
+
     requires = ("workload", "hardware")
     produces = WeightStreamingResult
 
-    def solve(self, model: TransformerWorkload, hardware: HardwareNode, seq_len: int,
-              batch_size: int = 1, precision: str = "fp16", efficiency: float = 0.5,
-              phase: str = "decode") -> WeightStreamingResult:
-        """Simulates Weight Streaming throughput and SRAM feasibility.
+    def solve(
+        self,
+        model: TransformerWorkload,
+        hardware: HardwareNode,
+        seq_len: int,
+        batch_size: int = 1,
+        precision: str = "fp16",
+        efficiency: float = 0.5,
+        phase: str = "decode",
+    ) -> WeightStreamingResult:
+        """Estimate layer-wise weight streaming time and on-device state capacity.
 
         Parameters
         ----------
-        phase : str
-            Inference phase: 'prefill' or 'decode' (default 'decode').
-            - prefill: processes all S tokens in parallel (compute-heavy, O(S^2) attention)
-            - decode: processes one token at a time per request (memory-bound)
+        model : TransformerWorkload
+            Transformer with positive layer count, parameters, and head geometry.
+        hardware : HardwareNode
+            Device supplying compute FLOP/s, resident memory bytes, dispatch time,
+            and weight-injection interconnect bytes/s. Missing/zero injection
+            bandwidth uses the fallback in engine.calibration.
+        seq_len : int
+            Positive resident context length in tokens per request.
+        batch_size : int, optional
+            Positive simultaneous requests; default one.
+        precision : str, optional
+            Weight and KV precision; default FP16.
+        efficiency : float, optional
+            Compute utilization in (0, 1]; default 0.5.
+        phase : str, optional
+            'prefill' processes seq_len tokens; 'decode' processes one token.
+            Other strings currently follow the decode branch.
+
+        Returns
+        -------
+        WeightStreamingResult
+            Layer compute/injection times, throughput in tokens/s, memory
+            utilization, optimal linear-work batch, and feasibility. Feasibility
+            checks KV state plus the declared activation allowance only.
+
+        Notes
+        -----
+        Equation: T_layer = max(W_layer/BW_inject, ``F_layer/(eta*peak)+dispatch)``.
+        T_step = ``layers*T_layer``. Decode F_layer = ``2P_layer*B``. Prefill adds
+        ``2*H_query*S^2*d*B`` to ``2P_layer*S*B`` under this model's approximation.
+        Resident storage is 1.1 times KV bytes; the extra tenth is a declared
+        activation allowance. Weights stream from external storage.
+
+        Assumptions: uniform layers and complete injection/compute overlap.
+        The optimal-batch estimate equates injection and linear compute time.
+        Excludes: decode attention work, runtime workspace, detailed communication
+        scheduling, and measured injection efficiency. Prefill uses the causal half-square attention approximation; ServingModel
+        uses a rectangular upper bound over the final context.
+
+        References
+        ----------
+        Derivation: divide each layer's weight bytes by injection bandwidth and
+        its operation count by effective compute rate; the slower concurrent
+        resource sets the layer time. The activation allowance is a heuristic.
+
+        Examples
+        --------
+        >>> from mlsysim import Hardware, Models
+        >>> from mlsysim.solvers import WeightStreamingModel
+        >>> r = WeightStreamingModel().solve(Models.Language.Llama3_8B,
+        ...     Hardware.Cloud.Cerebras_CS3, seq_len=128)
+        >>> bool(r.feasible and r.layer_compute_time.m_as("ms") > 0)
+        True
         """
         precision, bpp = resolve_precision(precision)
         peak_flops = hardware.compute.precision_flops.get(precision, hardware.compute.peak_flops)
@@ -748,12 +1003,11 @@ class WeightStreamingModel(ForwardModel):
         # Working set (activations for the current layer) must also fit, but KV cache dominates
         n_heads = model.kv_heads or model.heads or 32
         h_dim = model.hidden_dim or 4096
-        head_dim = h_dim // (model.heads or 32)
+        head_dim = model.head_dim or h_dim // (model.heads or 32)
 
         # KV dimensions per layer per sequence; the factor 2 counts the separate
         # K and V tensors stored per attention head.
-        bytes_per_seq_per_layer = seq_len * n_heads * head_dim * 2 * bpp.magnitude
-        total_kv_bytes = bytes_per_seq_per_layer * model.layers * batch_size * ureg.byte
+        total_kv_bytes = calc_kv_cache_size(model.layers, n_heads, head_dim, seq_len, batch_size, bpp)
 
         # 10% headroom for the current layer's activation working set — small next
         # to KV at these batch sizes, but not free.
@@ -762,13 +1016,21 @@ class WeightStreamingModel(ForwardModel):
         feasible = total_memory_required <= hardware.memory.capacity
         # Convert to dimensionless before reading the magnitude: GB / GiB left
         # unreduced overstated utilization by 2^30 / 10^9 = 7.4% (fixed 2026-09-15).
-        utilization = (total_memory_required / hardware.memory.capacity).to("dimensionless").magnitude if hardware.memory.capacity.magnitude > 0 else 1.0
+        utilization = (
+            (total_memory_required / hardware.memory.capacity).to("dimensionless").magnitude
+            if hardware.memory.capacity.magnitude > 0
+            else 1.0
+        )
 
         constraint_trace = []
         if feasible:
-            constraint_trace.append(f"SRAM Wall: Passed. Required {total_memory_required.to('GB'):~P} (KV + 10% Overhead) <= Available {hardware.memory.capacity.to('GB'):~P} on {hardware.name}.")
+            constraint_trace.append(
+                f"SRAM Wall: Passed. Required {total_memory_required.to('GB'):~P} (KV + 10% Overhead) <= Available {hardware.memory.capacity.to('GB'):~P} on {hardware.name}."
+            )
         else:
-            constraint_trace.append(f"SRAM Wall: FAILED. Required {total_memory_required.to('GB'):~P} (KV + 10% Overhead) > Available {hardware.memory.capacity.to('GB'):~P} on {hardware.name}.")
+            constraint_trace.append(
+                f"SRAM Wall: FAILED. Required {total_memory_required.to('GB'):~P} (KV + 10% Overhead) > Available {hardware.memory.capacity.to('GB'):~P} on {hardware.name}."
+            )
 
         # 2. Injection Bottleneck vs Compute Bottleneck per Layer
         layer_params = model.parameters / model.layers
@@ -777,7 +1039,11 @@ class WeightStreamingModel(ForwardModel):
         # Injection time (MemoryX -> WSE). Fall back to a calibrated default when
         # the registry entry is missing or zero — a zero injection bandwidth would
         # otherwise make the division below blow up.
-        inj_bw = hardware.interconnect.bandwidth if hardware.interconnect else Q_(cal.FALLBACK_INTERCONNECT_BANDWIDTH_GB_S, "GB/s")
+        inj_bw = (
+            hardware.interconnect.bandwidth
+            if hardware.interconnect
+            else Q_(cal.FALLBACK_INTERCONNECT_BANDWIDTH_GB_S, "GB/s")
+        )
         if inj_bw.magnitude == 0:
             inj_bw = Q_(cal.FALLBACK_INTERCONNECT_BANDWIDTH_GB_S, "GB/s")
 
@@ -785,18 +1051,16 @@ class WeightStreamingModel(ForwardModel):
 
         # Compute time depends on phase
         if phase == "prefill":
-            # Prefill: process all S tokens in parallel.
-            # Linear FLOPs: 2 * params * S * batch_size
-            # Attention FLOPs: 2 * n_heads * S^2 * head_dim * n_layers (per layer already factored below)
-            layer_linear_flops = 2 * layer_params.to(ureg.count).magnitude * seq_len * batch_size
-            # Attention for one layer: 2 * n_heads * seq_len^2 * head_dim
-            layer_attn_flops = 2 * n_heads * seq_len * seq_len * head_dim
-            layer_total_flops = (layer_linear_flops + layer_attn_flops * batch_size) * ureg.flop
-            layer_decode_flops = layer_total_flops
+            # Causal attention counts half the full square; query heads govern
+            # compute even when GQA shares a smaller set of K/V heads.
+            layer_linear_flops = calc_transformer_decode_flops(layer_params, seq_len) * batch_size
+            layer_attention_flops = (
+                calc_attention_matmul_flops(1, (model.heads or 32) * head_dim, seq_len, seq_len, batch_size) / 2
+            )
+            layer_decode_flops = layer_linear_flops + layer_attention_flops
         else:
-            # Decode: one new token per request across the batch
-            # 2 * parameters * batch_size
-            layer_decode_flops = 2 * layer_params.to(ureg.count).magnitude * batch_size * ureg.flop
+            # This weight-streaming approximation excludes decode attention.
+            layer_decode_flops = calc_transformer_decode_flops(layer_params) * batch_size
         layer_compute_time = (layer_decode_flops / (peak_flops * efficiency)).to("ms") + hardware.dispatch_tax
 
         # True layer time is bounded by the slowest process: weight streaming
@@ -817,7 +1081,9 @@ class WeightStreamingModel(ForwardModel):
         # What batch size perfectly overlaps injection and compute?
         # Solve: t_inject = (2 * layer_params * B) / (peak_flops * efficiency)
         # => B = t_inject * peak_flops * efficiency / (2 * layer_params)
-        optimal_batch = (layer_injection_time * peak_flops * efficiency) / (2 * layer_params.to(ureg.count).magnitude * ureg.flop)
+        optimal_batch = (layer_injection_time * peak_flops * efficiency) / (
+            2 * layer_params.to(ureg.count).magnitude * ureg.flop
+        )
         optimal_batch_int = max(1, int(optimal_batch.to_base_units().magnitude))
 
         # Short-circuit: if infeasible (SRAM overflow), report zero throughput
@@ -834,6 +1100,7 @@ class WeightStreamingModel(ForwardModel):
             optimal_batch_size=optimal_batch_int,
             wafer_memory_utilization=min(utilization, 1.0) if feasible else utilization,
         )
+
 
 class TailLatencyModel(ForwardModel):
     """
@@ -853,11 +1120,14 @@ class TailLatencyModel(ForwardModel):
     Literature Source:
     1. Dean & Barroso (2013), "The Tail at Scale."
     """
+
     requires = ("hardware",)
     produces = TailLatencyResult
 
-    def solve(self, arrival_rate_qps: float, service_latency_ms: float, num_replicas: int = 1, service_time_cv: float = 1.0) -> TailLatencyResult:
-        """Solves for P50 and P99 tail latencies under variable load.
+    def solve(
+        self, arrival_rate_qps: float, service_latency_ms: float, num_replicas: int = 1, service_time_cv: float = 1.0
+    ) -> TailLatencyResult:
+        """Solve for P50 and P99 tail latencies under variable load.
 
         Parameters
         ----------
@@ -866,13 +1136,51 @@ class TailLatencyModel(ForwardModel):
         service_latency_ms : float
             Mean service time per request in milliseconds.
         num_replicas : int
-            Number of server replicas (c in M/M/c).
+            Positive integer number of server replicas (c in M/M/c).
         service_time_cv : float
             Coefficient of variation of service time (default 1.0 = exponential).
             When CV != 1, applies Kingman's M/G/1 correction factor
             (cv^2 + 1) / 2 to queue wait times, approximating M/G/c behavior.
+
+        Returns
+        -------
+        TailLatencyResult
+            Estimated P50/P99 service-plus-wait times in milliseconds, utilization,
+            stability, and a dimensionless ratio of P99 wait to five service times.
+            Unstable queues have infinite waits; the ratio is not a probability.
+
+        See Also
+        --------
+        mlsysim.physics.serving.calc_queue_latency_mmc : Erlang-C wait quantiles.
+
+        Notes
+        -----
+        Equation: mu = 1000/service_latency_ms and rho = ``arrivals/(c*mu)``.
+        Erlang-C wait quantiles are multiplied by (CV^2+1)/2, then the mean
+        service duration is added to each quantile.
+
+        Assumptions: nonnegative arrivals, positive mean service time, positive
+        replica count, Poisson arrivals, and identical replicas. CV must be
+        nonnegative; CV=1 gives the exponential-service queue approximation.
+        Excludes: true convolution of service and wait distributions, bursty
+        arrivals, heterogeneous servers, and scheduler dynamics. The CV correction
+        is an approximation for multiple servers, not an exact M/G/c quantile.
+
+        References
+        ----------
+        Derivation: compose the Erlang-C queue-wait quantile with a fixed mean
+        service time. The variability multiplier extends a mean-wait correction
+        to quantiles as a modeling approximation.
+
+        Examples
+        --------
+        >>> from mlsysim.solvers import TailLatencyModel
+        >>> r = TailLatencyModel().solve(arrival_rate_qps=1, service_latency_ms=10)
+        >>> bool(r.is_stable and r.p99_latency >= r.p50_latency)
+        True
         """
         from ...core._validation import validate_nonnegative
+
         validate_nonnegative(service_time_cv, "service_time_cv")
         from ...physics import calc_queue_latency_mmc
 
@@ -886,7 +1194,7 @@ class TailLatencyModel(ForwardModel):
         # W_q(M/G/c) ≈ W_q(M/M/c) * (cv² + 1) / 2
         # When cv=1 (exponential), the factor is 1.0 (no correction).
         if service_time_cv != 1.0:
-            kingman_factor = (service_time_cv ** 2 + 1) / 2
+            kingman_factor = (service_time_cv**2 + 1) / 2
             p50_w = p50_w * kingman_factor
             p99_w = p99_w * kingman_factor
 
@@ -911,6 +1219,7 @@ class TailLatencyModel(ForwardModel):
             slo_headroom_ratio=slo_headroom_ratio,
         )
 
+
 class InferenceScalingModel(ForwardModel):
     """
     Models inference-time compute scaling (Wall 12: Reasoning/CoT Cost).
@@ -927,14 +1236,20 @@ class InferenceScalingModel(ForwardModel):
        More Effective Than Scaling Model Parameters."
     3. OpenAI (2024), "Learning to Reason with LLMs." (o1 reasoning model.)
     """
+
     requires = ("workload", "hardware")
     produces = InferenceScalingResult
 
-    def solve(self, model: TransformerWorkload, hardware: HardwareNode,
-              reasoning_steps: int = 8, context_length: int = 2048,
-              precision: str = "fp16", efficiency: float = 0.5) -> InferenceScalingResult:
-        """
-        Solves for inference-time reasoning cost.
+    def solve(
+        self,
+        model: TransformerWorkload,
+        hardware: HardwareNode,
+        reasoning_steps: int = 8,
+        context_length: int = 2048,
+        precision: str = "fp16",
+        efficiency: float = 0.5,
+    ) -> InferenceScalingResult:
+        """Solve for inference-time reasoning cost.
 
         Parameters
         ----------
@@ -943,24 +1258,60 @@ class InferenceScalingModel(ForwardModel):
         hardware : HardwareNode
             The target hardware node.
         reasoning_steps : int
-            Number of reasoning steps K (each generates tokens).
+            Nonnegative reasoning-step count K; each uses the declared token budget.
         context_length : int
-            Input context length in tokens.
+            Positive fixed input context length in tokens.
         precision : str
-            Numerical precision.
+            Weight and KV element precision, such as fp16 or int8.
         efficiency : float
-            Compute efficiency factor (0.0 to 1.0).
+            Compute efficiency fraction in (0, 1]; default 0.5.
 
         Returns
         -------
         InferenceScalingResult
-            Total reasoning time, cost per query, and token counts.
+            Total reasoning time, TDP-based energy per query in joules, and token counts.
+
+        See Also
+        --------
+        ServingModel.solve : Prefill, decode, and memory feasibility.
+
+        Notes
+        -----
+        Equation: generated_tokens = ``K*N_step``; T = TTFT + ``K*N_step*ITL``;
+        energy = ``TDP*T`` when TDP is available, otherwise zero is returned.
+        N_step is the declared TOKENS_PER_REASONING_STEP calibration default.
+
+        Assumptions: nonnegative reasoning-step count, fixed context for every
+        decode step, and the batch-one ServingModel assumptions.
+        Excludes: reasoning-quality prediction, growing contexts, verification
+        work, measured power, and price. Feasibility is inherited from serving;
+        a computed duration for an infeasible configuration is not deployable.
+
+        References
+        ----------
+        Derivation: multiply a supplied step count by an assumed token budget
+        and per-token latency, then add one prefill. Energy uses a TDP-time proxy;
+        neither token budget nor power is a measured workload trace.
+
+        Examples
+        --------
+        >>> from mlsysim import Hardware, Models
+        >>> from mlsysim.solvers import InferenceScalingModel
+        >>> solver = InferenceScalingModel()
+        >>> a = solver.solve(Models.Language.Llama3_8B, Hardware.Cloud.H100, reasoning_steps=1)
+        >>> b = solver.solve(Models.Language.Llama3_8B, Hardware.Cloud.H100, reasoning_steps=2)
+        >>> bool(b.tokens_generated == 2*a.tokens_generated and b.total_reasoning_time > a.total_reasoning_time)
+        True
         """
         # Use ServingModel internally to get per-step latency
         serving = ServingModel()
         serving_result = serving.solve(
-            model=model, hardware=hardware, seq_len=context_length,
-            batch_size=1, precision=precision, efficiency=efficiency
+            model=model,
+            hardware=hardware,
+            seq_len=context_length,
+            batch_size=1,
+            precision=precision,
+            efficiency=efficiency,
         )
 
         # Inter-token latency (ITL) is the cost per generated token
@@ -993,6 +1344,7 @@ class InferenceScalingModel(ForwardModel):
             serving_detail=serving_result,
         )
 
+
 class BatchingOptimizer(BaseOptimizer):
     """
     Finds the maximum batch size that satisfies a P99 latency SLA.
@@ -1000,15 +1352,23 @@ class BatchingOptimizer(BaseOptimizer):
     Searches the continuous batching design space using an M/M/c queueing
     model to find the optimal balance between throughput and tail latency.
     """
+
     requires = ("workload", "hardware", "sla_latency_ms")
     produces = BatchingOptimizerResult
 
-    def solve(self, model: TransformerWorkload, hardware: HardwareNode,
-              seq_len: int, sla_latency_ms: float, arrival_rate_qps: float,
-              num_replicas: int = 1, precision: str = "fp16",
-              efficiency: float = 0.5, max_search_batch: int = 256) -> BatchingOptimizerResult:
-        """
-        Determine the maximum batch size that satisfies a P99 latency SLA.
+    def solve(
+        self,
+        model: TransformerWorkload,
+        hardware: HardwareNode,
+        seq_len: int,
+        sla_latency_ms: float,
+        arrival_rate_qps: float,
+        num_replicas: int = 1,
+        precision: str = "fp16",
+        efficiency: float = 0.5,
+        max_search_batch: int = 256,
+    ) -> BatchingOptimizerResult:
+        """Determine the maximum batch size that satisfies a P99 latency SLA.
 
         Exhaustively scans batch sizes 1..``max_search_batch``. For each
         candidate ``b``, the per-batch service latency is
@@ -1016,8 +1376,8 @@ class BatchingOptimizer(BaseOptimizer):
         rate is ``arrival_rate_qps / b`` (requests are grouped into batches).
         A candidate is feasible when the model fits in memory, the M/M/c
         queue is stable, and the queueing P99 meets the SLA. Among feasible
-        candidates the largest batch wins, since throughput grows with batch
-        size.
+        candidates the largest batch wins by the chosen objective; this is not
+        a separate optimization of saturation throughput.
 
         Parameters
         ----------
@@ -1034,7 +1394,7 @@ class BatchingOptimizer(BaseOptimizer):
         num_replicas : int
             Number of serving replicas (the 'c' in M/M/c).
         precision : str
-            Numerical precision.
+            Weight and KV element precision, such as fp16 or int8.
         efficiency : float
             Software efficiency factor in (0, 1].
         max_search_batch : int
@@ -1045,19 +1405,57 @@ class BatchingOptimizer(BaseOptimizer):
         BatchingOptimizerResult
             Best batch size, resulting throughput (tokens/s), P99 latency,
             and SLO headroom; ``is_feasible=False`` if no batch size works.
+
+        See Also
+        --------
+        ServingModel.solve : Candidate service and capacity calculation.
+        TailLatencyModel.solve : Queueing estimate for grouped arrivals.
+
+        Notes
+        -----
+        Equation: service_time(b) = TTFT(b) + ``seq_len*ITL(b)``, with batch
+        arrival rate qps/b. Search maximizes b among memory-feasible, stable
+        candidates whose estimated P99 is within sla_latency_ms.
+
+        Assumptions: positive SLA, arrival rate, sequence length, replica count,
+        and search cap; fixed context and grouped arrivals. seq_len is used as
+        both prompt/context length and generated token count in this scenario.
+        Excludes: time spent forming batches, growing KV contexts, and dynamic
+        scheduling. Returned max_throughput is offered ``qps*seq_len``, not a measured
+        or independently optimized saturation capacity. No feasible candidate
+        returns is_feasible=False and batch zero.
+
+        References
+        ----------
+        Derivation: enumerate the integer batch domain, apply modeled capacity
+        and latency constraints, and choose the largest admitted batch.
+
+        Examples
+        --------
+        >>> from mlsysim import Hardware, Models
+        >>> from mlsysim.solvers import BatchingOptimizer
+        >>> r = BatchingOptimizer().solve(Models.Language.Llama3_8B, Hardware.Cloud.H100,
+        ...     seq_len=8, sla_latency_ms=10000, arrival_rate_qps=1, max_search_batch=2)
+        >>> bool(r.is_feasible and 1 <= r.best_batch_size <= 2)
+        True
         """
         from ...core.optimization.registry import OptimizationRegistry
+
         serving_model = ServingModel()
         tail_model = TailLatencyModel()
 
         def objective(b_array):
-            """Search objective: returns -b for feasible batch sizes (so the
-            exhaustive minimizer picks the largest feasible batch) and a 1e12
-            penalty for memory-infeasible, unstable, or SLA-violating ones."""
+            """Prefer the largest feasible batch.
+
+            Return -b for feasible batches and a penalty for memory-infeasible,
+            unstable, or SLA-violating ones.
+            """
             b = int(b_array[0])
-            res = serving_model.solve(model, hardware, seq_len=seq_len, batch_size=b, precision=precision, efficiency=efficiency)
+            res = serving_model.solve(
+                model, hardware, seq_len=seq_len, batch_size=b, precision=precision, efficiency=efficiency
+            )
             if not res.feasible:
-                return 1e12 # Infeasible due to memory
+                return 1e12  # Infeasible due to memory
 
             service_latency = res.ttft + (res.itl * seq_len)
             # Requests are grouped b-at-a-time, so the queue sees batches arriving
@@ -1065,7 +1463,7 @@ class BatchingOptimizer(BaseOptimizer):
             tail_res = tail_model.solve(arrival_rate_qps / b, service_latency.m_as("ms"), num_replicas)
 
             if not tail_res.is_stable or tail_res.p99_latency.m_as("ms") > sla_latency_ms:
-                return 1e12 # Infeasible due to queueing instability or SLA violation
+                return 1e12  # Infeasible due to queueing instability or SLA violation
 
             # We want to maximize batch size (which maximizes valid throughput), so minimize -b
             return -b
@@ -1083,14 +1481,16 @@ class BatchingOptimizer(BaseOptimizer):
                 p99_latency=Q_("0 ms"),
                 slo_headroom_ratio=0.0,
                 is_feasible=False,
-                total_searched=max_search_batch
+                total_searched=max_search_batch,
             )
 
         best_b = int(opt_res.best_configuration["optimal_variable"])
         max_tps = arrival_rate_qps * seq_len
 
         # Resolve final exact metrics for the optimal batch size
-        res = serving_model.solve(model, hardware, seq_len=seq_len, batch_size=best_b, precision=precision, efficiency=efficiency)
+        res = serving_model.solve(
+            model, hardware, seq_len=seq_len, batch_size=best_b, precision=precision, efficiency=efficiency
+        )
         service_latency = res.ttft + (res.itl * seq_len)
         tail_res = tail_model.solve(arrival_rate_qps / best_b, service_latency.m_as("ms"), num_replicas)
 
@@ -1102,8 +1502,9 @@ class BatchingOptimizer(BaseOptimizer):
             p99_latency=tail_res.p99_latency,
             slo_headroom_ratio=tail_res.slo_headroom_ratio,
             is_feasible=True,
-            total_searched=max_search_batch
+            total_searched=max_search_batch,
         )
+
 
 __all__ = [
     "ServingModel",

@@ -14,6 +14,7 @@ citation.
 from __future__ import annotations
 
 import sys
+import csv
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]  # directory holding the mlsysim package
@@ -55,7 +56,7 @@ A7_REPORTED_PP = 16
 # ── Configurations ──────────────────────────────────────────────────────────
 A1_GPUS = 8
 A1_CONFIG = dict(batch_size=256, precision="fp16", efficiency=0.19, is_training=True)
-A2_TP_DEGREE = 2
+A2_TP_DEGREE = 4  # Match the Argonne request-latency configuration, not minimum capacity.
 A3_ETA = 0.50
 A3_V_STAGES = 8
 # Llama 3 herd paper, Sec. 3.3.2 and Table 4: TP=8, CP=1, PP=16, DP=128 on 16K H100 at 8,192
@@ -129,9 +130,17 @@ def anchor_two() -> dict:
     _, bpp = resolve_precision("fp16")
     weights = model.size_in_bytes(bpp)
     floor = weights / (A2_TP_DEGREE * h100.memory.bandwidth)
+    path = Path(__file__).resolve().parents[1] / "data" / "argonne-llama2-70b-h100.csv"
+    with path.open() as stream:
+        rows = list(csv.DictReader(stream))
+    short = [r for r in rows if r["Input Output Length"] == "128"]
+    if len(short) != 2 or {r["Framework"] for r in short} != {"vLLM", "TensorRT-LLM"}:
+        raise ValueError("Expected one short-prompt row per Argonne engine")
+    averages = {r["Framework"]: float(r["Latency"]) * 1000 / 128 for r in short}
     return {
         "weights": weights, "floor_ms": floor.m_as("ms"), "tp": A2_TP_DEGREE,
-        "source": "Models.Language.Llama2_70B.size_in_bytes(FP16) / (2 x Hardware.Cloud.H100.memory.bandwidth)",
+        "request_average_ms": averages,
+        "source": "Models.Language.Llama2_70B.size_in_bytes(FP16) / (4 x Hardware.Cloud.H100.memory.bandwidth)",
     }
 
 

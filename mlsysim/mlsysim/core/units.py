@@ -173,7 +173,40 @@ PRECISION_MAP = {
 
 
 def normalize_precision(precision: str) -> str:
-    """Return the canonical precision key or raise for unsupported formats."""
+    """Normalize a supported precision name to its canonical lookup key.
+
+    Parameters
+    ----------
+    precision : str
+        Case-insensitive key in ``PRECISION_MAP``: fp32, tf32, bf16,
+        fp16, fp8, int8, or int4. Whitespace and aliases are not accepted.
+
+    Returns
+    -------
+    str
+        Lowercase supported precision key; no units are attached.
+
+    Raises
+    ------
+    TypeError
+        If precision is not a string.
+    ValueError
+        If the lowercase key does not appear in ``PRECISION_MAP``.
+
+    Notes
+    -----
+    The lookup lowercases the input and validates membership in
+    ``PRECISION_MAP``. It does not check hardware capabilities.
+
+    Callers must choose a storage precision supported by the shared table.
+    Alias expansion and mixed-precision policy selection remain the caller's
+    responsibility.
+
+    Examples
+    --------
+    >>> normalize_precision("BF16")
+    'bf16'
+    """
     if not isinstance(precision, str):
         raise TypeError(f"precision must be a string, got {type(precision).__name__}")
     key = precision.lower()
@@ -184,18 +217,44 @@ def normalize_precision(precision: str) -> str:
 
 
 def resolve_precision(precision: str):
-    """Return ``(canonical_key, bytes_per_element)`` for a supported precision.
+    """Resolve a precision name into its canonical key and storage width.
 
-    The single entry point solvers use to turn a user-facing precision string
-    into a storage width. ``bytes_per_element`` is a Pint byte Quantity from
-    ``PRECISION_MAP`` — the *storage* width, not the compute format (so
-    'tf32' maps to 4 bytes and 'fp8' to 1 byte). Case-insensitive; raises
-    ``ValueError`` for unsupported formats, listing the supported keys.
+    Parameters
+    ----------
+    precision : str
+        Case-insensitive supported precision key, validated by
+        ``normalize_precision``.
+
+    Returns
+    -------
+    tuple of str and Quantity
+        Canonical lowercase key and bytes per stored element, with Pint
+        byte units. This width describes storage, not arithmetic throughput.
+
+    Raises
+    ------
+    TypeError
+        If precision is not a string.
+    ValueError
+        If the precision is unsupported.
+
+    Notes
+    -----
+    The function normalizes the key and looks up ``PRECISION_MAP[key]``.
+    It does not derive device performance from the bit width.
+
+    Elements use the packed representation declared by the
+    shared precision table. TF32 retains FP32 storage width; INT4 uses
+    fractional bytes per element in bulk accounting.
+
+    Storage widths exclude quantization scales, padding, alignment, and
+    metadata. Hardware support for a compute format is checked separately.
 
     Examples
     --------
-    >>> resolve_precision("FP16")
-    ('fp16', <Quantity(2, 'byte')>)
+    >>> key, width = resolve_precision("FP16")
+    >>> key, width.m_as("byte")
+    ('fp16', 2)
     """
     key = normalize_precision(precision)
     return key, PRECISION_MAP[key]

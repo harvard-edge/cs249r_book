@@ -399,7 +399,43 @@ class MobileManipulatorPlatform(BaseModel):
 
     @property
     def chunk_schedule(self):
-        """Renewal timing of the chunk policy (see ``calc_chunk_renewal_schedule``)."""
+        """Derive the chunk renewal schedule from the platform's timing fields.
+
+        Returns
+        -------
+        dict
+            Renewal period, chunk span, and open-loop span as time quantities;
+            setpoints_per_renewal and min_supply_setpoints as counts. The helper
+            rejects a renewal that misses its grid or lacks sufficient setpoints.
+
+        See Also
+        --------
+        mlsysim.physics.robotics.calc_chunk_renewal_schedule : Schedule equations and validation.
+
+        Notes
+        -----
+        Equation: renewal_period = 1/chunk_rate; chunk_span = ``chunk_horizon*chunk_step``;
+            open_loop_span = renewal_period + chunk_inference_latency. The positive
+            chunk_rate is in Hz, chunk_step and chunk_inference_latency are times,
+            and chunk_horizon is an integer setpoint count.
+        Assumptions: periodic renewal, constant setpoint spacing, and inference
+            completing within the period; renewal aligns to whole setpoint steps.
+        Excludes: runtime jitter, missed transmissions, and a guarantee that the
+            commanded trajectory remains dynamically feasible.
+
+        References
+        ----------
+        Derivation: reciprocal frequency gives renewal time; multiplying setpoint
+            spacing by count gives supply duration. The referenced helper checks
+            whether that supply covers the scheduled replacement interval.
+
+        Examples
+        --------
+        >>> from mlsysim.embodied.registry import Embodied
+        >>> machine = Embodied.MobileManipulator.WarehouseMobileManipulator
+        >>> machine.chunk_schedule['min_supply_setpoints'] <= machine.chunk_horizon
+        True
+        """
         from ..physics.robotics import calc_chunk_renewal_schedule  # avoid import cycle
 
         return calc_chunk_renewal_schedule(
@@ -408,21 +444,112 @@ class MobileManipulatorPlatform(BaseModel):
 
     @property
     def chunk_period(self):
-        """Chunk-policy renewal period, 1 / chunk_rate."""
+        """Return the interval between scheduled chunk-policy renewals.
+
+        Returns
+        -------
+        Quantity
+            Renewal period as a time quantity returned by chunk_schedule.
+
+        See Also
+        --------
+        MobileManipulatorPlatform.chunk_schedule : Complete renewal contract.
+
+        Notes
+        -----
+        Equation: chunk_period = 1/chunk_rate, where chunk_rate is positive Hz.
+        Assumptions: the periodic setpoint schedule passes chunk_schedule validation.
+        Excludes: realized inference jitter, dropped renewals, and transport delay.
+
+        References
+        ----------
+        Derivation: a periodic process at f cycles per second has period 1/f seconds.
+
+        Examples
+        --------
+        >>> from mlsysim.embodied.registry import Embodied
+        >>> machine = Embodied.MobileManipulator.WarehouseMobileManipulator
+        >>> bool(machine.chunk_period * machine.chunk_rate == 1)
+        True
+        """
         return self.chunk_schedule["renewal_period"]
 
     @property
     def intent_weight_memory(self):
-        """Stored intent-model weights at the deployed precision."""
+        """Count stored intent-model weight bytes at deployment precision.
+
+        Returns
+        -------
+        Quantity
+            Weight storage in decimal GB, excluding activation and KV state.
+
+        Notes
+        -----
+        Equation: intent_weight_memory = intent_model.parameters *
+            intent_weight_bytes_per_param. Parameter count is in param and deployed
+            element storage is in byte/param; both must be positive.
+        Assumptions: all parameters are resident and stored at one uniform precision.
+        Excludes: quantization scales, alignment, allocator reserve, KV cache,
+            activations, and runtime workspaces.
+
+        References
+        ----------
+        Derivation: parameter count multiplied by bytes per parameter gives bytes;
+            the stored-precision field is an input, not an inferred compression ratio.
+
+        Examples
+        --------
+        >>> from mlsysim.embodied.registry import Embodied
+        >>> machine = Embodied.MobileManipulator.WarehouseMobileManipulator
+        >>> bool(machine.intent_weight_memory ==
+        ...      machine.intent_model.parameters * machine.intent_weight_bytes_per_param)
+        True
+        """
         return (self.intent_model.parameters * self.intent_weight_bytes_per_param).to(ureg.GB)
 
     @property
     def intent_latency_breakdown(self):
-        """Roofline terms of one fresh intent-model evaluation on the application processor.
+        """Estimate one fresh intent evaluation's prefill and decode times.
 
-        Prefill runs at the dense FP16 rate (weight-only quantization keeps 16-bit
-        activations); decode sweeps the stored weights at the sustained bandwidth.
-        See ``calc_vla_inference_latency``.
+        Returns
+        -------
+        dict
+            Compute and memory timing terms, total latency, token counts, and
+            throughput from calc_vla_inference_latency. Time values carry Pint
+            units; these are modeled durations, not the reference measured latency.
+
+        See Also
+        --------
+        mlsysim.physics.transformer.calc_vla_inference_latency : Phase equations and model exclusions.
+
+        Notes
+        -----
+        Equation: delegate to calc_vla_inference_latency with model parameter count,
+            deployed weight bytes, input token count, action dimension, layer count,
+            and hidden width. Each phase compares its compute and bandwidth bounds;
+            FP16 compute supply is multiplied by intent_compute_utilization and
+            byte bandwidth by dram_efficiency. intent_parallel_decode selects
+            parallel action-token prefill instead of sequential decode sweeps.
+        Assumptions: positive work/rates; efficiencies in (0, 1]; weight-only
+            quantization retains FP16 arithmetic. An explicit fp16 compute rate takes
+            precedence over the processor's canonical peak_flops. The referenced helper
+            defines attention work and the first-token convention.
+        Excludes: vision-encoder work outside supplied input tokens, runtime
+            workspace admission, scheduling jitter, and action-quality prediction.
+
+        References
+        ----------
+        Derivation: the platform supplies declared workload and processor fields to
+            the linked VLA phase model. It does not calibrate utilization from the
+            separate intent_reference_latency field.
+
+        Examples
+        --------
+        >>> from mlsysim.embodied.registry import Embodied
+        >>> from mlsysim import Q_
+        >>> machine = Embodied.MobileManipulator.WarehouseMobileManipulator
+        >>> machine.intent_latency_breakdown['t_total'] > Q_(0, 's')
+        True
         """
         from ..physics.transformer import calc_vla_inference_latency  # avoid import cycle
 
@@ -432,7 +559,7 @@ class MobileManipulatorPlatform(BaseModel):
             self.intent_weight_memory,
             self.intent_input_tokens,
             self.intent_model.action_dim,
-            soc.compute.precision_flops["fp16"],
+            soc.compute.precision_flops.get("fp16", soc.compute.peak_flops),
             soc.memory.bandwidth,
             bus_efficiency=self.dram_efficiency,
             compute_utilization=self.intent_compute_utilization,
@@ -443,31 +570,167 @@ class MobileManipulatorPlatform(BaseModel):
 
     @property
     def intent_inference_latency(self):
-        """Computed latency of one fresh intent-model evaluation (prefill plus decode)."""
+        """Return total modeled time for one fresh intent-model evaluation.
+
+        Returns
+        -------
+        Quantity
+            Prefill-plus-decode time from the VLA timing model, with time units.
+
+        See Also
+        --------
+        MobileManipulatorPlatform.intent_latency_breakdown : Timing model inputs and exclusions.
+
+        Notes
+        -----
+        Equation: intent_inference_latency = intent_latency_breakdown['t_total'];
+            total time sums prefill and decode under the configured execution mode.
+        Assumptions: the workload, precision, and efficiencies of the linked
+            breakdown apply to this evaluation, with no pipelining across requests.
+        Excludes: replacing the modeled total with intent_reference_latency,
+            external sensor-processing stages, or a measured runtime guarantee.
+
+        References
+        ----------
+        Derivation: select the total from the same phase calculation used for
+            validation, avoiding a separately stored latency that could diverge.
+
+        Examples
+        --------
+        >>> from mlsysim.embodied.registry import Embodied
+        >>> machine = Embodied.MobileManipulator.WarehouseMobileManipulator
+        >>> bool(machine.intent_inference_latency * machine.intent_rate <= 1)
+        True
+        """
         return self.intent_latency_breakdown["t_total"]
 
     @property
     def unloaded_mass(self):
-        """Base plus arm, without the tote-rack payload."""
+        """Add the base and arm masses before onboard payload is loaded.
+
+        Returns
+        -------
+        Quantity
+            Combined base and arm mass in kg.
+
+        Notes
+        -----
+        Equation: unloaded_mass = base.mass + arm.mass; both masses are in kg.
+        Assumptions: the base and arm entries contain disjoint installed masses.
+        Excludes: onboard payload and equipment not represented in either entry.
+
+        References
+        ----------
+        Derivation: mass is additive for the two non-overlapping components.
+
+        Examples
+        --------
+        >>> from mlsysim.embodied.registry import Embodied
+        >>> machine = Embodied.MobileManipulator.WarehouseMobileManipulator
+        >>> machine.unloaded_mass == machine.base.mass + machine.arm.mass
+        True
+        """
         return (self.base.mass + self.arm.mass).to(ureg.kg)
 
     @property
     def loaded_mass(self):
-        """Unloaded mass plus the full tote-rack capacity (an upper bound)."""
+        """Add the full onboard payload capacity to the unloaded machine mass.
+
+        Returns
+        -------
+        Quantity
+            Fully loaded mass in kg under the stated component inventory.
+
+        See Also
+        --------
+        MobileManipulatorPlatform.unloaded_mass : Base-plus-arm mass.
+
+        Notes
+        -----
+        Equation: loaded_mass = unloaded_mass + onboard_payload_capacity; payload
+            capacity is a nonnegative mass, not the actual payload of a particular run.
+        Assumptions: capacity is fully used and each component is counted once.
+        Excludes: overload, separate unlisted attachments, and payload distribution.
+
+        References
+        ----------
+        Derivation: adding the full allowed payload to the component sum gives the
+            upper load case for this inventory.
+
+        Examples
+        --------
+        >>> from mlsysim.embodied.registry import Embodied
+        >>> machine = Embodied.MobileManipulator.WarehouseMobileManipulator
+        >>> machine.loaded_mass - machine.unloaded_mass == machine.onboard_payload_capacity
+        True
+        """
         return (self.unloaded_mass + self.onboard_payload_capacity).to(ureg.kg)
 
     @property
     def arm_effective_contact_mass(self):
-        """Robot-side effective mass at the TCP: half the arm's moving mass plus payload."""
+        """Apply the declared half-arm-plus-payload contact-mass approximation.
+
+        Returns
+        -------
+        Quantity
+            Approximate robot-side contact mass at the tool center point, in kg.
+
+        Notes
+        -----
+        Equation: arm_effective_contact_mass = arm.mass/2 + arm.payload_capacity;
+            both required inputs are masses in kg.
+        Assumptions: half of the stated arm mass and the full payload capacity
+            participate in contact. This is a fixed modeling convention, not a
+            configuration-dependent operational-space inertia calculation.
+        Excludes: joint posture, contact direction, controller impedance, reflected
+            drivetrain inertia, and proof of a safe impact force.
+
+        References
+        ----------
+        Derivation: the implementation assigns a one-half participation factor to
+            arm mass and full participation to payload. That factor is an assumed
+            approximation rather than a consequence of general rigid-body mechanics.
+
+        Examples
+        --------
+        >>> from mlsysim.embodied.registry import Embodied
+        >>> machine = Embodied.MobileManipulator.WarehouseMobileManipulator
+        >>> machine.arm_effective_contact_mass == machine.arm.mass/2 + machine.arm.payload_capacity
+        True
+        """
         return (self.arm.mass / 2 + self.arm.payload_capacity).to(ureg.kg)
 
     @property
     def drive_wheel_load_share_max(self):
-        """Largest weight fraction the driven wheels may carry within their load rating.
+        """Bound the static mass share supported by the installed drive wheels.
 
-        The hub motors' datasheet load rating per pair bounds the static load on
-        the two driven wheels, so the casters must carry the remainder of the
-        loaded mass: phi <= rating / m_loaded (capped at 1).
+        Returns
+        -------
+        float or None
+            Dimensionless supported-mass fraction capped at one, or None when no
+            drive_unit is specified. This is a rating constraint, not actual axle load.
+
+        Notes
+        -----
+        Equation: share = min(1, (drive_wheel_count/2) *
+            drive_unit.load_rating_per_pair / loaded_mass). Load rating and loaded
+            mass are positive masses in kg; wheel count is a positive integer.
+        Assumptions: each installed pair has the same published static load rating,
+            and remaining machine load can be carried by the casters.
+        Excludes: uneven wheel loading, transient load transfer, tire friction,
+            suspension dynamics, and measurement of the actual drive-wheel share.
+
+        References
+        ----------
+        Derivation: multiply the per-pair rated mass by pair count, divide by total
+            loaded mass, and cap the admissible fraction at the whole vehicle mass.
+
+        Examples
+        --------
+        >>> from mlsysim.embodied.registry import Embodied
+        >>> machine = Embodied.MobileManipulator.WarehouseMobileManipulator
+        >>> 0 < machine.drive_wheel_load_share_max <= 1
+        True
         """
         if self.drive_unit is None:
             return None
@@ -477,17 +740,68 @@ class MobileManipulatorPlatform(BaseModel):
 
     @property
     def permission_rail_holdup_capacitance(self):
-        """Hold-up store sized to carry the permission load for the hold-up time.
+        """Size an ideal capacitor for the declared permission-rail ride-through.
 
-        The store is charged to the depleted-battery voltage and may discharge to
-        the regulator dropout: C = 2 P t / (V_low^2 - V_dropout^2).
+        Returns
+        -------
+        Quantity
+            Required ideal hold-up capacitance in farads.
+
+        Notes
+        -----
+        Equation: C = ``2*permission_rail_load*permission_rail_holdup`` /
+            ``(control_rail_battery_low**2`` - ``control_rail_dropout**2)``. Load is watts,
+            hold-up is seconds, voltages are volts, and low voltage must exceed
+            regulator dropout for usable positive stored energy.
+        Assumptions: constant power, lossless energy delivery, initial voltage equal
+            to depleted-battery voltage, and discharge ending exactly at dropout.
+        Excludes: capacitor ESR, tolerance, aging, converter loss, leakage, wiring
+            drops, and qualification of the permission-path electrical design.
+
+        References
+        ----------
+        Derivation: capacitor energy released between two voltages is
+            ``C*(V_initial**2`` - ``V_final**2)/2``; equate it to required energy ``P*t``.
+
+        Examples
+        --------
+        >>> from mlsysim.embodied.registry import Embodied
+        >>> machine = Embodied.MobileManipulator.WarehouseMobileManipulator
+        >>> released = machine.permission_rail_holdup_capacitance * (
+        ...     machine.control_rail_battery_low**2 - machine.control_rail_dropout**2)/2
+        >>> abs((released/machine.permission_rail_holdup_energy).m_as('') - 1) < 1e-12
+        True
         """
         return (2 * self.permission_rail_load * self.permission_rail_holdup
                 / (self.control_rail_battery_low**2 - self.control_rail_dropout**2)).to(ureg.farad)
 
     @property
     def permission_rail_holdup_energy(self):
-        """Energy the hold-up store delivers between its lowest charge and dropout: P t (added 2026-10-20)."""
+        """Compute permission-rail energy demand over the configured ride-through.
+
+        Returns
+        -------
+        Quantity
+            Energy demand in joules, excluding conversion and storage losses.
+
+        Notes
+        -----
+        Equation: E = permission_rail_load * permission_rail_holdup, using positive
+            load power in watts and hold-up duration in seconds.
+        Assumptions: constant total permission-path load throughout the interval.
+        Excludes: load transients, reserve margin, converter loss, and storage leakage.
+
+        References
+        ----------
+        Derivation: integrating constant power P for time t gives energy ``P*t``.
+
+        Examples
+        --------
+        >>> from mlsysim.embodied.registry import Embodied
+        >>> machine = Embodied.MobileManipulator.WarehouseMobileManipulator
+        >>> machine.permission_rail_holdup_energy == machine.permission_rail_load * machine.permission_rail_holdup
+        True
+        """
         return (self.permission_rail_load * self.permission_rail_holdup).to(ureg.joule)
 
 
@@ -668,24 +982,140 @@ class EmbodiedSiteScenario(BaseModel):
 
     @property
     def a_brake(self):
-        """Credible loaded deceleration on a dry floor: the base's registry value."""
+        """Read the scenario braking deceleration from its base specification.
+
+        Returns
+        -------
+        Quantity
+            Braking-deceleration magnitude in m/s^2.
+
+        Notes
+        -----
+        Equation: a_brake = machine.base.max_acceleration, converted to m/s^2.
+
+        Assumptions: The base specification is deliberately reused as a loaded dry-floor
+        deceleration assumption. The property does not establish that a particular floor
+        or load attains it.
+
+        Excludes: Independent braking tests, tire friction limits, center-of-gravity
+        effects, and braking-ramp dynamics.
+
+        References
+        ----------
+        Derivation: This is a unit-preserving projection of the scenario's base
+        specification, not a new empirical estimate.
+
+        Examples
+        --------
+        >>> from mlsysim.embodied.registry import Embodied
+        >>> site = Embodied.Scenario.WarehouseAisle
+        >>> bool(site.a_brake == site.machine.base.max_acceleration)
+        True
+        """
         return self.machine.base.max_acceleration.to(ureg.meter / ureg.second**2)
 
     @property
     def t_tick(self):
-        """Permission-loop period."""
+        """Convert permission-controller frequency to its period.
+
+        Returns
+        -------
+        Quantity
+            Permission-loop period in milliseconds.
+
+        Notes
+        -----
+        Equation: t_tick = 1 / machine.permission_rate.
+
+        Assumptions: The permission rate is positive and periodic; one whole period is
+        used where a worst-phase tick wait is budgeted.
+
+        Excludes: Interrupt masking, execution time, and jitter beyond the nominal
+        period.
+
+        References
+        ----------
+        Derivation: Frequency is cycles per second; its reciprocal is seconds per cycle.
+
+        Examples
+        --------
+        >>> from mlsysim.embodied.registry import Embodied
+        >>> site = Embodied.Scenario.WarehouseAisle
+        >>> bool((site.t_tick * site.machine.permission_rate).to("").magnitude == 1)
+        True
+        """
         return (1 / self.machine.permission_rate).to(ureg.millisecond)
 
     @property
     def perception_age(self):
-        """Navigation-camera observation age at dispatch (mid-exposure to the proposer)."""
+        """Accumulate navigation-camera age from exposure midpoint to dispatch.
+
+        Returns
+        -------
+        Quantity
+            Observation age in milliseconds.
+
+        Notes
+        -----
+        Equation: perception_age = exposure_time/2 + readout_time + t_transport + t_dma
+        + t_isp + t_backbone + t_ipc. Camera times come from machine.nav_camera; the
+        other terms are site stage allowances.
+
+        Assumptions: The exposure midpoint represents capture time and all listed stages
+        are serial. These stage allowances may be illustrative rather than measured.
+
+        Excludes: Unlisted queueing, frame batching, variable exposure/readout, and
+        overlap between stages.
+
+        References
+        ----------
+        Derivation: Elapsed time along a serial path is the sum of its nonoverlapping
+        stage durations, starting halfway through exposure.
+
+        Examples
+        --------
+        >>> from mlsysim.embodied.registry import Embodied
+        >>> site = Embodied.Scenario.WarehouseAisle
+        >>> bool(site.perception_age >= site.machine.nav_camera.exposure_time / 2)
+        True
+        """
         cam = self.machine.nav_camera
         return (cam.exposure_time / 2 + cam.readout_time + self.t_transport + self.t_dma
                 + self.t_isp + self.t_backbone + self.t_ipc).to(ureg.millisecond)
 
     @property
     def dispatch_age_limit(self):
-        """Oldest observation the producer may dispatch: observation age plus the clock-conversion bound (added 2026-10-20)."""
+        """Add clock-conversion uncertainty to the observation-age budget.
+
+        Returns
+        -------
+        Quantity
+            Dispatch age allowance in milliseconds.
+
+        Notes
+        -----
+        Equation: dispatch_age_limit = perception_age + clock_conversion_bound.
+
+        Assumptions: The clock-conversion bound is nonnegative and bounds the epoch
+        conversion error; it is added in the unfavorable direction.
+
+        Excludes: Clock faults outside the supplied bound, event reordering, and
+        enforcement of this allowance on actual packets.
+
+        References
+        ----------
+        Derivation: The largest age consistent with an additive absolute timestamp error
+        equals the nominal age plus that error bound.
+
+        Examples
+        --------
+        >>> from mlsysim.embodied.registry import Embodied
+        >>> site = Embodied.Scenario.WarehouseAisle
+        >>> from math import isclose
+        >>> isclose((site.dispatch_age_limit - site.perception_age).to("ms").magnitude,
+        ...         site.clock_conversion_bound.to("ms").magnitude)
+        True
+        """
         return (self.perception_age + self.clock_conversion_bound).to(ureg.millisecond)
 
     @field_validator("yaw_rate_turn", mode="after")
@@ -695,70 +1125,320 @@ class EmbodiedSiteScenario(BaseModel):
 
     @property
     def tau_delay(self):
-        """Total pre-brake delay: brake onset, lease, one tick, one bus cycle, and observation age."""
+        """Sum the legacy observation-to-brake delay budget.
+
+        Returns
+        -------
+        Quantity
+            Pre-brake delay in milliseconds, excluding dispatch-to-admission allocation.
+
+        Notes
+        -----
+        Equation: tau_delay = t_brake_onset + t_lease + t_tick + t_bus + perception_age.
+
+        Assumptions: A stalled proposer is noticed through lease expiry followed by one
+        permission tick and one bus cycle; brake-onset delay follows. Terms are charged
+        serially.
+
+        Excludes: The dispatch-to-admission allocation Delta_da, actual brake travel,
+        and timing overruns beyond the supplied allowances.
+
+        References
+        ----------
+        Derivation: The expression adds the observation-age and lease-response
+        intervals. The separate capture-to-brake ledger includes Delta_da explicitly.
+
+        Examples
+        --------
+        >>> from mlsysim.embodied.registry import Embodied
+        >>> site = Embodied.Scenario.WarehouseAisle
+        >>> bool(site.tau_delay >= site.perception_age)
+        True
+        """
         return (self.t_brake_onset + self.t_lease + self.t_tick + self.t_bus
                 + self.perception_age).to(ureg.millisecond)
 
     @property
     def t_handshake(self):
-        """Four-phase takeover exchange: request, acknowledge, commit on one tick, confirm."""
+        """Budget the four-phase remote takeover exchange.
+
+        Returns
+        -------
+        Quantity
+            Request-through-confirmation interval in milliseconds.
+
+        Notes
+        -----
+        Equation: t_handshake = t_handshake_request + t_handshake_acknowledge + t_tick +
+        t_handshake_confirm; the commit phase occupies one permission tick.
+
+        Assumptions: Request, acknowledgment, commit, and confirmation execute in order
+        with their specified allowances.
+
+        Excludes: Lost-message retransmission, authentication delays not included in the
+        fields, and network-tail guarantees.
+
+        References
+        ----------
+        Derivation: Four serial protocol phases contribute additive elapsed time; the
+        local commit is represented by the permission period.
+
+        Examples
+        --------
+        >>> from mlsysim.embodied.registry import Embodied
+        >>> site = Embodied.Scenario.WarehouseAisle
+        >>> bool(site.t_handshake >= site.t_tick)
+        True
+        """
         return (self.t_handshake_request + self.t_handshake_acknowledge + self.t_tick
                 + self.t_handshake_confirm).to(ureg.millisecond)
 
     @property
     def t_takeover_transport(self):
-        """Transport a remote takeover adds to the human response.
+        """Add video delivery and request-return transport for remote takeover.
 
-        The scene reaches the operator through the console video
-        (glass-to-glass latency), and the operator's request returns through
-        the four-phase exchange.
+        Returns
+        -------
+        Quantity
+            Transport contribution to takeover in milliseconds.
+
+        Notes
+        -----
+        Equation: t_takeover_transport = t_video_glass_to_glass + t_handshake.
+
+        Assumptions: The operator first sees the scene through the video link and then
+        returns a request through the four-phase handshake. The video field may be a
+        reference measurement rather than a site-specific worst case.
+
+        Excludes: Human reaction time, unmodeled video buffering, and a guarantee on
+        wireless tail latency.
+
+        References
+        ----------
+        Derivation: The scene-to-display and request-to-machine paths occur on opposite
+        sides of the operator response, so their elapsed times add.
+
+        Examples
+        --------
+        >>> from mlsysim.embodied.registry import Embodied
+        >>> site = Embodied.Scenario.WarehouseAisle
+        >>> bool(site.t_takeover_transport >= site.t_video_glass_to_glass)
+        True
         """
         return (self.t_video_glass_to_glass + self.t_handshake).to(ureg.millisecond)
 
     @property
     def t_human_simple_reaction(self):
-        """Model Human Processor simple reaction time: one perceptual, cognitive, and motor cycle."""
+        """Compose nominal perceptual, cognitive, and motor reaction stages.
+
+        Returns
+        -------
+        Quantity
+            Nominal simple-reaction estimate in milliseconds.
+
+        Notes
+        -----
+        Equation: t_human_simple_reaction = t_human_perceptual + t_human_cognitive +
+        t_human_motor.
+
+        Assumptions: One serial cycle of each Model Human Processor stage represents an
+        expected simple response to a known stimulus. Stage values retain the provenance
+        of the scenario fields.
+
+        Excludes: Decision complexity, surprise, divided attention, operator
+        variability, and a worst-case response guarantee.
+
+        References
+        ----------
+        Derivation: The property applies serial-stage accounting to the three supplied
+        human-processing durations; it does not infer their values or a population
+        quantile.
+
+        Examples
+        --------
+        >>> from mlsysim.embodied.registry import Embodied
+        >>> site = Embodied.Scenario.WarehouseAisle
+        >>> bool(site.t_human_simple_reaction >= site.t_human_motor)
+        True
+        """
         return (self.t_human_perceptual + self.t_human_cognitive
                 + self.t_human_motor).to(ureg.millisecond)
 
     @property
     def t_human_simple_reaction_slow(self):
-        """Simple reaction time with every processor at the slow end of its range."""
+        """Compose the slow-end simple-reaction stage estimates.
+
+        Returns
+        -------
+        Quantity
+            Sum of slow perceptual, cognitive, and motor stage durations in milliseconds.
+
+        Notes
+        -----
+        Equation: t_human_simple_reaction_slow = t_human_perceptual_slow +
+        t_human_cognitive_slow + t_human_motor_slow.
+
+        Assumptions: Each supplied stage is taken at the slow end of its reference range
+        and the stages execute serially for an expected simple stimulus.
+
+        Excludes: A joint statistical confidence bound, a guaranteed maximum human
+        response, and responses to unexpected hazards.
+
+        References
+        ----------
+        Derivation: Adding slow-end stage values constructs a conservative scenario
+        relative to those stage choices; a sum of range endpoints is not a measured
+        response quantile.
+
+        Examples
+        --------
+        >>> from mlsysim.embodied.registry import Embodied
+        >>> site = Embodied.Scenario.WarehouseAisle
+        >>> bool(site.t_human_simple_reaction_slow >= site.t_human_motor_slow)
+        True
+        """
         return (self.t_human_perceptual_slow + self.t_human_cognitive_slow
                 + self.t_human_motor_slow).to(ureg.millisecond)
 
     @property
     def t_takeover_in_loop(self):
-        """Design in-loop takeover: slow-bound simple reaction plus takeover transport.
+        """Combine attending-operator reaction and remote transport allowances.
 
-        Holds only for an attending operator with hands on the controls who
-        responds to the stimulus the task leads them to expect; an unexpected
-        hazard takes the longer perception-brake times.
+        Returns
+        -------
+        Quantity
+            Design in-loop takeover interval in milliseconds.
+
+        Notes
+        -----
+        Equation: t_takeover_in_loop = t_human_simple_reaction_slow +
+        t_takeover_transport.
+
+        Assumptions: The operator is attending, has hands on the controls, and expects
+        the task stimulus. The slow-end simple-reaction estimate and the transport
+        allowance apply to the same event path.
+
+        Excludes: Unexpected-hazard perception/braking time, disengaged operators, and
+        certification of a response deadline.
+
+        References
+        ----------
+        Derivation: The sequential path runs from scene delivery through human reaction
+        to the completed takeover exchange; these durations add.
+
+        Examples
+        --------
+        >>> from mlsysim.embodied.registry import Embodied
+        >>> site = Embodied.Scenario.WarehouseAisle
+        >>> bool(site.t_takeover_in_loop >= site.t_takeover_transport)
+        True
         """
         return (self.t_human_simple_reaction_slow + self.t_takeover_transport).to(ureg.millisecond)
 
     @property
     def t_takeover_out_of_loop(self):
-        """Design out-of-loop takeover: 90th-percentile condition-mean take-over time plus transport."""
+        """Compose an out-of-loop takeover design interval from reference data.
+
+        Returns
+        -------
+        Quantity
+            Reference takeover duration plus transport, in seconds.
+
+        Notes
+        -----
+        Equation: t_takeover_out_of_loop = t_takeover_driving_p90 +
+        t_takeover_transport.
+
+        Assumptions: The supplied driving reference is the 90th percentile of
+        condition-mean takeover times, not the 90th percentile of individual operators.
+        Applying it to this machine is a scenario assumption.
+
+        Excludes: An individual-response probability guarantee, direct validation for
+        this site, and unexpected delays beyond the transport field.
+
+        References
+        ----------
+        Derivation: The property adds the selected condition-mean reference duration to
+        remote transport; it does not transform the source statistic into a person-level
+        quantile.
+
+        Examples
+        --------
+        >>> from mlsysim.embodied.registry import Embodied
+        >>> site = Embodied.Scenario.WarehouseAisle
+        >>> bool(site.t_takeover_out_of_loop >= site.t_takeover_driving_p90)
+        True
+        """
         return (self.t_takeover_driving_p90 + self.t_takeover_transport).to(ureg.second)
 
     @property
     def t_board_link(self):
-        """Serialization of one chunk over the board link: 8 B / f_link."""
+        """Calculate serialized chunk transfer time on the board link.
+
+        Returns
+        -------
+        Quantity
+            Payload serialization time in milliseconds.
+
+        Notes
+        -----
+        Equation: t_board_link = 8 * chunk_wire_bytes / board_link_clock when chunk size
+        is expressed in bytes and clock in cycles per second.
+
+        Assumptions: One bit transfers per clock and chunk_wire_bytes already includes
+        the intended packet/header bytes. Board-link clock is positive.
+
+        Excludes: Idle cycles, framing not included in chunk size, retransmission,
+        contention, and deserialization.
+
+        References
+        ----------
+        Derivation: Transfer duration is the bit count divided by bits per second;
+        conversion from bytes supplies eight bits per byte.
+
+        Examples
+        --------
+        >>> from mlsysim.embodied.registry import Embodied
+        >>> site = Embodied.Scenario.WarehouseAisle
+        >>> bool(site.t_board_link * site.board_link_clock == site.chunk_wire_bytes.to("bit").magnitude)
+        True
+        """
         bits = self.chunk_wire_bytes.to(ureg.bit).magnitude
         return (bits / self.board_link_clock).to(ureg.millisecond)
 
     @property
     def t_dispatch_to_admission(self):
-        """Allocated dispatch-to-admission interval Delta_da of the discrete placement.
+        """Allocate the discrete dispatch-to-admission processing path.
 
-        Proposer inference charged in full after dispatch (conservative), board-link
-        serialization, deserialization, whole-plan validation, activation, and the
-        wait for the next permission tick. An allocation to qualify, not a
-        measurement.
+        Returns
+        -------
+        Quantity
+            Delta_da allocation in milliseconds; this is not a measured latency.
 
-        Source: additive stage budget; stage allowances are the scenario's
-        illustrative values, inference is the machine's registry latency.
+        Notes
+        -----
+        Equation: Delta_da = machine.chunk_inference_latency + t_board_link +
+        t_chunk_deserialize + t_plan_validate + t_plan_activate + t_tick.
+
+        Assumptions: Inference is charged in full after dispatch, followed by
+        serialization, deserialization, whole-plan validation, activation, and the next
+        permission tick. The stage allowances are supplied by the scenario.
+
+        Excludes: Proof of stage WCETs, runtime measurements, pipeline overlap, and
+        overruns not represented by the fields.
+
+        References
+        ----------
+        Derivation: Adding the declared serial stage budgets defines an allocation to
+        qualify. The inference term comes from the machine; other allowances may be
+        illustrative.
+
+        Examples
+        --------
+        >>> from mlsysim.embodied.registry import Embodied
+        >>> site = Embodied.Scenario.WarehouseAisle
+        >>> bool(site.t_dispatch_to_admission >= site.machine.chunk_inference_latency)
+        True
         """
         return (self.machine.chunk_inference_latency + self.t_board_link
                 + self.t_chunk_deserialize + self.t_plan_validate + self.t_plan_activate
@@ -774,46 +1454,149 @@ class EmbodiedSiteScenario(BaseModel):
 
     @property
     def t_capture_to_admission(self):
-        """Replacement latency L: capture (exposure midpoint) to admission.
+        """Join capture-to-dispatch and dispatch-to-admission allocations.
 
-        perception_age + t_dispatch_to_admission. The inference inside Delta_da
-        is charged in full after dispatch, so the vision backbone already in
-        perception_age is counted twice; the sum is conservative.
+        Returns
+        -------
+        Quantity
+            Replacement latency allocation in milliseconds.
 
-        Source: sum of the two registry intervals; an allocation to qualify,
-        not a measurement.
+        Notes
+        -----
+        Equation: L = perception_age + t_dispatch_to_admission.
+
+        Assumptions: Capture is represented by the exposure midpoint. Full inference
+        inside Delta_da is charged after dispatch, so the vision backbone already
+        present in perception_age is counted twice; the accounting is deliberately
+        conservative.
+
+        Excludes: A measured end-to-end latency, overlap recovery, and proof that
+        supplied stage allocations hold on hardware.
+
+        References
+        ----------
+        Derivation: The event ledger concatenates the capture-to-dispatch interval and
+        Delta_da; the documented duplicate backbone charge is retained rather than
+        silently canceled.
+
+        Examples
+        --------
+        >>> from mlsysim.embodied.registry import Embodied
+        >>> site = Embodied.Scenario.WarehouseAisle
+        >>> bool(site.t_capture_to_admission == site.perception_age + site.t_dispatch_to_admission)
+        True
         """
         return (self.perception_age + self.t_dispatch_to_admission).to(ureg.millisecond)
 
     @property
     def t_admission_to_brake_onset(self):
-        """Stalled-proposer response after admission: lease, one tick, one bus cycle, brake onset.
+        """Sum the stalled-proposer response after command admission.
 
-        Source: the lease-path terms of tau_delay; the lease starts at admission.
+        Returns
+        -------
+        Quantity
+            Admission-to-brake-onset allocation in milliseconds.
+
+        Notes
+        -----
+        Equation: t_admission_to_brake_onset = t_lease + t_tick + t_bus + t_brake_onset.
+
+        Assumptions: The lease starts at admission. After it expires, response may wait
+        one permission tick, one bus cycle, and the supplied brake-onset interval.
+
+        Excludes: Capture age, dispatch-to-admission work, braking travel after onset,
+        and unmodeled enforcement delays.
+
+        References
+        ----------
+        Derivation: The lease-response stages occur serially after the admission event,
+        so their duration sum is the corresponding event-ledger interval.
+
+        Examples
+        --------
+        >>> from mlsysim.embodied.registry import Embodied
+        >>> site = Embodied.Scenario.WarehouseAisle
+        >>> bool(site.t_admission_to_brake_onset >= site.t_lease)
+        True
         """
         return (self.t_lease + self.t_tick + self.t_bus
                 + self.t_brake_onset).to(ureg.millisecond)
 
     @property
     def t_capture_to_brake_onset(self):
-        """Full pre-brake interval, capture to brake onset, for a stalled proposer.
+        """Join the event-ledger intervals from capture through brake onset.
 
-        t_capture_to_admission + t_admission_to_brake_onset, which equals
-        tau_delay + t_dispatch_to_admission (tau_delay stops short of Delta_da).
+        Returns
+        -------
+        Quantity
+            Full stalled-proposer pre-brake allocation in milliseconds.
 
-        Source: sum of the three registry intervals.
+        Notes
+        -----
+        Equation: t_capture_to_brake_onset = t_capture_to_admission +
+        t_admission_to_brake_onset = tau_delay + t_dispatch_to_admission.
+
+        Assumptions: The capture, dispatch, admission, and brake-onset events occur in
+        order. Each ledger interval is charged once, including the conservative
+        inference allocation inside capture-to-admission.
+
+        Excludes: Braking distance after onset, measured execution guarantees, and a
+        safety certification of the composed path.
+
+        References
+        ----------
+        Derivation: Adjacent event intervals concatenate by addition; expanding their
+        definitions gives the equality with tau_delay plus Delta_da.
+
+        Examples
+        --------
+        >>> from mlsysim.embodied.registry import Embodied
+        >>> site = Embodied.Scenario.WarehouseAisle
+        >>> bool(site.t_capture_to_brake_onset == site.tau_delay + site.t_dispatch_to_admission)
+        True
         """
         return (self.t_capture_to_admission
                 + self.t_admission_to_brake_onset).to(ureg.millisecond)
 
     @property
     def v_takeover_in_loop_ceiling(self):
-        """Highest slow-down speed whose in-loop takeover, charged with Delta_da, still fits.
+        """Solve the delayed S-curve stopping model for an in-loop speed ceiling.
 
-        S-curve ceiling (calc_scurve_max_permitted_velocity) with pre-brake delay
-        tau_delay + T_takeover,in + Delta_da, the credible deceleration, the
-        stipulated jerk bound of the reference stop, and the localization,
-        tracking, and protective margins.
+        Returns
+        -------
+        Quantity
+            Modeled speed ceiling in meters per second; not a certified operating limit.
+
+        See Also
+        --------
+        mlsysim.physics.robotics.stopping.calc_scurve_max_permitted_velocity : Delayed S-curve speed inverse.
+
+        Notes
+        -----
+        Equation: Choose the largest v satisfying ``v*T`` + d_scurve(v, a_brake, j_brake) +
+        delta_loc + eps_track + delta_margin <= d_clear, where T = tau_delay +
+        t_takeover_in_loop + t_dispatch_to_admission.
+
+        Assumptions: The clearance and error margins bound this scenario. Available
+        deceleration is a_brake; jerk is stipulated from the reference C2 stop at the
+        base drive-limit speed. The attending-operator assumptions of t_takeover_in_loop
+        apply.
+
+        Excludes: Validation of traction or jerk capability, moving-obstacle approach,
+        operator-response guarantees, and enforcement on a deployed robot.
+
+        References
+        ----------
+        Derivation: The linked S-curve inverse solves a monotone delayed
+        stopping-distance inequality after adding the in-loop takeover and admission
+        allocations.
+
+        Examples
+        --------
+        >>> from mlsysim.embodied.registry import Embodied
+        >>> site = Embodied.Scenario.WarehouseAisle
+        >>> bool(site.v_takeover_in_loop_ceiling >= site.v_takeover_in_loop)
+        True
         """
         from ..physics.robotics import calc_c2_stop_suffix, calc_scurve_max_permitted_velocity
 
@@ -826,10 +1609,36 @@ class EmbodiedSiteScenario(BaseModel):
 
     @property
     def v_takeover_in_loop(self):
-        """Slow-down before an in-loop takeover request.
+        """Round the modeled in-loop takeover speed ceiling down to a command step.
 
-        The Delta_da-charged in-loop ceiling rounded down to v_takeover_resolution,
-        so the chosen speed always sits below the ceiling by less than one step.
+        Returns
+        -------
+        Quantity
+            Quantized speed in meters per second, at or below the modeled ceiling.
+
+        Notes
+        -----
+        Equation: v_takeover_in_loop = floor(v_takeover_in_loop_ceiling /
+        v_takeover_resolution) * v_takeover_resolution.
+
+        Assumptions: The command resolution is positive and the ceiling is nonnegative.
+        Rounding preserves the upstream stopping-model assumptions rather than
+        independently validating them.
+
+        Excludes: Tracking overshoot, actuator quantization error beyond the chosen
+        step, and certification of the commanded speed.
+
+        References
+        ----------
+        Derivation: Floor division selects the largest integer multiple of the command
+        resolution no greater than the continuous ceiling.
+
+        Examples
+        --------
+        >>> from mlsysim.embodied.registry import Embodied
+        >>> site = Embodied.Scenario.WarehouseAisle
+        >>> bool(0 <= (site.v_takeover_in_loop_ceiling - site.v_takeover_in_loop).to("m/s").magnitude < site.v_takeover_resolution.to("m/s").magnitude)
+        True
         """
         step = self.v_takeover_resolution.to(_MPS).magnitude
         ceiling = self.v_takeover_in_loop_ceiling.to(_MPS).magnitude
@@ -837,25 +1646,109 @@ class EmbodiedSiteScenario(BaseModel):
 
     @property
     def pre_trigger_window(self):
-        """Pre-trigger logging window: the out-of-loop design takeover, rounded up to whole seconds.
+        """Round the out-of-loop takeover interval up for pre-trigger logging.
 
-        The buffer must reach back past the divergence that preceded the
-        takeover, so it spans at least the design takeover interval.
+        Returns
+        -------
+        Quantity
+            Required logging-window allocation in whole seconds.
+
+        Notes
+        -----
+        Equation: pre_trigger_window = ceil(t_takeover_out_of_loop expressed in seconds)
+        * one second.
+
+        Assumptions: The retained history should span at least the selected design
+        takeover interval, and logging windows are allocated in whole seconds.
+
+        Excludes: An assurance that all causal precursors lie inside the window, storage
+        sizing, and a bound on individual human takeover time.
+
+        References
+        ----------
+        Derivation: Ceiling to an integer number of seconds ensures rounding cannot
+        shorten the reference takeover interval.
+
+        Examples
+        --------
+        >>> from mlsysim.embodied.registry import Embodied
+        >>> site = Embodied.Scenario.WarehouseAisle
+        >>> bool(site.pre_trigger_window >= site.t_takeover_out_of_loop)
+        True
         """
         return math.ceil(self.t_takeover_out_of_loop.to(ureg.second).magnitude) * ureg.second
 
     @property
     def fixed_overhead(self):
-        """Localization bound, protective clearance, and tracking bound."""
+        """Add localization, protective, and tracking distance margins.
+
+        Returns
+        -------
+        Quantity
+            Total fixed clearance deduction in meters.
+
+        Notes
+        -----
+        Equation: fixed_overhead = delta_loc + delta_margin + eps_track.
+
+        Assumptions: The three nonnegative distance allowances cover distinct
+        contributions and are combined additively in the unfavorable direction.
+
+        Excludes: Probabilistic cancellation, overlap correction, speed-dependent
+        braking travel, and validation of the supplied bounds.
+
+        References
+        ----------
+        Derivation: Adding absolute error and clearance budgets gives the
+        worst-direction distance reserved before motion-dependent terms.
+
+        Examples
+        --------
+        >>> from mlsysim.embodied.registry import Embodied
+        >>> site = Embodied.Scenario.WarehouseAisle
+        >>> bool(site.fixed_overhead == site.delta_loc + site.delta_margin + site.eps_track)
+        True
+        """
         return (self.delta_loc + self.delta_margin + self.eps_track).to(ureg.meter)
 
     @property
     def j_brake(self):
-        """Stop jerk bound: the peak jerk of the reference C2 polynomial stop from the drive limit.
+        """Read the stipulated jerk ceiling from the reference C2 stopping profile.
 
-        Stipulated, not measured: the resident S-curve stop takes its jerk bound
-        from the reference polynomial at the machine's drive limit and the
-        credible deceleration (calc_c2_stop_suffix).
+        Returns
+        -------
+        Quantity
+            Reference peak jerk in meters per second cubed.
+
+        See Also
+        --------
+        mlsysim.physics.robotics.stopping.calc_c2_stop_suffix : Reference polynomial stop and peak jerk.
+
+        Notes
+        -----
+        Equation: j_brake = calc_c2_stop_suffix(machine.base.max_velocity,
+        a_brake)["peak_jerk"]. The reference profile supplies the jerk limit used by the
+        resident S-curve model.
+
+        Assumptions: The drive-limit speed and scenario deceleration define the C2
+        polynomial reference. Its peak jerk is a stipulated design input, not a measured
+        drivetrain capability.
+
+        Excludes: Actuator identification, jerk tracking, traction changes, and
+        qualification of the resulting resident stop.
+
+        References
+        ----------
+        Derivation: The reference stopping-profile helper differentiates its polynomial
+        acceleration to obtain peak jerk; this property forwards that value with
+        explicit units.
+
+        Examples
+        --------
+        >>> from mlsysim.embodied.registry import Embodied
+        >>> site = Embodied.Scenario.WarehouseAisle
+        >>> bool(site.j_brake.to("m/s^3").magnitude > 0)
+        True
         """
         from ..physics.robotics import calc_c2_stop_suffix
 

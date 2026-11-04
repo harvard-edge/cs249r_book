@@ -111,28 +111,43 @@ class Pipeline:
         return "\n".join(lines)
 
     def run(self, **kwargs) -> Dict[str, Any]:
-        """Execute the pipeline, passing results between stages.
+        """Execute ordered solvers and expose their fields to later stages.
 
         Parameters
         ----------
-        **kwargs
-            All inputs needed by the pipeline. Each resolver's `solve()` is
-            called with whatever kwargs match its signature. Results from
-            earlier stages are accumulated and available to later stages.
+        **kwargs : Any
+            Inputs with the units required by each solver. Values are matched to solve parameter
+            names. Earlier result fields overwrite same-named accumulated inputs for subsequent
+            stages.
 
         Returns
         -------
         dict
-            Merged results from all stages, keyed by resolver name.
+            Original stage results keyed by resolver class name. Repeated instances of the same
+            class overwrite that key, although each stage executes.
 
         Notes
         -----
-        Stage wiring is **by parameter name**: each resolver receives only the
-        kwargs matching its ``solve()`` signature, and after each stage the
-        result model's fields are flattened into the shared namespace so a
-        later stage can consume them. Common concept aliases (``workload`` ↔
-        ``model``, ``ScalingResult.optimal_parameters`` → ``Workload``, and
-        default ``duration_days``) are bridged automatically.
+        For stage i, inputs are the accumulated fields matching its solve signature; after
+        solve, accumulated fields are updated from the result model. Stage order is the
+        constructor order.
+
+        Parameter names represent compatible concepts and units. Workload/model aliases are
+        bridged. A ScalingResult can synthesize a Workload with forward work 2P FLOPs; a
+        required absent duration_days defaults to 30.
+
+        The method does not provide automatic dependency sorting, unit reconciliation, callback rollback, or exception
+        suppression. Missing required inputs and solver/callback errors propagate; a
+        raise_errors keyword does not change that behavior.
+
+        Examples
+        --------
+        >>> from mlsysim import Q_
+        >>> from mlsysim.solvers import FailureIntervalModel
+        >>> result = Pipeline([FailureIntervalModel()]).run(component_mtbf=Q_(100,"h"),
+        ...     n_components=10, run_duration=Q_(20,"h"))
+        >>> result["FailureIntervalModel"].expected_failures
+        2.0
         """
         import inspect
         from ..core.units import Q_

@@ -9,10 +9,39 @@ from ._units import _ensure_unit
 
 
 def calc_coolant_mass_flow(heat_load, specific_heat, temperature_rise):
-    """Coolant mass flow that carries a heat load: ``m_dot = Q / (c_p * dT)``.
+    """Calculate coolant mass flow for a steady heat-removal load.
 
-    In steady state every watt a rack draws leaves as heat, so the coolant must
-    carry ``Q`` with a temperature rise ``dT``. Returns kg/s.
+    Parameters
+    ----------
+    heat_load : Quantity or float
+        Heat transferred into coolant, nonnegative; bare numbers mean watts.
+    specific_heat : Quantity or float
+        Positive coolant specific heat; bare numbers mean joule/(kilogram kelvin).
+    temperature_rise : Quantity or float
+        Positive coolant temperature difference; bare numbers mean kelvin.
+
+    Returns
+    -------
+    Quantity
+        Required coolant mass flow in kilogram/second.
+
+    Notes
+    -----
+    Equation: mass_flow = heat_load/(specific_heat * temperature_rise).
+    Assumptions: steady single-phase flow, constant specific heat, and complete
+    transfer of the stated heat load to the coolant. The caller supplies positive
+    specific heat; only temperature rise is explicitly validated here.
+    Excludes: pump power, pressure drop, phase change, and imperfect heat exchange.
+
+    References
+    ----------
+    Derivation: divide the steady sensible-heat balance Q_dot = m_dot c_p delta_T
+    by the heat absorbed per unit mass.
+
+    Examples
+    --------
+    >>> calc_coolant_mass_flow(0, 4000, 10).m_as('kg/s')
+    0.0
     """
     q = _ensure_unit(heat_load, ureg.watt, "heat_load")
     cp = _ensure_unit(specific_heat, ureg.joule / (ureg.kilogram * ureg.kelvin), "specific_heat")

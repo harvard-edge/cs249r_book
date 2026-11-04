@@ -39,6 +39,54 @@ class GoodputModel(ForwardModel):
     def solve(self, scheduling: float, runtime: float, program: float,
               ceilings: Optional[Dict[str, float]] = None,
               device_hour_rate: Optional[Quantity] = None) -> GoodputResult:
+        """Partition offered capacity-time into retained work and stage losses.
+
+        Parameters
+        ----------
+        scheduling : float
+            Scheduling fraction S in (0, 1], measured over offered capacity-time.
+        runtime : float
+            Runtime fraction R in (0, 1], measured over scheduled capacity-time.
+        program : float
+            Program fraction P in (0, 1], measured over retained runtime.
+        ceilings : dict of str to float, optional
+            Proposed fractions in (0, 1] keyed by ``S``, ``R``, or ``P``; each change
+            is evaluated alone with the other factors held fixed.
+        device_hour_rate : Quantity, optional
+            Nonnegative price per offered device-hour, convertible to USD/hour.
+
+        Returns
+        -------
+        GoodputResult
+            Dimensionless goodput, disjoint loss shares, factor sensitivities, and
+            one-factor ceiling gains. ``useful_rate`` is USD/hour of useful work,
+            or None when no price is supplied.
+
+        Notes
+        -----
+        Equation: MPG = ``S*R*P``; losses are 1-S, ``S*(1-R)``, and ``S*R*(1-P)``.
+        A factor's marginal point value is the product of the other two factors;
+        useful_rate = device_hour_rate / MPG.
+
+        Assumptions: factors have consecutive nested denominators. Positive factors
+        are required because costs and relative gains divide by them.
+
+        Excludes: correlated responses to simultaneous interventions, capital costs,
+        and forecasts of attainable ceilings. Inputs are supplied fractions.
+
+        References
+        ----------
+        Derivation: expand 1 = (1-S) + ``S*(1-R)`` + ``S*R*(1-P)`` + ``S*R*P``;
+        the partition charges each lost interval only at its first failed boundary.
+
+        Examples
+        --------
+        >>> result = GoodputModel().solve(0.5, 0.5, 1.0)
+        >>> result.mpg == 0.25
+        True
+        >>> result.scheduling_share + result.runtime_share + result.program_share + result.mpg == 1
+        True
+        """
         f = {"S": scheduling, "R": runtime, "P": program}
         mpg = scheduling * runtime * program
         point = {k: mpg / v for k, v in f.items()}
@@ -94,6 +142,67 @@ class RuntimeGoodputModel(ForwardModel):
 
     def solve(self, mtbf: Quantity, checkpoint_bytes: Quantity, recovery, input_wait: float,
               window: Quantity, lost_work: Quantity, preemption_rate: Quantity) -> RuntimeGoodputResult:
+        """Account for first-order runtime losses on one held-time denominator.
+
+        Parameters
+        ----------
+        mtbf : Quantity
+            Positive mean time between job failures, convertible to hours.
+        checkpoint_bytes : Quantity
+            Nonnegative bytes written and reloaded per checkpoint.
+        recovery : object
+            Recovery profile with positive ``checkpoint_write_bw_gbs`` and a
+            ``cold_restart_time`` method returning time, including optional detection.
+        input_wait : float
+            Fraction of held time lost to input stalls, between zero and one.
+        window : Quantity
+            Positive held-time window over which one startup is amortized.
+        lost_work : Quantity
+            Nonnegative work duration discarded by each forced preemption.
+        preemption_rate : Quantity
+            Nonnegative forced-preemption frequency, convertible to inverse hours.
+
+        Returns
+        -------
+        RuntimeGoodputResult
+            Checkpoint and recovery time budgets, dimensionless loss shares, and
+            runtime_goodput = 1 - summed losses. The value is not clipped; a negative
+            result signals that the small-loss approximation is outside its regime.
+
+        See Also
+        --------
+        mlsysim.engine.solvers.reliability.CheckpointIntervalModel.solve : Checkpoint waste accounting.
+
+        Notes
+        -----
+        Equation: loss = startup/window + input_wait + checkpoint_waste
+        + recovery_time/mtbf + ``preemption_rate*(lost_work`` + startup).
+        The effective interruption interval is 1/(1/mtbf + preemption_rate).
+
+        Assumptions: terms are small, disjoint first-order charges. The checkpoint
+        term includes failure rework; the recovery term excludes that rework.
+        Startup excludes failure detection for a scheduler-initiated restart.
+
+        Excludes: overlapping outages, correlated preemptions, recovery queueing,
+        and dynamic checkpoint adaptation. The interruption checkpoint interval is
+        reported separately rather than substituted into the primary loss budget.
+
+        References
+        ----------
+        Derivation: amortize each event duration over its observation window or
+        multiply it by its event frequency, then sum losses on held time.
+        The checkpoint submodel supplies its separately documented interval rule.
+
+        Examples
+        --------
+        >>> from mlsysim import Systems, Q_
+        >>> result = RuntimeGoodputModel().solve(Q_("100 hour"), Q_("1 GB"),
+        ...     Systems.Reliability.Recovery, 0.0, Q_("24 hour"), Q_("0 s"), Q_("0 / hour"))
+        >>> result.preemption_share == 0
+        True
+        >>> result.runtime_goodput == 1 - result.runtime_loss
+        True
+        """
         bw = Q_(float(recovery.checkpoint_write_bw_gbs), "GB/s")
         write_time = (checkpoint_bytes / bw).to(ureg.second)
         ckpt = CheckpointIntervalModel().solve(write_time, mtbf.to(ureg.hour))

@@ -29,9 +29,34 @@ class SimulationConfig(BaseModel):
 
     @model_validator(mode='after')
     def validate_physical_feasibility(self) -> 'SimulationConfig':
-        """
-        Runs a pre-solve check to ensure the configuration isn't
-        physically impossible (e.g., OOM on start).
+        """Apply a weight-only capacity check when root registry names resolve.
+
+        Parameters
+        ----------
+
+        Returns
+        -------
+        SimulationConfig
+            The same configuration on success or when either registry name is unresolved. Raises
+            ValueError only when resolved weight storage exceeds resolved accelerator capacity.
+
+        Notes
+        -----
+        If getattr(Models, model) and getattr(Hardware, hardware) resolve, require
+        model.size_in_bytes() <= hardware.memory.capacity; otherwise return self unchanged.
+
+        Names are direct attributes of the registry roots. The workload default precision is
+        used by size_in_bytes, independently of this configuration's precision field.
+
+        The method does not provide nested registry-path resolution, batch activations, KV cache, optimizer state,
+        distributed sharding, and full input validation. An unchanged result is not proof the
+        configuration fits.
+
+        Examples
+        --------
+        >>> config = SimulationConfig(model="unknown_model", hardware="unknown_device")
+        >>> config.validate_physical_feasibility() is config
+        True
         """
         # 1. Resolve registry items
         m_obj = getattr(Models, self.model, None)

@@ -46,21 +46,99 @@ class ComputeCore(BaseModel):
 
     @property
     def systolic_macs_per_cycle(self) -> Optional[int]:
-        """Multiply-accumulates one systolic array retires per cycle."""
+        """Count the peak MACs in one square systolic array.
+
+        Returns
+        -------
+        int or None
+            Multiply-accumulate operations per clock cycle, or None when the array dimension is unknown.
+
+        Notes
+        -----
+        Equation: MACs_per_cycle = systolic_array_dim ** 2.
+
+        Assumptions: each cell performs one MAC each cycle after the array is filled; one square array is described.
+
+        Excludes: pipeline fill/drain, operand starvation, utilization, multiple arrays, clock frequency, and conversion from MACs to FLOPs.
+
+        References
+        ----------
+        Derivation: a square array with dimension d contains ``d*d`` independent MAC cells. Peak cell count is not sustained throughput.
+
+        Examples
+        --------
+        >>> from mlsysim.hardware.types import ComputeCore
+        >>> from mlsysim.core.units import Q_
+        >>> core = ComputeCore(peak_flops=Q_('1 TFLOP/s'), systolic_array_dim=8)
+        >>> core.systolic_macs_per_cycle == core.systolic_array_dim ** 2
+        True
+        """
         if self.systolic_array_dim is None:
             return None
         return self.systolic_array_dim * self.systolic_array_dim
 
     @property
     def fp32_core_count(self) -> Optional[int]:
-        """FP32 (CUDA) cores on the chip: sm_count x fp32_cores_per_sm."""
+        """Count the chip-wide FP32 execution units.
+
+        Returns
+        -------
+        int or None
+            FP32 core count, or None if either per-SM count or SM count is absent.
+
+        Notes
+        -----
+        Equation: N_FP32 = sm_count * fp32_cores_per_sm.
+
+        Assumptions: all listed SMs have the same declared FP32-unit count.
+
+        Excludes: operating frequency, issue width, instructions per cycle, disabled units, and achieved utilization.
+
+        References
+        ----------
+        Derivation: sum an equal per-SM unit count over all registered SMs; this inventory multiplication is not a FLOP/s estimate.
+
+        Examples
+        --------
+        >>> from mlsysim.hardware.types import ComputeCore
+        >>> from mlsysim.core.units import Q_
+        >>> core = ComputeCore(peak_flops=Q_('1 TFLOP/s'), sm_count=2, fp32_cores_per_sm=8)
+        >>> core.fp32_core_count == core.sm_count * core.fp32_cores_per_sm
+        True
+        """
         if self.sm_count is None or self.fp32_cores_per_sm is None:
             return None
         return self.sm_count * self.fp32_cores_per_sm
 
     @property
     def tensor_core_count(self) -> Optional[int]:
-        """Tensor Cores on the chip: sm_count x tensor_cores_per_sm."""
+        """Count the chip-wide matrix execution units.
+
+        Returns
+        -------
+        int or None
+            Tensor Core count, or None when either constituent count is absent.
+
+        Notes
+        -----
+        Equation: N_tensor = sm_count * tensor_cores_per_sm.
+
+        Assumptions: all registered SMs contain the same number of Tensor Cores.
+
+        Excludes: matrix shape, precision support, sparsity modes, clock frequency, and utilization; cores from different generations need not have equal throughput.
+
+        References
+        ----------
+        Derivation: multiply equal per-SM inventories by the SM count. The result counts hardware units rather than their arithmetic work.
+
+        Examples
+        --------
+        >>> from mlsysim.hardware.types import ComputeCore
+        >>> from mlsysim.core.units import Q_
+        >>> core = ComputeCore(peak_flops=Q_('1 TFLOP/s'), sm_count=2, tensor_cores_per_sm=4)
+        >>> core.tensor_core_count == core.sm_count * core.tensor_cores_per_sm
+        True
+        """
         if self.sm_count is None or self.tensor_cores_per_sm is None:
             return None
         return self.sm_count * self.tensor_cores_per_sm
@@ -194,7 +272,33 @@ class IOInterconnect(BaseModel):
 
     @property
     def bandwidth_per_direction(self) -> Quantity:
-        """One-way deliverable bandwidth — the beta for transfer-time math."""
+        """Normalize the advertised link rate to one direction.
+
+        Returns
+        -------
+        Quantity
+            One-way data rate in the same compatible units as bandwidth.
+
+        Notes
+        -----
+        Equation: BW_oneway = bandwidth / 2 for bidirectional_total, otherwise bandwidth.
+
+        Assumptions: a bidirectional total sums equal transmit and receive capacities. The direction field correctly describes the vendor specification.
+
+        Excludes: protocol overhead, contention, payload efficiency, and asymmetric transmit/receive rates.
+
+        References
+        ----------
+        Derivation: a symmetric full-duplex total is the sum of two equal directional rates, so dividing by two recovers the transfer-time denominator.
+
+        Examples
+        --------
+        >>> from mlsysim.hardware.types import IOInterconnect
+        >>> from mlsysim.core.units import Q_
+        >>> link = IOInterconnect(name='Duplex', bandwidth=Q_('100 GB/s'), direction='bidirectional_total')
+        >>> 2 * link.bandwidth_per_direction == link.bandwidth
+        True
+        """
         if self.direction == "bidirectional_total":
             return self.bandwidth / 2
         return self.bandwidth
@@ -301,19 +405,75 @@ class HardwareNode(BaseModel):
 
     @property
     def embodied_carbon(self) -> Optional[Quantity]:
-        """Embodied manufacturing carbon as a Pint Quantity in kg, if present."""
+        """Attach mass units to the stored manufacturing-carbon estimate.
+
+        Returns
+        -------
+        Quantity or None
+            Kilograms of CO2-equivalent emissions, or None when no estimate is supplied.
+
+        Notes
+        -----
+        Equation: carbon = embodied_carbon_kg * kg.
+
+        Assumptions: the field already represents the intended manufacturing, packaging, and transport boundary. The registry source determines that boundary.
+
+        Excludes: operational energy emissions, service-life amortization, and a new life-cycle assessment.
+
+        References
+        ----------
+        Derivation: this property adds the declared kilogram unit to a stored scalar; it does not derive or validate the underlying emissions estimate.
+
+        Examples
+        --------
+        >>> from mlsysim import Hardware
+        >>> hw = Hardware.Cloud.H100.model_copy(update={'embodied_carbon_kg': 100.0})
+        >>> hw.embodied_carbon.m_as('kg') == hw.embodied_carbon_kg
+        True
+        """
         if self.embodied_carbon_kg is None:
             return None
         return Q_(self.embodied_carbon_kg, "kg")
 
     def ridge_point(self, precision: Optional[str] = None) -> Quantity:
-        """
-        Calculates the Roofline ridge point (Intensity threshold).
-        
-        Args:
-            precision: Optional precision string (e.g., 'fp16', 'fp8', 'int8').
-                If provided, uses the corresponding precision flops from ComputeCore.
-                If None (default), uses the default peak_flops.
+        """Calculate the peak Roofline arithmetic-intensity crossover.
+
+        Parameters
+        ----------
+        precision : str, optional
+            Precision key for compute.precision_flops, matched case-insensitively.
+            None selects peak_flops; an unknown key warns and falls back to it.
+
+        Returns
+        -------
+        Quantity
+            Peak compute throughput divided by primary-memory bandwidth, in
+            FLOP/byte. This is not derated by a solver's efficiency input.
+
+        Notes
+        -----
+        Equation: I_ridge = F_peak / BW_primary. At this intensity, the ideal
+        compute and memory-time bounds coincide.
+
+        Assumptions: positive primary-memory bandwidth and the declared peak
+        compute rate; peak compute and bandwidth can be compared for the same
+        workload precision and memory traffic boundary.
+
+        Excludes: dispatch overhead, SRAM/flash/offload paths, achieved bandwidth,
+        and compute efficiency. A solver's effective ridge may differ.
+
+        References
+        ----------
+        Williams et al. (2009), "Roofline: An Insightful Visual Performance Model
+        for Multicore Architectures."
+        https://doi.org/10.1145/1498765.1498785 (bibliography key: williams2009).
+
+        Examples
+        --------
+        >>> from mlsysim import Hardware
+        >>> hw = Hardware.Cloud.H100
+        >>> hw.ridge_point() == (hw.compute.peak_flops / hw.memory.bandwidth).to('flop/byte')
+        True
         """
         flops = self.compute.peak_flops
         if precision:

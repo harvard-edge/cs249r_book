@@ -11,9 +11,40 @@ class DifferentialExplainer:
     
     @staticmethod
     def compare_performance(baseline: Any, proposal: Any) -> str:
-        """
-        Compares two PerformanceProfile objects (or dicts containing them)
-        and explains the speedup (or lack thereof) based on the Iron Law and Roofline regime.
+        """Summarize latency ratio and reported bottleneck labels for two results.
+
+        Parameters
+        ----------
+        baseline : Any
+            Performance-like object with latency in time units and optional bottleneck, or dictionary containing SingleNodeModel.
+        proposal : Any
+            Comparable proposed result with latency in time units and optional bottleneck.
+
+        Returns
+        -------
+        str
+            Formatted ratio and label-based explanation, or a diagnostic string when latency is missing or cannot be converted to milliseconds.
+
+        Notes
+        -----
+        Equation: speedup = baseline_latency_ms / proposal_latency_ms for positive proposal latency; otherwise the implementation reports zero. A case-insensitive occurrence of memory selects the memory branch; other labels select the compute branch.
+
+        Assumptions: Both results refer to comparable work, and positive latency values use compatible units. Bottleneck labels summarize prior solver calculations.
+
+        Excludes: Independent causal attribution, verification of hardware changes, or decomposition of overhead and workload changes. Existing prose branches infer resource explanations from labels alone; those explanations require additional evidence.
+
+        References
+        ----------
+        Derivation: Dividing the same unit of work's old duration by its new duration gives a latency speedup. Comparing labels describes a reported regime change but does not prove its cause.
+
+        Examples
+        --------
+        >>> from types import SimpleNamespace
+        >>> from mlsysim import Q_
+        >>> base = SimpleNamespace(latency=Q_(2,"ms"), bottleneck="Memory")
+        >>> proposal = SimpleNamespace(latency=Q_(1,"ms"), bottleneck="Memory")
+        >>> "Speedup: 2.00x" in DifferentialExplainer.compare_performance(base, proposal)
+        True
         """
         try:
             # Handle if the input is a raw PerformanceProfile or wrapped in a dict

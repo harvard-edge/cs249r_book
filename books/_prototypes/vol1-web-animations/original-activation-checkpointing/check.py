@@ -51,7 +51,8 @@ with sync_playwright() as pw:
    assert root.locator('[data-activation-node="8"] text').last.text_content()==f'{vals[3]:.3f}'
    assert root.locator('[data-activation-node="9"] text').last.text_content()=='—'
    root.get_by_role('button',name='Next',exact=True).click();assert root.get_attribute('data-step')=='9';assert root.get_attribute('data-checkpoint-recomputed')=='1'
-   page.keyboard.press('Escape');page.emulate_media(reduced_motion='reduce');select.select_option('11');root.get_by_role('button',name='Expand',exact=True).click();assert page.locator('dialog[open]').count()==1;page.keyboard.press('Escape');assert page.locator('dialog[open]').count()==0
+   # Round four (2026-10-30): one Escape does one thing; a hovered tooltip takes the first Escape. Move the pointer off the bar so this Escape closes Expand.
+   page.mouse.move(2,2);page.keyboard.press('Escape');page.emulate_media(reduced_motion='reduce');select.select_option('11');root.get_by_role('button',name='Expand',exact=True).click();assert page.locator('dialog[open]').count()==1;page.mouse.move(2,2);page.keyboard.press('Escape');assert page.locator('dialog[open]').count()==0
    page.emulate_media(media='print');assert not root.is_visible();page.emulate_media(media='screen');assert not errors,errors
    print(engine,width,theme,'passed');page.close()
   browser.close()

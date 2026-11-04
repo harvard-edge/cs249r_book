@@ -13,9 +13,26 @@ def validate_quantity(v: Any) -> Q_:
             raise ValueError(f"Could not parse Quantity from {v}: {e}")
     raise ValueError(f"Expected Quantity, got {type(v)}")
 
+def serialize_unit(unit) -> str:
+    """Return a parseable unit expression without rounding fractional powers.
+
+    Pint's display formatters can round an exponent such as one third or use
+    Unicode superscripts that older supported parsers misread. Serialize the
+    canonical unit names and full stored exponent representations directly.
+    Negative powers remain explicit; an empty unit product is dimensionless.
+    """
+    terms = [name if power == 1 else f"{name} ** {power!r}"
+             for name, power in sorted(unit._units.items())]
+    return " * ".join(terms) or "dimensionless"
+
+
 def serialize_quantity(v: Q_) -> str:
-    # Use compact format for serialization
-    return f"{v:~P}"
+    """Serialize a scalar quantity with machine-readable units.
+
+    Magnitude and unit exponents retain their stored precision. Human-readable
+    formatting remains the responsibility of presentation helpers.
+    """
+    return f"{v.magnitude} {serialize_unit(v.units)}"
 
 
 def require_dimensionality(v: Any, expected_unit, field_name: str):

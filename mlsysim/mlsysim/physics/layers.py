@@ -12,49 +12,199 @@ import math
 
 
 def calc_receptive_field(layers: int, kernel: int) -> int:
-    """Side of the input window one output sees after ``layers`` stride-1 ``kernel``-wide convolutions.
+    """Calculate receptive-field width for stride-one convolutions.
 
-    Each layer adds ``kernel - 1`` pixels to the one-pixel start.
+    Parameters
+    ----------
+    layers : int
+        Nonnegative convolution layer count.
+    kernel : int
+        Positive kernel width in pixels.
+
+    Returns
+    -------
+    int
+        Receptive-field width in input pixels.
+
+    Notes
+    -----
+    Equation: R = 1 + L (K - 1).
+
+    Assumptions: Every convolution has the same kernel width, unit stride, and unit
+    dilation.
+
+    Excludes: Pooling, strided layers, dilation, and boundary clipping.
+
+    References
+    ----------
+    Derivation: R = 1 + L (K - 1).
+
+    Examples
+    --------
+    >>> calc_receptive_field(3, 3) == 1 + 3 * (3 - 1)
+    True
     """
     return 1 + layers * (kernel - 1)
 
 
 def calc_layers_for_receptive_field(field: int, kernel: int) -> int:
-    """Fewest stride-1 ``kernel``-wide convolutions whose receptive field reaches ``field`` pixels."""
+    """Find the layer count needed to reach a receptive-field width.
+
+    Parameters
+    ----------
+    field : int
+        Target width in input pixels, at least one.
+    kernel : int
+        Kernel width in pixels, greater than one.
+
+    Returns
+    -------
+    int
+        Minimum nonnegative count of stride-one convolution layers.
+
+    Notes
+    -----
+    Equation: L = ceil((R - 1) / (K - 1)).
+
+    Assumptions: Each layer increases receptive-field width by K - 1.
+
+    Excludes: Strides, dilation, and a kernel of width one, which cannot enlarge the field.
+
+    References
+    ----------
+    Derivation: Solve R = 1 + L(K - 1) for L and round upward to a whole layer.
+
+    Examples
+    --------
+    >>> calc_layers_for_receptive_field(7, 3) == 3
+    True
+    """
     return math.ceil((field - 1) / (kernel - 1))
 
 
 def calc_separable_cost_fraction(kernel: int, out_channels: int) -> float:
-    """Depthwise separable cost over a standard ``kernel``-by-``kernel`` convolution (Howard et al. 2017).
+    """Compare depthwise-separable and dense convolution work.
 
-    A depthwise step (one filter per input channel) and a pointwise 1x1 step
-    cost ``1/out_channels + 1/kernel**2`` of the standard convolution's
-    multiply-adds or weights.
+    Parameters
+    ----------
+    kernel : int
+        Positive square kernel width.
+    out_channels : int
+        Positive output channel count.
+
+    Returns
+    -------
+    float
+        Separable-to-dense MAC or weight-count ratio.
+
+    Notes
+    -----
+    Equation: rho = 1 / C_out + 1 / ``K**2``.
+
+    Assumptions: A depthwise K-by-K convolution is followed by a dense pointwise
+    convolution; spatial shape is identical.
+
+    Excludes: Biases, nonlinearities, memory movement, and achieved kernel speed.
+
+    References
+    ----------
+    Derivation: Divide ``K**2`` C_in + C_in C_out by the dense cost ``K**2`` C_in C_out. This is the counting argument used for depthwise-separable convolutions.
+
+    Examples
+    --------
+    >>> calc_separable_cost_fraction(3, 8) == 1 / 8 + 1 / 3**2
+    True
     """
-    return 1 / out_channels + 1 / kernel ** 2
+    return 1 / out_channels + 1 / kernel**2
 
 
 def calc_gradient_product(gain: float, depth: int) -> float:
-    """Product of ``depth`` per-layer gradient factors of average ``gain`` (plain stack, no skips)."""
-    return gain ** depth
+    """Multiply equal gradient gains through a plain layer stack.
 
+    Parameters
+    ----------
+    gain : float
+        Dimensionless per-layer scalar derivative factor.
+    depth : int
+        Nonnegative number of multiplied factors.
 
-def calc_resnet_bottleneck_macs(stages=((64, 3), (128, 4), (256, 6), (512, 3)), input_size: int = 224,
-                                num_classes: int = 1000, stride_on_3x3: bool = False) -> dict:
+    Returns
+    -------
+    float
+        Dimensionless product of local derivative factors.
+
+    Notes
+    -----
+    Equation: g_total = ``gain**depth``.
+
+    Assumptions: All scalar gains are identical and the computation follows one serial path.
+
+    Excludes: Residual paths, Jacobian spectra, and variation among layers.
+
+    References
+    ----------
+    Derivation: Apply the scalar chain rule repeatedly across depth layers.
+
+    Examples
+    --------
+    >>> calc_gradient_product(0.5, 3) == 0.5**3
+    True
     """
-    Multiply-adds per image of a bottleneck ResNet, by kernel size (added 2026-10-21).
+    return gain**depth
 
-    The architecture of He et al. (2016), Table 1: a 7x7/2 stem, a 3x3/2 max
-    pool, then stages of bottleneck blocks (1x1 to ``width``, 3x3, 1x1 to
-    4 x ``width``), a 1x1 projection on each stage's first block, global
-    pooling, and a fully connected classifier. The default ResNet-50 stages
-    give 1.850 G of 3x3 and 3.858 G of total multiply-adds at 224x224. The
-    original network strides the first 1x1 of a downsampling block
-    (``stride_on_3x3=False``); torchvision's v1.5 strides the 3x3 (about
-    4.09 G in total).
 
-    Returns ``{"7x7", "3x3", "1x1", "fc", "total"}`` in multiply-adds.
+def calc_resnet_bottleneck_macs(
+    stages=((64, 3), (128, 4), (256, 6), (512, 3)),
+    input_size: int = 224,
+    num_classes: int = 1000,
+    stride_on_3x3: bool = False,
+) -> dict:
+    """Count convolution and classifier MACs in a bottleneck ResNet.
+
+    Parameters
+    ----------
+    stages : sequence of tuple of int, optional
+        Positive (bottleneck width, block count) pairs; default describes ResNet-50.
+    input_size : int, optional
+        Square image side in pixels; default 224. Spatial downsampling uses integer
+        division.
+    num_classes : int, optional
+        Positive classifier output width; default 1000.
+    stride_on_3x3 : bool, optional
+        Put downsampling stride on the 3-by-3 convolution for v1.5; default False puts it on
+        the first 1-by-1.
+
+    Returns
+    -------
+    dict
+        MAC counts under keys 7x7, 3x3, 1x1, fc, and total, per image.
+
+    Notes
+    -----
+    Equation: MAC_conv = ``H_out**2`` C_in C_out ``K**2``; MAC_fc = C_in C_out; total sums all
+    counted layers.
+
+    Assumptions: A 7-by-7 stride-two stem, stride-two pooling, bottleneck expansion by four,
+    and projection at each stage's first block.
+
+    Excludes: Bias, batch normalization, pooling, nonlinearities, and residual-add
+    operations.
+
+    The original bottleneck places a downsampling stride in its first 1-by-1 convolution.
+    Moving that stride to the 3-by-3 convolution retains more first-projection work, so the
+    two variants need not have identical MAC counts.
+
+    References
+    ----------
+    Derivation: Enumerate the stem, three convolutions per bottleneck, stage-entry projection, and classifier; multiply each output element by its convolution reduction length. The architecture follows He et al. (2016), "Deep Residual Learning for Image Recognition," Table 1. https://arxiv.org/abs/1512.03385
+
+    Examples
+    --------
+    >>> work = calc_resnet_bottleneck_macs(stages=((4, 1),), input_size=32, num_classes=2)
+    >>> work["total"] == sum(work[k] for k in ("7x7", "3x3", "1x1", "fc"))
+    True
     """
+
     def conv(h, cin, cout, k, s):
         ho = h // s
         return ho, ho * ho * cout * cin * k * k
@@ -62,7 +212,7 @@ def calc_resnet_bottleneck_macs(stages=((64, 3), (128, 4), (256, 6), (512, 3)), 
     macs = {"7x7": 0, "3x3": 0, "1x1": 0, "fc": 0}
     h, m = conv(input_size, 3, 64, 7, 2)
     macs["7x7"] += m
-    h //= 2                                     # 3x3/2 max pool
+    h //= 2  # 3x3/2 max pool
     cin = 64
     for i, (width, blocks) in enumerate(stages):
         for b in range(blocks):

@@ -5,29 +5,92 @@ from __future__ import annotations
 import math
 import pint
 
-from mlsysim.core.units import ureg, MB
-from mlsysim.core._validation import validate_at_least, validate_nonnegative
+from mlsysim.core.units import ureg, MB, BYTES_FP32
+from mlsysim.core._validation import validate_at_least, validate_nonnegative, validate_positive
 
 from ._units import _ensure_unit
 
 
-def model_memory(params, bytes_per_param, unit=MB):
+def optimizer_state_bytes(optimizer: str):
+    """Return optimizer storage per trainable parameter, excluding gradients.
+
+    Parameters
+    ----------
+    optimizer : str
+        Case-insensitive storage convention: adam, adamw, sgd, or none.
+
+    Returns
+    -------
+    Quantity
+        Bytes per parameter; multiply by a parameter count to obtain total storage.
+
+    Notes
+    -----
+    Equation: B = c * b_FP32, with c = 3 for Adam/AdamW, 1 for SGD, and 0 for none.
+
+    Assumptions: Adam retains an FP32 master weight and two FP32 moments. SGD retains a
+    master weight but no momentum; this is an explicit mixed-precision convention.
+
+    Excludes: Model weights at execution precision, gradients, activations, allocator
+    reserve, and optimizer workspaces.
+
+    References
+    ----------
+    Derivation: count the stored FP32 tensors per parameter. The Adam convention follows
+    the model-state accounting in Rajbhandari et al. (2020), "ZeRO: Memory Optimizations
+    Toward Training Trillion Parameter Models," https://arxiv.org/abs/1910.02054
+    (bibliography key: rajbhandari2020). The SGD convention is declared here, not
+    inferred from every SGD implementation.
+
+    Examples
+    --------
+    >>> optimizer_state_bytes("adamw") == 3 * BYTES_FP32
+    True
     """
-    Calculates the memory footprint to store model weights in a requested unit.
+    copies = {"adam": 3, "adamw": 3, "sgd": 1, "none": 0}
+    key = optimizer.lower()
+    if key not in copies:
+        raise ValueError(f"Unknown optimizer '{optimizer}'. Supported: {', '.join(sorted(copies))}")
+    return copies[key] * BYTES_FP32
+
+
+def model_memory(params, bytes_per_param, unit=MB):
+    """Calculate weight storage in a requested memory unit.
 
     Parameters
     ----------
     params : Quantity or int
-        Total number of parameters in the model.
-    bytes_per_param : Quantity or int
-        Size of each parameter in bytes (e.g., 2 bytes for FP16).
+        Nonnegative parameter count, dimensionless or in param/count units.
+    bytes_per_param : Quantity or float
+        Nonnegative bytes per stored parameter; quantities must have byte units.
     unit : pint.Unit, optional
-        The desired output unit (defaults to MB).
+        Memory unit for the returned magnitude; defaults to decimal MB.
 
     Returns
     -------
     float
-        The calculated memory footprint magnitude in the requested unit.
+        Weight-memory magnitude in unit; unlike most physics helpers, this API returns
+        no attached unit.
+
+    Notes
+    -----
+    Equation: M = P * b, converted from bytes to unit.
+
+    Assumptions: Each parameter occupies the same storage width; the caller supplies any
+    quantized effective width.
+
+    Excludes: Activations, gradients, optimizer state, KV cache, metadata, padding, and
+    packing overhead.
+
+    References
+    ----------
+    Derivation: summing P equal-width stored elements gives P times the bytes per
+    element.
+
+    Examples
+    --------
+    >>> model_memory(1000, 2, unit=ureg.byte) == 1000 * 2
+    True
     """
     if isinstance(params, ureg.Quantity):
         try:
@@ -36,10 +99,7 @@ def model_memory(params, bytes_per_param, unit=MB):
             raise pint.DimensionalityError(
                 params.units,
                 ureg.count,
-                extra_msg=(
-                    f" in model_memory() — params must be in param/count units, "
-                    f"got {params.units}"
-                ),
+                extra_msg=(f" in model_memory() — params must be in param/count units, got {params.units}"),
             )
     else:
         param_count = params
@@ -51,10 +111,7 @@ def model_memory(params, bytes_per_param, unit=MB):
             raise pint.DimensionalityError(
                 bytes_per_param.units,
                 ureg.byte,
-                extra_msg=(
-                    f" in model_memory() — bytes_per_param must be byte units, "
-                    f"got {bytes_per_param.units}"
-                ),
+                extra_msg=(f" in model_memory() — bytes_per_param must be byte units, got {bytes_per_param.units}"),
             )
     else:
         bpp = bytes_per_param
@@ -86,54 +143,69 @@ def calc_activation_memory(
     precision_bytes=2,
     strategy="selective",
 ):
-    """
-    Estimates the activation memory required for a Transformer model during training.
-
-    Implements the per-layer analytical bounds of Korthikanti et al. (2023),
-    "Reducing Activation Recomputation in Large Transformer Models", Sec. 4.1,
-    whose constants are expressed in BYTES with FP16 (2-byte) activations baked in:
-
-    - ``none``      (no recomputation):  ``s*b*h*34 + 5*a*s^2*b``
-    - ``selective`` (recompute attention matrices): ``s*b*h*34``
-    - ``full``      (recompute everything; keep layer inputs): ``s*b*h*2``
-
-    where ``s`` = sequence length, ``b`` = microbatch size, ``h`` = hidden
-    dimension, and ``a`` = attention heads. The quadratic ``5*a*s^2*b`` term is
-    the attention softmax/dropout/score storage — dominant at long sequence
-    lengths — and is exactly what selective recomputation discards. Activations
-    stored at other precisions scale the FP16-based constants by
-    ``precision_bytes / 2``.
-
-    (Audit fix 2026-06-06: the previous implementation used 34/10/2 as
-    precision-free coefficients AND multiplied by ``precision_bytes``, double-
-    counting the FP16 width at every strategy; its ``selective=10`` matched no
-    published convention; and the attention term was missing entirely.)
+    """Estimate saved Transformer training activations per device.
 
     Parameters
     ----------
     n_layers : int
-        Number of transformer layers per device (after pipeline parallelism).
+        Positive number of layers resident on the device after pipeline partitioning.
     seq_len : int
-        Sequence length.
+        Positive tokens per sequence.
     batch_size : int
-        Microbatch size per device.
+        Positive microbatch sequence count per device.
     hidden_dim : int
-        Hidden dimension of the model.
+        Positive hidden width in elements.
     n_heads : int, optional
-        Number of attention heads. REQUIRED for ``strategy='none'`` (the
-        quadratic attention term needs it); unused otherwise.
+        Positive attention-head count; required for strategy="none" and otherwise
+        unused.
     precision_bytes : float, optional
-        Bytes per activation element (default 2, i.e. FP16 — the paper's
-        convention).
+        Positive bytes per activation element; default 2 scales the FP16 accounting.
     strategy : str, optional
-        Recomputation strategy: 'none', 'selective' (default), or 'full'.
+        Saved-state policy: none, selective (default), or full recomputation.
 
     Returns
     -------
     Quantity
-        The total estimated activation memory in bytes.
+        Total saved activation storage in bytes.
+
+    Notes
+    -----
+    Equation: M = L * (b/2) * A. At FP16, A = ``34*S*B*H`` + ``5*N_heads*S**2*B`` for none,
+    ``34*S*B*H`` for selective, and ``2*S*B*H`` for full.
+
+    Assumptions: Equal layer shapes and the FP16 saved-tensor convention of Korthikanti
+    et al. Selective recomputation discards attention matrices; full recomputation
+    retains layer inputs. Other precisions scale all coefficients uniformly.
+
+    Excludes: Weights, gradients, optimizer state, kernel scratch space, allocator
+    reserve, sequence/tensor-parallel sharding, and schedule-dependent simultaneous
+    microbatch residency.
+
+    The attention coefficient counts softmax probabilities, a dropout mask, and dropped
+    probabilities. The FP16 byte widths are already included in the coefficients;
+    multiplying them by precision_bytes without dividing by two would count precision
+    twice.
+
+    References
+    ----------
+    Korthikanti et al. (2023), "Reducing Activation Recomputation in Large Transformer
+    Models," https://arxiv.org/abs/2205.05198 (bibliography key: korthikanti2023). The
+    linear precision rescaling is a modeling convention.
+
+    Examples
+    --------
+    >>> full = calc_activation_memory(2, 8, 1, 16, strategy="full")
+    >>> selective = calc_activation_memory(2, 8, 1, 16, strategy="selective")
+    >>> bool(full < selective)
+    True
     """
     validate_at_least(n_layers, 1, "n_layers")
+    validate_at_least(seq_len, 1, "seq_len")
+    validate_at_least(batch_size, 1, "batch_size")
+    validate_at_least(hidden_dim, 1, "hidden_dim")
+    validate_positive(precision_bytes, "precision_bytes")
+    if n_heads is not None:
+        validate_at_least(n_heads, 1, "n_heads")
     s, b, h = seq_len, batch_size, hidden_dim
     precision_scale = precision_bytes / 2  # Korthikanti constants are FP16 bytes
     if strategy == "full":
@@ -147,24 +219,49 @@ def calc_activation_memory(
                 "attention term scales with the head count (Korthikanti et al. "
                 "2023, Sec. 4.1)."
             )
-        bytes_per_layer = (KORTHIKANTI_PER_TOKEN_BYTES * s * b * h
-                           + KORTHIKANTI_SCORE_BYTES * n_heads * s * s * b) * precision_scale
+        bytes_per_layer = (
+            KORTHIKANTI_PER_TOKEN_BYTES * s * b * h + KORTHIKANTI_SCORE_BYTES * n_heads * s * s * b
+        ) * precision_scale
     else:
-        raise ValueError(
-            f"Unknown activation strategy {strategy!r}; expected 'none', "
-            "'selective', or 'full'."
-        )
+        raise ValueError(f"Unknown activation strategy {strategy!r}; expected 'none', 'selective', or 'full'.")
     return (n_layers * bytes_per_layer) * ureg.byte
 
 
 def calc_checkpoint_memory_units(n_layers: int, checkpoints: int) -> float:
-    """
-    Activation memory of evenly spaced checkpointing, in units of one layer's activations.
+    """Estimate evenly spaced checkpoint memory in layer-equivalent units.
 
-    With ``k`` checkpoints over ``L`` equal layers, the forward pass keeps the
-    ``k`` checkpoint activations and the backward pass rebuilds one segment of
-    ``L/k`` layers at a time: ``k + L/k``, smallest near ``k = sqrt(L)``
-    (Chen et al. 2016). (Added 2026-10-20.)
+    Parameters
+    ----------
+    n_layers : int
+        Positive depth L of an equal-sized layer chain.
+    checkpoints : int
+        Positive checkpoint count k; use k <= L for a physical partition.
+
+    Returns
+    -------
+    float
+        Activation footprint measured in units of one layer, not bytes.
+
+    Notes
+    -----
+    Equation: M_layers = k + L/k.
+
+    Assumptions: The forward pass keeps k checkpoints while backward recomputes one
+    segment of L/k equal-sized layers at a time.
+
+    Excludes: Integer segment rounding, unequal layer sizes, tensor parallelism, and
+    recomputation runtime.
+
+    References
+    ----------
+    Chen et al. (2016), "Training Deep Nets with Sublinear Memory Cost,"
+    https://arxiv.org/abs/1604.06174 (bibliography key: chen2016training). The
+    equal-segment approximation yields k + L/k.
+
+    Examples
+    --------
+    >>> calc_checkpoint_memory_units(16, 4) == 4 + 16 / 4
+    True
     """
     validate_at_least(n_layers, 1, "n_layers")
     validate_at_least(checkpoints, 1, "checkpoints")
@@ -172,22 +269,40 @@ def calc_checkpoint_memory_units(n_layers: int, checkpoints: int) -> float:
 
 
 def calc_checkpoint_size(n_params, bytes_per_param=14):
-    """
-    Calculates the total storage size required for a training checkpoint.
+    """Calculate persistent training-checkpoint storage.
 
     Parameters
     ----------
-    n_params : Quantity
-        Total number of parameters in the model.
-    bytes_per_param : Quantity or int, optional
-        Bytes required per parameter for optimizer state + weights.
-        For mixed-precision Adam, this is typically 14 bytes (FP32 master weights,
-        FP32 momentum, FP32 variance, FP16 parameters). Defaults to 14.
+    n_params : Quantity or int
+        Nonnegative parameter count; quantities must be dimensionless/count-compatible.
+    bytes_per_param : Quantity or float, optional
+        Stored bytes per parameter, default 14: an FP16 weight plus an FP32 master
+        weight and two FP32 moments.
 
     Returns
     -------
     Quantity
-        Total checkpoint size in bytes.
+        Checkpoint storage in bytes.
+
+    Notes
+    -----
+    Equation: M_checkpoint = P * b_checkpoint.
+
+    Assumptions: Every parameter has the same saved-state footprint; the default stores
+    mixed-precision Adam state.
+
+    Excludes: Gradients, activations, dataset position, random-number state,
+    serialization metadata, filesystem replication, and compression.
+
+    References
+    ----------
+    Derivation: multiply parameter count by the sum of persisted tensor widths. The
+    default is 2 + 4 + 4 + 4 bytes per parameter, not a measured file size.
+
+    Examples
+    --------
+    >>> calc_checkpoint_size(1000).m_as("byte") == 1000 * 14
+    True
     """
     bpp = _ensure_unit(bytes_per_param, ureg.byte, "bytes_per_param")
     return (n_params * bpp).to(ureg.byte)
@@ -202,33 +317,51 @@ def calc_kv_cache_size(
     bytes_per_elem=2,
     kv_precision_bytes=None,
 ):
-    """
-    Calculates the KV cache memory size for autoregressive inference.
-
-    The KV cache stores Key and Value tensors for all previous tokens to avoid
-    recomputing them. The size is strictly: 2 * L * H * d * S * B * precision.
+    """Calculate resident key/value cache storage.
 
     Parameters
     ----------
     n_layers : int
-        Number of transformer layers.
+        Positive number of decoder layers.
     n_heads : int
-        Number of Key/Value attention heads (accounts for MQA/GQA).
+        Positive key/value-head count, not query-head count; use the GQA/MQA count.
     head_dim : int
-        Dimension of a single attention head.
+        Positive elements per key/value head.
     seq_len : int
-        Total sequence length (context + generated tokens).
+        Nonnegative resident token count per request, including prompt and generated
+        tokens.
     batch_size : int
-        Number of parallel requests.
-    bytes_per_elem : Quantity or int, optional
-        Numerical precision of the cache (defaults to 2 for FP16/BF16).
-    kv_precision_bytes : Quantity or int, optional
-        Override for specific KV cache quantization (e.g., INT8 KV cache).
+        Positive number of requests with this same resident length.
+    bytes_per_elem : Quantity or float, optional
+        Bytes per cache element; default 2 for FP16/BF16.
+    kv_precision_bytes : Quantity or float, optional
+        Cache-specific byte width overriding bytes_per_elem when supplied.
 
     Returns
     -------
     Quantity
-        Total KV cache size in bytes.
+        Combined K and V storage in bytes.
+
+    Notes
+    -----
+    Equation: M_KV = 2 * L * H_KV * d_head * S * B * b.
+
+    Assumptions: Each layer stores separate K and V vectors for every resident token and
+    KV head. Both vectors use the effective byte width.
+
+    Excludes: Page rounding, quantization scales, shared-prefix deduplication, allocator
+    reserve, and runtime workspaces.
+
+    References
+    ----------
+    Derivation: multiply the tensor dimensions for K and V and add their equal
+    footprints. The leading two counts tensors, not bytes of precision.
+
+    Examples
+    --------
+    >>> small = calc_kv_cache_size(2, 4, 8, 16, 1)
+    >>> calc_kv_cache_size(2, 4, 8, 32, 1) == 2 * small
+    True
     """
     validate_at_least(n_layers, 1, "n_layers")
     validate_at_least(n_heads, 1, "n_heads")
@@ -253,43 +386,49 @@ def calc_mla_cache_size(
     batch_size,
     bytes_per_elem=2,
 ):
-    """
-    Calculates the cache size for Multi-Head Latent Attention (MLA).
-
-    MLA compresses keys and values into a single low-rank latent vector per
-    token per layer, and carries a decoupled rotary position key alongside it.
-    Only those two are resident, so the cache is:
-
-        n_layers * (kv_lora_rank + qk_rope_head_dim) * S * B * precision
-
-    There is no leading factor of two: unlike standard attention, MLA does not
-    keep a separate K and V tensor per key-value head. That absence is the whole
-    point of the scheme, and it is why an MLA model's resident cache is an order
-    of magnitude smaller than a grouped-query model of comparable depth.
-
-    Source: DeepSeek-AI, "DeepSeek-V2/V3 Technical Report" (Multi-Head Latent
-    Attention), where the compressed latent has dimension ``kv_lora_rank`` and
-    the decoupled rotary key has dimension ``qk_rope_head_dim``.
+    """Calculate resident Multi-Head Latent Attention cache storage.
 
     Parameters
     ----------
     n_layers : int
-        Number of transformer layers.
+        Positive decoder-layer count.
     kv_lora_rank : int
-        Dimension of the compressed key-value latent held per token per layer.
+        Positive elements in the compressed key/value latent per token and layer.
     qk_rope_head_dim : int
-        Dimension of the decoupled rotary position key held alongside it.
+        Positive elements in the decoupled rotary key per token and layer.
     seq_len : int
-        Total sequence length (context + generated tokens).
+        Nonnegative resident tokens per request.
     batch_size : int
-        Number of parallel requests.
-    bytes_per_elem : Quantity or int, optional
-        Numerical precision of the cache (defaults to 2 for FP16/BF16).
+        Positive request count with the same resident length.
+    bytes_per_elem : Quantity or float, optional
+        Bytes per cached element, default 2.
 
     Returns
     -------
     Quantity
-        Total latent cache size in bytes.
+        Compressed latent plus rotary-key cache in bytes.
+
+    Notes
+    -----
+    Equation: M_MLA = L * (r_KV + d_RoPE) * S * B * b.
+
+    Assumptions: The latent and rotary key are the only resident cache vectors. K and V
+    are reconstructed/absorbed at use time, so no separate leading factor of two
+    applies.
+
+    Excludes: Reconstruction computation, quantization metadata, page rounding, prefix
+    sharing, and attention workspace.
+
+    References
+    ----------
+    DeepSeek-AI (2024), "DeepSeek-V2: A Strong, Economical, and Efficient
+    Mixture-of-Experts Language Model," https://arxiv.org/abs/2405.04434 (bibliography
+    key: deepseek2024v2).
+
+    Examples
+    --------
+    >>> calc_mla_cache_size(2, 8, 4, 16, 1).m_as("byte") == 2 * (8 + 4) * 16 * 2
+    True
     """
     validate_at_least(n_layers, 1, "n_layers")
     validate_at_least(kv_lora_rank, 1, "kv_lora_rank")
@@ -310,42 +449,56 @@ def calc_paged_kv_cache_size(
     page_size_tokens=16,
     bytes_per_elem=2,
 ):
-    """
-    Calculates KV cache size accounting for PagedAttention fragmentation.
-
-    PagedAttention (Kwon et al., 2023) allocates KV cache in fixed-size blocks
-    (pages). This eliminates external fragmentation but introduces internal
-    fragmentation in the final allocated page.
-
-    This sizes one known sequence length. When ``seq_len`` is a multiple of the
-    page size the waste is zero for every page size, so a single length cannot
-    show the page-size trade-off. ``calc_expected_paged_kv_tokens`` averages the
-    last-page tail over a distribution of request lengths, which is what makes
-    page size matter for capacity planning.
+    """Calculate page-rounded KV storage and internal fragmentation.
 
     Parameters
     ----------
     n_layers : int
-        Number of transformer layers.
+        Positive decoder-layer count.
     n_heads : int
-        Number of Key/Value attention heads.
+        Positive key/value-head count.
     head_dim : int
-        Dimension of a single attention head.
+        Positive elements per key/value head.
     seq_len : int
-        Current sequence length.
+        Nonnegative resident tokens per request.
     batch_size : int
-        Number of parallel requests.
+        Positive request count, each with the same length.
     page_size_tokens : int, optional
-        Number of tokens per allocated page block (defaults to 16).
-    bytes_per_elem : Quantity or int, optional
-        Numerical precision (defaults to 2).
+        Positive tokens per physical page, default 16.
+    bytes_per_elem : Quantity or float, optional
+        Bytes per cache element, default 2.
 
     Returns
     -------
     tuple
-        A 2-tuple containing:
-        - size (Quantity): Total allocated KV cache size in bytes.
-        - frag_pct (float): Internal memory fragmentation (0.0 to 1.0).
+        Allocated bytes as a Quantity and unused fraction of allocated bytes as a float;
+        empty sequences return zero for both.
+
+    Notes
+    -----
+    Equation: S_alloc = ``ceil(S/p)*p``; M = ``2*L*H_KV*d*S_alloc*B*b``; f = (S_alloc-S)/S_alloc
+    for nonempty allocation.
+
+    Assumptions: Each request receives whole pages and its final page is the only source
+    of internal slack.
+
+    Excludes: External fragmentation, block-table metadata, prefix sharing, and reserve
+    for future output tokens.
+
+    A single length divisible by the page size has no internal waste. Use
+    calc_expected_paged_kv_tokens when the question concerns a distribution of lengths.
+
+    References
+    ----------
+    Kwon et al. (2023), "Efficient Memory Management for Large Language Model Serving
+    with PagedAttention," https://arxiv.org/abs/2309.06180 (bibliography key: kwon2023).
+    Page rounding here is deterministic tensor accounting.
+
+    Examples
+    --------
+    >>> size, waste = calc_paged_kv_cache_size(2, 4, 8, 16, 1, page_size_tokens=8)
+    >>> size == calc_kv_cache_size(2, 4, 8, 16, 1) and waste == 0
+    True
     """
     validate_at_least(n_layers, 1, "n_layers")
     validate_at_least(n_heads, 1, "n_heads")
@@ -360,46 +513,53 @@ def calc_paged_kv_cache_size(
     padded_seq_len = math.ceil(seq_len / page_size_tokens) * page_size_tokens
     internal_frag = max(0, padded_seq_len - seq_len)
     frag_pct = internal_frag / padded_seq_len if padded_seq_len > 0 else 0.0
-    size = (
-        2 * n_layers * n_heads * head_dim * padded_seq_len * batch_size * bpe
-    ).to(ureg.byte)
+    size = calc_kv_cache_size(n_layers, n_heads, head_dim, padded_seq_len, batch_size, bpe)
     return size, frag_pct
 
 
 def calc_capped_exponential_scale(mean_tokens, max_tokens):
-    """
-    Solves for the exponential scale whose context-capped mean is ``mean_tokens``.
-
-    Request lengths are modeled as ``S = min(X, S_max)`` with
-    ``X ~ Exponential(mu)``: short requests are common, long ones are rare, and
-    a request that would run past the context window is cut off at ``S_max``.
-    The capped mean is ``E[S] = mu * (1 - exp(-S_max / mu))``, which rises
-    monotonically from 0 toward ``S_max`` as ``mu`` grows, so exactly one scale
-    matches any ``0 < mean_tokens < S_max``. At ``mean_tokens == S_max`` every
-    request fills the window (the fixed-length limit) and the scale is infinite.
-
-    The exponential shape is a modeling assumption, chosen because it is the
-    maximum-entropy distribution for a positive length with a known mean. It
-    is not fitted to a serving trace.
+    """Solve for the exponential scale of a context-capped length model.
 
     Parameters
     ----------
     mean_tokens : float
-        Mean tokens per request after the cap, ``0 < mean_tokens <= max_tokens``.
+        Mean resident tokens after capping, in (0, max_tokens].
     max_tokens : float
-        Context-window cap ``S_max`` in tokens (> 0).
+        Positive context cap in tokens.
 
     Returns
     -------
     float
-        Exponential scale ``mu`` in tokens (``math.inf`` in the fixed-length limit).
+        Uncapped exponential scale in tokens; infinity when every request reaches the
+        cap.
+
+    Notes
+    -----
+    Equation: mean_tokens = mu * (1 - exp(-max_tokens/mu)).
+
+    Assumptions: Length is min(X, max_tokens), where X is a continuous exponential
+    variable. Bisection solves the monotone mean relation; the shape is assumed, not
+    fitted to a trace.
+
+    Excludes: Discrete token effects and measured request-length distributions.
+
+    References
+    ----------
+    Derivation: integrate the survival function P(X > s) = exp(-s/mu) from zero to
+    max_tokens. The capped mean rises monotonically from zero to the cap.
+
+    Examples
+    --------
+    >>> math.isinf(calc_capped_exponential_scale(16, 16))
+    True
+    >>> mu = calc_capped_exponential_scale(8, 32)
+    >>> math.isclose(mu * (1 - math.exp(-32 / mu)), 8)
+    True
     """
     if max_tokens <= 0:
         raise ValueError(f"max_tokens ({max_tokens}) must be positive")
     if not 0 < mean_tokens <= max_tokens:
-        raise ValueError(
-            f"mean_tokens ({mean_tokens}) must be in (0, max_tokens={max_tokens}]"
-        )
+        raise ValueError(f"mean_tokens ({mean_tokens}) must be in (0, max_tokens={max_tokens}]")
     rho = mean_tokens / max_tokens
     if rho >= 1.0:
         return math.inf
@@ -416,40 +576,49 @@ def calc_capped_exponential_scale(mean_tokens, max_tokens):
 
 
 def calc_expected_paged_kv_tokens(mean_request_tokens, max_seq_len, page_size_tokens=16):
-    """
-    Expected KV tokens a paged allocator holds per request, and the waste inside.
-
-    PagedAttention (Kwon et al., 2023, Sec. 4.2) hands a request fixed-size
-    blocks on demand, so a request of ``S`` tokens holds ``ceil(S / p)`` blocks
-    and wastes at most the unused tail of its last block. With request lengths
-    ``S = min(X, S_max)`` and ``X`` exponential (``calc_capped_exponential_scale``),
-    the expected block count has a closed form from summing tail probabilities:
-
-        E[ceil(S/p)] = sum_{j=0}^{K-1} P(S > j p) = (1 - r^K) / (1 - r)
-        r = exp(-p / mu),  K = ceil(S_max / p)
-
-    The expected allocation is ``p * E[ceil(S/p)]`` and the expected internal
-    fragmentation is ``1 - mean / allocation``. When ``mu >> p`` the tail
-    averages about ``p / 2`` tokens, so larger pages waste proportionally more
-    even when ``S_max`` divides evenly by ``p``. In the fixed-length limit
-    (``mean_request_tokens == max_seq_len``) the allocation is
-    ``ceil(S_max / p) * p``, matching ``calc_paged_kv_cache_size``.
+    """Estimate page allocation under a capped exponential request model.
 
     Parameters
     ----------
     mean_request_tokens : float
-        Mean tokens a request fills, ``0 < mean_request_tokens <= max_seq_len``.
+        Positive mean resident tokens, at most max_seq_len.
     max_seq_len : int
-        Longest context a request may reach, in tokens.
+        Positive cap on resident tokens per request.
     page_size_tokens : int, optional
-        Tokens per block (defaults to 16, the vLLM default).
+        Positive tokens per page; default 16.
 
     Returns
     -------
     tuple
-        A 2-tuple containing:
-        - allocated_tokens (float): Expected KV tokens allocated per request.
-        - internal_frag (float): Expected unused fraction of that allocation (0.0 to 1.0).
+        Expected allocated tokens per request and expected unused fraction of that
+        allocation, both floats.
+
+    Notes
+    -----
+    Equation: E[pages] = ``sum(exp(-j*p/mu)``, j=0..K-1) = ``(1-r**K)/(1-r)``, with
+    r=exp(-p/mu), K=ceil(S_max/p). Allocation is ``p*E``[pages], and waste is
+    1-mean/allocation.
+
+    Assumptions: Resident length is min(X, S_max), with an exponential X calibrated only
+    to the supplied capped mean. At the fixed-length limit, allocate ``ceil(S_max/p)*p``
+    tokens.
+
+    Excludes: External fragmentation, block metadata, time-varying occupancy, prefix
+    sharing, and departures from the assumed length distribution.
+
+    References
+    ----------
+    Derivation: the tail-sum identity for the integer page count gives the finite
+    geometric series. Kwon et al. (2023), "Efficient Memory Management for Large
+    Language Model Serving with PagedAttention," https://arxiv.org/abs/2309.06180
+    (bibliography key: kwon2023), motivates page allocation; the exponential request
+    model is an additional assumption.
+
+    Examples
+    --------
+    >>> allocation, waste = calc_expected_paged_kv_tokens(16, 16, page_size_tokens=8)
+    >>> allocation == 16 and waste == 0
+    True
     """
     validate_at_least(page_size_tokens, 1, "page_size_tokens")
     mu = calc_capped_exponential_scale(mean_request_tokens, max_seq_len)
@@ -465,40 +634,99 @@ def calc_expected_paged_kv_tokens(mean_request_tokens, max_seq_len, page_size_to
     return allocated_tokens, internal_frag
 
 
-
 # --- Decoder weight matrices (added 2026-10-20) ------------------------------
 
-def calc_decoder_matmul_weights(layers, hidden_dim, vocab_size, mlp_ratio=4):
-    """
-    Weights in the matrix multiplies of a GPT-style decoder, by kind.
 
-    Each block has four weight matrices: the fused query-key-value projection
-    (d x 3d), the attention output projection (d x d), and the two MLP
-    matrices (d x r d and r d x d). The output layer projects d to the
-    vocabulary (d x V). Biases, layer norms, and position embeddings are not
-    matrix multiplies and are left out.
+def calc_decoder_matmul_weights(layers, hidden_dim, vocab_size, mlp_ratio=4):
+    """Count GPT-style decoder matrix weights by location.
+
+    Parameters
+    ----------
+    layers : int
+        Positive decoder-block count L.
+    hidden_dim : int
+        Positive hidden width d.
+    vocab_size : int
+        Positive output-vocabulary size V.
+    mlp_ratio : float, optional
+        Positive intermediate-width multiple r; default 4.
 
     Returns
     -------
     dict
-        ``block`` (weights in all blocks), ``block_matrices`` (count of block
-        weight matrices), and ``output`` (output-layer weights).
+        Counts: block weights across all layers, block_matrices across all layers, and
+        output projection weights.
+
+    Notes
+    -----
+    Equation: block = ``L*(4*d**2`` + ``2*r*d**2)``; block_matrices = ``4*L``; output = ``V*d``.
+
+    Assumptions: Each block has one fused QKV matrix, one attention output matrix, and
+    two MLP matrices. The output projection is reported separately.
+
+    Excludes: Biases, normalization scales, position embeddings, GQA/MLA geometry, and
+    gated-MLP extra matrices.
+
+    References
+    ----------
+    Derivation: sum the rectangular matrix element counts ``d*(3*d)``, ``d*d``, ``d*(r*d)``,
+    ``(r*d)*d``, and ``V*d``. Fusing QKV changes matrix count, not parameter count.
+
+    Examples
+    --------
+    >>> result = calc_decoder_matmul_weights(2, 8, 16)
+    >>> result["block"] == 2 * (4 + 2 * 4) * 8**2
+    True
     """
     d = hidden_dim
-    per_block = d * 3 * d + d * d + 2 * d * mlp_ratio * d
+    from .transformer import calc_transformer_block_weights
+
+    _, _, per_block = calc_transformer_block_weights(d, ffn_multiple=mlp_ratio)
     return {"block": layers * per_block, "block_matrices": 4 * layers, "output": vocab_size * d}
 
 
 # --- KV cache residency: fit, blocks, sharing (added 2026-10-20) -------------
 
-def calc_kv_attention_design(heads, kv_heads=None, kv_lora_rank=None) -> str:
-    """
-    The attention design a model's KV geometry implies: "MLA", "GQA", or "MHA".
 
-    Multi-head latent attention (MLA) caches one compressed latent per token
-    per layer (``kv_lora_rank`` set). Grouped-query attention (GQA) stores
-    fewer key-value heads than query heads. Multi-head attention (MHA) stores
-    one key-value head per query head.
+def calc_kv_attention_design(heads, kv_heads=None, kv_lora_rank=None) -> str:
+    """Classify a cache geometry as MLA, GQA, or MHA.
+
+    Parameters
+    ----------
+    heads : int
+        Positive query-head count for a physical attention configuration.
+    kv_heads : int, optional
+        Key/value-head count; a positive count below heads selects GQA.
+    kv_lora_rank : int, optional
+        Compressed KV latent width; any nonzero value selects MLA before checking head
+        counts.
+
+    Returns
+    -------
+    str
+        MLA, GQA, or MHA; absent geometry defaults to MHA.
+
+    Notes
+    -----
+    Equation: design = MLA if kv_lora_rank is truthy, else GQA if 0 < kv_heads < heads,
+    else MHA.
+
+    Assumptions: This is a routing convention based on declared geometry, not an
+    inference from weights. Inputs describe an already valid model.
+
+    Excludes: Architectural validity checks, cache sizing, and distinctions between
+    single-head MQA and other GQA configurations.
+
+    References
+    ----------
+    Derivation: classify whether cache storage uses a compressed latent, grouped
+    key/value heads, or one key/value head per query head. The precedence is a local API
+    convention.
+
+    Examples
+    --------
+    >>> calc_kv_attention_design(8, kv_heads=2)
+    'GQA'
     """
     if kv_lora_rank:
         return "MLA"
@@ -508,43 +736,152 @@ def calc_kv_attention_design(heads, kv_heads=None, kv_lora_rank=None) -> str:
 
 
 def calc_kv_resident_fit(pool, bytes_per_sequence) -> int:
-    """
-    Whole sequences of ``bytes_per_sequence`` that fit in ``pool``.
+    """Count complete equal-sized sequences that fit a memory pool.
 
-        B = floor(M_pool / (S * m_token))
+    Parameters
+    ----------
+    pool : Quantity
+        Nonnegative available memory in byte-compatible units.
+    bytes_per_sequence : Quantity
+        Positive total cache bytes per sequence, including any caller-selected reserve.
 
-    Both arguments are byte quantities. The count is a memory-only bound: it
-    ignores block rounding, headroom, and promised output growth unless the
-    caller has folded them into ``bytes_per_sequence``.
+    Returns
+    -------
+    int
+        Whole sequence count; integer conversion equals floor for nonnegative ratios.
+
+    Notes
+    -----
+    Equation: B = floor(M_pool / M_sequence).
+
+    Assumptions: Equal resident length and storage per request; the supplied pool is
+    available exclusively for these caches.
+
+    Excludes: Block rounding, allocator headroom, other tensors, and output growth
+    unless the caller includes them in the inputs.
+
+    References
+    ----------
+    Derivation: the capacity inequality ``B*M_sequence`` <= M_pool is solved for the largest
+    nonnegative integer B.
+
+    Examples
+    --------
+    >>> calc_kv_resident_fit(10 * ureg.byte, 3 * ureg.byte) == 10 // 3
+    True
     """
     return int((pool / bytes_per_sequence).to("").magnitude)
 
 
 def calc_kv_block_count(tokens: int, block_tokens: int) -> int:
-    """Blocks of ``block_tokens`` a sequence of ``tokens`` occupies: ceil(S / b)."""
+    """Count fixed-size blocks needed by a token sequence.
+
+    Parameters
+    ----------
+    tokens : int
+        Nonnegative resident sequence length in tokens.
+    block_tokens : int
+        Positive tokens per allocation block.
+
+    Returns
+    -------
+    int
+        Number of whole blocks, with zero blocks for an empty sequence.
+
+    Notes
+    -----
+    Equation: N_blocks = ceil(tokens / block_tokens).
+
+    Assumptions: A block has identical token capacity for every sequence.
+
+    Excludes: Metadata bytes, sharing, and future token reservations.
+
+    References
+    ----------
+    Derivation: round the fractional block requirement upward because a partial block
+    still occupies one block.
+
+    Examples
+    --------
+    >>> calc_kv_block_count(17, 8) == math.ceil(17 / 8)
+    True
+    """
     validate_at_least(block_tokens, 1, "block_tokens")
     return math.ceil(tokens / block_tokens)
 
 
 def calc_shared_prefix_fit(pool_blocks: int, shared_blocks: int, private_blocks: int) -> int:
-    """
-    Requests that fit when ``shared_blocks`` are stored once for all of them.
+    """Count requests that share one physical prefix allocation.
 
-        B_shared = floor((N_blocks - N_common) / N_private)
+    Parameters
+    ----------
+    pool_blocks : int
+        Total nonnegative physical block capacity; must be at least shared_blocks for a
+        feasible pool.
+    shared_blocks : int
+        Nonnegative prefix blocks stored once for the group.
+    private_blocks : int
+        Positive unique suffix blocks needed by each request.
 
-    Each request adds only its ``private_blocks``; the common prefix is
-    counted once, as unique physical blocks.
+    Returns
+    -------
+    int
+        Whole request count; a negative value signals that the supplied prefix already
+        exceeds the pool.
+
+    Notes
+    -----
+    Equation: B = floor((pool_blocks - shared_blocks) / private_blocks).
+
+    Assumptions: Every admitted request reuses the same prefix and has the same private
+    suffix footprint.
+
+    Excludes: Copy-on-write duplication, reference-count metadata, and unequal suffix
+    lengths.
+
+    References
+    ----------
+    Derivation: solve shared_blocks + ``B*private_blocks`` <= pool_blocks for integer B.
+
+    Examples
+    --------
+    >>> calc_shared_prefix_fit(20, 4, 3) == (20 - 4) // 3
+    True
     """
     return (pool_blocks - shared_blocks) // private_blocks
 
 
 def calc_sharing_gain_limit(shared_fraction: float) -> float:
-    """
-    Large-pool limit of the resident-fit gain from sharing: 1 / (1 - f).
+    """Calculate the asymptotic residency gain from prefix sharing.
 
-    ``f`` is the shared fraction of each request's blocks. As the pool grows,
-    the one stored copy of the prefix becomes negligible and every request
-    costs only its private share.
+    Parameters
+    ----------
+    shared_fraction : float
+        Fraction f of each request footprint shared across requests, in [0, 1).
+
+    Returns
+    -------
+    float
+        Dimensionless large-pool request-capacity multiplier.
+
+    Notes
+    -----
+    Equation: gain = 1 / (1 - f).
+
+    Assumptions: The shared prefix is stored once and becomes negligible as pool/request
+    count grows.
+
+    Excludes: Finite-pool prefix cost, integer block rounding, and metadata overhead.
+
+    References
+    ----------
+    Derivation: the per-request private footprint is (1-f) times the unshared footprint;
+    capacity scales inversely with footprint.
+
+    Examples
+    --------
+    >>> calc_sharing_gain_limit(0) == 1
+    True
     """
     if not 0 <= shared_fraction < 1:
         raise ValueError("shared_fraction must be in [0, 1)")
@@ -553,20 +890,50 @@ def calc_sharing_gain_limit(shared_fraction: float) -> float:
 
 # --- On-device training: update traffic and parameter-efficient updates (added 2026-10-20) ---
 
+
 def calc_update_step_traffic(weights, gradients, optimizer_state, activations):
-    """
-    DRAM traffic of one full-update training step, one crossing per tensor use.
+    """Account for tensor traffic in one full-update training step.
 
-    With no cache reuse, the forward pass reads the weights and writes the
-    saved activations; the backward pass reads the activations and the
-    weights and writes the gradients; an Adam-style optimizer reads the
-    weights, the gradients, and its state, then writes the weights and its
-    state back:
+    Parameters
+    ----------
+    weights : Quantity or float
+        Nonnegative weight footprint; use bytes or byte-compatible quantities
+        consistently.
+    gradients : Quantity or float
+        Nonnegative gradient footprint in the same units as weights.
+    optimizer_state : Quantity or float
+        Nonnegative persistent optimizer-state footprint in the same units.
+    activations : Quantity or float
+        Nonnegative saved-activation footprint in the same units.
 
-        V_step = (W + A) + (A + W + G) + (W + G + S) + (W + S)
+    Returns
+    -------
+    tuple
+        Total step traffic and traffic from the three weight reads; both preserve the
+        input memory units.
 
-    Returns ``(step_traffic, weight_reads)``: the total bytes moved and the
-    bytes of the three weight reads (forward, backward, optimizer).
+    Notes
+    -----
+    Equation: V = (W+A) + (A+W+G) + (W+G+S) + (W+S) = ``4*W+2*A+2*G+2*S``; weight_reads =
+    ``3*W``.
+
+    Assumptions: Forward reads weights and writes saved activations. Backward reads both
+    and writes gradients. The optimizer reads weights, gradients, state, then writes
+    weights and state.
+
+    Excludes: Cache reuse, fused-kernel savings, temporary workspace, communication, and
+    activation recomputation.
+
+    References
+    ----------
+    Derivation: sum each read and write at the memory boundary exactly once for the
+    declared unfused execution sequence.
+
+    Examples
+    --------
+    >>> total, reads = calc_update_step_traffic(2, 3, 4, 5)
+    >>> total == 4*2 + 2*3 + 2*4 + 2*5 and reads == 3*2
+    True
     """
     forward = weights + activations
     backward = activations + weights + gradients
@@ -575,26 +942,80 @@ def calc_update_step_traffic(weights, gradients, optimizer_state, activations):
 
 
 def calc_low_rank_update_params(in_dim: int, out_dim: int, rank: int) -> int:
-    """
-    Trainable parameters of a rank-``rank`` update to an ``out_dim`` by ``in_dim`` weight.
+    """Count trainable weights in a low-rank matrix update.
 
-        P_LoRA = r (d_in + d_out)
+    Parameters
+    ----------
+    in_dim : int
+        Positive input width d_in of the frozen matrix.
+    out_dim : int
+        Positive output width d_out of the frozen matrix.
+    rank : int
+        Positive factor rank r; a low-rank use normally has r below both matrix
+        dimensions.
 
-    The update is the product of a down-projection (r by d_in) and an
-    up-projection (d_out by r); the frozen weight itself holds d_in d_out.
+    Returns
+    -------
+    int
+        Trainable parameter count in the two update factors.
+
+    Notes
+    -----
+    Equation: P = ``r*d_in`` + ``d_out*r``.
+
+    Assumptions: The update is a product of an r-by-d_in down projection and a
+    d_out-by-r up projection.
+
+    Excludes: Frozen base weights, biases, optimizer state, and any scale parameter.
+
+    References
+    ----------
+    Derivation: add the element counts of the two rectangular factors. This is the
+    factor-size accounting used by LoRA; it does not predict adaptation quality.
+
+    Examples
+    --------
+    >>> calc_low_rank_update_params(8, 16, 2) == 2 * (8 + 16)
+    True
     """
     validate_at_least(rank, 1, "rank")
     return rank * (in_dim + out_dim)
 
 
 def calc_residual_adapter_params(width: int, bottleneck: int) -> int:
-    """
-    Parameters of one residual bottleneck adapter, weights and biases.
+    """Count weights and biases in a bottleneck residual adapter.
 
-        P_adapter = 2 d r + r + d
+    Parameters
+    ----------
+    width : int
+        Positive input/output width d.
+    bottleneck : int
+        Positive hidden width r of the adapter.
 
-    A down-projection from width d to bottleneck r and an up-projection back
-    to d, each with a bias.
+    Returns
+    -------
+    int
+        Trainable parameter count for both affine projections.
+
+    Notes
+    -----
+    Equation: P = ``d*r`` + r + ``r*d`` + d.
+
+    Assumptions: A down projection maps d to r and an up projection maps r to d; each
+    has a bias.
+
+    Excludes: Layer-normalization parameters, gating, activation storage, and the frozen
+    surrounding model.
+
+    References
+    ----------
+    Derivation: count both projection matrices and their output biases. Residual
+    addition introduces no learned parameter.
+
+    Examples
+    --------
+    >>> calc_residual_adapter_params(8, 2) == 2 * 8 * 2 + 2 + 8
+    True
     """
     validate_at_least(bottleneck, 1, "bottleneck")
     return 2 * width * bottleneck + bottleneck + width
@@ -602,39 +1023,123 @@ def calc_residual_adapter_params(width: int, bottleneck: int) -> int:
 
 # --- Sparse storage formats (added 2026-10-20) --------------------------------
 
+
 def calc_sparse_bytes_per_nonzero(value_bytes, index_bytes, indices: int = 1):
-    """
-    Bytes one stored nonzero costs in an index-based sparse format.
+    """Calculate sparse value-plus-index storage per nonzero.
 
-        b_nz = b_value + k b_index
+    Parameters
+    ----------
+    value_bytes : Quantity or float
+        Nonnegative bytes per stored value; use the same units as index_bytes.
+    index_bytes : Quantity or float
+        Nonnegative bytes per index.
+    indices : int, optional
+        Nonnegative indices stored per nonzero: default 1 for CSR, 2 for COO.
 
-    CSR keeps one column index per value (k = 1; its row pointers are one per
-    row, not per value); COO keeps a row and a column index (k = 2).
+    Returns
+    -------
+    Quantity or float
+        Per-nonzero storage in the input byte units.
+
+    Notes
+    -----
+    Equation: b_nonzero = b_value + ``indices*b_index``.
+
+    Assumptions: Every stored nonzero carries its value and the declared fixed number of
+    indices.
+
+    Excludes: CSR row pointers, headers, padding, and compressed/variable-width index
+    coding.
+
+    References
+    ----------
+    Derivation: add the storage widths of the fields in one sparse entry.
+
+    Examples
+    --------
+    >>> calc_sparse_bytes_per_nonzero(2, 4, indices=2) == 2 + 2 * 4
+    True
     """
     validate_at_least(indices, 0, "indices")
     return value_bytes + indices * index_bytes
 
 
 def calc_sparse_breakeven_zero_share(dense_bytes_per_value, bytes_per_nonzero) -> float:
-    """
-    Share of zeros above which a sparse format stores fewer bytes than dense.
+    """Find the zero fraction at which sparse and dense storage tie.
 
-        z* = 1 - b_dense / b_nz
+    Parameters
+    ----------
+    dense_bytes_per_value : Quantity or float
+        Positive bytes per dense entry.
+    bytes_per_nonzero : Quantity or float
+        Positive bytes per sparse nonzero, in units compatible with
+        dense_bytes_per_value.
 
-    A dense tensor pays b_dense per entry, zero or not; a sparse one pays b_nz
-    per survivor, so it wins only when fewer than b_dense / b_nz survive.
-    Per-row overheads (CSR row pointers) are excluded.
+    Returns
+    -------
+    float
+        Dimensionless zero-share threshold; sparse wins above it. A negative threshold
+        means sparse entries are already cheaper before sparsity.
+
+    Notes
+    -----
+    Equation: z_star = 1 - b_dense/b_nonzero.
+
+    Assumptions: Only surviving nonzeros consume sparse storage; both representations
+    cover the same logical element count.
+
+    Excludes: Per-row pointers, format headers, sparse compute overhead, and alignment.
+
+    References
+    ----------
+    Derivation: equate ``N*b_dense`` with ``N*(1-z)*b_nonzero`` and solve for z.
+
+    Examples
+    --------
+    >>> calc_sparse_breakeven_zero_share(2, 6) == 1 - 2 / 6
+    True
     """
     return 1 - float(dense_bytes_per_value / bytes_per_nonzero)
 
 
 def calc_csr_bytes(nonzeros: int, rows: int, value_bytes, index_bytes):
-    """
-    Bytes of a matrix in compressed sparse row (CSR) form.
+    """Calculate compressed sparse row matrix storage.
 
-        B_CSR = nnz (b_value + b_index) + (rows + 1) b_index
+    Parameters
+    ----------
+    nonzeros : int
+        Nonnegative number of stored matrix entries, including any explicitly stored
+        zeros.
+    rows : int
+        Nonnegative matrix row count.
+    value_bytes : Quantity or float
+        Nonnegative bytes per value, in units compatible with index_bytes.
+    index_bytes : Quantity or float
+        Nonnegative bytes per column index and row pointer.
 
-    Values and column indices are one each per nonzero; row pointers are one
-    per row boundary, rows + 1 in all.
+    Returns
+    -------
+    Quantity or float
+        Total value, column-index, and row-pointer storage, preserving input byte units.
+
+    Notes
+    -----
+    Equation: M = ``nnz*(b_value+b_index)`` + ``(rows+1)*b_index``.
+
+    Assumptions: Each stored entry has one value and one column index; row boundaries
+    use rows+1 pointers of the same width as indices.
+
+    Excludes: Object headers, alignment, capacity over-allocation, and separate
+    indexing-width choices for columns and row offsets.
+
+    References
+    ----------
+    Derivation: sum the three CSR arrays: nnz values, nnz column indices, and rows+1 row
+    pointers.
+
+    Examples
+    --------
+    >>> calc_csr_bytes(5, 3, 2, 4) == 5 * (2 + 4) + (3 + 1) * 4
+    True
     """
     return nonzeros * (value_bytes + index_bytes) + (rows + 1) * index_bytes

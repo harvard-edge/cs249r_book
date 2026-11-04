@@ -7,6 +7,7 @@ when callers omit explicit arguments. Use ``Literature.*``, ``Systems.*``, and
 
 from ..core.provenance import sourced
 from ..core import provenance_catalog as pc
+from ..physics.memory import optimizer_state_bytes
 
 # Engine: software stack latency (CUDA programming guide order of magnitude)
 KERNEL_LAUNCH_LATENCY_US = 15.0
@@ -60,8 +61,8 @@ CHECKPOINT_BYTES_PER_PARAM_ADAM = 14
 CHECKPOINT_BYTES_PER_PARAM_SGD = 4
 
 # TrainingMemoryModel: optimizer state (weights accounted separately in memory model)
-TRAINING_OPTIMIZER_BYTES_ADAM = 12.0  # FP32 master + first/second moments
-TRAINING_OPTIMIZER_BYTES_SGD = 4.0    # FP32 master
+TRAINING_OPTIMIZER_BYTES_ADAM = optimizer_state_bytes("adam").m_as("byte")
+TRAINING_OPTIMIZER_BYTES_SGD = optimizer_state_bytes("sgd").m_as("byte")
 
 # Fallback bandwidths for undefined hardware attributes
 FALLBACK_STORAGE_BANDWIDTH_GB_S = 1.0

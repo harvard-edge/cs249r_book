@@ -15,7 +15,7 @@ MLSYSIM_ROOT = ..
 UV_RUN = uv run --no-project --python 3.11 \
 	--with "pint>=0.24.4" --with "pydantic>=2.10.5" --with "numpy>=2.0" \
 	--with typer --with rich --with pyyaml --with matplotlib \
-	--with pytest --with marimo --with scipy --with ortools --with plotly
+	--with pytest --with marimo --with scipy --with ortools --with plotly --with numpydoc
 GENERATOR = paper/scripts/generate_paper_values.py
 
 values:
@@ -65,10 +65,10 @@ GENERATED_TEX = $(wildcard generated/*.tex)
 paper: paper.pdf
 
 paper.pdf: paper.tex references.bib $(GENERATED_TEX) $(ALL_FIGURES)
-	pdflatex -interaction=nonstopmode paper.tex || true
-	bibtex paper || true
-	pdflatex -interaction=nonstopmode paper.tex || true
-	pdflatex -interaction=nonstopmode paper.tex || true
+	pdflatex -interaction=nonstopmode -halt-on-error paper.tex
+	bibtex paper
+	pdflatex -interaction=nonstopmode -halt-on-error paper.tex
+	pdflatex -interaction=nonstopmode -halt-on-error paper.tex
 
 # ── Rasterize each PDF page to PNG (layout / float debugging) ─
 layout-review: paper.pdf
