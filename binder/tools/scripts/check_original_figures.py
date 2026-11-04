@@ -63,7 +63,7 @@ def main():
       url=args.base_url.rstrip('/')+'/'+path.relative_to(root/'books').as_posix()+'?view=explore#'+entry['figure_id']
       for width,theme in [(1440,'light'),(390,'light'),(1440,'dark'),(390,'dark')]:
        page=b.new_page(viewport={'width':width,'height':1100},color_scheme=theme,reduced_motion='reduce');errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
-       page.goto(url);outer=page.locator('#'+entry['figure_id']);page.wait_for_function('(id)=>document.getElementById(id).dataset.mlsysExploreState==="ready"',arg=entry['figure_id'])
+       page.goto(url);outer=page.locator('#'+entry['figure_id']);outer.scroll_into_view_if_needed();page.wait_for_function('(id)=>document.getElementById(id).dataset.mlsysExploreState==="ready"',arg=entry['figure_id'])
        comp=outer.locator('.mlsys-original-player,.life-panel');assert comp.is_visible();assert outer.get_attribute('data-mlsys-movement-ms')==str(timing['movement-ms']);assert outer.get_attribute('data-mlsys-reading-pause-ms')==str(timing['reading-pause-ms'])
        menu=comp.locator('.mlsys-original-sequence select,.life-sequence select');values=menu.locator('option').evaluate_all('(xs)=>xs.map(x=>x.value)')
        assert comp.get_attribute('data-playing') in [None,'false'];assert comp.get_attribute('data-running') in [None,'false']
@@ -85,6 +85,8 @@ def main():
        page.emulate_media(media='print');assert not comp.is_visible();assert outer.locator('.mlsys-diagram-panel').is_visible()
        assert not errors,(key,errors)
        report.append({'key':key,'width':width,'theme':theme,'states':len(values),'paint_references':'local','keys':'passed','print':'static'})
+       (out/'report.json').write_text(json.dumps(report,indent=2))
+       print(key,width,theme,'PASS',flush=True)
        page.close()
      b.close()
     (out/'report.json').write_text(json.dumps(report,indent=2));print(json.dumps({'profiles':len(report),'figures':len(manifest),'passed':True}))
