@@ -14,10 +14,12 @@ participate in accelerator collectives.
 
 from __future__ import annotations
 
+
 from dataclasses import dataclass, replace
 from math import ceil
 from typing import Iterable, Mapping
 
+from mlsysim.core.types import serialize_unit
 from mlsysim.core.units import Q_, ureg
 from mlsysim.hardware.registry import Hardware
 from mlsysim.physics.communication import (
@@ -192,7 +194,7 @@ def serialize_quantity(quantity: object) -> dict[str, object]:
 
     return {
         "value": float(quantity.magnitude),
-        "unit": str(quantity.units),
+        "unit": serialize_unit(quantity.units),
     }
 
 

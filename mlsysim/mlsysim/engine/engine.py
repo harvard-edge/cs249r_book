@@ -5,7 +5,7 @@ from . import calibration as cal
 from ..physics import calc_bottleneck
 from ..core.exceptions import OOMError
 from ..core._validation import validate_range, validate_at_least
-from ..models.types import Workload
+from ..models.types import Workload, TransformerWorkload
 from ..hardware.types import HardwareNode, Quantity
 
 __all__ = ["PerformanceProfile", "Engine"]
@@ -41,12 +41,37 @@ class PerformanceProfile(BaseModel):
 
     @property
     def energy_per_inference(self) -> Quantity:
-        """Energy cost for a single inference pass.
+        """Return energy for the batch-latency window.
 
-        This is the total energy for the batch-latency window. For per-sample
-        energy, divide by the batch size used in Engine.solve(). The engine
-        does not store batch_size on the profile to keep it hardware-centric,
-        so the caller must apply the division when needed.
+        Returns
+        -------
+        Quantity
+            Stored batch energy in joules. Despite this legacy property name,
+            the value is not divided by batch size.
+
+        Notes
+        -----
+        Equation: energy_per_inference = energy. Per-sample energy is energy / B,
+        where B is the batch size supplied to Engine.solve.
+
+        Assumptions: the caller retains B; PerformanceProfile does not store it.
+        The underlying energy estimate uses average power over the batch time.
+
+        Excludes: a separate measurement of individual sample energy, device
+        power-meter traces, and division by the number of samples.
+
+        References
+        ----------
+        Derivation: this compatibility property returns the stored batch energy
+        without arithmetic. Dividing total energy by the sample count gives
+        an average per sample, not a separately simulated quantity.
+
+        Examples
+        --------
+        >>> from mlsysim import Engine, Hardware, Models
+        >>> profile = Engine.solve(Models.Vision.ResNet50, Hardware.Cloud.H100)
+        >>> profile.energy_per_inference == profile.energy
+        True
         """
         return self.energy
 
@@ -78,14 +103,16 @@ class Engine:
 
     The Iron Law of ML Training
     ---------------------------
-    Every solver in mlsysim ultimately decomposes into this equation:
+    Compute-dominated training time can be organized as:
 
         Time = FLOPs / (N × Peak_FLOPS × MFU × η_scaling × Goodput)
 
     where N is device count, MFU is Model FLOPs Utilization, η_scaling is
-    scaling efficiency (communication overhead), and Goodput accounts for
-    failures and checkpointing. This engine evaluates the single-node case
-    (N=1, η_scaling=1, Goodput=1); DistributedModel handles the fleet case.
+    scaling efficiency, and Goodput accounts for failures and checkpointing.
+    This accounting view requires mutually consistent definitions of the
+    efficiency factors. Engine.solve evaluates compute and memory bounds
+    on one device; DistributedModel adds fleet coordination terms. Neither
+    this expression nor a single efficiency factor replaces those bounds.
 
     Source: Williams et al. (2009), "Roofline: An Insightful Visual
     Performance Model for Floating-Point Programs and Multicore Architectures."
@@ -97,51 +124,106 @@ class Engine:
               raise_errors: bool = False, is_training: bool = False,
               seq_len: int = 2048, zero_stage: int = 0, dp_size: int = 1,
               is_lora: bool = False, activation_recomputation: bool = False) -> PerformanceProfile:
-        """
-        Solves the Roofline performance profile for a single hardware node.
+        """Estimate one device's compute, memory, and capacity limits.
 
         Parameters
         ----------
         model : Workload
-            The model architecture to simulate.
+            Workload whose lower method supplies FLOPs and weight bytes. A dense
+            autoregressive Transformer graph represents one token; a vision
+            graph represents one input. Training multiplies Transformer work
+            by seq_len before forming a batch.
         hardware : HardwareNode
-            The target hardware node.
-        batch_size : int
-            Batch size for throughput calculation.
-        precision : str
-            Numerical precision ('fp32', 'fp16', 'int8', 'int4').
-        efficiency : float
-            Achieved compute efficiency as a fraction of peak (0.0 to 1.0).
-            Derates the COMPUTE ceiling only — memory bandwidth is used at
-            its full spec value. This asymmetry is deliberate (sustained HBM
-            bandwidth is far closer to spec than sustained FLOPs), but note
-            it shifts the effective ridge point left by the same factor.
-        raise_errors : bool
-            If True, raise OOMError when the model does not fit in memory.
-        is_training : bool
-            Whether to model training (impacts memory and FLOPs). Inference
-            memory footprint counts WEIGHTS ONLY (no activations, no KV
-            cache, batch-independent) — serving-realistic memory accounting
-            including KV cache lives in ServingModel.
-        seq_len : int
-            Sequence length (used for training memory footprint).
-        zero_stage : int
-            ZeRO optimization stage (0, 1, 2, 3) for memory sharding.
-        dp_size : int
-            Data parallel size for ZeRO sharding.
-        is_lora : bool
-            Whether to use Low-Rank Adaptation (reduces optimizer memory).
-        activation_recomputation : bool
-            Whether to use activation recomputation (saves memory, adds 33% FLOPs).
+            Device specification with FLOP/s, byte/s, byte capacity, dispatch
+            time, and optional TDP in watts and alternate memory tiers.
+        batch_size : int, default: 1
+            Positive number of samples per batch, or sequences during training.
+        precision : str, default: 'fp16'
+            Registered numeric format controlling bytes per weight and the
+            precision-specific compute ceiling. Missing device precision
+            throughput falls back to the device's default peak.
+        efficiency : float, default: 0.5
+            Declared compute efficiency in [1e-9, 1]. It derates FLOP/s only;
+            bandwidth remains the selected tier's peak specification. This
+            input is an assumption, not a fitted bandwidth efficiency.
+        raise_errors : bool, default: False
+            Raise OOMError for a footprint above device capacity. Otherwise
+            retain feasible=False and estimate offload-limited latency.
+        is_training : bool, default: False
+            Include backward work and training state. Inference capacity
+            checks weights only; use ServingModel for KV-aware capacity.
+        seq_len : int, default: 2048
+            Positive tokens per training sequence. Scales Transformer work
+            and activation storage; generic inference remains one forward step.
+        zero_stage : int, default: 0
+            ZeRO stage 0, 1, 2, or 3, passed to Transformer training memory.
+        dp_size : int, default: 1
+            Positive data-parallel count used for ZeRO state sharding. Does
+            not add distributed execution or communication to this solver.
+        is_lora : bool, default: False
+            Use the training-memory adapter approximation. The generic
+            non-Transformer fallback uses a separate 1.1-times-weights heuristic.
+        activation_recomputation : bool, default: False
+            Recompute a forward pass during training: four rather than three
+            forward-equivalent work units, paired with full activation recompute.
 
         Returns
         -------
         PerformanceProfile
-            Complete performance characterization of the workload on the hardware.
+            Modeled batch latency in milliseconds, throughput in samples/s,
+            energy in joules, byte footprint, utilization fractions, selected
+            resource bound, and feasibility trace. A false capacity flag remains
+            false even when an offload-latency estimate is returned.
+
+        See Also
+        --------
+        mlsysim.physics.performance.calc_bottleneck : Compute and memory bounds.
+        mlsysim.solvers.ServingModel : KV-aware prefill and decode estimates.
+        mlsysim.models.types.TransformerWorkload.training_memory : Training state.
+
+        Notes
+        -----
+        Equation: T = max(F_batch / (eta * F_peak), W * (1 + 0.1 * B) / BW)
+        + T_dispatch + L * T_layer * launch_multiplier. Here W is weight bytes,
+        B is batch size, and launch_multiplier is three for training and one
+        for inference. Training work is three forward passes, or four with full
+        recomputation. Throughput is B / T; energy is average_power * T.
+
+        Assumptions: activation traffic is the declared 0.1 * W per-sample
+        heuristic, not an architecture trace. Compute and memory bounds overlap
+        ideally. The bandwidth path selects host offload, resident SRAM, flash,
+        or primary memory. Offload charges all traffic at the limiting link
+        rate, not only the spilled fraction. Power is TDP times an idle-plus-HFU
+        model with fractions in engine.calibration; missing TDP yields zero
+        estimated energy. Fixed dispatch and layer taxes are modeling defaults.
+
+        Excludes: KV-cache capacity, attention-context work in generic inference,
+        allocator reserve, kernel workspaces, queueing, serving concurrency,
+        and communication between devices. Feasibility is a footprint check,
+        not a deployment guarantee. The bottleneck label compares compute and
+        memory terms; overhead_dominated separately flags a larger additive tax.
+
+        References
+        ----------
+        Williams et al. (2009), "Roofline: An Insightful Visual Performance Model
+        for Multicore Architectures."
+        https://doi.org/10.1145/1498765.1498785 (bibliography key: williams2009).
+        The activation traffic, layer tax, and power coefficients are separate
+        implementation assumptions, not constants established by Roofline.
+
+        Examples
+        --------
+        >>> from mlsysim import Engine, Hardware, Models
+        >>> result = Engine.solve(Models.Vision.ResNet50, Hardware.Cloud.H100)
+        >>> result.feasible
+        True
+        >>> result.latency >= max(result.latency_compute, result.latency_memory)
+        True
         """
         # 0. Input validation
         validate_range(efficiency, 1e-9, 1.0, "efficiency")  # >0 to prevent division by zero
         validate_at_least(batch_size, 1, "batch_size")
+        validate_at_least(seq_len, 1, "seq_len")
 
         # 1. Canonicalize precision and map it to bytes per parameter. Unknown
         # precision names fail here instead of falling back to FP16 storage.
@@ -163,13 +245,17 @@ class Engine:
 
         # 3. Lower the workload to a ComputationGraph
         graph = model.lower(bpp)
+        # Transformer lowering is per token; training batches contain sequences.
+        # CNN and other workload graphs already describe one complete sample.
+        tokens_per_sample = seq_len if is_training and isinstance(model, TransformerWorkload) else 1
+        sample_ops = graph.total_ops * tokens_per_sample
 
         # 4. Resolve memory footprint and FLOPs based on training vs inference
         if is_training:
             # Training is roughly 3x FLOPs of inference (1 forward, 2 backward passes)
             # With activation recomputation, it adds another forward pass (+33% total training ops) -> 4x base ops
             ops_multiplier = 4 if activation_recomputation else 3
-            base_ops = graph.total_ops * ops_multiplier
+            base_ops = sample_ops * ops_multiplier
             
             # Calculate training memory footprint
             if hasattr(model, 'training_memory'):
@@ -311,7 +397,7 @@ class Engine:
         #         Korthikanti et al. (2022), "Reducing Activation Recomputation".
         # IMPORTANT: Use Pint unit-aware division to handle TFLOPS/s vs flop correctly.
         latency_s = latency.to("s")
-        model_ops = graph.total_ops * (3 if is_training else 1) * batch_size
+        model_ops = sample_ops * (3 if is_training else 1) * batch_size
         if latency_s.magnitude > 0 and peak_flops.magnitude > 0:
             mfu = ((model_ops / latency_s).to(peak_flops.units) / peak_flops).to_base_units().magnitude
             mfu = max(0.0, min(mfu, 1.0))  # Clamp to [0, 1]
@@ -361,28 +447,61 @@ class Engine:
     @staticmethod
     def sweep(model: Workload, hardware_list: list, batch_sizes: list = None,
               precisions: list = None, efficiency: float = 0.5) -> list:
-        """
-        Sweeps over hardware, batch sizes, and precisions to produce a list of PerformanceProfiles.
-
-        Enables rapid design-space exploration: evaluate thousands of configurations in sub-second time.
+        """Evaluate feasible inference configurations over a Cartesian product.
 
         Parameters
         ----------
         model : Workload
-            The model architecture to evaluate.
-        hardware_list : list[HardwareNode]
-            List of hardware nodes to evaluate against.
-        batch_sizes : list[int], optional
-            List of batch sizes (default: [1]).
-        precisions : list[str], optional
-            List of precisions (default: ["fp16"]).
-        efficiency : float
-            Achieved compute efficiency.
+            Fixed workload to lower for each device and precision.
+        hardware_list : list of HardwareNode
+            Devices to evaluate in their supplied order; an empty list gives
+            no results.
+        batch_sizes : list of int, optional
+            Positive sample counts. None or an empty list uses [1].
+        precisions : list of str, optional
+            Registered numeric formats. None or an empty list uses ['fp16'].
+        efficiency : float, default: 0.5
+            Declared compute efficiency in [1e-9, 1], shared by all configurations.
 
         Returns
         -------
-        list[dict]
-            List of dicts with 'hardware', 'batch_size', 'precision', and 'profile' keys.
+        list of dict
+            One entry per capacity-feasible combination, containing hardware
+            name, batch_size, precision, and a PerformanceProfile with units.
+            Capacity failures are omitted rather than returned as failed rows.
+
+        See Also
+        --------
+        mlsysim.engine.engine.Engine.solve : Per-configuration model and limits.
+
+        Notes
+        -----
+        Equation: results = [solve(model, h, b, p) for h, b, p in
+        hardware_list x batch_sizes x precisions if the footprint fits]. The
+        latency and energy equations are those of Engine.solve.
+
+        Assumptions: every point uses generic inference and the same efficiency;
+        input order determines result order. OOMError alone is caught; invalid
+        parameters and other errors still propagate.
+
+        Excludes: training configuration sweeps, optimization, queueing, measured
+        hardware execution, and a record of omitted infeasible configurations.
+        No runtime bound follows from the number of configurations alone.
+
+        References
+        ----------
+        Derivation: enumeration of the Cartesian product delegates each point
+        to Engine.solve and filters its capacity failures. There is no separate
+        performance equation or cross-configuration scheduling model.
+
+        Examples
+        --------
+        >>> from mlsysim import Engine, Hardware, Models
+        >>> rows = Engine.sweep(Models.Vision.ResNet50, [Hardware.Cloud.H100], [1, 2])
+        >>> [row['batch_size'] for row in rows]
+        [1, 2]
+        >>> all(row['profile'].feasible for row in rows)
+        True
         """
         results = []
         batch_sizes = batch_sizes or [1]

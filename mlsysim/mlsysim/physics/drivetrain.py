@@ -24,30 +24,39 @@ _MPS2 = ureg.meter / ureg.second**2
 
 
 def calc_traction_deceleration_limit(friction_coefficient: float, drive_load_share: float = 1.0):
-    """
-    Deceleration ceiling set by tire-floor friction on the braked wheels.
-
-    Equation:
-        a_traction = mu * g * phi
-
-    where phi is the fraction of the machine's weight carried by the braked
-    (driven) wheels. Unbraked casters carry the rest and contribute no
-    retarding force.
-
-    Source: Coulomb friction F <= mu N (OpenStax, University Physics Volume 1,
-    Sec. 6.2, Eq. 6.2).
+    """Calculate the tire-friction braking ceiling.
 
     Parameters
     ----------
     friction_coefficient : float
-        Tire-floor friction coefficient mu (dimensionless, > 0).
-    drive_load_share : float
-        Fraction phi of the weight on the braked wheels, in (0, 1].
+        Positive dimensionless tire-floor friction coefficient mu.
+    drive_load_share : float, optional
+        Fraction phi of machine weight carried by braked wheels, in (0, 1].
 
     Returns
     -------
     Quantity
-        Deceleration ceiling in m/s^2.
+        Deceleration ceiling in meter/second squared.
+
+    Notes
+    -----
+    Equation: a_traction = mu * g * phi.
+    Assumptions: Coulomb friction with constant normal-load share on the braked
+    wheels; unbraked casters contribute no retarding force.
+    Excludes: transient load transfer, slip dynamics, surface variation, and
+    traction-control behavior. The ceiling is conditional, not a safety guarantee.
+
+    References
+    ----------
+    Derivation: the available horizontal force is mu times the braked-wheel
+    normal load phi m g; divide by translating mass m. This is the Coulomb
+    friction model stated in OpenStax, University Physics Volume 1, Section 6.2.
+
+    Examples
+    --------
+    >>> a = calc_traction_deceleration_limit(0.5)
+    >>> (a / ureg.standard_gravity).m_as('') == 0.5
+    True
     """
     if not friction_coefficient > 0:
         raise ValueError(f"friction_coefficient must be positive; got {friction_coefficient}")
@@ -57,13 +66,37 @@ def calc_traction_deceleration_limit(friction_coefficient: float, drive_load_sha
 
 
 def calc_required_friction(deceleration, drive_load_share: float = 1.0) -> float:
-    """
-    Minimum friction coefficient that supports a deceleration on the braked wheels.
+    """Invert the traction ceiling to obtain required tire friction.
 
-    Equation:
-        mu_min = a / (g * phi)
+    Parameters
+    ----------
+    deceleration : Quantity
+        Positive requested deceleration in meter/second squared.
+    drive_load_share : float, optional
+        Braked-wheel normal-load share phi, in (0, 1].
 
-    Source: inverse of calc_traction_deceleration_limit.
+    Returns
+    -------
+    float
+        Minimum dimensionless friction coefficient under the load-share model.
+
+    Notes
+    -----
+    Equation: mu_required = a/(g * phi).
+    Assumptions: the same fixed-load Coulomb friction model as
+    :func:`calc_traction_deceleration_limit`.
+    Excludes: drive torque, tip-over, dynamic load transfer, and uncertainty in
+    surface friction. A computed coefficient does not establish available traction.
+
+    References
+    ----------
+    Derivation: solve a = mu g phi for mu using the specified deceleration
+    and braked-wheel load share.
+
+    Examples
+    --------
+    >>> calc_required_friction(1 * ureg.standard_gravity, 1.0)
+    1.0
     """
     validate_positive(deceleration, "deceleration")
     if not 0.0 < drive_load_share <= 1.0:
@@ -72,31 +105,39 @@ def calc_required_friction(deceleration, drive_load_share: float = 1.0) -> float
 
 
 def calc_tipover_deceleration_limit(cg_height, tip_arm):
-    """
-    Deceleration at which a braking machine starts to pitch over its leading support.
-
-    The retarding force acts at the floor while inertia acts at the center of
-    gravity, so braking pitches the body forward. It stays on the ground while
-    the inertial moment m a h stays below the restoring moment m g d.
-
-    Equation:
-        a_tip = g * d / h_cg
-
-    Source: moment balance about the tipping edge for a rigid body in static
-    equilibrium (OpenStax, University Physics Volume 1, Sec. 12.2).
+    """Calculate the rigid-body braking ceiling before forward tip-over.
 
     Parameters
     ----------
     cg_height : Quantity
-        Height h_cg of the center of gravity above the floor (m).
+        Positive center-of-gravity height h above the floor, in meters.
     tip_arm : Quantity
-        Horizontal distance d from the center of gravity to the leading
-        support line (m), for the arm pose being checked.
+        Positive horizontal distance d from the center of gravity to the leading support line, in meters.
 
     Returns
     -------
     Quantity
-        Deceleration ceiling in m/s^2.
+        Deceleration ceiling in meter/second squared.
+
+    Notes
+    -----
+    Equation: a_tip = g * d/h.
+    Assumptions: planar rigid-body moment balance about the leading support line,
+    with a fixed center of gravity for the arm pose being checked.
+    Excludes: suspension motion, transient pitching, payload shifts, uneven floors,
+    and dynamic stabilization. The result is not a tip-over safety certification.
+
+    References
+    ----------
+    Derivation: balance the inertial pitching moment m a h against the restoring
+    weight moment m g d. Static moment balance is described in OpenStax,
+    University Physics Volume 1, Section 12.2.
+
+    Examples
+    --------
+    >>> a = calc_tipover_deceleration_limit(1 * ureg.m, 1 * ureg.m)
+    >>> a == 1 * ureg.standard_gravity
+    True
     """
     validate_positive(cg_height, "cg_height")
     validate_positive(tip_arm, "tip_arm")
@@ -104,13 +145,34 @@ def calc_tipover_deceleration_limit(cg_height, tip_arm):
 
 
 def calc_max_cg_height_ratio(deceleration) -> float:
-    """
-    Largest ratio h_cg / d at which a deceleration does not tip the machine.
+    """Invert the tip-over ceiling to bound the height-to-arm ratio.
 
-    Equation:
-        (h_cg / d)_max = g / a
+    Parameters
+    ----------
+    deceleration : Quantity
+        Positive requested deceleration in meter/second squared.
 
-    Source: inverse of calc_tipover_deceleration_limit.
+    Returns
+    -------
+    float
+        Largest dimensionless center-of-gravity height divided by tipping arm.
+
+    Notes
+    -----
+    Equation: (h/d)_max = g/a.
+    Assumptions: a fixed rigid-body center of gravity and planar static moment
+    balance, as in :func:`calc_tipover_deceleration_limit`.
+    Excludes: suspension and transient pitch dynamics; the ratio alone does not
+    establish that a particular machine is stable.
+
+    References
+    ----------
+    Derivation: rearrange a h <= g d to h/d <= g/a for positive deceleration.
+
+    Examples
+    --------
+    >>> calc_max_cg_height_ratio(1 * ureg.standard_gravity)
+    1.0
     """
     validate_positive(deceleration, "deceleration")
     return float((_G / deceleration).to("dimensionless").magnitude)
@@ -123,39 +185,46 @@ def calc_drive_torque_deceleration_limit(
     mass,
     rotating_equivalent_mass=None,
 ):
-    """
-    Deceleration ceiling set by the torque the drives deliver at their current limit.
-
-    Equation:
-        m_eff = m + sum_i J_i / r^2        (per wheel, reflected through N^2 if geared)
-        a_torque = n * tau_wheel,max / (r * m_eff)
-
-    with tau_wheel,max = eta * N * K_t * I_max for a geared drive, or the hub
-    motor's torque at the current limit for direct drive (N = 1).
-
-    Source: Newton's second law with the rotating parts reflected into the
-    translational mass (Lynch and Park, Modern Robotics, 2017, Sec. 8.9.2).
+    """Calculate the braking ceiling from available wheel torque.
 
     Parameters
     ----------
     wheel_torque_max : Quantity
-        Torque each driven wheel delivers at the configured current limit (N m).
+        Positive delivered torque per braked wheel, in newton meters.
     wheel_radius : Quantity
-        Rolling radius r (m).
+        Positive rolling radius, in meters.
     n_driven_wheels : int
-        Number of driven (braked) wheels.
+        Number of torque-producing braked wheels, at least one.
     mass : Quantity
-        Translating mass m (kg).
+        Positive translating mass, in kilograms.
     rotating_equivalent_mass : Quantity, optional
-        Sum of N^2 J / r^2 over all rotating drive parts (kg). A sourced upper
-        bound gives a lower bound on the deceleration.
+        Nonnegative sum of reflected rotational inertia divided by wheel radius squared, in kilograms; None means zero.
 
     Returns
     -------
     dict
-        - "force": total retarding force at the floor (N)
-        - "m_eff": effective translational mass (kg)
-        - "a_max": deceleration ceiling (m/s^2)
+        Force in newtons under force, effective mass in kilograms under m_eff, and deceleration in meter/second squared under a_max.
+
+    Notes
+    -----
+    Equation: force = n * torque/r; m_eff = m + m_rot;
+    a_max = force/m_eff, with m_rot = sum(J_reflected/r^2).
+    Assumptions: equal torque and wheel radius at every driven wheel; the supplied
+    torque already accounts for gearing, current limits, and transmission efficiency.
+    Excludes: tire slip, aerodynamic drag, rolling resistance, and speed-dependent
+    motor limits. A sourced upper bound on m_rot produces a lower torque ceiling.
+
+    References
+    ----------
+    Derivation: Newton's law F = m_eff a with each wheel's torque converted
+    through F = torque/r. Reflected inertia follows energy equivalence between
+    rotation and translation; see Lynch and Park, Modern Robotics (2017), Section 8.9.2.
+
+    Examples
+    --------
+    >>> result = calc_drive_torque_deceleration_limit(1 * ureg.N * ureg.m, 1 * ureg.m, 1, 1 * ureg.kg)
+    >>> result['a_max'] == 1 * ureg.m / ureg.s**2
+    True
     """
     validate_positive(wheel_torque_max, "wheel_torque_max")
     validate_positive(wheel_radius, "wheel_radius")
@@ -170,45 +239,50 @@ def calc_drive_torque_deceleration_limit(
 
 
 def calc_drive_voltage_headroom(back_emf_constant, velocity, wheel_radius, bus_voltage, current, line_resistance):
-    """
-    Terminal voltage a direct-drive wheel motor needs at speed, braking and driving.
-
-    With two phases conducting, the line-to-line terminal equation is
-    V = e + I R when driving and V = e - I R when braking (current opposes
-    the back-EMF). The drive keeps current control while the voltage it must
-    impose stays within the bus; if e itself exceeds the bus, the inverter's
-    diodes conduct and braking current is no longer controlled.
-
-    Equation:
-        omega = v / r ;  e = K_e * omega
-        V_drive = e + I R ;  V_brake = e - I R ;  headroom = V_bus - e
-
-    Source: brushless DC motor terminal equation (Krishnan, Permanent Magnet
-    Synchronous and Brushless DC Motor Drives, CRC Press, 2010).
+    """Evaluate direct-drive motor terminal voltages during drive and braking.
 
     Parameters
     ----------
     back_emf_constant : Quantity
-        Line-to-line back-EMF per unit shaft speed (e.g. V/rpm).
+        Positive line-to-line back-EMF per shaft speed, e.g. volt/rpm.
     velocity : Quantity
-        Ground speed (m/s).
+        Nonnegative ground speed, in meter/second.
     wheel_radius : Quantity
-        Rolling radius (m).
+        Positive rolling radius, in meters.
     bus_voltage : Quantity
-        DC bus voltage available to the drive (V).
+        Positive available DC bus voltage, in volts.
     current : Quantity
-        Phase current at which the check is made (A).
+        Nonnegative conducting phase current, in amperes.
     line_resistance : Quantity
-        Line-to-line winding resistance (ohm).
+        Positive line-to-line winding resistance, in ohms.
 
     Returns
     -------
     dict
-        - "omega": wheel speed (rpm)
-        - "e_bemf": back-EMF (V)
-        - "v_drive": terminal voltage to drive at this current (V)
-        - "v_brake": terminal voltage to brake at this current (V)
-        - "headroom": bus voltage minus back-EMF (V)
+        Wheel speed omega in rpm; e_bemf, v_drive, v_brake, and headroom in volts. Headroom is bus voltage minus back-EMF, not the loaded drive margin.
+
+    Notes
+    -----
+    Equation: omega = v/r; e = K_e omega; V_drive = e + I R;
+    V_brake = e - I R; headroom = V_bus - e.
+    Assumptions: direct drive with two phases conducting and constant winding
+    resistance; braking current opposes the back-EMF. If back-EMF exceeds the bus,
+    inverter diode conduction can prevent controlled braking current.
+    Excludes: inductive transients, inverter voltage drops, bus regeneration
+    limits, and current-controller dynamics.
+
+    References
+    ----------
+    Derivation: apply the brushless DC steady terminal balance V = e + I R,
+    reversing current polarity for braking. Krishnan, Permanent Magnet
+    Synchronous and Brushless DC Motor Drives (CRC Press, 2010), supplies the
+    motor-circuit basis; the headroom metric here is the unloaded bus-minus-EMF difference.
+
+    Examples
+    --------
+    >>> result = calc_drive_voltage_headroom(1 * ureg.V / ureg.rpm, 0 * ureg.m / ureg.s, 1 * ureg.m, 24 * ureg.V, 0 * ureg.A, 1 * ureg.ohm)
+    >>> result['headroom'] == 24 * ureg.V
+    True
     """
     validate_positive(back_emf_constant, "back_emf_constant")
     validate_nonnegative(velocity, "velocity")
@@ -241,24 +315,58 @@ def calc_braking_limits(
     cg_height=None,
     tip_arm=None,
 ):
-    """
-    Check a credible deceleration against the traction, tip-over, and drive-torque ceilings.
+    """Compare a requested deceleration with independent braking ceilings.
 
-    Each ceiling is computed by its own helper; the admissible deceleration is
-    the smallest ceiling that could be computed. When the center-of-gravity
-    geometry is unknown the tip-over ceiling is None and the result reports
-    instead the largest h_cg / d the requested deceleration tolerates.
-
-    Source: see calc_traction_deceleration_limit, calc_tipover_deceleration_limit,
-    and calc_drive_torque_deceleration_limit.
+    Parameters
+    ----------
+    mass : Quantity
+        Positive translating mass in kilograms.
+    deceleration : Quantity
+        Positive requested deceleration in meter/second squared.
+    wheel_torque_max : Quantity
+        Positive available braking torque per driven wheel in newton meters.
+    wheel_radius : Quantity
+        Positive wheel rolling radius in meters.
+    n_driven_wheels : int
+        Number of driven braked wheels, at least one.
+    friction_coefficient : float
+        Positive dimensionless tire-floor friction coefficient.
+    drive_load_share : float, optional
+        Braked-wheel normal-load fraction in (0, 1].
+    rotating_equivalent_mass : Quantity, optional
+        Nonnegative reflected rotating mass in kilograms; None supplies zero.
+    cg_height : Quantity, optional
+        Positive center-of-gravity height in meters; required with tip_arm for a tip-over check.
+    tip_arm : Quantity, optional
+        Positive horizontal tipping arm in meters; required with cg_height.
 
     Returns
     -------
     dict
-        - "a_traction", "a_torque", "a_tip" (None if geometry unknown), "m_eff",
-          "force", "mu_required", "cg_ratio_max", "a_admissible", "binding",
-          and "passes" (True only if every computed ceiling meets the request
-          and the tip-over ceiling was computed).
+        Individual ceilings a_traction, a_torque, a_tip and a_admissible in meter/second squared; force in newtons; m_eff in kilograms; dimensionless mu_required and cg_ratio_max; binding label and Boolean passes.
+
+    Notes
+    -----
+    Equation: a_admissible = min(a_traction, a_torque, a_tip) over the
+    available ceilings. The request passes only if every available ceiling meets
+    it and the tip-over geometry was supplied.
+    Assumptions: the component traction, torque, and static moment models apply
+    simultaneously. Missing center-of-gravity geometry makes a_tip None and
+    passes False, while still reporting the available ceilings and h/d bound.
+    Excludes: drive-voltage limits, reaction latency, dynamic stability, and
+    uncertain friction. Passing these algebraic ceilings is not a safety certification.
+
+    References
+    ----------
+    Derivation: intersect the admissible sets returned by
+    :func:`calc_traction_deceleration_limit`, :func:`calc_tipover_deceleration_limit`,
+    and :func:`calc_drive_torque_deceleration_limit`; the smallest ceiling binds.
+
+    Examples
+    --------
+    >>> result = calc_braking_limits(1 * ureg.kg, 1 * ureg.m / ureg.s**2, wheel_torque_max=1 * ureg.N * ureg.m, wheel_radius=1 * ureg.m, n_driven_wheels=1, friction_coefficient=0.5)
+    >>> result['a_tip'] is None and result['passes'] is False
+    True
     """
     validate_positive(deceleration, "deceleration")
     a_trac = calc_traction_deceleration_limit(friction_coefficient, drive_load_share)

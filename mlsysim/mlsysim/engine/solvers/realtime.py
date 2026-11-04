@@ -11,9 +11,8 @@ situation (added 2026-10-20).
 from __future__ import annotations
 
 import math
-from typing import Optional, Sequence
+from typing import Optional
 
-import numpy as np
 
 from ..results import (
     CanFdBusResult,
@@ -54,12 +53,64 @@ class PhaseLagBudgetModel(ForwardModel):
     also gives the largest total delay the allowance absorbs and the highest
     crossover the delay supports. A budget, not a stability proof.
     """
+
     requires = ("crossover", "sample_period")
     produces = PhaseLagBudgetResult
 
     def solve(self, crossover: Quantity, sample_period: Quantity,
               compute_delay: Optional[Quantity] = None, transport_delay: Optional[Quantity] = None,
               phase_allowance: Optional[Quantity] = None) -> PhaseLagBudgetResult:
+        """Budget the phase consumed by sampling, computation, and transport.
+
+        Parameters
+        ----------
+        crossover : Quantity
+            Positive loop crossover frequency, convertible to Hz.
+        sample_period : Quantity
+            Positive controller sampling period, convertible to seconds.
+        compute_delay : Quantity, optional
+            Nonnegative sample-to-output time; None contributes zero delay.
+        transport_delay : Quantity, optional
+            Nonnegative output-to-actuator time; None contributes zero delay.
+        phase_allowance : Quantity, optional
+            Positive phase budget in degrees or radians; None omits budget comparisons.
+
+        Returns
+        -------
+        PhaseLagBudgetResult
+            Delays in ms, phases in degrees, and optional crossover ceiling in Hz. The
+            fits flag checks only the stated phase budget.
+
+        See Also
+        --------
+        mlsysim.physics.robotics.control.calc_phase_lag_total : Delay and phase calculation.
+
+        Notes
+        -----
+        Equation: tau = sample_period/2 + compute_delay + transport_delay; phase =
+        ``360*crossover*tau`` degrees. The allowance gives tau_max =
+        ``phase_allowance/(360*crossover)``.
+
+        Assumptions: The zero-order hold is approximated by a half-sample delay well
+        below the sampling frequency; compute and transport are pure delays.
+
+        Excludes: Plant poles, controller dynamics, jitter distributions, and a
+        closed-loop stability proof.
+
+        References
+        ----------
+        Derivation: a pure delay has frequency response ``exp(-j*omega*tau)``, hence phase
+        loss ``omega*tau``; composing delays adds their phase losses.
+
+        Examples
+        --------
+        >>> from mlsysim import Q_
+        >>> from mlsysim.solvers import PhaseLagBudgetModel
+        >>> result = PhaseLagBudgetModel().solve(Q_(10, "Hz"), Q_(1, "ms"),
+        ...     phase_allowance=Q_(30, "degree"))
+        >>> bool(result.fits and result.total_delay > Q_(0, "ms"))
+        True
+        """
         r = calc_phase_lag_total(crossover, sample_period, compute_delay=compute_delay,
                                  transport_delay=transport_delay, phase_allowance=phase_allowance)
         total = r["phase_total"].to(_DEG)
@@ -89,11 +140,62 @@ class ResponseTimeModel(ForwardModel):
     meets the deadline follow. With an observed unloaded run, the gap between
     it and the declared WCET is the claim that timing analysis must justify.
     """
+
     requires = ("wcet", "blocking", "interference", "deadline")
     produces = ResponseTimeResult
 
     def solve(self, wcet: Quantity, blocking: Quantity, interference: Quantity, deadline: Quantity,
               unloaded: Optional[Quantity] = None) -> ResponseTimeResult:
+        """Compare a declared response-time bound with a deadline.
+
+        Parameters
+        ----------
+        wcet : Quantity
+            Nonnegative declared worst-case execution time, convertible to microseconds.
+        blocking : Quantity
+            Nonnegative declared blocking bound in time units.
+        interference : Quantity
+            Nonnegative declared higher-priority interference bound in time units.
+        deadline : Quantity
+            Positive relative deadline in time units.
+        unloaded : Quantity, optional
+            Observed unloaded execution time; None omits the WCET-minus-observation gap.
+
+        Returns
+        -------
+        ResponseTimeResult
+            Component times and margins in microseconds; meets_deadline is true when the
+            supplied sum is no greater than deadline.
+
+        See Also
+        --------
+        mlsysim.physics.robotics.control.calc_response_time_bound : Add declared timing bounds.
+
+        Notes
+        -----
+        Equation: R = wcet + blocking + interference; margin = deadline - R;
+        blocking_limit = deadline - wcet - interference.
+
+        Assumptions: The caller supplies independently justified bounds that may be
+        summed for the task under study.
+
+        Excludes: Derivation of WCET, priority assignment, interference fixed-point
+        iteration, and certification from an unloaded observation.
+
+        References
+        ----------
+        Derivation: partition response time into execution, blocking, and interference;
+        rearrange R <= deadline to solve each remaining budget.
+
+        Examples
+        --------
+        >>> from mlsysim import Q_
+        >>> from mlsysim.solvers import ResponseTimeModel
+        >>> result = ResponseTimeModel().solve(Q_(20, "us"), Q_(5, "us"),
+        ...     Q_(5, "us"), Q_(40, "us"))
+        >>> bool(result.meets_deadline and result.response + result.margin == Q_(40, "us"))
+        True
+        """
         r = calc_response_time_bound(wcet, blocking, interference, deadline)
         return ResponseTimeResult(
             wcet=wcet.to(_US), blocking=blocking.to(_US), interference=interference.to(_US),
@@ -113,11 +215,68 @@ class CanFdBusModel(ForwardModel):
     necessary check only; blocking and retransmission need a response-time
     analysis. ``axes_capacity`` is the most axes whose frames fit one cycle.
     """
+
     requires = ("num_axes",)
     produces = CanFdBusResult
 
     def solve(self, num_axes: int, payload_bytes: int, frames_per_axis: int,
               baud_arbitration: Quantity, baud_data: Quantity, cycle: Quantity) -> CanFdBusResult:
+        """Count CAN FD serialization occupancy within one control cycle.
+
+        Parameters
+        ----------
+        num_axes : int
+            Positive number of axes sharing this bus.
+        payload_bytes : int
+            Application bytes per frame, from zero through 64; padded to a legal CAN FD
+            data-field size.
+        frames_per_axis : int
+            Positive number of command/feedback frames per axis per cycle.
+        baud_arbitration : Quantity
+            Positive nominal-phase bit rate, convertible to bit/s.
+        baud_data : Quantity
+            Positive data-phase bit rate, convertible to bit/s.
+        cycle : Quantity
+            Positive cycle duration in time units.
+
+        Returns
+        -------
+        CanFdBusResult
+            Frame bit counts, times in microseconds, utilization fraction, and
+            axes_capacity. fits is a serialization-only occupancy check.
+
+        See Also
+        --------
+        mlsysim.physics.robotics.control.calc_canfd_bus_utilization : CAN FD frame accounting and serialization.
+
+        Notes
+        -----
+        Equation: t_frame = bits_nominal/baud_arbitration + bits_data/baud_data;
+        occupancy = ``num_axes*frames_per_axis*t_frame``; axes_capacity =
+        ``floor(cycle/(frames_per_axis*t_frame))``.
+
+        Assumptions: Standard identifiers, worst-case dynamic stuffing, and the
+        frame-format accounting of calc_canfd_bus_utilization; all frames have the
+        supplied payload.
+
+        Excludes: Competing traffic, nonpreemptive blocking, retransmissions, and a
+        schedulability guarantee.
+
+        References
+        ----------
+        Derivation: serialization time is bit count divided by bit rate, summed across
+        the nominal and data phases. Frame-format assumptions are documented in the
+        linked physics function.
+
+        Examples
+        --------
+        >>> from mlsysim import Q_
+        >>> from mlsysim.solvers import CanFdBusModel
+        >>> result = CanFdBusModel().solve(1, 8, 2, Q_(1, "Mbit/s"),
+        ...     Q_(5, "Mbit/s"), Q_(1, "ms"))
+        >>> bool(result.fits and result.axes_capacity >= 1)
+        True
+        """
         r = calc_canfd_bus_utilization(num_axes=num_axes, payload_bytes=payload_bytes,
                                        baud_arbitration=baud_arbitration, baud_data=baud_data,
                                        cycle_time=cycle, frames_per_axis=frames_per_axis)
@@ -140,11 +299,64 @@ class EtherCatCycleModel(ForwardModel):
     The frame carries every axis's process data; each node forwards it with a
     fixed hop delay, so occupancy is serialization plus forwarding.
     """
+
     requires = ("num_axes",)
     produces = EtherCatCycleResult
 
     def solve(self, num_axes: int, bytes_per_axis: int, baud_rate: Quantity, header_bytes: int,
               hop_delay: Quantity, cycle: Quantity) -> EtherCatCycleResult:
+        """Budget one summation frame through an EtherCAT drive chain.
+
+        Parameters
+        ----------
+        num_axes : int
+            Positive number of nodes traversed by the frame.
+        bytes_per_axis : int
+            Positive process-data payload bytes contributed by each node.
+        baud_rate : Quantity
+            Positive link bit rate, convertible to bit/s.
+        header_bytes : int
+            Nonnegative total framing overhead in bytes, supplied by the caller.
+        hop_delay : Quantity
+            Nonnegative forwarding time per node.
+        cycle : Quantity
+            Positive control-cycle duration.
+
+        Returns
+        -------
+        EtherCatCycleResult
+            Serialization, forwarding, occupancy, and margin times; dimensionless
+            utilization and fits comparing total occupancy with cycle.
+
+        See Also
+        --------
+        mlsysim.physics.robotics.control.calc_ethercat_cycle_time : Summation-frame occupancy.
+
+        Notes
+        -----
+        Equation: occupancy = ``8*(header_bytes`` + ``num_axes*bytes_per_axis)/baud_rate`` +
+        ``num_axes*hop_delay``; utilization = occupancy/cycle.
+
+        Assumptions: One frame carries all process data and each node adds a fixed
+        forwarding delay.
+
+        Excludes: Cable propagation unless included in hop_delay, multi-frame
+        fragmentation, host jitter, and protocol error recovery.
+
+        References
+        ----------
+        Derivation: transmit all frame bits at the declared line rate, then add the
+        per-node forwarding budgets along the chain.
+
+        Examples
+        --------
+        >>> from mlsysim import Q_
+        >>> from mlsysim.solvers import EtherCatCycleModel
+        >>> result = EtherCatCycleModel().solve(2, 32, Q_(100, "Mbit/s"),
+        ...     64, Q_(1, "us"), Q_(1, "ms"))
+        >>> bool(result.fits and result.unallocated > Q_(0, "us"))
+        True
+        """
         r = calc_ethercat_cycle_time(num_axes=num_axes, bytes_per_axis=bytes_per_axis,
                                      baud_rate=baud_rate, header_bytes=header_bytes,
                                      hop_delay=hop_delay, cycle_time=cycle)
@@ -171,6 +383,7 @@ class LeaseBudgetModel(ForwardModel):
     ``age`` is the evidence's age when the chunk is admitted. The stall
     timeline puts the stall after the second renewal completes.
     """
+
     requires = ("speed", "deceleration", "clear_distance", "lease")
     produces = LeaseBudgetResult
 
@@ -180,6 +393,77 @@ class LeaseBudgetModel(ForwardModel):
               observation_age: Quantity, admission_age: Quantity,
               renewal_period: Quantity, renewal_jitter: Quantity,
               inference_latency: Quantity) -> LeaseBudgetResult:
+        """Bound a command lease using the remaining stopping distance.
+
+        Parameters
+        ----------
+        speed : Quantity
+            Positive travel speed in length/time units, held constant until braking.
+        deceleration : Quantity
+            Positive available constant braking deceleration.
+        clear_distance : Quantity
+            Positive distance available before the protected boundary.
+        loc_margin : Quantity
+            Nonnegative localization-distance allowance.
+        physical_margin : Quantity
+            Nonnegative protective distance retained after stopping.
+        brake_onset : Quantity
+            Nonnegative delay from stop command delivery to braking onset.
+        lease : Quantity
+            Positive command-validity duration since admission.
+        tick : Quantity
+            Positive worst-case expiry-detection tick delay.
+        bus : Quantity
+            Nonnegative stop-command bus delay.
+        observation_age : Quantity
+            Nonnegative age of evidence for the reported age-adjusted ceiling.
+        admission_age : Quantity
+            Nonnegative evidence age at admission, used by the fits comparison.
+        renewal_period : Quantity
+            Positive interval between replacement requests.
+        renewal_jitter : Quantity
+            Nonnegative additional renewal-lateness allowance.
+        inference_latency : Quantity
+            Nonnegative inference time used to place the constructed stall timeline.
+
+        Returns
+        -------
+        LeaseBudgetResult
+            Timing budgets in ms and travel in mm. fits checks renewal_period +
+            renewal_jitter < lease <= the admission-age-adjusted ceiling.
+
+        See Also
+        --------
+        mlsysim.engine.solvers.embodied.StoppingBudgetModel.solve : Distance and delay ceilings.
+
+        Notes
+        -----
+        Equation: stop distance = ``speed*(lease`` + tick + bus + brake_onset) +
+        ``speed**2/(2*deceleration)`` + loc_margin + physical_margin. Subtract fixed delays
+        from the distance-derived delay ceiling to obtain the lease ceiling.
+
+        Assumptions: Straight-line constant speed before constant-deceleration braking;
+        the constructed stall occurs after the second renewal completes.
+
+        Excludes: Jerk ramps, changing obstacles, stochastic delays, and proof that a
+        deployed watchdog or brake meets these budgets.
+
+        References
+        ----------
+        Derivation: integrate constant cruise and braking motion, reserve both distance
+        margins, then isolate the lease term in the stopping-distance inequality.
+
+        Examples
+        --------
+        >>> from mlsysim import Q_
+        >>> from mlsysim.solvers import LeaseBudgetModel
+        >>> result = LeaseBudgetModel().solve(Q_(1, "m/s"), Q_(2, "m/s^2"),
+        ...     Q_(2, "m"), Q_(0, "m"), Q_(0, "m"), Q_(10, "ms"),
+        ...     Q_(100, "ms"), Q_(1, "ms"), Q_(1, "ms"), Q_(0, "ms"),
+        ...     Q_(0, "ms"), Q_(50, "ms"), Q_(1, "ms"), Q_(10, "ms"))
+        >>> bool(result.fits and result.spare > Q_(0, "mm"))
+        True
+        """
         path = (lease + tick + bus).to(_MS)
         to_onset = (path + brake_onset).to(_MS)
         stop = StoppingBudgetModel()
@@ -224,6 +508,7 @@ class SharedDramReadModel(ForwardModel):
     tick's end time at each count. A FIFO controller is optimistic: a
     row-hit-first controller can keep passing the read.
     """
+
     requires = ("bandwidth", "sense", "compute_after_sense")
     produces = SharedDramReadResult
 
@@ -231,6 +516,79 @@ class SharedDramReadModel(ForwardModel):
               transaction_bytes: int, bandwidth: Quantity, bank_switches: int,
               bank_switch_time: Quantity, sense: Quantity, compute_after_sense: Quantity,
               wcet: Quantity, execution_ceiling: Quantity) -> SharedDramReadResult:
+        """Budget a snapshot read behind a constructed FIFO memory backlog.
+
+        Parameters
+        ----------
+        tile_bytes : int
+            Positive weight-tile byte count, aligned to transaction_bytes.
+        camera_bytes : int
+            Positive camera-transfer byte count, aligned to transaction_bytes.
+        telemetry_bytes : int
+            Positive telemetry-transfer byte count, aligned to transaction_bytes.
+        snapshot_bytes : int
+            Positive snapshot-read byte count, aligned to transaction_bytes.
+        transaction_bytes : int
+            Positive transfer granularity in bytes.
+        bandwidth : Quantity
+            Positive effective transfer rate, convertible to byte/s; a peak rate yields
+            a floor.
+        bank_switches : int
+            Nonnegative number of bank/row-switch penalties in one backlog.
+        bank_switch_time : Quantity
+            Nonnegative time charged for each bank switch.
+        sense : Quantity
+            Nonnegative sensing-time allowance, before post-sense computation.
+        compute_after_sense : Quantity
+            Nonnegative computation time following the snapshot read.
+        wcet : Quantity
+            Declared execution-time budget including sensing and computation.
+        execution_ceiling : Quantity
+            Deadline-derived execution budget after blocking and interference are
+            removed.
+
+        Returns
+        -------
+        SharedDramReadResult
+            Read and completion times in microseconds, transaction counts, and
+            whole-backlog counts. A negative count indicates that even the own-read
+            allowance does not fit.
+
+        See Also
+        --------
+        mlsysim.physics.robotics.control.calc_axi_fifo_contention : FIFO and bypass transfer accounting.
+
+        Notes
+        -----
+        Equation: wait = (tile_bytes + camera_bytes + telemetry_bytes)/bandwidth +
+        ``bank_switches*bank_switch_time``; own = snapshot_bytes/bandwidth; n =
+        floor((read_allowance-own)/wait).
+
+        Assumptions: All declared backlog transfers queue before the snapshot; FIFO
+        prevents new arrivals from overtaking it. Priority bypass waits for one
+        transaction only.
+
+        Excludes: Refresh, arbitration inefficiency, row-hit-first starvation, cache
+        behavior, and an AXI service-time guarantee.
+
+        References
+        ----------
+        Derivation: sum serialized byte-transfer and row-switch times, then solve own +
+        ``n*wait`` <= read_allowance for the largest integer n.
+
+        Examples
+        --------
+        >>> from mlsysim import Q_
+        >>> from mlsysim.solvers import SharedDramReadModel
+        >>> result = SharedDramReadModel().solve(tile_bytes=64, camera_bytes=64,
+        ...     telemetry_bytes=64, snapshot_bytes=64, transaction_bytes=64,
+        ...     bandwidth=Q_(1, "GB/s"), bank_switches=0,
+        ...     bank_switch_time=Q_(0, "us"), sense=Q_(10, "us"),
+        ...     compute_after_sense=Q_(1, "us"), wcet=Q_(20, "us"),
+        ...     execution_ceiling=Q_(30, "us"))
+        >>> bool(result.loaded_read > result.snapshot_read)
+        True
+        """
         r = calc_axi_fifo_contention(
             tile_bytes=tile_bytes, camera_bytes=camera_bytes, telemetry_bytes=telemetry_bytes,
             safety_read_bytes=snapshot_bytes, transaction_bytes=transaction_bytes,
@@ -263,7 +621,7 @@ class SharedDramReadModel(ForwardModel):
 
 class ThermalThrottleModel(ForwardModel):
     """
-    A tick on a governed clock: a thermal trip halves the clock until the junction clears.
+    A tick on a governed clock: a thermal trip reduces the clock until the junction clears.
 
     The tick is sized to its declared WCET at the nominal clock; the throttled
     clock stretches the same cycles. The junction is a first-order lumped
@@ -272,6 +630,7 @@ class ThermalThrottleModel(ForwardModel):
     hysteresis lasts ``tau ln((T_trip - T_quiet) / (T_clear - T_quiet))`` after
     the load stops (``calc_first_order_time_to_temperature``).
     """
+
     requires = ("wcet", "nominal_clock", "throttled_clock", "time_constant")
     produces = ThermalThrottleResult
 
@@ -279,6 +638,80 @@ class ThermalThrottleModel(ForwardModel):
               tick: Quantity, nominal_clock: Quantity, throttled_clock: Quantity,
               time_constant: Quantity, ambient: Quantity, theta: Quantity, quiet_power: Quantity,
               loaded_power: Quantity, trip: Quantity, clear: Quantity) -> ThermalThrottleResult:
+        """Translate a thermal clock reduction into task response and recovery time.
+
+        Parameters
+        ----------
+        wcet : Quantity
+            Positive execution time at nominal_clock, excluding blocking and
+            interference.
+        blocking_and_interference : Quantity
+            Nonnegative combined blocking and interference time.
+        deadline : Quantity
+            Positive task deadline.
+        tick : Quantity
+            Positive period used to count complete ticks exposed during recovery.
+        nominal_clock : Quantity
+            Positive normal clock frequency, convertible to Hz.
+        throttled_clock : Quantity
+            Positive reduced clock frequency, convertible to Hz.
+        time_constant : Quantity
+            Positive first-order thermal time constant.
+        ambient : Quantity
+            Ambient absolute temperature, convertible to kelvin.
+        theta : Quantity
+            Positive junction-to-ambient thermal resistance in K/W.
+        quiet_power : Quantity
+            Nonnegative quiet-state dissipation in watts.
+        loaded_power : Quantity
+            Loaded dissipation in watts, greater than quiet_power.
+        trip : Quantity
+            Trip temperature above clear and below the loaded equilibrium.
+        clear : Quantity
+            Recovery temperature above the quiet equilibrium and below trip.
+
+        Returns
+        -------
+        ThermalThrottleResult
+            Execution and response times in microseconds, junction temperatures in
+            degrees Celsius, thermal durations, and whole exposed-tick counts. Overrun
+            may be negative when slack remains.
+
+        See Also
+        --------
+        mlsysim.physics.motors.calc_first_order_time_to_temperature : First-order thermal threshold crossing.
+
+        Notes
+        -----
+        Equation: cycles = ``wcet*nominal_clock``; throttled execution =
+        cycles/throttled_clock. T_inf = ambient + ``power*theta`` and t =
+        ``tau*ln((T_inf-T_start)/(T_inf-T_target))``.
+
+        Assumptions: Fixed instruction-cycle demand, a single lumped thermal pole, step
+        changes in power, and reachable trip/clear thresholds.
+
+        Excludes: Memory-bound execution, temperature-dependent leakage, spatial thermal
+        gradients, and governor transition overhead.
+
+        References
+        ----------
+        Derivation: conserve execution cycles across the frequency change; solve the
+        first-order exponential thermal response for each threshold crossing.
+
+        Examples
+        --------
+        >>> from mlsysim import Q_
+        >>> from mlsysim.solvers import ThermalThrottleModel
+        >>> result = ThermalThrottleModel().solve(wcet=Q_(10, "us"),
+        ...     blocking_and_interference=Q_(1, "us"), deadline=Q_(30, "us"),
+        ...     tick=Q_(1, "ms"), nominal_clock=Q_(1, "GHz"),
+        ...     throttled_clock=Q_(0.5, "GHz"), time_constant=Q_(10, "s"),
+        ...     ambient=Q_(300, "K"), theta=Q_(1, "K/W"),
+        ...     quiet_power=Q_(10, "W"), loaded_power=Q_(100, "W"),
+        ...     trip=Q_(350, "K"), clear=Q_(330, "K"))
+        >>> bool(result.execution_throttled > result.execution and result.recovery > Q_(0, "s"))
+        True
+        """
         k = ureg.kelvin
         cycles = float((wcet * nominal_clock).to("").magnitude)
         ex = (cycles / nominal_clock).to(_US)
@@ -309,7 +742,7 @@ class CommandAuthenticationModel(ForwardModel):
     """
     Authentication of a remote command as one more pre-brake delay, and a flood of forgeries.
 
-    A published cycle count divided by the permission processor's clock gives
+    A supplied cycle count divided by the permission processor's clock gives
     the time of one signature verification and of a MAC over a frame of
     ``mac_blocks`` cipher blocks. Verification adds to the delay before a
     remote stop can act, so each millisecond is travel at ``speed`` against
@@ -319,12 +752,75 @@ class CommandAuthenticationModel(ForwardModel):
     fewest that push it past the deadline is n = floor(T_latest / t_verify),
     sustained at n / ((n + 1) t_verify) packets per second (added 2026-10-20).
     """
+
     requires = ("clock", "verify_cycles", "speed", "spare", "deadline")
     produces = CommandAuthenticationResult
 
     def solve(self, clock: Quantity, verify_cycles: float, mac_block_cycles: float, mac_blocks: int,
               speed: Quantity, spare: Quantity, deadline: Quantity, deadline_after_admission: Quantity,
               freshness_window: Quantity) -> CommandAuthenticationResult:
+        """Charge serial authentication work against a remote-command deadline.
+
+        Parameters
+        ----------
+        clock : Quantity
+            Positive verification-processor clock frequency in Hz.
+        verify_cycles : float
+            Positive assumed cycle count for one signature verification.
+        mac_block_cycles : float
+            Positive assumed cycle count for authenticating one cipher block.
+        mac_blocks : int
+            Positive cipher-block count per authenticated command.
+        speed : Quantity
+            Nonnegative machine speed held during verification and freshness delays.
+        spare : Quantity
+            Remaining distance allowance before adding authentication delay.
+        deadline : Quantity
+            Positive total command-verification deadline.
+        deadline_after_admission : Quantity
+            Positive verification allowance for a command already admitted.
+        freshness_window : Quantity
+            Nonnegative maximum age accepted by the command freshness check.
+
+        Returns
+        -------
+        CommandAuthenticationResult
+            Signature time in ms, MAC time in microseconds, travel in mm, and
+            forged-packet counts/rate. Negative remaining spare denotes budget
+            exhaustion.
+
+        See Also
+        --------
+        mlsysim.physics.quantities.compute_time : Work divided by service rate.
+
+        Notes
+        -----
+        Equation: t_sig = verify_cycles/clock; t_mac =
+        ``mac_blocks*mac_block_cycles/clock``; travel = ``speed*time``; n =
+        floor(deadline/t_sig) forged commands delay the following veto until
+        ``(n+1)*t_sig``.
+
+        Assumptions: Cycle counts are supplied, verification is serial, and each forged
+        signed packet consumes a full verification before rejection.
+
+        Excludes: Cryptographic security strength, early rejection, parallel
+        verification, network admission controls, and a deployed-system timing
+        guarantee.
+
+        References
+        ----------
+        Derivation: convert cycles to time at a fixed clock and count serial service
+        slots before the deadline; integrate constant speed over that delay.
+
+        Examples
+        --------
+        >>> from mlsysim import Q_
+        >>> from mlsysim.solvers import CommandAuthenticationModel
+        >>> result = CommandAuthenticationModel().solve(Q_(1, "MHz"), 1000, 10, 1,
+        ...     Q_(1, "m/s"), Q_(1, "m"), Q_(10, "ms"), Q_(5, "ms"), Q_(1, "ms"))
+        >>> bool(result.veto_verified_at > result.deadline)
+        True
+        """
         t_sig = (verify_cycles / clock).to(_MS)
         t_mac = (mac_blocks * mac_block_cycles / clock).to(_US)
         n = math.floor((deadline / t_sig).to("").magnitude)

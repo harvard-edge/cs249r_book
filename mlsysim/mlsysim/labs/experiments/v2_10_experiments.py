@@ -7,10 +7,12 @@ results.  They are not measurements of a production service.
 
 from __future__ import annotations
 
+
 from dataclasses import dataclass, replace
 import math
 from typing import Iterable, Literal, Sequence
 
+from mlsysim.core.types import serialize_unit
 from mlsysim.core.units import ureg
 
 
@@ -43,7 +45,7 @@ def serialize_quantity(value) -> dict[str, float | str]:
     magnitude = float(value.magnitude)
     if not math.isfinite(magnitude):
         raise ValueError("serialized quantity magnitude must be finite")
-    return {"magnitude": magnitude, "unit": str(value.units)}
+    return {"magnitude": magnitude, "unit": serialize_unit(value.units)}
 
 
 def deserialize_quantity(data: dict[str, float | str]):

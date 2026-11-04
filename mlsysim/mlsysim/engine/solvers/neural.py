@@ -48,6 +48,64 @@ class DenseNetworkModel(ForwardModel):
     def solve(self, layer_widths: List[int], batch_size: int, bytes_per_value: Quantity,
               optimizer_bytes_per_parameter: Quantity,
               training_examples: Optional[int] = None) -> DenseNetworkResult:
+        """Count dense-network arithmetic, traffic, and resident training state.
+
+        Parameters
+        ----------
+        layer_widths : list of int
+            Positive widths including input and output, with at least two entries.
+        batch_size : int
+            Positive examples processed together in one step.
+        bytes_per_value : Quantity
+            Positive storage size of one weight, activation, or gradient value,
+            expressed as bytes. This model uses a common representation for all three.
+        optimizer_bytes_per_parameter : Quantity
+            Nonnegative extra optimizer-state bytes per parameter, excluding gradients.
+        training_examples : int, optional
+            Nonnegative examples per epoch; whole-batch step count discards a remainder.
+
+        Returns
+        -------
+        DenseNetworkResult
+            Parameter and FLOP counts, byte footprints, FLOP/byte intensity, and
+            training/inference ratios. No hardware capacity or feasibility is tested.
+
+        See Also
+        --------
+        mlsysim.physics.neural.calc_dense_forward_flops : Forward-work accounting.
+        mlsysim.physics.neural.calc_training_state : Weight, gradient, optimizer bytes.
+
+        Notes
+        -----
+        Equation: layer weights = ``n_in*n_out``, biases = n_out, and forward work
+        = ``2*B*sum(n_in*n_out)`` + ``2*B*sum(n_out)``. Training memory adds weights,
+        gradients, optimizer state, and saved activations. Inference memory retains
+        weights and the largest adjacent activation-buffer pair.
+
+        Assumptions: fully connected layers execute separately. Traffic includes
+        weight reads plus layer inputs/outputs; hidden activations cross memory
+        between kernels. Training-step FLOPs count matrix products, whereas the
+        reported forward FLOPs also include bias and activation work.
+
+        Excludes: kernel fusion, reuse in caches, optimizer arithmetic, activation
+        checkpointing, and device workspaces. Layer widths and batch size are cast
+        to integers, so callers must supply integer counts rather than fractions.
+
+        References
+        ----------
+        Derivation: count the coefficients of each dense matrix and bias vector;
+        a multiply-accumulate contributes two FLOPs. Saved tensors and state arrays
+        are counted by element cardinality times representation size.
+
+        Examples
+        --------
+        >>> from mlsysim import Q_
+        >>> result = DenseNetworkModel().solve([2, 3, 1], 2, Q_("4 byte"), Q_("8 byte"))
+        >>> result.parameters == (2 * 3 + 3) + (3 * 1 + 1)
+        True
+        >>> result.training_memory > result.inference_memory
+        True
+        """
         widths = [int(w) for w in layer_widths]
         b = int(batch_size)
         w = calc_dense_weights(widths)
@@ -117,6 +175,73 @@ class EpochOverheadModel(ForwardModel):
               host: HardwareNode, accelerator: HardwareNode, precision: str,
               dispatch: Quantity, launch: Quantity, steps: int,
               dram_energy_per_byte: Quantity, flop_energy: Quantity) -> EpochOverheadResult:
+        """Compare epoch work and fixed launch overhead on two devices.
+
+        Parameters
+        ----------
+        network : DenseNetworkResult
+            Target-batch network counts, training-step FLOPs, and FLOP/byte intensity.
+        network_batch1 : DenseNetworkResult
+            Same architecture at batch one for the attainable-rate comparison.
+        host : HardwareNode
+            Host profile with positive memory bandwidth and selected precision rate.
+        accelerator : HardwareNode
+            Accelerator profile with positive bandwidth and selected precision rate.
+        precision : str
+            Key present in both devices' ``compute.precision_flops`` dictionaries.
+        dispatch : Quantity
+            Nonnegative host dispatch time per modeled operation.
+        launch : Quantity
+            Nonnegative additional accelerator kernel-launch time per operation.
+        steps : int
+            Positive number of batch steps in the epoch.
+        dram_energy_per_byte : Quantity
+            Nonnegative energy to transfer one byte, convertible to J/byte.
+        flop_energy : Quantity
+            Positive energy per arithmetic FLOP, convertible to J/flop.
+
+        Returns
+        -------
+        EpochOverheadResult
+            Per-device attainable FLOP/s, memory bandwidth, intensity ridge,
+            work/overhead/total times in ms, and dimensionless speed and energy ratios.
+            This result does not check memory residency.
+
+        See Also
+        --------
+        mlsysim.physics.neural.calc_training_step_ops : Modeled launches per step.
+
+        Notes
+        -----
+        Equation: rate = min(precision_peak, ``bandwidth*intensity)``;
+        work_time = ``steps*training_step_flops/rate``; overhead_time = ``steps*ops_per_step``
+        * per_operation_time. Host per-operation time is dispatch; accelerator time
+        is dispatch + launch. Movement/arithmetic energy = energy_per_byte /
+        ``(intensity*energy_per_flop)``.
+
+        Assumptions: a common intensity represents epoch work, and overhead adds
+        serially to arithmetic time. Each step has the operation count returned by
+        ``calc_training_step_ops`` for the layer count.
+
+        Excludes: overlap of launch and work, actual kernel traces, input loading,
+        clock variation, and empirical power measurements.
+
+        References
+        ----------
+        Derivation: the slower of compute and byte transfer limits the attainable
+        rate; dividing work by that rate gives time. Independent launch costs add
+        per operation, and energy rates convert bytes/FLOP into an energy ratio.
+
+        Examples
+        --------
+        >>> from mlsysim import Hardware, Q_
+        >>> network = DenseNetworkModel().solve([2, 3, 1], 1, Q_("4 byte"), Q_("8 byte"))
+        >>> result = EpochOverheadModel().solve(network, network, Hardware.Cloud.H100,
+        ...     Hardware.Cloud.H100, "fp32", Q_("1 us"), Q_("0 us"), 1,
+        ...     Q_("1 pJ/byte"), Q_("1 pJ/flop"))
+        >>> result.total_time["host"] == result.total_time["accelerator"]
+        True
+        """
         machines = {"host": host, "accelerator": accelerator}
         per_op = {"host": dispatch, "accelerator": dispatch + launch}
         step_flops = network.training_step_flops * Q_(1, "flop")

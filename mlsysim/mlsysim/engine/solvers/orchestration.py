@@ -7,7 +7,6 @@ path, derived from ``engine.solvers.__init__``); kept per-domain so the logic st
 from __future__ import annotations
 
 
-import math
 
 from ..results import (
     OrchestrationResult,
@@ -39,22 +38,47 @@ class OrchestrationModel(ForwardModel):
     produces = OrchestrationResult
 
     def solve(self, fleet: Fleet, arrival_rate_jobs_per_day: float, avg_job_duration_days: float) -> OrchestrationResult:
-        """
-        Solves for cluster wait times and utilization.
+        """Estimate waiting time for a whole-fleet M/D/1 queue.
 
         Parameters
         ----------
         fleet : Fleet
-            The hardware cluster configuration.
+            Fleet context for the query; its device count does not enter this single-server
+            queue equation.
         arrival_rate_jobs_per_day : float
-            λ: Rate at which new training jobs are submitted.
+            Nonnegative Poisson arrival rate in jobs/day.
         avg_job_duration_days : float
-            The average time a job takes to run if it has the whole cluster.
+            Positive deterministic service duration in days; one job occupies the whole fleet.
 
         Returns
         -------
         OrchestrationResult
-            Wait time, queue length, utilization, and stability metrics.
+            Dimensionless utilization, mean waiting time in days, queue length in jobs, and
+            is_stable. Waiting time and queue length are infinite when utilization is at least
+            one.
+
+        Notes
+        -----
+        Equation: mu = 1 / service_days; rho = arrival_rate / mu; Wq = rho / (2 mu (1-rho)); Lq
+        = rho^2 / (2(1-rho)) for rho < 1.
+
+        Assumptions: Poisson arrivals, deterministic service, one logical server, and steady
+        state for rho < 1.
+
+        Excludes: Multi-tenant packing, job-size variation, scheduling priorities, and preemption.
+
+        References
+        ----------
+        Derivation: The M/G/1 mean-wait identity Wq = lambda E[S^2] / (2(1-rho)) becomes the
+        stated M/D/1 expression when S is constant. Little's identity Lq = lambda Wq gives queue
+        length.
+
+        Examples
+        --------
+        >>> from mlsysim import Systems
+        >>> r = OrchestrationModel().solve(Systems.Clusters.Research_256, 0.5, 1.0)
+        >>> r.is_stable and r.avg_wait_time_days.m_as("day") == 0.5
+        True
         """
         # ρ = λ / μ  (Utilization)
         # μ = 1 / avg_duration
@@ -97,6 +121,54 @@ class PreemptionTaxModel(ForwardModel):
 
     def solve(self, n_devices: int, checkpoint_bytes, lost_work, preemption_rate, recovery,
               device_hour_rate) -> PreemptionTaxResult:
+        """Calculate discarded work and relaunch cost from forced preemption.
+
+        Parameters
+        ----------
+        n_devices : int
+            Nonnegative number of devices reserved by the preempted job.
+        checkpoint_bytes : Quantity
+            Nonnegative checkpoint size in bytes.
+        lost_work : Quantity
+            Nonnegative time discarded since the last checkpoint.
+        preemption_rate : Quantity
+            Nonnegative preemption frequency in inverse time.
+        recovery : RecoveryProfile
+            Restart, checkpoint bandwidth, and warmup profile; bandwidth must be positive.
+        device_hour_rate : Quantity
+            Nonnegative device-hour cost in USD/hour.
+
+        Returns
+        -------
+        PreemptionTaxResult
+            Per-event loss and relaunch components, USD cost per event, events/day, lost
+            time/day, and device-hours/day.
+
+        Notes
+        -----
+        Equation: relaunch = restart + checkpoint_bytes / bandwidth + warmup; per_event =
+        lost_work + relaunch; daily_loss = preemption_rate * one_day * per_event.
+
+        Assumptions: Each forced stop incurs the same lost-work and restart budget; all reserved
+        devices remain charged.
+
+        Excludes: Failure detection time because the scheduler initiates the stop; overlapping
+        recovery, migration, and time-varying prices.
+
+        References
+        ----------
+        Derivation: Serial restart phases add in time. Multiplying event loss by the expected
+        event count gives daily loss, and multiplying device-hours by the rate gives cost.
+
+        Examples
+        --------
+        >>> from mlsysim import Q_
+        >>> from mlsysim.systems.reliability import Reliability
+        >>> r = PreemptionTaxModel().solve(4, Q_(1, "GB"), Q_(1, "min"),
+        ...     Q_(1, "1/day"), Reliability.Recovery, Q_(2, "USD/hour"))
+        >>> r.lost_per_day == r.per_event
+        True
+        """
         restart = Q_(float(recovery.restart_time_s), ureg.second)
         reload = (checkpoint_bytes / Q_(float(recovery.checkpoint_write_bw_gbs), "GB/s")).to(ureg.second)
         warmup = Q_(float(recovery.warmup_time_s), ureg.second)

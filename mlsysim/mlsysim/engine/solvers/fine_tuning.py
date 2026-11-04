@@ -19,16 +19,13 @@ from ..results import (
     TargetMaskResult,
 )
 from .base import ForwardModel
-from ...core.types import Quantity
-from ...core.units import ureg as _ureg
-from ...physics.agents import calc_append_only_context, calc_cost_per_accepted
+from ...physics.agents import calc_append_only_context
 from ...physics.fine_tuning import (
     calc_example_average_share,
     calc_first_fit_decreasing,
     calc_preference_pair,
     calc_token_average_shares,
 )
-from ...physics.statistics import calc_proportion_gap_se
 
 
 class TargetMaskModel(ForwardModel):
@@ -42,11 +39,52 @@ class TargetMaskModel(ForwardModel):
     average divides by ``stored - 1`` prediction terms; each target's weight
     shrinks by ``(stored - 1) / targets``.
     """
+
     requires = ()
     produces = TargetMaskResult
 
-    def solve(self, prompt: int, task: int, rationale: int, response: int, observation: int,
-              unselected_response: int) -> TargetMaskResult:
+    def solve(
+        self, prompt: int, task: int, rationale: int, response: int, observation: int, unselected_response: int
+    ) -> TargetMaskResult:
+        """Count stored context and selected prediction targets.
+
+        Parameters
+        ----------
+        prompt : int
+            Prompt token count, nonnegative.
+        task : int
+            Task-description token count, nonnegative.
+        rationale : int
+            Rationale token count, nonnegative.
+        response : int
+            Response token count, positive.
+        observation : int
+            Observation token count, nonnegative.
+        unselected_response : int
+            Response tokens retained as context; from zero to response minus one.
+
+        Returns
+        -------
+        TargetMaskResult
+            Token counts and dimensionless target shares and dilution ratios.
+
+        Notes
+        -----
+        Equation: stored = prompt + task + rationale + response + observation; selected = response - unselected_response; predicted = stored - 1.
+
+        Assumptions: Counts refer to a single serialized sequence; the first position has no preceding predictor.
+
+        Excludes: Tokenizer behavior, model quality, and loss values.
+
+        References
+        ----------
+        Derivation: Subtracting excluded responses counts targets; dividing by stored positions or prediction terms gives the reported shares and dilution.
+
+        Examples
+        --------
+        >>> TargetMaskModel().solve(2, 1, 1, 4, 2, 1).selected_response
+        3
+        """
         if not 0 <= unselected_response < response:
             raise ValueError("unselected responses must be fewer than all responses")
         stored = prompt + task + rationale + response + observation
@@ -82,15 +120,46 @@ class PerInvocationSerializationModel(ForwardModel):
     (``calc_append_only_context`` with ``s0 = delta = a``), an expansion of
     ``(H + 1) / 2``.
     """
+
     requires = ()
     produces = PerInvocationSerializationResult
 
     def solve(self, turns: int, tokens_per_turn: int) -> PerInvocationSerializationResult:
+        """Compare repeated call prefixes with one stored transcript.
+
+        Parameters
+        ----------
+        turns : int
+            Positive number of turns.
+        tokens_per_turn : int
+            Positive number of tokens appended per turn.
+
+        Returns
+        -------
+        PerInvocationSerializationResult
+            Token counts and a dimensionless storage expansion.
+
+        Notes
+        -----
+        Equation: transcript = a H; per_invocation = a H (H + 1) / 2.
+
+        Assumptions: Every turn appends the same a tokens and stores its full prefix.
+
+        Excludes: Compression, deduplication, tokenization, and model execution.
+
+        References
+        ----------
+        Derivation: Summing prefix lengths a, 2a, ..., Ha yields the arithmetic-series total.
+
+        Examples
+        --------
+        >>> PerInvocationSerializationModel().solve(3, 10).expansion
+        2.0
+        """
         last, total = calc_append_only_context(tokens_per_turn, tokens_per_turn, turns)
         return PerInvocationSerializationResult(
-            per_invocation_tokens=total, transcript_tokens=last, expansion=total / last)
-
-
+            per_invocation_tokens=total, transcript_tokens=last, expansion=total / last
+        )
 
 
 class LossNormalizationModel(ForwardModel):
@@ -104,11 +173,48 @@ class LossNormalizationModel(ForwardModel):
     averaging weights each record once, so the trajectory's share rises from
     ``1/B`` to ``k/(B - 1 + k)``.
     """
+
     requires = ()
     produces = LossNormalizationResult
 
-    def solve(self, focus_targets: int, other_examples: int, other_targets: int,
-              focus_pieces: int = 1) -> LossNormalizationResult:
+    def solve(
+        self, focus_targets: int, other_examples: int, other_targets: int, focus_pieces: int = 1
+    ) -> LossNormalizationResult:
+        """Compare target-token weighting with equal-record weighting.
+
+        Parameters
+        ----------
+        focus_targets : int
+            Positive selected-target count of the focus trajectory.
+        other_examples : int
+            Positive count of other records.
+        other_targets : int
+            Positive target count in each other record.
+        focus_pieces : int, optional
+            Positive number of focus records after splitting; default one.
+
+        Returns
+        -------
+        LossNormalizationResult
+            Counts and dimensionless weighting shares.
+
+        Notes
+        -----
+        Equation: focus_token_share = focus_targets / (focus_targets + other_examples * other_targets); focus_example_share = focus_pieces / (focus_pieces + other_examples).
+
+        Assumptions: Splitting preserves all focus targets; other records have equal target counts.
+
+        Excludes: Gradient magnitudes, optimization dynamics, and changes in training quality.
+
+        References
+        ----------
+        Derivation: Token averaging normalizes by target counts; equal-record averaging normalizes by the count of records.
+
+        Examples
+        --------
+        >>> LossNormalizationModel().solve(20, 2, 10).focus_token_share
+        0.5
+        """
         shares = calc_token_average_shares([focus_targets] + [other_targets] * other_examples)
         records = focus_pieces + other_examples
         return LossNormalizationResult(
@@ -131,10 +237,42 @@ class SequencePackingModel(ForwardModel):
     the first ``capacity``-token buffer with room (first-fit decreasing).
     Occupancy counts context and targets alike; it is not measured throughput.
     """
+
     requires = ()
     produces = SequencePackingResult
 
     def solve(self, lengths, capacity: int) -> SequencePackingResult:
+        """Compare padding with first-fit-decreasing sequence packing.
+
+        Parameters
+        ----------
+        lengths : sequence of int
+            Nonempty sequence of positive token counts, each no larger than capacity.
+        capacity : int
+            Positive token capacity of each packing buffer.
+
+        Returns
+        -------
+        SequencePackingResult
+            Token-position counts, buffer loads, and dimensionless occupancies.
+
+        Notes
+        -----
+        Equation: padded = N * max(lengths); packed = number_of_buffers * capacity; occupancy = sum(lengths) / allocated_positions.
+
+        Assumptions: Examples remain whole; first-fit decreasing determines the buffer placement.
+
+        Excludes: Attention masking costs, runtime throughput, and optimal bin packing.
+
+        References
+        ----------
+        Derivation: Allocated positions count rectangular padding or fixed buffers; occupancy is occupied divided by allocated positions.
+
+        Examples
+        --------
+        >>> SequencePackingModel().solve([2, 2], 4).packed_occupancy
+        1.0
+        """
         lengths = list(lengths)
         stored = sum(lengths)
         longest = max(lengths)
@@ -142,11 +280,18 @@ class SequencePackingModel(ForwardModel):
         loads = calc_first_fit_decreasing(lengths, capacity)
         packed = len(loads) * capacity
         return SequencePackingResult(
-            examples=len(lengths), stored=stored, longest=longest,
-            mean_length=stored / len(lengths), padded_positions=padded,
-            buffers=len(loads), buffer_loads=loads, packed_positions=packed,
-            padded_occupancy=stored / padded, packed_occupancy=stored / packed,
-            position_ratio=padded / packed)
+            examples=len(lengths),
+            stored=stored,
+            longest=longest,
+            mean_length=stored / len(lengths),
+            padded_positions=padded,
+            buffers=len(loads),
+            buffer_loads=loads,
+            packed_positions=packed,
+            padded_occupancy=stored / padded,
+            packed_occupancy=stored / packed,
+            position_ratio=padded / packed,
+        )
 
 
 class PreferencePairModel(ForwardModel):
@@ -158,19 +303,68 @@ class PreferencePairModel(ForwardModel):
     ``beta / 2``. The logistic score depends on ``beta``, so it measures fit to
     this comparison, not a success probability.
     """
+
     requires = ()
     produces = PreferencePairResult
 
-    def solve(self, policy_preferred: float, reference_preferred: float, policy_dispreferred: float,
-              reference_dispreferred: float, beta: float) -> PreferencePairResult:
+    def solve(
+        self,
+        policy_preferred: float,
+        reference_preferred: float,
+        policy_dispreferred: float,
+        reference_dispreferred: float,
+        beta: float,
+    ) -> PreferencePairResult:
+        """Evaluate one DPO preference margin and logistic loss.
+
+        Parameters
+        ----------
+        policy_preferred : float
+            Log probability of the preferred response under the policy, dimensionless.
+        reference_preferred : float
+            Log probability of the preferred response under the reference, dimensionless.
+        policy_dispreferred : float
+            Log probability of the dispreferred response under the policy, dimensionless.
+        reference_dispreferred : float
+            Log probability of the dispreferred response under the reference, dimensionless.
+        beta : float
+            Positive dimensionless scale of the policy/reference log-ratio margin.
+
+        Returns
+        -------
+        PreferencePairResult
+            Dimensionless margin, logistic score, loss, saturation, and gradient coefficient.
+
+        Notes
+        -----
+        Equation: margin = beta * ((policy_preferred - reference_preferred) - (policy_dispreferred - reference_dispreferred)); loss = -log(sigmoid(margin)).
+
+        Assumptions: The supplied log probabilities describe one preferred/dispreferred pair; initialization has zero log-ratio margin.
+
+        Excludes: Sequence generation, empirical success probability, and training dynamics.
+
+        References
+        ----------
+        Derivation: The negative log-sigmoid gives pairwise logistic loss; differentiating the margin yields the saturation factor and beta-scaled coefficient. This wrapper delegates the calculation to calc_preference_pair.
+
+        Examples
+        --------
+        >>> PreferencePairModel().solve(0.0, 0.0, 0.0, 0.0, 0.2).preference_score
+        0.5
+        """
         zw, zl, margin, score, loss, sat, coef = calc_preference_pair(
-            policy_preferred, reference_preferred, policy_dispreferred, reference_dispreferred, beta)
+            policy_preferred, reference_preferred, policy_dispreferred, reference_dispreferred, beta
+        )
         _, _, _, _, loss0, sat0, coef0 = calc_preference_pair(0.0, 0.0, 0.0, 0.0, beta)
         return PreferencePairResult(
-            score_preferred=zw, score_dispreferred=zl, margin=margin, preference_score=score,
-            loss=loss, initial_loss=loss0, saturation_factor=sat, initial_saturation_factor=sat0,
-            gradient_coefficient=coef, initial_gradient_coefficient=coef0)
-
-
-
-
+            score_preferred=zw,
+            score_dispreferred=zl,
+            margin=margin,
+            preference_score=score,
+            loss=loss,
+            initial_loss=loss0,
+            saturation_factor=sat,
+            initial_saturation_factor=sat0,
+            gradient_coefficient=coef,
+            initial_gradient_coefficient=coef0,
+        )

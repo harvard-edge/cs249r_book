@@ -33,20 +33,45 @@ class DataModel(ForwardModel):
     produces = DataResult
 
     def solve(self, workload_data_rate: Quantity, hardware: HardwareNode) -> DataResult:
-        """
-        Solves for data pipeline feasibility.
+        """Compare ingestion demand with the slowest specified data path.
 
         Parameters
         ----------
         workload_data_rate : Quantity
-            The required data ingestion rate (e.g., TB/hour or GB/s).
+            Nonnegative required ingestion bandwidth, convertible to GB/s.
         hardware : HardwareNode
-            The hardware node with storage and interconnect specs.
+            Hardware entry with optional storage and I/O bandwidth specifications.
 
         Returns
         -------
         DataResult
-            Pipeline metrics including utilization and stall probability.
+            Demand, supply, and margin in GB/s; utilization is demand/supply.
+            ``is_stalled`` indicates demand above supply, not an empirical probability.
+            Missing positive paths yield zero supply and infinite utilization.
+
+        Notes
+        -----
+        Equation: supply = min(positive specified storage and I/O bandwidths);
+        utilization = demand/supply and margin = supply - demand.
+
+        Assumptions: each specified path carries the same steady-state byte stream.
+        An absent or nonpositive path is omitted rather than treated as a zero-rate
+        physical link. If all paths are absent, capacity is unknown.
+
+        Excludes: CPU transformations, buffering, burstiness, cache reuse, and
+        concurrent clients. The stall flag alone does not predict elapsed time.
+
+        References
+        ----------
+        Derivation: conservation of the same byte stream across serial stages makes
+        the smallest stage bandwidth the sustainable pipeline supply.
+
+        Examples
+        --------
+        >>> from mlsysim import Hardware, Q_
+        >>> result = DataModel().solve(Q_("1 MB/s"), Hardware.Cloud.H100)
+        >>> result.margin == result.supply_bw - result.demand_bw
+        True
         """
         # 1. Resolve Hardware Supply
         storage_bw = getattr(hardware.storage, 'bandwidth', None) if hardware.storage else None
@@ -102,24 +127,48 @@ class TransformationModel(ForwardModel):
 
     def solve(self, batch_size: int, sample_size_bytes: Quantity,
               cpu_throughput: Quantity, accelerator_step_time: Quantity) -> TransformationResult:
-        """
-        Solves for CPU preprocessing bottleneck.
+        """Compare batch preprocessing time with accelerator step time.
 
         Parameters
         ----------
         batch_size : int
-            Number of samples per batch.
+            Positive number of samples in one batch.
         sample_size_bytes : Quantity
-            Size of one sample in bytes (e.g., Q_("500 KB")).
+            Nonnegative encoded or transformed byte size per sample, as appropriate
+            for the supplied CPU throughput measurement.
         cpu_throughput : Quantity
-            CPU preprocessing throughput (e.g., Q_("2 GB/s")).
+            Positive aggregate preprocessing throughput, convertible to byte/s.
         accelerator_step_time : Quantity
-            Time for one accelerator training step (e.g., Q_("50 ms")).
+            Positive time for the accelerator to process that same batch.
 
         Returns
         -------
         TransformationResult
-            Transform time, bottleneck status, and accelerator utilization.
+            Preprocessing and accelerator times in ms, bottleneck flag, dimensionless
+            utilization, and slowdown relative to the accelerator alone.
+
+        Notes
+        -----
+        Equation: T_cpu = batch_size * sample_size_bytes / cpu_throughput;
+        T_step = max(T_cpu, T_accelerator), utilization = T_accelerator/T_step.
+
+        Assumptions: steady-state prefetch perfectly overlaps the CPU and accelerator
+        stages; CPU throughput is already aggregate across its workers.
+
+        Excludes: pipeline fill/drain, transfer latency, storage stalls, and
+        contention. The maximum describes overlap, not serial execution.
+
+        References
+        ----------
+        Derivation: byte volume divided by byte rate gives stage service time;
+        the slower of two fully overlapped stages determines steady-state cadence.
+
+        Examples
+        --------
+        >>> from mlsysim import Q_
+        >>> result = TransformationModel().solve(2, Q_("1 MB"), Q_("1 MB/s"), Q_("1 s"))
+        >>> result.accelerator_utilization == 0.5
+        True
         """
         # T_transform = (B × S_sample) / C_throughput
         batch_data = batch_size * sample_size_bytes.to("byte")

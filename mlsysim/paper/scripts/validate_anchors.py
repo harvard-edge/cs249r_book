@@ -5,11 +5,11 @@ The anchor configurations live in ``paper_scenarios.py`` and are the same ones
 ``generate_paper_values.py`` turns into the paper's macros, so this check and
 the paper cannot disagree about what was run.
 
-The paper reports the error of every comparison with a published measurement
-(A1, A3, A4) rather than claiming a tolerance, so those rows are reported, not
-gated. The script exits non-zero when a check the paper does state as exact
-fails (A5 and A6 are identities, A7 must recover Meta's TP and PP), when a run
-the paper describes as fitting in memory does not fit, or when a solver raises.
+B1 and B3 retain configured relative-error regression gates; these protect the
+selected calibrated scenarios, not a general accuracy guarantee. B4 reports an
+accounting comparison. B2 reports a weight-only bound alongside an unmatched
+request-average metric and has no decode-error gate. The script also checks
+accounting identities, layout recovery, and memory feasibility.
 
 Run from the mlsysim project root (the directory holding the ``mlsysim``
 package)::
@@ -29,7 +29,7 @@ import paper_scenarios as ps  # noqa: E402
 
 # Gated checks: ("relative", r) passes when |pred - rep| / rep <= r; ("exact", None)
 # requires an exact match.
-# B1 and B3 gate the intro's "within 10% for physical predictions" claim;
+# B1 and B3 retain scenario-specific regression tolerances;
 # B5 is an identity the paper states to better than 1%;
 # B6 is an identity up to the rounding of the published 552 t;
 # B7 requires exact recovery of Meta's TP and PP layout.
@@ -65,7 +65,7 @@ def main() -> int:
         gated_row("B1", "ResNet-50 8x A100 (img/s)", f"{a1['node']:,.0f}", f"{a1['reported']:,}", a1["rel_error"])
 
         a2 = ps.anchor_two()
-        rows.append(("B2", "Llama-2 70B TP=2 decode floor", f"{a2['floor_ms']:.1f} ms", "none", "no reported value", "INFO"))
+        rows.append(("B2", f"Llama-2 70B TP={a2['tp']} weight floor", f"{a2['floor_ms']:.2f} ms", "request average only", "metric mismatch; no ITL error", "INFO"))
 
         a3 = ps.anchor_three()
         gated_row("B3", "Llama 3 405B 16K H100 MFU", f"{a3['mfu']:.1%}", f"{a3['reported']:.1%}", a3["rel_error"])
