@@ -725,7 +725,7 @@ The Data walls govern how data moves \emph{to} the accelerator. A node that is l
 \end{equation}
 When $\rho_{\text{data}} > 1$, the accelerator stalls waiting for data. $BW_{\text{demand}}$ is the product of batch size, sample size, and step rate; $BW_{\text{supply}}$ is the effective throughput of the storage subsystem after accounting for read amplification and caching. For LLM training on tokenized text, $BW_{\text{demand}}$ is small compared with image, audio, and video workloads, which are where this wall usually binds. The model assumes storage bandwidth is the binding bottleneck rather than network I/O during single-node training.
 
-\textbf{Wall~9: The Transformation Wall.} JPEG decoding, tokenization, and augmentation execute on CPU cores, not on the accelerator. When the CPU preprocessing pipeline cannot keep pace, the accelerator stalls even if storage bandwidth is abundant. In the scenario of Case~S2 (\Cref{sec:usage}), each CPU worker decodes and augments ${\sim}\CaseSTwoAugmentRate$ images/s, so \CaseSTwoWorkers{} workers cap the pipeline at ${\sim}\CaseSTwoEffectiveSupplyImgPerS$ images/s, below what an 8-GPU DGX A100's compute can consume. The \texttt{TransformationModel} quantifies this bottleneck~\citep{murray2021tf}:
+\textbf{Wall~9: The Transformation Wall.} JPEG decoding, tokenization, and augmentation execute on CPU cores, not on the accelerator. When the CPU preprocessing pipeline cannot keep pace, the accelerator stalls even if storage bandwidth is abundant. In the scenario of Case~S2 (\Cref{sec:usage}), each CPU worker decodes and augments ${\sim}\CaseSTwoAugmentRate$ images/s, the per-core rate tf.data measures for the standard ImageNet pipeline~\citep{murray2021tf}, so \CaseSTwoWorkers{} workers cap the pipeline at ${\sim}\CaseSTwoEffectiveSupplyImgPerS$ images/s, below what an 8-GPU DGX A100's compute can consume. The \texttt{TransformationModel} quantifies this bottleneck~\citep{murray2021tf}:
 \begin{equation}
 \label{eq:transform}
 T_{\text{transform}} = \frac{B \cdot S_{\text{sample}}}{C_{\text{cpu}}}
@@ -1078,7 +1078,7 @@ We present two examples chosen to illustrate complementary aspects of the framew
 A student investigates the inference economics of chain-of-thought (CoT) prompting. Using Llama-3 70B on H100 hardware, they configure the \texttt{InferenceScalingModel} with $K{=}8$ reasoning steps. Each step generates $\sim$50 tokens (the solver default) at the memory-bound decode rate, so the total reasoning time is $T_{\text{reason}} = \text{TTFT} + K \cdot 50 \cdot \text{ITL}$. The solver reports a total reasoning time of ${\sim}17.9$\,s, a $6.5{\times}$ per-query \emph{latency} multiplier relative to a single-step answer (the one-time prefill TTFT amortizes across the $K$ steps). The \emph{cost} multiplier is larger and tracks total work rather than latency: CoT generates $8{\times}$ as many decode tokens ($K \cdot 50$ vs.\ 50), and because decode is memory-bandwidth-bound, the serving throughput is set by token volume. Feeding this into the \texttt{EconomicsModel}, a deployment sized for 100~QPS of single-pass queries must grow its H100 fleet, and hence its TCO, by ${\sim}8{\times}$ to sustain the same query rate under CoT. The two multipliers are distinct: \mlsysim shows chain-of-thought taxes both latency and infrastructure cost, but by different factors.
 
 \subsubsection{S2: CPU Pipeline Bottleneck}
-A student configures ResNet-50 training on a DGX A100 (8 GPUs) with a batch size of \CaseSTwoBatch. At a kernel-level efficiency of $\eta = \CaseSTwoEta$, the \texttt{DistributedModel} evaluated on a single DGX A100 node predicts a step time of ${\sim}\CaseSTwoStepMs$\,ms, a demand rate of ${\sim}\CaseSTwoDemandImgPerS$ images/s. Adding the \texttt{DataModel} rules out storage I/O. With \CaseSTwoWorkers{} CPU workers (\CaseSTwoWorkersPerGpu{} per GPU) decoding ImageNet JPEGs at \CaseSTwoDecodeRate{} images/s each, the raw decode pipeline delivers \CaseSTwoRawSupplyImgPerS{} images/s. This appears sufficient, but the \texttt{TransformationModel} accounts for the full augmentation pipeline (random crop, color jitter, normalization) at \CaseSTwoAugmentRate{} images/s per worker, reducing effective throughput to \CaseSTwoEffectiveSupplyImgPerS{} images/s, below the GPUs' \CaseSTwoDemandImgPerS{} images/s appetite. The student discovers that the binding constraint shifts from the accelerators to Wall~9 (Transformation). The GPUs have spare cycles, accelerator utilization falls to \CaseSTwoAccelUtilizationPct\%, and the achieved end-to-end efficiency drops to $\eta \approx \CaseSTwoEndToEndEta$, demonstrating how \mlsysim isolates the upstream data pipeline bottleneck rather than falsely attributing the throughput loss to accelerator execution.
+A student configures ResNet-50 training on a DGX A100 (8 GPUs) with a batch size of \CaseSTwoBatch. At a kernel-level efficiency of $\eta = \CaseSTwoEta$, the \texttt{DistributedModel} evaluated on a single DGX A100 node predicts a step time of ${\sim}\CaseSTwoStepMs$\,ms, a demand rate of ${\sim}\CaseSTwoDemandImgPerS$ images/s. Adding the \texttt{DataModel} rules out storage I/O. With \CaseSTwoWorkers{} CPU workers (\CaseSTwoWorkersPerGpu{} per GPU) decoding ImageNet JPEGs at \CaseSTwoDecodeRate{} images/s each, the raw decode pipeline delivers \CaseSTwoRawSupplyImgPerS{} images/s. This appears sufficient, but the \texttt{TransformationModel} accounts for the full pipeline (decode, random crop and resize, flip, normalization) at \CaseSTwoAugmentRate{} images/s per worker, the per-core rate tf.data measures for it (one ImageNet epoch in \CaseSTwoPrepRefEpochS\,s on \CaseSTwoPrepRefCores{} cores)~\citep{murray2021tf}, reducing effective throughput to \CaseSTwoEffectiveSupplyImgPerS{} images/s, below the GPUs' \CaseSTwoDemandImgPerS{} images/s appetite. The student discovers that the binding constraint shifts from the accelerators to Wall~9 (Transformation). The GPUs have spare cycles, accelerator utilization falls to \CaseSTwoAccelUtilizationPct\%, and the achieved end-to-end efficiency drops to $\eta \approx \CaseSTwoEndToEndEta$. Keeping the GPUs fed would take about \CaseSTwoCoresPerGpuNeeded{} cores per GPU, within the 3--24 cores per GPU that \citet{mohan2021} found image and audio models need on V100 servers. The case demonstrates how \mlsysim isolates the upstream data pipeline bottleneck rather than falsely attributing the throughput loss to accelerator execution.
 
 \subsection{Instructor Use Cases}
 
@@ -1596,11 +1596,13 @@ print(f"Total Carbon: {sust.carbon_footprint_kg / 1000:.1f} tonnes CO2e")
 \begin{lstlisting}[language=Python, caption={\textbf{Data Pipeline Analysis (Tier 1).} Evaluating the ``Data Wall''. This example separates I/O bandwidth bottlenecks (storage to GPU) from CPU transformation bottlenecks (decoding and augmenting data), in the spirit of Case Study S2 but with an under-provisioned 16-worker pipeline.}, label={lst:appendix-data}]
 from mlsysim.solvers import DataModel, TransformationModel
 from mlsysim.hardware.registry import Hardware
+from mlsysim.datasets.registry import Datasets
 from mlsysim.core.units import Q_
 
 # 1. Define the ingestion demand (e.g., training a vision model)
 # We need to feed 40,000 images per second to the GPU.
-demand_rate = Q_("40000 1/s") * Q_("150 KB")  # ~6 GB/s
+image = Datasets.ImageNet.mean_compressed_image_size  # ~115 KB
+demand_rate = Q_("40000 1/s") * image  # ~4.6 GB/s
 
 # 2. Check if the A100 node's I/O path can handle the bandwidth
 data_result = DataModel().solve(
@@ -1610,13 +1612,13 @@ data_result = DataModel().solve(
 print(f"I/O Stalled: {data_result.is_stalled}")  # (*@\ScenarioCIoStalled@*)
 
 # 3. Check if 16 CPU workers can decode + augment fast enough
-#    (850 images/s per worker, 150 KB per image)
-cpu_throughput = 16 * 850 * Q_("150 KB/s")
+#    (~364 images/s per worker: tf.data's measured ImageNet rate per core)
+cpu_throughput = 16 * Q_("364 1/s") * image
 transform_result = TransformationModel().solve(
     batch_size=2048,
-    sample_size_bytes=Q_("150 KB"),
+    sample_size_bytes=image,
     cpu_throughput=cpu_throughput,
-    accelerator_step_time=Q_("48 ms"),
+    accelerator_step_time=Q_("51.2 ms"),  # 2048 images at 40,000/s
 )
 print(f"CPU Stalled: {transform_result.is_bottleneck}")  # (*@\ScenarioCCpuStalled@*)
 print(f"Accel. Utilization: "
