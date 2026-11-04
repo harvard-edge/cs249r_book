@@ -19,6 +19,7 @@ from mlsysim.tools.audit_provenance import (
     audit_systems_reference_values,
     audit_systems_topology,
     audit_systems_reliability,
+    audit_tier2_book_series,
 )
 
 class TestProvenanceAudit(unittest.TestCase):
@@ -93,6 +94,73 @@ class TestProvenanceAudit(unittest.TestCase):
     def test_systems_reliability_have_provenance(self):
         issues = audit_systems_reliability()
         self.assertEqual(issues, [], "\n".join(issues))
+
+    def test_tier2_book_series_have_provenance(self):
+        issues = audit_tier2_book_series()
+        self.assertEqual(issues, [], "\n".join(issues))
+
+    def test_series_provenance_parser_and_figure_checker_catch_malformed_headers(self):
+        import sys
+        import tempfile
+        from pathlib import Path
+        from mlsysim.core.series_loader import LocalSeries
+
+        repo_root = Path(__file__).resolve().parents[2]
+        binder_dir = repo_root / "binder"
+        if str(binder_dir) not in sys.path:
+            sys.path.insert(0, str(binder_dir))
+        from cli.checks import figure_data_provenance as fdp
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_dir = Path(tmp)
+            bad_csv = tmp_dir / "bad.csv"
+            bad_csv.write_text(
+                "# Verified: Oct 2026\n"
+                "# Epistemic: empirical\n"
+                "# Upstream-SHA256: deadbeef\n"
+                "# Generator: python3 binder/tools/scripts/does_not_exist.py\n"
+                "x,y\n1,2\n",
+                encoding="utf-8",
+            )
+            violations = fdp.check_csv_file(bad_csv, repo_root=repo_root, bib_cache={None: {"patterson2021carbon"}})
+            codes = {v.code for v in violations}
+            self.assertEqual(
+                codes,
+                {
+                    "series_missing_source",
+                    "series_invalid_verified",
+                    "series_missing_computation_or_notes",
+                    "series_invalid_epistemic",
+                    "series_invalid_sha256",
+                    "series_missing_generator_script",
+                },
+            )
+
+            good_csv = tmp_dir / "good.csv"
+            good_csv.write_text(
+                "# Source: Patterson et al. (2021), Table 4 (@patterson2021carbon)\n"
+                "# Verified: 2026-10-20\n"
+                "# Epistemic: measured (metered system power * PUE)\n"
+                "# Computation: E_MWh = chips * kw * hours / 1000\n"
+                "x,y\n1,2\n",
+                encoding="utf-8",
+            )
+            series = LocalSeries(good_csv)
+            self.assertEqual(series.provenance["verified"], "2026-10-20")
+            self.assertTrue(series.provenance["epistemic"].startswith("measured"))
+            self.assertEqual(
+                fdp.check_csv_file(good_csv, repo_root=repo_root, bib_cache={None: {"patterson2021carbon"}}),
+                [],
+            )
+
+            bad_qmd = tmp_dir / "chapter.qmd"
+            bad_qmd.write_text(
+                '::: {#fig-demo fig-cap="**Demo**: Test."}\n```{python}\nimport matplotlib.pyplot as plt\n```\n:::\n',
+                encoding="utf-8",
+            )
+            checked, cell_violations = fdp.collect_cell_provenance([bad_qmd], repo_root=repo_root)
+            self.assertEqual(checked, 1)
+            self.assertEqual([v.code for v in cell_violations], ["figure_missing_cell_provenance"])
 
 if __name__ == "__main__":
     unittest.main()
