@@ -47,7 +47,8 @@
   <b><a href="https://mlsysbook.ai/kits/">🧰 Kits</a></b> •
   <b><a href="https://mlsysbook.ai/mlsysim/">🔮 MLSys·im</a></b> •
   <b><a href="https://mlsysbook.ai/instructors/">🎓 Instructors</a></b> •
-  <b><a href="https://mlsysbook.ai/staffml/">💼 StaffML</a></b>
+  <b><a href="https://mlsysbook.ai/staffml/">💼 StaffML</a></b> •
+  <b><a href="taxonomy/">Taxonomy</a></b>
 </p>
 
 <p align="center">📚 <b>Volume I is forthcoming in print from MIT Press.</b></p>

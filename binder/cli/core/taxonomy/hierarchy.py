@@ -1,4 +1,4 @@
-"""Validate and export the SKOS hierarchy slice projected from `taxonomy/ml-systems-taxonomy.yml`.
+"""Validate and export the SKOS hierarchy slice projected from `taxonomy/taxonomy.yml`.
 
 Collections are navigation sets, not broader/narrower claims. Technical field
 relationships and book links never become taxonomy or prerequisite statements.
@@ -7,13 +7,12 @@ relationships and book links never become taxonomy or prerequisite statements.
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import re
+from pathlib import Path
 from urllib.parse import quote
 
-from .concept_graph import PAGE_URL, SITE_DIR, ConceptGraphError
-from .taxonomy_schema import validate_https_url
-
+from ..concept_graph import PAGE_URL, SITE_DIR, ConceptGraphError
+from .schema import get_enum_values, validate_https_url
 
 PREFIX = PAGE_URL
 
@@ -45,7 +44,7 @@ def _records(model, name):
 
 def load_taxonomy(root: Path, field: dict, _bundle: dict | None = None) -> dict | None:
     """Load the optional taxonomy without inferring classification or coverage."""
-    from .field_graph import TAXONOMY_FILE, load_taxonomy_yaml, load_unified_taxonomy
+    from ..field_graph import TAXONOMY_FILE, load_taxonomy_yaml, load_unified_taxonomy
     unified = _bundle if _bundle is not None else load_unified_taxonomy(root)
     if unified is not None:
         model = unified["skos"]
@@ -61,8 +60,9 @@ def load_taxonomy(root: Path, field: dict, _bundle: dict | None = None) -> dict 
     if not isinstance(model, dict) or model.get("schema_version") != 1:
         _fail("unsupported schema")
     _text(model, ("id", "title", "scope", "status"), "metadata")
-    if model["status"] != "editorial-draft":
-        _fail("only editorial-draft is supported before review provenance exists")
+    allowed_statuses = set(get_enum_values("ModelStatusEnum", root))
+    if model["status"] not in allowed_statuses:
+        _fail(f"unsupported status {model['status']}")
     sources = _records(model, "sources")
     for source in sources:
         _text(source, ("title", "url", "role"), source["id"])
@@ -143,7 +143,7 @@ def load_taxonomy(root: Path, field: dict, _bundle: dict | None = None) -> dict 
         resolved_collections.append({**collection, "members": members})
     if assigned != families:
         _fail("collections must cover every field family exactly once")
-    from .taxonomy_schema import validate_linkml
+    from .schema import validate_linkml
     validate_linkml(model, "TaxonomyHierarchyModel", root, "taxonomy")
     if any(node.get("family") not in assigned for node in field_nodes.values()):
         _fail("collections drop field concepts with unknown families")

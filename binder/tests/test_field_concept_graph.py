@@ -27,12 +27,12 @@ def landscape(tmp_path):
         views=[dict(id="overview", title="Selected question?", concepts=["mlsys.capacity", "mlsys.state"]),
                dict(id="all", title="Whole field?", concepts=["mlsys.capacity", "mlsys.state", "mlsys.unmapped"])],
     )
-    (folder / "ml-systems-taxonomy.yml").write_text(yaml.safe_dump(model))
+    (folder / "taxonomy.yml").write_text(yaml.safe_dump(model))
     return tmp_path, model
 
 
 def save(root, model):
-    (root / "taxonomy/ml-systems-taxonomy.yml").write_text(yaml.safe_dump(model))
+    (root / "taxonomy/taxonomy.yml").write_text(yaml.safe_dump(model))
 
 
 def test_field_identity_and_unmapped_concepts_survive_empty_books(landscape):
@@ -194,7 +194,7 @@ def test_retired_identities_stay_unused_and_point_to_a_replacement(landscape, re
 def test_taxonomy_yaml_rejects_aliases(tmp_path):
     from core.field_graph import load_taxonomy_yaml
 
-    path = tmp_path / "ml-systems-taxonomy.yml"
+    path = tmp_path / "taxonomy.yml"
     path.write_text("a: &shared [x, y]\nb: *shared\n")
     with pytest.raises(ConceptGraphError, match="aliases"):
         load_taxonomy_yaml(path)

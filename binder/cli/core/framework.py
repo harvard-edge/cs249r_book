@@ -1,8 +1,8 @@
-"""Compile the subject framework and practitioner guides projected from `taxonomy/ml-systems-taxonomy.yml`.
+"""Compile the subject framework and practitioner guides projected from `taxonomy/taxonomy.yml`.
 
 All subject groups (`F, S, P, Q, T`), areas (`F1`–`T2`), rows (`F1.1`–`T2.5`), facet dimensions, and practitioner
 guides (roles, symptom triage entries, and learning paths) are authored in the single canonical
-file `taxonomy/ml-systems-taxonomy.yml`. Each concept declares its primary maintenance home via
+file `taxonomy/taxonomy.yml`. Each concept declares its primary maintenance home via
 `home: <subject-row-id>` on the concept record; row `concepts` lists are derived automatically
 by `load_unified_taxonomy` and never hand-duplicated on the row.
 
@@ -25,6 +25,7 @@ from .field_graph import TAXONOMY_FILE, load_taxonomy_yaml, load_unified_taxonom
 from .taxonomy_release import release_artifacts
 from .taxonomy_schema import (
     SCOPE_REF_RE as SCOPE_REF,
+    expected_status_for_version,
     get_class_slots,
     get_enum_values,
     get_required_class_slots,
@@ -127,7 +128,7 @@ def _chapters(root: Path, codes, context):
 
 
 def load_framework(root: Path, field: dict, _bundle: dict | None = None) -> dict | None:
-    """Validate the `framework` and `guides` projections of `taxonomy/ml-systems-taxonomy.yml` against `FrameworkModel` and `GuidesModel` and resolve chapter/passage links.
+    """Validate the `framework` and `guides` projections of `taxonomy/taxonomy.yml` against `FrameworkModel` and `GuidesModel` and resolve chapter/passage links.
 
     New field identities deliberately block compilation until their candidate
     home is considered. No classification or additional book link is guessed.
@@ -147,8 +148,12 @@ def load_framework(root: Path, field: dict, _bundle: dict | None = None) -> dict
         _fail("unsupported schema")
     _text(model, ("id", "title", "version", "status", "scope"), "metadata",
           set(get_class_slots("FrameworkModel", root)))
-    if model["status"] != "editorial-draft" or model["version"] not in SUPPORTED_VERSIONS:
-        _fail(f"only versions {', '.join(SUPPORTED_VERSIONS)} with editorial-draft status are supported")
+    supported_versions = get_enum_values("FrameworkVersionEnum", root)
+    expected_status = expected_status_for_version(str(model["version"]))
+    if model["status"] != expected_status or model["version"] not in supported_versions:
+        _fail(
+            f"version '{model['version']}' requires status '{expected_status}' within supported versions {', '.join(supported_versions)}"
+        )
     sources = _records(model.get("sources"), "source")
     source_slots = set(get_class_slots("FrameworkSource", root))
     for source in sources:
@@ -278,24 +283,8 @@ def load_framework(root: Path, field: dict, _bundle: dict | None = None) -> dict
     unassigned = sorted(set(concepts) - set(homes))
     if unassigned:
         _fail(f"unassigned field concepts require a candidate home decision: {', '.join(unassigned)}")
-    # 2026-10-27: taxonomy/README.md and .claude/rules/taxonomy.md
-    # claim at least two relationships per concept and a connected graph.
-    if model["version"] not in ("0.1-draft", "0.2-draft"):
-        adj = {ident: set() for ident in concepts}
-        for edge in field.get("relationships", []):
-            adj[edge["source"]].add(edge["target"])
-            adj[edge["target"]].add(edge["source"])
-        under = sorted(ident for ident, neighbors in adj.items() if len(neighbors) < 2)
-        if under:
-            _fail(f"concepts require at least two relationships: {', '.join(under)}")
-        seen, stack = set(), [next(iter(concepts))] if concepts else []
-        while stack:
-            curr = stack.pop()
-            if curr not in seen:
-                seen.add(curr)
-                stack.extend(adj[curr] - seen)
-        if len(seen) != len(concepts):
-            _fail(f"concept graph is disconnected: {', '.join(sorted(set(concepts) - seen))}")
+    # Sparse or disconnected semantic graphs are permitted. Browsing homes
+    # remain mandatory; edge count is a review diagnostic, never warrant.
     gaps = _records(model.get("gaps"), "gap", nonempty=False)
     resolved_gaps = []
     rows_by_id = {row["id"]: row for area in resolved_areas for row in area["rows"]}

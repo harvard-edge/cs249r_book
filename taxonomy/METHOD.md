@@ -1,132 +1,138 @@
 # How the ML Systems Taxonomy is built
 
-This document states the published standards the taxonomy adopts, how each recommendation is met, and where it is not yet met. Status terms are used strictly: **met** means the record or a check shows it, **partial** means some of it is done and the rest is named, and **open** means it has not been done. Numbers describe version `0.4-draft` and are computed from the release files named beside them.
+Status: **editorial draft**. This document specifies a repeatable construction and maintenance method. It does not claim complete field coverage, full standards conformance, human validation, or community endorsement.
 
-## The standards
+The procedure is repeatable because the scope, sources, starting records, decisions, and checks are recorded. Another editor can inspect and replay a change, challenge its evidence, and apply the same questions to another subject. Different editors may still make different judgments. Agreement and usefulness must be evaluated separately.
 
-| Layer | Standard adopted | Role |
+## How the vocabulary is organized
+
+The browsing outline groups subjects into areas and broad groups. Each concept has a permanent identifier and one home subject. Its preferred label, aliases, and definition describe its meaning; typed relationships connect it to other concepts. Browsing membership is separate from semantic hierarchy: being filed under a subject does not make that subject a broader concept.
+
+The public name is “taxonomy.” Its representation combines a browsing classification with a controlled concept vocabulary and associative relationships. SKOS collections represent browsing groups, while reviewed specialization links supply broader/narrower relations. This is not a claim that the entire graph is a strict hierarchy or a formal domain ontology.
+
+## Construction and maintenance protocol
+
+The ML systems taxonomy is constructed through a documented evidence-and-review process and maintained using established controlled-vocabulary practices. ANSI/NISO Z39.19 informs construction, testing, and maintenance; ISO 25964 informs concept and term management and interoperability; W3C SKOS supplies the exchange representation. This statement describes the method adopted. The standards assessment below records the limits of verification; no certification or complete conformance is implied.
+
+The existing vocabulary is the starting inventory. Its groups, subjects, concepts, identifiers, source records, and exports are retained unless a documented review supports a change. Existing membership is not sufficient evidence for acceptance, and an incomplete evidence record is not by itself grounds for deleting a useful concept. Such records remain explicitly pending review.
+
+### Standards baseline and project choices
+
+| Authority | Application in this project | Boundary of the claim |
 |---|---|---|
-| Construction | [ANSI/NISO Z39.19-2005 (R2010)](https://groups.niso.org/higherlogic/ws/public/download/6484/Guidelines%20for%20the%20Construction,%20Format,%20and%20Management%20of%20Monolingual%20Controlled%20Vocabularies.pdf), *Guidelines for the Construction, Format, and Management of Monolingual Controlled Vocabularies* | How terms are chosen, formed, related, tested, and maintained |
-| Representation | [W3C SKOS Reference](https://www.w3.org/TR/skos-reference/) (Recommendation, 2009), with a declared OWL extension for typed relations | The published data model |
-| Metadata and publication | [DCTERMS](https://www.dublincore.org/specifications/dublin-core/dcmi-terms/), [W3C DCAT 3](https://www.w3.org/TR/vocab-dcat-3/), [W3C Best Practice Recipes for Publishing RDF Vocabularies](https://www.w3.org/TR/swbp-vocab-pub/), and [Ten simple rules for making a vocabulary FAIR](https://pmc.ncbi.nlm.nih.gov/articles/PMC8238180) | Identifiers, licensing, versions, and reuse |
-| Validation | Inter-indexer consistency as used in library science: Hooper's measure and [Rolling's measure](https://informationr.net/ir/18-4/paper601.html), reported beside Cohen's kappa | Whether people and tools apply the vocabulary the same way |
+| [ANSI/NISO Z39.19-2005 (R2010)](https://www.niso.org/publications/ansiniso-z3919-2005-r2010) | Term selection, scope, equivalence, relationships, testing, and maintenance | Selected warrant, term-equivalence, and construction passages inspected; other clause attributions remain unverified |
+| [ISO 25964-1:2011](https://www.iso.org/standard/53657.html) | Concept-centered vocabulary management, preferred and alternative terms, scope, and change records | Public ISO and NISO descriptions support this adoption; a full-text conformance audit remains open |
+| [ISO 25964-2:2013](https://www.iso.org/standard/53658.html) | Establishing and maintaining mappings to neighboring vocabularies | Mapping work is planned; no external equivalence is inferred from similar labels |
+| [W3C SKOS Reference](https://www.w3.org/TR/skos-reference/) | Concepts, collections, labels, semantic relationships, and mapping properties | Structural validation does not establish domain correctness or completeness |
 
-**ISO 25964 is a reference, not a conformance claim.** ISO 25964-1 and ISO 25964-2 are the international thesaurus and interoperability standards, and [NISO describes their scope](https://niso.org/schemas/iso25964). Their text is sold rather than published, and this project has not read it, so no clause-level conformance is claimed. The mapping properties in SKOS are the planned route for its interoperability guidance.
+These editions are the declared baseline. ISO's catalog, checked on November 4, 2026, lists ISO 25964-1:2011 as current with a replacement in development. A later edition requires a recorded impact review before adoption.
 
-**What Z39.19 says this is.** Under section 5.4 a *taxonomy* connects all preferred terms in a hierarchy, and a *thesaurus* displays several relationship types with standardized indicators. This vocabulary keeps the familiar name but is structurally a thesaurus: most links are associative, and subjects are browsing groups rather than broader terms.
+The source-count thresholds, source-lineage rules, model-review configuration, one-home browsing policy, minimum relationship count, and evaluation thresholds are project policies. They are not ANSI, ISO, or W3C mandates. Model agreement is review evidence, not proof that a technical claim is true. An editor remains responsible for acceptance and for resolving disagreements against sources. Changes to these policies must be recorded separately from changes to the vocabulary; the simplified correction path is an explicit policy change. Historical records keep their original validation rules; release transitions still have separate gates.
 
-**Ontology methodologies.** This project adopts controlled-vocabulary guidance and does not claim to implement an ontology-development methodology such as NeOn or METHONTOLOGY. Relations are declared in OWL only so that the SKOS extension is machine-readable.
+### Repeatable construction procedure
 
-## How a version is built
-
-Z39.19 section 11.1.3 recommends a committee approach, an empirical approach, or a combination. This project uses empirical construction under a top-down outline, with model-assisted review. It has no expert committee, which is a departure. The refresh procedure follows this order:
-
-1. **Scope and structure first** (11.1.2 asks that structure and display be decided before terms are collected). The five groups, 20 areas, and subjects are fixed at the start of a refresh and change only by recorded decision.
-2. **Check existing vocabularies** (11.1.1, 11.1.5). Candidates are searched against the vocabulary and named external sources.
-3. **Collect candidates** (11.1.3.2, 11.1.3.4). Candidates come inductively from the content being indexed: book chapters, StaffML questions that could not be tagged, conference programs, and courses.
-4. **Establish warrant** (5.3.5). Each candidate must show recorded evidence, and the project's two-source rule applies.
-5. **Control the term** (6, 7). One preferred label, entry terms as aliases, one definition, and one home subject.
-6. **Relate the term** (8). Generic hierarchy must pass the all-and-some test. Everything else is associative.
-7. **Verify independently** (11.1.5, 11.2.2). Reviewers from other model families read every proposal, and a reconciliation script fails if a flagged item is unchanged and has no written override. It detects unaddressed verdicts; whether a correction is adequate needs review.
-8. **Test** (11.2). Coverage against recorded checklists, a held-out test compiled without access to the vocabulary, and tagging consistency.
-9. **Record and release** (11.3). Changelog, identity rules, generated downloads, and validation of the RDF.
-
-The step-by-step procedure is maintained with the project's editorial tooling. `README.md` describes the maintenance loop, and `CHANGELOG.md` records what each round did and which reviewers took part.
-
-**Human and machine roles.** Z39.19 section 11.1.3.4 assumes construction calls for intellectual decisions and describes machines as assistants for tasks such as identifying candidate terms. This project goes further: language models proposed terms, cross-checked them, and audited the result, and one author holds final authority. That is a real departure from the standard's assumption, and it is the main reason the status below stays *editorial draft*.
-
-## Conformance to Z39.19
-
-Appendix A of the standard is informative and summarizes its recommendations. The table follows the clauses that apply to this vocabulary.
-
-| Clause | Requirement | Status | How it is met, or what is missing |
-|---|---|---|---|
-| 5.3.1 | Each term has one meaning | partial | The compiler rejects a label or alias shared by two concepts. That proves unique strings, not unambiguous meaning, and no ambiguity review is recorded |
-| 5.3.2 | Each concept has one preferred term; synonyms point to it | met | `label` and `aliases`, exported as `skos:prefLabel` and `skos:altLabel` |
-| 5.3.3 | Equivalence, hierarchical, and associative relationships | met | Aliases, `specializes`, and the other 16 relations |
-| 5.3.5.1 | Literary warrant | partial | 699 of 878 concepts occur in book chapters and 471 are cited by covered paper, course, or standards topics. Counts are computed, but the corpus is not yet an enumerated sample of the field |
-| 5.3.4 | Facets | met by design | The standard leaves facet choice to the designer; groups and row facets are stated in the framework |
-| 5.3.5.2 | Organizational warrant | partial | 425 concepts are tied to covered book topics or section links. That is coverage; the clause asks for the term forms the organization prefers, and those decisions are not documented |
-| 5.3.5.3 | User warrant | partial | The standard means user requests and searches, which are not recorded. `user_warrant_proxy` counts StaffML question tags (626 concepts), a term-assignment frequency and not user behavior |
-| 6.1 | Term choice by domain, warrant, and specificity | partial | The admission test is written and applied; 27 concepts have no recorded warrant of any kind and are listed below for review |
-| 6.2.2 | Scope notes | partial | Subjects carry includes and excludes, exported as `skos:scopeNote`. Concepts carry definitions, not separate scope notes, and reciprocal notes are not checked |
-| 6.2.3, 11.3.2.2 | History notes | partial | Each concept records `added_in`, exported as `skos:historyNote`. That is a release, not an entry date, and later changes are in the changelog, not per concept |
-| 6.3–6.7 | Term form | partial | Label rules are written; conformance has been reviewed, not checked by a compiled rule |
-| 7 | Compound terms | partial | Multiword labels have not been reviewed against the criteria in 7.5 and 7.6. 93 labels join ideas with "and", "versus", or "vs.", such as "Stop conditions and output-length limits", and come first |
-| 8.1 | Reciprocal relationships | met | Each relation has forward and inverse phrasing |
-| 8.3, 8.3.1 | Generic hierarchy passes the all-and-some test | partial | Two independent audits read all 127 `specializes` edges. They agreed on 111 and both failed 27: 21 were retyped, 6 removed, and 2 of those re-added in reverse direction, leaving 100. These are editorial corrections pending technical review, and the 16 where the audits split await expert review |
-| 8.3.3 | Whole-part links are inherent and exclusive | met by exclusion | Section 8.3.3.2 makes parts of multiple wholes associative. `part-of` is therefore exported under `skos:related`, not as hierarchy |
-| 8.4 | Associative relationships | partial | Sixteen typed relations with conditions, read literally by reviewers; not checked against the clause item by item |
-| 9.5 | Documentation | partial | `README.md`, this document, and published tagging rules, with 878 preferred terms and 1,254 entry terms. Filing rules and an item-by-item check are open |
-| 10 | Interoperability | open | No crosswalk to ACM CCS, CS2023, SFIA, or ESCO exists |
-| 11.1.1 | Avoid duplicating existing vocabularies | partial | Neighboring taxonomies are named in the README, but the documented comparison is open |
-| 11.1.3 | Construction by subject experts and vocabulary specialists | open | No such committee has taken part |
-| 11.1.4 | A term record for every term | partial | Every concept has a record. The optional elements are incomplete: sources exist for 224 of 878 concepts, and there are no dated history notes |
-| 11.1.5 | Verification before admission | partial | Candidates are checked by reviewers in other model families; consulting technical references is not recorded per term |
-| 11.1.6 | Candidates marked | met | Declared `gaps` and `status: draft` |
-| 11.2.1 | Testing methods | open | The named methods are expert heuristic evaluation, card sorting, and usability testing. None has been run with people |
-| 11.2.2 | Evaluation criteria, including indexing experiments | partial | Model taggers have indexed the same items; an indexing experiment with people is open |
-| 11.3 | Date and responsible person for each change | partial | Git history records both per commit. The term records do not |
-| 11.3.1 | Periodic review policy | met | The refresh procedure, run before each citable release |
-| 11.3.1.1, 11.3.1.2 | Nominating and changing terms; review by an editor and board | partial | A public issue form takes nominations, and the author is the editor. There is no board |
-| 11.3.1.3 | Over-used and rarely assigned terms reviewed | open | The clause concerns indexing frequency. No thresholds or review exist yet; StaffML tag counts are available |
-| 11.3.2 | Deprecated terms and their history | partial | `retired` with `replaced_by`, exported with `owl:deprecated` and `dct:isReplacedBy`. The former label, date, and predecessor note are not exported |
-| 11.3.3 | Hyperlink maintenance | partial | Internal identifiers are checked by the compiler; external links are not routinely checked |
-
-**Review queue from warrant.** 27 concepts have no recorded warrant in any corpus. This project reviews them under section 6.1; it is separate from the indexing-frequency review in 11.3.1.3. No warrant recorded does not mean no warrant exists, because the corpora are limited. Filter the concepts CSV for zero in all four warrant columns to list them. They are not removed until reviewed.
-
-## Conformance to SKOS
-
-| Item | Status | How it is met |
+| Stage | Editorial action | Required record and completion condition |
 |---|---|---|
-| Concepts, scheme, and collections | met | `skos:Concept`, `skos:ConceptScheme`, and `skos:Collection`, with groups, areas, and subjects as collections |
-| S9, S37: class disjointness | met | Checked on the release for concepts, collections, and the scheme |
-| S13, S14: label rules | met on concepts | Checked for `skos:prefLabel` and `skos:altLabel`; no hidden labels are exported |
-| S27: hierarchy and association disjoint | met | Enforced by the compiler and checked on the release for `specializes` and the relation properties |
-| Typed relations | met | `mlsys-taxonomy-relations.ttl` declares 17 OWL properties. `specializes` refines `skos:broader`, and 16 refine `skos:related`. `skos:broader` is also written out for tools without inference |
-| Mapping properties | open | Awaits the crosswalks |
-| Conditional meaning | partial | RDF carries the relation, while the condition under which it holds is in the JSON and GraphML releases only. A consumer of the Turtle alone sees an unconditional link |
+| Scope | State the intended users, tasks, boundaries, and level of specificity; examine overlapping vocabularies before adding new structure | A scope statement, neighboring-vocabulary inventory, and reasons for reuse, mapping, or a distinct concept |
+| Evidence selection | Select sources using recorded inclusion and exclusion rules across the existing source strata; distinguish construction material from evaluation material | A source inventory with versions, locators, provenance, and exposure status; related sources are not counted as independent without justification |
+| Candidate extraction | Extract an engineering idea and its supporting passage before choosing its preferred label or home; record whether it is new or already present | A candidate record with evidence, proposed meaning, and nearest existing concepts; summaries and model suggestions are labeled as such |
+| Term reconciliation | Decide whether candidate terms denote the same concept, different concepts, a broader or narrower concept, or an implementation | A preferred label, justified alternative labels, a definition, boundary notes where needed, and an accept, revise, defer, or reject decision with reasons |
+| Organization | Place the concept in the browsing outline and assess each semantic relationship independently | A justified home and reviewed relationships; browsing membership is not exported as a broader relation; a minimum edge count never justifies inventing an edge |
+| Review | Check scope, sources, duplicates, definitions, aliases, and literal relationship meaning; revisit incident relationships whenever meaning changes | Reviewer judgments, disagreements, their resolution, and the responsible editor; uncertain candidates remain pending |
+| Evaluation | Freeze the candidate vocabulary before evaluation; apply it to material that did not shape the changes and observe actual tagging and retrieval tasks | Inputs, judgments, failures, and reproducible calculations; model evaluation and human evaluation are identified separately, and inspected evaluation material is no longer described as unseen |
+| Release | Validate identities, schemas, exports, links, and downstream consumers; inspect the rendered site and review the conformance statement | A versioned candidate, changelog, validation records, known limitations, and editorial release decision; public draft and reviewed release remain distinct statuses |
 
-The tests are in `binder/tests/test_taxonomy_skos.py`. They are a restricted check of this export, not a full SKOS validator, and passing them shows consistency, not truth.
+Repeatability means that another editor can inspect the same inputs, apply the same decision rules, and explain differences in judgment. It does not promise identical structures or prove completeness of the field. Retrospective reconstruction of an existing decision must be labeled retrospective; it must not be presented as a protocol followed before the original decision.
 
-## Publication and reuse
+### Decision record
 
-| Item | Status | How it is met |
+For each substantive change, the review record must identify the affected concept or subject, the proposed operation, the source passages and locators, the nearest competing interpretation, the reason for the decision, the reviewer and editor, the date, and the release or content revision. Definition changes also record their effect on existing relationships and tags. Deferrals record the missing evidence or unresolved distinction. These are review requirements mapped onto the existing campaign and provenance records, not new fields to insert into the canonical YAML without a schema change.
+
+For example, a proposal to make a named software system an alias of a general mechanism must establish equivalence within the declared scope. Evidence that the system merely uses the mechanism is insufficient. The appropriate outcome may be an illustrative reference, a related concept, or a deferred proposal. This is an illustrative decision rule, not a report of a completed review.
+
+### Maintenance cycle
+
+Contributions enter through the feedback process and receive a recorded disposition. Accepted changes follow the construction stages relevant to their impact: a spelling correction needs lexical and collision checks, while a changed definition, split, merge, or relationship requires semantic and downstream review. Review depth may vary; provenance and editorial accountability remain required.
+
+Identifiers remain stable and are never reused. Retirements preserve replacement information and history; splits identify their successors and flag existing assignments for review. Each published change records its reason and version. Release artifacts should remain retrievable by version, with license and citation information. Archival publication and live identifier resolution remain release work until verified.
+
+Periodic review examines unresolved proposals, ambiguous or rarely useful terms, new source material, broken links, mapping drift, and feedback from instructors and practitioners. Mappings follow ISO 25964-2 guidance and use SKOS mapping properties only after meaning and scope have been compared. Similar wording alone does not establish an exact match.
+
+### Applying the protocol to the existing inventory
+
+Start with the current canonical vocabulary and its existing evidence records. Review a bounded subject through the stages above, preserving its identifiers and documenting which evidence is historical, newly checked, or absent. Use the resulting decision records to expose ambiguities in the procedure before extending the review across other subjects. Prioritize already recorded alias exceptions, disputed hierarchy edges, and unsupported concepts. A review may retain an existing entry unchanged; edits must resolve an identified problem.
+
+The existing empirical study and refresh machinery can support this work, but their claims require their own receipts. This protocol is a prospective operating specification; adding it does not establish that past runs satisfied it or establish that the historical evidence meets prospective release requirements.
+
+## Executable checks and refresh requirements
+
+The construction protocol above is the editorial recipe. The following commands are available from the repository root:
+
+```bash
+./binder/binder concepts check
+./binder/binder concepts build
+./binder/binder concepts coverage --check
+./binder/binder concepts agreement --check
+python3 taxonomy/reviews/structured-generation/verify.py
+```
+
+The compiler checks the schema, identifiers, graph invariants, provenance consistency, and recorded coverage and agreement inputs. The build generates the public formats and downstream lookup data. Coverage and agreement commands recompute recorded judgments; they do not obtain new judgments or establish that a sample was independent of construction. The worked-example verifier checks its pinned baseline and review inventory, not the technical truth of its recommendations.
+
+Vocabulary changes must preserve the provenance chain. For corrections to existing draft records, use the public `binder/tools/audit/review_taxonomy.py` command described in [Maintaining the taxonomy](README.md#maintaining-the-taxonomy). Each accepted review records exact before/after content, sources and their support, rationale, reviewer identity and kind, and incident relationships. The command previews and validates before application, retains original files, and restores originals after ordinary write or validation failures. It is not a crash-atomic multi-file transaction.
+
+This correction path replaces mandatory model-family agreement with accountable source-backed editorial decisions. Model assistance is optional; model agreement does not establish correctness. Historical campaigns keep their historical validation rules and evidence limitations. The same interface supports additions, moves, explicit splits and retirements, typed entry-term decisions, and draft version transitions; see the [maintenance operations](reviews/lifecycle.md). A separate command freezes versioned draft archives. Earlier private refresh scripts are not a required public maintenance interface.
+
+Reviewer counts and admission thresholds are project policies, not requirements imposed by ANSI/NISO, ISO, or W3C. Human domain review and indexing trials remain necessary evidence for a reviewed release.
+
+## Historical study and evidence recovery
+
+The records in `taxonomy/method-study/` preserve the earlier method study and its reported results. Public end-to-end replication of that study remains unavailable: raw judgments and portions of the workflow are maintainer-local, and the published summaries do not establish the claimed isolation, preregistration, or execution history. The historical metrics are not used here as verified evidence of publication readiness or procedure repeatability.
+
+The current schema-4 exposure ledger is a conservative recovery of the archived schema-3 ledger. `binder/tools/audit/migrate_taxonomy_ledger.py` reconstructs it deterministically from `legacy-burned-clusters-v3.json.gz` and `evaluation-reconstruction.json`. The recovery preserves recorded history and identifies missing evidence. Historical coauthor classifications remain unknown and are excluded from independent-source eligibility. The ledger contains no reconstructed evaluation-unseal events: the recovery does not manufacture timestamps, registrations, or receipts.
+
+`binder/tools/audit/reconstruct_taxonomy_evaluation.py` can recover evaluated item identities and source-file hashes from the retained raw outputs when those files are available. It does not recompute study scores or prove that the evaluated items were sealed beforehand. The recovery inventory and migration tests support these limited claims only.
+
+The structured-generation review in `taxonomy/reviews/structured-generation/` is a public worked example of reviewing an existing subject. It records a baseline, source-linked findings, proposed dispositions, and unresolved questions. Its accepted boundary corrections were applied through the public correction command; the review also retains deferred proposals. Further reviews must record their scope and distinguish targeted editorial screening from exhaustive verification, independent human review, and cross-family review.
+
+## Standards assessment
+
+The declared baseline is ANSI/NISO Z39.19-2005 (R2010), ISO 25964-1:2011, ISO 25964-2:2013, and the W3C SKOS Recommendation. Their roles differ: vocabulary construction and maintenance, thesaurus management, mappings between vocabularies, and web representation. Edition changes require an impact review rather than automatic adoption.
+
+| Aspect | Implemented practice | Verification limit |
 |---|---|---|
-| Stable identifier per concept | met | `https://mlsysbook.ai/taxonomy/concept/<id>`; identities are permanent |
-| Identifiers resolve | partial | The build generates a redirect page for each URI, linking the RDF. Live resolution is unverified until deployment, and the host cannot serve content negotiation |
-| License and creator | met | CC BY 4.0, recorded with DCTERMS |
-| Catalog metadata | met | `mlsys-taxonomy.dcat.ttl` and `CITATION.cff` in the downloads |
-| Per-version stable download | open | The site serves the current release only |
-| Persistent citation | open | No DOI has been minted |
+| Warrant and term decisions | Source-linked definitions, alias decisions, and correction rationales | Targeted source review; the whole inventory has not received assertion-level validation |
+| Identity and change history | Stable identifiers, recorded retirements, exact correction replay, and content hashes | A valid chain establishes recorded consistency, not the truth of an editorial judgment |
+| Concept and label separation | Concepts have identifiers; labels and entry terms are lexical fields | Legacy retrieval terms do not assert equivalence; explicit term decisions distinguish synonyms, narrower meanings, and implementations |
+| Hierarchy and association | Browsing collections are separate from specialization and other relations | Graph checks cannot prove that each specialization is semantically sound |
+| SKOS interchange | Labels, collections, hierarchy, and associations are exported; conditional engineering relations retain wording and conditions in statement records | Successful parsing and integrity tests establish only the properties they check; this is not a complete conformance certification |
+| External mappings | ISO 25964-2 informs the proposed crosswalk procedure | No external equivalence is asserted merely because two labels look alike; crosswalk work remains outstanding |
+| User testing | Coverage and agreement commands recompute recorded judgments | Historical model judgments are not human indexing or usability evidence |
 
-## Consistency
+[The standards source check](reviews/standards-check.md) records what was actually inspected. Selected passages of the official NISO text were read. Public ISO catalog descriptions were checked; the complete normative ISO texts were not inspected. Earlier clause attributions in historical provenance remain historical claims until verified. SKOS supplies a representation, not a guarantee of subject correctness.
 
-Agreement between two independent model taggers, recomputed by `binder concepts agreement`:
+For a future external mapping, record both vocabulary versions, source and target identifiers, mapping type, evidence, reviewer, and disposition. Check definitions and scope before choosing exact, close, broader, narrower, or related mapping. Review mappings again when either vocabulary changes. This is the project's proposed implementation of interoperability guidance, not a completed ISO audit.
 
-| Sample | Subject κ | Hooper | Rolling |
-|---|---|---|---|
-| 300 questions, first rules | 0.781 | 65.7% | 74.6% |
-| Same 300, rules revised on them | 0.832 | 74.7% | 81.0% |
-| Held-out 300 | 0.802 | 67.3% | 74.9% |
+The [editorial dispositions](reviews/dispositions.md) record compound-entry decisions, typed search terms, withdrawn unsupported relationships, and remaining evidence limits. The [inventory](reviews/inventory.json) distinguishes targeted review from mechanical checks across the vocabulary. The [human-review protocol](reviews/human-review.md) is prepared; it does not report participant results.
 
-Hooper's measure is c / (A + B − c) and Rolling's is 2c / (A + B), where c is the number of concepts both taggers assigned and A and B are the numbers each assigned. Scores are per-item means over items where both taggers assigned at least one concept: 280, 286, and 282 of 300 respectively. Items where only one tagger assigned a concept (12, 12, and 11) are excluded, and subject kappa uses all 300. These numbers measure agreement between models on these samples and do not stand in for a trial with human indexers.
+## Publication and maintenance decisions
 
-## Governance
+An editorial draft may invite public review while clearly stating its limitations. Before proposing publication, an editor must inspect the final diff and rendered site, check downloadable formats and downstream identities, record unresolved decisions, and confirm that the public description matches the evidence. Publication is a separate approval; generating files does not authorize deployment.
 
-- **Editor.** Vijay Janapa Reddi holds final authority over scope, admission, and release.
-- **Editorial board.** Open. Section 11.3.1.1 prefers review by a board; this project plans one named expert for each of the five groups.
-- **Change requests.** Anyone can propose an addition or correction through the [taxonomy issue form](https://github.com/harvard-edge/cs249r_book/issues/new?template=taxonomy_feedback.yml).
-- **Review.** Each refresh decides every declared gap and every proposal, with reasons recorded. A public comment window before a citable release is open.
-- **Identity.** Identifiers are permanent. A withdrawn concept is retired with its replacement, never deleted or reused.
+A reviewed release requires additional evidence: domain-expert review of contested meanings and relationships, human indexing and navigation trials with recorded methods, a checked standards claim, and a versioned archival record. These activities are not reported as completed. Earlier board sizes, model quorums, sampling thresholds, and source-independence formulas were project study designs; none is imposed by ANSI/NISO, ISO, or W3C.
 
-## What stands between this and a citable release
+The public maintenance path records exact changes, source evidence, impact decisions, and provenance for additions, corrections, moves, splits, merges, retirements, and entry-term decisions. Draft version transitions and immutable local archives are supported. Declaring a reviewed release still requires actual human evaluation and the reviewed-release governance gate; an editorial command cannot manufacture that evidence.
 
-1. A named editorial board reviews each group, with the 16 split hierarchy edges and the review queue as its first work.
-2. A written sampling frame defines the courses, venues, standards, and roles that completeness is measured against.
-3. An indexing trial with human indexers reports Hooper, Rolling, and kappa on a fresh sample.
-4. Crosswalks to neighboring vocabularies are published with SKOS mapping properties.
-5. Compound terms and per-term sources are reviewed against sections 7 and 11.1.4.
-6. A DOI and per-version downloads are issued.
+Feedback enters through the [taxonomy issue form](https://github.com/harvard-edge/cs249r_book/issues/new?template=taxonomy_feedback.yml). Each accepted change records its reason and preserves identities. When evidence is insufficient, defer the decision explicitly rather than adding unsupported detail. Review depth should follow the impact of the change; a wording correction and a concept split do not need the same investigation.
 
-Until then the correct description is this: an editorial draft that adopts Z39.19 as its construction standard and publishes in SKOS, with partial conformance itemized above. Z39.19 is a set of recommendations, and this document does not claim full conformance.
+## Competency design probes
+
+A subject label identifies knowledge; a competency requires observable engineering work. Four draft probes illustrate the difference:
+
+| Task | Connected knowledge | Evidence to assess |
+|---|---|---|
+| Decide whether quantization improves a constrained inference workload | Profiling, workload, bandwidth, arithmetic intensity, quantization, metrics, SLOs | Reproducible baseline, measured bottleneck, quality comparison, decision with stated limits |
+| Recover distributed training under an explicit failure model | Parallelism, training state, checkpoints, consistent cuts, artifact identity, collectives | Checkpoint manifest, injected-failure/restart logs, restored-state checks, guarantee boundaries |
+| Configure a retrieval-assisted service under quality and capacity constraints | Retrieval, ANN, embeddings, benchmark design, hallucination, admission, tail latency, goodput, cost | Retrieval and answer evaluation, workload traces, failure accounting, transfer-case reassessment |
+| Evaluate timing and fallback behavior of a learned physical component | Operating domain, observation age, feedback delay, execution time, WCET, runtime assurance | Contained experiment, timing evidence, fallback behavior, limits of the tested operating domain |
+
+These are proposed assessment designs, not claims that existing chapters assess those tasks. A later AI engineering profile could select relevant knowledge and tasks with a declared role, autonomy, constraints, and evidence rubric. Reading a chapter, visiting a map, or recognizing concepts does not demonstrate competence. The [CS2023 competency introduction](https://csed.acm.org/wp-content/uploads/2024/04/1.4-Introduction-to-Competency-Framework.pdf) provides a useful task-and-context distinction; [SFIA responsibility levels](https://sfia-online.org/en/sfia-9/responsibilities) describe professional responsibility and must not be converted into a student mastery score.

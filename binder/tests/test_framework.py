@@ -6,6 +6,8 @@ import json
 
 import pytest
 import yaml
+from rdflib import Graph, Literal
+from rdflib.namespace import RDF, RDFS, SKOS
 
 from core.concept_graph import ConceptGraphError
 from core.framework import framework_artifacts, load_framework
@@ -25,14 +27,14 @@ def candidate(tmp_path):
                            dict(id="mlsys.capacity", label="Capacity", definition="Available storage.")],
                  relationships=[dict(id="relation", source="mlsys.state", target="mlsys.capacity", predicate="occupies")],
                  book_links=[dict(concept="mlsys.state", book_concept="vol1.state", volume="vol1", label="State", chapter_title="Execution", url="https://mlsysbook.ai/state", depth="not-assessed", status="draft")])
-    path = tmp_path / "taxonomy/ml-systems-taxonomy.yml"
+    path = tmp_path / "taxonomy/taxonomy.yml"
     path.parent.mkdir(parents=True)
     path.write_text(yaml.safe_dump(model, sort_keys=False))
     return tmp_path, model, field
 
 
 def write(root, model):
-    (root / "taxonomy/ml-systems-taxonomy.yml").write_text(yaml.safe_dump(model, sort_keys=False))
+    (root / "taxonomy/taxonomy.yml").write_text(yaml.safe_dump(model, sort_keys=False))
 
 
 def test_missing_optional_framework_preserves_old_build(tmp_path):
@@ -146,6 +148,19 @@ def test_exports_share_authored_rows_and_preserve_unmapped_concepts(candidate):
     assert artifacts == framework_artifacts(root, field, framework)
 
 
+def test_untyped_candidate_relationship_keeps_wording_without_inventing_type(candidate):
+    root, model, field = candidate
+    artifacts = framework_artifacts(root, field, load_framework(root, field))
+    graph = Graph().parse(data=artifacts[root / "taxonomy/downloads/mlsys-taxonomy.ttl"], format="turtle")
+    statements = list(graph.subjects(RDF.type, RDF.Statement))
+    assert len(statements) == len(field["relationships"])
+    statement = statements[0]
+    assert graph.value(statement, RDF.predicate) == SKOS.related
+    assert graph.value(statement, RDFS.label) == Literal("occupies", lang="en")
+    # Reification must not turn that description into an asserted typed edge.
+    assert (graph.value(statement, RDF.subject), SKOS.related, graph.value(statement, RDF.object)) not in graph
+
+
 def test_empty_candidate_row_and_secondary_links_do_not_inflate_home_counts(candidate):
     root, model, field = candidate
     model["areas"][0]["rows"].append(dict(id="row-proposed", label="Proposed subject", definition="A candidate beyond the current inventory.",
@@ -207,7 +222,7 @@ def test_csv_preserves_scope_boundaries_and_source_warrants(candidate):
     assert json.loads(result["warrant_source_titles"]) == ["SKOS"]
     assert result["warrant_role"] == "design-reading-not-claim-proof"
     assert result["inventory_status"] == "draft-inventory"
-    assert result["source_file"] == "taxonomy/ml-systems-taxonomy.yml"
+    assert result["source_file"] == "taxonomy/taxonomy.yml"
     assert result["area_question"] == area["question"]
     assert result["row_display_label"] == "State"
 
@@ -326,12 +341,11 @@ def test_bad_codes_fail(candidate, edit, error):
         load_framework(root, field)
 
 
-def test_v03_enforces_two_relationships_per_concept_and_connected_graph(candidate):
+def test_sparse_and_disconnected_graphs_do_not_require_invented_edges(candidate):
     root, model, field = candidate
     model["version"] = "0.3-draft"
     write(root, model)
-    with pytest.raises(ConceptGraphError, match="at least two relationships"):
-        load_framework(root, field)
+    load_framework(root, field)
     # Two separate 3-cycles satisfy degree >= 2 everywhere but are disconnected.
     ids = [f"mlsys.c{i}" for i in range(6)]
     field["concepts"] = [dict(id=c, label=c, definition="A concept.") for c in ids]
@@ -344,8 +358,7 @@ def test_v03_enforces_two_relationships_per_concept_and_connected_graph(candidat
     ]
     model["areas"][0]["rows"][0]["concepts"] = ids
     write(root, model)
-    with pytest.raises(ConceptGraphError, match="disconnected"):
-        load_framework(root, field)
+    load_framework(root, field)
     field["relationships"].append(dict(id="bridge", source="mlsys.c2", target="mlsys.c3", predicate="links"))
     assert load_framework(root, field)["summary"]["concepts"] == 6
 
@@ -365,7 +378,7 @@ def _write_guides(root, symptom_levers, role_core=("row-state", "row-b", "row-c"
               "learning_paths": [{"id": "p", "label": "Path", "audience": "Students.",
                                   "steps": [{"subject": "row-state", "why": "First."}, {"subject": "row-b", "why": "Second."},
                                             {"subject": "row-c", "why": "Third."}]}]}
-    (root / "taxonomy/ml-systems-taxonomy.yml").write_text(yaml.safe_dump(guides, sort_keys=False))
+    (root / "taxonomy/taxonomy.yml").write_text(yaml.safe_dump(guides, sort_keys=False))
 
 
 def test_guides_compile_and_reach_the_release(tmp_path):

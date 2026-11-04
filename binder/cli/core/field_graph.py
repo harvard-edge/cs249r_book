@@ -1,6 +1,6 @@
-"""Compile the ML systems taxonomy from its single source of truth (`taxonomy/ml-systems-taxonomy.yml`).
+"""Compile the ML systems taxonomy from its single source of truth (`taxonomy/taxonomy.yml`).
 
-`taxonomy/ml-systems-taxonomy.yml` is the sole authored taxonomy file in the repository,
+`taxonomy/taxonomy.yml` is the sole authored taxonomy file in the repository,
 validated against `UnifiedTaxonomyModel` in `taxonomy/schema/mlsys-taxonomy.linkml.yml`.
 `load_unified_taxonomy(root)` parses and validates that file once (cached by path and mtime)
 and deterministically projects the four aspect models consumed by the compiler pipeline:
@@ -24,15 +24,19 @@ from copy import deepcopy
 import functools
 import html
 import json
+import math
 from pathlib import Path
+import re
 
 import yaml
 
 from .concept_graph import SITE_DIR, ConceptGraphError, digest, svg_map
 
+_BARE_SCI_SCALAR_RE = re.compile(r"^[+-]?[0-9]+(?:_[0-9]+)*(?:\.[0-9]*)?[eE][+-]?[0-9]+$")
+
 
 class _UniqueKeySafeLoader(yaml.SafeLoader):
-    """YAML SafeLoader that rejects duplicate keys in any mapping."""
+    """YAML SafeLoader that rejects duplicate keys and non-finite floats (including bare 1e999/-1e999 scalars)."""
 
 
 def _construct_unique_mapping(loader: _UniqueKeySafeLoader, node: yaml.MappingNode, deep: bool = False) -> dict:
@@ -46,9 +50,39 @@ def _construct_unique_mapping(loader: _UniqueKeySafeLoader, node: yaml.MappingNo
     return mapping
 
 
+def _construct_finite_float(loader: _UniqueKeySafeLoader, node: yaml.ScalarNode) -> float:
+    val = yaml.SafeLoader.construct_yaml_float(loader, node)
+    if not isinstance(val, (int, float)) or not math.isfinite(float(val)):
+        raise ConceptGraphError(f"non-finite YAML float {node.value!r} is forbidden")
+    return float(val)
+
+
+def _construct_checked_str(loader: _UniqueKeySafeLoader, node: yaml.ScalarNode) -> str:
+    val = yaml.SafeLoader.construct_yaml_str(loader, node)
+    # Plain (unquoted) YAML 1.1 scalars without a decimal dot such as `1e999` or `-1e999`
+    # fall through to `tag:yaml.org,2002:str`; reject unquoted exponent-overflow literals while
+    # preserving explicitly quoted string literals (`"1e999"`, `'1e999'`).
+    if node.style in (None, "") and len(val) < 64 and _BARE_SCI_SCALAR_RE.match(val):
+        try:
+            num = float(val.replace("_", ""))
+        except OverflowError as exc:
+            raise ConceptGraphError(f"non-finite YAML exponent scalar {node.value!r} is forbidden") from exc
+        if not math.isfinite(num):
+            raise ConceptGraphError(f"non-finite YAML exponent scalar {node.value!r} is forbidden")
+    return val
+
+
 _UniqueKeySafeLoader.add_constructor(
     yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG,
     _construct_unique_mapping,
+)
+_UniqueKeySafeLoader.add_constructor(
+    "tag:yaml.org,2002:float",
+    _construct_finite_float,
+)
+_UniqueKeySafeLoader.add_constructor(
+    "tag:yaml.org,2002:str",
+    _construct_checked_str,
 )
 
 
@@ -68,14 +102,14 @@ def load_taxonomy_yaml(path: Path) -> object:
         raise ConceptGraphError(f"{path.name}: {exc}") from exc
 
 
-TAXONOMY_FILE = "taxonomy/ml-systems-taxonomy.yml"
+TAXONOMY_FILE = "taxonomy/taxonomy.yml"
 
 
 @functools.lru_cache(maxsize=4)
 def _cached_unified_taxonomy(
     path_str: str, mtime_ns: int, schema_mtime_ns: int, root_str: str
 ) -> dict[str, dict | None] | None:
-    """Parse, validate, and project the single-source taxonomy/ml-systems-taxonomy.yml."""
+    """Parse, validate, and project the single-source taxonomy/taxonomy.yml."""
     path = Path(path_str)
     root = Path(root_str)
     raw = load_taxonomy_yaml(path)
@@ -180,7 +214,7 @@ def _cached_unified_taxonomy(
 
 
 def load_unified_taxonomy(root: Path) -> dict[str, dict | None] | None:
-    """Load the canonical single-source taxonomy/ml-systems-taxonomy.yml if present."""
+    """Load the canonical single-source taxonomy/taxonomy.yml if present."""
     path = root / TAXONOMY_FILE
     if not path.exists():
         return None
@@ -261,8 +295,9 @@ def _validate_field_model(root: Path, model: dict) -> tuple[list[dict], dict, di
         validate_schema_sync,
     )
     _text(model, ("id", "title", "scope", "status"), "metadata", set(get_class_slots("FieldModel", root)))
-    if model["status"] != "editorial-draft":
-        raise ConceptGraphError("field model: only editorial-draft is supported before review provenance exists")
+    allowed_statuses = set(get_enum_values("ModelStatusEnum", root))
+    if model["status"] not in allowed_statuses:
+        raise ConceptGraphError(f"field model: unsupported status {model['status']}")
     sources = _index(model.get("sources"), "source")
     source_slots = set(get_class_slots("FieldSource", root))
     for ref in sources.values():

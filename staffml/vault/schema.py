@@ -198,7 +198,7 @@ class Question(BaseModel):
     bloom_level: str = ""
     phase: Optional[str] = None
 
-    # ML Systems Taxonomy tags (identities from taxonomy/ml-systems-taxonomy.yml)
+    # ML Systems Taxonomy tags (identities from taxonomy/taxonomy.yml)
     taxonomy_subject: Optional[str] = None
     taxonomy_concepts: Optional[list[str]] = None
 
