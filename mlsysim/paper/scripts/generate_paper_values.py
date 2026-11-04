@@ -8,6 +8,8 @@ quotes against the in-repo ``mlsysim`` package and writes:
   trailing ``% source:`` comment naming the solver call that produced it;
 * ``paper/generated/values.json`` the raw (unrounded) values, the printed
   strings, and the sources, for audit and for ``--check``;
+* ``paper/generated/timing_samples.json`` raw local durations, run context,
+  dependency versions, and input/output hashes;
 * ``paper/generated/hw_catalog.tex`` and ``paper/generated/infra_systems.tex``
   table-row macros for the appendix registry snapshots;
 * ``paper/figures/roofline-crossover.{pdf,svg}`` and
@@ -24,22 +26,28 @@ install)::
     cd mlsysim && PYTHONPATH=. uv run --no-project --python 3.11 \\
         --with "pint>=0.24.4" --with "pydantic>=2.10.5" --with "numpy>=2.0" \\
         --with typer --with rich --with pyyaml --with matplotlib \\
-        --with pytest --with marimo --with scipy --with ortools --with plotly \\
+        --with pytest --with numpydoc --with marimo --with scipy --with ortools --with plotly \\
         python paper/scripts/generate_paper_values.py
 
 or ``make values`` in ``paper/``. The test-count step collects ``tests/``,
 which imports the lab and optimizer extras.
 
 Drift gate: ``python paper/scripts/generate_paper_values.py --check`` recomputes
-every value without writing anything and exits non-zero if any value differs
-from the committed ``generated/values.json`` (relative tolerance 1e-6), if the
-appendix tables differ, or if a diagram label is out of sync. It skips the
-figures, the sweep timing, the machine description, and the test count, which
-describe the machine and environment rather than the model.
+deterministic values without writing anything and exits non-zero if a raw value
+differs from ``generated/values.json`` (relative tolerance 1e-6), displayed text or
+source comments differ, appendix tables differ, or diagram labels are out of sync.
+The complete ``values.tex`` must match the recorded macros. Recorded runtime and
+machine values are not replaced with the checking machine's values: their display,
+raw samples, sampling protocol, source/output hashes, and run metadata are checked.
+Schema-2 receipts record a project-relative equivalent invocation; host-specific
+executable and checkout paths are retained only in private execution logs.
+The receipt detects drift and inconsistent evidence, not coordinated fabrication;
+independent execution remains part of publication review.
 
 Any solver error, any infeasible result where the paper needs a feasible run,
 any malformed or duplicate macro name, and any diagram template naming an
-unknown value is fatal: the script exits non-zero before writing.
+unknown value is fatal. If source files change during generation, the run fails
+and must be repeated after edits finish; the freshness gate rejects stale receipts.
 """
 
 from __future__ import annotations
@@ -69,6 +77,10 @@ FIGURES_DIR = PAPER_DIR / "figures"
 for p in (str(PROJECT_ROOT), str(SCRIPT.parent)):
     if p not in sys.path:
         sys.path.insert(0, p)
+
+from paper_integrity import (  # noqa: E402
+    check_timing_receipt, file_hashes, render_values_tex, source_paths, write_timing_receipt,
+)
 
 import matplotlib  # noqa: E402
 
@@ -263,6 +275,9 @@ class Values:
 BATCH_WORDS = {1: "One", 8: "Eight", 32: "ThirtyTwo", 128: "OneTwentyEight", 256: "TwoFiftySix"}
 
 
+TIMING_SAMPLES = []
+
+
 def median_seconds(fn, runs: int = 5, warmup: int = 1) -> float:
     for _ in range(warmup):
         fn()
@@ -271,6 +286,8 @@ def median_seconds(fn, runs: int = 5, warmup: int = 1) -> float:
         t0 = time.perf_counter()
         fn()
         samples.append(time.perf_counter() - t0)
+    TIMING_SAMPLES.append({"function": fn.__qualname__, "warmup_runs": warmup,
+                           "seconds": samples, "median_seconds": statistics.median(samples)})
     return statistics.median(samples)
 
 
@@ -487,7 +504,13 @@ def section_anchors(V: Values) -> None:
     a2 = ps.anchor_two()
     V.num("AnchorTwoWeightsGB", gb(a2["weights"]), "Models.Language.Llama2_70B.size_in_bytes(FP16)")
     V.num("AnchorTwoTpDegree", a2["tp"], "paper_scenarios.A2_TP_DEGREE")
-    V.num("AnchorTwoDecodeFloorMs", a2["floor_ms"], a2["source"], nd=1)
+    V.num("AnchorTwoDecodeFloorMs", a2["floor_ms"], a2["source"], nd=2)
+    for key, engine in [("Vllm", "vLLM"), ("Trt", "TensorRT-LLM")]:
+        V.num(f"AnchorTwo{key}RequestAverageMs", a2["request_average_ms"][engine],
+              f"paper/data/argonne-llama2-70b-h100.csv: {engine}, 128 input/output tokens, Latency * 1000 / 128; NOT decode ITL", nd=2)
+    from mlsysim.engine.calibration import FRAMEWORK_LAYER_TAX_MS
+    V.num("DefaultDispatchUs", H100.dispatch_tax.m_as("us"), "Hardware.Cloud.H100.dispatch_tax")
+    V.num("DefaultLayerTaxUs", FRAMEWORK_LAYER_TAX_MS * 1000, "FRAMEWORK_LAYER_TAX_MS converted to microseconds")
 
     a3 = ps.anchor_three()
     d, fleet = a3["result"], a3["fleet"]
@@ -1029,6 +1052,8 @@ def section_overview(V: Values, check: bool) -> None:
     econ = EconomicsModel().solve(f1k, duration_days=30, datacenter=us, mfu=OVERVIEW_MFU)
     rel = ReliabilityModel().solve(f1k, job_duration_hours=720)
     elapsed = time.perf_counter() - t0
+    TIMING_SAMPLES.append({"function": "section_overview", "warmup_runs": 0,
+                           "seconds": [elapsed]})
     require(node.feasible, "overview (d): Llama-3 70B FP16 must fit on one B200")
     require(elapsed < CLAIMED_CHAIN_BOUND_S, f"overview (d) took {elapsed:.3f} s, over the claimed bound")
     wall = {"Memory": 2, "Compute": 1}.get(node.bottleneck)
@@ -1436,20 +1461,41 @@ def sync_diagrams(V: Values, write: bool) -> list[str]:
 
 def write_outputs(V: Values, tables: dict[str, str]) -> None:
     GENERATED_DIR.mkdir(parents=True, exist_ok=True)
-    lines = ["% Generated by mlsysim/paper/scripts/generate_paper_values.py. Do not edit by hand.",
-             "% Regenerate with `make values` in mlsysim/paper/. Raw values: generated/values.json.",
-             "% Percent macros (*Pct) print the number without the percent sign."]
-    current = None
-    for name, rec in V.records.items():
-        if rec["section"] != current:
-            current = rec["section"]
-            lines += ["", f"% ===== {current} ====="]
-        lines.append(f"\\newcommand{{\\{name}}}{{{rec['tex']}}}% source: {rec['source']}")
-    (GENERATED_DIR / "values.tex").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    (GENERATED_DIR / "values.tex").write_text(render_values_tex(V.records), encoding="utf-8")
     payload = {"generator": "mlsysim/paper/scripts/generate_paper_values.py", "values": V.records, "audit": V.audit}
     (GENERATED_DIR / "values.json").write_text(json.dumps(payload, indent=2, default=str) + "\n", encoding="utf-8")
     for name, text in tables.items():
         (GENERATED_DIR / name).write_text(text, encoding="utf-8")
+
+
+def check_volatile_display(records: dict) -> list[str]:
+    """Reformat recorded runtime/machine values without remeasuring the machine."""
+    decimal_places = {"CountTests": 0, "CaseIOneSweepMs": 2, "CaseRThreeChainSeconds": 3,
+                      "OverviewDSolveSeconds": 3, "SweepTimingConfigs": 0,
+                      "SweepTimingMedianMs": 0, "SweepTimingPerConfigUs": 0, "MachineCores": 0}
+    text_names = {"MachineCpu", "MachineOs", "MachinePython"}
+    problems = []
+    volatile = {name for name, rec in records.items() if rec.get("volatile")}
+    if volatile != set(decimal_places) | text_names:
+        problems.append("volatile macro inventory differs from declared runtime/machine values")
+    for name in volatile:
+        rec = records[name]
+        raw = rec.get("raw")
+        if name in decimal_places:
+            if not isinstance(raw, (int, float)) or isinstance(raw, bool) or not math.isfinite(raw) or raw <= 0:
+                problems.append(f"{name}: recorded value must be finite and positive")
+                continue
+            printed = fmt_fixed(raw, decimal_places[name])
+        elif name in text_names:
+            if not isinstance(raw, str) or not raw:
+                problems.append(f"{name}: recorded machine text is missing")
+                continue
+            printed = raw
+        else:
+            continue
+        if rec.get("printed") != printed or rec.get("tex") != to_tex(printed):
+            problems.append(f"{name}: displayed value differs from recorded raw value")
+    return problems
 
 
 def check_drift(V: Values, tables: dict[str, str]) -> list[str]:
@@ -1457,7 +1503,19 @@ def check_drift(V: Values, tables: dict[str, str]) -> list[str]:
     committed_path = GENERATED_DIR / "values.json"
     if not committed_path.exists():
         return [f"{committed_path} is missing; run `make values`"]
-    committed = json.loads(committed_path.read_text(encoding="utf-8"))["values"]
+    try:
+        committed = json.loads(committed_path.read_text(encoding="utf-8"))["values"]
+        required_fields = {"raw", "printed", "tex", "source", "section", "volatile"}
+        if not isinstance(committed, dict) or any(not isinstance(rec, dict) or
+                not required_fields.issubset(rec) for rec in committed.values()):
+            raise ValueError("malformed value records")
+    except (ValueError, KeyError, TypeError) as exc:
+        return [f"generated/values.json is invalid: {exc}"]
+    tex_path = GENERATED_DIR / "values.tex"
+    if not tex_path.exists() or tex_path.read_text(encoding="utf-8") != render_values_tex(committed):
+        problems.append("generated/values.tex differs from displayed values/source comments in values.json")
+    problems.extend(check_timing_receipt(PROJECT_ROOT, committed, GENERATED_DIR))
+    problems.extend(check_volatile_display(committed))
     for name, rec in V.records.items():
         if rec["volatile"]:
             continue
@@ -1465,6 +1523,9 @@ def check_drift(V: Values, tables: dict[str, str]) -> list[str]:
         if old is None:
             problems.append(f"{name}: new value {rec['printed']!r} not in committed values.json")
             continue
+        for field in ("printed", "tex", "source", "section", "volatile"):
+            if rec[field] != old.get(field):
+                problems.append(f"{name}: {field} differs from recomputed value")
         a, b = rec["raw"], old["raw"]
         if isinstance(a, float) and isinstance(b, (int, float)) and not isinstance(b, bool):
             if not math.isclose(a, b, rel_tol=CHECK_REL_TOL, abs_tol=1e-12):
@@ -1488,9 +1549,11 @@ def main() -> int:
     parser.add_argument("--check", action="store_true",
                         help="recompute without writing; exit 1 if any value differs from generated/values.json")
     args = parser.parse_args()
+    TIMING_SAMPLES.clear()
     warnings.simplefilter("ignore")
     apply_style()
     V = Values()
+    initial_source_hashes = file_hashes(PROJECT_ROOT, source_paths(PROJECT_ROOT))
     try:
         section_registry(V)
         section_counts(V, args.check)
@@ -1519,7 +1582,8 @@ def main() -> int:
         figures = figure_roofline(roof) + figure_carbon(carbon)
         changed = sync_diagrams(V, write=True)
         write_outputs(V, tables)
-    except GenerationError as exc:
+        write_timing_receipt(PROJECT_ROOT, V.records, TIMING_SAMPLES, initial_source_hashes)
+    except (GenerationError, ValueError) as exc:
         print(f"generate_paper_values: FAILED: {exc}", file=sys.stderr)
         return 1
     print(f"wrote {len(V.records)} macros to {GENERATED_DIR / 'values.tex'}")

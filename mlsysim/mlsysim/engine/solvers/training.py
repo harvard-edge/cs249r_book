@@ -18,6 +18,7 @@ from ...core.units import ureg, Q_, resolve_precision
 from ...literature.registry import Literature
 from .. import calibration as cal
 from ...core.types import Quantity
+from ...core._validation import validate_positive
 from ...models.types import Workload, TransformerWorkload, SparseTransformerWorkload
 from ...hardware.types import HardwareNode
 from .base import ForwardModel
@@ -40,16 +41,66 @@ class CheckpointModel(ForwardModel):
     def solve(self, model: Workload, hardware: HardwareNode, optimizer: str = "adam",
               checkpoint_interval_hours: float = 4.0, n_writers: int = 1,
               filesystem_limit_gbs: float = 500.0) -> CheckpointResult:
-        """Solves for checkpoint size, write time, and resulting MFU penalty.
+        """Estimate synchronous checkpoint size, write time, and stall fraction.
 
         Parameters
         ----------
-        n_writers : int
-            Number of parallel checkpoint writers (default 1). Distributed
-            checkpointing (e.g., FSDP) shards the write across workers.
-        filesystem_limit_gbs : float
-            Maximum aggregate filesystem write bandwidth in GB/s (default 500).
-            Prevents over-optimistic scaling when n_writers is large.
+        model : Workload
+            Workload whose parameter count sets the checkpoint payload.
+        hardware : HardwareNode
+            Device with storage bandwidth in bytes/second. Missing or zero storage
+            bandwidth uses the declared fallback in ``engine.calibration``.
+        optimizer : str, optional
+            ``"adam"`` selects mixed-precision Adam checkpoint bytes; other names
+            use the SGD convention. Gradients are not persisted.
+        checkpoint_interval_hours : float, optional
+            Hours between checkpoints. A nonpositive interval returns a stall
+            fraction of one; positive intervals use write time divided by interval.
+        n_writers : int, optional
+            Positive number of writers sharing the checkpoint payload.
+        filesystem_limit_gbs : float, optional
+            Positive aggregate filesystem ceiling in decimal GB/second.
+
+        Returns
+        -------
+        CheckpointResult
+            Checkpoint size in GB, write duration in seconds, and a dimensionless
+            stall fraction in ``mfu_penalty_pct`` (not multiplied by 100).
+            ``storage_bottleneck`` flags writes longer than one minute; it does
+            not certify that a checkpoint schedule fits the interval.
+
+        See Also
+        --------
+        mlsysim.physics.memory.calc_checkpoint_size : Persisted state accounting.
+
+        Notes
+        -----
+        Equation: M = P b; bandwidth = min(n_writers * device_bandwidth,
+        filesystem_limit); write_time = M / bandwidth. The penalty is
+        write_time / checkpoint_interval for a positive interval.
+
+        Assumptions: writers partition one payload without duplicated writes;
+        checkpointing synchronously blocks useful training. Byte conventions
+        come from ``engine.calibration`` and are separate from storage rates.
+
+        Excludes: asynchronous overlap, filesystem metadata, serialization CPU
+        work, network contention, and checkpoint recovery. The penalty can
+        exceed one when a write takes longer than its configured interval.
+
+        References
+        ----------
+        Derivation: payload size is parameter count times persisted bytes per
+        parameter; elapsed transfer time is payload divided by available rate.
+        The writer minimum is a shared-bandwidth capacity constraint.
+
+        Examples
+        --------
+        >>> from mlsysim import Models, Hardware
+        >>> result = CheckpointModel().solve(Models.Language.Llama3_8B, Hardware.Cloud.H100)
+        >>> result.checkpoint_size.to("GB").magnitude > 0
+        True
+        >>> result.write_time_seconds.to("second").magnitude > 0
+        True
         """
         from ...physics import calc_checkpoint_size
 
@@ -138,16 +189,8 @@ class TrainingMemoryModel(ForwardModel):
         ValueError
             If the requested optimizer is not supported.
         """
-        mapping = {
-            "adam": cal.TRAINING_OPTIMIZER_BYTES_ADAM,   # FP32 master + first and second moments
-            "adamw": cal.TRAINING_OPTIMIZER_BYTES_ADAM,
-            "sgd": cal.TRAINING_OPTIMIZER_BYTES_SGD,     # FP32 master weights
-            "none": 0.0,
-        }
-        if optimizer_key not in mapping:
-            supported = ", ".join(sorted(mapping))
-            raise ValueError(f"Unknown optimizer '{optimizer_key}'. Supported: {supported}")
-        return mapping[optimizer_key]
+        from ...physics.memory import optimizer_state_bytes
+        return optimizer_state_bytes(optimizer_key).m_as("byte")
 
     def solve(
         self,
@@ -168,20 +211,92 @@ class TrainingMemoryModel(ForwardModel):
         communication_buffer_fraction: float = 0.05,
         sequence_parallel: bool = True,
     ) -> TrainingMemoryResult:
-        """Estimate per-accelerator training memory.
+        """Estimate per-accelerator training memory from local state and activations.
 
-        ``batch_size`` is the global batch. The activation term uses the local
-        microbatch implied by data parallelism and gradient accumulation. Model
-        states are sharded by tensor, pipeline, and expert parallelism first;
-        ZeRO then shards optimizer, gradient, and parameter states across the
-        data-parallel group according to its stage.
+        Parameters
+        ----------
+        model : TransformerWorkload
+            Parameter count, layer count, hidden width, and attention-head geometry.
+        hardware : HardwareNode
+            Device memory capacity used for the residency comparison.
+        batch_size : int
+            Global sequence count per update; must be at least one.
+        seq_len : int, optional
+            Tokens per sequence; must be at least one.
+        precision : str, optional
+            Parameter and gradient storage precision, resolved to bytes/element.
+        optimizer : str, optional
+            Optimizer storage convention supported by ``optimizer_state_bytes``.
+        activation_checkpointing : {'none', 'selective', 'full'}, optional
+            Activation retention strategy passed to the activation-memory model.
+        tp_size : int, optional
+            Tensor-parallel degree, at least one.
+        pp_size : int, optional
+            Pipeline-parallel degree, at least one.
+        dp_size : int, optional
+            Data-parallel degree, at least one.
+        ep_size : int, optional
+            Expert-parallel degree, at least one.
+        zero_stage : {0, 1, 2, 3}, optional
+            Cumulative DP sharding: optimizer state, then gradients, then weights.
+        gradient_accumulation_steps : int, optional
+            Positive number of sequential microbatches per update.
+        trainable_fraction : float, optional
+            Fraction in [0, 1] receiving gradients and optimizer state.
+        communication_buffer_fraction : float, optional
+            Gradient staging buffer as a fraction in [0, 1] of local gradients.
+        sequence_parallel : bool, optional
+            If true, split stored activations across the TP group. If false,
+            retain the unsharded activation estimate as a conservative bound.
 
-        With ``tp_size > 1`` and ``sequence_parallel`` (the Megatron-LM recipe
-        Korthikanti et al. 2023 evaluate), every stored activation is split
-        across the tensor-parallel group, so the activation term divides by
-        ``tp_size`` (their Table 2). Without sequence parallelism the
-        LayerNorm and dropout activations stay replicated; that case keeps the
-        unsharded activation term as a conservative upper bound.
+        Returns
+        -------
+        TrainingMemoryResult
+            Weights, gradients, optimizer state, activations, buffers, and total
+            memory in GB. ``feasible`` compares that modeled total with device
+            capacity; it excludes unmodeled runtime reserves.
+
+        See Also
+        --------
+        mlsysim.physics.memory.calc_activation_memory : Activation retention model.
+        mlsysim.physics.memory.optimizer_state_bytes : Optimizer storage convention.
+
+        Notes
+        -----
+        Equation: total = weights + gradients + optimizer + activations +
+        communication_buffers. Parameter state first divides by TP * PP * EP;
+        ZeRO then divides selected terms by DP. Local microbatch is
+        max(1, ceil(global_batch / (DP * accumulation_steps))). Layers per stage
+        are max(1, ceil(layers / PP)). Activation bytes follow
+        ``calc_activation_memory`` and divide by TP when sequence parallelism
+        is enabled. Buffers contain a gradient fraction plus send/receive
+        pipeline boundary activations.
+
+        Assumptions: balanced parameter sharding and uniform layer geometry.
+        The precision byte count rescales the activation model's FP16 baseline.
+        ZeRO stages are cumulative. Trainable fraction affects gradients and
+        optimizer state but not resident weights.
+
+        Excludes: allocator reserves, implementation workspaces, fragmentation,
+        uneven expert placement, and detailed interleaved pipeline lifetimes.
+        A capacity pass does not guarantee a runnable deployment.
+
+        References
+        ----------
+        Rajbhandari et al. (2020), "ZeRO: Memory Optimizations Toward Training
+        Trillion Parameter Models." https://arxiv.org/abs/1910.02054 (bibliography key: rajbhandari2020).
+        Korthikanti et al. (2023), "Reducing Activation Recomputation in Large
+        Transformer Models." https://arxiv.org/abs/2205.05198 (bibliography key: korthikanti2023).
+
+        Examples
+        --------
+        >>> from mlsysim import Models, Hardware
+        >>> result = TrainingMemoryModel().solve(Models.Language.Llama3_8B,
+        ...     Hardware.Cloud.H100, batch_size=1, seq_len=128)
+        >>> result.total_memory.to("GB").magnitude > 0
+        True
+        >>> result.feasible == (result.total_memory <= result.available_memory)
+        True
         """
         from ...core._validation import validate_at_least, validate_range
         from ...physics import calc_activation_memory
@@ -315,20 +430,51 @@ class ScalingModel(ForwardModel):
     produces = ScalingResult
 
     def solve(self, compute_budget: Quantity, target_model_size: Optional[Quantity] = None) -> ScalingResult:
-        """
-        Solves for compute-optimal model and dataset parameters.
+        """Allocate a training compute budget between parameters and tokens.
 
         Parameters
         ----------
         compute_budget : Quantity
-            Total training budget (e.g., in TFLOPs or H100-GPU-days).
+            Finite positive training work in FLOPs, or a finite positive duration interpreted
+            as reference-H100 compute time at the declared sustained efficiency.
+            Any compatible FLOP prefix is accepted and normalized before calculation.
         target_model_size : Quantity, optional
-            If provided, calculates the required tokens for this specific model size.
+            Finite positive fixed parameter count. If omitted, use the registered
+            compute-optimal tokens-per-parameter ratio.
 
         Returns
         -------
         ScalingResult
-            Optimal parameters, token count, and training duration estimates.
+            Modeled parameter and token counts, compute budget, and dimensionless
+            tokens per parameter. The result does not include a quality estimate
+            or a memory-feasibility decision.
+
+        Notes
+        -----
+        Equation: C = k P D, where k is the registered compute coefficient.
+        With D = r P, P = sqrt(C / (k r)); when P is fixed, D = C / (k P).
+        A time input becomes C = duration * reference_peak * reference_MFU.
+
+        Assumptions: parameter-dominated dense training work and a constant
+        registered optimal token ratio. The time conversion uses a declared
+        reference accelerator rather than an arbitrary fleet supplied by a user.
+
+        Excludes: inference cost, data-quality variation, architecture-dependent
+        loss prediction, attention work, and hardware memory capacity.
+
+        References
+        ----------
+        Hoffmann et al. (2022), "Training Compute-Optimal Large Language Models."
+        https://arxiv.org/abs/2203.15556 (bibliography key: hoffmann2022chinchilla).
+        The fixed-ratio allocation is the package's simplified accounting form.
+
+        Examples
+        --------
+        >>> result = ScalingModel().solve(Q_(1200000, "flop"))
+        >>> result.optimal_parameters.to("count").magnitude > 0
+        True
+        >>> result.optimal_tokens.to("count").magnitude > 0
+        True
         """
         # C = 6 * P * D
         # Chinchilla: D = 20 * P
@@ -342,11 +488,16 @@ class ScalingModel(ForwardModel):
             # Source: NVIDIA H100 datasheet (989 TFLOPs FP16 dense)
             c_flops = (compute_budget * (cal.REFERENCE_HARDWARE_TFLOPS * ureg.TFLOPs / ureg.second) * cal.REFERENCE_MFU_SUSTAINED).to(ureg.flop)
 
-        if target_model_size:
+        # Prefixes describe the same work: normalize before extracting magnitude.
+        c_flops = c_flops.to(ureg.flop)
+        validate_positive(c_flops, "compute_budget")
+
+        if target_model_size is not None:
             # Pinned model size: spend the whole budget on tokens via C = 6PD,
             # i.e. D = C / (6P). The result may be over- or under-trained
             # relative to the Chinchilla-optimal D = 20P.
             p_opt = target_model_size.to(ureg.count).magnitude
+            validate_positive(p_opt, "target_model_size")
             d_opt = (c_flops.magnitude / (Literature.Chinchilla.ComputeConstant * p_opt))
         else:
             # Compute-optimal point: substituting D = 20P into C = 6PD gives
@@ -389,6 +540,70 @@ class TrainingRunModel(ForwardModel):
 
     def solve(self, model: Workload, fleet, local_efficiency: float, scaling_efficiency: float,
               overheads: dict, precision: str = "fp8", tokens: Quantity = None):
+        """Compose compute, scaling, and operational factors into training time.
+
+        Parameters
+        ----------
+        model : Workload
+            Parameter count and, when tokens is omitted, training-token count.
+        fleet : Fleet
+            Accelerator count and per-device peak compute at the chosen precision.
+        local_efficiency : float
+            Positive dimensionless fraction of local peak throughput, usually
+            at most one. It acts before cluster scaling losses.
+        scaling_efficiency : float
+            Positive fraction of compute throughput retained after communication
+            and pipeline effects, usually at most one.
+        overheads : dict
+            Ordered mapping from stage name to nonnegative fractional time
+            overhead. Each fraction applies to the preceding subtotal.
+        precision : str, optional
+            Compute precision key; unsupported keys use the hardware's base peak.
+        tokens : Quantity, optional
+            Positive total training-token count overriding model.training_tokens.
+
+        Returns
+        -------
+        TrainingRunResult
+            Work in FLOPs and peak, compute, scaled, intermediate, and total times
+            in hours. Delivered fraction is peak time divided by total time;
+            this calculation does not check model residency.
+
+        See Also
+        --------
+        mlsysim.physics.transformer.calc_transformer_training_flops : Training work.
+        mlsysim.physics.performance.dTime : Work divided by effective compute rate.
+
+        Notes
+        -----
+        Equation: F = 6 P D; T_peak = F / (N peak); T_compute = T_peak / eta;
+        T_scaled = T_compute / scaling_efficiency. Each overhead f multiplies
+        its preceding subtotal by (1 + f).
+
+        Assumptions: homogeneous accelerator throughput and supplied efficiencies
+        that already summarize kernel and cluster behavior. The overhead mapping
+        is an ordered accounting scenario, not a measured trace.
+
+        Excludes: overlap among overhead stages, explicit communication schedules,
+        activation residency, data starvation, and changing efficiency during a run.
+
+        References
+        ----------
+        Derivation: work divided by aggregate rate gives elapsed compute time;
+        sequential fractional overheads multiply the running subtotal.
+        Parameter-dominated training work follows the cited contract in
+        ``mlsysim.physics.transformer.calc_transformer_training_flops``.
+
+        Examples
+        --------
+        >>> from mlsysim import Models, Systems
+        >>> result = TrainingRunModel().solve(Models.Language.Llama3_8B,
+        ...     Systems.Clusters.Research_256, local_efficiency=0.5,
+        ...     scaling_efficiency=0.8, overheads={"checkpoint": 0.1},
+        ...     tokens=Q_(1000, "count"))
+        >>> result.total_time > result.scaled_time > result.peak_time
+        True
+        """
         from ..results import TrainingRunResult
         from ...physics.performance import dTime
         from ...physics.transformer import calc_transformer_training_flops
@@ -436,6 +651,61 @@ class TrainingStateModel(ForwardModel):
     produces = None
 
     def solve(self, model: Workload, tp_size: int, dp_size: int, activations: Quantity):
+        """Account for mixed-precision Adam state under selected sharding choices.
+
+        Parameters
+        ----------
+        model : Workload
+            Model parameter count; this accounting uses FP16 weights and gradients.
+        tp_size : int
+            Positive tensor-parallel degree splitting each state term.
+        dp_size : int
+            Positive data-parallel degree additionally splitting Adam moments in
+            the reported moments-sharded comparison.
+        activations : Quantity
+            Nonnegative total activation storage in bytes, supplied by the caller
+            rather than derived from a batch shape.
+
+        Returns
+        -------
+        TrainingStateResult
+            Full and per-device state components in GB, including TP-only,
+            offloaded, and moments-sharded comparisons. These totals do not imply
+            device feasibility because no capacity is supplied.
+
+        See Also
+        --------
+        mlsysim.engine.solvers.training.TrainingMemoryModel.solve : Full state budget.
+
+        Notes
+        -----
+        Equation: W = G = 2 P bytes; master = 4 P bytes; moments = 8 P bytes.
+        Persistent state is W + G + master + moments. TP-only total is
+        (persistent + activations) / TP. The moments-sharded term is
+        moments / (TP * DP); weights remain W / TP in that comparison.
+
+        Assumptions: uniform dense parameter storage and even sharding. The
+        moments-only comparison does not shard the master copy and must not be
+        read as a complete implementation of every ZeRO state transition.
+
+        Excludes: communication buffers, activation recomputation, allocator
+        reserve, offload transfer latency, and a hardware capacity check.
+
+        References
+        ----------
+        Rajbhandari et al. (2020), "ZeRO: Memory Optimizations Toward Training
+        Trillion Parameter Models." https://arxiv.org/abs/1910.02054 (bibliography key: rajbhandari2020).
+        The moments-only output is a declared partial-sharding comparison;
+        ``TrainingMemoryModel`` provides cumulative ZeRO-stage accounting.
+
+        Examples
+        --------
+        >>> from mlsysim import Models
+        >>> result = TrainingStateModel().solve(Models.Language.Llama3_8B,
+        ...     tp_size=2, dp_size=4, activations=Q_(1, "GB"))
+        >>> result.zero_moments_per_device < result.tp_moments_per_device
+        True
+        """
         from ..results import TrainingStateResult
         from ...core.units import BYTES_FP16, BYTES_FP32
 

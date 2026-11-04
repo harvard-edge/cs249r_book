@@ -1,0 +1,90 @@
+---
+title: "Follow a Calculation Through the Code"
+subtitle: "Find the inputs, equations, and result behind a serving scenario."
+---
+
+A named scenario connects an input configuration to a calculation. To understand
+its result, follow that connection through the implementation. The same route
+helps a contributor find the file that owns a proposed change.
+
+## Start from the public call
+
+The named serving case below selects a workload, a device, a context length, and
+a batch size. Its `result` property invokes the serving model.
+
+```{python}
+from mlsysim import Scenarios
+
+case = Scenarios.Llama3_70B_ServingH100
+result = case.result
+print("Scenario type:", type(case).__name__)
+print("Result type:", type(result).__name__)
+print("Fits modeled memory:", result.feasible)
+```
+
+Feasibility is part of the result. A latency estimate alone does not establish
+that the selected workload fits the device. For an introduction to the public
+interfaces and their different scopes, see [Choosing a Python API](choosing-an-api.qmd).
+
+## Find the owner of each part
+
+The serving domain uses the same name across scenario definitions, named
+configurations, and result schemas. These files have different responsibilities.
+
+| Part | File under `mlsysim/engine/` | What to read |
+|:--|:--|:--|
+| Named inputs | `scenario_catalog/serving/foundations.py` | `Llama3_70B_ServingH100`: the selected workload, hardware, and scenario assumptions |
+| Typed scenario | `scenario_definitions/serving.py` | `ServingScenario`: its input fields and `result` property |
+| Solver | `solvers/serving.py` | `ServingModel.solve`: the parameters, accounting, validity regime, and exclusions |
+| Result | `result_types/serving.py` | `ServingResult`: returned fields, units, and feasibility semantics |
+
+`ServingScenario.result` passes the configured inputs to `ServingModel.solve`.
+The solver combines reusable equations and shared serving accounting. Its imports
+point to the specific owners: transformer work in `physics/transformer.py`, KV
+storage in `physics/memory.py`, and the shared decode calculation in
+`engine/solvers/_decode.py`. Read the solver's docstring before interpreting a
+helper in isolation; it states which costs the composed estimate includes.
+
+The [serving scenario reference](api/scenario-domain-serving.qmd) links related
+contracts. Each class page identifies the file that defines it. The
+[domain directory](api/scenario-domains.qmd) follows the same organization for
+training, communication, data, and the other modeling subjects.
+
+## Keep public imports stable
+
+Textbooks and applications continue to import `Scenarios`, `mlsysim.solvers`,
+and the established scenario and result classes. The modules
+`engine/scenario_types.py`, `engine/scenarios.py`, and `engine/results.py`
+forward those imports to the domain implementations. They provide compatibility;
+a calculation has one implementation in its defining module.
+
+Historical class metadata is preserved for serialization compatibility. It may
+therefore identify the older public module rather than the file that now owns
+the class. Use the source locations in the generated reference when navigating
+the implementation.
+
+A domain describes a modeling subject, not a textbook volume. A serving scenario
+can support several volumes, a lab, and a paper without moving or acquiring a
+second implementation.
+
+## Make a change reviewable
+
+First identify whether the proposal changes a specification, a scenario input,
+an equation, or a result's presentation. Edit its owner. A hardware specification
+belongs with its sourced registry data; a different context length belongs in a
+scenario configuration; a different accounting assumption belongs with the
+calculation and its documented contract.
+
+For serving behavior, start with `tests/test_physical_contracts.py`,
+`tests/test_shared_accounting.py`, and `tests/test_solver_suite.py`.
+`tests/test_calculation_scenarios.py` exercises named cases. The test directory's
+`README.md` maps these checks to the broader suite. Documentation examples check
+that the stated calls run; physical contracts check the calculation's units,
+accounting, and limiting behavior.
+
+A source move should preserve those behaviors. A numerical correction needs a
+separate explanation of the changed assumption and its downstream consequences.
+Run the [modeling documentation checks](modeling-conventions.qmd), then compare
+the affected textbook and paper consumers using the release runbook's downstream
+snapshot workflow. Surface changed prose claims for editorial review rather than
+silently updating their numbers.

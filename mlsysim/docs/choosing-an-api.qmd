@@ -1,0 +1,155 @@
+---
+title: "Choosing a Python API"
+subtitle: "Start with the question, then select the model that includes its costs."
+---
+
+MLSys·im separates specifications, equations, and the solvers that combine them.
+The same engine serves every textbook volume. Choosing an API depends on the
+physical question, not on which volume introduces it.
+
+## Choose the calculation
+
+| Question | Start here | What the result represents |
+|:--|:--|:--|
+| How do compute and memory bandwidth constrain one device? | `Engine.solve()` | A generic Roofline profile with declared traffic and overhead approximations |
+| How do prompt length, KV storage, and batch size affect token generation? | `ServingModel().solve()` | Separate prefill and decode estimates with KV-aware memory accounting |
+| Does training fit, or how does a fleet scale? | `TrainingMemoryModel` or `DistributedModel` | Training-state capacity or distributed training performance |
+| How do named workload and hardware choices perform against a latency target? | `Scenario(...).evaluate()` | A composed feasibility, performance, and annual economics scorecard |
+| What does one equation imply? | A function in `mlsysim.physics` | A reusable calculation with an explicit unit and modeling contract |
+
+The [solver guide](solver-guide.qmd) maps additional questions to solvers. The
+[resolver guide](models-and-solvers.qmd) explains forward models, inverse solvers,
+and optimizers. These categories describe different calculations; using a more
+specialized class only helps when its assumptions match the question.
+
+## A generic single-device profile
+
+Import the main entry point and registries from `mlsysim`. This example evaluates
+one batch of a vision model. Its efficiency is an assumed compute-capacity
+fraction, not a measured end-to-end utilization.
+
+```{python}
+#| label: api-engine-example
+from mlsysim import Engine, Hardware, Models
+
+profile = Engine.solve(
+    model=Models.Vision.ResNet50,
+    hardware=Hardware.Cloud.H100,
+    batch_size=8,
+    precision="fp16",
+    efficiency=0.5,  # Assumed compute efficiency for this example.
+)
+print(f"Fits modeled memory: {profile.feasible}")
+print(f"Batch latency: {profile.latency.to('ms'):~.3f}")
+print(f"Limiting resource: {profile.bottleneck}")
+```
+
+`Engine.solve()` returns a `PerformanceProfile`. Its `latency` is per batch;
+`throughput` divides batch size by that latency. A feasibility flag checks the
+modeled footprint, which does not reserve all production runtime workspaces.
+
+For a language model, the generic engine uses an activation-traffic approximation.
+It does not become KV-aware autoregressive serving simply because the workload
+is a transformer. A sweep through this API cannot establish a serving engine's
+inter-token latency or continuous-batching capacity.
+
+## KV-aware language-model serving
+
+Import specialized classes from `mlsysim.solvers`. `ServingModel` keeps prompt
+prefill and decode separate. Decode compares compute time with weight and KV
+traffic time, then adds the configured layer overhead. Either compute or memory
+can limit the estimate.
+
+```{python}
+#| label: api-serving-example
+from mlsysim import Hardware, Models
+from mlsysim.solvers import ServingModel
+
+serving = ServingModel().solve(
+    model=Models.Language.Llama3_8B,
+    hardware=Hardware.Cloud.H100,
+    seq_len=2048,
+    batch_size=1,
+    precision="fp16",
+    efficiency=0.5,  # Derates compute; it does not derate memory bandwidth.
+)
+print(f"Fits modeled memory: {serving.feasible}")
+print(f"Prefill estimate: {serving.ttft.to('ms'):~.3f}")
+print(f"Decode step estimate: {serving.itl.to('ms'):~.3f}")
+print(f"KV storage: {serving.kv_cache_size.to('GB'):~.3f}")
+```
+
+Here `seq_len` sets the modeled context length. `itl` is a decode step under
+those assumptions; it is not a request's total latency divided by its output
+length. The default prefill model is compute based. These estimates do not
+include every kernel, allocator, scheduling, or multi-device communication cost.
+The [serving reference](api/solvers.ServingModel.qmd) documents the supported
+options and exclusions.
+
+## A named scenario and scorecard
+
+A `Scenario` binds a workload, target system, and declared constraints so a
+calculation can be reused. This example adds an illustrative latency target to a
+vision workload; the target is a local assumption, not a hardware specification.
+
+```{python}
+#| label: api-scenario-example
+from mlsysim import Hardware, Models, Q_, Scenario
+
+scenario = Scenario(
+    name="Vision latency exercise",
+    description="Evaluate a vision batch against an illustrative latency target.",
+    workload=Models.Vision.ResNet50,
+    system=Hardware.Cloud.H100,
+    sla_latency=Q_("10 ms"),
+)
+scorecard = scenario.evaluate(batch_size=8, precision="fp16")
+print(f"Feasibility: {scorecard.feasibility.status}")
+print(f"Performance: {scorecard.performance.status}")
+print(scorecard.performance.summary)
+```
+
+The current generic `Scenario.evaluate()` uses `SingleNodeModel` for one device
+and `DistributedModel` for a fleet. It does **not** select `ServingModel` when the
+workload is a language model. Its feasibility level checks weight residency and
+any configured input data rate; its performance level checks the latency target.
+Its macro level uses annual economics defaults. It is not a check of every
+constraint exposed elsewhere in the package. For explicit serving costs,
+training-memory breakdowns, or custom economics assumptions, call those solvers
+directly and compose their results.
+
+`Scenario` is the class for a local case. `Scenarios` is the registry of named,
+reusable cases and analytical inputs. Inspect an entry's type and documentation:
+not every registry entry has the generic class's `evaluate()` method.
+
+## Follow a result into the code
+
+| Layer | Source location | What to inspect |
+|:--|:--|:--|
+| Specifications | `hardware/`, `models/`, `systems/`, `infrastructure/` | Typed fields, units, and provenance for selected inputs |
+| Equations | `physics/` | Reusable formulas, assumptions, exclusions, and references |
+| Composition | `engine/solvers/` | How a domain solver combines equations and accounts for costs |
+| Scenario definitions | `engine/scenario_definitions/` | Typed inputs and their calculations, grouped by domain |
+| Named configurations | `engine/scenario_catalog/` | Reusable choices of inputs exposed through `Scenarios` |
+| Outputs | `engine/result_types/` | Result schemas, units, and constraint traces in the same domains |
+| Presentation | `fmt/`, `viz/`, `cli/`, `labs/` | Formatting and interaction around those results |
+
+Some domain-specific calculations live directly in a solver or a private shared
+helper. Follow its source link rather than assuming every equation is in
+`physics/`. The [modeling conventions](modeling-conventions.qmd) describe the
+calculation documentation contract; the [API reference](api/index.qmd) is built
+from the package docstrings.
+
+The [code walkthrough](code-walkthrough.qmd) follows one serving case through
+these layers. Browse [scenarios by domain](api/scenario-domains.qmd) for related
+calculations, or use [the alphabetical index](api/scenario-index.qmd) for a known
+class name.
+
+Use the public imports shown above in textbook cells and applications. Internal
+paths explain where implementation lives, but callers do not need to depend on
+private helpers or the layout beneath `engine/solvers/`. This separation allows
+internal cleanup while preserving the public entry points.
+
+`engine/scenario_types.py`, `engine/scenarios.py`, and `engine/results.py`
+preserve the established imports. Their definitions live in the domain packages
+listed above; the compatibility modules do not own a second implementation.

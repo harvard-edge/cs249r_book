@@ -1729,7 +1729,15 @@ class TestContinuousBatchingModel:
         assert result.static_max_active_requests == 65
         assert result.max_active_requests == 259
         assert result.paged_internal_fragmentation == pytest.approx(0.0038, abs=5e-4)
-        assert result.speedup_vs_static == pytest.approx(1.56, abs=0.01)
+        # Both allocation policies must use the same serving-step accounting.
+        # Paging changes admitted concurrency, not the cost model or layer tax.
+        paged_step = ServingModel().solve(Models.Language.Llama3_8B, Hardware.Cloud.H100,
+                                         seq_len=2048, batch_size=result.max_active_requests)
+        static_step = ServingModel().solve(Models.Language.Llama3_8B, Hardware.Cloud.H100,
+                                          seq_len=2048, batch_size=result.static_max_active_requests)
+        expected_gain = ((result.max_active_requests / paged_step.itl)
+                         / (result.static_max_active_requests / static_step.itl)).to("").magnitude
+        assert result.speedup_vs_static == pytest.approx(expected_gain)
 
     def test_batch_cap_binding_both_allocators_removes_advantage(self):
         """If the scheduler cap binds before memory, allocation policy cannot help."""

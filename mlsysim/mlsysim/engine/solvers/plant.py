@@ -81,6 +81,40 @@ class SpeedStepModel(ForwardModel):
     produces = SpeedStepResult
 
     def solve(self, base_speed: Quantity, raised_speed: Quantity, deceleration: Quantity) -> SpeedStepResult:
+        """Braking travel added by raising the speed setpoint, and the delay that costs the same distance.
+
+        Parameters
+        ----------
+        base_speed : Quantity
+            Positive initial speed (m/s).
+        raised_speed : Quantity
+            Comparison speed (m/s).
+        deceleration : Quantity
+            Positive constant braking magnitude (m/s^2).
+
+        Returns
+        -------
+        SpeedStepResult
+            Added braking distance in mm and equivalent delay in ms; fractional growth is dimensionless.
+
+        Notes
+        -----
+        Equation: For speeds v0 and v1 and positive deceleration a, d0 = v0^2/(2a), d1 = v1^2/(2a), added = d1-d0, growth = d1/d0-1, and equivalent delay = added/v0.
+
+        Assumptions: Fixed deceleration at both speeds.
+
+        Excludes: Brake ramps, tire slip, and controller delay.
+
+        References
+        ----------
+        Derivation: Integrating constant deceleration gives stopping time v/a and mean speed v/2. Their product is the stopping distance; divide the difference of two distances by the original speed to express it as delay.
+
+        Examples
+        --------
+        >>> from mlsysim.core.units import Q_ as Q
+        >>> SpeedStepModel().solve(Q("1 m/s"), Q("2 m/s"), Q("1 m/s^2")).braking_added.magnitude > 0
+        True
+        """
         base = (base_speed ** 2 / (2 * deceleration)).to(_MM)
         raised = (raised_speed ** 2 / (2 * deceleration)).to(_MM)
         added = (raised - base).to(_MM)
@@ -103,6 +137,46 @@ class FreshnessProfileModel(ForwardModel):
     def solve(self, target_speed: Quantity, tolerance: Quantity, initial_error: Quantity,
               stages: Sequence[Tuple[str, Quantity, Quantity, Quantity]], focus_stage: str,
               tail_age: Quantity) -> FreshnessProfileResult:
+        """A moving target's freshness deadline against a capture-to-onset age profile.
+
+        Parameters
+        ----------
+        target_speed : Quantity
+            Positive target speed (m/s).
+        tolerance : Quantity
+            Allowed position error (m).
+        initial_error : Quantity
+            Position error before motion (m).
+        stages : Sequence[Tuple[str, Quantity, Quantity, Quantity]]
+            Sequence of (name, median, p99, maximum), with times in seconds.
+        focus_stage : str
+            Name present in stages whose median is inspected.
+        tail_age : Quantity
+            Separately supplied end-to-end tail age (s).
+
+        Returns
+        -------
+        FreshnessProfileResult
+            Allowed error and travel in mm, age/deadline in ms, and focus rate in Hz.
+
+        Notes
+        -----
+        Equation: Remaining position allowance r = tolerance-initial_error gives deadline r/target_speed. Each stage column is summed separately. Travel at age t is ``target_speed*t``; slack is r-travel.
+
+        Assumptions: Constant target speed; stage quantiles are added as a budgeting convention, not as a probabilistic convolution.
+
+        Excludes: Correlation modeling and a guarantee that summed p99 values equal end-to-end p99.
+
+        References
+        ----------
+        Derivation: A constant-speed target consumes position allowance linearly with age. Stage-quantile sums are a declared budget construction, while tail_age is a separate end-to-end input; summing marginal quantiles does not derive a joint quantile.
+
+        Examples
+        --------
+        >>> from mlsysim.core.units import Q_ as Q
+        >>> FreshnessProfileModel().solve(Q("1 m/s"), Q("1 m"), Q("0.1 m"), [("sensor", Q("0.01 s"), Q("0.02 s"), Q("0.03 s"))], "sensor", Q("0.04 s")).deadline.magnitude > 0
+        True
+        """
         allowed = (tolerance - initial_error).to(_MM)
         p50 = sum((s[1] for s in stages), 0 * _MS).to(_MS)
         p99 = sum((s[2] for s in stages), 0 * _MS).to(_MS)
@@ -135,6 +209,60 @@ class BrakingCeilingsModel(ForwardModel):
               current_limit: Quantity, drive_load_share: float, mu_dry: float, mu_inspected: float,
               bus_low: Quantity, cg_height: Optional[Quantity] = None,
               tip_arm: Optional[Quantity] = None) -> BrakingCeilingsResult:
+        """The three ceilings on a credible deceleration (traction, tip-over, drive torque) and back-EMF headroom.
+
+        Parameters
+        ----------
+        mass : Quantity
+            Positive translated mass (kg).
+        deceleration : Quantity
+            Requested positive deceleration (m/s^2).
+        speed : Quantity
+            Forward speed (m/s).
+        hub : object
+            Motor specification with wheel radius, torque constant, rotating mass bound, rated torque, back-EMF constant, and line resistance.
+        n_wheels : int
+            Positive driven wheel count.
+        current_limit : Quantity
+            Per-wheel current limit (A).
+        drive_load_share : float
+            Fraction of normal load carried by driven wheels, in (0, 1].
+        mu_dry : float
+            Positive dry-floor friction coefficient.
+        mu_inspected : float
+            Positive inspected-floor friction coefficient.
+        bus_low : Quantity
+            Available bus voltage (V).
+        cg_height : Optional[Quantity]
+            Optional positive center-of-gravity height (m).
+        tip_arm : Optional[Quantity]
+            Optional positive support-polygon tipping arm (m).
+
+        Returns
+        -------
+        BrakingCeilingsResult
+            Forces in N, deceleration ceilings in m/s^2, wheel torque in N*m, voltage headroom in V.
+
+        Notes
+        -----
+        Equation: Per-wheel torque is ``Kt*current_limit``. Effective mass is ``mass+n_wheels*rotating_mass_bound``; torque-limited deceleration is ``n_wheels*torque/(radius*effective_mass)``. Traction limits are ``mu*g*drive_load_share``. Tip-over and voltage checks compose calc_braking_limits and calc_drive_voltage_headroom.
+
+        Assumptions: Quasistatic traction and rigid-body torque limits; identical wheel drives.
+
+        Excludes: Dynamic load transfer, tire dynamics, and safety certification.
+
+        References
+        ----------
+        Derivation: Wheel torque divided by radius gives longitudinal force; dividing by effective mass gives deceleration. Friction bounds that force by normal load times friction coefficient. See mlsysim.physics.drivetrain.calc_braking_limits for the tipping constraint and mlsysim.physics.drivetrain.calc_drive_voltage_headroom for the electrical convention.
+
+        Examples
+        --------
+        >>> from mlsysim.core.units import Q_ as Q
+        >>> from types import SimpleNamespace
+        >>> hub = SimpleNamespace(wheel_radius=Q("0.1 m"), torque_constant=Q("1 N*m/A"), rotating_mass_bound=Q("1 kg"), rated_torque=Q("1 N*m"), peak_torque=Q("2 N*m"), back_emf_constant=Q("1 V*s/rad"), line_resistance=Q("1 ohm"), line_inductance=Q("0.001 H"), peak_current=Q("20 A"), pole_pairs=10)
+        >>> BrakingCeilingsModel().solve(Q("100 kg"), Q("1 m/s^2"), Q("1 m/s"), hub, 2, Q("10 A"), 1.0, 0.8, 0.6, Q("48 V")).force.magnitude > 0
+        True
+        """
         r = hub.wheel_radius
         tau_wheel = (hub.torque_constant * current_limit).to(ureg.newton * ureg.meter)
         m_rot = (n_wheels * hub.rotating_mass_bound).to(ureg.kg)
@@ -173,6 +301,44 @@ class HubDriveElectricalModel(ForwardModel):
     produces = HubDriveElectricalResult
 
     def solve(self, hub, current_limit: Quantity, bus_voltage: Quantity, brake_onset: Quantity) -> HubDriveElectricalResult:
+        """Electrical time constant, voltage-limited current ramp, and phase-short braking peak of a hub drive.
+
+        Parameters
+        ----------
+        hub : object
+            Motor specification with line inductance/resistance, peak current, and pole pairs.
+        current_limit : Quantity
+            Positive target current (A).
+        bus_voltage : Quantity
+            Positive applied voltage (V).
+        brake_onset : Quantity
+            Positive allotted electrical onset time (s).
+
+        Returns
+        -------
+        HubDriveElectricalResult
+            Electrical times in ms, currents in A, electrical speed in rad/s, wheel speed in rpm, and pole frequency in Hz.
+
+        Notes
+        -----
+        Equation: Electrical time constant is L/R; initial ramp time is ``L*current_limit/bus_voltage``. Full-step current is bus_voltage/R. The short-braking peak electrical speed is R/L, wheel speed is (R/L)/pole_pairs, and pole frequency is ``R/(2*pi*L)``.
+
+        Assumptions: Linear winding inductance/resistance; zero back-EMF during current-ramp calculation.
+
+        Excludes: PWM switching, magnetic saturation, and inverter dynamics.
+
+        References
+        ----------
+        Derivation: The series RL circuit equation at zero back-EMF gives the initial current slope V/L and steady current V/R. The short-braking speed estimate equates winding reactance and resistance; it assumes the linear sinusoidal electrical model.
+
+        Examples
+        --------
+        >>> from mlsysim.core.units import Q_ as Q
+        >>> from types import SimpleNamespace
+        >>> hub = SimpleNamespace(wheel_radius=Q("0.1 m"), torque_constant=Q("1 N*m/A"), rotating_mass_bound=Q("1 kg"), rated_torque=Q("1 N*m"), peak_torque=Q("2 N*m"), back_emf_constant=Q("1 V*s/rad"), line_resistance=Q("1 ohm"), line_inductance=Q("0.001 H"), peak_current=Q("20 A"), pole_pairs=10)
+        >>> HubDriveElectricalModel().solve(hub, Q("10 A"), Q("48 V"), Q("0.01 s")).time_constant.magnitude > 0
+        True
+        """
         l_, r_ = hub.line_inductance, hub.line_resistance
         ramp = (l_ * current_limit / bus_voltage).to(_MS)
         full = (bus_voltage / r_).to(ureg.ampere)
@@ -198,6 +364,44 @@ class GearedRotorModel(ForwardModel):
 
     def solve(self, gear_ratio: float, rotor_mass: Quantity, rotor_inertia: Quantity,
               flywheel_radius: Quantity, load_inertia: Quantity) -> GearedRotorResult:
+        """Reflected rotor inertia N^2 J_rotor, sized as a solid flywheel, and the inertia match.
+
+        Parameters
+        ----------
+        gear_ratio : float
+            Positive output reduction ratio.
+        rotor_mass : Quantity
+            Positive rotor mass (kg).
+        rotor_inertia : Quantity
+            Positive rotor inertia (kg*m^2).
+        flywheel_radius : Quantity
+            Positive equivalent solid-disk radius (m).
+        load_inertia : Quantity
+            Positive output load inertia (kg*m^2).
+
+        Returns
+        -------
+        GearedRotorResult
+            Reflected inertia in kg*m^2, equivalent mass in kg, radius in mm, and dimensionless response share.
+
+        Notes
+        -----
+        Equation: Reflected inertia is ``gear_ratio^2*rotor_inertia``. Equivalent disk mass is ``2*reflected_inertia/flywheel_radius^2``. Matched ratio Nstar = sqrt(load_inertia/rotor_inertia); normalized acceleration is ``2*x/(1+x^2)``, x = gear_ratio/Nstar.
+
+        Assumptions: Ideal rigid transmission and solid-disk equivalent flywheel.
+
+        Excludes: Gear compliance, friction, and efficiency losses.
+
+        References
+        ----------
+        Derivation: Conservation of rotational kinetic energy reflects inertia through the square of the speed ratio. The disk equivalent uses J = ``m*r^2/2``. Maximizing acceleration at fixed motor torque over reduction ratio gives the inertia match; see mlsysim.physics.motors.calc_inertia_matched_ratio.
+
+        Examples
+        --------
+        >>> from mlsysim.core.units import Q_ as Q
+        >>> GearedRotorModel().solve(10, Q("1 kg"), Q("0.01 kg*m^2"), Q("0.1 m"), Q("1 kg*m^2")).reflected_inertia.magnitude > 0
+        True
+        """
         j_ref = calc_reflected_inertia(gear_ratio, rotor_inertia).to(ureg.kg * ureg.meter ** 2)
         n_star = calc_inertia_matched_ratio(load_inertia, rotor_inertia)
         return GearedRotorResult(
@@ -220,6 +424,48 @@ class GearRatioCostModel(ForwardModel):
 
     def solve(self, motor, loss_resistance: Quantity, input_inertia: Quantity, output_torque: Quantity,
               gear_efficiency: float, ratios: Iterable[int]) -> GearRatioCostResult:
+        """Holding heat and reflected inertia of one motor holding one joint torque, per gear ratio.
+
+        Parameters
+        ----------
+        motor : object
+            Motor specification with torque constant, peak torque, and rated torque.
+        loss_resistance : Quantity
+            Positive equivalent copper-loss resistance (ohm).
+        input_inertia : Quantity
+            Positive input-side inertia (kg*m^2).
+        output_torque : Quantity
+            Required joint holding torque (N*m).
+        gear_efficiency : float
+            Transmission efficiency in (0, 1].
+        ratios : Iterable[int]
+            Iterable of positive integer reduction ratios.
+
+        Returns
+        -------
+        GearRatioCostResult
+            Per-ratio dictionaries of torque (N*m), copper loss (W), and reflected inertia (kg*m^2).
+
+        Notes
+        -----
+        Equation: For reduction N, motor torque is ``output_torque/(gear_efficiency*N)``, motor constant Km = torque_constant/sqrt(loss_resistance), copper loss = (motor_torque/Km)^2, and reflected inertia = ``N^2*input_inertia``.
+
+        Assumptions: Constant torque constant, loss resistance, and efficiency across ratios.
+
+        Excludes: Motion losses, gear mass, and temperature feedback.
+
+        References
+        ----------
+        Derivation: Combining torque = ``Kt*current`` with Joule loss ``current^2*R`` gives the torque-squared loss expression. Reflection increases inertia quadratically while required motor torque decreases inversely with reduction; their loss-inertia product therefore cancels N under fixed efficiency.
+
+        Examples
+        --------
+        >>> from mlsysim.core.units import Q_ as Q
+        >>> from types import SimpleNamespace
+        >>> hub = SimpleNamespace(wheel_radius=Q("0.1 m"), torque_constant=Q("1 N*m/A"), rotating_mass_bound=Q("1 kg"), rated_torque=Q("1 N*m"), peak_torque=Q("2 N*m"), back_emf_constant=Q("1 V*s/rad"), line_resistance=Q("1 ohm"), line_inductance=Q("0.001 H"), peak_current=Q("20 A"), pole_pairs=10)
+        >>> GearRatioCostModel().solve(hub, Q("1 ohm"), Q("0.01 kg*m^2"), Q("10 N*m"), 0.9, [10, 20]).copper_loss[10].magnitude > 0
+        True
+        """
         k_m = (motor.torque_constant / loss_resistance ** 0.5).to(ureg.newton * ureg.meter / ureg.watt ** 0.5)
         tm, loss, jr, prod, over = {}, {}, {}, {}, {}
         for n in ratios:
@@ -248,6 +494,52 @@ class ThermalBurstModel(ForwardModel):
     def solve(self, rated_current: Quantity, loss_resistance: Quantity, thermal_capacitance: Quantity,
               thermal_resistance: Quantity, ambient: Quantity, limit: Quantity, ceiling: Quantity,
               burst_factor: float, burst_on: Quantity) -> ThermalBurstResult:
+        """Burst horizons from a cold and a heat-soaked start, the average-power duty screen, and the periodic peak.
+
+        Parameters
+        ----------
+        rated_current : Quantity
+            Positive rated current (A).
+        loss_resistance : Quantity
+            Fixed copper-loss resistance (ohm).
+        thermal_capacitance : Quantity
+            Positive lumped winding heat capacity (J/K).
+        thermal_resistance : Quantity
+            Positive winding-to-ambient resistance (K/W).
+        ambient : Quantity
+            Absolute ambient temperature (K).
+        limit : Quantity
+            Absolute burst temperature limit (K).
+        ceiling : Quantity
+            Absolute average-operation temperature ceiling (K).
+        burst_factor : float
+            Positive multiplier on rated current.
+        burst_on : Quantity
+            Positive burst duration (s).
+
+        Returns
+        -------
+        ThermalBurstResult
+            Thermal horizons in s, temperatures in K, losses in W, burst current in A, and dimensionless duty.
+
+        Notes
+        -----
+        Equation: Thermal time constant is ``thermal_resistance*thermal_capacitance``. Burst loss is ``(burst_factor*rated_current)^2*loss_resistance``; asymptotic temperature is ``ambient+burst_loss*thermal_resistance``. Duty = ``(ceiling-ambient)/(thermal_resistance*burst_loss)``; off-time is ``burst_on*(1-duty)/duty``, rounded upward to tenths of a second for the periodic check.
+
+        Assumptions: Single thermal pole and fixed resistance; choose limits below the burst asymptote for finite heating horizons.
+
+        Excludes: Temperature-dependent resistance, spatial hot spots, and thermal protection certification.
+
+        References
+        ----------
+        Derivation: The lumped thermal energy balance gives exponential heating toward ``ambient+power*thermal_resistance``. Inverting this exponential yields cold and hot horizons. See mlsysim.physics.motors.calc_first_order_time_to_temperature and calc_periodic_burst_peak_rise; average-power screening alone does not bound the periodic peak.
+
+        Examples
+        --------
+        >>> from mlsysim.core.units import Q_ as Q
+        >>> ThermalBurstModel().solve(Q("1 A"), Q("1 ohm"), Q("10 J/K"), Q("1 K/W"), Q("300 K"), Q("303 K"), Q("302 K"), 2, Q("1 s")).burst_loss.magnitude > 0
+        True
+        """
         tau = (thermal_resistance * thermal_capacitance).to(ureg.second)
         amb = ambient.to(_K)
         p_rated = (rated_current ** 2 * loss_resistance).to(ureg.watt)
@@ -284,6 +576,50 @@ class StallDeratingModel(ForwardModel):
     def solve(self, hold_torque: Quantity, gear_ratio: float, gear_efficiency: float, torque_constant: Quantity,
               loss_resistance: Quantity, thermal_resistance: Quantity, ambient: Quantity,
               limit: Quantity) -> StallDeratingResult:
+        """Steady stall temperature with copper's resistance feedback, and the hold the winding can sustain.
+
+        Parameters
+        ----------
+        hold_torque : Quantity
+            Required output holding torque (N*m).
+        gear_ratio : float
+            Positive reduction ratio.
+        gear_efficiency : float
+            Transmission efficiency in (0, 1].
+        torque_constant : Quantity
+            Positive motor torque constant (N*m/A).
+        loss_resistance : Quantity
+            Positive resistance at the copper reference temperature (ohm).
+        thermal_resistance : Quantity
+            Positive winding-to-ambient resistance (K/W).
+        ambient : Quantity
+            Absolute ambient temperature (K).
+        limit : Quantity
+            Absolute winding limit above ambient (K).
+
+        Returns
+        -------
+        StallDeratingResult
+            Steady thermal rise in K, current in A, resistance in ohm, loss in W, and sustainable torque in N*m.
+
+        Notes
+        -----
+        Equation: Motor current I = ``hold_torque/(gear_efficiency*gear_ratio*torque_constant)``. With copper coefficient alpha, cold resistance R0, and thermal resistance theta, feedback gain g = ``I^2*R0*theta*alpha``. Steady rise is ``I^2*R0*theta*(1+alpha*(ambient-T0))/(1-g)``. Sustainable current is ``sqrt((limit-ambient)/(theta*R(limit)))``.
+
+        Assumptions: Linear copper resistance feedback; finite stable equilibrium requires feedback_gain < 1.
+
+        Excludes: Nonlinear heat transfer and runaway transient dynamics; algebraic output above unit gain is not a stable equilibrium.
+
+        References
+        ----------
+        Derivation: Substitute the linear copper resistance-temperature relation into steady Joule heating and collect terms in temperature rise. The resulting denominator exposes the unit-gain instability. See mlsysim.physics.motors.calc_copper_resistance_factor for the reference-temperature convention.
+
+        Examples
+        --------
+        >>> from mlsysim.core.units import Q_ as Q
+        >>> StallDeratingModel().solve(Q("1 N*m"), 10, 0.9, Q("1 N*m/A"), Q("1 ohm"), Q("1 K/W"), Q("300 K"), Q("350 K")).sustainable_current.magnitude > 0
+        True
+        """
         alpha, t0 = COPPER_TEMPERATURE_COEFFICIENT, COPPER_COEFFICIENT_REFERENCE_TEMPERATURE
         tau_m = (hold_torque / (gear_efficiency * gear_ratio)).to(ureg.newton * ureg.meter)
         i = (tau_m / torque_constant).to(ureg.ampere)
@@ -315,6 +651,42 @@ class ContinuousDeratingModel(ForwardModel):
 
     def solve(self, ceiling: Quantity, catalog_ambient: Quantity, installed_ambient: Quantity,
               thermal_resistance_factor: float) -> ContinuousDeratingResult:
+        """Installed continuous torque relative to the catalog rating.
+
+        Parameters
+        ----------
+        ceiling : Quantity
+            Absolute winding temperature ceiling (K).
+        catalog_ambient : Quantity
+            Catalog ambient below ceiling (K).
+        installed_ambient : Quantity
+            Installed ambient below ceiling (K).
+        thermal_resistance_factor : float
+            Positive installed/catalog thermal resistance ratio.
+
+        Returns
+        -------
+        ContinuousDeratingResult
+            Dimensionless installed/catalog torque shares for ambient alone and combined thermal effects.
+
+        Notes
+        -----
+        Equation: Ambient-only torque share is sqrt((ceiling-installed_ambient)/(ceiling-catalog_ambient)); combined share divides this by sqrt(thermal_resistance_factor).
+
+        Assumptions: Torque proportional to current and copper loss proportional to current squared.
+
+        Excludes: Temperature-dependent electrical resistance and transient bursts.
+
+        References
+        ----------
+        Derivation: At equilibrium, allowable copper power is temperature headroom divided by thermal resistance. Fixed resistance makes allowable current proportional to the square root of this power, and fixed torque constant makes torque proportional to current.
+
+        Examples
+        --------
+        >>> from mlsysim.core.units import Q_ as Q
+        >>> ContinuousDeratingModel().solve(Q("350 K"), Q("300 K"), Q("320 K"), 2).combined_share < 1
+        True
+        """
         amb = _ratio(ceiling.to(_K) - installed_ambient.to(_K), ceiling.to(_K) - catalog_ambient.to(_K)) ** 0.5
         return ContinuousDeratingResult(ambient_share=amb, combined_share=amb / thermal_resistance_factor ** 0.5)
 
@@ -337,6 +709,62 @@ class DriveBusModel(ForwardModel):
               bus_resistance: Quantity, full: Quantity, nominal: Quantity, depleted: Quantity, lockout: Quantity,
               compute_power: Quantity, converter_efficiency: float, capacitance: Quantity, clamp: Quantity,
               regen_fraction: float) -> DriveBusResult:
+        """A shared drive bus: sustained sag under a coincident load step, and the regenerative surge of a stop.
+
+        Parameters
+        ----------
+        mass : Quantity
+            Positive moving mass (kg).
+        speed : Quantity
+            Positive entry speed (m/s).
+        deceleration : Quantity
+            Positive constant deceleration (m/s^2).
+        step_current : Quantity
+            Positive coincident current increase (A).
+        bus_resistance : Quantity
+            Positive supply-path resistance (ohm).
+        full : Quantity
+            Full-pack voltage (V).
+        nominal : Quantity
+            Nominal voltage (V).
+        depleted : Quantity
+            Depleted-pack voltage (V).
+        lockout : Quantity
+            Converter undervoltage lockout (V).
+        compute_power : Quantity
+            Compute load power (W).
+        converter_efficiency : float
+            Converter efficiency in (0, 1].
+        capacitance : Quantity
+            Positive bus capacitance (F).
+        clamp : Quantity
+            Regeneration clamp voltage (V).
+        regen_fraction : float
+            Fraction of kinetic energy recovered, in (0, 1].
+
+        Returns
+        -------
+        DriveBusResult
+            Bus voltages in V, currents in A, energies in J, stop time in ms, peak power in W, and resistor bound in ohm.
+
+        Notes
+        -----
+        Equation: Compute current = ``compute_power/(converter_efficiency*nominal)``; sag = ``step_current*bus_resistance``. Recovered energy E = ``regen_fraction*mass*speed^2/2`` gives capacitor-only endpoint ``sqrt(full^2+2*E/capacitance)``. Stop duration = speed/deceleration, peak regenerative power = ``2*E/stop_duration``, and resistor ceiling = clamp^2/peak_power.
+
+        Assumptions: Constant deceleration, resistive sustained sag, and stated energy-recovery fraction.
+
+        Excludes: Inductive transients, battery absorption, and chopper switching dynamics.
+
+        References
+        ----------
+        Derivation: Ohm's law gives sustained sag. Equating recovered kinetic energy to the increase in capacitor energy gives the endpoint voltage. Constant deceleration makes recovery power triangular in time, so its peak is twice its mean. This treats the capacitor-only case separately from battery absorption.
+
+        Examples
+        --------
+        >>> from mlsysim.core.units import Q_ as Q
+        >>> DriveBusModel().solve(Q("100 kg"), Q("1 m/s"), Q("1 m/s^2"), Q("10 A"), Q("0.1 ohm"), Q("48 V"), Q("44 V"), Q("40 V"), Q("36 V"), Q("100 W"), 0.9, Q("1 F"), Q("50 V"), 0.5).regenerated.magnitude > 0
+        True
+        """
         i_compute = (compute_power / (converter_efficiency * nominal)).to(ureg.ampere)
         sag = calc_voltage_droop(step_current, bus_resistance).to(ureg.volt)
         e_k = calc_kinetic_energy(mass, speed).to(ureg.joule)
@@ -372,6 +800,40 @@ class ZeroFailureModel(ForwardModel):
 
     def solve(self, trials: int, confidence: float,
               target_rate: Optional[float] = None) -> ZeroFailureResult:
+        """Upper bound on the per-trial failure rate after a failure-free campaign.
+
+        Parameters
+        ----------
+        trials : int
+            Positive number of independent failure-free trials.
+        confidence : float
+            One-sided confidence level in (0, 1).
+        target_rate : Optional[float]
+            Optional target per-trial failure probability in (0, 1).
+
+        Returns
+        -------
+        ZeroFailureResult
+            Dimensionless approximate/exact failure bounds and trial counts; optional target counts are None when no target is supplied.
+
+        Notes
+        -----
+        Equation: For n trials and confidence C, approximate upper failure probability is -ln(1-C)/n; exact upper probability is 1-(1-C)^(1/n). A target p requires ceil(ln(1-C)/ln(1-p)) failure-free trials.
+
+        Assumptions: Independent identically distributed Bernoulli trials; approximate rate uses the zero-event Poisson bound.
+
+        Excludes: Nonstationarity, correlated failures, and proof of absence of failures.
+
+        References
+        ----------
+        Derivation: For independent Bernoulli trials, the probability of zero failures is (1-p)^n. Invert this probability at tail mass 1-C to obtain the exact one-sided bound. Replacing ln(1-p) by -p yields the Poisson approximation; see mlsysim.physics.robotics.assurance.calc_zero_failure_sample_size.
+
+        Examples
+        --------
+        >>> from mlsysim.core.units import Q_ as Q
+        >>> ZeroFailureModel().solve(100, 0.95).rate_upper_exact < 1
+        True
+        """
         p = calc_zero_failure_rate_upper_bound(trials, confidence)
         coefficient = -math.log(1 - confidence)
         needed = needed_approx = None
@@ -403,6 +865,44 @@ class ExponentialRareEventModel(ForwardModel):
 
     def solve(self, threshold: Quantity, mean: Quantity, elite_share: float, relative_error: float,
               confidence: float) -> ExponentialRareEventResult:
+        """One rare exponential tail estimated by plain Monte Carlo, a zero-failure campaign, and cross-entropy importance sampling (added 2026-10-20).
+
+        Parameters
+        ----------
+        threshold : Quantity
+            Positive failure threshold, in the same units as mean.
+        mean : Quantity
+            Positive operational exponential mean.
+        elite_share : float
+            Cross-entropy elite fraction in (0, 1).
+        relative_error : float
+            Positive target relative standard error.
+        confidence : float
+            One-sided confidence level in (0, 1).
+
+        Returns
+        -------
+        ExponentialRareEventResult
+            Analytic failure probabilities, dimensionless variances, effective counts, and proposal mean in the input units.
+
+        Notes
+        -----
+        Equation: Failure probability p = exp(-threshold/mean). Plain Monte Carlo requires ``(1-p)/(p*relative_error^2)`` draws; importance sampling requires relative_variance/relative_error^2. Proposal means and variances come from the analytic exponential cross-entropy and importance-sampling helpers.
+
+        Assumptions: Exponential operational and proposal families with analytic importance weights.
+
+        Excludes: Empirical sampling, distribution misspecification, and device measurements.
+
+        References
+        ----------
+        Derivation: The exponential survival function gives p. Bernoulli variance divided by squared target absolute error gives the ordinary sample budget. Applying the same variance-to-error calculation to likelihood-weighted draws yields the importance budget; see mlsysim.physics.statistics.calc_importance_sampling_exponential and calc_cross_entropy_exponential_proposal.
+
+        Examples
+        --------
+        >>> from mlsysim.core.units import Q_ as Q
+        >>> ExponentialRareEventModel().solve(Q("5 s"), Q("1 s"), 0.1, 0.1, 0.95).failure_probability < 1
+        True
+        """
         ce = calc_cross_entropy_exponential_proposal(threshold, mean, elite_share)
         weighted = calc_importance_sampling_exponential(threshold, mean, ce["proposal_mean"])
         p = weighted["failure_probability"]
@@ -439,6 +939,40 @@ class DiagnosticCoverageModel(ForwardModel):
     produces = DiagnosticCoverageResult
 
     def solve(self, strata: Dict[str, float], target: float, confidence: float) -> DiagnosticCoverageResult:
+        """Diagnostic coverage that leaves at most ``target`` of a raw fault rate unmitigated, and the zero-miss injection campaign that demonstrates it (added 2026-10-20).
+
+        Parameters
+        ----------
+        strata : Dict[str, float]
+            Mapping from stratum names to nonnegative fault rates (FIT), positive total.
+        target : float
+            Positive residual rate below the total, in FIT.
+        confidence : float
+            One-sided confidence level in (0, 1).
+
+        Returns
+        -------
+        DiagnosticCoverageResult
+            Fault-rate total in FIT, dimensionless coverage and shares, and injection counts.
+
+        Notes
+        -----
+        Equation: Raw rate is sum(strata.values()); required coverage = 1-target/raw_rate. The exact real-valued trial threshold is ln(1-confidence)/ln(coverage), rounded upward for injections. Stratum share = stratum_rate/raw_rate; allocation = ``injections*share``.
+
+        Assumptions: Independent representative injection trials and proportional stratum allocation.
+
+        Excludes: Unequal detection probability by stratum, common-cause dependencies, and certification.
+
+        References
+        ----------
+        Derivation: Residual faults are the raw rate times the missed fraction. For independent representative injections, observing no misses has probability coverage^n. Inverting that probability gives the trial threshold. Proportional allocations are expected counts, not a rounded stratified test design.
+
+        Examples
+        --------
+        >>> from mlsysim.core.units import Q_ as Q
+        >>> DiagnosticCoverageModel().solve({"sensor": 100.0}, 1.0, 0.95).injections > 0
+        True
+        """
         raw = sum(strata.values())
         coverage = 1.0 - target / raw
         n = calc_zero_failure_sample_size(coverage, confidence=confidence)
@@ -458,6 +992,40 @@ class ThrottledStageModel(ForwardModel):
     produces = ThrottledStageResult
 
     def solve(self, stage_time: Quantity, clock_ratio: float, speed: Quantity) -> ThrottledStageResult:
+        """A compute-bound stage at a fraction of full clock: its time scales by the inverse clock ratio, and the added age is paid as travel at the stated speed.
+
+        Parameters
+        ----------
+        stage_time : Quantity
+            Positive stage latency at full clock (s).
+        clock_ratio : float
+            Positive throttled/full clock ratio.
+        speed : Quantity
+            Motion speed during execution (m/s).
+
+        Returns
+        -------
+        ThrottledStageResult
+            Throttled time and added age in ms, and added travel in mm.
+
+        Notes
+        -----
+        Equation: Throttled duration = stage_time/clock_ratio; added age = throttled duration-stage_time; added travel = ``speed*added`` age.
+
+        Assumptions: Entire stage is compute bound and scales inversely with clock.
+
+        Excludes: Memory stalls, DVFS transition time, and nonlinear frequency effects.
+
+        References
+        ----------
+        Derivation: Fixed instruction work takes inversely proportional time as clock frequency changes when every relevant cycle scales with that clock. Constant-speed kinematics then converts the additional time into distance.
+
+        Examples
+        --------
+        >>> from mlsysim.core.units import Q_ as Q
+        >>> ThrottledStageModel().solve(Q("1 ms"), 0.5, Q("1 m/s")).added_age.magnitude > 0
+        True
+        """
         slow = (stage_time / clock_ratio).to(_MS)
         added = (slow - stage_time).to(_MS)
         return ThrottledStageResult(throttled=slow, added_age=added, added_travel=(speed * added).to(_MM))

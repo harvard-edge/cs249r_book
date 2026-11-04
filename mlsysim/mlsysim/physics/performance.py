@@ -2,33 +2,50 @@
 
 from __future__ import annotations
 
+import math
+
 from mlsysim.core.units import ureg
 from mlsysim.core._validation import validate_positive, validate_at_least, validate_range, validate_nonnegative
 
 
 def dTime(total_ops, num_devices, peak_flops_per_device, efficiency_eta):
-    """
-    Core training time calculation; returns duration in seconds.
-
-    This function implements the Iron Law of ML Training execution time,
-    accounting for hardware scale and utilization efficiency.
+    """Estimate execution time from total work and effective fleet throughput.
 
     Parameters
     ----------
     total_ops : Quantity
-        Total floating point operations required for the workload (e.g., FLOPs).
+        Nonnegative total floating-point operation count.
     num_devices : int
-        Number of physical accelerators (e.g., GPUs or TPUs) in the cluster.
+        Number of identical accelerators, at least one.
     peak_flops_per_device : Quantity
-        The theoretical maximum throughput of a single device (e.g., TFLOP/s).
+        Positive peak computation rate per device in FLOP/s-compatible units.
     efficiency_eta : float
-        The Model FLOPs Utilization (MFU), representing the fraction of 
-        peak throughput actually achieved by the workload (0.0 to 1.0).
+        Achieved fraction of aggregate peak throughput, in (0, 1].
 
     Returns
     -------
     Quantity
-        The calculated training duration in seconds.
+        Modeled execution duration in seconds.
+
+    Notes
+    -----
+    Equation: T = C / (N F_peak eta).
+
+    Assumptions: The workload is divisible across identical devices; eta already includes
+    the utilization losses the caller intends to model.
+
+    Excludes: Separate memory, communication, and recovery terms; add these explicitly or
+    incorporate them consistently into eta.
+
+    References
+    ----------
+    Derivation: Aggregate useful computation rate is N F_peak eta; divide the required work C by that rate.
+
+    Examples
+    --------
+    >>> from mlsysim.core.units import Q_
+    >>> dTime(Q_(8, "flop"), 2, Q_(4, "flop/s"), 0.5) == Q_(2, "s")
+    True
     """
     validate_at_least(num_devices, 1, "num_devices")
     validate_range(efficiency_eta, 0.0, 1.0, "efficiency_eta")
@@ -42,44 +59,85 @@ calc_training_time = dTime
 
 
 def calc_amdahls_speedup(p, s):
-    """
-    Overall system speedup (Amdahl's Law).
-
-    Calculates the theoretical maximum speedup of a system when only a 
-    fraction of the system is improved.
+    """Calculate speedup when one fraction of execution is accelerated.
 
     Parameters
     ----------
     p : float
-        The proportion of execution time that the improvement applies to (0.0 to 1.0).
+        Fraction of original elapsed time affected by the improvement, in [0, 1].
     s : float
-        The speedup factor for the improved portion of execution (e.g., 2.0 for 2x faster).
+        Positive speedup of the affected fraction; positive infinity removes its time
+        entirely.
 
     Returns
     -------
     float
-        The overall theoretical speedup factor for the entire system.
+        Overall dimensionless speedup; infinity when all original time is removed.
+
+    Notes
+    -----
+    Equation: S = 1 / [(1 - p) + p/s].
+
+    Assumptions: The original work and unaffected elapsed time remain fixed.
+
+    Excludes: New overhead, workload growth, and a changing accelerated fraction.
+
+    References
+    ----------
+    Amdahl (1967), "Validity of the single processor approach to achieving
+    large scale computing capabilities." https://doi.org/10.1145/1465482.1465560
+    (bibliography key: amdahl1967).
+
+    Derivation: Normalize original elapsed time to one, retain 1-p, and divide the affected p by s. This is Amdahl's fixed-work speedup relation.
+
+    Examples
+    --------
+    >>> calc_amdahls_speedup(0.5, float("inf"))
+    2.0
     """
     validate_range(p, 0.0, 1.0, "p (parallel fraction)")
+    if s == math.inf:
+        return math.inf if p == 1.0 else 1 / (1 - p)
     validate_positive(s, "s (speedup factor)")
     return 1 / ((1 - p) + (p / s))
 
 
 def calc_partial_slowdown_stretch(stall_fraction, slowdown):
-    """
-    Stretch of a task when only a fraction of its time is slowed down.
+    """Calculate elapsed-time growth when one task fraction slows.
 
-    Equation:
-        stretch = (1 - f) + f * S
+    Parameters
+    ----------
+    stall_fraction : float
+        Fraction of unloaded elapsed time exposed to the slowdown, in [0, 1].
+    slowdown : float
+        Multiplicative duration increase for that fraction, at least one.
 
-    Amdahl's law read as a slowdown: a fraction ``f`` of the unloaded time
-    (for example, time stalled on shared-cache misses) runs ``S`` times
-    slower under interference while the rest is unchanged. The loaded time
-    is ``t_unloaded * stretch``. Equal to ``1 / calc_amdahls_speedup(f, 1/S)``.
+    Returns
+    -------
+    float
+        Loaded duration divided by unloaded duration.
 
-    Source: Amdahl, "Validity of the single processor approach to achieving
-    large scale computing capabilities," AFIPS Spring Joint Computer
-    Conference, 1967 (fixed-fraction model, applied to a slowdown).
+    Notes
+    -----
+    Equation: stretch = (1 - f) + f S.
+
+    Assumptions: The affected fraction f is measured in the unloaded task and remains fixed.
+
+    Excludes: Changes in work, additional interference paths, and queueing beyond the
+    supplied slowdown.
+
+    References
+    ----------
+    Amdahl (1967), "Validity of the single processor approach to achieving
+    large scale computing capabilities." https://doi.org/10.1145/1465482.1465560
+    (bibliography key: amdahl1967).
+
+    Derivation: Apply the fixed-fraction time decomposition of Amdahl's law, with a slowdown rather than a speedup.
+
+    Examples
+    --------
+    >>> calc_partial_slowdown_stretch(0.5, 3) == (1 - 0.5) + 0.5 * 3
+    True
     """
     validate_range(stall_fraction, 0.0, 1.0, "stall_fraction")
     validate_at_least(slowdown, 1.0, "slowdown")
@@ -87,19 +145,37 @@ def calc_partial_slowdown_stretch(stall_fraction, slowdown):
 
 
 def calc_stall_share_breakeven(allowed_stretch, slowdown):
-    """
-    Largest slowed fraction of a task that keeps it within an allowed stretch.
+    """Find the largest slowed task fraction within a duration budget.
 
-    Equation:
-        f_max = (C / t_unloaded - 1) / (S - 1)
+    Parameters
+    ----------
+    allowed_stretch : float
+        Maximum total duration divided by unloaded duration, at least one.
+    slowdown : float
+        Duration multiplier for the affected portion, at least one.
 
-    The inverse of ``calc_partial_slowdown_stretch``: with a budget ``C``
-    (a declared WCET or deadline) and unloaded time ``t_unloaded``, the
-    allowed stretch is ``C / t_unloaded``; a slowed share above ``f_max``
-    crosses the budget. Capped at 1 (the whole task may be slowed).
+    Returns
+    -------
+    float
+        Largest admissible affected fraction, capped at one.
 
-    Source: Amdahl 1967 fixed-fraction model, solved for the fraction
-    (see ``calc_partial_slowdown_stretch``).
+    Notes
+    -----
+    Equation: f_max = min(1, (allowed_stretch - 1) / (slowdown - 1)); f_max = 1 when
+    slowdown = 1.
+
+    Assumptions: The allowed duration is no smaller than the unloaded duration.
+
+    Excludes: Time-varying interference and uncertainty in the baseline duration.
+
+    References
+    ----------
+    Derivation: Solve 1 + f(S - 1) <= allowed_stretch for f and cap the physical fraction at one.
+
+    Examples
+    --------
+    >>> calc_stall_share_breakeven(2, 3) == (2 - 1) / (3 - 1)
+    True
     """
     validate_at_least(allowed_stretch, 1.0, "allowed_stretch")
     validate_at_least(slowdown, 1.0, "slowdown")
@@ -109,21 +185,37 @@ def calc_stall_share_breakeven(allowed_stretch, slowdown):
 
 
 def calc_strong_scaling_speedup(num_devices, communication_fraction):
-    """
-    Strong scaling speedup with communication fraction overhead.
+    """Estimate fixed-work scaling with a nonparallel time fraction.
 
     Parameters
     ----------
     num_devices : int
-        Number of participating devices (>= 1).
+        Participating device count, at least one.
     communication_fraction : float
-        Fraction of single-device step time spent on communication in the
-        baseline system (0.0 to 1.0).
+        Fraction of baseline time modeled as nonparallel communication, in [0, 1].
 
     Returns
     -------
     float
-        The effective strong-scaling speedup.
+        Dimensionless speedup relative to one device.
+
+    Notes
+    -----
+    Equation: S(N) = N / [1 + (N - 1) f].
+
+    Assumptions: Communication fraction f is constant and the remaining work scales
+    perfectly.
+
+    Excludes: Topology-dependent communication growth, overlap changes, and load imbalance.
+
+    References
+    ----------
+    Derivation: Rewrite Amdahl's 1 / [f + (1-f)/N] by multiplying numerator and denominator by N.
+
+    Examples
+    --------
+    >>> calc_strong_scaling_speedup(4, 0.0)
+    4.0
     """
     validate_at_least(num_devices, 1, "num_devices")
     validate_range(communication_fraction, 0.0, 1.0, "communication_fraction")
@@ -131,32 +223,43 @@ def calc_strong_scaling_speedup(num_devices, communication_fraction):
 
 
 def calc_universal_scalability_law(n, sigma, kappa):
-    """
-    Universal Scalability Law (Gunther, 1993).
-
-    Calculates relative system throughput / speedup C(N) under concurrency N,
-    accounting for both serialization contention (sigma) and coherency
-    crosstalk / coordination overhead (kappa).
-
-    Model:
-        C(N) = N / (1 + sigma * (N - 1) + kappa * N * (N - 1))
-
-    When kappa = 0, USL reduces exactly to Amdahl's Law with serial fraction sigma.
-    When kappa > 0, C(N) exhibits retrograde scaling beyond N* = sqrt((1 - sigma) / kappa).
+    """Evaluate capacity under serialization and pairwise coordination costs.
 
     Parameters
     ----------
     n : int or float
-        Concurrency level (number of workers, threads, or agents, >= 1).
+        Dimensionless concurrency, at least one.
     sigma : float
-        Contention parameter representing serialized resource fraction (0.0 to 1.0).
+        Serialization/contention parameter in [0, 1].
     kappa : float
-        Coherency / cross-talk parameter representing pairwise coordination (>= 0.0).
+        Nonnegative pairwise-coordination coefficient.
 
     Returns
     -------
     float
-        Relative system capacity / speedup C(N).
+        Relative capacity C(n), normalized to one at n = 1.
+
+    Notes
+    -----
+    Equation: C(n) = n / [1 + sigma(n - 1) + kappa n(n - 1)].
+
+    Assumptions: sigma and kappa are supplied workload parameters, not hardware constants.
+
+    Excludes: A fit or independent validation of the parameters and explicit queueing
+    dynamics.
+
+    References
+    ----------
+    Gunther (2008), "A General Theory of Computational Scalability Based on
+    Rational Functions." https://arxiv.org/abs/0808.1431
+    (bibliography key: gunther2008general).
+
+    Derivation: The Universal Scalability Law models normalized overhead as a serialization term proportional to n-1 and a coordination term proportional to n(n-1); capacity divides concurrency by this overhead. These terms define the model rather than a physical identity.
+
+    Examples
+    --------
+    >>> calc_universal_scalability_law(4, 0.0, 0.0)
+    4.0
     """
     validate_at_least(n, 1, "n")
     validate_range(sigma, 0.0, 1.0, "sigma")
@@ -168,24 +271,43 @@ def calc_universal_scalability_law(n, sigma, kappa):
 
 
 def calc_usl_optimal_concurrency(sigma, kappa):
-    """
-    Optimal concurrency N* under the Universal Scalability Law.
-
-    Model:
-        N* = sqrt((1 - sigma) / kappa)  for kappa > 0
-        N* = inf                       for kappa == 0
+    """Find the stationary concurrency of the scalability model.
 
     Parameters
     ----------
     sigma : float
-        Contention parameter (0.0 to 1.0).
+        Serialization parameter in [0, 1].
     kappa : float
-        Coherency parameter (>= 0.0).
+        Nonnegative pairwise-coordination coefficient.
 
     Returns
     -------
     float
-        The optimal concurrency level N* where throughput peaks before retrograde collapse.
+        Continuous stationary concurrency, not rounded or clamped to a realizable device
+        count; infinity for kappa = 0 and one for sigma = 1 with positive kappa.
+
+    Notes
+    -----
+    Equation: N_star = sqrt((1 - sigma) / kappa) for kappa > 0 and sigma < 1.
+
+    Assumptions: The continuous USL model applies with fixed coefficients. Values below one
+    require boundary handling by the caller.
+
+    Excludes: Integer search, capacity constraints, and an empirical fit of USL
+    coefficients.
+
+    References
+    ----------
+    Gunther (2008), "A General Theory of Computational Scalability Based on
+    Rational Functions." https://arxiv.org/abs/0808.1431
+    (bibliography key: gunther2008general).
+
+    Derivation: Set the derivative of n/[``1+sigma(n-1)+kappa*n*(n-1)``] to zero. Its numerator is ``1-sigma-kappa*n**2``.
+
+    Examples
+    --------
+    >>> calc_usl_optimal_concurrency(0.0, 0.25)
+    2.0
     """
     import math
 
@@ -199,32 +321,46 @@ def calc_usl_optimal_concurrency(sigma, kappa):
 
 
 def calc_bottleneck(ops, model_bytes, device_flops, device_bw):
-    """
-    Roofline bottleneck analysis (Williams et al., 2009).
-
-    Determines whether a workload is compute-bound or memory-bound on a 
-    specific hardware device by evaluating the Roofline model's ridge point.
+    """Compare compute and memory-transfer times for a workload.
 
     Parameters
     ----------
     ops : Quantity
-        Total operations in the workload (e.g., FLOPs).
+        Nonnegative workload operation count in FLOPs.
     model_bytes : Quantity
-        Total memory movement required for the workload (e.g., Bytes).
+        Nonnegative total traffic in bytes; this argument represents traffic, not
+        necessarily model storage alone.
     device_flops : Quantity
-        Peak compute throughput of the hardware (e.g., FLOP/s).
+        Positive available computation rate in FLOP/s.
     device_bw : Quantity
-        Peak memory bandwidth of the hardware (e.g., Byte/s).
+        Positive available memory bandwidth in byte/s.
 
     Returns
     -------
     dict
-        A dictionary containing:
-        - compute_ms (float): Time spent computing (ms).
-        - memory_ms (float): Time spent moving data (ms).
-        - bottleneck (str): 'Compute' or 'Memory'.
-        - ratio (float): The ratio of the bottlenecked time to the non-bottlenecked time.
-        - intensity (float): The arithmetic intensity (FLOP/Byte) of the workload.
+        Compute_ms and memory_ms are time magnitudes; bottleneck is Compute or Memory; ratio
+        compares larger to smaller time; intensity is FLOP/byte.
+
+    Notes
+    -----
+    Equation: T_compute = C/F; T_memory = M/BW; intensity = C/M.
+
+    Assumptions: Compute and memory are independent ceilings; ties are labeled Compute.
+    Times below the implementation zero threshold use explicit degenerate-work cases.
+
+    Excludes: Dispatch overhead, communication, nonideal overlap, and any traffic omitted
+    from model_bytes.
+
+    References
+    ----------
+    Williams et al. (2009), "Roofline: An Insightful Visual Performance Model for Multicore Architectures." https://doi.org/10.1145/1498765.1498785 (bibliography key: williams2009).
+
+    Examples
+    --------
+    >>> from mlsysim.core.units import Q_
+    >>> result = calc_bottleneck(Q_(2, "flop"), Q_(4, "byte"), Q_(2, "flop/s"), Q_(2, "byte/s"))
+    >>> result["bottleneck"]
+    'Memory'
     """
     # Arithmetic intensity is an intrinsic property of the workload (FLOP / Byte)
     # independent of device performance:
@@ -294,26 +430,42 @@ def calc_bottleneck(ops, model_bytes, device_flops, device_bw):
 
 
 def calc_pipeline_bubble(n_stages, n_microbatches, v_stages=1):
-    """
-    Pipeline bubble fraction (GPipe / 1F1B / Interleaved 1F1B).
-
-    Calculates the proportion of idle time (bubble) injected into the 
-    pipeline schedule due to filling and draining the pipeline.
+    """Estimate the fill-and-drain fraction of a balanced pipeline.
 
     Parameters
     ----------
     n_stages : int
-        Number of physical pipeline stages (e.g., number of nodes/devices).
+        Positive physical pipeline-stage count.
     n_microbatches : int
-        Number of microbatches (M) injected into the pipeline per step.
+        Positive microbatch count per training step.
     v_stages : int, optional
-        Number of virtual stages per physical device for interleaved schedules.
-        Default is 1 (standard 1F1B/GPipe).
+        Positive virtual-stage factor; default one represents no interleaving.
 
     Returns
     -------
     float
-        The fraction of time spent idle (0.0 to 1.0).
+        Dimensionless idle fraction in [0, 1).
+
+    Notes
+    -----
+    Equation: bubble = (p - 1) / (v m + p - 1).
+
+    Assumptions: Stages have equal duration; virtual stages reduce the fill/drain penalty
+    according to the stated schedule approximation.
+
+    Excludes: Stage imbalance, communication stalls, runtime scheduling details, and
+    activation feasibility.
+
+    References
+    ----------
+    Derivation: Count p-1 fill/drain slots against ``v*m`` useful slots in the balanced pipeline approximation. The virtual-stage substitution summarizes interleaving; it is not an event-level schedule simulation.
+
+    Examples
+    --------
+    >>> calc_pipeline_bubble(1, 4)
+    0.0
+    >>> calc_pipeline_bubble(4, 8, 2) < calc_pipeline_bubble(4, 8)
+    True
     """
     validate_at_least(n_stages, 1, "n_stages")
     validate_at_least(n_microbatches, 1, "n_microbatches")
@@ -326,24 +478,43 @@ def calc_pipeline_bubble(n_stages, n_microbatches, v_stages=1):
 
 
 def calc_effective_flops(peak_flops, mfu, scaling_eff, goodput_ratio):
-    """
-    Effective FLOPS after MFU, scaling efficiency, and goodput overheads.
+    """Apply utilization, scaling, and goodput factors to peak rate.
 
     Parameters
     ----------
-    peak_flops : Quantity
-        Theoretical peak throughput of the hardware (e.g., TFLOP/s).
+    peak_flops : Quantity or float
+        Positive computation rate; bare values are interpreted as FLOP/s.
     mfu : float
-        Model FLOPs Utilization (0.0 to 1.0).
+        Model FLOP utilization factor in [0, 1].
     scaling_eff : float
-        Scaling efficiency accounting for distributed overheads (0.0 to 1.0).
+        Additional distributed scaling factor in [0, 1].
     goodput_ratio : float
-        Fraction of time doing useful work vs. recovery/checkpointing (0.0 to 1.0).
+        Fraction of elapsed time contributing useful progress, in [0, 1].
 
     Returns
     -------
     Quantity
-        The effective usable throughput in FLOP/s.
+        Effective useful computation rate in FLOP/s.
+
+    Notes
+    -----
+    Equation: F_effective = F_peak * mfu * scaling_eff * goodput_ratio.
+
+    Assumptions: Factors describe distinct losses; the caller must avoid charging a loss
+    twice.
+
+    Excludes: Estimating the factors, phase-dependent utilization, and changing workload
+    intensity.
+
+    References
+    ----------
+    Derivation: Apply successive dimensionless useful-work fractions to the same baseline rate; the product is valid only when the factors do not duplicate losses.
+
+    Examples
+    --------
+    >>> from mlsysim.core.units import Q_
+    >>> calc_effective_flops(Q_(8, "flop/s"), 0.5, 0.5, 1.0) == Q_(2, "flop/s")
+    True
     """
     from ._units import _ensure_unit
 
@@ -356,13 +527,37 @@ def calc_effective_flops(peak_flops, mfu, scaling_eff, goodput_ratio):
 
 
 def calc_pareto_frontier(points):
-    """
-    Indices of the points no other point beats on both axes.
+    """Return indices of points undominated in cost and value.
 
-    ``points`` is a sequence of (cost, value) pairs, lower cost and higher
-    value better (latency and accuracy, for example). A point is dominated
-    when another is at least as good on both axes and strictly better on one.
-    Added 2026-10-20.
+    Parameters
+    ----------
+    points : sequence of tuple of float
+        Pairs (cost, value), with lower cost and higher value preferred. Each axis must use
+        a consistent unit.
+
+    Returns
+    -------
+    list of int
+        Original indices of nondominated points; equal duplicates are retained.
+
+    Notes
+    -----
+    Equation: Point i is excluded if some j has cost_j <= cost_i and value_j >= value_i,
+    with at least one strict inequality.
+
+    Assumptions: Both objectives are deterministic and directly comparable within their
+    axes.
+
+    Excludes: Uncertainty, scalar preference weights, and constraints beyond the two axes.
+
+    References
+    ----------
+    Derivation: Apply the definition of Pareto dominance pairwise to every input point.
+
+    Examples
+    --------
+    >>> calc_pareto_frontier([(1, 2), (2, 1), (2, 3)])
+    [0, 2]
     """
     keep = []
     for i, (c, v) in enumerate(points):

@@ -16,17 +16,7 @@ def calc_safe_stopping_distance(
     loc_margin=None,
     physical_margin=None,
 ):
-    """
-    Calculate dynamic stopping distance under non-zero control latency.
-
-    Equation:
-        d_stop = v * tau_latency + (v^2) / (2 * a_max) + delta_loc + delta_margin
-
-    Source: reaction distance v * tau plus constant-deceleration braking
-    distance v^2 / (2 * a), from v^2 = v0^2 + 2 * a * (x - x0) (OpenStax,
-    University Physics Volume 1, Sec. 3.4, Eq. 3.14; Example 3.10 adds
-    reaction-time travel to braking distance the same way). The additive
-    localization and clearance margins are a modeling assumption.
+    """Calculate dynamic stopping distance under non-zero control latency.
 
     Parameters
     ----------
@@ -45,13 +35,41 @@ def calc_safe_stopping_distance(
     -------
     Quantity
         Total stopping distance in meters.
+
+    Notes
+    -----
+    Equation:
+        d_stop = v * tau_latency + (v^2) / (2 * a_max) + delta_loc + delta_margin
+
+    Assumptions: Forward speed is nonnegative, delay and available constant deceleration are
+    positive, and optional nonnegative margins add linearly.
+
+    Excludes: Jerk ramps, changing traction, moving obstacles, and safety certification.
+
+    References
+    ----------
+    Reaction distance v * tau adds to constant-deceleration braking
+    distance v^2 / (2 * a), from v^2 = v0^2 + 2 * a * (x - x0) (OpenStax,
+    University Physics Volume 1, Sec. 3.4, Eq. 3.14; Example 3.10 adds
+    reaction-time travel to braking distance the same way). The additive
+    localization and clearance margins are a modeling assumption.
+
+    Derivation: Integrate constant speed during the delay and constant deceleration during
+    braking, then add clearance margins.
+
+    Examples
+    --------
+    >>> from mlsysim.physics.robotics.stopping import calc_safe_stopping_distance
+    >>> from mlsysim.core.units import ureg
+    >>> calc_safe_stopping_distance(ureg('0 m/s'), ureg('1 s'), ureg('1 m/s**2')) == ureg('0 m')
+    True
     """
     validate_nonnegative(velocity, "velocity")
     validate_positive(total_latency, "total_latency")
     validate_positive(max_deceleration, "max_deceleration")
 
     reaction_distance = velocity * total_latency
-    braking_distance = (velocity ** 2) / (2 * max_deceleration)
+    braking_distance = (velocity**2) / (2 * max_deceleration)
     total_distance = reaction_distance + braking_distance
 
     if loc_margin is not None:
@@ -71,19 +89,7 @@ def calc_max_permitted_velocity(
     loc_margin=None,
     physical_margin=None,
 ):
-    """
-    Calculate maximum safe forward velocity admitted by physical stopping clearance.
-
-    Solves the quadratic inequality:
-        v * tau + v^2 / (2 * a) <= D_clear - delta_loc - delta_margin
-    for the maximum non-negative velocity root:
-        v_max = -a * tau + sqrt((a * tau)^2 + 2 * a * D_eff)
-    where D_eff = D_clear - delta_loc - delta_margin. If D_eff <= 0, v_max = 0.
-
-    Source: derived here as the positive root of the
-    calc_safe_stopping_distance quadratic, so it rests on the same kinematics
-    (OpenStax, University Physics Volume 1, Sec. 3.4, Eq. 3.14) and the same
-    additive-margin modeling assumption.
+    """Calculate the forward-velocity ceiling in the delayed stopping model.
 
     Parameters
     ----------
@@ -101,7 +107,40 @@ def calc_max_permitted_velocity(
     Returns
     -------
     Quantity
-        Maximum safe forward velocity in meters/second.
+        Modeled forward-velocity ceiling in meters/second.
+
+    Notes
+    -----
+    Equation:
+
+    Solves the quadratic inequality:
+        v * tau + v^2 / (2 * a) <= D_clear - delta_loc - delta_margin
+    for the maximum non-negative velocity root:
+        v_max = -a * tau + sqrt((a * tau)^2 + 2 * a * D_eff)
+    where D_eff = D_clear - delta_loc - delta_margin. If D_eff <= 0, v_max = 0.
+
+    Assumptions: Clearance is nonnegative; the delay and constant braking deceleration are
+    positive. Margins consume clearance before solving.
+
+    Excludes: Jerk ramps, approaching obstacles, changing traction, and certified safe-speed
+    determination.
+
+    References
+    ----------
+    The speed ceiling follows from the positive root of the
+    calc_safe_stopping_distance quadratic, so it rests on the same kinematics
+    (OpenStax, University Physics Volume 1, Sec. 3.4, Eq. 3.14) and the same
+    additive-margin modeling assumption.
+
+    Derivation: Take the nonnegative root of v tau + v squared/(2 a) = effective clearance,
+    clamping to zero when no clearance remains.
+
+    Examples
+    --------
+    >>> from mlsysim.physics.robotics.stopping import calc_max_permitted_velocity
+    >>> from mlsysim.core.units import ureg
+    >>> calc_max_permitted_velocity(ureg('0 m'), ureg('1 s'), ureg('1 m/s**2')) == ureg('0 m/s')
+    True
     """
     validate_nonnegative(d_clear, "d_clear")
     validate_positive(total_latency, "total_latency")
@@ -119,16 +158,31 @@ def calc_max_permitted_velocity(
         return (0.0 * (ureg.meter / ureg.second)).to(ureg.meter / ureg.second)
 
     a_tau = max_deceleration * total_latency
-    discriminant = (a_tau ** 2) + 2.0 * max_deceleration * d_eff
-    v_max = -a_tau + discriminant ** 0.5
+    discriminant = (a_tau**2) + 2.0 * max_deceleration * d_eff
+    v_max = -a_tau + discriminant**0.5
 
     v_mps = max(0.0, v_max.to(ureg.meter / ureg.second).magnitude)
     return (v_mps * (ureg.meter / ureg.second)).to(ureg.meter / ureg.second)
 
 
 def calc_c2_stop_suffix(entry_velocity, peak_deceleration):
-    """
-    Calculate the duration and distance of a C2-continuous stop from cruise.
+    """Calculate the duration and distance of a C2-continuous stop from cruise.
+
+    Parameters
+    ----------
+    entry_velocity : Quantity
+        Cruise velocity at the start of the stop (e.g. m/s).
+    peak_deceleration : Quantity
+        Credible peak deceleration the stop may reach (e.g. m/s^2).
+
+    Returns
+    -------
+    dict
+        Duration (ms), distance (m), and peak_jerk (m/s^3).
+
+    Notes
+    -----
+    Equation:
 
     A stop that begins and ends at zero acceleration, entered from constant
     velocity v_c, follows the minimum-order polynomial
@@ -149,21 +203,27 @@ def calc_c2_stop_suffix(entry_velocity, peak_deceleration):
     and a jerk-limited S-curve with the same a and j_peak stops shorter
     (calc_scurve_stop_distance).
 
-    Source: derived here. The polynomial satisfies q' = v_c, q'' = 0 at u = 0
+    Assumptions: Positive entry speed begins at zero acceleration; the specified quartic
+    position polynomial stops with zero final acceleration.
+
+    Excludes: An independent jerk bound, actuator tracking, and an optimality claim across other
+    smooth profiles.
+
+    References
+    ----------
+    This polynomial construction satisfies q' = v_c, q'' = 0 at u = 0
     and q' = 0, q'' = 0 at u = 1; peak |q''| occurs at u = 1/2 (minimum of
     q''(u) = v_c / T * (-6u + 6u^2)); peak |q'''| occurs at u = 0 and u = 1.
 
-    Parameters
-    ----------
-    entry_velocity : Quantity
-        Cruise velocity at the start of the stop (e.g. m/s).
-    peak_deceleration : Quantity
-        Credible peak deceleration the stop may reach (e.g. m/s^2).
+    Derivation: Differentiate the displayed quartic to locate its peak deceleration at
+    normalized time one-half, then solve for duration.
 
-    Returns
-    -------
-    dict
-        duration (ms), distance (m), and peak_jerk (m/s^3).
+    Examples
+    --------
+    >>> from mlsysim.physics.robotics.stopping import calc_c2_stop_suffix
+    >>> from mlsysim.core.units import ureg
+    >>> calc_c2_stop_suffix(ureg('1 m/s'), ureg('1 m/s**2'))['distance'].check('[length]')
+    True
     """
     validate_positive(entry_velocity, "entry_velocity")
     validate_positive(peak_deceleration, "peak_deceleration")
@@ -204,8 +264,25 @@ def _scurve_si_inputs(entry_velocity, max_deceleration, max_jerk):
 
 
 def calc_scurve_stop_distance(entry_velocity, max_deceleration, max_jerk):
-    """
-    Distance of a jerk-limited S-curve stop entered from zero-acceleration cruise.
+    """Distance of a jerk-limited S-curve stop entered from zero-acceleration cruise.
+
+    Parameters
+    ----------
+    entry_velocity : Quantity
+        Cruise velocity at stop onset (e.g. m/s); zero gives zero distance.
+    max_deceleration : Quantity
+        Deceleration bound a_max (e.g. m/s^2).
+    max_jerk : Quantity
+        Jerk bound j_max (e.g. m/s^3).
+
+    Returns
+    -------
+    Quantity
+        Stopping distance in meters.
+
+    Notes
+    -----
+    Equation:
 
     The stop drives acceleration from zero to -a at the jerk limit j, holds
     -a, and returns acceleration to zero at the jerk limit as velocity reaches
@@ -222,44 +299,77 @@ def calc_scurve_stop_distance(entry_velocity, max_deceleration, max_jerk):
     and |j| <= j_max this is the time-optimal stop, and for a stop that does not
     reverse it is also the shortest.
 
-    Source: Biagiotti, L. and Melchiorri, C., Trajectory Planning for Automatic
+    Assumptions: Entry speed is nonnegative, acceleration and jerk limits are positive, and both
+    boundary accelerations are zero.
+
+    Excludes: Reaction delay, traction variation, tracking error, and safety certification.
+
+    References
+    ----------
+    Biagiotti, L. and Melchiorri, C., Trajectory Planning for Automatic
     Machines and Robots, Springer (2008; DOI 10.1007/978-3-540-85629-0),
     ch. 3, trajectory with double S velocity profile, specialized here to a
     stop from v to rest with zero boundary accelerations. Formula re-derived and
     checked against a discretized minimum-distance linear program.
 
-    Parameters
-    ----------
-    entry_velocity : Quantity
-        Cruise velocity at stop onset (e.g. m/s); zero gives zero distance.
-    max_deceleration : Quantity
-        Deceleration bound a_max (e.g. m/s^2).
-    max_jerk : Quantity
-        Jerk bound j_max (e.g. m/s^3).
+    Derivation: Integrate symmetric jerk ramps with an optional constant-deceleration plateau;
+    symmetry makes distance v T/2.
 
-    Returns
-    -------
-    Quantity
-        Stopping distance in meters.
+    Examples
+    --------
+    >>> from mlsysim.physics.robotics.stopping import calc_scurve_stop_distance
+    >>> from mlsysim.core.units import ureg
+    >>> calc_scurve_stop_distance(ureg('0 m/s'), ureg('1 m/s**2'), ureg('1 m/s**3')) == ureg('0 m')
+    True
     """
     v, a, j = _scurve_si_inputs(entry_velocity, max_deceleration, max_jerk)
     return (_scurve_stop_si(v, a, j)[1] * ureg.meter).to(ureg.meter)
 
 
 def calc_scurve_stop_time(entry_velocity, max_deceleration, max_jerk):
-    """
-    Duration of the jerk-limited S-curve stop of calc_scurve_stop_distance.
+    """Duration of the jerk-limited S-curve stop of calc_scurve_stop_distance.
 
-        if v >= a^2 / j:   T = v / a + a / j
-        else:              T = 2 * sqrt(v / j)
-
-    Source: Biagiotti and Melchiorri (2008), ch. 3, double S velocity profile;
-    see calc_scurve_stop_distance.
+    Parameters
+    ----------
+    entry_velocity : Quantity
+        Nonnegative speed at onset in m/s.
+    max_deceleration : Quantity
+        Positive braking deceleration bound in m/s^2.
+    max_jerk : Quantity
+        Positive jerk bound in m/s^3.
 
     Returns
     -------
     Quantity
         Stopping time in milliseconds.
+
+    Notes
+    -----
+    Equation:
+
+    if v >= a^2 / j:   T = v / a + a / j
+        else:              T = 2 * sqrt(v / j)
+
+    Assumptions: The stop has the same nonnegative entry speed, positive limits, and zero
+    boundary accelerations as calc_scurve_stop_distance.
+
+    Excludes: Pre-brake delay, tracking error, and dynamics beyond the acceleration and jerk
+    bounds.
+
+    References
+    ----------
+    Biagiotti and Melchiorri (2008), ch. 3, double S velocity profile;
+    see calc_scurve_stop_distance.
+
+    Derivation: Sum the two jerk-ramp durations and the plateau, when present; otherwise solve
+    the triangular acceleration area for duration.
+
+    Examples
+    --------
+    >>> from mlsysim.physics.robotics.stopping import calc_scurve_stop_time
+    >>> from mlsysim.core.units import ureg
+    >>> calc_scurve_stop_time(ureg('0 m/s'), ureg('1 m/s**2'), ureg('1 m/s**3')) == ureg('0 ms')
+    True
     """
     v, a, j = _scurve_si_inputs(entry_velocity, max_deceleration, max_jerk)
     return (_scurve_stop_si(v, a, j)[0] * ureg.second).to(ureg.millisecond)
@@ -274,8 +384,33 @@ def calc_scurve_max_permitted_velocity(
     physical_margin=None,
     approach_velocity=None,
 ):
-    """
-    Highest cruise speed whose delayed S-curve stop fits the clearance.
+    """Highest cruise speed whose delayed S-curve stop fits the clearance.
+
+    Parameters
+    ----------
+    d_clear : Quantity
+        Clear distance to the obstacle (e.g. m).
+    total_latency : Quantity
+        Pre-brake delay tau (e.g. ms).
+    max_deceleration : Quantity
+        Stop limits a_max (m/s^2) and j_max (m/s^3).
+    max_jerk : Quantity
+        Stop limits a_max (m/s^2) and j_max (m/s^3).
+    loc_margin : Quantity, optional
+        Localization bound and protective clearance subtracted from d_clear.
+    physical_margin : Quantity, optional
+        Localization bound and protective clearance subtracted from d_clear.
+    approach_velocity : Quantity, optional
+        Speed at which the obstacle closes during delay and stop (e.g. m/s).
+
+    Returns
+    -------
+    Quantity
+        Speed ceiling in m/s (zero if the margins consume the clearance).
+
+    Notes
+    -----
+    Equation:
 
     Solves for the largest v with
 
@@ -289,27 +424,26 @@ def calc_scurve_max_permitted_velocity(
     stop regimes; for v_h = 0 in the trapezoidal regime the result equals
     calc_max_permitted_velocity with delay tau + a / (2 j).
 
-    Source: derived here from calc_scurve_stop_distance (Biagiotti and
+    Assumptions: Clearance, delay, margins, and obstacle approach speed are nonnegative;
+    deceleration and jerk limits are positive and the obstacle approaches at constant speed.
+
+    Excludes: Obstacle acceleration, curved motion, tracking error, and safety certification.
+
+    References
+    ----------
+    This inverse uses calc_scurve_stop_distance (Biagiotti and
     Melchiorri 2008, ch. 3) and the additive delay-plus-braking budget of
     calc_safe_stopping_distance.
 
-    Parameters
-    ----------
-    d_clear : Quantity
-        Clear distance to the obstacle (e.g. m).
-    total_latency : Quantity
-        Pre-brake delay tau (e.g. ms).
-    max_deceleration, max_jerk : Quantity
-        Stop limits a_max (m/s^2) and j_max (m/s^3).
-    loc_margin, physical_margin : Quantity, optional
-        Localization bound and protective clearance subtracted from d_clear.
-    approach_velocity : Quantity, optional
-        Speed at which the obstacle closes during delay and stop (e.g. m/s).
+    Derivation: Find the largest root of delay travel plus S-curve travel plus obstacle closure
+    minus available clearance by bisection.
 
-    Returns
-    -------
-    Quantity
-        Speed ceiling in m/s (zero if the margins consume the clearance).
+    Examples
+    --------
+    >>> from mlsysim.physics.robotics.stopping import calc_scurve_max_permitted_velocity
+    >>> from mlsysim.core.units import ureg
+    >>> calc_scurve_max_permitted_velocity(ureg('0 m'), ureg('0 s'), ureg('1 m/s**2'), ureg('1 m/s**3')) == ureg('0 m/s')
+    True
     """
     validate_nonnegative(d_clear, "d_clear")
     validate_nonnegative(total_latency, "total_latency")
@@ -350,12 +484,29 @@ def calc_scurve_max_permitted_velocity(
 
 
 def calc_scurve_rest_to_rest_time(distance, max_acceleration, max_jerk):
-    """
-    Calculate the duration of a jerk-limited rest-to-rest move with no cruise phase.
+    """Calculate the duration of a jerk-limited rest-to-rest move with no cruise phase.
+
+    Parameters
+    ----------
+    distance : Quantity
+        Positive linear distance in m or angular distance in rad.
+    max_acceleration : Quantity
+        Positive acceleration limit in distance-units per second squared.
+    max_jerk : Quantity
+        Positive jerk bound in m/s^3.
+
+    Returns
+    -------
+    dict
+        Duration in s, peak_velocity in distance-units/s, and Boolean reaches_max_acceleration.
+
+    Notes
+    -----
+    Equation:
 
     A symmetric double-S profile that accelerates, then immediately decelerates.
     With t_j = a/j and x the time from the start of the jerk ramp to the end of
-    the constant-acceleration plateau minus t_j (peak speed a*x):
+    the constant-acceleration plateau minus t_j (peak speed ``a*x)``:
 
         plateau reached (x >= t_j):  D = a * x * (x + t_j),  T = 2 (x + t_j)
         no plateau (D < 2 a^3 / j^2): D = 2 j tau^3,           T = 4 tau
@@ -363,8 +514,25 @@ def calc_scurve_rest_to_rest_time(distance, max_acceleration, max_jerk):
     Returns a dict with ``duration``, ``peak_velocity``, and ``reaches_max_acceleration``.
     Works for linear or angular moves (distance in m or rad, rates to match).
 
-    Source: Biagiotti and Melchiorri, Trajectory Planning for Automatic Machines
+    Assumptions: Distance and both limits are positive; the symmetric profile has no speed limit
+    or cruise phase, with matching linear or angular units.
+
+    Excludes: Velocity ceilings, tracking error, and asymmetric acceleration limits.
+
+    References
+    ----------
+    Biagiotti and Melchiorri, Trajectory Planning for Automatic Machines
     and Robots (Springer, 2008), ch. 3, double-S velocity profile.
+
+    Derivation: Integrate the symmetric double-S profile; solve a quadratic when the
+    acceleration plateau exists and a cubic otherwise.
+
+    Examples
+    --------
+    >>> from mlsysim.physics.robotics.stopping import calc_scurve_rest_to_rest_time
+    >>> from mlsysim.core.units import ureg
+    >>> calc_scurve_rest_to_rest_time(ureg('1 m'), ureg('1 m/s**2'), ureg('1 m/s**3'))['duration'].check('[time]')
+    True
     """
     validate_positive(distance, "distance")
     validate_positive(max_acceleration, "max_acceleration")
@@ -403,26 +571,16 @@ def calc_latch_contact_stopping_profile(
     *,
     scenario=None,
 ):
-    """
-    Calculate contact force rise, brake command force, and required arm deceleration upon latch contact.
-
-    When a robot manipulator contacts a compliant latch or strike plate:
-    1. Force accumulation rate: df/dt = k_latch * v_approach
-    2. Force at brake command onset (tripwire force + accumulation during response time):
-       f_cmd = f_tripwire + k_latch * v_approach * t_response
-    3. Remaining allowable deflection before exceeding contact limit f_limit:
-       x_remaining = (f_limit - f_cmd) / k_latch
-    4. Required constant arm deceleration to halt within x_remaining:
-       a_arm_needed = v_approach^2 / (2 * x_remaining)
-    5. Duration of the arm stopping phase:
-       t_arm_stop = v_approach / a_arm_needed
+    """Calculate force rise and required braking after latch contact.
 
     Parameters
     ----------
     approach_velocity : Quantity, optional
-        Arm approach speed (e.g. m/s). If omitted and scenario is given, defaults to scenario.v_latch_approach.
+        Arm approach speed (e.g. m/s). If omitted and scenario is given, defaults to
+        scenario.v_latch_approach.
     tripwire_force : Quantity, optional
-        Tripwire threshold force (e.g. N). Defaults to scenario.f_latch_tripwire if scenario is given.
+        Tripwire threshold force (e.g. N). Defaults to scenario.f_latch_tripwire if scenario is
+        given.
     latch_stiffness : Quantity, optional
         Spring stiffness of the latch mechanism (e.g. N/m). Defaults to scenario.k_latch.
     response_time : Quantity, optional
@@ -441,6 +599,39 @@ def calc_latch_contact_stopping_profile(
         - "a_arm_needed": Required arm deceleration to honor force limit (Quantity in m/s^2).
         - "t_arm_stop": Arm stopping duration (Quantity in ms).
         - "df_dt": Force rate of rise during contact (Quantity in N/s).
+
+    Notes
+    -----
+    Equation:
+
+    When a robot manipulator contacts a compliant latch or strike plate:
+    1. Force accumulation rate: df/dt = k_latch * v_approach
+    2. Force at brake command onset (tripwire force + accumulation during response time):
+       f_cmd = f_tripwire + k_latch * v_approach * t_response
+    3. Remaining allowable deflection before exceeding contact limit f_limit:
+       x_remaining = (f_limit - f_cmd) / k_latch
+    4. Required constant arm deceleration to halt within x_remaining:
+       a_arm_needed = v_approach^2 / (2 * x_remaining)
+    5. Duration of the arm stopping phase:
+       t_arm_stop = v_approach / a_arm_needed
+
+    Assumptions: Positive approach speed remains constant until brake onset; a positive linear
+    stiffness sets force and braking deceleration is constant afterward. Brake-onset force must
+    remain below the limit.
+
+    Excludes: Jerk ramps, damping, actuator limits, and contact safety certification.
+
+    References
+    ----------
+    Derivation: Use Hooke's law for the remaining compression and solve v squared/(2 a) =
+    remaining compression for required deceleration.
+
+    Examples
+    --------
+    >>> from mlsysim.physics.robotics.stopping import calc_latch_contact_stopping_profile
+    >>> from mlsysim.core.units import ureg
+    >>> calc_latch_contact_stopping_profile(ureg('1 m/s'), ureg('1 N'), ureg('1 N/m'), ureg('1 s'), ureg('10 N'))['a_arm_needed'].check('[length]/[time]**2')
+    True
     """
     if scenario is not None:
         if approach_velocity is None:
@@ -454,7 +645,13 @@ def calc_latch_contact_stopping_profile(
         if force_limit is None:
             force_limit = scenario.f_latch_limit
 
-    if approach_velocity is None or tripwire_force is None or latch_stiffness is None or response_time is None or force_limit is None:
+    if (
+        approach_velocity is None
+        or tripwire_force is None
+        or latch_stiffness is None
+        or response_time is None
+        or force_limit is None
+    ):
         raise ValueError("All parameters must be provided directly or inferred from scenario.")
 
     validate_positive(approach_velocity, "approach_velocity")
@@ -490,18 +687,9 @@ def calc_latch_contact_stopping_profile(
 
 # --- Elementary stopping budget terms (added 2026-10-20) --------------------
 
+
 def calc_stopping_crossover_speed(total_latency, max_deceleration):
-    """
-    Speed at which travel during the pre-brake delay equals braking travel.
-
-    Equation:
-        v * tau = v^2 / (2 * a)  =>  v* = 2 * a * tau
-
-    Below v*, delay travel is the larger term of the elementary stopping
-    budget; above it, braking travel is.
-
-    Source: equates the two terms of calc_safe_stopping_distance (OpenStax,
-    University Physics Volume 1, Sec. 3.4, Eq. 3.14 and Example 3.10).
+    """Speed at which travel during the pre-brake delay equals braking travel.
 
     Parameters
     ----------
@@ -514,6 +702,32 @@ def calc_stopping_crossover_speed(total_latency, max_deceleration):
     -------
     Quantity
         Crossover speed in m/s.
+
+    Notes
+    -----
+    Equation:
+        v * tau = v^2 / (2 * a)  =>  v* = 2 * a * tau
+
+    Below v*, delay travel is the larger term of the elementary stopping
+    budget; above it, braking travel is.
+
+    Assumptions: Delay is nonnegative and braking deceleration is positive and constant.
+
+    Excludes: Margins, jerk ramps, and moving obstacles.
+
+    References
+    ----------
+    The crossover equates the two terms of calc_safe_stopping_distance (OpenStax,
+    University Physics Volume 1, Sec. 3.4, Eq. 3.14 and Example 3.10).
+
+    Derivation: Equate v tau to v squared/(2 a) and select the nonzero crossover branch v = 2 a tau.
+
+    Examples
+    --------
+    >>> from mlsysim.physics.robotics.stopping import calc_stopping_crossover_speed
+    >>> from mlsysim.core.units import ureg
+    >>> calc_stopping_crossover_speed(ureg('0 s'), ureg('1 m/s**2')) == ureg('0 m/s')
+    True
     """
     validate_nonnegative(total_latency, "total_latency")
     validate_positive(max_deceleration, "max_deceleration")
@@ -521,19 +735,43 @@ def calc_stopping_crossover_speed(total_latency, max_deceleration):
 
 
 def calc_braking_time(velocity, max_deceleration):
-    """
-    Time to brake from ``velocity`` to rest at constant deceleration.
+    """Time to brake from ``velocity`` to rest at constant deceleration.
 
-    Equation:
-        t_brake = v / a
-
-    Source: v = v0 + a * t with v = 0 (OpenStax, University Physics Volume 1,
-    Sec. 3.4, Eq. 3.12).
+    Parameters
+    ----------
+    velocity : Quantity
+        Nonnegative forward speed in m/s.
+    max_deceleration : Quantity
+        Positive braking deceleration bound in m/s^2.
 
     Returns
     -------
     Quantity
         Braking time in seconds.
+
+    Notes
+    -----
+    Equation:
+        t_brake = v / a
+
+    Assumptions: Speed is nonnegative and the positive braking deceleration is constant.
+
+    Excludes: Reaction time, jerk ramps, and speed-dependent braking.
+
+    References
+    ----------
+    The constant-acceleration relation v = v0 + a * t is evaluated at rest (OpenStax, University
+    Physics Volume 1,
+    Sec. 3.4, Eq. 3.12).
+
+    Derivation: Integrate dv/dt = -a to rest to get elapsed time v/a.
+
+    Examples
+    --------
+    >>> from mlsysim.physics.robotics.stopping import calc_braking_time
+    >>> from mlsysim.core.units import ureg
+    >>> calc_braking_time(ureg('1 m/s'), ureg('1 m/s**2')) == ureg('1 s')
+    True
     """
     validate_nonnegative(velocity, "velocity")
     validate_positive(max_deceleration, "max_deceleration")
@@ -541,9 +779,24 @@ def calc_braking_time(velocity, max_deceleration):
 
 
 def calc_travel_between_speeds(start_velocity, end_velocity, duration):
-    """
-    Distance covered while speed changes uniformly between two recorded values.
+    """Distance covered while speed changes uniformly between two recorded values.
 
+    Parameters
+    ----------
+    start_velocity : Quantity
+        Nonnegative initial speed in m/s.
+    end_velocity : Quantity
+        Nonnegative final speed in m/s.
+    duration : Quantity
+        Nonnegative elapsed time in s.
+
+    Returns
+    -------
+    Quantity
+        Distance in meters.
+
+    Notes
+    -----
     Equation:
         x = (v_start + v_end) / 2 * t
 
@@ -551,13 +804,25 @@ def calc_travel_between_speeds(start_velocity, end_velocity, duration):
     with two recorded speeds it is the trapezoid estimate of the distance
     covered between them.
 
-    Source: x = (v0 + v) / 2 * t for constant acceleration (OpenStax,
+    Assumptions: Both endpoint speeds and duration are nonnegative; speed varies linearly
+    between endpoints.
+
+    Excludes: Unobserved nonlinear speed changes and reverse travel.
+
+    References
+    ----------
+    Constant-acceleration travel is x = (v0 + v) / 2 * t (OpenStax,
     University Physics Volume 1, Sec. 3.4, Eq. 3.11 with Eq. 3.12).
 
-    Returns
-    -------
-    Quantity
-        Distance in meters.
+    Derivation: Integrate the linear velocity interpolation: mean endpoint speed times elapsed
+    duration.
+
+    Examples
+    --------
+    >>> from mlsysim.physics.robotics.stopping import calc_travel_between_speeds
+    >>> from mlsysim.core.units import ureg
+    >>> calc_travel_between_speeds(ureg('1 m/s'), ureg('1 m/s'), ureg('1 s')) == ureg('1 m')
+    True
     """
     validate_nonnegative(start_velocity, "start_velocity")
     validate_nonnegative(end_velocity, "end_velocity")
@@ -566,9 +831,24 @@ def calc_travel_between_speeds(start_velocity, end_velocity, duration):
 
 
 def calc_smoothstep_braking_blend(entry_velocity, deceleration, window):
-    """
-    Exit speed and travel of a fixed-endpoint smoothstep blend from cruise into braking.
+    """Exit speed and travel of a fixed-endpoint smoothstep blend from cruise into braking.
 
+    Parameters
+    ----------
+    entry_velocity : Quantity
+        Nonnegative speed at onset in m/s.
+    deceleration : Quantity
+        Positive braking deceleration in m/s^2.
+    window : Quantity
+        Positive blend duration in s.
+
+    Returns
+    -------
+    dict
+        ``exit_speed`` (m/s) and ``travel`` (m).
+
+    Notes
+    -----
     Equation:
         a(t) = -a_b alpha(t / T),  alpha(s) = 10 s^3 - 15 s^4 + 6 s^5
         v_exit = v0 - a_b T / 2          (the integral of alpha over [0, 1] is 1/2)
@@ -578,22 +858,57 @@ def calc_smoothstep_braking_blend(entry_velocity, deceleration, window):
     so the commanded deceleration rises from zero to a_b with continuous jerk
     (added 2026-10-20).
 
-    Returns
-    -------
-    dict
-        ``exit_speed`` (m/s) and ``travel`` (m).
+    Assumptions: Entry speed is nonnegative; positive deceleration rises through a quintic
+    smoothstep over a positive window. The intended regime avoids reversing before the window
+    ends.
+
+    Excludes: A zero-speed clamp and subsequent stop. An overlong window can return a negative
+    exit speed.
+
+    References
+    ----------
+    Derivation: Integrate the quintic once for velocity and twice for displacement; the full-
+    window integrals are one-half and one-seventh.
+
+    Examples
+    --------
+    >>> from mlsysim.physics.robotics.stopping import calc_smoothstep_braking_blend
+    >>> from mlsysim.core.units import ureg
+    >>> calc_smoothstep_braking_blend(ureg('1 m/s'), ureg('1 m/s**2'), ureg('1 s'))['exit_speed'].check('[length]/[time]')
+    True
     """
     validate_nonnegative(entry_velocity, "entry_velocity")
     validate_positive(deceleration, "deceleration")
     validate_positive(window, "window")
     v_exit = (entry_velocity - deceleration * window / 2).to(ureg.meter / ureg.second)
-    travel = (entry_velocity * window - deceleration * window ** 2 / 7).to(ureg.meter)
+    travel = (entry_velocity * window - deceleration * window**2 / 7).to(ureg.meter)
     return {"exit_speed": v_exit, "travel": travel}
 
 
 def calc_blend_reserve_use(entry_velocity, deceleration, max_jerk, window, tick):
-    """
-    Largest growth, over a smoothstep blend's ticks, of travel plus the resident stop.
+    """Largest growth, over a smoothstep blend's ticks, of travel plus the resident stop.
+
+    Parameters
+    ----------
+    entry_velocity : Quantity
+        Nonnegative speed at onset in m/s.
+    deceleration : Quantity
+        Positive braking deceleration in m/s^2.
+    max_jerk : Quantity
+        Positive jerk bound in m/s^3.
+    window : Quantity
+        Positive blend duration in s.
+    tick : Quantity
+        Positive permission sampling interval in s.
+
+    Returns
+    -------
+    Quantity
+        Reserve use in millimeters.
+
+    Notes
+    -----
+    Equation:
 
     At each permission tick i of a blend of length T from cruise into braking,
     u = min(i * tick / T, 1); the blended speed and travel follow from the
@@ -608,10 +923,23 @@ def calc_blend_reserve_use(entry_velocity, deceleration, max_jerk, window, tick)
     acceleration, which overstates it while the blend is already decelerating,
     so the bound is conservative (added 2026-10-20).
 
-    Returns
-    -------
-    Quantity
-        Reserve use in millimeters.
+    Assumptions: Positive window and tick define a finite permission grid; positive deceleration
+    and jerk define the resident stop, and blended speed stays nonnegative.
+
+    Excludes: Between-tick maxima, acceleration-aware resident stopping, tracking error, and
+    safety certification.
+
+    References
+    ----------
+    Derivation: At each sampled permission time, integrate the blend and add the resident zero-
+    acceleration stop; subtract the original stop distance and take the largest sampled growth.
+
+    Examples
+    --------
+    >>> from mlsysim.physics.robotics.stopping import calc_blend_reserve_use
+    >>> from mlsysim.core.units import ureg
+    >>> calc_blend_reserve_use(ureg('1 m/s'), ureg('1 m/s**2'), ureg('1 m/s**3'), ureg('0.1 s'), ureg('0.01 s')).check('[length]')
+    True
     """
     d_start = calc_scurve_stop_distance(entry_velocity, deceleration, max_jerk)
     n = math.ceil((window / tick).to("").magnitude - 1e-9)

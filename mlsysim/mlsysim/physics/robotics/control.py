@@ -18,8 +18,30 @@ def calc_action_chunk_streaming_amortization(
     chunk_horizon: int,
     bus_efficiency: float = 0.70,
 ):
-    """
-    Calculate a weight-stream lower bound and its amortized cost per waypoint.
+    """Calculate the weight-stream floor per chunk and per waypoint.
+
+    Parameters
+    ----------
+    model_weight_memory : Quantity
+        Model parameter storage footprint (e.g. GB).
+    memory_bandwidth : Quantity
+        Peak memory bus bandwidth (e.g. GB/s).
+    chunk_horizon : int
+        Number of steps predicted per chunk H (>= 1).
+    bus_efficiency : float, optional
+        Sustained DRAM efficiency fraction eta in (0, 1] (default 0.70).
+        This physical range is a caller requirement, not validated here.
+
+    Returns
+    -------
+    dict
+        Fields: t_stream, f_single, tau_step, f_waypoint_equivalent,
+        f_effective (legacy alias), b_sustained. Times are milliseconds, rates
+        are hertz, and sustained bandwidth is GB/s.
+
+    Notes
+    -----
+    Equation: t = M / (BW eta); waypoint time = t / H.
 
     Under memory-bandwidth bound autoregressive weight streaming:
         t_stream = M_weights / (BW_peak * eta_bus)
@@ -32,25 +54,22 @@ def calc_action_chunk_streaming_amortization(
     work and other inference costs are excluded. ``f_effective`` is retained
     as a legacy alias for callers of this function.
 
-    Source: Zhao et al., "Learning Fine-Grained Bimanual Manipulation with Low-Cost Hardware",
+    Assumptions: One weight read per chunk and a positive caller-supplied sustained-bandwidth fraction. The default fraction is an assumption.
+
+    Excludes: Decoder compute, KV traffic, transport, and fresh-observation frequency.
+
+    References
+    ----------
+    Derivation: Divide bytes by sustained bytes per second, then allocate that time over H waypoints. The action-chunk paper motivates chunking, not the assumed efficiency.
+
+    Zhao et al., "Learning Fine-Grained Bimanual Manipulation with Low-Cost Hardware",
     arXiv:2304.13705; Volume IV Chapter 3.
 
-    Parameters
-    ----------
-    model_weight_memory : Quantity
-        Model parameter storage footprint (e.g. GB).
-    memory_bandwidth : Quantity
-        Peak memory bus bandwidth (e.g. GB/s).
-    chunk_horizon : int
-        Number of steps predicted per chunk H (>= 1).
-    bus_efficiency : float, optional
-        Sustained DRAM efficiency factor eta (default 0.70).
-
-    Returns
-    -------
-    dict
-        t_stream, f_single, tau_step, f_waypoint_equivalent,
-        f_effective (legacy alias), b_sustained.
+    Examples
+    --------
+    >>> result = calc_action_chunk_streaming_amortization(ureg.Quantity("1 GB"), ureg.Quantity("10 GB/s"), 4, bus_efficiency=1.0)
+    >>> bool(result["tau_step"] * 4 == result["t_stream"])
+    True
     """
     validate_at_least(chunk_horizon, 1, "chunk_horizon")
     validate_positive(model_weight_memory, "model_weight_memory")
@@ -79,8 +98,36 @@ def calc_chunk_renewal_schedule(
     chunk_horizon: int,
     inference_latency,
 ):
-    """
-    Timing of a chunk policy that renews on a whole number of setpoint steps.
+    """Calculate renewal timing on an aligned setpoint grid.
+
+    Parameters
+    ----------
+    chunk_rate : Quantity
+        Renewal rate f_r of the chunk policy (Hz).
+    chunk_step : Quantity
+        Setpoint spacing Delta t within a chunk (s).
+    chunk_horizon : int
+        Setpoints per chunk H (>= 1).
+    inference_latency : Quantity
+        Time from capture to an available chunk t_infer (s), for example a P99 target.
+
+    Returns
+    -------
+    dict
+        Fields: renewal_period, setpoints_per_renewal (int), open_loop_span,
+        min_supply_setpoints (int), chunk_span, overlapping_chunks (int),
+        renewal_slack (T_r - t_infer). All time values are milliseconds.
+
+    Raises
+    ------
+    ValueError
+        If the renewal period is not a whole number of setpoint steps, if the
+        inference does not finish within one renewal period, or if one chunk
+        cannot bridge a renewal (H < h_min).
+
+    Notes
+    -----
+    Equation: n = T_r / dt; open age = T_r + t_infer; H_min = ceil(open age / dt).
 
     A chunk policy begins a fresh evaluation every renewal period T_r = 1/f_r
     and emits H setpoints spaced Delta t apart. With the renewal on the setpoint
@@ -98,36 +145,25 @@ def calc_chunk_renewal_schedule(
     and admission delays. n_overlap is the number of predictions a temporal
     ensemble blends at a step in steady state.
 
-    Source: action chunking and temporal ensembling from Zhao et al., "Learning
+    Assumptions: Periodic renewal aligned with the setpoint grid and inference finishing before the next renewal.
+
+    Excludes: Transport delays, missed renewals, scheduling jitter, and closed-loop stability.
+
+    References
+    ----------
+    Derivation: Count grid intervals covered by renewal and inference; floor H/n counts complete overlapping chunks.
+
+    action chunking and temporal ensembling from Zhao et al., "Learning
     Fine-Grained Bimanual Manipulation with Low-Cost Hardware" (ACT), RSS 2023,
     arXiv:2304.13705, which queries its policy every step (n = 1). The
     renewal-on-the-grid requirement, the worst-case age, and the overlap count
     are arithmetic of this package for n > 1 (Volume IV, Brain chapter, section on action chunking).
 
-    Parameters
-    ----------
-    chunk_rate : Quantity
-        Renewal rate f_r of the chunk policy (Hz).
-    chunk_step : Quantity
-        Setpoint spacing Delta t within a chunk (s).
-    chunk_horizon : int
-        Setpoints per chunk H (>= 1).
-    inference_latency : Quantity
-        Time from capture to an available chunk t_infer (s), for example a P99 target.
-
-    Returns
-    -------
-    dict
-        renewal_period, setpoints_per_renewal (int), open_loop_span,
-        min_supply_setpoints (int), chunk_span, overlapping_chunks (int),
-        renewal_slack (T_r - t_infer).
-
-    Raises
-    ------
-    ValueError
-        If the renewal period is not a whole number of setpoint steps, if the
-        inference does not finish within one renewal period, or if one chunk
-        cannot bridge a renewal (H < h_min).
+    Examples
+    --------
+    >>> result = calc_chunk_renewal_schedule(10 * ureg.hertz, 10 * ureg.millisecond, 20, 20 * ureg.millisecond)
+    >>> bool(result["open_loop_span"] == result["renewal_period"] + 20 * ureg.millisecond)
+    True
     """
     validate_positive(chunk_rate, "chunk_rate")
     validate_positive(chunk_step, "chunk_step")
@@ -140,21 +176,16 @@ def calc_chunk_renewal_schedule(
     n_per_renewal = round(ratio)
     if n_per_renewal < 1 or abs(ratio - n_per_renewal) > 1e-9:
         raise ValueError(
-            f"renewal period {period:~P} is not a whole number of {step:~P} setpoint steps "
-            f"(ratio {ratio:.4g})"
+            f"renewal period {period:~P} is not a whole number of {step:~P} setpoint steps (ratio {ratio:.4g})"
         )
     t_infer = inference_latency.to(ureg.millisecond)
     if t_infer >= period:
-        raise ValueError(
-            f"inference latency {t_infer:~P} does not finish within the {period:~P} renewal period"
-        )
+        raise ValueError(f"inference latency {t_infer:~P} does not finish within the {period:~P} renewal period")
 
     open_loop = (period + t_infer).to(ureg.millisecond)
     h_min = math.ceil((open_loop / step).to("dimensionless").magnitude - 1e-12)
     if chunk_horizon < h_min:
-        raise ValueError(
-            f"chunk horizon {chunk_horizon} is shorter than the {h_min} setpoints one renewal needs"
-        )
+        raise ValueError(f"chunk horizon {chunk_horizon} is shorter than the {h_min} setpoints one renewal needs")
     span = (chunk_horizon * step).to(ureg.millisecond)
 
     return {
@@ -169,20 +200,7 @@ def calc_chunk_renewal_schedule(
 
 
 def calc_temporal_ensemble_weights(decay: float, predictions: int):
-    """
-    Normalized weights of a temporal ensemble over overlapping action chunks.
-
-    A chunk policy queried every step holds ``predictions`` overlapping
-    predictions for the current step, index 0 the oldest. ACT blends them with
-    exponentially decaying weights
-
-        w_i = exp(-k i) / sum_j exp(-k j),   i = 0 .. n - 1,
-
-    so the oldest prediction weighs most for k > 0.
-
-    Source: Zhao et al., "Learning Fine-Grained Bimanual Manipulation with
-    Low-Cost Hardware" (ACT), RSS 2023, arXiv:2304.13705, and its reference
-    code (imitate_episodes.py, temporal-ensembling branch).
+    """Normalize exponential weights over overlapping chunk predictions.
 
     Parameters
     ----------
@@ -194,8 +212,38 @@ def calc_temporal_ensemble_weights(decay: float, predictions: int):
     Returns
     -------
     dict
-        weights (numpy array, sums to 1), oldest_over_newest (w_0 / w_{n-1}),
+        Fields: weights (numpy array, sums to 1), oldest_over_newest (w_0 / w_{n-1}),
         newest_share (w_{n-1}).
+
+    Notes
+    -----
+    Equation: w_i = exp(-decay i) / sum_j exp(-decay j), oldest first.
+
+    A chunk policy queried every step holds ``predictions`` overlapping
+    predictions for the current step, index 0 the oldest. ACT blends them with
+    exponentially decaying weights
+
+        w_i = exp(-k i) / sum_j exp(-k j),   i = 0 .. n - 1,
+
+    so the oldest prediction weighs most for k > 0.
+
+    Assumptions: The oldest prediction has index zero; decay is nonnegative and the count is positive.
+
+    Excludes: Prediction quality, correlations, and whether blending preserves constraints.
+
+    References
+    ----------
+    Derivation: Normalize nonnegative exponential weights by their sum. A positive decay weights older entries more heavily.
+
+    Zhao et al., "Learning Fine-Grained Bimanual Manipulation with
+    Low-Cost Hardware" (ACT), RSS 2023, arXiv:2304.13705, and its reference
+    code (imitate_episodes.py, temporal-ensembling branch).
+
+    Examples
+    --------
+    >>> result = calc_temporal_ensemble_weights(0.0, 4)
+    >>> bool(np.allclose(result["weights"], np.ones(4) / 4))
+    True
     """
     validate_at_least(predictions, 1, "predictions")
     validate_nonnegative(decay, "decay")
@@ -213,8 +261,27 @@ def calc_watchdog_lease_bound(
     initial_velocity,
     max_deceleration,
 ):
-    """
-    Calculate the ideal total delay budget before emergency braking begins.
+    """Calculate the ideal total delay budget before braking.
+
+    Parameters
+    ----------
+    clearance_distance : Quantity
+        Defended physical clearance / sensory safety field ahead of obstacle (e.g. m).
+    initial_velocity : Quantity
+        Cruise velocity of the vehicle / mobile base v0 (e.g. m/s).
+    max_deceleration : Quantity
+        Positive emergency-braking deceleration supplied by the caller (e.g. m/s^2);
+        the function does not certify its achievability.
+
+    Returns
+    -------
+    dict
+        Fields: t_total_delay_max, t_lease_max (legacy alias), d_brake,
+        d_drift_allowable. Delay values are milliseconds and distances are meters.
+
+    Notes
+    -----
+    Equation: d_brake = v^2/(2a); delay = (clearance - d_brake)/v.
 
     Under constant velocity v0 during uncommanded drift, followed by emergency braking
     at constant deceleration a_max:
@@ -227,20 +294,19 @@ def calc_watchdog_lease_bound(
     brake-onset time. ``t_lease_max`` is retained as a legacy alias for the
     ideal total ceiling, not a safe standalone lease setting.
 
-    Parameters
-    ----------
-    clearance_distance : Quantity
-        Defended physical clearance / sensory safety field ahead of obstacle (e.g. m).
-    initial_velocity : Quantity
-        Cruise velocity of the vehicle / mobile base v0 (e.g. m/s).
-    max_deceleration : Quantity
-        Certified worst-case emergency braking deceleration a_max (e.g. m/s^2).
+    Assumptions: Constant positive speed during the delay followed by constant positive deceleration. The caller supplies the achievable deceleration.
 
-    Returns
-    -------
-    dict
-        t_total_delay_max, t_lease_max (legacy alias), d_brake,
-        d_drift_allowable.
+    Excludes: Detection, transport, and brake-onset reservations; this ceiling alone is not a safe watchdog setting or certification.
+
+    References
+    ----------
+    Derivation: Integrate constant acceleration to obtain stopping distance, subtract it from clearance, then divide the remaining drift distance by speed.
+
+    Examples
+    --------
+    >>> result = calc_watchdog_lease_bound(2 * ureg.meter, 1 * ureg.meter / ureg.second, 1 * ureg.meter / ureg.second**2)
+    >>> bool(result["d_brake"] + result["d_drift_allowable"] == 2 * ureg.meter)
+    True
     """
     validate_positive(clearance_distance, "clearance_distance")
     validate_positive(initial_velocity, "initial_velocity")
@@ -275,30 +341,7 @@ def calc_phase_lag_total(
     transport_delay=None,
     phase_allowance=None,
 ):
-    """
-    Total loop delay and the phase it removes at crossover (sample-and-hold,
-    compute, and transport terms together).
-
-    A zero-order hold behaves in the baseband like a pure delay of half a
-    sample period. A controller that outputs its command some time after it
-    samples adds that compute delay, and a command that reaches the actuator
-    one bus cycle later adds the transport delay. A pure delay tau removes
-    phase omega * tau at every frequency, so near crossover:
-
-        tau_total   = T_s / 2 + tau_comp + tau_bus
-        dphi_total  = 2 * pi * f_c * tau_total              (radians)
-
-    Given a phase allowance dphi_allow, the largest total delay the loop can
-    absorb, and the highest crossover a given total delay supports, are
-
-        tau_allow   = dphi_allow / (2 * pi * f_c)
-        f_c,max     = dphi_allow / (2 * pi * tau_total)
-
-    Source: Franklin, G. F., Powell, J. D. and Workman, M. L., Digital Control
-    of Dynamic Systems, 3rd ed., Addison-Wesley, 1998 (zero-order hold as a
-    T/2 delay; phase of a pure delay). The half-sample approximation holds
-    only well below the sampling frequency; it is a budget, not a stability
-    proof.
+    """Calculate phase consumed by sampling, compute, and transport.
 
     Parameters
     ----------
@@ -318,10 +361,49 @@ def calc_phase_lag_total(
     Returns
     -------
     dict
-        tau_zoh, tau_total (ms); phase_zoh, phase_compute, phase_transport,
+        Fields: tau_zoh, tau_total (ms); phase_zoh, phase_compute, phase_transport,
         phase_total (degrees); and, with phase_allowance, tau_allowed,
         tau_margin (negative when the budget fails), f_crossover_max,
         within_allowance.
+
+    Notes
+    -----
+    Equation: tau = T_s/2 + tau_compute + tau_bus; phase = 2 pi f_c tau.
+
+    A zero-order hold behaves in the baseband like a pure delay of half a
+    sample period. A controller that outputs its command some time after it
+    samples adds that compute delay, and a command that reaches the actuator
+    one bus cycle later adds the transport delay. A pure delay tau removes
+    phase omega * tau at every frequency, so near crossover:
+
+        tau_total   = T_s / 2 + tau_comp + tau_bus
+        dphi_total  = 2 * pi * f_c * tau_total              (radians)
+
+    Given a phase allowance dphi_allow, the largest total delay the loop can
+    absorb, and the highest crossover a given total delay supports, are
+
+        tau_allow   = dphi_allow / (2 * pi * f_c)
+        f_c,max     = dphi_allow / (2 * pi * tau_total)
+
+    Assumptions: The zero-order-hold half-period approximation applies well below the sampling frequency.
+
+    Excludes: Plant/model uncertainty and a proof of closed-loop stability.
+
+    References
+    ----------
+    Derivation: Add serial delay contributions and apply the phase of exp(-s tau) at the crossover frequency.
+
+    Franklin, G. F., Powell, J. D. and Workman, M. L., Digital Control
+    of Dynamic Systems, 3rd ed., Addison-Wesley, 1998 (zero-order hold as a
+    T/2 delay; phase of a pure delay). The half-sample approximation holds
+    only well below the sampling frequency; it is a budget, not a stability
+    proof.
+
+    Examples
+    --------
+    >>> result = calc_phase_lag_total(10 * ureg.hertz, 2 * ureg.millisecond)
+    >>> bool(result["tau_total"] == result["tau_zoh"])
+    True
     """
     validate_positive(crossover_frequency, "crossover_frequency")
     validate_positive(sample_period, "sample_period")
@@ -372,8 +454,28 @@ def calc_canfd_frame_bits(
     extended_id: bool = False,
     worst_case_stuffing: bool = True,
 ):
-    """
-    Bit count of one CAN FD data frame, split by the bit rate each bit uses.
+    """Count nominal-rate and data-rate bits in one CAN FD frame.
+
+    Parameters
+    ----------
+    payload_bytes : int
+        Application bytes to carry (0 to 64). Padded up to the next data-field
+        size a DLC can encode.
+    extended_id : bool
+        29-bit identifier (extended format) instead of 11-bit.
+    worst_case_stuffing : bool
+        Include the worst-case dynamic stuff bits (the bound a response-time
+        analysis needs). False gives the unstuffed length.
+
+    Returns
+    -------
+    dict
+        Fields: data_field_bytes, crc_bits, fixed_stuff_bits, stuff_bits_nominal,
+        stuff_bits_data, bits_nominal, bits_data (all int).
+
+    Notes
+    -----
+    Equation: bits = fixed fields + padded payload bits + selected stuffing bound.
 
     Frame layout (ISO 11898-1:2015 FD base format; extended format adds the
     SRR bit and the 18-bit identifier extension):
@@ -394,28 +496,25 @@ def calc_canfd_frame_bits(
     above instead. BRS and the CRC delimiter straddle the rate switch; both
     are counted whole at the nominal rate, which slightly overstates the time.
 
-    Source: ISO 11898-1:2015, Road vehicles -- Controller area network (CAN)
+    Assumptions: The stated base/extended frame layout, legal DLC padding, and the selected worst-case or unstuffed mode.
+
+    Excludes: Error frames, retransmissions, arbitration waits, and measurement of an actual bus.
+
+    References
+    ----------
+    Derivation: Sum the documented frame fields; bound dynamic stuffing by floor((L-1)/4), with fixed CRC stuffing counted separately.
+
+    ISO 11898-1:2015, Road vehicles -- Controller area network (CAN)
     -- Part 1: Data link layer and physical signalling (FD frame format, stuff
     count, fixed stuff bits); Robert Bosch GmbH, CAN with Flexible Data-Rate,
     Specification Version 1.0, 2012 (dual bit rate, CRC-17/21, fixed CRC stuff
     bits).
 
-    Parameters
-    ----------
-    payload_bytes : int
-        Application bytes to carry (0 to 64). Padded up to the next data-field
-        size a DLC can encode.
-    extended_id : bool
-        29-bit identifier (extended format) instead of 11-bit.
-    worst_case_stuffing : bool
-        Include the worst-case dynamic stuff bits (the bound a response-time
-        analysis needs). False gives the unstuffed length.
-
-    Returns
-    -------
-    dict
-        data_field_bytes, crc_bits, fixed_stuff_bits, stuff_bits_nominal,
-        stuff_bits_data, bits_nominal, bits_data (all int).
+    Examples
+    --------
+    >>> result = calc_canfd_frame_bits(payload_bytes=9)
+    >>> result["data_field_bytes"] == min(size for size in CANFD_DATA_FIELD_SIZES if size >= 9)
+    True
     """
     validate_at_least(payload_bytes, 0, "payload_bytes")
     if payload_bytes > 64:
@@ -462,24 +561,7 @@ def calc_canfd_bus_utilization(
     extended_id: bool = False,
     worst_case_stuffing: bool = True,
 ):
-    """
-    Serialization time and bus occupancy of a cyclic CAN FD axis exchange.
-
-    Each axis exchanges ``frames_per_axis`` frames per cycle (default 2: one
-    command frame from the controller and one feedback frame from the drive;
-    CAN carries them separately, unlike a summation-frame bus such as
-    EtherCAT). Frame bits come from ``calc_canfd_frame_bits``:
-
-        t_frame   = bits_nominal / R_nom + bits_data / R_data
-        n_frames  = num_axes * frames_per_axis
-        t_total   = n_frames * t_frame
-        rho       = t_total / cycle_time
-
-    rho <= 1 is only a necessary condition: non-preemptive blocking, competing
-    frames, and error retransmissions still need a response-time analysis.
-
-    Source: frame format per ISO 11898-1:2015 and Bosch CAN FD Specification
-    1.0 (2012), via ``calc_canfd_frame_bits``.
+    """Calculate serial CAN FD occupancy for a cyclic axis exchange.
 
     Parameters
     ----------
@@ -505,8 +587,45 @@ def calc_canfd_bus_utilization(
     Returns
     -------
     dict
-        t_tx (per frame), t_total_tx, n_frames, utilization, is_schedulable,
+        Fields: t_tx (per frame), t_total_tx, n_frames, utilization, is_schedulable,
         plus the per-frame bit breakdown of ``calc_canfd_frame_bits``.
+        Times are microseconds, utilization is dimensionless, and counts
+        are integers. is_schedulable checks occupancy only.
+
+    Notes
+    -----
+    Equation: t_frame = b_nom/R_nom + b_data/R_data; occupancy = axes frames_per_axis t_frame / cycle.
+
+    Each axis exchanges ``frames_per_axis`` frames per cycle (default 2: one
+    command frame from the controller and one feedback frame from the drive;
+    CAN carries them separately, unlike a summation-frame bus such as
+    EtherCAT). Frame bits come from ``calc_canfd_frame_bits``:
+
+        t_frame   = bits_nominal / R_nom + bits_data / R_data
+        n_frames  = num_axes * frames_per_axis
+        t_total   = n_frames * t_frame
+        rho       = t_total / cycle_time
+
+    rho <= 1 is only a necessary condition: non-preemptive blocking, competing
+    frames, and error retransmissions still need a response-time analysis.
+
+    Assumptions: One serial bus, identical frame lengths, positive rates/cycle, and the chosen frame-stuffing policy.
+
+    Excludes: Non-preemptive blocking, other traffic, errors, and sufficient schedulability or safety certification.
+
+    References
+    ----------
+    Derivation: Convert each bit-rate phase to time, sum frames, and divide by the available cycle.
+
+    frame format per ISO 11898-1:2015 and Bosch CAN FD Specification
+    1.0 (2012), via ``calc_canfd_frame_bits``.
+
+    Examples
+    --------
+    >>> one = calc_canfd_bus_utilization(1)
+    >>> two = calc_canfd_bus_utilization(2)
+    >>> bool(two["t_total_tx"] == 2 * one["t_total_tx"])
+    True
     """
     validate_at_least(num_axes, 1, "num_axes")
     validate_at_least(frames_per_axis, 1, "frames_per_axis")
@@ -549,20 +668,7 @@ def calc_ethercat_cycle_time(
     hop_delay=None,
     cycle_time=None,
 ):
-    """
-    Calculate on-the-fly hardware processing latency and bus utilization for EtherCAT daisy chain.
-
-    In an EtherCAT daisy-chain ring, a single standard Ethernet frame passes through all
-    slave ESCs (EtherCAT SubDevice Controllers). Each node processes and injects PDO data
-    on-the-fly with hardware forwarding latency hop_delay (typically 0.6 us).
-
-    Equation:
-        total_frame_bytes = header_bytes + (num_axes * bytes_per_axis)
-        t_tx = (total_frame_bytes * 8) / baud_rate
-        t_forward = num_axes * hop_delay
-        t_cycle_total = t_tx + t_forward
-        rho = t_cycle_total / cycle_time
-        t_margin = cycle_time - t_cycle_total
+    """Calculate serialization and forwarding time for an EtherCAT chain.
 
     Parameters
     ----------
@@ -582,7 +688,36 @@ def calc_ethercat_cycle_time(
     Returns
     -------
     dict
-        t_tx, t_forward, t_cycle_total, t_margin, utilization, is_schedulable.
+        Fields: t_tx, t_forward, t_cycle_total, t_margin (microseconds),
+        utilization (dimensionless), and is_schedulable (occupancy test only).
+
+    Notes
+    -----
+    In an EtherCAT daisy-chain ring, a single standard Ethernet frame passes through all
+    slave ESCs (EtherCAT SubDevice Controllers). Each node processes and injects PDO data
+    on-the-fly with hardware forwarding latency hop_delay (typically 0.6 us).
+
+    Equation:
+        total_frame_bytes = header_bytes + (num_axes * bytes_per_axis)
+        t_tx = (total_frame_bytes * 8) / baud_rate
+        t_forward = num_axes * hop_delay
+        t_cycle_total = t_tx + t_forward
+        rho = t_cycle_total / cycle_time
+        t_margin = cycle_time - t_cycle_total
+
+    Assumptions: One frame carries all supplied process data; each node adds the same forwarding delay. Positive rates/cycle and nonnegative overheads are caller requirements.
+
+    Excludes: Extra frames, synchronization jitter, competing traffic, and a sufficient schedulability or safety guarantee.
+
+    References
+    ----------
+    Derivation: Bytes become wire bits, bits divided by bit rate give serialization time, and serial node delays add.
+
+    Examples
+    --------
+    >>> result = calc_ethercat_cycle_time(2)
+    >>> bool(result["t_cycle_total"] == result["t_tx"] + result["t_forward"])
+    True
     """
     validate_at_least(num_axes, 1, "num_axes")
     validate_at_least(bytes_per_axis, 1, "bytes_per_axis")
@@ -612,8 +747,28 @@ def calc_ethercat_cycle_time(
 
 
 def calc_response_time_bound(wcet, blocking, interference, deadline=None):
-    """
-    Response-time bound of one periodic task: R = C + B + I.
+    """Sum declared execution, blocking, and interference bounds.
+
+    Parameters
+    ----------
+    wcet : Quantity
+        Nonnegative worst-case execution-time bound in time units.
+    blocking : Quantity
+        Nonnegative lower-priority blocking bound in time units.
+    interference : Quantity
+        Nonnegative higher-priority interference bound over the response window.
+    deadline : Quantity, optional
+        Positive deadline in time units; omit to return only the response bound.
+
+    Returns
+    -------
+    dict
+        Fields: response; with deadline, margin, meets_deadline, blocking_limit
+        (all times in microseconds).
+
+    Notes
+    -----
+    Equation: R = C + B + I; margin = D - R.
 
     ``wcet`` (C) is the task's worst-case execution time, ``blocking`` (B) the
     longest section in which lower-priority code keeps it from running, and
@@ -623,15 +778,23 @@ def calc_response_time_bound(wcet, blocking, interference, deadline=None):
     establish it. With a ``deadline`` D, the margin D - R and the largest
     blocking that still meets D (D - C - I) are returned as well.
 
-    Source: Buttazzo, G., Hard Real-Time Computing Systems, 3rd ed., Springer,
+    Assumptions: The three supplied terms are valid bounds for the same response window.
+
+    Excludes: Deriving interference through scheduling fixed points, empirical certification of WCET, and safety certification.
+
+    References
+    ----------
+    Derivation: Partition response time into own execution, blocking, and higher-priority interference, then add these disjoint contributions.
+
+    Buttazzo, G., Hard Real-Time Computing Systems, 3rd ed., Springer,
     2011 (response-time analysis with blocking); Sha, Rajkumar, and Lehoczky,
     "Priority Inheritance Protocols," IEEE Trans. Computers 39(9), 1990.
 
-    Returns
-    -------
-    dict
-        response; with deadline, margin, meets_deadline, blocking_limit
-        (all times in microseconds).
+    Examples
+    --------
+    >>> result = calc_response_time_bound(2 * ureg.microsecond, 3 * ureg.microsecond, 4 * ureg.microsecond, 12 * ureg.microsecond)
+    >>> bool(result["response"] + result["margin"] == 12 * ureg.microsecond)
+    True
     """
     us = ureg.microsecond
     for q, name in ((wcet, "wcet"), (blocking, "blocking"), (interference, "interference")):
@@ -649,8 +812,25 @@ def calc_response_time_bound(wcet, blocking, interference, deadline=None):
 
 
 def calc_cbf_qp_orthogonal_projection(u_nom, a_vec, b_scalar):
-    """
-    Project onto a supplied abstract half-space in Euclidean control coordinates.
+    """Project a nominal control vector onto one supplied half-space.
+
+    Parameters
+    ----------
+    u_nom : array_like
+        Finite nominal vector in consistent Euclidean control coordinates.
+    a_vec : array_like
+        Half-space normal with the same length as u_nom; nonzero when correction is needed.
+    b_scalar : float
+        Finite half-space bound in the units of the dot product a_vec dot u_nom.
+
+    Returns
+    -------
+    dict
+        Projected vector, correction norm, multiplier lambda_star, and was_modified flag. Units follow the supplied control coordinates.
+
+    Notes
+    -----
+    Equation: u* = u_nom - max(0, (a dot u_nom - b)/(a dot a)) a for nonzero a.
 
     Solves the quadratic program:
         min  1/2 ||u - u_nom||^2
@@ -658,6 +838,20 @@ def calc_cbf_qp_orthogonal_projection(u_nom, a_vec, b_scalar):
 
     The caller must derive ``a`` and ``b`` from its plant and barrier. This
     arithmetic alone proves neither forward invariance nor a physical stop.
+
+    Assumptions: One Euclidean half-space with compatible vector dimensions and a nonzero normal for an active constraint.
+
+    Excludes: Plant dynamics, deriving the barrier, forward-invariance proofs, and physical safety certification.
+
+    References
+    ----------
+    Derivation: The active half-space boundary requires a dot u*=b; minimizing correction length makes the correction parallel to a.
+
+    Examples
+    --------
+    >>> result = calc_cbf_qp_orthogonal_projection([2.0, 0.0], [1.0, 0.0], 1.0)
+    >>> result["u_projected"] == [1.0, 0.0]
+    True
     """
     u_n = np.asarray(u_nom, dtype=float)
     a = np.asarray(a_vec, dtype=float)
@@ -697,7 +891,37 @@ def calc_axi_fifo_contention(
     bank_switch_time,
     compute_time,
 ):
-    """Compare a constructed FIFO backlog with priority bypass at AXI granularity.
+    """Compare a finite FIFO backlog with priority bypass.
+
+    Parameters
+    ----------
+    tile_bytes : int
+        Positive tile-transfer bytes, aligned to transaction_bytes.
+    camera_bytes : int
+        Positive camera-transfer bytes, aligned to transaction_bytes.
+    telemetry_bytes : int
+        Positive telemetry-transfer bytes, aligned to transaction_bytes.
+    safety_read_bytes : int
+        Positive defended-read bytes, aligned to transaction_bytes.
+    transaction_bytes : int
+        Positive bytes per indivisible transaction.
+    bandwidth : Quantity
+        Positive transfer bandwidth in bytes per second.
+    bank_switches : int
+        Nonnegative bank switches charged to FIFO backlog.
+    bank_switch_time : Quantity
+        Nonnegative time per bank switch.
+    compute_time : Quantity
+        Nonnegative compute time added after memory service.
+
+    Returns
+    -------
+    dict
+        Transaction counts and queue/read/total times in microseconds for FIFO and priority-bypass assumptions.
+
+    Notes
+    -----
+    Equation: FIFO wait = (tile + camera + telemetry)/BW + switches switch_time; bypass wait = transaction/BW.
 
     All transfers are aligned multiples of ``transaction_bytes``. The FIFO
     scenario admits the entire tile, camera transfer, and telemetry transfer
@@ -705,6 +929,20 @@ def calc_axi_fifo_contention(
     scenario waits only for one already in-flight transaction. These are
     controller-policy assumptions, not AXI timing guarantees. Peak bandwidth
     ignores arbitration, refresh, and protocol overhead, so times are floors.
+
+    Assumptions: Aligned transfers, no arrivals after the initial FIFO backlog, and priority bypass blocked only by the current transaction.
+
+    Excludes: Refresh, arbitration, protocol overhead, and any AXI latency or safety guarantee.
+
+    References
+    ----------
+    Derivation: A constructed policy scenario sums service times of bytes ahead of a read; priority bypass retains only one non-preemptible transaction.
+
+    Examples
+    --------
+    >>> result = calc_axi_fifo_contention(tile_bytes=64, camera_bytes=32, telemetry_bytes=16, safety_read_bytes=16, transaction_bytes=16, bandwidth=ureg.Quantity("1 GB/s"), bank_switches=0, bank_switch_time=0 * ureg.nanosecond, compute_time=0 * ureg.nanosecond)
+    >>> bool(result["total_fifo"] >= result["total_priority_bypass"])
+    True
     """
     for name, count in (
         ("tile_bytes", tile_bytes),
@@ -715,9 +953,7 @@ def calc_axi_fifo_contention(
     ):
         if not isinstance(count, int) or count <= 0:
             raise ValueError(f"{name} must be a positive integer")
-    if any(count % transaction_bytes for count in (
-        tile_bytes, camera_bytes, telemetry_bytes, safety_read_bytes
-    )):
+    if any(count % transaction_bytes for count in (tile_bytes, camera_bytes, telemetry_bytes, safety_read_bytes)):
         raise ValueError("all transfers must align to transaction_bytes")
     if not isinstance(bank_switches, int) or bank_switches < 0:
         raise ValueError("bank_switches must be a nonnegative integer")
@@ -744,9 +980,22 @@ def calc_axi_fifo_contention(
 
 
 def calc_delay_phase_margin_ceiling(phase_margin, crossover):
-    """
-    Longest pure delay a loop can absorb before its phase margin is gone (added 2026-10-20).
+    """Convert nominal phase margin into an ideal pure-delay ceiling.
 
+    Parameters
+    ----------
+    phase_margin : Quantity
+        Positive phase margin in angle units, converted to radians.
+    crossover : Quantity
+        Positive angular gain-crossover frequency in radians per second.
+
+    Returns
+    -------
+    Quantity
+        Delay ceiling in milliseconds.
+
+    Notes
+    -----
     Equation:
         phase lost = omega_c tau  =>  tau_max = PM / omega_c
 
@@ -754,8 +1003,22 @@ def calc_delay_phase_margin_ceiling(phase_margin, crossover):
     frequency, so at the gain crossover omega_c it spends the nominal margin
     PM (radians) at tau_max.
 
-    Source: Franklin, Powell, and Emami-Naeini, Feedback Control of Dynamic
+    Assumptions: A pure delay preserves gain, and the supplied crossover/margin describe the nominal loop.
+
+    Excludes: Robustness to plant uncertainty and certification of closed-loop safety.
+
+    References
+    ----------
+    Derivation: At crossover, exp(-s tau) consumes angular_crossover times tau radians of phase.
+
+    Franklin, Powell, and Emami-Naeini, Feedback Control of Dynamic
     Systems, 8th ed. (2019), Sec. 6.4 (time delay); the delay margin.
+
+    Examples
+    --------
+    >>> delay = calc_delay_phase_margin_ceiling(1 * ureg.radian, 2 * ureg.radian / ureg.second)
+    >>> bool(delay * 2 == 1 * ureg.second)
+    True
     """
     validate_positive(crossover, "crossover")
     pm = phase_margin.to(ureg.radian).magnitude

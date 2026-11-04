@@ -46,6 +46,45 @@ class AllReduceAlgorithmModel(ForwardModel):
 
     def solve(self, message: Quantity, group_sizes: Sequence[int], alpha: Quantity,
               bandwidth: Quantity) -> AllReduceAlgorithmResult:
+        """Compare ring, tree, and star transfer bounds.
+
+        Parameters
+        ----------
+        message : Quantity
+            Nonnegative buffer size as a byte-compatible quantity.
+        group_sizes : Sequence[int]
+            Integer rank counts, each at least two.
+        alpha : Quantity
+            Nonnegative startup latency per round as a time quantity.
+        bandwidth : Quantity
+            Positive per-port transfer rate in bytes per second.
+
+        Returns
+        -------
+        AllReduceAlgorithmResult
+            Modeled accounting components with unit-bearing sizes and times; ratios
+            are dimensionless. These components do not certify deployment feasibility.
+
+        Notes
+        -----
+        Equation: T_ring = 2(N-1) alpha + 2(N-1)M/(N bandwidth); tree uses twice the ceiling of log2(N) rounds.
+
+        Assumptions: Equal chunks and serialized startup-plus-transfer costs.
+
+        Excludes: Contention, reduction arithmetic, and protocol overhead.
+
+        References
+        ----------
+        Derivation: T_ring = 2(N-1) alpha + 2(N-1)M/(N bandwidth); tree uses twice the ceiling of log2(N) rounds. The class documentation describes
+        the accounting sequence and its modeling context.
+
+        Examples
+        --------
+        >>> from mlsysim.core.units import Q_
+        >>> r = AllReduceAlgorithmModel().solve(Q_('1 MB'), [2, 4], Q_('1 us'), Q_('1 GB/s'))
+        >>> r.ring_time[4] > r.ring_startup_time[4]
+        True
+        """
         out = {k: {} for k in ("chunk", "ring_factor", "ring_rounds", "tree_rounds", "ring_byte_time",
                                "ring_startup_time", "ring_time", "tree_byte_time", "tree_startup_time",
                                "tree_time", "star_byte_time", "star_ring_limit", "crossover_estimate",
@@ -96,6 +135,49 @@ class HierarchicalAllReduceModel(ForwardModel):
 
     def solve(self, message: Quantity, n_nodes: int, gpus_per_node: int, intra_bandwidth: Quantity,
               inter_bandwidth: Quantity, inter_alpha: Quantity) -> HierarchicalAllReduceResult:
+        """Compare hierarchical and flat AllReduce bounds.
+
+        Parameters
+        ----------
+        message : Quantity
+            Nonnegative buffer size as a byte-compatible quantity.
+        n_nodes : int
+            Positive integer node count.
+        gpus_per_node : int
+            Positive integer accelerator count per node.
+        intra_bandwidth : Quantity
+            Positive within-node bandwidth in bytes per second.
+        inter_bandwidth : Quantity
+            Positive between-node bandwidth in bytes per second; required for multiple nodes.
+        inter_alpha : Quantity
+            Nonnegative between-node startup latency as a time quantity.
+
+        Returns
+        -------
+        HierarchicalAllReduceResult
+            Modeled accounting components with unit-bearing sizes and times; ratios
+            are dimensionless. These components do not certify deployment feasibility.
+
+        Notes
+        -----
+        Equation: T = 2 M(G-1)/(G intra_bandwidth) + T_ring(M/G, nodes, inter_bandwidth, inter_alpha).
+
+        Assumptions: Independent inter-node ports per GPU position and no intra-node startup.
+
+        Excludes: Shared-port contention and reduction arithmetic.
+
+        References
+        ----------
+        Derivation: T = 2 M(G-1)/(G intra_bandwidth) + T_ring(M/G, nodes, inter_bandwidth, inter_alpha). The class documentation describes
+        the accounting sequence and its modeling context.
+
+        Examples
+        --------
+        >>> from mlsysim.core.units import Q_
+        >>> r = HierarchicalAllReduceModel().solve(Q_('1 MB'), 2, 2, Q_('10 GB/s'), Q_('1 GB/s'), Q_('1 us'))
+        >>> r.total_time > r.inter_time
+        True
+        """
         from ...literature.registry import Literature
         g = gpus_per_node
         intra = message * calc_ring_collective_data_factor(g)
@@ -135,6 +217,53 @@ class AllToAllDispatchModel(ForwardModel):
     def solve(self, total_tokens: int, n_devices: int, n_experts: int, hidden_dim: int,
               bytes_per_element: Quantity, alpha: Quantity, bandwidth: Quantity,
               receive_skew: float = 1.0) -> AllToAllDispatchResult:
+        """Bound uniform and skewed expert dispatch.
+
+        Parameters
+        ----------
+        total_tokens : int
+            Nonnegative total token count; integer division discards routing remainders.
+        n_devices : int
+            Positive integer device count.
+        n_experts : int
+            Positive integer expert count.
+        hidden_dim : int
+            Positive hidden-vector width in elements.
+        bytes_per_element : Quantity
+            Storage per element as a byte quantity.
+        alpha : Quantity
+            Nonnegative startup latency per round as a time quantity.
+        bandwidth : Quantity
+            Positive per-port transfer rate in bytes per second.
+        receive_skew : float
+            Nonnegative multiplier on uniform remote receiver load; default one.
+
+        Returns
+        -------
+        AllToAllDispatchResult
+            Modeled accounting components with unit-bearing sizes and times; ratios
+            are dimensionless. These components do not certify deployment feasibility.
+
+        Notes
+        -----
+        Equation: sent = (N-1) floor(floor(tokens/N)/N) hidden_dim bytes_per_element; injection time = alpha + sent/bandwidth.
+
+        Assumptions: Uniform integer token partitions; skew changes receiver load only.
+
+        Excludes: Routing remainders, expert compute, combine phase, and contention.
+
+        References
+        ----------
+        Derivation: sent = (N-1) floor(floor(tokens/N)/N) hidden_dim bytes_per_element; injection time = alpha + sent/bandwidth. The class documentation describes
+        the accounting sequence and its modeling context.
+
+        Examples
+        --------
+        >>> from mlsysim.core.units import Q_
+        >>> r = AllToAllDispatchModel().solve(16, 2, 4, 8, Q_('2 byte'), Q_('1 us'), Q_('1 GB/s'))
+        >>> r.hot_remote_tokens == r.uniform_remote_tokens
+        True
+        """
         per_device = total_tokens // n_devices
         per_pair = per_device // n_devices
         remote = n_devices - 1
@@ -171,6 +300,39 @@ class RingTraceModel(ForwardModel):
     produces = RingTraceResult
 
     def solve(self, vectors: Sequence[Sequence[int]]) -> RingTraceResult:
+        """Trace integer reduction and gathering around a ring.
+
+        Parameters
+        ----------
+        vectors : Sequence[Sequence[int]]
+            Square sequence of integer vectors, one vector and one chunk per rank.
+
+        Returns
+        -------
+        RingTraceResult
+            Modeled accounting components with unit-bearing sizes and times; ratios
+            are dimensionless. These components do not certify deployment feasibility.
+
+        Notes
+        -----
+        Equation: Each of N-1 scatter steps adds the received chunk; N-1 gather steps disseminate completed sums.
+
+        Assumptions: Square input vectors with one scalar chunk per rank.
+
+        Excludes: Transfer time, floating-point reduction order, and failures.
+
+        References
+        ----------
+        Derivation: Each of N-1 scatter steps adds the received chunk; N-1 gather steps disseminate completed sums. The class documentation describes
+        the accounting sequence and its modeling context.
+
+        Examples
+        --------
+        >>> from mlsysim.core.units import Q_
+        >>> r = RingTraceModel().solve([[1, 2], [3, 4]])
+        >>> r.totals == [sum(x) for x in zip([1, 2], [3, 4])]
+        True
+        """
         n = len(vectors)
         partial = [list(row) for row in vectors]
         scatter = []
@@ -218,6 +380,39 @@ class ErrorFeedbackModel(ForwardModel):
     produces = ErrorFeedbackResult
 
     def solve(self, gradients: Sequence[float]) -> ErrorFeedbackResult:
+        """Track rounding residuals across gradient transmissions.
+
+        Parameters
+        ----------
+        gradients : Sequence[float]
+            Scalar gradient sequence in consistent arbitrary units.
+
+        Returns
+        -------
+        ErrorFeedbackResult
+            Modeled accounting components with unit-bearing sizes and times; ratios
+            are dimensionless. These components do not certify deployment feasibility.
+
+        Notes
+        -----
+        Equation: v_t = round(g_t + e_t); e_(t+1) = g_t + e_t - v_t.
+
+        Assumptions: Scalar whole-unit compressor with ties rounded away from zero.
+
+        Excludes: Optimizer convergence and vector compression costs.
+
+        References
+        ----------
+        Derivation: v_t = round(g_t + e_t); e_(t+1) = g_t + e_t - v_t. The class documentation describes
+        the accounting sequence and its modeling context.
+
+        Examples
+        --------
+        >>> from mlsysim.core.units import Q_
+        >>> r = ErrorFeedbackModel().solve([0.25, 0.25])
+        >>> r.total_sent + r.final_error == r.true_total
+        True
+        """
         errors, corrected, sent = [0.0], [], []
         for t, g in enumerate(gradients):
             s = g + errors[t]
@@ -254,6 +449,47 @@ class CompressionRunModel(ForwardModel):
 
     def solve(self, steps: int, compute_time: Quantity, communication_times: Dict[str, Quantity],
               ratio: float, step_penalty: float) -> CompressionRunResult:
+        """Compare time to a supplied quality target.
+
+        Parameters
+        ----------
+        steps : int
+            Positive baseline optimizer-step count.
+        compute_time : Quantity
+            Nonnegative compute duration per step.
+        communication_times : Dict[str, Quantity]
+            Mapping from network name to nonnegative communication duration.
+        ratio : float
+            Positive communication compression ratio; one leaves traffic unchanged.
+        step_penalty : float
+            Fractional increase in steps needed for the quality target; must exceed minus one.
+
+        Returns
+        -------
+        CompressionRunResult
+            Modeled accounting components with unit-bearing sizes and times; ratios
+            are dimensionless. These components do not certify deployment feasibility.
+
+        Notes
+        -----
+        Equation: T = steps (compute + communication); compressed T = round(steps(1+penalty)) (compute + communication/ratio).
+
+        Assumptions: Step penalty is a supplied assumption; communication does not overlap compute.
+
+        Excludes: Compression kernels and prediction of achieved quality.
+
+        References
+        ----------
+        Derivation: T = steps (compute + communication); compressed T = round(steps(1+penalty)) (compute + communication/ratio). The class documentation describes
+        the accounting sequence and its modeling context.
+
+        Examples
+        --------
+        >>> from mlsysim.core.units import Q_
+        >>> r = CompressionRunModel().solve(10, Q_('1 ms'), {'link': Q_('1 ms')}, 1, 0)
+        >>> r.totals == r.compressed_totals
+        True
+        """
         steps_c = round(steps * (1 + step_penalty))
         step, step_c, total, total_c, change = {}, {}, {}, {}, {}
         for k, comm in communication_times.items():
@@ -282,6 +518,48 @@ class OverlapBudgetModel(ForwardModel):
 
     def solve(self, workload, bytes_per_value: Quantity, backward_per_layer: Quantity, bucket_size: Quantity,
               time_per_bucket: Quantity) -> OverlapBudgetResult:
+        """Account for layerwise reduction overlap.
+
+        Parameters
+        ----------
+        workload : Workload
+            Layered workload with positive layer count and weight-size conversion.
+        bytes_per_value : Quantity
+            Gradient storage per element as a byte quantity.
+        backward_per_layer : Quantity
+            Nonnegative backward duration of each equal layer.
+        bucket_size : Quantity
+            Positive gradient bucket size as a byte quantity.
+        time_per_bucket : Quantity
+            Nonnegative reduction duration per bucket.
+
+        Returns
+        -------
+        OverlapBudgetResult
+            Modeled accounting components with unit-bearing sizes and times; ratios
+            are dimensionless. These components do not certify deployment feasibility.
+
+        Notes
+        -----
+        Equation: T_overlap = L b + c + (L-1) max(0,c-b), where c is rounded-up bucket count times bucket duration.
+
+        Assumptions: Equal layers and serialized communication with backward/reduction overlap.
+
+        Excludes: Variable layer sizes and transport contention.
+
+        References
+        ----------
+        Derivation: T_overlap = L b + c + (L-1) max(0,c-b), where c is rounded-up bucket count times bucket duration. The class documentation describes
+        the accounting sequence and its modeling context.
+
+        Examples
+        --------
+        >>> from mlsysim.core.units import Q_
+        >>> from mlsysim import Models
+        >>> r = OverlapBudgetModel().solve(Models.Language.Llama3_8B, Q_('2 byte'), Q_('1 ms'), Q_('1 GB'), Q_('1 ms'))
+        >>> r.overlapped_time <= r.sequential_time
+        True
+        """
         layers = workload.layers
         grad = (workload.size_in_bytes(bytes_per_value) / layers).to("MB")
         buckets = math.ceil((grad / bucket_size).to_base_units().magnitude)

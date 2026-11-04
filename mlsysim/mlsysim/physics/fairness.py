@@ -15,13 +15,44 @@ import math
 
 
 def calc_fpr_from_ppv(base_rate, ppv, fnr):
-    """False positive rate implied by a group's base rate, precision, and false negative rate.
+    """Infer a false-positive rate from prevalence, precision, and false negatives.
 
-    Equation (Chouldechova 2017, "Fair Prediction with Disparate Impact"):
-        FPR = p / (1 - p) * (1 - PPV) / PPV * (1 - FNR)
+    Parameters
+    ----------
+    base_rate : float
+        Positive-class prevalence p, dimensionless, in (0, 1).
+    ppv : float
+        Positive predictive value, dimensionless, in (0, 1].
+    fnr : float
+        False-negative fraction, dimensionless, expected in [0, 1].
 
-    With equal PPV and unequal base rates ``p``, the false positive and false
-    negative rates cannot both be equal across groups.
+    Returns
+    -------
+    float
+        Implied false-positive fraction. An inconsistent input triple can yield
+        a value above one; this function does not clamp the result.
+
+    Notes
+    -----
+    Equation: FPR = p/(1-p) * (1-PPV)/PPV * (1-FNR).
+
+    Assumptions: All rates describe the same population and classifier threshold.
+
+    Excludes: Estimation uncertainty, threshold selection, and compatibility checks for
+        the supplied rates.
+
+    Equal PPV with unequal base rates prevents simultaneously equal false-positive
+    and false-negative rates, except in degenerate cases.
+
+    References
+    ----------
+    Chouldechova (2017), "Fair Prediction with Disparate Impact."
+    https://arxiv.org/abs/1703.00056 (bibliography key: chouldechova2017).
+
+    Examples
+    --------
+    >>> round(calc_fpr_from_ppv(0.2, 0.8, 0.1), 5)
+    0.05625
     """
     p = float(base_rate)
     if not 0.0 < p < 1.0 or not 0.0 < ppv <= 1.0:
@@ -30,19 +61,78 @@ def calc_fpr_from_ppv(base_rate, ppv, fnr):
 
 
 def calc_feedback_disparity(launch_gap, factor, cycles):
-    """Disparity after ``cycles`` retraining cycles: ``gap(k) = gap(0) * factor^k``.
+    """Propagate a disparity through repeated multiplicative feedback.
 
-    A factor above one grows a gap passed at launch; below one it decays.
+    Parameters
+    ----------
+    launch_gap : float
+        Initial rate difference, expressed as a fraction.
+    factor : float
+        Dimensionless multiplicative feedback factor per cycle, nonnegative.
+    cycles : int
+        Number of retraining cycles, nonnegative.
+
+    Returns
+    -------
+    float
+        Modeled rate difference after the specified cycles, in the same units
+        as launch_gap; not clamped to a probability interval.
+
+    Notes
+    -----
+    Equation: gap(k) = gap(0) * ``factor**k``.
+
+    Assumptions: The same feedback factor applies each cycle; factors above one grow
+        the disparity and factors below one reduce it.
+
+    Excludes: Observed feedback dynamics, saturation, and sampling error.
+
+    References
+    ----------
+    Derivation: apply the recurrence gap(k+1) = factor * gap(k) repeatedly.
+
+    Examples
+    --------
+    >>> calc_feedback_disparity(0.02, 2, 3)
+    0.16
     """
-    return launch_gap * factor ** cycles
+    return launch_gap * factor**cycles
 
 
 def calc_cycles_to_gate(launch_gap, factor, gate):
-    """Unrounded cycle count at which ``launch_gap * factor^k`` reaches ``gate``.
+    """Find the fractional cycle at which a growing disparity reaches a gate.
 
-    ``k = ln(gate / gap(0)) / ln(factor)``; the gate first fails at the next
-    whole cycle above it. Requires a growing gap (``factor > 1``) that starts
-    inside the gate.
+    Parameters
+    ----------
+    launch_gap : float
+        Initial positive disparity, below gate, in the same units as gate.
+    factor : float
+        Dimensionless multiplicative growth per cycle, greater than one.
+    gate : float
+        Positive disparity threshold, greater than launch_gap.
+
+    Returns
+    -------
+    float
+        Continuous cycle count at equality. Failure under a strict greater-than
+        gate occurs at the next whole cycle above this value.
+
+    Notes
+    -----
+    Equation: k = ln(gate/launch_gap) / ln(factor).
+
+    Assumptions: A positive disparity grows monotonically by a constant factor.
+
+    Excludes: Discrete-cycle rounding and empirical estimation of feedback strength.
+
+    References
+    ----------
+    Derivation: take logarithms of gate = launch_gap * ``factor**k``.
+
+    Examples
+    --------
+    >>> calc_cycles_to_gate(0.01, 2, 0.08)
+    3.0
     """
     if factor <= 1.0 or not 0.0 < launch_gap < gate:
         raise ValueError("need factor > 1 and 0 < launch_gap < gate")
@@ -50,10 +140,39 @@ def calc_cycles_to_gate(launch_gap, factor, gate):
 
 
 def calc_gap_samples_per_group(rate, half_width, z_critical):
-    """Per-group draws, equal groups, for a gap between two rates to have half-width ``half_width``.
+    """Plan equal group sizes for a normal-approximation rate-gap interval.
 
-    The gap's variance is the sum of both groups' variances:
-    ``h = z sqrt(p (1 - p) / n + p (1 - p) / n)``, so
-    ``n = ceil(2 z^2 p (1 - p) / h^2)``, twice the single-rate count.
+    Parameters
+    ----------
+    rate : float
+        Assumed common Bernoulli probability p, dimensionless, in [0, 1].
+    half_width : float
+        Desired positive half-width of the difference in rates, as a fraction.
+    z_critical : float
+        Positive normal critical value for the chosen confidence level.
+
+    Returns
+    -------
+    int
+        Rounded-up number of independent observations required in each group.
+
+    Notes
+    -----
+    Equation: n = ``ceil(2*z_critical**2*p*(1-p)/half_width**2)``.
+
+    Assumptions: Independent Bernoulli observations, equal group sizes, the same
+        planning rate in both groups, and an adequate normal approximation.
+
+    Excludes: Exact finite-sample coverage, paired groups, and unequal allocation.
+
+    References
+    ----------
+    Derivation: the independent difference has variance ``2*p*(1-p)/n``; solve
+        ``z*sqrt(variance)`` = half_width for n and round up.
+
+    Examples
+    --------
+    >>> calc_gap_samples_per_group(0.5, 0.1, 2)
+    200
     """
-    return math.ceil(2 * z_critical ** 2 * rate * (1 - rate) / half_width ** 2)
+    return math.ceil(2 * z_critical**2 * rate * (1 - rate) / half_width**2)
