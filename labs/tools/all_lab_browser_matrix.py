@@ -419,6 +419,55 @@ def orientation_workflow(p, directory):
     return checks
 
 
+def fleet_orientation_workflow(p, directory):
+    """Exercise setup persistence; orientation does not claim numerical causality."""
+    checks = []
+    def tab(letter):
+        p.get_by_role("tab", name=re.compile("^" + letter + " ·")).click()
+        pause(p)
+    tab("A")
+    track = p.get_by_label("My fleet project", exact=True)
+    old = track.input_value()
+    choices = track.locator("option").evaluate_all("es=>es.map(e=>e.value)")
+    track.select_option(next(value for value in choices if value != old))
+    pause(p)
+    assert track.input_value() != old
+    checks.append({"part": "A", "mode": "orientation workflow", "project_selection_changes": True, "passed": True})
+    tab("B")
+    p.get_by_role("radio", name="Changing the view changes the live briefing", exact=True).check()
+    p.get_by_role("button", name="Lock my prediction", exact=True).click()
+    view = p.get_by_label("Live briefing view", exact=True)
+    view.select_option(label="Model preparation")
+    pause(p)
+    p.get_by_role("button", name="Capture this comparison", exact=True).click()
+    pause(p)
+    view.select_option(label="Project setting")
+    pause(p)
+    p.get_by_text("changed since capture; your saved comparison stays the same", exact=False).first.wait_for()
+    checks.append({"part": "B", "mode": "orientation workflow", "frozen_capture_survives_live_change": True, "passed": True})
+    tab("C")
+    p.get_by_role("button", name="Save my progress", exact=True).click()
+    p.get_by_text("Saved and read back.", exact=False).first.wait_for(timeout=30000)
+    with p.expect_download() as event:
+        p.get_by_role("link", name="Download your work", exact=True).click()
+    path = directory / "orientation-download.json"
+    event.value.save_as(path)
+    payload = json.loads(path.read_text())
+    assert payload["comparison"]["result"]["inputs"]["case"] == "alternative"
+    p.reload()
+    p.get_by_role("tab").first.wait_for(timeout=240000)
+    tab("C")
+    p.get_by_text("Welcome back.", exact=False).first.wait_for(timeout=30000)
+    checks.append({"part": "C", "mode": "orientation workflow", "download_matches_capture": True, "reload_restores": True, "passed": True})
+    tab("D")
+    link = p.get_by_role("link", name=re.compile("Open Lab 01"))
+    assert link.count()
+    resolved = link.evaluate("e=>e.href")
+    assert "/vol2/lab_01_introduction/" in resolved and "lab_00_orientation" not in resolved, resolved
+    checks.append({"part": "D", "mode": "orientation workflow", "next_lab_handoff_present": True, "passed": True})
+    return checks
+
+
 def audit(browser, c, out, port, base=None):
     lab = ROOT / c["notebook"]
     d = out / f"v{c['volume']}_{c['chapter']:02}"
@@ -486,7 +535,9 @@ def audit(browser, c, out, port, base=None):
         pause(p)
         if c["volume"] == 1 and c["chapter"] == 0:
             r["parts"] = orientation_workflow(p, d)
-        for part in [] if c["volume"] == 1 and c["chapter"] == 0 else c["parts"]:
+        if c["volume"] == 2 and c["chapter"] == 0:
+            r["parts"] = fleet_orientation_workflow(p, d)
+        for part in [] if c["volume"] in (1, 2) and c["chapter"] == 0 else c["parts"]:
             q = {
                 "part": part["id"],
                 "reachable": False,
