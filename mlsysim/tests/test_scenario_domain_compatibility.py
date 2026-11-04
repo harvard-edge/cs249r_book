@@ -56,7 +56,7 @@ def test_catalog_objects_are_the_public_registry_objects():
                 assert target.id not in authored, f"Duplicate construction of {target.id}"
                 authored[target.id] = obj
                 assert getattr(Scenarios, target.id) is obj
-    registry = {name: value for name, value in vars(Scenarios).items() if not name.startswith("_")}
+    registry = {name: value for name, value in vars(Scenarios).items() if not name.startswith("_") and name not in Scenarios.__registry_list_exclude__}
     assert registry.keys() == authored.keys()
     expected = []
     for name in sorted(authored):
@@ -104,3 +104,14 @@ def test_scenario_variant_and_nested_input_identity_remain_shallow():
     assert pickle.loads(pickle.dumps(case)).model_dump() == case.model_dump()
     assert Scenario.__module__ == "mlsysim.engine.scenarios"
     assert inspect.getmodule(type(case)) is scenario_types
+
+
+def test_narrative_deployment_briefs_do_not_enter_numerical_catalog():
+    """Narrative metadata remains public without posing as an executable scenario."""
+    from mlsysim.engine.deployment_journeys import DeploymentJourneyCatalog
+
+    assert Scenarios.__registry_list_exclude__ == frozenset({"DeploymentJourneys"})
+    assert isinstance(Scenarios.DeploymentJourneys, DeploymentJourneyCatalog)
+    assert all(value is not Scenarios.DeploymentJourneys for value in Scenarios.list())
+    assert Scenarios.ControlledTaskFactors in Scenarios.list()
+    assert Scenarios.PlacementStudy in Scenarios.list()

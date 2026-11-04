@@ -55,10 +55,15 @@ def _(mo):
 
 
 @app.cell
-def _(mo, set_evidence):
+def _(ledger, mo, set_evidence):
+    from mlsysbook_labs.contexts import preferred_context as _preferred_context
+
+    _track_options = {"TinyML": "tinyml", "Mobile": "mobile", "Edge": "edge", "Cloud": "cloud"}
+    _preferred_track = _preferred_context(ledger)
+    _initial_label = next(label for label, identifier in _track_options.items() if identifier == _preferred_track)
     track = mo.ui.dropdown(
-        {"TinyML": "tinyml", "Mobile": "mobile", "Edge": "edge", "Cloud": "cloud"},
-        value="TinyML", label="Deployment track", on_change=lambda _value: set_evidence({}),
+        _track_options,
+        value=_initial_label, label="Deployment track", on_change=lambda _value: set_evidence({}),
     )
     return (track,)
 
@@ -107,6 +112,22 @@ def _(mo, profile, track_id):
         a_speedup, b_repeats, b_samples, b_warmup, c_duration, c_stress,
         d_choice, d_mode, d_rejected, d_slice_floor, e_decision, e_mismatch,
     )
+
+
+@app.cell
+def _(mo, track_id):
+    _context = track_id
+    d_confidence = mo.ui.dropdown({"Reference confidence": "reference", "Overconfident scores": "overconfident", "Calibration-split repair": "repaired"}, value="Overconfident scores", label="Confidence study")
+    d_counts = mo.ui.slider(5, 200, value=40, step=5, label="Heldout cases per slice")
+    return d_confidence, d_counts
+
+
+@app.cell
+def _(d_confidence, d_counts, track_id):
+    from mlsysim.labs.experiments.v1_12_experiments import compare_calibration
+    d_calibration_base = compare_calibration(track_id, examples_per_slice=d_counts.value, confidence_mode="reference")
+    d_calibration = compare_calibration(track_id, examples_per_slice=d_counts.value, confidence_mode=d_confidence.value)
+    return d_calibration, d_calibration_base
 
 
 @app.cell
@@ -210,6 +231,7 @@ def _(
     d_rejected, d_results, d_slice_floor, e_decision, e_mismatch,
     e_mismatched, e_prediction, e_repaired, mo, set_evidence, to_jsonable,
     track_id,
+    d_calibration, d_calibration_base, d_confidence, d_counts,
 ):
     def store(part, capture):
         set_evidence(lambda current: {**current, part: capture})
@@ -219,7 +241,7 @@ def _(
     c_upstream = {"duration_seconds": c_duration.value, "stress_scale": c_stress.value}
     d_upstream = {
         "candidate_mode": d_mode.value, "worst_slice_floor_pct": d_slice_floor.value,
-        "choice": d_choice.value, "rejected": d_rejected.value,
+        "choice": d_choice.value, "rejected": d_rejected.value, "confidence_mode": d_confidence.value, "examples_per_slice": d_counts.value,
     }
     e_upstream = {"mismatch": e_mismatch.value, "decision": e_decision.value}
 
@@ -274,7 +296,7 @@ def _(
             baseline=to_jsonable(d_baseline),
             result=to_jsonable(d_results[d_selected_mode]),
             upstream_inputs=d_upstream,
-            alternatives=tuple(to_jsonable(d_results[mode]) for mode in d_results),
+            alternatives=tuple(to_jsonable(d_results[mode]) for mode in d_results) + tuple({"model_key": "v1_12_experiments.compare_calibration", **to_jsonable(result)} for result in (d_calibration_base, d_calibration)),
             decision={"choice": d_choice.value, "rejected": d_rejected.value},
             model_key="v1_12_experiments.compare_quality_slices",
             chosen_result=to_jsonable(d_baseline) if d_choice.value == "none" else to_jsonable(d_results[d_selected_mode]),
@@ -298,23 +320,25 @@ def _(
 
 
 @app.cell
-def _(ACADEMIC_LAB_CSS, LAB_CSS, mo, profile, track):
-    css = mo.Html("""
-    <style>
-    .bench-head{background:linear-gradient(135deg,#101827,#194f72);color:white;border-radius:14px;padding:clamp(18px,4vw,32px);margin:30px 0 14px}
-    .bench-top{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font:700 .72rem ui-monospace;letter-spacing:.08em}
-    .bench-head h1{font-size:clamp(1.65rem,5vw,2.65rem);line-height:1.05;margin:16px 0 8px}.bench-head p{color:#dbeafe;max-width:760px}
-    .bench-meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:9px;margin-top:17px}.bench-meta div{background:#ffffff14;border:1px solid #ffffff26;padding:9px 11px;border-radius:8px}
-    .saved{border-left:4px solid #2ca02c;background:#f0fdf4;padding:9px 12px;border-radius:7px}.table-wrap{max-width:100%;overflow-x:auto}
-    .lab-hud{display:flex;align-items:center;flex-wrap:wrap;gap:10px;background:#101827!important;color:#fff;padding:14px 18px;border-radius:9px}.lab-hud .hud-label{color:#a7b9cf}.lab-hud .hud-value{color:#fff}.lab-hud .hud-active{color:#86efac}
-    @media(max-width:520px){.bench-head{border-radius:9px}.bench-meta{grid-template-columns:1fr}}
-    </style>""")
-    header = mo.Html(f"""<section class="bench-head"><div class="bench-top"><span>VOLUME I · LAB 12</span><span>ABOUT 50–55 MIN</span></div><h1>Benchmark Claims That Survive</h1><p>Can a performance gain survive fair, credible, representative measurement while preserving useful behavior?</p><div class="bench-meta"><div><b>Track</b><br>{profile.display_name}</div><div><b>Workload</b><br>{profile.workload_id}</div><div><b>Output</b><br>Auditable benchmark recommendation</div></div></section>""")
-    mo.vstack([
-        track, css, LAB_CSS, ACADEMIC_LAB_CSS, header,
-        mo.md("A fast component is only a hypothesis. Test scope, measurement amount, sustained behavior, quality slices, and protocol parity before deciding what can be reported. These repeatable traces are teaching scenarios, not measurements of a named product."),
+def _(get_lab_metadata, mo, track, track_id):
+    from mlsysbook_labs.notebook import notebook_scenario as _scenario
+    from mlsysbook_labs.notebook import notebook_header, notebook_learning_map, notebook_learning_part, notebook_shell, notebook_table, notebook_tab_hint
+    from mlsysbook_labs.learning_paths import get_learning_path
+    from mlsysim import Scenarios
+
+    _mission = Scenarios.DeploymentJourneys.get(track_id)
+    _episode = _mission.episode(12)
+    _metadata = get_lab_metadata("vol1/lab_12_perf_bench.py")
+    learning_contract = get_learning_path("vol1", 12)
+    notebook_shell([
+        notebook_header(_metadata, _episode.question, topics=_episode.core_concepts),
+        track,
+        _scenario(learning_contract, track=track_id, scene=_episode.scene),
+        notebook_learning_map(learning_contract),
+        mo.md('Repeatable traces are teaching scenarios, not measurements of a named product. Preserve scope, measurement conditions, behavioral evidence, and protocol parity.'),
     ])
-    return
+    return learning_contract, notebook_learning_part, notebook_shell, notebook_table, notebook_tab_hint
+
 
 
 @app.cell
@@ -328,6 +352,12 @@ def _(
     e_mismatched, e_prediction, e_repaired, e_upstream, final_choice,
     final_rejected, final_risk, final_trigger, get_evidence, go, mo, rationale,
     track_id,
+    notebook_shell,
+    learning_contract,
+    d_calibration, d_confidence, d_counts,
+    notebook_learning_part,
+    notebook_table,
+    notebook_tab_hint,
 ):
     def ms(quantity):
         return quantity.m_as("ms")
@@ -336,9 +366,7 @@ def _(
         return value.magnitude if hasattr(value, "magnitude") else value
 
     def table(rows):
-        return mo.vstack([mo.ui.table(rows, pagination=False)]).style(
-            {"max-width": "100%", "overflow-x": "auto"}
-        )
+        return notebook_table(rows)
 
     def saved(part):
         capture = get_evidence().get(part)
@@ -434,13 +462,15 @@ def _(
             f"Aggregate floor (≥{d_result['quality_floor_pct']:.0f}%)": "PASS" if result["candidate_aggregate_eligible"] else "FAIL",
             "Slice floor": "PASS" if result["candidate_worst_slice_eligible"] else "FAIL",
         } for mode, result in d_results.items()]
+        calibration_rows = [{"Study": label, "Cases": metrics["count"], "Positive / negative": f"{metrics['positive_count']} / {metrics['negative_count']}", "Accuracy (%)": f"{metrics['accuracy_pct']:.2f}", "ROC AUC": "Unavailable" if metrics['roc_auc'] is None else f"{metrics['roc_auc']:.3f}", "Brier": f"{metrics['brier_score']:.3f}", "Calibration gap": f"{metrics['ece']:.3f}"} for label,metrics in (("Reference",d_calibration['reference']),("Selected confidence",d_calibration['candidate']))]
+        calibration_view = mo.vstack([mo.md("**Does the confidence deserve the same claim?** Use a separate matched synthetic confidence study. Change score confidence while retaining heldout labels; compare ranking, classification, and calibration. A supported repair is fitted on the calibration split, then evaluated on heldout cases."), mo.hstack([d_confidence,d_counts], widths="equal",wrap=True), table(calibration_rows), mo.md(f"**Evidence boundary:** {d_calibration['evidence_note']} Repair temperature: **{d_calibration['fitted_temperature']:.2f}**, fitted from **{d_calibration['calibration_count']}** separate calibration cases. **Still open:** {' '.join(d_calibration['missing_coverage'])}"),mo.accordion({"Inspect reliability bins": table(list(d_calibration['candidate']['reliability_bins']))})])
         decision_invalid = d_choice.value is not None and d_choice.value != "none" and d_choice.value == d_rejected.value
         return mo.vstack([
             intro, d_prediction, mo.hstack([d_mode, d_slice_floor], widths="equal", wrap=True),
             figure, table(rows), mo.hstack([d_choice, d_rejected], widths="equal", wrap=True),
             mo.callout(mo.md(f"**Prediction:** {d_prediction.value}. The selected candidate's observed overall result is **{d_result['candidate_overall_accuracy_pct']:.1f}%**; its difficult slice is **{d_result['slices']['difficult']['candidate_accuracy_pct']:.1f}%**."), kind="danger" if not d_result["candidate_worst_slice_eligible"] else "success"),
             mo.callout(mo.md("Choose a different tested alternative." if decision_invalid else "Your decision will carry into synthesis."), kind="warn" if decision_invalid else "info"),
-            d_capture, saved("D"),
+            calibration_view, d_capture, saved("D"),
             mo.accordion({"Calculation Notes": mo.md("Accuracy comes from fixed binary labels and scores. The aggregate floor changes eligibility only; it does not change predictions. The worst-slice floor is evaluated separately.")}),
         ])
 
@@ -482,8 +512,16 @@ def _(
             mo.callout(mo.md("**Ready for the local report.**" if ready else "Capture five current contrasts and match synthesis to the saved Part D candidate decision."), kind="success" if ready else "warn"),
         ])
 
-    mo.ui.tabs({"Part A": part_a(), "Part B": part_b(), "Part C": part_c(), "Part D": part_d(), "Part E": part_e(), "Synthesis": synthesis()})
+    notebook_shell([notebook_tab_hint(), mo.ui.tabs({"Part A": notebook_learning_part(learning_contract, "A", part_a()), "Part B": notebook_learning_part(learning_contract, "B", part_b()), "Part C": notebook_learning_part(learning_contract, "C", part_c()), "Part D": notebook_learning_part(learning_contract, "D", part_d()), "Part E": notebook_learning_part(learning_contract, "E", part_e()), "Synthesis": synthesis()})])
     return (audit,)
+
+
+@app.cell(hide_code=True)
+def _():
+    from mlsysbook_labs.learning_paths import get_learning_path as _submission_path
+    from mlsysbook_labs.notebook import notebook_shell as _submission_shell, notebook_submission as _submission
+    _submission_shell([_submission(_submission_path(1, 12))])
+    return
 
 
 @app.cell
@@ -491,6 +529,8 @@ def _(
     audit, build_lab_report, final_choice, final_rejected, final_risk,
     final_trigger, get_evidence, get_lab_metadata, mo, profile, rationale,
     report_export_panel, track_id,
+    notebook_shell,
+    learning_contract,
 ):
     _captures = get_evidence()
     _d_saved = _captures["D"].to_dict()["decision"] if "D" in _captures else {}
@@ -502,16 +542,13 @@ def _(
         and final_rejected.value == _d_saved.get("rejected")
         and (final_choice.value == "none" or final_choice.value != final_rejected.value)
     )
-    mo.stop(not _ready)
+    from mlsysbook_labs.notebook import notebook_download_readiness as _download_readiness
+    mo.stop(not _ready, _download_readiness(volume=1))
     _snapshots = {part: _captures[part].to_dict() for part in "ABCDE"}
     report = build_lab_report(
         get_lab_metadata("vol1/lab_12_perf_bench.py"),
         track=track_id, scenario=profile.workload_id,
-        learning_objectives=[
-            "Distinguish component speedup from whole-path benefit",
-            "Design repeated measurements that disclose warmup and drift",
-            "Require sustained, slice, and protocol evidence before reporting a gain",
-        ],
+        learning_objectives=learning_contract["learning_objectives"],
         predictions={part: snapshot["prediction"] for part, snapshot in _snapshots.items()},
         knob_settings={part: snapshot["inputs"] for part, snapshot in _snapshots.items()},
         evidence_summary={part: {
@@ -550,14 +587,17 @@ def _(
         },
         source_trace={"scenario": "Disclosed illustrative seeded fixture", "calculations": "MLSysIM"},
     )
-    mo.vstack([mo.md("## Local evidence report"), report_export_panel(report)])
+    notebook_shell([report_export_panel(report)])
     return (report,)
 
 
+
+
 @app.cell
-async def _(
+def _(
     audit, final_choice, final_rejected, final_risk, final_trigger,
     get_evidence, ledger, mo, rationale, track_id,
+    notebook_shell,
 ):
     _captures = get_evidence()
     _d_saved = _captures["D"].to_dict()["decision"] if "D" in _captures else {}
@@ -569,8 +609,31 @@ async def _(
         and final_rejected.value == _d_saved.get("rejected")
         and (final_choice.value == "none" or final_choice.value != final_rejected.value)
     )
-    _status = "EVIDENCE IN PROGRESS"
-    if _ready:
+    _status = "READY TO SAVE" if _ready else "EVIDENCE IN PROGRESS"
+    save_discussion = mo.ui.run_button(label="Save discussion", disabled=not _ready)
+    notebook_shell([save_discussion, mo.md("When ready, downloading is separate from saving locally. Editing evidence or your discussion requires saving again.")])
+    return (save_discussion,)
+
+
+@app.cell
+async def _(
+    audit, final_choice, final_rejected, final_risk, final_trigger,
+    get_evidence, ledger, mo, rationale, track_id,
+    notebook_shell,
+    save_discussion,
+):
+    _captures = get_evidence()
+    _d_saved = _captures["D"].to_dict()["decision"] if "D" in _captures else {}
+    _ready = (
+        audit.complete
+        and all(widget.value is not None for widget in (final_choice, final_rejected, final_trigger, final_risk))
+        and bool(rationale.value.strip())
+        and final_choice.value == _d_saved.get("choice")
+        and final_rejected.value == _d_saved.get("rejected")
+        and (final_choice.value == "none" or final_choice.value != final_rejected.value)
+    )
+    _status = "READY TO SAVE" if _ready else "EVIDENCE IN PROGRESS"
+    if _ready and save_discussion.value:
         try:
             ledger.save(chapter=12, design={
                 "schema_version": 1,
@@ -589,7 +652,7 @@ async def _(
             _status = "LOCAL SAVE FAILED · DOWNLOAD THE REPORT TO KEEP YOUR EVIDENCE"
         else:
             _status = "SAVED"
-    mo.Html(f'<div class="lab-hud"><span class="hud-label">LAB</span><span class="hud-value">12 · Benchmark Claims That Survive · STATUS: </span><span class="hud-active">{_status}</span></div>')
+    notebook_shell([mo.Html(f'<div class="lab-hud"><span class="hud-label">LAB</span><span class="hud-value">12 · Benchmark Claims That Survive · STATUS: </span><span class="hud-active">{_status}</span></div>')])
     return
 
 

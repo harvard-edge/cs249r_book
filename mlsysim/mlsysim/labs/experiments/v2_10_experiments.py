@@ -896,6 +896,7 @@ __all__ = [
     "cost_snapshot",
     "illustrative_track_scenario",
     "lifetime_cost_crossover",
+    "language_routing_reference",
     "qualified_cost",
     "replay_requests",
     "replay_snapshot",
@@ -903,3 +904,67 @@ __all__ = [
     "state_admission",
     "unavailable_snapshot",
 ]
+
+
+# Explicit teaching fixture: milliseconds and KV allocation units, not device calibration.
+_LANGUAGE_ROUTING_FIXTURE = {
+    "capacity": 12,
+    "seeded": ((0, "long-active", 160, 4),
+               (1, "short-a", 8, 3), (1, "short-b", 16, 3), (1, "short-c", 24, 3)),
+    "arrivals": ((0, "new-a", 24, 4), (8, "new-b", 24, 4), (16, "new-c", 24, 4)),
+    "deadline_ms": 80,
+}
+
+
+def language_routing_reference(policy: str = "remaining_work", *, state_scale: int = 1) -> dict:
+    """Route an explicit finite language-service trace with atomic KV admission.
+
+    Each replica executes queued work serially. Supplied seed finish times encode
+    its existing backlog. Count and remaining-work observations are refreshed at
+    each arrival; no stale probes are simulated. Request KV is reserved at route
+    time until completion, with no paging, growth, migration, or retry. Candidates
+    are ordered by the selected signal and checked atomically against the same
+    capacity; the second candidate is tried if the first cannot fit. Both replicas
+    are ready, placement-eligible, and on the same artifact version.
+    """
+    if policy not in ("request_count", "remaining_work"):
+        raise ValueError("policy must be request_count or remaining_work")
+    if isinstance(state_scale, bool) or state_scale not in (1, 2, 4):
+        raise ValueError("state_scale must be 1, 2, or 4")
+    fixture = _LANGUAGE_ROUTING_FIXTURE
+    queues = [[], []]
+    for replica, request, finish, state in fixture["seeded"]:
+        queues[replica].append({"request_id": request, "finish_ms": finish, "kv_units": state})
+    records = []
+    for arrival, request, service, state in fixture["arrivals"]:
+        for queue in queues:
+            queue[:] = [item for item in queue if item["finish_ms"] > arrival]
+        counts = [len(queue) for queue in queues]
+        work = [max((item["finish_ms"] for item in queue), default=arrival) - arrival for queue in queues]
+        used = [sum(item["kv_units"] for item in queue) for queue in queues]
+        signal = counts if policy == "request_count" else work
+        order = sorted(range(2), key=lambda replica: (signal[replica], replica))
+        checks = []
+        chosen = finish = None
+        allocation = state * state_scale
+        for replica in order:
+            fits = used[replica] + allocation <= fixture["capacity"]
+            checks.append({"replica": replica, "observed_requests": counts[replica],
+                           "observed_work_ms": work[replica], "kv_before": used[replica],
+                           "kv_requested": allocation, "fits": fits})
+            if fits:
+                chosen = replica
+                finish = arrival + work[replica] + service
+                queues[replica].append({"request_id": request, "finish_ms": finish, "kv_units": allocation})
+                break
+        records.append({"request_id": request, "arrival_ms": arrival, "replica": chosen,
+                        "finish_ms": finish, "latency_ms": None if finish is None else finish - arrival,
+                        "on_time": finish is not None and finish - arrival <= fixture["deadline_ms"],
+                        "admission_checks": checks})
+    return {"inputs": {"policy": policy, "state_scale": state_scale},
+            "requests": records, "offered_count": len(records),
+            "completed_count": sum(item["finish_ms"] is not None for item in records),
+            "rejected_count": sum(item["finish_ms"] is None for item in records),
+            "on_time_count": sum(item["on_time"] for item in records),
+            "deadline_ms": fixture["deadline_ms"], "kv_capacity_per_replica": fixture["capacity"],
+            "assumption_note": "Separate language-service routing reference; supplied serial service times and KV allocation units, not production calibration. Fresh observations; atomic reserve-or-reject; no paging, KV growth, retries, stale probes, version mismatch, or migration. Rejected requests stay in the offered denominator."}

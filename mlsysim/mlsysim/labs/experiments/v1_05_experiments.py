@@ -2,8 +2,10 @@
 
 The track profiles in :data:`TRACKS` are illustrative teaching scenarios. They
 describe generic memory envelopes and small multilayer perceptrons; they are not
-measurements of branded devices. The accounting is analytical and intentionally
-does not predict latency, energy, throughput, or model quality.
+measurements of branded devices. Tensor accounting is exact under the stated
+schedules; the sequential service model is illustrative and applies only to
+memory-feasible designs. It does not establish measured device performance,
+energy, or model quality.
 
 The forward-work convention is explicit: one dense weight application is one
 multiply-accumulate (MAC), converted at the fixed convention of two FLOPs per
@@ -314,6 +316,8 @@ def evaluate_track(
     Execution is an illustrative sequential model:
     ``batch time = FLOPs/rate + counted bytes/bandwidth + layers*launch overhead``.
     It excludes overlap, arrivals, queue delay, and latency percentiles.
+    A capacity failure suppresses service metrics; tensor work and hypothetical
+    sequential timing components remain available for explaining the failed design.
     """
     if track_id not in TRACKS:
         raise ValueError(f"track_id must be one of {', '.join(TRACKS)}")
@@ -350,6 +354,7 @@ def evaluate_track(
     launch_time = (len(result["layers"]) * overhead).to(ureg.millisecond)
     batch_latency = (compute_time + movement_time + launch_time).to(ureg.millisecond)
     throughput = Q_(result["batch_size"], "count") / batch_latency.to(ureg.second)
+    fits_memory = required <= limit
     inputs = {
         **result["inputs"],
         "track_id": track_id,
@@ -378,20 +383,29 @@ def evaluate_track(
         "scenario": track["scenario"],
         "memory_limit": limit,
         "memory_margin": margin,
-        "fits_memory": required <= limit,
-        "violations": [] if required <= limit else ["memory"],
+        "fits_memory": fits_memory,
+        "execution_status": "modeled" if fits_memory else "infeasible_memory",
+        "violations": [] if fits_memory else ["memory"],
         "compute_time": compute_time,
         "movement_time": movement_time,
         "launch_time": launch_time,
         "effective_compute_rate": compute_rate,
         "effective_bandwidth": bandwidth,
         "launch_overhead": overhead,
-        "batch_latency": batch_latency,
-        "throughput": throughput.to(1 / ureg.second),
-        "amortized_service_time": (batch_latency / result["batch_size"]).to(ureg.millisecond),
+        "batch_latency": batch_latency if fits_memory else None,
+        "throughput": throughput.to(1 / ureg.second) if fits_memory else None,
+        "amortized_service_time": (
+            (batch_latency / result["batch_size"]).to(ureg.millisecond)
+            if fits_memory else None
+        ),
+        "timing_component_scope": (
+            "Hypothetical sequential components from work and minimum tensor traffic; "
+            "not an executable runtime when the memory envelope fails."
+        ),
         "execution_assumption": (
             "Illustrative sequential additive time from exact batch FLOPs and minimum "
-            "tensor traffic; excludes overlap, arrivals, queue delay, and percentiles."
+            "tensor traffic; service metrics require memory fit. Excludes overlap, arrivals, "
+            "queue delay, and percentiles; fitting does not establish measured performance."
         ),
         "provenance": TRACK_PROVENANCE,
     }
@@ -429,13 +443,18 @@ def compare_track(
         "minimum_forward_traffic": (
             action["minimum_forward_traffic"] - saved_baseline["minimum_forward_traffic"]
         ).to(ureg.byte),
-        "batch_latency": (action["batch_latency"] - saved_baseline["batch_latency"]).to(
-            ureg.millisecond
-        ),
-        "throughput": (action["throughput"] - saved_baseline["throughput"]).to(1 / ureg.second),
-        "amortized_service_time": (
-            action["amortized_service_time"] - saved_baseline["amortized_service_time"]
-        ).to(ureg.millisecond),
+        **{
+            key: (
+                (action[key] - saved_baseline[key]).to(unit)
+                if action[key] is not None and saved_baseline[key] is not None
+                else None
+            )
+            for key, unit in (
+                ("batch_latency", ureg.millisecond),
+                ("throughput", 1 / ureg.second),
+                ("amortized_service_time", ureg.millisecond),
+            )
+        },
     }
     return {"baseline": saved_baseline, "result": action, "delta": delta}
 
@@ -507,12 +526,21 @@ def _replay_quantity(value: Any, expected_unit: str, name: str):
 def replay(model_key: str, inputs: Mapping[str, Any]) -> dict[str, Any]:
     """Replay one saved V1-05 result from its method-specific evidence inputs.
 
-    The dispatcher recognizes only the two public experiment methods used by
+    The dispatcher recognizes the public experiment methods used by
     the notebook. It rejects missing or extra input fields so evidence cannot be
     silently reinterpreted by a different method or a future default change.
     """
     if not isinstance(inputs, Mapping):
         raise ValueError("inputs must be a mapping")
+    if model_key == DEPENDENCY_MODEL_KEY:
+        expected = {"discarded", "activation", "x"}
+        if set(inputs) != expected:
+            raise ValueError(f"dependency replay inputs must contain exactly {sorted(expected)}")
+        return run_dependency_trace(**dict(inputs))
+    if model_key == NONLINEARITY_MODEL_KEY:
+        if set(inputs) != {"activation"}:
+            raise ValueError("nonlinearity replay requires activation")
+        return run_nonlinearity_case(**dict(inputs))
     if model_key == NUMERICAL_MODEL_KEY:
         expected = {"case_id", "numeric_format"}
         if set(inputs) != expected:
@@ -685,3 +713,91 @@ def run_numerical_case(case_id: str, numeric_format: str) -> dict[str, Any]:
             "not task accuracy or learned-model quality."
         ),
     }
+
+
+# Exact hand-constructed mathematical fixtures, not observations of a trained
+# network or hardware. These reusable definitions live in the calculation layer.
+DEPENDENCY_MODEL_KEY = "v1_05.run_dependency_trace.v1"
+NONLINEARITY_MODEL_KEY = "v1_05.run_nonlinearity_case.v1"
+DEPENDENCY_FIXTURE = {"x": 2.0, "w1": 3.0, "b1": -1.0, "w2": -2.0, "b2": 1.0, "target": 1.0}
+
+
+def run_dependency_trace(*, discarded=(), activation: str = "relu", x: float | None = None) -> dict[str, Any]:
+    """Trace the chain rule through y=w2*f(w1*x+b1)+b2, L=(y-target)^2/2.
+
+    Discarding a forward operand makes the dependent derivative unavailable,
+    not zero. No recomputation is attempted. ReLU's derivative at zero uses the
+    explicit convention zero; this fixture makes no training-quality claim.
+    """
+    if activation not in {"relu", "linear"}:
+        raise ValueError("activation must be relu or linear")
+    if isinstance(discarded, (str, bytes)):
+        raise ValueError("discarded must be a collection of forward operand names")
+    lost = set(discarded)
+    if not lost <= {"x", "z1", "h", "prediction"}:
+        raise ValueError("discarded operands must be x, z1, h, or prediction")
+    p = dict(DEPENDENCY_FIXTURE)
+    if x is not None:
+        if isinstance(x, bool) or not isinstance(x, (int, float)) or not math.isfinite(x):
+            raise ValueError("x must be finite")
+        p["x"] = float(x)
+    z1 = p["w1"] * p["x"] + p["b1"]
+    h = max(0.0, z1) if activation == "relu" else z1
+    prediction = p["w2"] * h + p["b2"]
+    forward = {"x": p["x"], "z1": z1, "h": h, "prediction": prediction}
+    available = {key: value for key, value in forward.items() if key not in lost}
+    available.update({key: p[key] for key in ("w1", "w2", "target")})
+    trace = []
+
+    def step(name, required, formula, operation):
+        missing = [key for key in required if available.get(key) is None]
+        value = None if missing else float(operation())
+        available[name] = value
+        trace.append({"derivative": name, "required_operands": list(required),
+                      "missing_operands": missing, "value": value,
+                      "status": "unavailable" if missing else "available", "formula": formula})
+
+    step("d_prediction", ("prediction", "target"), "prediction-target",
+         lambda: available["prediction"] - available["target"])
+    step("d_w2", ("d_prediction", "h"), "d_prediction*h",
+         lambda: available["d_prediction"] * available["h"])
+    step("d_h", ("d_prediction", "w2"), "d_prediction*w2",
+         lambda: available["d_prediction"] * available["w2"])
+    requirements = ("d_h", "z1") if activation == "relu" else ("d_h",)
+    step("d_z1", requirements, "d_h * (z1>0)" if activation == "relu" else "d_h",
+         lambda: available["d_h"] * (float(available["z1"] > 0) if activation == "relu" else 1.0))
+    step("d_w1", ("d_z1", "x"), "d_z1*x", lambda: available["d_z1"] * available["x"])
+    return {"model_key": DEPENDENCY_MODEL_KEY,
+            "inputs": {"discarded": sorted(lost), "activation": activation, "x": p["x"]},
+            "forward_values": {key: value for key, value in forward.items() if key not in lost},
+            "fixed_parameters": {key: value for key, value in p.items() if key != "x"},
+            "loss": (prediction - p["target"]) ** 2 / 2,
+            "backward_trace": trace,
+            "gradients": {key: available[key] for key in ("d_w1", "d_w2")},
+            "required_operands": {item["derivative"]: item["required_operands"] for item in trace},
+            "missing_operands": sorted(lost),
+            "scope_note": "Exact scalar chain-rule fixture; no recomputation, optimizer, quality, or timing model. Missing operands are unknown, never numerical zero."}
+
+
+def run_nonlinearity_case(activation: str = "relu") -> dict[str, Any]:
+    """Evaluate a fixed two-hidden-unit XOR construction with/without ReLU.
+
+    h=(f(x1+x2), f(x1+x2-1)), output=h1-2*h2. No fitting or
+    quality simulation is involved. Any affine map obeys f00+f11=f01+f10;
+    the supplied XOR targets violate that identity.
+    """
+    if activation not in {"relu", "linear"}:
+        raise ValueError("activation must be relu or linear")
+    rows = []
+    for x1, x2 in ((0, 0), (0, 1), (1, 0), (1, 1)):
+        pre = [x1 + x2, x1 + x2 - 1]
+        hidden = [max(0, value) if activation == "relu" else value for value in pre]
+        output = hidden[0] - 2 * hidden[1]
+        target = int(x1 != x2)
+        rows.append({"input": [x1, x2], "preactivation": pre, "hidden": hidden,
+                     "output": output, "target": target, "matches": output == target})
+    return {"model_key": NONLINEARITY_MODEL_KEY, "inputs": {"activation": activation},
+            "rows": rows, "all_match": all(row["matches"] for row in rows),
+            "layer_dims": [2, 2, 1], "activation_evaluations": len(rows) * 2,
+            "affine_identity": "f(0,0)+f(1,1)=f(0,1)+f(1,0)",
+            "scope_note": "Exact hand-constructed XOR mapping; same affine weights in both arms, no training, task-quality estimate, or hardware timing."}

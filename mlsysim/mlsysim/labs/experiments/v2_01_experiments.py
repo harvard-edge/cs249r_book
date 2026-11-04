@@ -632,3 +632,31 @@ __all__ = [
     "serialize_evaluation",
     "serialize_value",
 ]
+
+
+DEMAND_GAIN_OPTIONS = {"Small equal gains": 0.05, "Moderate equal gains": 0.10, "Larger equal gains": 0.20}
+
+
+def evaluate_quality_demand(*, equal_loss_gain: float) -> dict[str, object]:
+    """Normalized introductory power law, not a fitted task-accuracy forecast.
+
+    Reuse the chapter's registered shallow-power-law exponent. Loss is measured
+    above an irreducible floor, normalized to one at baseline compute. Two equal
+    absolute loss reductions expose rising marginal compute cost.
+    """
+    from mlsysim.engine.scenarios import Scenarios
+
+    if isinstance(equal_loss_gain, bool) or not isinstance(equal_loss_gain, (int, float)):
+        raise ValueError("equal_loss_gain must be a finite number between zero and one half")
+    if not math.isfinite(equal_loss_gain) or not 0 < equal_loss_gain < 0.5:
+        raise ValueError("equal_loss_gain must be strictly between zero and one half")
+    exponent = Scenarios.ShallowPowerLawExample.exponent
+    targets = tuple(1.0 - step * equal_loss_gain for step in range(3))
+    compute = tuple(target ** (-1.0 / exponent) for target in targets)
+    return {
+        "normalized_floor": 0.0, "exponent": exponent,
+        "equal_loss_gain": equal_loss_gain, "excess_loss": targets,
+        "relative_compute": compute,
+        "additional_compute": (compute[1] - compute[0], compute[2] - compute[1]),
+        "limitation": "Illustrative normalized loss law; not measured accuracy or a validated fit for this track.",
+    }

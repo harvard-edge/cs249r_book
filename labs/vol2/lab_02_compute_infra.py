@@ -57,10 +57,12 @@ def _(mo):
 
 
 @app.cell
-def _(mo, set_evidence):
+def _(ledger, mo, set_evidence):
+    from mlsysbook_labs.contexts import preferred_context as _preferred_context
+    _track_options = {"TinyML": "tinyml", "Mobile": "mobile", "Edge": "edge", "Cloud": "cloud"}
     track = mo.ui.dropdown(
-        {"TinyML": "tinyml", "Mobile": "mobile", "Edge": "edge", "Cloud": "cloud"},
-        value="TinyML", label="Training-infrastructure track",
+        _track_options,
+        value=next(label for label, context in _track_options.items() if context == _preferred_context(ledger)), label="Deployment context",
         on_change=lambda _value: set_evidence({}),
     )
     return (track,)
@@ -142,7 +144,7 @@ def _(mo, profile, track_id):
     rationale = mo.ui.text_area(
         label="Evidence-based rationale",
         placeholder="Cite the selected option, one number for the rejected alternative, the limitation, and the trigger.",
-    )
+     debounce=False)
     return e_decision, e_rejected, final_choice, final_rejected, final_risk, final_trigger, rationale
 
 
@@ -224,13 +226,29 @@ def _(
 
 @app.cell
 def _(ACADEMIC_LAB_CSS, LAB_CSS, mo, profile, track):
+    from mlsysbook_labs.notebook import (
+        notebook_header as _course_header, notebook_shell as _course_shell,
+        notebook_learning_map as _course_learning_map,
+        notebook_scenario as _course_scenario,
+    )
+    from mlsysbook_labs.learning_paths import get_learning_path as _course_path
+    from mlsysbook_labs import get_lab_metadata as _course_metadata
     css = mo.Html("""
     <style>
-    .pilot-head{background:linear-gradient(135deg,#101827,#1d4f78);color:white;border-radius:14px;padding:clamp(18px,4vw,32px);margin-bottom:14px}.pilot-top{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font:700 .72rem ui-monospace;letter-spacing:.08em}.pilot-head h1{font-size:clamp(1.65rem,5vw,2.65rem);line-height:1.05;margin:16px 0 8px}.pilot-head p{color:#dbeafe;max-width:780px}.pilot-meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:9px;margin-top:17px}.pilot-meta div{background:#ffffff14;border:1px solid #ffffff26;padding:9px 11px;border-radius:8px}.track-outside{border:1px solid #cbd5e1;background:#f8fafc;border-radius:10px;padding:10px 14px;margin-bottom:8px}.saved{border-left:4px solid #2ca02c;background:#f0fdf4;padding:9px 12px;border-radius:7px}.lab-hud{display:flex;align-items:center;flex-wrap:wrap;gap:10px;background:#101827!important;color:#fff;padding:14px 18px;border-radius:9px}@media(max-width:520px){.pilot-head{border-radius:9px;margin-top:30px}.pilot-meta{grid-template-columns:1fr}}
+    .track-outside{border:1px solid #cbd5e1;background:#f8fafc;border-radius:10px;padding:10px 14px;margin-bottom:8px}.saved{border-left:4px solid #2ca02c;background:#f0fdf4;padding:9px 12px;border-radius:7px}.lab-hud{display:flex;align-items:center;flex-wrap:wrap;gap:10px;background:#101827!important;color:#fff;padding:14px 18px;border-radius:9px}
     </style>""")
-    header = mo.Html(f"""<section class="pilot-head"><div class="pilot-top"><span>VOLUME II · LAB 02</span><span>ABOUT 50–55 MIN</span></div><h1>The Compute Infrastructure Wall</h1><p>When does peak compute stop predicting useful capacity, and which accelerator–node–rack design survives the full constraint cascade?</p><div class="pilot-meta"><div><b>Track</b><br>{profile.label}</div><div><b>Fleet context</b><br>{profile.infrastructure_role}</div><div><b>Output</b><br>Evidence-backed infrastructure decision</div></div></section>""")
+    header = _course_header(_course_metadata("vol2/lab_02_compute_infra.py"), 'When does peak compute stop predicting useful capacity, and which accelerator–node–rack design survives the full constraint cascade?')
     note = mo.md("Hardware and transfer-tier specifications come from the course registry. Workload sizes, facility envelopes, duty cycles, and efficiency are **illustrative scenario assumptions**. Each part states omitted effects.")
-    mo.vstack([LAB_CSS, ACADEMIC_LAB_CSS, css, mo.Html('<div class="track-outside"><b>Choose the deployment workload whose training infrastructure you will design.</b></div>'), track, header, note], gap=0.5).style({"padding-top": "32px"})
+    _course_shell([
+        LAB_CSS,
+        ACADEMIC_LAB_CSS,
+        css,
+        header,
+        track,
+        _course_scenario(_course_path('vol2', 2), track=track.value, volume=2),
+        note,
+        _course_learning_map(_course_path('vol2', 2))
+    ], gap=0.5, volume=2).style({"padding-top": "32px"})
     return
 
 
@@ -251,6 +269,12 @@ def _(
     final_rejected, final_risk, final_trigger, get_evidence, go, mo, profile,
     rationale, track_id,
 ):
+    _saved_prediction_widgets = {'A': a_prediction, 'B': b_prediction, 'C': c_prediction, 'D': d_prediction, 'E': e_prediction}
+    from mlsysbook_labs.notebook import notebook_prediction_label as _read_prediction
+    from mlsysbook_labs.notebook import notebook_tab_hint as _part_tabs_hint, notebook_shell as _lesson_shell
+    from mlsysbook_labs.notebook import notebook_part_reflection as _concept_reflection
+    from mlsysbook_labs.learning_paths import get_learning_path as _reflection_path
+    _reflection_contract = _reflection_path('vol2', 2)
     _captures = get_evidence()
     _upstream = {"A": a_upstream, "B": b_upstream, "C": c_upstream, "D": d_upstream, "E": e_upstream}
     audit = audit_evidence(_captures, track=track_id, required_parts=tuple("ABCDE"), per_part_upstream_inputs=_upstream, contrast_required_parts=tuple("ABCDE"))
@@ -265,7 +289,7 @@ def _(
         if part in audit.stale or (part, part) in audit.identical_pairs:
             return mo.callout(mo.md("**STALE OR NON-CONTRASTING EVIDENCE.** Recapture this part."), kind="danger")
         snap = item.to_dict()
-        return mo.Html(f'<div class="saved"><b>Saved snapshot</b> · original prediction: {snap["prediction"]}<br><small>Later control changes do not rewrite this evidence.</small></div>')
+        return mo.Html(f'<div class="saved"><b>Saved snapshot</b> · original prediction: {_read_prediction(_saved_prediction_widgets[part], value=snap["prediction"])}<br><small>Later control changes do not rewrite this evidence.</small></div>')
 
     def build_part_a():
         intro = mo.md(f"### A · When does the faster accelerator fail to help? (9 min)\nFor the **{profile.infrastructure_role}**, evaluate candidate training devices. The options trade peak compute against memory bandwidth. Predict the changed ranking before opening the instrument.")
@@ -277,9 +301,9 @@ def _(
             fig.add_bar(name=label, x=[r["device_name"] for r in result["rows"]], y=[r["useful_tflops"] for r in result["rows"]])
         fig.update_layout(barmode="group", height=285, yaxis_title="Roofline ceiling (TFLOP/s)", legend_orientation="h")
         rows = [{"Run": "Baseline", "Intensity": 10, "Winner": a_base["winner_device_key"]}, {"Run": "Changed", "Intensity": a_intensity.value, "Winner": a_result["winner_device_key"]}]
-        reveal = mo.callout(mo.md(f"**Prediction:** {a_prediction.value}. **Analytical result:** {a_base['winner_device_key']} wins at 10 FLOP/byte; {a_result['winner_device_key']} wins at {a_intensity.value} FLOP/byte."), kind="info")
+        reveal = mo.callout(mo.md(f"**Prediction:** {_read_prediction(a_prediction)}. **Analytical result:** {a_base['winner_device_key']} wins at 10 FLOP/byte; {a_result['winner_device_key']} wins at {a_intensity.value} FLOP/byte."), kind="info")
         notes = mo.accordion({"Calculation Notes": mo.md("Roofline throughput = min(peak compute, memory bandwidth × arithmetic intensity). This upper bound excludes software efficiency, launch overhead, and contention.")})
-        return mo.vstack([intro, a_intensity, a_prediction, apply_plotly_theme(fig), table(rows), reveal, a_capture, saved("A"), notes])
+        return mo.vstack([mo.vstack([intro, a_intensity, a_prediction, apply_plotly_theme(fig), table(rows), reveal, a_capture, saved("A"), notes]), _concept_reflection(_reflection_contract, "A")])
 
     def build_part_b():
         b_device = b_base.get("device_name", "the training accelerator")
@@ -290,9 +314,9 @@ def _(
         fig.update_layout(barmode="group", height=275, yaxis_title="Memory (GiB)", legend_orientation="h")
         rows = [{"Run": "Baseline", "Fit": b_base["fits"], "Bandwidth floor": f"{b_base['bandwidth_floor_ms']:.1f} ms"}, {"Run": f"{b_scale.value:.1f}×", "Fit": b_result["fits"], "Bandwidth floor": f"{b_result['bandwidth_floor_ms']:.1f} ms"}]
         outcome = f"fits; {b_result['bottleneck']} binds" if b_result["fits"] else f"fails capacity by {-b_result['headroom_gib']:.1f} GiB"
-        reveal = mo.callout(mo.md(f"**Prediction:** {b_prediction.value}. **Result:** the enlarged workload {outcome}."), kind="success" if b_result["fits"] else "danger")
+        reveal = mo.callout(mo.md(f"**Prediction:** {_read_prediction(b_prediction)}. **Result:** the enlarged workload {outcome}."), kind="success" if b_result["fits"] else "danger")
         notes = mo.accordion({"Calculation Notes": mo.md("Fit requires working set ≤ capacity. For a fit, latency floor = max(operations ÷ peak compute, bytes moved ÷ memory bandwidth).")})
-        return mo.vstack([intro, b_scale, b_prediction, apply_plotly_theme(fig), table(rows), reveal, b_capture, saved("B"), notes])
+        return mo.vstack([mo.vstack([intro, b_scale, b_prediction, apply_plotly_theme(fig), table(rows), reveal, b_capture, saved("B"), notes]), _concept_reflection(_reflection_contract, "B")])
 
     def build_part_c():
         c_device = c_all.get("device_name", "the training accelerator")
@@ -304,10 +328,10 @@ def _(
         slowdown = c_result["slowdown_vs_baseline"]
         fig = go.Figure([go.Bar(x=[c_base["tier"], c_result["tier"]], y=[c_base["transfer_ms"], c_result["transfer_ms"]], marker_color=[COLORS["BlueLine"], COLORS["OrangeLine"]])])
         fig.update_layout(height=275, yaxis_title="Transfer lower bound (ms)", showlegend=False)
-        reveal = mo.callout(mo.md(f"**Prediction:** {c_prediction.value}. **Result:** {c_result['tier']} is **{slowdown:.1f}×** slower than {c_base['tier']} for the same {c_result['payload_gib']:.1f} GiB payload."), kind="info")
+        reveal = mo.callout(mo.md(f"**Prediction:** {_read_prediction(c_prediction)}. **Result:** {c_result['tier']} is **{slowdown:.1f}×** slower than {c_base['tier']} for the same {c_result['payload_gib']:.1f} GiB payload."), kind="info")
         omitted = f" Omitted/unmodeled registry links for {c_device}: {', '.join(c_all['omitted_links'])}." if c_all.get("omitted_links") else ""
         notes = mo.accordion({"Calculation Notes": mo.md(f"Transfer time = payload ÷ one-way bandwidth. The streaming lower bound excludes startup, protocol overhead, and contention.{omitted} Network bandwidth is an illustrative scenario assumption.")})
-        return mo.vstack([intro, c_destination, c_prediction, apply_plotly_theme(fig), table(rows), reveal, c_capture, saved("C"), notes])
+        return mo.vstack([mo.vstack([intro, c_destination, c_prediction, apply_plotly_theme(fig), table(rows), reveal, c_capture, saved("C"), notes]), _concept_reflection(_reflection_contract, "C")])
 
     def build_part_d():
         intro = mo.md(f"### D · Can the facility power and cool this capacity? (9 min)\nFor the **{profile.infrastructure_role}**, hosts and rack equipment add heat around the training accelerators. This scenario supplies **{d_result['electrical_capacity_kw']:.1f} kW electrical** and **{d_result['cooling_capacity_kw']:.1f} kW cooling**; PUE adds electrical draw outside the IT load.")
@@ -320,9 +344,9 @@ def _(
         rows = [{"Run": f"{d_base['accelerator_count']} accelerator(s) (baseline)", "IT heat": f"{d_base['it_power_kw']:.2f} kW", "Facility draw": f"{d_base['facility_power_kw']:.2f} kW", "Outcome": "PASS" if d_base["feasible"] else "FAIL"}, {"Run": f"{d_count.value} accelerator(s)", "IT heat": f"{d_result['it_power_kw']:.2f} kW", "Facility draw": f"{d_result['facility_power_kw']:.2f} kW", "Outcome": "PASS" if d_result["feasible"] else "FAIL"}]
         failed = [name for name, ok in (("electrical", d_result["electrical_ok"]), ("cooling", d_result["cooling_ok"])) if not ok]
         outcome = "both limits pass" if not failed else " and ".join(failed) + " fails"
-        reveal = mo.callout(mo.md(f"**Prediction:** {d_prediction.value}. **Result:** {outcome}; the design occupies {d_result['node_count']} node(s) and {d_result['rack_count']} rack(s)."), kind="success" if d_result["feasible"] else "danger")
+        reveal = mo.callout(mo.md(f"**Prediction:** {_read_prediction(d_prediction)}. **Result:** {outcome}; the design occupies {d_result['node_count']} node(s) and {d_result['rack_count']} rack(s)."), kind="success" if d_result["feasible"] else "danger")
         notes = mo.accordion({"Calculation Notes": mo.md("IT power sums accelerator TDP, node overhead, and rack overhead. Cooling handles IT heat; electrical capacity handles IT power × PUE.")})
-        return mo.vstack([intro, d_count, d_prediction, apply_plotly_theme(fig), table(rows), reveal, d_capture, saved("D"), notes])
+        return mo.vstack([mo.vstack([intro, d_count, d_prediction, apply_plotly_theme(fig), table(rows), reveal, d_capture, saved("D"), notes]), _concept_reflection(_reflection_contract, "D")])
 
     def build_part_e():
         intro = mo.md(f"### E · Which feasible system should we buy? (9 min)\nFor the **{profile.infrastructure_role}**, compare equal counts and one horizon at low and expected duty. A cheaper system that fails memory or facility limits is not feasible.")
@@ -332,9 +356,9 @@ def _(
         for low, expected in zip(e_base["rows"], e_result["rows"]):
             rows.append({"Candidate": expected["device_name"], "Memory": "PASS" if expected["memory_fits"] else "FAIL", "Facility": "PASS" if expected["facility_fits"] else "FAIL", "Sustained": f"{expected['active_sustained_tflops']:.0f} TFLOP/s", "Low-duty $/PFLOP-h": f"${low['usd_per_useful_pflop_hour']:.1f}", "Expected $/PFLOP-h": f"${expected['usd_per_useful_pflop_hour']:.1f}", "Ownership": f"${expected['ownership_cost_usd']:,.0f}"})
         feasible = [r["device_key"] for r in e_result["rows"] if r["feasible"]]
-        reveal = mo.callout(mo.md(f"**Prediction:** {e_prediction.value}. **Result:** feasible candidates are {', '.join(feasible) if feasible else 'none'}. Cost per work cannot erase a memory or facility failure."), kind="info" if feasible else "danger")
+        reveal = mo.callout(mo.md(f"**Prediction:** {_read_prediction(e_prediction)}. **Result:** feasible candidates are {', '.join(feasible) if feasible else 'none'}. Cost per work cannot erase a memory or facility failure."), kind="info" if feasible else "danger")
         notes = mo.accordion({"Calculation Notes": mo.md("Average power blends active and idle draw. Cost includes accelerator capital, explicit added capital, maintenance, and PUE-loaded electricity over one horizon. Staffing and construction remain outside the boundary.")})
-        return mo.vstack([intro, e_duty, e_prediction, table(rows), reveal, mo.hstack([e_decision, e_rejected], widths="equal", wrap=True), e_capture, saved("E"), notes])
+        return mo.vstack([mo.vstack([intro, e_duty, e_prediction, table(rows), reveal, mo.hstack([e_decision, e_rejected], widths="equal", wrap=True), e_capture, saved("E"), notes]), _concept_reflection(_reflection_contract, "E")])
 
     def build_synthesis():
         rows = []
@@ -348,8 +372,16 @@ def _(
         return mo.vstack([mo.md("### Synthesis · Defend one infrastructure decision (5 min)\nUse saved evidence: chosen option → quantified rejected alternative → remaining limitation → reevaluation trigger."), table(rows), mo.callout(mo.md("Saved snapshots preserve exact evaluator arguments and cannot be rewritten by later controls."), kind="info"), mo.hstack([final_choice, final_rejected], widths="equal", wrap=True), mo.hstack([final_trigger, final_risk], widths="equal", wrap=True), rationale, mo.callout(mo.md(message), kind="success" if complete else "warn")])
 
     tabs = mo.ui.tabs({"Part A": build_part_a(), "Part B": build_part_b(), "Part C": build_part_c(), "Part D": build_part_d(), "Part E": build_part_e(), "Synthesis": build_synthesis()})
-    tabs
+    _lesson_shell([_part_tabs_hint(), tabs], volume=2)
     return (audit,)
+
+
+@app.cell
+def _():
+    from mlsysbook_labs.notebook import notebook_shell as _submit_shell, notebook_submission as _submit_guide
+    from mlsysbook_labs.learning_paths import get_learning_path as _submit_path
+    _submit_shell([_submit_guide(_submit_path(2, 2))], volume=2)
+    return
 
 
 @app.cell
@@ -358,10 +390,12 @@ def _(
     final_trigger, get_evidence, get_lab_metadata, mo, profile, rationale,
     report_export_panel, track_id,
 ):
+    from mlsysbook_labs.notebook import notebook_shell as _workspace_shell
     _captures = get_evidence()
     _saved = _captures["E"].to_dict()["decision"] if "E" in _captures else None
     _ready = audit.complete and all(w.value is not None for w in (final_choice, final_rejected, final_trigger, final_risk)) and bool(rationale.value.strip()) and final_choice.value != final_rejected.value and final_choice.value == _saved
-    mo.stop(not _ready)
+    from mlsysbook_labs.notebook import notebook_download_readiness as _download_readiness
+    mo.stop(not _ready, _download_readiness(volume=2))
     snapshots = {part: _captures[part].to_dict() for part in "ABCDE"}
     report = build_lab_report(
         get_lab_metadata("vol2/lab_02_compute_infra.py"), track=track_id,
@@ -379,36 +413,37 @@ def _(
         result_snapshot={"track": track_id, "captures": snapshots, "recommendation": final_choice.value, "rejected": final_rejected.value, "trigger": final_trigger.value, "residual_risk": final_risk.value},
         source_trace={"scenario": "Illustrative workload and facility assumptions.", "calculations": "Analytical Roofline, transfer, facility, and ownership-cost equations."},
     )
-    mo.vstack([mo.md("## Local evidence report"), report_export_panel(report)])
+    _workspace_shell([mo.vstack([mo.md("### Download your discussion"), report_export_panel(report)])], volume=2)
     return (report,)
 
 
 @app.cell
-async def _(
-    MODEL_ID, audit, final_choice, final_rejected, final_risk, final_trigger,
-    get_evidence, ledger, mo, rationale, track_id,
+def _(
+    MODEL_ID, audit, final_choice, final_rejected, final_risk, final_trigger, get_evidence, mo, rationale, track_id
 ):
+    from mlsysbook_labs.fleet_evidence import discussion_fingerprint as _discussion_fingerprint
     _captures = get_evidence()
-    _saved = _captures["E"].to_dict()["decision"] if "E" in _captures else None
-    _ready = audit.complete and all(w.value is not None for w in (final_choice, final_rejected, final_trigger, final_risk)) and bool(rationale.value.strip()) and final_choice.value != final_rejected.value and final_choice.value == _saved
-    _status = "EVIDENCE IN PROGRESS"
-    if _ready:
-        try:
-            ledger.save(chapter=2, design={
-                "schema_version": 1, "lab_id": "v2_02", "track_id": track_id,
-                "model_id": MODEL_ID,
-                "evidence": {part: item.to_dict() for part, item in _captures.items()},
-                "recommendation": final_choice.value,
-                "rejected_alternative": final_rejected.value,
-                "reevaluation_trigger": final_trigger.value,
-                "residual_risk": final_risk.value, "rationale": rationale.value,
-            })
-            await ledger.flush()
-        except Exception:
-            _status = "LOCAL SAVE FAILED · DOWNLOAD THE REPORT TO KEEP YOUR EVIDENCE"
-        else:
-            _status = "SAVED"
-    mo.Html(f'<div class="lab-hud"><span>LAB 02 · The Compute Infrastructure Wall · STATUS: {_status}</span></div>')
+    _saved = _captures['E'].to_dict()['decision'] if 'E' in _captures else None
+    _ready = audit.complete and all((w.value is not None for w in (final_choice, final_rejected, final_trigger, final_risk))) and bool(rationale.value.strip()) and (final_choice.value != final_rejected.value) and (final_choice.value == _saved)
+    fleet_discussion_ready = _ready
+    fleet_discussion_design = {'schema_version': 1, 'lab_id': 'v2_02', 'track_id': track_id, 'model_id': MODEL_ID, 'evidence': {part: item.to_dict() for part, item in _captures.items()}, 'recommendation': final_choice.value, 'rejected_alternative': final_rejected.value, 'reevaluation_trigger': final_trigger.value, 'residual_risk': final_risk.value, 'rationale': rationale.value} if _ready else None
+    fleet_discussion_fingerprint = _discussion_fingerprint(fleet_discussion_design)
+    # Recreated when any evidence, track, or discussion field changes.
+    save_discussion = mo.ui.run_button(label="Save discussion", disabled=not fleet_discussion_ready)
+    return (fleet_discussion_ready, fleet_discussion_design, fleet_discussion_fingerprint, save_discussion)
+
+
+@app.cell
+async def _(fleet_discussion_design, fleet_discussion_fingerprint, fleet_discussion_ready,
+            ledger, mo, save_discussion, track_id):
+    from mlsysbook_labs.fleet_evidence import save_completed_discussion as _save_completed_discussion
+    from mlsysbook_labs.notebook import notebook_shell as _discussion_shell, notebook_status as _notebook_status
+    _outcome = await _save_completed_discussion(
+        ledger, chapter=2, track=track_id, design=fleet_discussion_design,
+        fingerprint=fleet_discussion_fingerprint, ready=fleet_discussion_ready,
+        requested=bool(save_discussion.value),
+    )
+    _discussion_shell([mo.vstack([save_discussion, _notebook_status(_outcome.status, _outcome.detail)])], volume=2)
     return
 
 

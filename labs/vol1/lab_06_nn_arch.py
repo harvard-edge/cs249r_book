@@ -85,10 +85,12 @@ def _(mo):
 
 
 @app.cell
-def _(mo, set_evidence):
+def _(mo, set_evidence, ledger):
+    from mlsysbook_labs.contexts import preferred_context as _preferred_context
+    _track_labels = {"tinyml": "TinyML", "mobile": "Mobile", "edge": "Edge", "cloud": "Cloud"}
     track = mo.ui.dropdown(
         {"TinyML": "tinyml", "Mobile": "mobile", "Edge": "edge", "Cloud": "cloud"},
-        value="TinyML",
+        value=_track_labels[_preferred_context(ledger)],
         label="Deployment track",
         on_change=lambda _value: set_evidence({}),
     )
@@ -168,6 +170,28 @@ def _(
         d_priority,
         d_rejected,
     )
+
+
+@app.cell
+def _(mo):
+    reference_history = mo.ui.slider(32, 512, step=32, value=128, label="Language-reference history (tokens)")
+    reference_vocabulary = mo.ui.dropdown({"Smaller vocabulary": 1024, "Larger vocabulary": 8192}, value="Smaller vocabulary", label="Embedding-reference vocabulary")
+    return reference_history, reference_vocabulary
+
+
+@app.cell
+def _(mo):
+    structure_task = mo.ui.radio(
+        {"Position matters: a pulse in the first half": "direction", "Position does not matter: a pulse anywhere": "presence"},
+        value="Position matters: a pulse in the first half", label="Reference task")
+    structure_transform = mo.ui.dropdown(
+        {"Ordered window": "identity", "Global mean": "mean", "Reversal invariant": "reversal_invariant"},
+        value="Global mean", label="Representation commitment", full_width=True)
+    structure_prediction = mo.ui.radio(
+        {"All required distinctions remain in these cases": "preserved", "At least one required distinction is erased": "erased"},
+        label="Will this representation retain the information the task needs?"
+    ).form(submit_button_label="Lock information-loss prediction")
+    return structure_task, structure_transform, structure_prediction
 
 
 @app.cell
@@ -345,8 +369,17 @@ def _(
     mo,
     scenario,
     set_evidence,
-    track_id,
+    track_id, reference_history, reference_vocabulary,
+    structure_task, structure_transform, structure_prediction,
 ):
+    from mlsysim.labs.experiments.v1_06_experiments import attention_state_comparison as _saved_attention, language_phase_reference as _saved_phase, embedding_lookup_reference as _saved_embedding
+    from mlsysim.labs.experiments.v1_05_experiments import snapshot as _reference_snapshot
+    from mlsysim.labs.experiments.v1_06_experiments import structure_probe as _saved_structure
+    _structure_ref = _saved_structure(task=structure_task.value, transform=structure_transform.value)
+    _attention_ref = {**_reference_snapshot(_saved_attention(track_id, scale_value=c_scale.value)), "model_key": "v1_06_experiments.attention_state_comparison"}
+    _phase_ref = {**_reference_snapshot(_saved_phase(history_tokens=reference_history.value)), "model_key": "v1_06_experiments.language_phase_reference"}
+    _embedding_ref = {**_reference_snapshot(_saved_embedding(vocabulary_size=reference_vocabulary.value)), "model_key": "v1_06_experiments.embedding_lookup_reference"}
+
     def store(part, capture):
         set_evidence(lambda current: {**current, part: capture})
 
@@ -354,6 +387,9 @@ def _(
     a_upstream = {
         "training_examples": a_examples.value,
         "conclusion": a_conclusion.value,
+        "structure_task": structure_task.value,
+        "structure_transform": structure_transform.value,
+        "structure_prediction": structure_prediction.value,
     }
     b_upstream = {
         "candidate_id": b_candidate.value,
@@ -362,17 +398,19 @@ def _(
     c_upstream = {
         "candidate_id": c_candidate.value,
         "scale_value": c_scale.value,
+        "reference_history": reference_history.value,
     }
     d_upstream = {
         "priority": d_priority.value,
         "choice": d_choice.value,
         "rejected": _rejected_id,
+        "reference_vocabulary": reference_vocabulary.value,
     }
     _a_ids = tuple(a_records)
     a_capture = mo.ui.button(
-        label="Capture sample-efficiency contrast",
+        label="Capture structure and outcome evidence",
         kind="success",
-        disabled=a_prediction.value is None or a_conclusion.value is None,
+        disabled=a_prediction.value is None or a_conclusion.value is None or structure_prediction.value is None,
         on_click=lambda _v: store(
             "A",
             capture_evidence(
@@ -384,7 +422,7 @@ def _(
                     "conclusion": a_conclusion.value,
                 },
                 baseline=a_records[_a_ids[1]],
-                result=a_records[_a_ids[0]],
+                result={**a_records[_a_ids[0]], "supplemental_reference": _structure_ref},
                 alternatives=tuple(a_records.values()),
                 upstream_inputs=a_upstream,
                 decision=a_conclusion.value,
@@ -430,7 +468,7 @@ def _(
                     "scale_value": c_scale.value,
                 },
                 baseline=c_base,
-                result=c_result,
+                result={**c_result, "supplemental_references": {"attention_state": _attention_ref, "language_phase": _phase_ref}},
                 upstream_inputs=c_upstream,
                 decision=c_result["violations"],
                 model_key=MODEL_KEY,
@@ -468,7 +506,7 @@ def _(
                     "rejected": _rejected_id,
                 },
                 baseline=d_records[_rejected_id],
-                result=d_records[_result_id],
+                result={**d_records[_result_id], "supplemental_reference": _embedding_ref},
                 alternatives=tuple(d_records.values()),
                 upstream_inputs=d_upstream,
                 decision=d_choice.value,
@@ -491,22 +529,34 @@ def _(
 
 
 @app.cell
-def _(ACADEMIC_LAB_CSS, LAB_CSS, mo, scenario, track):
-    css = mo.Html("""
-    <style>
-    .pilot-head{background:linear-gradient(135deg,#101827,#1d4f78);color:white;border-radius:14px;padding:clamp(18px,4vw,32px);margin:10px 0 14px}
-    .pilot-top{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font:700 .72rem ui-monospace;letter-spacing:.08em}
-    .pilot-head h1{font-size:clamp(1.65rem,5vw,2.65rem);line-height:1.05;margin:16px 0 8px}.pilot-head p{color:#dbeafe;max-width:780px}
-    .pilot-meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:9px;margin-top:17px}.pilot-meta div{background:#ffffff14;border:1px solid #ffffff26;padding:9px 11px;border-radius:8px}
-    .saved{border-left:4px solid #2ca02c;background:#f0fdf4;padding:9px 12px;border-radius:7px}.table-wrap{max-width:100%;overflow-x:auto}
-    .lab-hud{display:flex;align-items:center;flex-wrap:wrap;gap:10px;background:#101827!important;color:#fff;padding:14px 18px;border-radius:9px}.lab-hud .hud-label{color:#a7b9cf}.lab-hud .hud-value{color:#fff}.lab-hud .hud-active{color:#86efac}.lab-hud .hud-failed{color:#fca5a5;font-weight:700}
-    @media(max-width:520px){.pilot-head{border-radius:9px;margin-top:30px}.pilot-meta{grid-template-columns:1fr}}
-    </style>""")
-    header = mo.Html(
-        f"""<section class="pilot-head"><div class="pilot-top"><span>VOLUME I · LAB 06</span><span>ABOUT 45–55 MIN</span></div><h1>Architecture Commitments</h1><p>When does a neural architecture match the task, and when does its computation, traffic, dependency chain, or memory shape break the system?</p><div class="pilot-meta"><div><b>Track</b><br>{scenario.label}</div><div><b>Task</b><br>{scenario.task}</div><div><b>Input sweep</b><br>{scenario.scale_axis}</div><div><b>Output</b><br>Architecture recommendation</div></div></section>"""
+def _(get_lab_metadata, mo, track, track_id, scenario):
+    from mlsysbook_labs.notebook import notebook_scenario as _scenario
+    from mlsysim import Scenarios as _Scenarios
+    from mlsysbook_labs.learning_paths import get_learning_path as _get_learning_path
+    from mlsysbook_labs.notebook import (
+        notebook_bridge as _bridge, notebook_header as _header,
+        notebook_learning_map as _learning_map, notebook_shell as _opening_shell,
     )
-    mo.vstack([LAB_CSS, ACADEMIC_LAB_CSS, css, track, header])
-    return
+
+    learning_contract = _get_learning_path("vol1", 6)
+    _journey = _Scenarios.DeploymentJourneys.get(track_id)
+    _episode = _journey.episode(6)
+    learning_contract["narrative"] = {
+        "project": _journey.mission,
+        "scene": _episode.scene,
+        "carry_forward": _episode.handoff,
+        "scope": _journey.boundary,
+    }
+    _opening_shell([
+        _header(get_lab_metadata("vol1/lab_06_nn_arch.py"), _episode.question,
+                topics=[part["label"] for part in learning_contract["parts"]]),
+        track,
+        _scenario(learning_contract, track=track_id, scene=_episode.scene),
+        _learning_map(learning_contract),
+        mo.md(f"**Reference used in today’s instruments:** {scenario.task}. This controlled case tests the chapter’s mechanism; transfer the reasoning to your project without treating the result as project validation."),
+        mo.callout(mo.md("These are supplied, controlled reference studies. Their results do not validate the deployment project. Choose a prediction in Part A to open its live experiment; a wrong prediction still opens the evidence."), kind="info"),
+    ])
+    return (learning_contract,)
 
 
 @app.cell
@@ -557,9 +607,44 @@ def _(
     rationale,
     scenario,
     track_id,
+    reference_history, reference_vocabulary,
+    learning_contract,
+    structure_task, structure_transform, structure_prediction,
 ):
+    from mlsysbook_labs.notebook import notebook_shell as _shell, notebook_learning_part as _learning_part, notebook_tab_hint as _tab_hint
+    from mlsysim.labs.experiments.v1_06_experiments import attention_state_comparison as _attention_state, language_phase_reference as _language_phase, embedding_lookup_reference as _embedding
+    from mlsysim.fmt import fmt_memory as _fmt_memory, fmt_flops as _fmt_flops
+
+    def _attention_reference():
+        _comparison = _attention_state(track_id, scale_value=c_scale.value)
+        _rows = []
+        for _label, _arm in (("Full scores stored", _comparison["baseline"]), ("Full scores not stored", _comparison["result"])):
+            _rows.append({"State policy": _label, "Dense work": _fmt_flops(_arm["flops"]), "Score state": _fmt_memory(_arm["attention_score_memory"]), "Total state": _fmt_memory(_arm["total_runtime_memory"]), "Fits": _arm["fits_memory"]})
+        _phase = _language_phase(history_tokens=reference_history.value)
+        return mo.vstack([
+            mo.md("#### Does removing score storage remove the work?\nThe attention candidate uses the same input size as the main sweep. Compare stored scores with a lower bound that does not store the full matrix; inspect arithmetic separately from memory."),
+            table(_rows), mo.md(_comparison["scope_note"]),
+            mo.md("#### Separate language-decoder reference\nThis is a different task from the deployment project. Change history, then distinguish processing a whole known prompt from generating one next token; compare work and retained state without claiming a latency result."),
+            reference_history,
+            table([{"Phase": _label, "Tokens per request": _phase[_key]["tokens_processed_per_request"], "Dense work": _fmt_flops(_phase[_key]["flops"]), "KV state": _fmt_memory(_phase[_key]["kv_state"]), "Weights per processed token": _fmt_memory(_phase[_key]["weight_bytes_per_processed_token"])} for _label, _key in (("Prefill", "prefill"), ("Decode", "decode"))]),
+            mo.md(_phase["scope_note"]),
+        ])
+
+    def _embedding_reference():
+        _result = _embedding(vocabulary_size=reference_vocabulary.value)
+        return mo.vstack([
+            mo.md("#### Separate embedding-capacity reference\nKeep requested rows and vector width fixed. Change vocabulary, then compare total capacity with the bytes read by those same requests. What evidence about an unseen item is still missing?"),
+            reference_vocabulary,
+            table([{"Vocabulary": _result["inputs"]["vocabulary_size"], "Requested rows": _result["inputs"]["requested_rows"], "Table capacity": _fmt_memory(_result["table_memory"]), "Logical request reads": _fmt_memory(_result["request_read_bytes"])}]),
+            mo.md(_result["scope_note"]),
+        ])
+
+    _route = {part["id"]: part for part in learning_contract["parts"]}
+
+
     def table(rows):
-        return mo.vstack([mo.ui.table(rows, pagination=False)]).style({"max-width": "100%", "overflow-x": "auto"})
+        from mlsysbook_labs.notebook import notebook_table as _compact_table
+        return _compact_table(rows)
 
     def verdict(record):
         return (
@@ -589,9 +674,27 @@ def _(
         },
     )
 
+    def structure_reference():
+        from mlsysim.labs.experiments.v1_06_experiments import structure_probe as _probe
+        _intro = mo.md("#### What information does the representation erase?\nThe team wants to simplify its input before choosing an architecture. First test the structural assumption on this small **shared reference**, separate from every project dataset. Each window has ordered positions. Compare a task where position matters with one where it does not; keep the cases fixed. **Ordered window** keeps every position; **global mean** averages all positions; **reversal invariant** treats a window and its reversal as the same input.")
+        _opening = [_intro, structure_task, structure_transform, structure_prediction]
+        if structure_prediction.value is None:
+            return mo.vstack(_opening)
+        _probe_result = _probe(task=structure_task.value, transform=structure_transform.value)
+        _rows = [{"Case": _row["case"], "Ordered input": str(_row["input"]), "Representation": str(_row["representation"]), "Required answer": _row["required_label"]} for _row in _probe_result["rows"]]
+        if _probe_result["conflicts"]:
+            _pair = _probe_result["conflicts"][0]
+            _feedback = f"**A required distinction is erased.** {_pair['cases'][0].capitalize()} and {_pair['cases'][1]} now have the same representation but require different answers ({_pair['labels'][0]} and {_pair['labels'][1]}). A downstream predictor receiving only that representation cannot distinguish them. Keeping more training examples cannot restore the removed position."
+        else:
+            _feedback = "**These supplied cases retain every required distinction.** Any identical representations have compatible required answers. This does not establish general adequacy or sample efficiency; inspect the same representation under the other task before accepting the assumption."
+        return mo.vstack([*_opening, mo.md(f"**Question:** {_probe_result['task_question']} Required answers use 1 for yes and 0 for no. This representation retains **{_probe_result['representation_elements_per_case']} value(s)** per case; this is a shape count, not a speed prediction."), table(_rows),
+            mo.callout(mo.md(_feedback), kind="warn" if _probe_result["conflicts"] else "info"),
+            mo.md("**Try a controlled contrast:** keep the representation fixed and change the task, then keep the task fixed and restore the ordered window. Which distinction was unnecessary in one task but essential in the other? The quality curves below address a different question: supplied outcomes at a fixed example count."),
+            mo.accordion({"Reference boundaries": mo.md(_probe_result["scope_note"])})])
+
     def part_a():
         intro = mo.md(
-            "### A · When does a structural assumption help? (10 min)\nThe candidates solve the same task and use the same training-example count. Commit to which one will reach the highest supplied validation quality before opening the evidence."
+            "The candidates solve the same task and use the same training-example count. Commit to which one will reach the highest supplied validation quality before opening the evidence."
         )
         if a_prediction.value is None:
             return mo.vstack([intro, a_examples, a_prediction])
@@ -630,6 +733,8 @@ def _(
                 intro,
                 a_examples,
                 a_prediction,
+                structure_reference(),
+                mo.md("#### Compare supplied outcomes at a fixed example count"),
                 apply_plotly_theme(_fig),
                 table(_rows),
                 mo.callout(
@@ -653,7 +758,7 @@ def _(
 
     def part_b():
         intro = mo.md(
-            "### B · Does more compute capability guarantee a proportional speedup? (10 min)\nHold the task and architecture fixed. Change compute rate or memory bandwidth independently, then predict the remaining execution bound."
+            "Hold the task and architecture fixed. Change compute rate or memory bandwidth independently, then predict the remaining execution bound."
         )
         if b_prediction.value is None:
             return mo.vstack([intro, b_candidate, b_resource, b_prediction])
@@ -698,7 +803,7 @@ def _(
 
     def part_c():
         intro = mo.md(
-            f"### C · Which commitment breaks first as {scenario.scale_axis} grows? (10 min)\nKeep the architecture fixed and compare the baseline {scenario.scale_axis} with one changed input."
+            f"Keep the architecture fixed and compare the baseline {scenario.scale_axis} with one changed input."
         )
         if c_prediction.value is None:
             return mo.vstack([intro, c_candidate, c_scale, c_prediction])
@@ -764,6 +869,7 @@ def _(
                 ),
                 c_capture,
                 saved("C"),
+                _attention_reference(),
                 mo.accordion(
                     {
                         "Calculation Notes": mo.md(
@@ -776,7 +882,7 @@ def _(
 
     def part_d():
         intro = mo.md(
-            "### D · Which architecture remains defensible? (10 min)\nEvery candidate must satisfy memory, latency, and matched-task quality requirements. Predict which feasible candidate the selected priority will choose."
+            "Every candidate must satisfy memory, latency, and matched-task quality requirements. Predict which feasible candidate the selected priority will choose."
         )
         if d_prediction.value is None:
             return mo.vstack([intro, d_priority, d_prediction])
@@ -811,6 +917,7 @@ def _(
                 mo.hstack([d_choice, d_rejected], widths="equal", wrap=True),
                 d_capture,
                 saved("D"),
+                _embedding_reference(),
                 mo.accordion(
                     {
                         "Calculation Notes": mo.md(
@@ -881,16 +988,24 @@ def _(
             ]
         )
 
-    mo.ui.tabs(
+    _shell([_tab_hint(), mo.ui.tabs(
         {
-            "Part A": part_a(),
-            "Part B": part_b(),
-            "Part C": part_c(),
-            "Part D": part_d(),
+            "Part A": _learning_part(learning_contract, "A", part_a()),
+            "Part B": _learning_part(learning_contract, "B", part_b()),
+            "Part C": _learning_part(learning_contract, "C", part_c()),
+            "Part D": _learning_part(learning_contract, "D", part_d()),
             "Synthesis": build_synthesis(),
         }
-    )
+    )])
     return (audit,)
+
+
+@app.cell(hide_code=True)
+def _():
+    from mlsysbook_labs.learning_paths import get_learning_path as _submission_path
+    from mlsysbook_labs.notebook import notebook_shell as _submission_shell, notebook_submission as _submission
+    _submission_shell([_submission(_submission_path(1, 6))])
+    return
 
 
 @app.cell
@@ -925,7 +1040,8 @@ def _(
             or final_choice.value != final_rejected.value
         )
     )
-    mo.stop(not _ready)
+    from mlsysbook_labs.notebook import notebook_download_readiness as _download_readiness
+    mo.stop(not _ready, _download_readiness(volume=1))
     _snapshots = {part: _captures[part].to_dict() for part in "ABCD"}
     _choice_label = (
         "Hold / gather more evidence"
@@ -996,8 +1112,23 @@ def _(
             "calculations": "Analytical operation, state, traffic, and critical-path model.",
         },
     )
-    mo.vstack([mo.md("## Local evidence report"), report_export_panel(report)])
+    from mlsysbook_labs.notebook import notebook_shell as _report_shell
+    _report_shell([report_export_panel(report)])
     return (report,)
+
+
+
+
+@app.cell
+def _(mo, get_evidence, final_choice, final_rejected, final_risk, final_trigger, rationale, audit):
+    from mlsysbook_labs.notebook import notebook_shell as _save_shell
+    _draft_identity = (audit.to_dict(), get_evidence(), final_choice.value, final_rejected.value, final_risk.value, final_trigger.value, rationale.value)
+    save_discussion = mo.ui.run_button(label="Save discussion")
+    _save_shell([
+        save_discussion,
+        mo.md("Save your completed discussion locally. Editing a decision, rationale, or saved comparison requires saving again. Download remains available independently of local storage."),
+    ])
+    return (save_discussion,)
 
 
 @app.cell
@@ -1012,6 +1143,7 @@ async def _(
     mo,
     rationale,
     track_id,
+    save_discussion,
 ):
     _captures = get_evidence()
     _saved = _captures["D"].to_dict()["decision"] if "D" in _captures else None
@@ -1028,9 +1160,9 @@ async def _(
             or final_choice.value != final_rejected.value
         )
     )
-    _save_status = "EVIDENCE IN PROGRESS"
+    _save_status = "DRAFT READY · SAVE DISCUSSION TO RECORD" if _ready else "EVIDENCE IN PROGRESS"
     _status_class = "hud-active"
-    if _ready:
+    if _ready and save_discussion.value:
         try:
             ledger.save(
                 chapter=6,
@@ -1055,9 +1187,8 @@ async def _(
         except Exception:
             _save_status = "SAVE FAILED — REPORT STILL AVAILABLE"
             _status_class = "hud-failed"
-    mo.Html(
-        f'<div class="lab-hud"><span class="hud-label">LAB</span><span class="hud-value">06 · Architecture Commitments</span><span aria-hidden="true"> · STATUS: </span><span class="{_status_class}">{_save_status}</span></div>'
-    )
+    from mlsysbook_labs.notebook import notebook_shell as _status_shell, notebook_status as _status_view
+    _status_shell([_status_view("Lab 06", _save_status)])
     return
 
 

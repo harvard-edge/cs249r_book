@@ -5,8 +5,9 @@ what differential-privacy guarantee a release has, what utility was observed,
 and what latency or deletion cost the system pays.  Scenario fixtures are
 illustrative teaching inputs, not measurements of a named production system.
 
-Only a bounded scalar mean with fixed-size replace-one adjacency is implemented
-here.  This is a pure-epsilon Laplace mechanism.  Seeded draws are reproducible
+The privacy mechanism is a bounded scalar mean with fixed-size replace-one
+adjacency: a pure-epsilon Laplace mechanism. Finite integrity and query-ledger
+experiments separately expose writable boundaries and cumulative collection.  Seeded draws are reproducible
 classroom demonstrations only: a deterministic public seed is not suitable for
 a production privacy-preserving release.  The module intentionally does not
 implement or approximate a DP-SGD accountant.
@@ -323,6 +324,9 @@ class TrustLatencyResult:
     overhead_ms: float
     meets_deadline: bool
     execution_tier: str = ""
+    cold_latency_ms: float = 0.0
+    steady_latency_ms: float = 0.0
+    average_latency_ms: float = 0.0
 
 
 def evaluate_trust_latency(
@@ -333,7 +337,13 @@ def evaluate_trust_latency(
     requests_per_session: int,
     deadline_ms: float,
 ) -> TrustLatencyResult:
-    """Amortize setup overhead while keeping protection categorical."""
+    """Separate session-average cost from cold and steady request latency.
+
+    The first request waits for all fixed setup. Later requests pay only the
+    per-request overhead. The deadline applies to every request, including the
+    cold one; amortizing setup cannot establish that deadline. For compatible
+    evidence readers, ``total_latency_ms`` remains the session-average value.
+    """
 
     if base_latency_ms < 0 or mechanism.fixed_overhead_ms < 0:
         raise ValueError("latencies must be non-negative")
@@ -346,13 +356,18 @@ def evaluate_trust_latency(
         + mechanism.per_request_overhead_ms
     )
     total = base_latency_ms + overhead
+    steady = base_latency_ms + mechanism.per_request_overhead_ms
+    cold = steady + mechanism.fixed_overhead_ms
     return TrustLatencyResult(
         mechanism_name=mechanism.name,
         protected=adversary in mechanism.protected_threats,
         total_latency_ms=total,
         overhead_ms=overhead,
-        meets_deadline=total <= deadline_ms,
+        meets_deadline=cold <= deadline_ms,
         execution_tier=mechanism.execution_tier,
+        cold_latency_ms=cold,
+        steady_latency_ms=steady,
+        average_latency_ms=total,
     )
 
 
@@ -827,3 +842,234 @@ def get_deletion_artifacts(
     else:
         raise ValueError(f"unsupported deletion mode: {mode}")
     return tuple(copies)
+
+
+@dataclass(frozen=True)
+class CollectionDay:
+    day: int
+    admitted_queries: int
+    cumulative_queries: int
+    denied_queries: int
+
+
+@dataclass(frozen=True)
+class CollectionBudgetResult:
+    history: tuple[CollectionDay, ...]
+    collected_queries: int
+    denied_queries: int
+    target_queries: int
+    target_collected: bool
+    principal_count: int
+    lifetime_limit_per_principal: int | None
+    scope: str = "query count only; no surrogate fidelity or privacy guarantee"
+
+
+def evaluate_collection_budget(
+    *, days: int, queries_per_day_per_principal: int,
+    daily_limit_per_principal: int, lifetime_limit_per_principal: int | None,
+    principal_count: int, target_queries: int,
+) -> CollectionBudgetResult:
+    """Replay daily admissions with persistent per-principal lifetime counters.
+
+    Each principal makes the same supplied daily demand. Counters reset daily
+    only for the daily quota. Lifetime counters persist. Principals are assumed
+    independent identities, so increasing their number demonstrates the identity
+    boundary rather than silently treating credentials as unique actors. The
+    collection target is an illustrative attacker objective, not an empirical
+    extraction-success threshold. Output detail and surrogate quality are not
+    inferred from query count.
+    """
+    integers = (days, queries_per_day_per_principal, daily_limit_per_principal,
+                principal_count, target_queries)
+    if any(type(value) is not int or value <= 0 for value in integers):
+        raise ValueError("collection counts must be positive integers")
+    if lifetime_limit_per_principal is not None and (
+        type(lifetime_limit_per_principal) is not int or lifetime_limit_per_principal < 0
+    ):
+        raise ValueError("lifetime limit must be a non-negative integer or None")
+    per_principal = 0
+    history = []
+    denied_total = 0
+    for day in range(1, days + 1):
+        admitted = min(queries_per_day_per_principal, daily_limit_per_principal)
+        if lifetime_limit_per_principal is not None:
+            admitted = min(admitted, max(0, lifetime_limit_per_principal - per_principal))
+        per_principal += admitted
+        denied = (queries_per_day_per_principal - admitted) * principal_count
+        denied_total += denied
+        history.append(CollectionDay(day, admitted * principal_count,
+                                     per_principal * principal_count, denied))
+    return CollectionBudgetResult(tuple(history), per_principal * principal_count,
+                                  denied_total, target_queries,
+                                  per_principal * principal_count >= target_queries,
+                                  principal_count, lifetime_limit_per_principal)
+
+
+@dataclass(frozen=True)
+class GradientIntegrityResult:
+    worker_updates: tuple[float, ...]
+    rule: str
+    trim_each_tail: int
+    aggregate: float
+    honest_mean: float
+    aggregate_error: float
+    starting_parameter: float
+    updated_parameter: float
+    loss_before: float
+    loss_after: float
+    improves_objective: bool
+    ring_per_worker_payloads: float
+    gather_per_worker_payloads: float
+    gather_to_ring_ratio: float
+    malicious_workers: int
+    assumed_fault_budget: int
+    within_fault_budget: bool
+    scope: str = "finite scalar round; no convergence or adaptive-attack certification"
+
+
+def evaluate_gradient_integrity(
+    *, honest_updates: Sequence[float], malicious_updates: Sequence[float],
+    rule: Literal["mean", "trimmed_mean"], trim_each_tail: int = 1,
+    starting_parameter: float = 1.0, learning_rate: float = 0.1,
+) -> GradientIntegrityResult:
+    """Compare exact mean/coordinate-trimmed aggregation on a supplied round.
+
+    The scalar objective is L(w)=w²/2; honest updates are supplied noisy
+    gradients near w. Every worker contributes equal weight. Trimming removes
+    the same count from both sorted tails, requiring 2f < n, but does not certify
+    Byzantine convergence or that a retained update is honest. The gathering
+    comparison receives all individual payloads at every worker: (n-1)M versus
+    ring AllReduce 2(n-1)M/n. It is an implementation comparison, not a lower
+    bound on robust-protocol communication. No private data is accessed.
+    """
+    updates = tuple(honest_updates) + tuple(malicious_updates)
+    if not honest_updates or len(updates) < 2:
+        raise ValueError("at least one honest update and two workers are required")
+    if any(not isfinite(value) for value in (*updates, starting_parameter, learning_rate)):
+        raise ValueError("updates and optimization inputs must be finite")
+    if learning_rate <= 0:
+        raise ValueError("learning_rate must be positive")
+    if type(trim_each_tail) is not int or trim_each_tail < 0 or 2 * trim_each_tail >= len(updates):
+        raise ValueError("trim count must be non-negative and leave at least one update")
+    if rule == "mean":
+        retained = updates
+    elif rule == "trimmed_mean":
+        ordered = sorted(updates)
+        retained = ordered[trim_each_tail:len(ordered) - trim_each_tail] if trim_each_tail else ordered
+    else:
+        raise ValueError("unsupported aggregation rule")
+    aggregate = sum(retained) / len(retained)
+    honest_mean = sum(honest_updates) / len(honest_updates)
+    updated = starting_parameter - learning_rate * aggregate
+    before, after = starting_parameter ** 2 / 2, updated ** 2 / 2
+    workers = len(updates)
+    ring = 2 * (workers - 1) / workers
+    gather = workers - 1
+    return GradientIntegrityResult(
+        updates, rule, trim_each_tail, aggregate, honest_mean,
+        abs(aggregate - honest_mean), starting_parameter, updated, before, after,
+        after < before, ring, gather, gather / ring, len(malicious_updates),
+        trim_each_tail, len(malicious_updates) <= trim_each_tail,
+    )
+
+
+def get_integrity_round(malicious_workers: int = 1) -> tuple[float, ...]:
+    """Honest updates in an illustrative five-worker backend training round."""
+    if malicious_workers not in (1, 2):
+        raise ValueError("the classroom round supports one or two compromised workers")
+    return (0.8, 0.9, 1.0, 1.1, 1.2)[:5 - malicious_workers]
+
+
+def get_collection_assumptions() -> dict[str, int]:
+    """Constructed collection objective shared by all fleet endpoint tracks.
+
+    These counts are deliberately small so a daily admission ledger can be
+    inspected; they are not empirical model-extraction sample requirements.
+    """
+    return {"queries_per_day_per_principal": 50,
+            "daily_limit_per_principal": 50,
+            "target_queries": 1000,
+            "lifetime_limit_per_principal": 300}
+
+
+@dataclass(frozen=True)
+class PoisonCandidateEvaluation:
+    candidate_feature: float | None
+    candidate_label: int | None
+    label_matches_truth: bool
+    slope: float
+    intercept: float
+    target_score: float
+    target_squared_error: float
+    target_misclassified: bool
+    broad_correct: int
+    broad_evaluated: int
+    broad_squared_error: float
+    outer_objective: float
+
+
+@dataclass(frozen=True)
+class CleanLabelPoisonResult:
+    poison_budget: int
+    attack_objective: str
+    baseline: PoisonCandidateEvaluation
+    selected: PoisonCandidateEvaluation
+    candidates: tuple[PoisonCandidateEvaluation, ...]
+    target_feature: float
+    target_true_label: int
+    candidate_features: tuple[float, ...]
+    training_features: tuple[float, ...]
+    training_labels: tuple[int, ...]
+    broad_features: tuple[float, ...]
+    scope: str = "exact finite least-squares retraining; constructed data, not empirical model vulnerability"
+
+
+def evaluate_clean_label_poisoning(
+    *, poison_budget: int, attack_objective: Literal["targeted", "broad"],
+) -> CleanLabelPoisonResult:
+    """Enumerate an outer poison choice over exact inner least-squares fits.
+
+    Public ground truth is y=1[x>0]. The attacker may append repeated copies of
+    one candidate, preserving its true label. Candidate space and dose are
+    explicit; this does not solve a general continuous poisoning optimization.
+    The defender refits intercept and slope by ordinary least squares on every
+    altered training set, classifying scores >=0.5 as positive. Scores are raw
+    regression outputs, not calibrated probabilities. A separate near-boundary
+    target and broad held-out cohort expose how a targeted failure can coexist
+    with unchanged aggregate classification accuracy. No attack prevalence or
+    empirical effectiveness is supplied or inferred.
+    """
+    if type(poison_budget) is not int or poison_budget not in (0, 1, 2):
+        raise ValueError("poison_budget must be zero, one, or two candidate copies")
+    if attack_objective not in ("targeted", "broad"):
+        raise ValueError("unsupported attack objective")
+    training = (-2.0, -1.0, 1.0, 2.0)
+    labels = tuple(int(x > 0) for x in training)
+    candidates = (-3.0, -0.5, -0.01, 0.01, 0.5, 3.0)
+    broad = (-2.5, -1.5, 1.5, 2.5)
+    target, target_label = -0.1, 0
+
+    def fit_and_evaluate(candidate: float | None, dose: int) -> PoisonCandidateEvaluation:
+        truth = int(candidate > 0) if candidate is not None else None
+        xs = training + ((candidate,) * dose if candidate is not None else ())
+        ys = labels + ((truth,) * dose if truth is not None else ())
+        mean_x, mean_y = sum(xs) / len(xs), sum(ys) / len(ys)
+        slope = sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys)) / sum((x - mean_x) ** 2 for x in xs)
+        intercept = mean_y - slope * mean_x
+        score = intercept + slope * target
+        target_error = (score - target_label) ** 2
+        broad_error = sum((intercept + slope * x - int(x > 0)) ** 2 for x in broad) / len(broad)
+        broad_correct = sum(int(intercept + slope * x >= 0.5) == int(x > 0) for x in broad)
+        return PoisonCandidateEvaluation(
+            candidate, truth, candidate is None or truth == int(candidate > 0),
+            slope, intercept, score, target_error, int(score >= 0.5) != target_label,
+            broad_correct, len(broad), broad_error,
+            target_error if attack_objective == "targeted" else broad_error,
+        )
+
+    baseline = fit_and_evaluate(None, 0)
+    evaluations = tuple(fit_and_evaluate(candidate, poison_budget) for candidate in candidates)
+    selected = max(evaluations, key=lambda result: result.outer_objective) if poison_budget else baseline
+    return CleanLabelPoisonResult(poison_budget, attack_objective, baseline, selected,
+                                  evaluations, target, target_label, candidates,
+                                  training, labels, broad)

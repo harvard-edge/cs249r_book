@@ -319,3 +319,34 @@ def test_evaluation_serialization_preserves_exact_inputs_and_units():
 def test_invalid_scenarios_fail_loudly(call, message):
     with pytest.raises(ValueError, match=message):
         call()
+
+
+def test_equal_loss_gains_cost_increasing_compute_and_use_chapter_exponent():
+    from mlsysim.engine.scenarios import Scenarios
+    from mlsysim.labs.experiments.v2_01_experiments import evaluate_quality_demand
+
+    result = evaluate_quality_demand(equal_loss_gain=0.1)
+    assert result["exponent"] == Scenarios.ShallowPowerLawExample.exponent
+    losses, compute = result["excess_loss"], result["relative_compute"]
+    assert losses[0] - losses[1] == pytest.approx(losses[1] - losses[2])
+    assert result["additional_compute"][1] > result["additional_compute"][0]
+    for loss, resource in zip(losses, compute):
+        assert resource ** -result["exponent"] == pytest.approx(loss)
+    assert result["normalized_floor"] == 0
+
+
+def test_quality_demand_changes_with_target_without_claiming_accuracy():
+    from mlsysim.labs.experiments.v2_01_experiments import evaluate_quality_demand
+
+    small = evaluate_quality_demand(equal_loss_gain=0.05)
+    large = evaluate_quality_demand(equal_loss_gain=0.2)
+    assert large["relative_compute"][-1] > small["relative_compute"][-1]
+    assert "not measured accuracy" in large["limitation"]
+
+
+@pytest.mark.parametrize("gain", [0, -0.1, 0.5, 1, float("nan"), float("inf"), True, "0.1"])
+def test_quality_demand_rejects_unreachable_or_invalid_targets(gain):
+    from mlsysim.labs.experiments.v2_01_experiments import evaluate_quality_demand
+
+    with pytest.raises(ValueError):
+        evaluate_quality_demand(equal_loss_gain=gain)

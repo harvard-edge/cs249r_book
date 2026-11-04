@@ -611,3 +611,9 @@ from .scenario_definitions.statistics import (
     RetrainingIntervalScenario as RetrainingIntervalScenario,
     SegmentAccuracyScenario as SegmentAccuracyScenario,
 )
+
+from .scenario_definitions.controlled_studies import (
+    PlacementStudyScenario as PlacementStudyScenario,
+    TaskFactorCard as TaskFactorCard,
+    TaskFactorStudyScenario as TaskFactorStudyScenario,
+)

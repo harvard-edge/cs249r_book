@@ -281,7 +281,7 @@ def _validate_capture(part: str, capture: Any) -> tuple[str, ...] | None:
     return _capture_failures(capture)
 
 
-def replay_evidence_arm(
+def _replay_primary_evidence_arm(
     model_id: str,
     model_key: str,
     arm: Mapping[str, Any],
@@ -310,23 +310,29 @@ def replay_evidence_arm(
 
         return replay_v1_05(model_key, arm["inputs"])
     if model_id == "constraint_explorer":
-        from mlsysim.engine.constraint_explorer import evaluate
+        from mlsysim.engine.constraint_explorer import replay as replay_constraint
 
-        if model_key != "constraint_explorer.evaluate":
-            raise ValueError(f"unknown pilot model_key {model_key!r}")
-        return evaluate(**arm["inputs"])
+        return replay_constraint(model_key, arm["inputs"])
     if model_id == "v1_06_experiments":
-        from mlsysim.labs.experiments.v1_06_experiments import replay_snapshot
+        from mlsysim.labs.experiments import v1_06_experiments as architecture
 
-        return replay_snapshot({"model_key": model_key, "inputs": arm["inputs"]})
+        references = {
+            "v1_06_experiments.structure_probe": architecture.structure_probe,
+            "v1_06_experiments.attention_state_comparison": architecture.attention_state_comparison,
+            "v1_06_experiments.language_phase_reference": architecture.language_phase_reference,
+            "v1_06_experiments.embedding_lookup_reference": architecture.embedding_lookup_reference,
+        }
+        if model_key in references:
+            return references[model_key](**arm["inputs"])
+        return architecture.replay_snapshot({"model_key": model_key, "inputs": arm["inputs"]})
     if model_id == "v1_07_experiments":
         from mlsysim.labs.experiments.v1_07_experiments import replay as replay_v1_07
 
         return replay_v1_07(model_key, arm["inputs"])
     if model_id == "v1_09_experiments":
-        from mlsysim.labs.experiments.v1_09_experiments import replay
+        from mlsysim.labs.experiments.v1_09_experiments import replay as replay_v1_09
 
-        return replay(model_key, arm["inputs"])
+        return replay_v1_09(model_key, arm["inputs"])
     if model_id == "v1_08_experiments":
         from mlsysim.labs.experiments.v1_08_experiments import replay as replay_v1_08
 
@@ -341,22 +347,36 @@ def replay_evidence_arm(
         if track_id is None:
             raise ValueError("track_id is required to replay Chapter 11 evidence")
         return replay_experiment(
-            {"model_key": model_key, "track_id": normalize_track_id(track_id), "inputs": arm["inputs"]}
+            {
+                "model_key": model_key,
+                "track_id": normalize_track_id(track_id),
+                "inputs": arm["inputs"],
+            }
         )
     if model_id == "v1_12_experiments":
         from mlsysim.labs.experiments.v1_12_experiments import replay as replay_v1_12
 
         return replay_v1_12(model_key, arm["inputs"])
     if model_id == "v1_16_experiments":
-        return replay(model_key, arm["inputs"])
+        result = replay(model_key, arm["inputs"])
+        if model_key == "v1_16.behavior_transfer.v1":
+            import json
+            if json.dumps(dict(arm), sort_keys=True) != json.dumps(result, sort_keys=True):
+                raise ValueError("behavioral transfer evidence differs from exact replay")
+        return result
     if model_id == "v1_15_experiments":
         from mlsysim.engine import v1_15_experiments as v1_15
 
         methods = {
             "v1_15_experiments.population_mix": v1_15.population_mix,
+            "v1_15_experiments.proxy_alignment": v1_15.proxy_alignment,
+            "v1_15_experiments.feedback_replay": v1_15.feedback_replay,
+            "v1_15_experiments.fairness_criteria": v1_15.fairness_criteria,
+            "v1_15_experiments.selective_feedback": v1_15.selective_feedback,
             "v1_15_experiments.threshold_consequences": v1_15.threshold_consequences,
             "v1_15_experiments.bounded_mean_release": v1_15.bounded_mean_release,
             "v1_15_experiments.lifecycle_footprint": v1_15.lifecycle_footprint,
+            "v1_15_experiments.lifecycle_policy": v1_15.lifecycle_policy,
             "v1_15_experiments.investigate_incident": v1_15.investigate_incident,
         }
         if model_key not in methods:
@@ -366,11 +386,102 @@ def replay_evidence_arm(
         from mlsysim.labs.experiments.v1_14_experiments import replay_experiment
 
         return replay_experiment(model_key, arm["inputs"])
-    from mlsysim.labs.experiments.v1_13_experiments import REPLAY_METHOD, replay_serving_snapshot
+    from mlsysim.labs.experiments.v1_13_experiments import (
+        REPLAY_METHOD,
+        replay_serving_snapshot,
+        language_scheduling_reference,
+        language_batching_reference,
+        language_scheduling_to_snapshot,
+        get_language_serving_reference,
+        state_capacity,
+        state_capacity_to_snapshot,
+    )
 
+    if model_key == "v1_13.language_batching":
+        return language_batching_reference(**arm["inputs"])
+    if model_key == "v1_13.language_scheduling":
+        return language_scheduling_to_snapshot(language_scheduling_reference(**arm["inputs"]))
+    if model_key == "v1_13.language_state_capacity":
+        return state_capacity_to_snapshot(
+            state_capacity(get_language_serving_reference(**arm["inputs"])),
+            pressure=arm["inputs"]["pressure"],
+        )
     if model_key != REPLAY_METHOD:
         raise ValueError(f"unsupported Chapter 13 model_key {model_key!r}")
     return replay_serving_snapshot(arm["inputs"])
+
+
+_REFERENCE_CONTAINERS = frozenset(
+    {
+        "supplemental_reference",
+        "supplemental_references",
+        "release_gate_reference",
+    }
+)
+
+
+def _validate_reference_node(node: Any, *, track_id: str | None = None) -> None:
+    """Recompute explicitly identified supporting studies without trusting prose.
+
+    This checks saved numerical supporting evidence while leaving the primary
+    release/failure policy unchanged. Unknown or altered reference payloads are
+    incompatible, rather than silently receiving the primary study's validity.
+    """
+    if not isinstance(node, Mapping):
+        raise ValueError("supporting reference must be a mapping")
+    key = node.get("model_key")
+    if key is None:
+        if not node or any(not isinstance(value, Mapping) for value in node.values()):
+            raise ValueError("supporting reference requires model_key and inputs")
+        for value in node.values():
+            _validate_reference_node(value, track_id=track_id)
+        return
+    if not isinstance(key, str) or not isinstance(node.get("inputs"), Mapping):
+        raise ValueError("supporting reference requires model_key and inputs")
+    prefix = key.split(".", 1)[0]
+    model_id = prefix if prefix.endswith("_experiments") else prefix + "_experiments"
+    if model_id not in DIRECT_REPLAY_MODEL_IDS:
+        raise ValueError(f"unknown supporting reference model_key {key!r}")
+    result = _replay_primary_evidence_arm(model_id, key, node, track_id=track_id)
+    from mlsysim.labs.experiments.v1_05_experiments import snapshot
+
+    if model_id == "v1_11_experiments":
+        from mlsysim.labs.experiments.v1_11_experiments import to_jsonable
+
+        expected = to_jsonable(result)
+    elif model_id == "v1_12_experiments":
+        from mlsysim.labs.experiments.v1_12_experiments import to_jsonable
+
+        expected = to_jsonable(result)
+    else:
+        expected = snapshot(result)
+    # Replay packets carry metadata beside their serialized result. Native
+    # reference functions instead return a complete result with inputs.
+    if set(node).issubset({"model_key", "track_id", "inputs", "result", "outputs"}) and (
+        "result" in node or "outputs" in node
+    ):
+        actual = node["result"] if "result" in node else node["outputs"]
+    else:
+        actual = dict(node)
+        if isinstance(expected, Mapping) and "model_key" not in expected:
+            actual.pop("model_key", None)
+    if snapshot(actual) != snapshot(expected):
+        raise ValueError(f"supporting reference {key!r} differs from exact replay")
+
+
+def replay_evidence_arm(
+    model_id: str,
+    model_key: str,
+    arm: Mapping[str, Any],
+    *,
+    track_id: str | None = None,
+) -> Any:
+    """Replay a primary arm and verify its explicitly attached supporting studies."""
+    result = _replay_primary_evidence_arm(model_id, model_key, arm, track_id=track_id)
+    for name in _REFERENCE_CONTAINERS:
+        if name in arm:
+            _validate_reference_node(arm[name], track_id=track_id)
+    return result
 
 
 def replay_capture(model_id: str, capture: Mapping[str, Any]) -> dict[str, Any]:
@@ -391,6 +502,17 @@ def replay_capture(model_id: str, capture: Mapping[str, Any]) -> dict[str, Any]:
         arms["chosen_result"] = replay_evidence_arm(
             model_id, model_key, capture["chosen_result"], track_id=capture.get("track")
         )
+    alternatives = capture.get("alternatives", ())
+    if not isinstance(alternatives, Sequence) or isinstance(alternatives, (str, bytes)):
+        raise ValueError("capture alternatives must be a sequence")
+    for alternative in alternatives:
+        if isinstance(alternative, Mapping):
+            if "model_key" in alternative:
+                _validate_reference_node(alternative, track_id=capture.get("track"))
+            else:
+                for name in _REFERENCE_CONTAINERS:
+                    if name in alternative:
+                        _validate_reference_node(alternative[name], track_id=capture.get("track"))
     return arms
 
 
@@ -788,10 +910,150 @@ def transfer_design(
     return evaluate_joint_design(transferred, target_envelope)
 
 
+
+# Exact finite diagnostic reference: these are declared cases, not observations
+# of a wearable, camera, vehicle, or recommendation endpoint. Labels follow the
+# signed signal. The nuisance feature is only imperfectly associated with it.
+_TRANSFER_CASES = (
+    ("outer-negative", -3.0, -3.0),
+    ("negative-two", -2.0, -2.0),
+    ("negative-one", -1.0, -1.0),
+    ("negative-boundary", -0.5, 0.5),
+    ("positive-boundary", 0.5, -0.5),
+    ("positive-one", 1.0, 1.0),
+    ("positive-two", 2.0, 2.0),
+    ("outer-positive", 3.0, 3.0),
+)
+_TRANSFER_FLOOR = 0.75  # Hypothetical finite-case acceptance requirement.
+TRANSFER_RESPONSES = {
+    "keep": "Keep deployed rule",
+    "rollback": "Roll back release",
+    "restore_boundary": "Restore transform",
+    "signal_rule": "Signal-rule candidate",
+    "contain": "Quarantine for review",
+}
+TRANSFER_CAUSES = {
+    "release_regression": "Input transform reversed",
+    "population_shift": "Outer-case association shifted",
+}
+
+
+def behavioral_transfer_trial(
+    track_id: str,
+    target_track: str,
+    *,
+    cause: str = "population_shift",
+    response: str = "rollback",
+    phase: str = "propose",
+    evidence_bundle: str = "current",
+) -> dict[str, Any]:
+    """Diagnose and retest an exact, deliberately small behavioral counterexample.
+
+    Physical transfer is evaluated independently using the existing prepared
+    design. Finite-case correctness is not native-project quality. Neither a
+    drift alarm nor a proposed repair supplies a compatible behavioral retest.
+    A new prediction rule also needs new execution measurements: resource use
+    is never inferred from its finite-case correctness.
+    """
+    import hashlib
+    import json
+
+    source_track = normalize_track_id(track_id)
+    destination = normalize_track_id(target_track)
+    if cause not in TRANSFER_CAUSES:
+        raise ValueError("unknown transfer cause")
+    if response not in TRANSFER_RESPONSES:
+        raise ValueError("unknown transfer response")
+    if phase not in {"propose", "retest"}:
+        raise ValueError("phase must be propose or retest")
+    if evidence_bundle not in {"source", "current"}:
+        raise ValueError("evidence_bundle must be source or current")
+
+    def bundle(population: str, artifact: str) -> str:
+        identity = json.dumps({"fixture": "signed-signal-transfer.v1", "population": population,
+                               "artifact": artifact, "protocol": "all-declared-cases.v1"}, sort_keys=True)
+        return hashlib.sha256(identity.encode()).hexdigest()
+
+    def run(*, changed_population: bool, artifact: str) -> dict[str, Any]:
+        rows = []
+        for identifier, signal, original_nuisance in _TRANSFER_CASES:
+            nuisance = (-original_nuisance if changed_population and identifier.startswith("outer-")
+                        else original_nuisance)
+            transformed = -nuisance if artifact == "proxy.inverted" else nuisance
+            predicted = (None if artifact == "review" else
+                         int(signal > 0) if artifact == "signal.identity" else int(transformed > 0))
+            label = int(signal > 0)
+            rows.append({"case": identifier, "signal": signal, "nuisance": nuisance,
+                         "served_nuisance": transformed, "label": label, "prediction": predicted,
+                         "correct": None if predicted is None else predicted == label})
+        automated = sum(row["prediction"] is not None for row in rows)
+        correct = sum(row["correct"] is True for row in rows)
+        return {"rows": rows, "cases": len(rows), "automated_cases": automated,
+                "review_cases": len(rows) - automated, "correct": correct,
+                "correctness_pct": 100 * correct / automated if automated else None,
+                "gate_passes": correct / automated >= _TRANSFER_FLOOR if automated else None}
+
+    population = "outer-association-shift.v1" if cause == "population_shift" else "source.v1"
+    changed = cause == "population_shift"
+    deployed_artifact = "proxy.inverted" if cause == "release_regression" else "proxy.identity"
+    artifact = ("signal.identity" if response == "signal_rule" else "review" if response == "contain"
+                else "proxy.identity" if response in {"rollback", "restore_boundary"} else deployed_artifact)
+    source_bundle = bundle("source.v1", "proxy.identity")
+    selected_bundle = bundle(population, artifact)
+    supplied_bundle = selected_bundle if evidence_bundle == "current" else source_bundle
+    compatible = supplied_bundle == selected_bundle
+    source = run(changed_population=False, artifact="proxy.identity")
+    before = run(changed_population=changed, artifact=deployed_artifact)
+    observed = run(changed_population=changed, artifact=artifact) if phase == "retest" and compatible else None
+    if phase == "propose":
+        state = "proposed_unverified"
+    elif not compatible:
+        state = "incompatible_evidence"
+    elif observed["automated_cases"] == 0:
+        state = "contained_for_review"
+    else:
+        state = "compatible_retest_pass" if observed["gate_passes"] else "observed_failure"
+    scenario = prepared_instructor_scenario(source_track)
+    target = prepared_instructor_scenario(destination)
+    physical = transfer_design(scenario["snapshot"], target["envelope"])
+    execution_compatible = artifact == "proxy.identity"
+    feedback = {
+        "proposed_unverified": "The response changes the proposal, not the available behavioral evidence. Retest its exact artifact and population.",
+        "incompatible_evidence": "The earlier source bundle names a different artifact or population. Its outcomes cannot certify this candidate.",
+        "contained_for_review": "Automation is withheld. Review work is visible; automated correctness is unavailable, not perfect.",
+        "compatible_retest_pass": "This artifact passes the declared finite cases. The result covers this fixture and protocol only.",
+        "observed_failure": "The compatible retest still fails the finite requirement. Identify whether the response changed the cause that broke the claim.",
+    }[state]
+    return {
+        "inputs": {"track_id": source_track, "target_track": destination, "cause": cause,
+                   "response": response, "phase": phase, "evidence_bundle": evidence_bundle},
+        "reference_name": "Signed-signal finite transfer reference",
+        "fixture_version": "signed-signal-transfer.v1", "cause": cause,
+        "response": response, "phase": phase, "state": state,
+        "source": source, "before": before, "after": observed,
+        "finite_requirement_pct": 100 * _TRANSFER_FLOOR,
+        "artifact": artifact, "population": population,
+        "source_bundle": source_bundle, "candidate_bundle": selected_bundle,
+        "supplied_bundle": supplied_bundle, "retest_evidence_compatible": compatible,
+        "physical_reference": physical,
+        "candidate_execution_evidence_compatible": execution_compatible,
+        "native_target_quality_available": False,
+        "joint_release_supported": False,
+        "violations": ["finite_behavior_requirement"] if state == "observed_failure" else [],
+        "unavailable_requirements": (["behavioral_retest"] if observed is None else []) +
+                                    (["candidate_execution"] if not execution_compatible else []) +
+                                    ["native_target_quality"],
+        "feedback": feedback,
+        "scope_note": "Exact deterministic finite cases and transparent rules, not measured project quality or a learned repair. The physical reference evaluates the original prepared design; a replacement rule has no new execution measurement.",
+    }
+
+
 def replay(model_key: str, inputs: Mapping[str, Any]) -> Any:
     """Replay a Chapter 16 evidence arm from JSON-safe exact inputs."""
     if not isinstance(inputs, Mapping):
         raise ValueError("inputs must be a mapping")
+    if model_key == "v1_16.behavior_transfer.v1":
+        return behavioral_transfer_trial(**inputs)
     if model_key == "v1_16.audit_ledger.v1":
         return audit_ledger(
             inputs["history"],
@@ -813,4 +1075,5 @@ __all__ = [
     "evaluate_envelope_fraction",
     "evaluate_joint_design", "normalize_track_id", "prepared_instructor_scenario",
     "replay", "replay_capture", "replay_evidence_arm", "transfer_design",
+    "behavioral_transfer_trial", "TRANSFER_CAUSES", "TRANSFER_RESPONSES",
 ]

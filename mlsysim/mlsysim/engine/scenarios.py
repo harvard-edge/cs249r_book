@@ -104,6 +104,9 @@ from .scenario_catalog.statistics import monitoring as _statistics_monitoring
 from .scenario_catalog.economics import duties as _economics_duties
 
 
+from .scenario_catalog.optimization import controlled_studies as _controlled_studies
+
+
 class Scenarios(Registry):
     """
     Executable scenario registry.
@@ -113,6 +116,13 @@ class Scenarios(Registry):
     power budget. Non-executable sourced anchors live separately under
     ``ReferenceStats``.
     """
+
+    __registry_list_exclude__ = frozenset({"DeploymentJourneys"})
+    ControlledTaskFactors = _controlled_studies.ControlledTaskFactors
+    DeploymentJourneys = _controlled_studies.DeploymentJourneys
+    PlacementStudy = _controlled_studies.PlacementStudy
+    ShallowPowerLawExample = _controlled_studies.ShallowPowerLawExample
+
 
     SmartDoorbell = _base_applications.SmartDoorbell
     TinySensor = _base_applications.TinySensor

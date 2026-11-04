@@ -755,3 +755,149 @@ def conformal_experiment_payload(
             "assumption_note": result.assumption_note,
         },
     }
+
+
+# Finite incident fixtures, not measurements of detector efficacy or model training.
+# Ground-truth poison labels are revealed for teaching only; the gates use named
+# observable flags, never the truth column. A legitimate rare record is flagged.
+_POISON_RECORDS = (
+    ("ordinary", False, True, False, False, False),
+    ("rare-legitimate", False, True, True, False, False),
+    ("untrusted-source", True, False, False, False, False),
+    ("feature-outlier", True, True, True, False, False),
+    ("high-influence", True, True, False, True, False),
+    ("triggered-behavior", True, True, False, False, True),
+)
+_POISON_LAYERS = ("ingress", "anomaly", "training_review", "post_training")
+
+
+def poisoning_experiment_payload(*, layer_count: int, lineage: bool) -> dict[str, object]:
+    """Replay ordered gates and descendant invalidation on a supplied incident.
+
+    The third layer is a supplied training-influence review, not simulated robust
+    training. The final layer detects a triggered behavior in a fixed candidate;
+    it blocks promotion rather than deleting an individual training record.
+    Lineage identifies descendants to quarantine; it never repairs their weights.
+    """
+    if type(layer_count) is not int or layer_count not in range(1, 5):
+        raise ValueError("layer_count must be an integer from 1 through 4")
+    if not isinstance(lineage, bool):
+        raise ValueError("lineage must be boolean")
+    rows = []
+    retained = []
+    for identifier, poison, trusted, anomaly, influence, trigger in _POISON_RECORDS:
+        blocked_by = None
+        if not trusted:
+            blocked_by = "ingress"
+        elif layer_count >= 2 and anomaly:
+            blocked_by = "anomaly"
+        elif layer_count >= 3 and influence:
+            blocked_by = "training_review"
+        if blocked_by is None:
+            retained.append((identifier, poison, trigger))
+        rows.append({"record": identifier, "poison_truth": poison,
+                     "trusted_source": trusted, "anomaly_flag": anomaly,
+                     "influence_flag": influence, "trigger_probe_fails": trigger,
+                     "disposition": blocked_by or "retained"})
+    promotion_blocked = layer_count >= 4 and any(trigger for _, _, trigger in retained)
+    # A historical checkpoint and derived deployment already consumed the batch.
+    # Re-screening today's batch does not remove those pre-existing artifacts.
+    descendants = ("checkpoint-from-batch", "deployed-descendant")
+    return {
+        "inputs": {"layer_count": layer_count, "lineage": lineage},
+        "result": {
+            "enabled_layers": list(_POISON_LAYERS[:layer_count]),
+            "record_trace": rows,
+            "retained_poison_records": sum(poison for _, poison, _ in retained),
+            "quarantined_legitimate_records": sum(
+                not row["poison_truth"] and row["disposition"] != "retained" for row in rows),
+            "promotion_blocked": promotion_blocked,
+            "clean_probe_correct": 11, "clean_probe_total": 12,
+            "trigger_probe_correct": 0, "trigger_probe_total": 2,
+            "identified_descendants": list(descendants) if lineage else [],
+            "descendant_scope_known": lineage,
+            "descendant_weights_repaired": False,
+            "scope": "Supplied incident flags and probe outcomes; no training or detector efficacy estimate.",
+        },
+    }
+
+
+# Prompt/answer and repeated-sample fixtures with explicit evidence adjudication.
+# Low-entropy agreement intentionally includes a confidently repeated falsehood.
+_GENERATION_CASES = (
+    {"prompt": "deployment-window", "answer": "Sunday", "entropy": 0.1,
+     "samples": ("Sunday", "Sunday", "Sunday"), "current": False, "archived": True,
+     "context_has_current_answer": False, "current_excerpt":"Deployment window: Saturday.", "archived_excerpt":"Deployment window: Sunday."},
+    {"prompt": "rare-fallback", "answer": "hold-and-review", "entropy": 0.9,
+     "samples": ("hold-and-review", "hold", "review"), "current": True, "archived": True,
+     "context_has_current_answer": True, "current_excerpt":"Fallback: hold-and-review.", "archived_excerpt":"Fallback: hold-and-review."},
+    {"prompt": "rollback-owner", "answer": "release-team", "entropy": 0.1,
+     "samples": ("release-team", "release-team", "release-team"), "current": True, "archived": True,
+     "context_has_current_answer": True, "current_excerpt":"Rollback owner: release-team.", "archived_excerpt":"Rollback owner: release-team."},
+    {"prompt": "buffer-limit", "answer": "unlimited", "entropy": 0.2,
+     "samples": ("unlimited", "unlimited", "unlimited"), "current": False, "archived": False,
+     "context_has_current_answer": True, "current_excerpt":"Buffers are bounded; reject excess arrivals.", "archived_excerpt":"Buffers are bounded; reject excess arrivals."},
+)
+
+
+def generative_reliability_payload(*, routing: str, evidence_source: str) -> dict[str, object]:
+    """Route fixed answers, separating uncertainty, agreement, and evidence.
+
+    Evidence support is supplied adjudication, not an automated fact checker.
+    Routing never edits an answer or creates truth. Counts apply only to these
+    named prompts under the recorded fixed decode/sample protocol.
+    """
+    _require_choice("routing", routing, ("entropy", "consistency", "evidence"))
+    _require_choice("evidence_source", evidence_source, ("current", "archived"))
+    rows = []
+    for case in _GENERATION_CASES:
+        agreement = max(Counter(case["samples"]).values()) / len(case["samples"])
+        if routing == "entropy":
+            accepted = case["entropy"] <= 0.5
+        elif routing == "consistency":
+            accepted = agreement == 1.0
+        else:
+            accepted = case[evidence_source]
+        rows.append({"prompt": case["prompt"], "answer": case["answer"],
+                     "entropy_signal": case["entropy"], "sample_agreement": agreement,
+                     "evidence_support": case[evidence_source],
+                     "evidence_excerpt": case[evidence_source + "_excerpt"],
+                     "supported_by_current_reference": case["current"],
+                     "context_has_current_answer": case["context_has_current_answer"],
+                     "accepted": accepted})
+    accepted_rows = [row for row in rows if row["accepted"]]
+    return {"inputs": {"routing": routing, "evidence_source": evidence_source},
+            "result": {
+                "prompt_set": "deployment-handbook-four-prompts",
+                "decode_protocol": "fixed recorded answers; three supplied samples per prompt",
+                "reference": "current-release-handbook" if evidence_source == "current" else "archived-release-handbook",
+                "cases": rows, "requests": len(rows), "accepted": len(accepted_rows),
+                "review_arrivals": len(rows) - len(accepted_rows),
+                "unsupported_accepted": sum(not row["evidence_support"] for row in accepted_rows),
+                "current_reference_errors_accepted": sum(not row["supported_by_current_reference"] for row in accepted_rows),
+                "decode_sequences": sum(len(case["samples"]) if routing == "consistency" else 1 for case in _GENERATION_CASES),
+                "evidence_checks": len(rows) if routing == "evidence" else 0,
+                "retrieval_gap_cases": sum(not row["context_has_current_answer"] for row in rows),
+                "generation_gap_cases": sum(row["context_has_current_answer"] and not row["supported_by_current_reference"] for row in rows),
+                "scope": "Finite supplied answers and adjudications; sequence/check counts are not latency, energy, or a factuality guarantee.",
+            }}
+
+
+def robustness_review_payload(track_id: str, defense_id: str, threat_id: str, *,
+                              layer_count: int, lineage: bool) -> dict[str, object]:
+    """Combine existing scoped defense evidence with an independent pipeline replay."""
+    defense = defense_experiment_payload(track_id, defense_id, threat_id)
+    pipeline = poisoning_experiment_payload(layer_count=layer_count, lineage=lineage)
+    return {"inputs": {**defense["inputs"], **pipeline["inputs"]},
+            "result": {**defense["result"], "poisoning": pipeline["result"]}}
+
+
+def competence_review_payload(calibration_scores: Sequence[float], test_true_label_scores: Sequence[float], *,
+                              alpha: float, exchangeability_assumed: bool,
+                              routing: str, evidence_source: str) -> dict[str, object]:
+    """Keep conformal label coverage separate from generated-claim evidence support."""
+    conformal = conformal_experiment_payload(calibration_scores, test_true_label_scores,
+                    alpha=alpha, exchangeability_assumed=exchangeability_assumed)
+    generation = generative_reliability_payload(routing=routing, evidence_source=evidence_source)
+    return {"inputs": {**conformal["inputs"], **generation["inputs"]},
+            "result": {**conformal["result"], "generation": generation["result"]}}
