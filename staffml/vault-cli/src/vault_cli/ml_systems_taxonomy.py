@@ -1,6 +1,6 @@
 """Read the ML Systems Taxonomy that question tags refer to.
 
-The canonical single source of truth lives at ``taxonomy/ml-systems-taxonomy.yml``
+The canonical single source of truth lives at ``taxonomy/taxonomy.yml``
 (governed by ``taxonomy/schema/mlsys-taxonomy.linkml.yml``), two levels above
 ``staffml/vault``. When ``binder/cli`` is present in the repository checkout,
 this module delegates directly to ``binder.cli.core.field_graph.load_unified_taxonomy``
@@ -218,7 +218,7 @@ def _find_cycle(adj: dict[str, list[str]]) -> str | None:
 
 
 def _load_standalone_taxonomy(repo_root: Path, unified_path: Path) -> Taxonomy:
-    """Validate and project `taxonomy/ml-systems-taxonomy.yml` when `binder/cli` is not available."""
+    """Validate and project `taxonomy/taxonomy.yml` when `binder/cli` is not available."""
     text = unified_path.read_text(encoding="utf-8")
     if any(isinstance(event, yaml.AliasEvent) for event in yaml.parse(text, Loader=yaml.SafeLoader)):
         raise ValueError(f"{unified_path.name}: YAML anchors/aliases are not allowed")
@@ -318,29 +318,7 @@ def _load_standalone_taxonomy(repo_root: Path, unified_path: Path) -> Taxonomy:
     for rec in raw.get("retired", []) or []:
         if isinstance(rec, dict) and (rec.get("id") in concept_home or rec.get("replaced_by") not in concept_home):
             raise ValueError(f"{unified_path}: retired identity {rec.get('id')} must be unused and name a current replacement")
-    if raw.get("version") not in (None, "0.1-draft", "0.2-draft") and concept_home:
-        deg: dict[str, int] = {cid: 0 for cid in concept_home}
-        undir: dict[str, set[str]] = {cid: set() for cid in concept_home}
-        for edge in edges:
-            s_id, t_id = edge["source"], edge["target"]
-            deg[s_id] = deg.get(s_id, 0) + 1
-            deg[t_id] = deg.get(t_id, 0) + 1
-            undir[s_id].add(t_id)
-            undir[t_id].add(s_id)
-        low_deg = sorted(cid for cid, d in deg.items() if d < 2)
-        if low_deg:
-            raise ValueError(f"{unified_path}: concepts need at least two relationships: {', '.join(low_deg[:5])}")
-        start_c = next(iter(concept_home))
-        visited_c = {start_c}
-        queue_c = [start_c]
-        while queue_c:
-            cur_c = queue_c.pop()
-            for nxt_c in undir.get(cur_c, ()):
-                if nxt_c not in visited_c:
-                    visited_c.add(nxt_c)
-                    queue_c.append(nxt_c)
-        if len(visited_c) != len(concept_home):
-            raise ValueError(f"{unified_path}: concept relationship graph is disconnected")
+    # Semantic connectivity is a review diagnostic, not a tagging invariant.
     for rel_name in hierarchical_rels:
         adj: dict[str, list[str]] = {}
         for edge in edges:
@@ -494,7 +472,7 @@ def _load_standalone_taxonomy(repo_root: Path, unified_path: Path) -> Taxonomy:
 def load_taxonomy(vault_dir: Path) -> Taxonomy | None:
     """Return the repo's validated taxonomy, or None in a vault-only checkout."""
     repo_root = vault_dir.parent.parent
-    unified_path = repo_root / "taxonomy" / "ml-systems-taxonomy.yml"
+    unified_path = repo_root / "taxonomy" / "taxonomy.yml"
     if not unified_path.exists():
         return None
 

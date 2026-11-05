@@ -1,10 +1,14 @@
 """Fault-tolerance experiments for the Volume II fleet lab.
 
-The functions in this module keep three reliability questions distinct:
+The analytical experiments keep three reliability questions distinct:
 
 * a coupled training job is interrupted by any worker or failure-domain event;
 * a serving fleet loses capacity when independent devices fail; and
 * replicated service availability depends on where replicas share failure domains.
+
+Exact synthetic fault, progress, checkpoint-shard and resize traces additionally
+test necessary correctness conditions. Their injected events and time units are
+scenario assumptions, not measured failure or detection rates.
 
 Track values are explicitly illustrative scenario assumptions.  Reusable component
 and recovery values come from :mod:`mlsysim.systems.reliability`.
@@ -13,6 +17,8 @@ and recovery values come from :mod:`mlsysim.systems.reliability`.
 from __future__ import annotations
 
 import math
+import json
+import zlib
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
 
@@ -379,29 +385,40 @@ def checkpoint_tradeoff(
 def select_restore_checkpoint(
     checkpoints: Sequence[Mapping[str, object]], *, failure_step: int
 ) -> dict:
-    """Select the newest completed, digest-valid generation before a failure."""
+    """Select a committed, digest-valid consistent generation before a failure.
+
+    Explicit shard fixtures must contain every expected shard at the manifest's
+    step and a published manifest. Legacy scalar records retain their declared
+    completed/digest semantics; they do not establish a distributed cut.
+    """
     failed_at = _integer(failure_step, "failure_step", minimum=0)
     normalized = []
     for record in checkpoints:
         if "step" not in record:
             raise ValueError("every checkpoint record must include step")
         step = _integer(record["step"], "checkpoint step", minimum=0)
-        normalized.append(
-            {
-                "step": step,
-                "completed": bool(record.get("completed", False)),
-                "digest_valid": bool(record.get("digest_valid", False)),
-            }
-        )
-    candidates = [
-        record
-        for record in normalized
-        if record["step"] <= failed_at and record["completed"] and record["digest_valid"]
-    ]
+        item = {
+            "step": step,
+            "completed": bool(record.get("completed", False)),
+            "digest_valid": bool(record.get("digest_valid", False)),
+        }
+        if "shard_steps" in record:
+            item["shard_steps"] = [_integer(value, "shard step", minimum=0) for value in record["shard_steps"]]
+            item["expected_shards"] = _integer(record.get("expected_shards", len(item["shard_steps"])), "expected_shards")
+            item["manifest_published"] = bool(record.get("manifest_published", False))
+        normalized.append(item)
+    generation_checks = []
+    for item in normalized:
+        cut_valid = (len(item["shard_steps"]) == item["expected_shards"] and all(value == item["step"] for value in item["shard_steps"])) if "shard_steps" in item else None
+        committed = item.get("manifest_published", item["completed"])
+        eligible = item["step"] <= failed_at and item["completed"] and item["digest_valid"] and committed and cut_valid is not False
+        generation_checks.append({"step": item["step"], "completed": item["completed"], "digest_valid": item["digest_valid"], "consistent_cut": cut_valid, "manifest_published": committed, "eligible": eligible})
+    candidates = [record for record, check in zip(normalized, generation_checks) if check["eligible"]]
     if not candidates:
         return {
             "inputs": {"checkpoints": deepcopy(normalized), "failure_step": failed_at},
             "recoverable": False,
+            "generation_checks": generation_checks,
             "restore_step": None,
             "newest_checkpoint_step": max((item["step"] for item in normalized), default=None),
             "lost_steps": None,
@@ -412,6 +429,7 @@ def select_restore_checkpoint(
     return {
         "inputs": {"checkpoints": deepcopy(normalized), "failure_step": failed_at},
         "recoverable": True,
+        "generation_checks": generation_checks,
         "restore_step": selected["step"],
         "newest_checkpoint_step": max((item["step"] for item in normalized), default=None),
         "lost_steps": failed_at - selected["step"],
@@ -434,13 +452,21 @@ def checkpoint_fault_fixture(track_id: str, fault: str = "corrupt") -> dict:
         {"step": 300, "completed": True, "digest_valid": True},
         {"step": 400, "completed": True, "digest_valid": True},
     ]
+    for record in baseline_records:
+        record.update(shard_steps=[record["step"]] * 4, expected_shards=4, manifest_published=True)
     result_records = deepcopy(baseline_records)
     if fault == "corrupt":
         result_records[3]["digest_valid"] = False
     elif fault == "incomplete":
         result_records[3]["completed"] = False
+    elif fault == "mixed_step":
+        result_records[3]["shard_steps"][3] = 300
+    elif fault == "unpublished":
+        result_records[3]["manifest_published"] = False
+    elif fault == "missing_shard":
+        result_records[3]["shard_steps"].pop()
     else:
-        raise ValueError(f"unknown fault {fault!r}; choose 'corrupt' or 'incomplete'")
+        raise ValueError(f"unknown fault {fault!r}; choose corrupt, incomplete, mixed_step, unpublished or missing_shard")
 
     baseline_selection = select_restore_checkpoint(baseline_records, failure_step=failure_step)
     result_selection = select_restore_checkpoint(result_records, failure_step=failure_step)
@@ -538,3 +564,102 @@ __all__ = [
     "track_scenario",
     "training_exposure",
 ]
+
+
+def fault_verification_trace(*, persistence: str = "transient", manifestation: str = "value_corrupting", scope: str = "rank", verification: str = "all") -> dict:
+    """Replay an explicitly injected fault, not a field failure-rate estimate.
+
+    Arithmetic corruption precedes a correctly checksummed transfer. Verification
+    recomputes selected rank contributions; CRC alone therefore cannot detect it.
+    Three attempts distinguish retry success from recurrence and permanence.
+    """
+    if persistence not in {"transient", "intermittent", "permanent"}:
+        raise ValueError("unknown persistence")
+    if manifestation not in {"fail_stop", "degraded", "value_corrupting"}:
+        raise ValueError("unknown manifestation")
+    if scope not in {"rank", "rack"} or verification not in {"none", "rank0", "all"}:
+        raise ValueError("unknown scope or verification")
+    affected = [3] if scope == "rank" else [2, 3]
+    checked = {"none": [], "rank0": [0], "all": list(range(4))}[verification]
+    expected = [2, 4, 6, 8]  # synthetic scalar contributions, not a measured gradient distribution
+    attempts = []
+    for attempt in range(3):
+        active = persistence == "permanent" or attempt == 0 or (persistence == "intermittent" and attempt == 2)
+        values = [value + (10 if active and rank in affected and manifestation == "value_corrupting" else 0) for rank, value in enumerate(expected)]
+        alive = [not(active and rank in affected and manifestation == "fail_stop") for rank in range(4)]
+        durations = [8 if active and rank in affected and manifestation == "degraded" else 1 for rank in range(4)]
+        payload = json.dumps(values).encode("utf-8")
+        sent_crc = zlib.crc32(payload)
+        received_crc = zlib.crc32(bytes(payload))
+        mismatches = [rank for rank in checked if values[rank] != expected[rank]]
+        collective_completes = all(alive)
+        observed = sum(values) / len(values) if collective_completes else None
+        attempts.append({"attempt": attempt, "fault_active": active, "heartbeat_alive": alive,
+                         "step_duration_units": max(durations) if collective_completes else None,
+                         "contributions": values, "sent_crc": sent_crc, "received_crc": received_crc,
+                         "transport_crc_valid": sent_crc == received_crc,
+                         "checked_ranks": checked, "arithmetic_mismatches": mismatches,
+                         "collective_completes": collective_completes,
+                         "reduced_mean": observed,
+                         "accepted": collective_completes and not mismatches,
+                         "accepted_wrong_value": collective_completes and not mismatches and observed != sum(expected) / len(expected)})
+    return {"inputs": {"persistence": persistence, "manifestation": manifestation, "scope": scope, "verification": verification},
+            "axes": {"persistence": persistence, "manifestation": manifestation, "scope": scope},
+            "affected_ranks": affected, "expected_contributions": expected,
+            "reference_mean": sum(expected) / len(expected), "attempts": attempts,
+            "verification_recomputations": len(checked) * len(attempts),
+            "retry_response": {"transient": "retry then verify", "intermittent": "quarantine recurring source and verify", "permanent": "replace and restore"}[persistence],
+            "scope_note": "Rack injection shares one fault across ranks 2 and 3; this is a supplied trace, not a correlation estimate."}
+
+
+def gray_failure_trace(*, detector: str = "progress", threshold: float = 2.0, incident: str = "gray") -> dict:
+    """Separate heartbeat liveness from slowest-rank progress on exact traces."""
+    if detector not in {"heartbeat", "progress"} or incident not in {"healthy", "gray", "crash"}:
+        raise ValueError("unknown detector or incident")
+    limit = _positive(threshold, "threshold")
+    times = [1.0, 1.0, 1.0, 8.0 if incident == "gray" else 1.0]
+    alive = [True, True, True, incident != "crash"]
+    suspected = [rank for rank in range(4) if not alive[rank] or (detector == "progress" and times[rank] > limit)]
+    return {"inputs": {"detector": detector, "threshold": limit, "incident": incident},
+            "heartbeat_alive": alive, "rank_step_units": times,
+            "barrier_step_units": max(times) if all(alive) else None,
+            "suspected_ranks": suspected, "detected": bool(suspected),
+            "false_positive_ranks": [rank for rank in suspected if alive[rank] and times[rank] == 1.0],
+            "response": "recover stopped rank" if not all(alive) else ("mitigate straggler; checkpoint restore does not remove slow hardware" if suspected and incident == "gray" else "inspect false alarm" if suspected else "continue without alarm"),
+            "scope": "One deterministic observation window; no measured latency distribution or false-alarm probability."}
+
+
+def elastic_recovery_trace(*, preserve_batch: bool = True, data_cursor: str = "exact", reconstruct_state: bool = True, fence_epoch: bool = True) -> dict:
+    """Resize a supplied data-parallel job while checking independent invariants.
+
+    State IDs, sample IDs and writer epochs are explicit synthetic records. No
+    statistical convergence claim follows from passing these necessary gates.
+    """
+    if data_cursor not in {"exact", "rewind", "skip"}:
+        raise ValueError("unknown data_cursor")
+    for name, value in (("preserve_batch", preserve_batch), ("reconstruct_state", reconstruct_state), ("fence_epoch", fence_epoch)):
+        if not isinstance(value, bool):
+            raise ValueError(f"{name} must be boolean")
+    old_workers, survivors, microbatch, old_accumulation = 4, 2, 2, 1
+    accumulation = old_workers // survivors if preserve_batch else old_accumulation
+    consumed = list(range(8))
+    start = {"exact": 8, "rewind": 4, "skip": 12}[data_cursor]
+    resumed = list(range(start, 16))
+    observed = consumed + resumed
+    duplicates = sorted({item for item in observed if observed.count(item) > 1})
+    missing = sorted(set(range(16)) - set(observed))
+    required_state = [f"optimizer_shard_{rank}" for rank in range(old_workers)]
+    available_state = required_state if reconstruct_state else required_state[:survivors]
+    writer_attempts = [{"epoch": 1, "writer": "lost-rank-late-write"}, {"epoch": 2, "writer": "resumed-job"}]
+    writes = [{**entry, "accepted": not fence_epoch or entry["epoch"] == 2} for entry in writer_attempts]
+    gates = {"effective_batch_preserved": survivors * microbatch * accumulation == old_workers * microbatch * old_accumulation,
+             "exactly_once_data": not duplicates and not missing,
+             "all_state_reconstructable": set(available_state) == set(required_state),
+             "stale_writer_fenced": not writes[0]["accepted"]}
+    return {"inputs": {"preserve_batch": preserve_batch, "data_cursor": data_cursor, "reconstruct_state": reconstruct_state, "fence_epoch": fence_epoch},
+            "before": {"workers": old_workers, "microbatch": microbatch, "accumulation": old_accumulation, "effective_batch": old_workers * microbatch * old_accumulation},
+            "after": {"workers": survivors, "microbatch": microbatch, "accumulation": accumulation, "effective_batch": survivors * microbatch * accumulation},
+            "consumed_samples": consumed, "resumed_samples": resumed, "duplicate_samples": duplicates, "missing_samples": missing,
+            "required_state": required_state, "available_state": available_state, "writer_attempts": writes,
+            "gates": gates, "safe_to_resume": all(gates.values()),
+            "scope": "Necessary consistency checks on supplied data-parallel records; no reshard implementation, learning-rate validation or measured recovery throughput."}

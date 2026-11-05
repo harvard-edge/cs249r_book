@@ -10,32 +10,52 @@ from ._units import _ensure_unit
 
 
 def calc_queue_latency_mmc(arrival_rate_hz, service_rate_hz, num_servers):
-    """
-    M/M/c queueing model for inference tail latency (Erlang C).
-
-    Calculates the expected queueing delays (P50 and P99) for a system with 
-    Markovian arrivals, Markovian service times, and `c` parallel servers.
-
-    This implementation uses the Log-Sum-Exp trick to calculate the Erlang C 
-    formula. This prevents floating-point overflow (`math.inf`) or underflow 
-    to `0.0` when dealing with large-scale clusters (e.g., c > 100).
+    """Calculate M/M/c utilization and queue-wait percentiles.
 
     Parameters
     ----------
     arrival_rate_hz : Quantity or float
-        The average rate of incoming requests (λ) in requests per second (Hz).
+        Nonnegative request arrival rate lambda; bare numbers mean Hz.
     service_rate_hz : Quantity or float
-        The average rate at which a single server completes requests (μ) in Hz.
+        Positive completion rate mu per replica; bare numbers mean Hz.
     num_servers : int
-        The number of active parallel serving replicas (c).
+            Replica count c; implementation truncates to an integer and clamps to at
+        least one.
 
     Returns
     -------
     tuple
-        A 3-tuple containing:
-        - rho (float): Server utilization (λ / (c * μ)).
-        - p50_wait (Quantity): The 50th percentile queueing wait time.
-        - p99_wait (Quantity): The 99th percentile queueing wait time.
+            Dimensionless utilization, median queue wait, and p99 queue wait; waits are
+        second quantities.
+
+    Notes
+    -----
+    Equation: rho = lambda/(c mu); P(W > t) = ErlangC(c, rho) exp[-c mu (1-rho)t]. The
+    returned waits invert this tail at tail probabilities 0.5 and 0.01.
+
+    Assumptions: Poisson arrivals, independent exponential service, identical replicas,
+    and a shared first-come queue. Stable operation requires lambda < c mu.
+
+    Excludes: Service duration in the returned waits, batching, admission limits,
+    heterogeneous replicas, and burst correlations.
+
+    The Erlang C sum is evaluated in the log domain to limit overflow. Numerical
+    breakdown falls back to rho as a proxy waiting probability, which is an
+    approximation. At saturation or zero service rate the function returns
+    utilization one and infinite waits; these are not finite latency estimates.
+
+    References
+    ----------
+    Harchol-Balter (2013), Performance Modeling and Design of Computer
+    Systems: Queueing Theory in Action.
+    https://www.cs.cmu.edu/~harchol/PerformanceModeling/book.html
+    (bibliography key: harchol-balter2013).
+
+    Examples
+    --------
+    >>> rho, median, tail = calc_queue_latency_mmc(1, 2, 1)
+    >>> rho == 0.5 and median.magnitude == 0 and tail.magnitude > 0
+    True
     """
     lam = _ensure_unit(arrival_rate_hz, ureg.hertz, "arrival_rate_hz").magnitude
     mu = _ensure_unit(service_rate_hz, ureg.hertz, "service_rate_hz").magnitude
@@ -57,10 +77,7 @@ def calc_queue_latency_mmc(arrival_rate_hz, service_rate_hz, num_servers):
         log_last = c * math.log(a) - math.lgamma(c + 1) - math.log(1 - rho)
         # Series terms a^i/i! for i < c: the Poisson-shaped "i servers busy,
         # no queue" states. a == 0 means no load: only the i=0 term survives.
-        log_terms = [
-            i * math.log(a) - math.lgamma(i + 1) if a > 0 else (-math.inf if i > 0 else 0.0)
-            for i in range(c)
-        ]
+        log_terms = [i * math.log(a) - math.lgamma(i + 1) if a > 0 else (-math.inf if i > 0 else 0.0) for i in range(c)]
         # Log-sum-exp: factor out the largest exponent so every exp() argument
         # is <= 0 and nothing overflows; the common factor cancels in the ratio.
         max_log = max(max(log_terms) if log_terms else -math.inf, log_last)
@@ -88,30 +105,43 @@ def calc_queue_latency_mmc(arrival_rate_hz, service_rate_hz, num_servers):
 
 
 def calc_mg1_wait_ratio(utilization, service_cv):
-    """Mean M/G/1 queue wait as a multiple of the mean service time.
-
-    The Pollaczek-Khinchine formula for one server with Poisson arrivals and a
-    general service-time distribution:
-
-        W_q / (1/mu) = rho / (1 - rho) * (1 + C_s^2) / 2
-
-    The first factor (load) grows without bound as ``utilization`` approaches 1;
-    the second (variability) scales the whole curve by the spread of service
-    times, ``service_cv`` being their coefficient of variation (1 for
-    exponential service). Added 2026-10-20 for scheduler queueing, where a
-    fleet is modeled as one server working through jobs.
+    """Calculate mean M/G/1 queue wait relative to mean service time.
 
     Parameters
     ----------
     utilization : float
-        Offered load rho, in [0, 1).
+        Nonnegative busy fraction rho; values at or above one return infinity.
     service_cv : float
-        Coefficient of variation of service time, C_s >= 0.
+        Nonnegative dimensionless coefficient of variation of service duration.
 
     Returns
     -------
     float
-        Mean queue wait divided by the mean service time (``inf`` at rho >= 1).
+        Mean waiting time divided by mean service time; dimensionless.
+
+    Notes
+    -----
+    Equation: Wq/E[S] = rho (1 + ``Cs**2)`` / [2 (1-rho)].
+
+    Assumptions: Poisson arrivals, one first-come server, independent service times
+    with finite second moment.
+
+    Excludes: Tail percentiles, correlated service, finite queue capacity, and multiple
+    servers.
+
+    References
+    ----------
+    Harchol-Balter (2013), Performance Modeling and Design of Computer
+    Systems: Queueing Theory in Action.
+    https://www.cs.cmu.edu/~harchol/PerformanceModeling/book.html
+    (bibliography key: harchol-balter2013).
+
+    Examples
+    --------
+    >>> calc_mg1_wait_ratio(0.5, 1) == 1
+    True
+    >>> calc_mg1_wait_ratio(0.5, 0) < calc_mg1_wait_ratio(0.5, 1)
+    True
     """
     rho = float(utilization)
     cv = float(service_cv)
@@ -124,45 +154,158 @@ def calc_mg1_wait_ratio(utilization, service_cv):
 
 # --- Serving at scale: occupancy, batching, speculation (added 2026-10-20) -----
 
+
 def calc_littles_law_occupancy(arrival_rate, time_in_system):
-    """
-    Mean requests in a stable system, by Little's law.
+    """Calculate mean occupancy from arrival rate and residence time.
 
-        L = lambda W
+    Parameters
+    ----------
+    arrival_rate : Quantity or float
+            Nonnegative average arrivals per unit time; use units reciprocal to
+        time_in_system.
+    time_in_system : Quantity or float
+        Nonnegative mean total residence duration, including waiting and service.
 
-    ``arrival_rate`` (requests per unit time) times ``time_in_system`` (the
-    mean time each request spends inside). The law needs only stability, not
-    a distribution, so it gives a mean and says nothing about the tail.
+    Returns
+    -------
+    Quantity or float
+        Mean resident request count; units follow the product of the inputs.
+
+    Notes
+    -----
+    Equation: L = lambda W.
+
+    Assumptions: A stable system and consistently defined boundaries for arrivals,
+    occupancy, and residence.
+
+    Excludes: Tail occupancy, burst reserves, and admission guarantees.
+
+    References
+    ----------
+    Little (1961), A Proof for the Queuing Formula: L = lambda W.
+    https://doi.org/10.1287/opre.9.3.383 (bibliography key: little1961).
+
+    Examples
+    --------
+    >>> calc_littles_law_occupancy(2 / ureg.second, 3 * ureg.second).dimensionless
+    True
     """
     return arrival_rate * time_in_system
 
 
 def calc_batch_knee(fixed_time, per_request_time):
-    """
-    Batch size at which per-request cost equals the per-batch fixed cost.
+    """Calculate where variable batch work equals fixed work.
 
-        B_knee = t_0 / t_req
+    Parameters
+    ----------
+    fixed_time : Quantity
+        Nonnegative fixed duration per batch.
+    per_request_time : Quantity
+        Positive incremental duration per request; compatible time units.
 
-    With batch service time S(B) = t_0 + B t_req, throughput B / S(B) reaches
-    half its ceiling 1 / t_req at this batch.
+    Returns
+    -------
+    float
+        Continuous batch-size knee; an integer scheduler may need rounding.
+
+    Notes
+    -----
+    Equation: Bknee = t0/treq; throughput B/(t0+B treq) is half its asymptotic ceiling
+    at this point.
+
+    Assumptions: Batch service duration is affine in batch size with fixed
+    coefficients.
+
+    Excludes: Queueing, capacity limits, nonlinear kernels, and discrete batch-size
+    rounding.
+
+    References
+    ----------
+    Derivation: equate the fixed term t0 and variable term B treq in the
+    affine batch-service model and solve for B.
+
+    Examples
+    --------
+    >>> calc_batch_knee(4 * ureg.ms, 2 * ureg.ms) == 2
+    True
     """
     return (fixed_time / per_request_time).to("").magnitude
 
 
 def calc_batch_throughput_share(batch_size, fixed_time, per_request_time) -> float:
-    """Throughput at ``batch_size`` as a share of the ceiling 1 / t_req: B t_req / (t_0 + B t_req)."""
+    """Calculate batch throughput as a fraction of its affine-model ceiling.
+
+    Parameters
+    ----------
+    batch_size : int or float
+        Nonnegative request count B, with a positive total service duration.
+    fixed_time : Quantity
+        Nonnegative fixed per-batch duration t0.
+    per_request_time : Quantity
+        Positive incremental duration treq per request.
+
+    Returns
+    -------
+    float
+        Dimensionless share of the ceiling throughput 1/treq.
+
+    Notes
+    -----
+    Equation: share = B treq / (t0 + B treq).
+
+    Assumptions: The same affine service model holds across batch sizes.
+
+    Excludes: Queue formation, memory-capacity limits, and changes in per-request
+    execution efficiency.
+
+    References
+    ----------
+    Derivation: divide B/(t0+B treq) by its large-batch limit 1/treq.
+
+    Examples
+    --------
+    >>> calc_batch_throughput_share(2, 4 * ureg.ms, 2 * ureg.ms) == 0.5
+    True
+    """
     work = batch_size * per_request_time
     return (work / (fixed_time + work)).to("").magnitude
 
 
 def calc_padding_waste_fraction(lengths) -> float:
-    """
-    Share of slot time a fixed-membership batch leaves idle.
+    """Calculate idle slot share when a batch waits for its longest member.
 
-        W = 1 - mean(L) / max(L)
+    Parameters
+    ----------
+    lengths : iterable of float
+            Nonempty sequence of nonnegative work lengths in common units, with a
+        positive maximum.
 
-    Every member holds its slot until the longest member finishes, so slot
-    time is ``n max(L)`` while useful work is ``sum(L)``.
+    Returns
+    -------
+    float
+        Dimensionless fraction of reserved slot-time unused.
+
+    Notes
+    -----
+    Equation: waste = 1 - sum(L)/(n max(L)).
+
+    Assumptions: Each member reserves one slot until the longest member finishes, and
+    length is proportional to slot occupancy.
+
+    Excludes: Continuous replacement, variable work per token, and non-slot resource
+    bottlenecks.
+
+    References
+    ----------
+    Derivation: useful slot-time is sum(L), while fixed-membership reservation
+    consumes n max(L). Divide the unused difference by the reservation.
+
+    Examples
+    --------
+    >>> calc_padding_waste_fraction([2, 2]) == 0
+    True
+    >>> calc_padding_waste_fraction([1, 2]) > 0
+    True
     """
     lengths = [float(x) for x in lengths]
     if not lengths or max(lengths) <= 0:
@@ -171,57 +314,167 @@ def calc_padding_waste_fraction(lengths) -> float:
 
 
 def calc_speculative_expected_tokens(acceptance: float, draft_length: int) -> float:
-    """
-    Expected tokens one speculative round emits.
+    """Calculate expected emitted tokens per speculative round.
 
-        E[tokens] = (1 - alpha^(K+1)) / (1 - alpha)
+    Parameters
+    ----------
+    acceptance : float
+            Independent per-token acceptance probability alpha in [0, 1); the alpha=1
+        limit is not accepted by this implementation.
+    draft_length : int
+        Nonnegative number K of draft proposals; caller must supply an integer count.
 
-    A draft proposes ``draft_length`` (K) tokens, each accepted independently
-    with probability ``acceptance`` (alpha) until the first rejection; the
-    target's verification pass always contributes one token.
+    Returns
+    -------
+    float
+        Expected total emitted tokens, including the target bonus or correction token.
+
+    Notes
+    -----
+    Equation: E[tokens] = ``sum(alpha**i``, i=0..K) = ``(1-alpha**(K+1))/(1-alpha)``.
+
+    Assumptions: Identical independent acceptance probabilities; verification stops at
+    the first rejected draft, and the target supplies one additional token.
+
+    Excludes: Context-dependent acceptance, verification compute, draft cost, and
+    output quality.
+
+    References
+    ----------
+    Leviathan, Kalman, and Matias (2023), Fast Inference from Transformers
+    via Speculative Decoding. https://proceedings.mlr.press/v202/leviathan23a.html
+    (bibliography key: leviathan2023fast).
+
+    Examples
+    --------
+    >>> calc_speculative_expected_tokens(0, 4) == 1
+    True
+    >>> calc_speculative_expected_tokens(0.5, 4) > calc_speculative_expected_tokens(0.5, 2)
+    True
     """
     a = float(acceptance)
     if not 0 <= a < 1:
         raise ValueError("acceptance must be in [0, 1)")
     return (1 - a ** (draft_length + 1)) / (1 - a)
+
+
 # --- Residence time and turn rate (added 2026-10-20) --------------------------
 
+
 def calc_littles_law_rate(occupied_slots, residence_time):
-    """
-    Turns per unit time that ``occupied_slots`` sustain, by Little's law.
+    """Calculate average turnover rate from occupied slots and residence time.
 
-        L = lambda W   =>   lambda = L / W
+    Parameters
+    ----------
+    occupied_slots : Quantity or float
+        Nonnegative mean count L of occupied slots.
+    residence_time : Quantity or float
+        Positive mean duration W for which each turn holds a slot.
 
-    ``residence_time`` is the time each turn holds its slot. The law assumes
-    only a stable system, so the rate is an average, not a peak.
+    Returns
+    -------
+    Quantity or float
+        Average turnover rate L/W, reciprocal to the residence-time unit.
+
+    Notes
+    -----
+    Equation: lambda = L/W.
+
+    Assumptions: Stable operation and a common definition of a turn across slot and
+    duration measurements.
+
+    Excludes: Peak throughput, tail delays, and idle capacity not represented by
+    occupied_slots.
+
+    References
+    ----------
+    Little (1961), A Proof for the Queuing Formula: L = lambda W.
+    https://doi.org/10.1287/opre.9.3.383 (bibliography key: little1961).
+
+    Examples
+    --------
+    >>> calc_littles_law_rate(6, 3 * ureg.second) == 2 / ureg.second
+    True
     """
     return occupied_slots / residence_time
 
 
 def calc_residency_factor(generation_time, wait_time) -> float:
-    """
-    How much holding a slot through a wait divides the turn rate.
+    """Calculate how retaining state during a wait expands residence time.
 
-        1 + T_wait / T_gen
+    Parameters
+    ----------
+    generation_time : Quantity
+        Positive active generation duration.
+    wait_time : Quantity
+        Nonnegative additional duration for which state retains its slot.
 
-    Keeping state through a wait stretches each turn's residence from
-    ``generation_time`` to ``generation_time + wait_time``; for the same slots,
-    Little's law divides the rate by this factor (the residency tax).
+    Returns
+    -------
+    float
+            Dimensionless residence multiplier; fixed-slot turnover is divided by this
+        factor.
+
+    Notes
+    -----
+    Equation: factor = (Tgen + Twait)/Tgen.
+
+    Assumptions: Generation and waiting are sequential, and both reserve the same slot.
+
+    Excludes: Releasing state during waits, overlapping work, and different memory
+    sizes across phases.
+
+    References
+    ----------
+    Derivation: compare total reserved duration Tgen+Twait with generation-only
+    duration Tgen; Little's law converts this to the inverse turnover ratio.
+
+    Examples
+    --------
+    >>> calc_residency_factor(2 * ureg.second, 0 * ureg.second) == 1
+    True
     """
     return ((generation_time + wait_time) / generation_time).to("").magnitude
 
 
 # --- One-server queueing and batch formation (added 2026-10-20) ---------------
 
+
 def calc_mm1_time_in_system(service_time, utilization):
-    """
-    Mean time a request spends in an M/M/1 server, waiting plus service.
+    """Calculate mean M/M/1 residence time including service.
 
-        W = S / (1 - rho)
+    Parameters
+    ----------
+    service_time : Quantity or float
+        Positive mean service duration S; output preserves its unit.
+    utilization : float
+        Dimensionless busy fraction rho in [0, 1).
 
-    ``service_time`` (S) is the mean service time and ``utilization`` (rho)
-    the fraction of time the server is busy. W grows without bound as rho
-    approaches 1: the queueing knee.
+    Returns
+    -------
+    Quantity or float
+        Mean total residence time, in the service-time unit.
+
+    Notes
+    -----
+    Equation: W = S/(1-rho).
+
+    Assumptions: One first-come server, Poisson arrivals, independent exponential
+    service, and steady state.
+
+    Excludes: Finite buffer loss, nonexponential service, and tail percentiles.
+
+    References
+    ----------
+    Harchol-Balter (2013), Performance Modeling and Design of Computer
+    Systems: Queueing Theory in Action.
+    https://www.cs.cmu.edu/~harchol/PerformanceModeling/book.html
+    (bibliography key: harchol-balter2013).
+
+    Examples
+    --------
+    >>> calc_mm1_time_in_system(2 * ureg.ms, 0) == 2 * ureg.ms
+    True
     """
     rho = float(utilization)
     if not 0 <= rho < 1:
@@ -230,13 +483,36 @@ def calc_mm1_time_in_system(service_time, utilization):
 
 
 def calc_exponential_quantile_factor(quantile: float) -> float:
-    """
-    A quantile of an exponential distribution as a multiple of its mean.
+    """Calculate an exponential quantile relative to its mean.
 
-        k_q = ln(1 / (1 - q))
+    Parameters
+    ----------
+    quantile : float
+        Cumulative probability q in [0, 1).
 
-    Time in an M/M/1 system is exponential, so its p99 is ln(100) = 4.605
-    times its mean at every load.
+    Returns
+    -------
+    float
+        Dimensionless quantile-to-mean ratio.
+
+    Notes
+    -----
+    Equation: kq = -log(1-q).
+
+    Assumptions: An exponential distribution with positive finite mean.
+
+    Excludes: Other service-time distributions and mixtures with a point mass at zero.
+
+    References
+    ----------
+    Derivation: invert F(t)=1-exp(-t/mean) at F(t)=q, then divide by mean.
+
+    Examples
+    --------
+    >>> calc_exponential_quantile_factor(0) == 0
+    True
+    >>> calc_exponential_quantile_factor(0.99) > calc_exponential_quantile_factor(0.5)
+    True
     """
     q = float(quantile)
     if not 0 <= q < 1:
@@ -245,39 +521,123 @@ def calc_exponential_quantile_factor(quantile: float) -> float:
 
 
 def calc_mm1_max_utilization(service_time, tail_budget, tail_factor: float) -> float:
-    """
-    Highest utilization at which an M/M/1 tail stays within ``tail_budget``.
+    """Calculate the utilization ceiling implied by an M/M/1 tail budget.
 
-        k S / (1 - rho) <= T   =>   rho <= 1 - k S / T
+    Parameters
+    ----------
+    service_time : Quantity
+        Positive mean service duration S.
+    tail_budget : Quantity
+        Positive allowed tail duration T, in compatible units.
+    tail_factor : float
+        Positive tail-to-mean multiplier k, normally from the exponential quantile.
 
-    ``tail_factor`` (k) is the tail as a multiple of the mean time in system
-    (``calc_exponential_quantile_factor``).
+    Returns
+    -------
+    float
+            Unclamped dimensionless ceiling; a negative result means even idle service
+        misses the budget.
+
+    Notes
+    -----
+    Equation: rho_max = 1 - k S/T.
+
+    Assumptions: M/M/1 response time is exponential, and the tail factor matches the
+    chosen quantile.
+
+    Excludes: Admission enforcement, finite buffers, or nonexponential latency tails.
+
+    References
+    ----------
+    Derivation: rearrange k S/(1-rho) <= T for rho. The underlying M/M/1
+    mean is documented in calc_mm1_time_in_system.
+
+    Examples
+    --------
+    >>> calc_mm1_max_utilization(2 * ureg.ms, 2 * ureg.ms, 1) == 0
+    True
     """
     return 1 - (tail_factor * service_time / tail_budget).to("").magnitude
 
 
 def calc_batch_formation_wait(batch_size: int, arrival_rate):
-    """
-    Mean time a request waits for a batch of ``batch_size`` to fill.
+    """Calculate mean delay while a fixed-size batch fills.
 
-        W_form = (B - 1) / (2 lambda)
+    Parameters
+    ----------
+    batch_size : int
+        Positive batch count B; no timeout or partial-batch release.
+    arrival_rate : Quantity or float
+        Positive stationary arrival rate lambda; output has reciprocal-rate units.
 
-    With arrivals at a steady ``arrival_rate`` (lambda), the first request of
-    a batch waits for B - 1 more and the last for none; the mean is half.
+    Returns
+    -------
+    Quantity or float
+        Mean formation delay, excluding execution and downstream queueing.
+
+    Notes
+    -----
+    Equation: Wform = (B-1)/(2 lambda).
+
+    Assumptions: Average interarrival gap is 1/lambda and each request position within
+    a batch is equally represented.
+
+    Excludes: Arrival bursts correlated with batch position, timeouts, priorities, and
+    execution delay.
+
+    References
+    ----------
+    Derivation: batch positions wait for B-1, B-2, ..., 0 subsequent arrivals;
+    averaging those counts and multiplying by the mean gap gives the formula.
+
+    Examples
+    --------
+    >>> calc_batch_formation_wait(1, 2 / ureg.second) == 0 * ureg.second
+    True
     """
     return (batch_size - 1) / (2 * arrival_rate)
 
 
 # --- Agent serving economics: queue price and speculative rounds (added 2026-10-20) ---
 
+
 def calc_kingman_wait_ratio(utilization: float, arrival_scv: float, service_scv: float) -> float:
-    """Mean queue wait of one server as a multiple of the mean service time (Kingman 1961).
+    """Approximate mean G/G/1 wait relative to mean service time.
 
-        E[W] / E[S] ~ (c_a^2 + c_s^2) / 2 * rho / (1 - rho)
+    Parameters
+    ----------
+    utilization : float
+        Busy fraction rho in [0, 1).
+    arrival_scv : float
+        Nonnegative squared coefficient of variation of interarrival gaps.
+    service_scv : float
+        Nonnegative squared coefficient of variation of service durations.
 
-    A heavy-traffic approximation for a G/G/1 queue: ``arrival_scv`` and
-    ``service_scv`` are the squared coefficients of variation of interarrival
-    and service times. Exact for M/M/1 (both 1); a mean, not a tail.
+    Returns
+    -------
+    float
+        Dimensionless approximate mean-wait to mean-service ratio.
+
+    Notes
+    -----
+    Equation: Wq/E[S] approximately ``((Ca**2`` + ``Cs**2)/2)`` rho/(1-rho).
+
+    Assumptions: A single first-come server with independent renewal arrivals and
+    service durations; the approximation is motivated by heavy traffic.
+
+    Excludes: Tail percentiles, correlated service/arrivals, finite buffers, and
+    multiple-server routing.
+
+    References
+    ----------
+    Kingman (1961), The Single Server Queue in Heavy Traffic.
+    https://doi.org/10.1017/S0305004100036094
+    (bibliography key: kingman1961single).
+
+    Examples
+    --------
+    >>> calc_kingman_wait_ratio(0.5, 1, 1) == calc_mg1_wait_ratio(0.5, 1)
+    True
     """
     rho = float(utilization)
     if not 0 <= rho < 1:
@@ -288,16 +648,45 @@ def calc_kingman_wait_ratio(utilization: float, arrival_scv: float, service_scv:
     return variability * rho / (1 - rho)
 
 
-def calc_speculative_round_speedup(accepted_per_round: float, draft_length: int,
-                                   draft_cost_ratio: float) -> float:
-    """Decode-stream speedup of speculative decoding (Leviathan et al. 2023).
+def calc_speculative_round_speedup(accepted_per_round: float, draft_length: int, draft_cost_ratio: float) -> float:
+    """Calculate a speculative-round decode speedup under fixed step costs.
 
-        S = (m + 1) / (gamma r + 1)
+    Parameters
+    ----------
+    accepted_per_round : float
+        Nonnegative mean number m of accepted draft tokens, excluding the target token.
+    draft_length : int
+        Nonnegative number gamma of draft steps per round.
+    draft_cost_ratio : float
+        Nonnegative draft-step duration divided by one target-step duration.
 
-    Each round drafts ``draft_length`` (gamma) tokens at ``draft_cost_ratio``
-    (r) of a target step each, and the target's one verification step keeps
-    ``accepted_per_round`` (m) drafted tokens plus one of its own. Faster only
-    while m > gamma r.
+    Returns
+    -------
+    float
+        Dimensionless time-per-token speedup against serial target-only decoding.
+
+    Notes
+    -----
+    Equation: speedup = (m+1)/(gamma r + 1).
+
+    Assumptions: Draft steps execute serially and one target verification costs one
+    target step regardless of gamma; one target token is always emitted.
+
+    Excludes: Verification compute growth, KV-cache memory, communication, and changing
+    context or acceptance.
+
+    References
+    ----------
+    Leviathan, Kalman, and Matias (2023), Fast Inference from Transformers
+    via Speculative Decoding. https://proceedings.mlr.press/v202/leviathan23a.html
+    (bibliography key: leviathan2023fast).
+
+    Examples
+    --------
+    >>> calc_speculative_round_speedup(0, 0, 0) == 1
+    True
+    >>> calc_speculative_round_speedup(1, 4, 1) < 1
+    True
     """
     if accepted_per_round < 0 or draft_length < 0 or draft_cost_ratio < 0:
         raise ValueError("inputs must be nonnegative")

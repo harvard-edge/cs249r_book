@@ -12,7 +12,7 @@
 <div align="center">
   <h1>Co-Labs</h1>
   <blockquote>
-    <b>34 Interactive Labs Powered by MLSys·IM</b><br>
+    <b>Interactive Labs Powered by MLSys·IM</b><br>
     <i>Predict → Discover → Explain</i>
   </blockquote>
 </div>
@@ -37,7 +37,15 @@ Each lab follows a consistent structure:
 
 Every prediction is structured (radio buttons or numeric entry, never free text). You predict first, then explore the instruments to discover whether you were right. The gap between prediction and reality is the learning moment.
 
+The goal is to make a defensible systems decision. Change a design choice,
+compare its benefits and costs against a baseline, find the constraint it
+violates, and try a recovery. Save the evidence for your recommendation,
+including the alternative you rejected and what would make you reconsider.
+MLSysIM supplies the calculations so you can concentrate on the tradeoffs.
+
 ## Lab Inventory
+
+Every volume begins with Lab 00 for onboarding. The [labs landing page](index.qmd) generates the complete four-volume route from the canonical learning contracts; the tables below describe the original deployment volumes.
 
 ### Volume I: Foundations (17 labs · Single-machine ML systems)
 
@@ -138,7 +146,7 @@ Every prediction is structured (radio buttons or numeric entry, never free text)
   </tbody>
 </table>
 
-### Volume II: Scaling (17 labs · Distributed ML systems)
+### Volume II: Scaling (18 labs · Distributed ML systems)
 
 <table width="100%" style="width:100%">
   <thead>
@@ -149,6 +157,11 @@ Every prediction is structured (radio buttons or numeric entry, never free text)
     </tr>
   </thead>
   <tbody>
+    <tr>
+      <td>00</td>
+      <td><code>lab_00_orientation</code></td>
+      <td>Choose a fleet project (orientation)</td>
+    </tr>
     <tr>
       <td>01</td>
       <td><code>lab_01_introduction</code></td>

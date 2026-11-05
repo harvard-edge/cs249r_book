@@ -91,7 +91,48 @@ def _rounded(value: float) -> float:
 
 
 def margins(result: Mapping[str, Any]) -> dict[str, float]:
-    """Return positive slack (or negative shortfall) for each deployment limit."""
+    """Compute signed slack against each illustrative deployment limit.
+
+    Parameters
+    ----------
+    result : mapping of str to object
+        An evaluate result containing quality_pct, quality_floor_pct, memory_mb,
+        memory_limit_mb, latency_ms, latency_limit_ms, energy_mj, and energy_limit_mj.
+
+    Returns
+    -------
+    dict of str to float
+        Quality slack in percentage points, memory slack in MB, latency slack in ms, and energy
+        slack in mJ; positive values satisfy the corresponding limit. Values round to four
+        decimal places.
+
+    See Also
+    --------
+    evaluate : Evaluate one assumed deployment envelope.
+
+    Notes
+    -----
+    Equation: quality_margin = quality - quality_floor; resource_margin = resource_limit -
+    resource_use.
+
+    Assumptions: The supplied result uses the units and constraint directions returned by
+    evaluate.
+
+    Excludes: Intervention-budget slack, uncertainty margins, and any inference that passing
+    these illustrative limits certifies deployment.
+
+    References
+    ----------
+    Derivation: A minimum-quality constraint permits quality minus floor; a maximum-resource
+    constraint permits limit minus use. Their signs therefore share the same pass
+    interpretation.
+
+    Examples
+    --------
+    >>> r = evaluate("tinyml")
+    >>> margins(r)["memory_mb"] == round(r["memory_limit_mb"] - r["memory_mb"], 4)
+    True
+    """
     return {
         "quality_pct": _rounded(result["quality_pct"] - result["quality_floor_pct"]),
         "memory_mb": _rounded(result["memory_limit_mb"] - result["memory_mb"]),
@@ -101,7 +142,43 @@ def margins(result: Mapping[str, Any]) -> dict[str, float]:
 
 
 def speedup(baseline: Mapping[str, Any], result: Mapping[str, Any]) -> float:
-    """Latency speedup for two evaluated outcomes (baseline latency / result latency)."""
+    """Calculate a latency ratio for two evaluated outcomes.
+
+    Parameters
+    ----------
+    baseline : mapping of str to object
+        Baseline with finite, nonnegative latency_ms in milliseconds.
+    result : mapping of str to object
+        Comparison with finite, nonnegative latency_ms in milliseconds.
+
+    Returns
+    -------
+    float
+        Baseline latency divided by comparison latency, rounded to four decimal places. Returns
+        positive infinity whenever comparison latency is zero, including when both latencies are
+        zero.
+
+    Notes
+    -----
+    Equation: speedup = baseline[latency_ms] / result[latency_ms] for positive comparison
+    latency.
+
+    Assumptions: Both outcomes represent comparable work and have the same latency units;
+    comparability is the caller's responsibility.
+
+    Excludes: Quality, energy, memory, and statistical significance of a difference.
+
+    References
+    ----------
+    Derivation: The ratio expresses how many comparison-duration intervals fit into one baseline
+    duration. The zero-denominator infinity is an API convention, not a finite performance
+    prediction.
+
+    Examples
+    --------
+    >>> speedup({"latency_ms": 10}, {"latency_ms": 5})
+    2.0
+    """
     latency = _number(result["latency_ms"], "result latency_ms", minimum=0.0)
     if latency == 0:
         return float("inf")
@@ -118,19 +195,82 @@ def evaluate(
     intervention: str = "none",
     demand_scale: float = 1,
     budget_scale: float = 1,
+    scenario_version: str | None = None,
 ) -> dict[str, Any]:
-    """Evaluate one fixed-model deployment outcome.
+    """Evaluate an illustrative deployment envelope using additive resource accounts.
 
-    ``shift_pct`` is a percentage-point change in difficult-cohort share. The
-    The timing equation is ``T = D_vol / BW + O / R_effective + L``.  The
-    ``compute_scale``, ``movement_scale``, and ``overhead_scale`` multiply
-    compute capability, bandwidth capability, and runtime-overhead capability
-    respectively (so 2 means twice as capable). ``demand_scale`` multiplies
-    serialized workload, and therefore represents repeated work in sequence,
-    not a queue model. ``budget_scale`` scales the illustrative deployment
-    envelope (memory, latency, energy, and intervention budget), not a
-    hardware claim.
+    Parameters
+    ----------
+    track_id : str
+        One of "tinyml", "mobile", "edge", or "cloud"; selects an assumed teaching envelope, not
+        a branded device.
+    candidate : str, optional
+        One of "compact", "balanced" (default), or "large"; selects assumed work, footprint, and
+        cohort-quality rates.
+    shift_pct : float, optional
+        Finite percentage-point shift in difficult-cohort share, default zero; the resulting
+        share must remain in [0, 1].
+    compute_scale : float, optional
+        Positive finite compute-capability multiplier; default one. Twice the capability halves
+        the compute term.
+    movement_scale : float, optional
+        Positive finite bandwidth multiplier; default one.
+    overhead_scale : float, optional
+        Positive finite overhead-capability multiplier; default one. The fixed runtime term
+        divides by this value.
+    intervention : str, optional
+        "none" (default), "data", "model", or "machine"; selects the explicitly assumed cohort
+        improvement, candidate upgrade, or compute-time/energy tradeoff.
+    demand_scale : float, optional
+        Positive finite serialized-work multiplier; default one. Scales movement, compute, and
+        overhead but not resident model memory.
+    budget_scale : float, optional
+        Positive finite multiplier for memory, latency, energy, and intervention-cost limits;
+        default one. Does not scale the quality floor.
+
+    scenario_version : str or None, optional
+        Required study version when replaying saved evidence; None accepts the current version.
+
+    Returns
+    -------
+    dict of str to object
+        Quality in percent, memory in MB, timing components and latency in ms, energy in mJ,
+        limit violations, feasibility booleans, dominant timing term, and input/provenance
+        records. Displayed numeric results round to four decimals; feasibility uses unrounded
+        values.
+
+    Notes
+    -----
+    Equation: T = movement_volume / bandwidth + operations / effective_compute_rate + overhead;
+    E = sum(term_time * term_energy_rate); Q = ``(1-difficult_share)*easy_quality`` +
+    ``difficult_share*difficult_quality``. Feasibility requires every quality, resource, and
+    intervention-budget constraint.
+
+    Assumptions: All times add without overlap. Candidate quality and interventions are
+    constructed teaching assumptions. The data intervention adds seven percentage points to
+    difficult-cohort quality; the model intervention advances one candidate; the machine
+    intervention multiplies compute time by 0.60 and its energy rate by two.
+
+    Excludes: Empirical accuracy prediction, queueing, concurrent demand, thermal behavior, and
+    production hardware validation. operational_ok excludes quality violations but includes the
+    intervention budget.
+
+    References
+    ----------
+    Derivation: Work divided by capacity gives each service time. Adding serial terms yields
+    latency, and weighting them by energy per millisecond yields energy. The quality mixture is
+    a weighted mean of assumed cohort rates; it is not learned from measured outcomes.
+
+    Examples
+    --------
+    >>> r = evaluate("mobile", demand_scale=2)
+    >>> r["latency_ms"] == 2 * evaluate("mobile")["latency_ms"]
+    True
+    >>> r["memory_mb"] == evaluate("mobile")["memory_mb"]
+    True
     """
+    if scenario_version is not None and scenario_version != INTRO_SCENARIO_VERSION:
+        raise ValueError("deployment scenario version differs; preserve the old evidence and rerun this study")
     track = _track(track_id)
     if candidate not in _CANDIDATES:
         raise ValueError(f"candidate must be one of {', '.join(_CANDIDATES)}")
@@ -227,13 +367,59 @@ def evaluate(
             "compute_scale": compute_scale, "movement_scale": movement_scale,
             "overhead_scale": overhead_scale, "intervention": intervention,
             "demand_scale": demand_scale, "budget_scale": budget_scale,
+            **({"scenario_version": scenario_version} if scenario_version is not None else {}),
         },
     }
     return result
 
 
 def compare(track_id: str, *, baseline: Mapping[str, Any] | None = None, **kwargs: Any) -> dict[str, Any]:
-    """Compare an action with the same baseline; no score surrogate is used."""
+    """Compare one intervention outcome against an explicit or unchanged baseline.
+
+    Parameters
+    ----------
+    track_id : str
+        Illustrative deployment track accepted by evaluate.
+    baseline : mapping of str to object or None, optional
+        Previously evaluated baseline. None evaluates the same kwargs with intervention="none".
+        Supplied baselines are copied but not checked for matching workloads.
+    **kwargs : object
+        Keyword arguments forwarded to evaluate for the action, including candidate,
+        intervention, cohort shift, and positive capability/demand/budget scales.
+
+    Returns
+    -------
+    dict of str to object
+        Baseline and action dictionaries, rounded action-minus-baseline deltas in their original
+        units, dimensionless latency speedup, and signed action margins.
+
+    See Also
+    --------
+    evaluate : Compute each side of the comparison.
+    margins : Interpret signed resource and quality slack.
+
+    Notes
+    -----
+    Equation: delta[key] = action[key] - baseline[key]; speedup = baseline_latency /
+    action_latency.
+
+    Assumptions: The automatic baseline retains all action inputs except intervention. A
+    supplied baseline is comparable only if the caller chooses matching work and units.
+
+    Excludes: Automatic workload matching, uncertainty estimates, and a scalar score that trades
+    quality against resource use.
+
+    References
+    ----------
+    Derivation: Paired subtraction isolates changes in each reported metric without combining
+    unlike units; the latency ratio separately reports relative execution time.
+
+    Examples
+    --------
+    >>> r = compare("edge", intervention="none")
+    >>> r["speedup"] == 1 and all(v == 0 for v in r["delta"].values())
+    True
+    """
     action = evaluate(track_id, **kwargs)
     if baseline is None:
         baseline_kwargs = dict(kwargs)
@@ -254,10 +440,57 @@ def stress_compare(
     scale: float = 1,
     budget_scale: float = 1,
 ) -> dict[str, Any]:
-    """Compare one capability or demand condition with its unchanged baseline.
+    """Vary one capability or serialized-demand condition against a fixed baseline.
 
-    ``budget_scale`` is passed to both sides, so a capability counterfactual
-    remains inside the same loose or tight deployment envelope.
+    Parameters
+    ----------
+    track_id : str
+        Illustrative track accepted by evaluate.
+    candidate : str, optional
+        Assumed candidate on both sides; default "balanced".
+    shift_pct : float, optional
+        Difficult-cohort percentage-point shift on both sides; default zero.
+    intervention : str, optional
+        Intervention held fixed on both sides; default "none".
+    condition : str, optional
+        One of "compute", "movement", "overhead", or "demand" (default); selects the changed
+        scale.
+    scale : float, optional
+        Positive finite multiplier of the selected capability or demand; default one.
+    budget_scale : float, optional
+        Positive deployment-limit multiplier shared by both sides; default one.
+
+    Returns
+    -------
+    dict of str to object
+        Comparison output with per-metric deltas, latency ratio, and margins. Times are ms, memory
+        MB, energy mJ, and quality deltas percentage points.
+
+    See Also
+    --------
+    compare : Return metric differences and margins.
+
+    Notes
+    -----
+    Equation: baseline = evaluate with every capability and demand scale equal to one; action =
+    evaluate with condition_scale = scale.
+
+    Assumptions: Candidate, intervention, population mix, and deployment limits remain
+    unchanged; only the named work/capability factor varies.
+
+    Excludes: Concurrent request arrivals, changed model quality from faster hardware, and
+    automatic changes in deployment limits.
+
+    References
+    ----------
+    Derivation: Holding all other inputs fixed forms a one-factor counterfactual, allowing the
+    changed additive timing term to be inspected separately.
+
+    Examples
+    --------
+    >>> r = stress_compare("cloud", condition="compute", scale=2)
+    >>> r["result"]["compute_ms"] == r["baseline"]["compute_ms"] / 2
+    True
     """
     if condition not in {"compute", "movement", "overhead", "demand"}:
         raise ValueError("condition must be one of compute, movement, overhead, demand")
@@ -284,11 +517,55 @@ def population_compare(
     intervention: str = "none",
     budget_scale: float = 1,
 ) -> dict[str, Any]:
-    """Compare a changed cohort mix while holding model and runtime fixed.
+    """Vary difficult-cohort share while holding execution assumptions fixed.
 
-    ``shift_delta_pct`` is an additional percentage-point difficult-cohort
-    shift. Both outcomes preserve the supplied candidate, intervention, and
-    deployment envelope; only cohort mix changes.
+    Parameters
+    ----------
+    track_id : str
+        Illustrative track accepted by evaluate.
+    candidate : str, optional
+        Candidate shared by both populations; default "balanced".
+    shift_pct : float, optional
+        Baseline percentage-point shift from the track's difficult-cohort share; default zero.
+    shift_delta_pct : float, optional
+        Additional finite percentage-point shift for the comparison, default zero; both
+        resulting shares must remain in [0, 1].
+    intervention : str, optional
+        Intervention shared by both populations; default "none".
+    budget_scale : float, optional
+        Positive deployment-limit multiplier on both sides; default one.
+
+    Returns
+    -------
+    dict of str to object
+        Paired outcomes, per-metric deltas, speedup and margins, plus shift_delta_pct. Quality
+        deltas are percentage points; execution units match evaluate.
+
+    See Also
+    --------
+    compare : Compare the baseline and shifted outcomes.
+
+    Notes
+    -----
+    Equation: comparison_share = track_share + (shift_pct + shift_delta_pct)/100; quality =
+    ``(1-share)*easy_quality`` + ``share*difficult_quality``.
+
+    Assumptions: Only the cohort mixture changes. The same candidate has fixed easy/difficult
+    quality and fixed resource work regardless of cohort.
+
+    Excludes: Longer or more expensive difficult requests, distribution-dependent runtime, and
+    empirical prediction of shifted accuracy.
+
+    References
+    ----------
+    Derivation: A mixture of two fixed quality rates changes linearly with its mixing weight.
+    Keeping the execution inputs fixed leaves the timing and resource accounts unchanged.
+
+    Examples
+    --------
+    >>> r = population_compare("edge", shift_delta_pct=10)
+    >>> r["delta"]["quality_pct"] < 0 and r["delta"]["latency_ms"] == 0
+    True
     """
     shift_pct = _number(shift_pct, "shift_pct", minimum=-100.0)
     shift_delta_pct = _number(shift_delta_pct, "shift_delta_pct", minimum=-100.0)
@@ -317,11 +594,49 @@ def monitoring_plan(
     check_interval_ms: float | None = None,
     window_ms: float = 1000.0,
 ) -> dict[str, Any]:
-    """Describe monitoring work separately; it never changes model quality.
+    """Price periodic inspection effort and its ideal detection delay.
 
-    Detection delay assumes failures arrive uniformly within an interval and a
-    check observes them instantly: expected delay is interval/2, maximum delay
-    is one interval. More frequent checks raise total inspection effort.
+    Parameters
+    ----------
+    track_id : str
+        Illustrative track selecting assumed interval and per-check effort.
+    demand_scale : float, optional
+        Positive finite multiplier for monitoring work per inspection; default one.
+    check_interval_ms : float or None, optional
+        Positive finite interval between checks in ms; None uses the track assumption.
+    window_ms : float, optional
+        Positive finite accounting-window duration in ms; default 1000.
+
+    Returns
+    -------
+    dict of str to object
+        Expected and maximum detection delays in ms, fractional checks/window, effort in mJ,
+        chosen inputs, and assumption labels. Reported values round to four decimal places.
+
+    Notes
+    -----
+    Equation: checks_per_window = window_ms / interval_ms; expected_delay = interval_ms/2;
+    maximum_delay = interval_ms; effort = base_effort_per_check * checks_per_window *
+    demand_scale.
+
+    Assumptions: Failures arrive uniformly within a checking interval and checks observe them
+    instantly. The fractional check count is a rate-based budget, not an integer schedule;
+    per-check base effort is a teaching assumption.
+
+    Excludes: False negatives, inspection execution delay, check jitter, corrective action, and
+    changes in the classifier's quality.
+
+    References
+    ----------
+    Derivation: The residual wait to the next periodic check is uniform over one interval, with
+    mean half that interval. Multiplying check frequency, window duration, and per-check effort
+    gives total inspection work.
+
+    Examples
+    --------
+    >>> r = monitoring_plan("tinyml", check_interval_ms=20, window_ms=100)
+    >>> r["checks_per_window"] == 5 and r["detection_delay_ms"] == 10
+    True
     """
     track = _track(track_id)
     demand_scale = _number(demand_scale, "demand_scale", minimum=0.0)
@@ -345,3 +660,157 @@ def monitoring_plan(
         "detection_assumption": "Uniform failure arrival within an interval; instant check observation.",
         "provenance": track["provenance"],
     }
+
+# Registry owns the reusable teaching inputs; this module owns evaluation.
+from mlsysim.engine.scenarios import Scenarios
+
+_INTRO_STUDY = Scenarios.ControlledTaskFactors
+INTRO_SCENARIO_VERSION = _INTRO_STUDY.version
+INTRO_SHIFT_OPTIONS = _INTRO_STUDY.shift_options
+INTRO_CAPABILITY_OPTIONS = _INTRO_STUDY.capability_options
+INTRO_TERMS = ("movement", "compute", "overhead")
+INTRO_CANDIDATES = _CANDIDATES
+INTRO_TASK_OPTIONS = {card.label: key for key, card in _INTRO_STUDY.cards.items() if key != "baseline"}
+
+
+def introductory_profile(track_id: str) -> dict[str, Any]:
+    """Return source-owned controls and illustrative cohort descriptions.
+
+    Parameters
+    ----------
+    track_id : str
+        Teaching deployment track accepted by evaluate.
+
+    Returns
+    -------
+    dict
+        Versioned controls, cohort names, and the authored-study boundary.
+
+    Notes
+    -----
+    Equation: profile = fixed control metadata indexed by track_id.
+    Assumptions: The track names a supported teaching envelope.
+    Excludes: Device measurements and learned quality predictions.
+
+    References
+    ----------
+    Derivation: Select the declared cohort descriptions and shared controls without
+    estimating or transforming an observed outcome.
+
+    Examples
+    --------
+    >>> introductory_profile("tinyml")["scenario_version"] == INTRO_SCENARIO_VERSION
+    True
+    """
+    _track(track_id)
+    cohorts = {
+        "tinyml": ("quiet sensor/audio inputs", "noisy sensor/audio inputs"),
+        "mobile": ("ordinary capture conditions", "difficult capture conditions"),
+        "edge": ("ordinary inspection inputs", "difficult inspection inputs"),
+        "cloud": ("ordinary request inputs", "difficult request inputs"),
+    }
+    return {
+        "scenario_version": INTRO_SCENARIO_VERSION,
+        "cohorts": cohorts[track_id], "shift_options": INTRO_SHIFT_OPTIONS,
+        "capability_options": INTRO_CAPABILITY_OPTIONS, "terms": INTRO_TERMS,
+        "candidates": INTRO_CANDIDATES,
+        "provenance": "Authored illustrative controlled comparisons; no device measurements or learned quality prediction.",
+    }
+
+
+def task_factors(track_id: str, card_id: str = "baseline", scenario_version: str = INTRO_SCENARIO_VERSION) -> dict[str, Any]:
+    """Compare authored host factors with separately supplied quality evidence.
+
+    Parameters
+    ----------
+    track_id : str
+        Supported teaching track; host-factor cards are shared across tracks.
+    card_id : str, optional
+        Authored study card, default baseline.
+    scenario_version : str, optional
+        Version captured with the evidence; incompatible versions are rejected.
+
+    Returns
+    -------
+    dict
+        Duration in seconds, work in FLOPs, supplied quality, and explicit violations.
+
+    Notes
+    -----
+    Equation: duration = ``samples * ops_per_sample * seconds_per_op``.
+    Assumptions: Realized seconds per operation already includes all execution costs;
+    supplied quality is independent of the runtime factorization.
+    Excludes: Training simulation, selection overhead, accuracy prediction, and
+    measurements of the deployment project. Missing quality remains unknown.
+
+    References
+    ----------
+    Derivation: Multiply sample count by work per sample for total operations, then
+    multiply by realized seconds per operation for end-to-end duration.
+
+    Examples
+    --------
+    >>> task_factors("tinyml", "unverified")["quality_pct"] is None
+    True
+    """
+    _track(track_id)
+    if scenario_version != INTRO_SCENARIO_VERSION:
+        raise ValueError("task-factor scenario version differs; preserve the old evidence and rerun this study")
+    if card_id not in _INTRO_STUDY.cards:
+        raise ValueError(f"card_id must be one of {', '.join(_INTRO_STUDY.cards)}")
+    card = _INTRO_STUDY.cards[card_id]
+    operations_quantity = card.samples * card.ops_per_sample
+    operations = operations_quantity.to("flop").magnitude
+    duration = (operations_quantity * card.seconds_per_op).to("second").magnitude
+    quality_floor = _INTRO_STUDY.quality_floor_pct
+    violations = ["quality evidence missing"] if card.quality_pct is None else (["quality"] if card.quality_pct < quality_floor else [])
+    return {
+        "scenario_version": INTRO_SCENARIO_VERSION,
+        "host": "Separate illustrative single-host training study",
+        "card_id": card_id, "label": card.label, "changed_factor": card.factor,
+        "samples_per_task": card.samples, "operations_per_sample": card.ops_per_sample.to("flop").magnitude,
+        "seconds_per_operation": card.seconds_per_op.to("second / flop").magnitude, "total_operations": operations,
+        "duration_seconds": _rounded(duration), "quality_pct": card.quality_pct,
+        "quality_floor_pct": quality_floor, "quality_evidence": "unavailable" if card.quality_pct is None else "supplied illustrative held-out observation",
+        "feasible": not violations, "violations": violations,
+        "provenance": "Authored independent task-factor and held-out-quality fixtures; not a size-to-accuracy law.",
+        "inputs": {"track_id": track_id, "card_id": card_id, "scenario_version": scenario_version},
+    }
+
+
+def replay(model_key: str, inputs: Mapping[str, Any]) -> dict[str, Any]:
+    """Replay saved evidence through a closed set of model entry points.
+
+    Parameters
+    ----------
+    model_key : str
+        Registered evaluate or task-factor replay identifier.
+    inputs : mapping
+        Keyword arguments captured with the original evidence.
+
+    Returns
+    -------
+    dict
+        Output of the identified evaluator with the supplied arguments.
+
+    Notes
+    -----
+    Equation: output = registered evaluator applied to saved inputs.
+    Assumptions: The evaluator validates its version and physical inputs.
+    Excludes: Arbitrary code dispatch and migration of incompatible evidence.
+
+    References
+    ----------
+    Implementation references: ``mlsysim.engine.constraint_explorer.evaluate`` and
+    ``mlsysim.engine.constraint_explorer.task_factors``.
+
+    Examples
+    --------
+    >>> replay("constraint_explorer.evaluate", {"track_id": "tinyml"})["inputs"]["track_id"]
+    'tinyml'
+    """
+    if model_key == "constraint_explorer.evaluate":
+        return evaluate(**dict(inputs))
+    if model_key == "constraint_explorer.task_factors.v1":
+        return task_factors(**dict(inputs))
+    raise ValueError(f"unknown constraint explorer model_key {model_key!r}")

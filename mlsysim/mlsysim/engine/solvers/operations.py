@@ -40,6 +40,56 @@ class SpanCriticalPathModel(ForwardModel):
 
     def solve(self, intervals: Mapping[str, Sequence[Quantity]], depends_on: Mapping[str, Sequence[str]],
               intervention: Mapping[str, Quantity]) -> SpanCriticalPathResult:
+        """Explain elapsed time using dependent spans and a duration intervention.
+
+        Parameters
+        ----------
+        intervals : mapping of str to sequence of Quantity
+            Nonempty mapping from span names to (start, end) times on a shared clock; end must
+            not precede start.
+        depends_on : mapping of str to sequence of str
+            Acyclic predecessor graph using known span names; observed starts must respect
+            dependencies.
+        intervention : mapping of str to Quantity
+            Replacement nonnegative durations for selected spans; omitted spans keep their
+            observed duration.
+
+        Returns
+        -------
+        SpanCriticalPathResult
+            Sum of span durations, dependency critical path, observed elapsed time, unexplained
+            gap, intervened elapsed time, and saving in seconds; changed_critical lists the
+            limiting span chain.
+
+        See Also
+        --------
+        mlsysim.physics.agents.calc_cleanup_critical_path : Evaluate the longest dependent span chain.
+
+        Notes
+        -----
+        Equation: path[k] = duration[k] + max(path[p] for predecessors p); gap[k] = start[k] -
+        max(end[p], default=global_start); changed_finish[k] = max(changed_finish[p], default=0)
+        + gap[k] + new_duration[k].
+
+        Assumptions: Observed predecessor waits remain fixed after intervention; durations
+        change without altering the dependency graph.
+
+        Excludes: Resource contention, new dependencies, and causal effects of an intervention
+        on other spans. The result is an accounting counterfactual, not a measured speedup.
+
+        References
+        ----------
+        Derivation: The longest-path recurrence counts overlapping branches once on the
+        completion path. Retaining each observed dependency gap isolates the stated duration
+        change.
+
+        Examples
+        --------
+        >>> from mlsysim import Q_
+        >>> r = SpanCriticalPathModel().solve({"a": (Q_(0,"s"), Q_(2,"s"))}, {}, {"a": Q_(1,"s")})
+        >>> r.saving == Q_(1, "s")
+        True
+        """
         start = {k: iv[0] for k, iv in intervals.items()}
         end = {k: iv[1] for k, iv in intervals.items()}
         dur = {k: end[k] - start[k] for k in intervals}
@@ -89,6 +139,60 @@ class TraceRetentionModel(ForwardModel):
     def solve(self, failed: float, unresolved: float, ordinary: float, cohort_period: Quantity,
               trace_size: Quantity, window: Quantity, head_probability: float,
               control_probability: float, control_step: float) -> TraceRetentionResult:
+        """Compare trace storage under full, head, and verdict-aware selection.
+
+        Parameters
+        ----------
+        failed : float
+            Nonnegative failed-trial count per cohort.
+        unresolved : float
+            Nonnegative unresolved-trial count per cohort; disjoint from failed.
+        ordinary : float
+            Nonnegative ordinary-trial count per cohort; disjoint from both other classes.
+        cohort_period : Quantity
+            Positive duration of one cohort.
+        trace_size : Quantity
+            Nonnegative bytes per retained trace body.
+        window : Quantity
+            Nonnegative retention-window duration.
+        head_probability : float
+            Probability in [0, 1] of keeping a trial independently of verdict.
+        control_probability : float
+            Probability in [0, 1] of retaining an ordinary control under tail selection.
+        control_step : float
+            Nonnegative increment in control probability used for marginal storage accounting.
+
+        Returns
+        -------
+        TraceRetentionResult
+            Expected retained counts, storage volumes in GB, full-to-tail ratio,
+            verdict-required storage floor, and volume for control_step.
+
+        Notes
+        -----
+        Equation: trials = failed + unresolved + ordinary; head_count = trials *
+        head_probability; tail_count = failed + unresolved + ordinary * control_probability;
+        volume = count * window/cohort_period * trace_size.
+
+        Assumptions: Disjoint verdict classes, identical body size, stationary cohort rates, and
+        positive tail volume for the reported ratio.
+
+        Excludes: Trace compression, indexing metadata, variable body sizes, and verdict errors.
+
+        References
+        ----------
+        Derivation: Expected sampled counts are population counts times retention probabilities.
+        Storage is expected count times body size across the number of cohorts in the retention
+        window.
+
+        Examples
+        --------
+        >>> from mlsysim import Q_
+        >>> r = TraceRetentionModel().solve(2, 1, 7, Q_(1,"day"), Q_(1,"MB"),
+        ...     Q_(1,"day"), 0.5, 0.0, 0.1)
+        >>> r.tail_count == 3 and r.tail_volume == r.floor_volume
+        True
+        """
         periods = _ratio(window / cohort_period)
         trials = failed + unresolved + ordinary
         head_count = trials * head_probability
@@ -129,6 +233,65 @@ class SequentialCanaryModel(ForwardModel):
 
     def solve(self, p_base: float, p_degraded: float, alpha: float, beta: float, arrival_rate: Quantity,
               fraction: float, label_delay: Quantity) -> SequentialCanaryResult:
+        """Estimate a sequential canary decision budget under a degraded hypothesis.
+
+        Parameters
+        ----------
+        p_base : float
+            Baseline acceptance probability strictly between zero and one.
+        p_degraded : float
+            Degraded acceptance probability strictly between zero and p_base.
+        alpha : float
+            False-hold probability target strictly between zero and one.
+        beta : float
+            Missed-degradation probability target strictly between zero and one; alpha + beta
+            should be below one.
+        arrival_rate : Quantity
+            Positive eligible-task arrival rate in inverse time.
+        fraction : float
+            Candidate exposure fraction in (0, 1].
+        label_delay : Quantity
+            Nonnegative fixed delay between task admission and label availability.
+
+        Returns
+        -------
+        SequentialCanaryResult
+            Log-likelihood increments and thresholds, expected labeled-task count, candidate
+            rate, admission/decision time in hours, pending labels, and expected excess
+            failures.
+
+        See Also
+        --------
+        mlsysim.physics.statistics.calc_sprt_boundaries : Set log-likelihood stopping boundaries.
+        mlsysim.physics.statistics.calc_sprt_expected_samples : Estimate stopping samples from evidence drift.
+
+        Notes
+        -----
+        Equation: success_step = log(p_degraded/p_base); failure_step =
+        log((1-p_degraded)/(1-p_base)); drift is their degraded-probability weighted mean.
+        Expected samples = ``((1-beta)*upper`` + ``beta*lower)/drift``; admission_time =
+        ``expected_samples/(arrival_rate*fraction)``.
+
+        Assumptions: Independent Bernoulli verdicts, fixed simple hypotheses, steady task
+        arrivals, and Wald's no-overshoot expected-stopping approximation.
+
+        Excludes: Threshold overshoot corrections, correlated verdicts, time-varying acceptance,
+        and queueing in the labeling service. No trial labels are generated by this solver.
+
+        References
+        ----------
+        Derivation: The Bernoulli likelihood ratio adds one log increment per observed verdict.
+        Dividing approximate terminal log evidence by expected drift estimates sample count;
+        arrivals during label delay add exposure.
+
+        Examples
+        --------
+        >>> from mlsysim import Q_
+        >>> r = SequentialCanaryModel().solve(0.9, 0.8, 0.05, 0.1,
+        ...     Q_(100,"1/hour"), 0.1, Q_(1,"hour"))
+        >>> r.expected_samples > 0 and r.decision_time > r.admission_time
+        True
+        """
         success_inc, failure_inc = calc_sprt_increments(1 - p_degraded, 1 - p_base)
         success_step, failure_step = -success_inc, -failure_inc
         upper, lower = calc_sprt_boundaries(alpha, beta)

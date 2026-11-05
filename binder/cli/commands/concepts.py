@@ -1,6 +1,6 @@
 """CLI entrypoint for `binder concepts` (`build`, `check`, `refresh`, `audit`, `coverage`, `agreement`).
 
-Compiles and validates the ML Systems Taxonomy (`taxonomy/ml-systems-taxonomy.yml`) and
+Compiles and validates the ML Systems Taxonomy (`taxonomy/taxonomy.yml`) and
 chapter concept maps against the LinkML metamodel (`taxonomy/schema/mlsys-taxonomy.linkml.yml`).
 """
 
@@ -101,7 +101,7 @@ def run(root: Path, args: list[str]) -> bool:
                     if staffml_json in rel_artifacts:
                         if not staffml_json.exists() or staffml_json.read_bytes() != rel_artifacts[staffml_json]:
                             raise ConceptGraphError(
-                                "staffml/app/src/data/mlsys-taxonomy.json is missing or out of sync with taxonomy/ml-systems-taxonomy.yml; run './binder/binder concepts build'"
+                                "staffml/app/src/data/mlsys-taxonomy.json is missing or out of sync with taxonomy/taxonomy.yml; run './binder/binder concepts build'"
                             )
             if (root / "taxonomy/coverage-ledger.yml").exists() and not volumes:
                 from cli.core.concept_coverage import coverage_report as ledger_coverage_report

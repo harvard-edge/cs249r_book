@@ -492,6 +492,8 @@ class ValidateCommand:
         "cli": [
             Scope("contract", "_run_cli_contract",
                   note="public Binder command contract"),
+            Scope("volume-entrypoints", "_run_volume_entrypoints", default=True,
+                  note="canonical entry-point copies preserve includes, provenance, and selective-build state"),
             Scope("binder-canonical", "_run_binder_canonical",
                   note="book-content pre-commit hooks must dispatch through ./binder/binder",
                   default=True),
@@ -981,6 +983,8 @@ class ValidateCommand:
             Scope("epubcheck", "_run_epubcheck", default=False),
         ],
         "pdf": [
+            Scope("compression-contract", "_run_pdf_compression_contract", default=False,
+                  note="lossless compression preserves rendered pages and document navigation; requires PyMuPDF and pytest"),
             # Scans the built _build/pdf-volN/ artifact. Volumes come from
             # --volN (or the --path volume); with neither, vol1 and vol2.
             Scope("verify", "_run_pdf_verify"),
@@ -1687,6 +1691,26 @@ class ValidateCommand:
         issues = self._issues_from_records(cli_contract.run_contract(repo_root))
         return self._result("cli-contract", "Public Binder CLI command contract",
                             len(cli_contract.CASES), issues, start)
+
+    def _run_volume_entrypoints(self, root: Path) -> ValidationRunResult:
+        """Run the shared Linux/Windows entry-point and source-preservation contracts."""
+        start = time.time()
+        from cli.checks import volume_entrypoints
+
+        repo_root = Path(__file__).resolve().parents[3]
+        issues = self._issues_from_records(volume_entrypoints.run_contract(repo_root))
+        return self._result("volume-entrypoints", "Canonical volume entry points and relative includes",
+                            len(volume_entrypoints.TEST_FILES), issues, start)
+
+    def _run_pdf_compression_contract(self, root: Path, **flags: bool) -> ValidationRunResult:
+        """Exercise the compressor through Binder's canonical check surface."""
+        start = time.time()
+        from cli.checks import pdf_compression
+
+        repo_root = Path(__file__).resolve().parents[3]
+        issues = self._issues_from_records(pdf_compression.run_contract(repo_root))
+        return self._result("pdf-compression-contract", "Lossless PDF preservation regression contract",
+                            len(pdf_compression.TEST_FILES), issues, start)
 
     def _run_binder_canonical(self, root: Path) -> ValidationRunResult:
         """Assert book-content pre-commit hooks dispatch through ./binder/binder."""

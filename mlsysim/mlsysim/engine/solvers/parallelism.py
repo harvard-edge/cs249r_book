@@ -73,6 +73,66 @@ class ParallelLayoutModel(ForwardModel):
               local_efficiency: float, link_bandwidth: Quantity, overlap_fraction: float,
               gradient_precision="fp16", window_resolution: Optional[Quantity] = None,
               device_memory: Optional[Quantity] = None) -> ParallelLayoutResult:
+        """Estimate a specified parallel training layout.
+
+        Parameters
+        ----------
+        model : Workload
+            Workload with parameter count and weight-size conversion.
+        tp_size : int
+            Positive tensor-parallel group size.
+        pp_size : int
+            Positive pipeline stage count.
+        dp_size : int
+            Positive data-parallel group size.
+        microbatches : int
+            Positive microbatch count per pipeline iteration.
+        batch_tokens : float
+            Positive total tokens per optimizer update.
+        flops_per_param_token : float
+            Positive FLOP count per parameter per token, supplied by the caller.
+        peak_flops : Quantity
+            Positive per-device peak compute rate in FLOP/s.
+        local_efficiency : float
+            Fraction of peak compute achieved, greater than zero and at most one.
+        link_bandwidth : Quantity
+            Positive link rate in bytes per second; None skips optional transfer timing.
+        overlap_fraction : float
+            Fraction of communication eligible for hiding, between zero and one.
+        gradient_precision : str or Quantity
+            Gradient precision name or bytes-per-element quantity; defaults to fp16.
+        window_resolution : Optional[Quantity]
+            Optional positive time resolution for decimal rounding of compute duration.
+        device_memory : Optional[Quantity]
+            Optional positive memory capacity in bytes for a state-only device-count bound.
+
+        Returns
+        -------
+        ParallelLayoutResult
+            Modeled accounting components with unit-bearing sizes and times; ratios
+            are dimensionless. These components do not certify deployment feasibility.
+
+        Notes
+        -----
+        Equation: T = compute/(1-bubble) + communication - min(overlap_fraction communication, compute); bubble=(PP-1)/(microbatches+PP-1).
+
+        Assumptions: Large-group ring communication approximation, equal partitions, mixed-precision Adam.
+
+        Excludes: Activation memory, runtime workspaces, and detailed pipeline schedules.
+
+        References
+        ----------
+        Derivation: T = compute/(1-bubble) + communication - min(overlap_fraction communication, compute); bubble=(PP-1)/(microbatches+PP-1). The class documentation describes
+        the accounting sequence and its modeling context.
+
+        Examples
+        --------
+        >>> from mlsysim.core.units import Q_
+        >>> from mlsysim import Models
+        >>> r = ParallelLayoutModel().solve(Models.Language.Llama3_8B, 1, 1, 2, 2, 128, 6, Q_('100 TFLOP/s'), 0.5, Q_('100 GB/s'), 0.5)
+        >>> r.step_time >= r.compute_time
+        True
+        """
         n = tp_size * pp_size * dp_size
         p = model.parameters.to(param).magnitude
         step_flops = Q_(flops_per_param_token * p * batch_tokens, "flop")
@@ -126,6 +186,46 @@ class ZeroShardingModel(ForwardModel):
 
     def solve(self, model: Workload, n_devices: int, activations: Optional[Quantity] = None,
               link_bandwidth: Optional[Quantity] = None) -> ZeroShardingResult:
+        """Account for persistent state at each ZeRO stage.
+
+        Parameters
+        ----------
+        model : Workload
+            Workload with parameter count and weight-size conversion.
+        n_devices : int
+            Positive integer device count.
+        activations : Optional[Quantity]
+            Optional nonnegative unsharded activation memory; None contributes zero bytes.
+        link_bandwidth : Optional[Quantity]
+            Positive link rate in bytes per second; None skips optional transfer timing.
+
+        Returns
+        -------
+        ZeroShardingResult
+            Modeled accounting components with unit-bearing sizes and times; ratios
+            are dimensionless. These components do not certify deployment feasibility.
+
+        Notes
+        -----
+        Equation: State is W+G+O, W+G+O/N, W+(G+O)/N, or (W+G+O)/N for DDP through ZeRO-3.
+
+        Assumptions: FP16 weights/gradients and registry mixed-precision Adam state; supplied activations remain unsharded.
+
+        Excludes: Allocator reserve, temporary gather buffers, and communication startup.
+
+        References
+        ----------
+        Derivation: State is W+G+O, W+G+O/N, W+(G+O)/N, or (W+G+O)/N for DDP through ZeRO-3. The class documentation describes
+        the accounting sequence and its modeling context.
+
+        Examples
+        --------
+        >>> from mlsysim.core.units import Q_
+        >>> from mlsysim import Models
+        >>> r = ZeroShardingModel().solve(Models.Language.Llama3_8B, 2)
+        >>> r.stage_state['ZeRO-3'] < r.stage_state['DDP']
+        True
+        """
         _, opt_bpp = _adam_bytes()
         w = model.size_in_bytes(BYTES_FP16).to("GB")
         g = w
@@ -167,6 +267,60 @@ class DataParallelScaleOutModel(ForwardModel):
               per_device_batch: int, devices_per_node: int, nodes: int, intra_bandwidth: Quantity,
               inter_bandwidth: Optional[Quantity] = None, accumulation_steps: int = 1,
               node_hour_rate: Optional[Quantity] = None) -> DataParallelScaleOutResult:
+        """Estimate data-parallel speedup from a device profile.
+
+        Parameters
+        ----------
+        model : Workload
+            Workload with parameter count and weight-size conversion.
+        precision : str or Quantity
+            Gradient precision name or bytes-per-element quantity.
+        step_time : Quantity
+            Positive one-device compute duration per local step.
+        training_time : Quantity
+            Positive baseline one-device training duration.
+        per_device_batch : int
+            Positive samples per local step per device.
+        devices_per_node : int
+            Positive devices per node.
+        nodes : int
+            Positive node count.
+        intra_bandwidth : Quantity
+            Positive within-node bandwidth in bytes per second.
+        inter_bandwidth : Optional[Quantity]
+            Positive between-node bandwidth in bytes per second; required for multiple nodes.
+        accumulation_steps : int
+            Positive local steps per synchronized update; defaults to one.
+        node_hour_rate : Optional[Quantity]
+            Optional nonnegative node rental rate in USD/hour.
+
+        Returns
+        -------
+        DataParallelScaleOutResult
+            Modeled accounting components with unit-bearing sizes and times; ratios
+            are dimensionless. These components do not certify deployment feasibility.
+
+        Notes
+        -----
+        Equation: speedup = N compute/(compute + intra_ring + inter_ring); compute = accumulation_steps step_time.
+
+        Assumptions: Serial intra/inter exchanges and unchanged one-device work per sample.
+
+        Excludes: Overlap, startup, convergence changes from larger batches, and capacity.
+
+        References
+        ----------
+        Derivation: speedup = N compute/(compute + intra_ring + inter_ring); compute = accumulation_steps step_time. The class documentation describes
+        the accounting sequence and its modeling context.
+
+        Examples
+        --------
+        >>> from mlsysim.core.units import Q_
+        >>> from mlsysim import Models
+        >>> r = DataParallelScaleOutModel().solve(Models.Language.Llama3_8B, 'fp16', Q_('1 s'), Q_('1 hour'), 1, 2, 1, Q_('100 GB/s'))
+        >>> 0 < r.efficiency <= 1
+        True
+        """
         n = devices_per_node * nodes
         grad = model.size_in_bytes(precision)
         zero = Q_(0, "ms")
@@ -216,6 +370,52 @@ class TensorParallelLayerModel(ForwardModel):
     def solve(self, model: TransformerWorkload, tp_size: int, tokens: int, peak_flops: Quantity,
               local_efficiency: float, links: Dict[str, Quantity],
               collectives_per_layer: int = 2) -> TensorParallelLayerResult:
+        """Compare layer compute with tensor-parallel communication.
+
+        Parameters
+        ----------
+        model : TransformerWorkload
+            Workload with parameter count and weight-size conversion.
+        tp_size : int
+            Positive tensor-parallel group size.
+        tokens : int
+            Positive tokens processed by the layer.
+        peak_flops : Quantity
+            Positive per-device peak compute rate in FLOP/s.
+        local_efficiency : float
+            Fraction of peak compute achieved, greater than zero and at most one.
+        links : Dict[str, Quantity]
+            Mapping of link names to positive bandwidth quantities in bytes per second.
+        collectives_per_layer : int
+            Positive number of activation AllReduces; defaults to two.
+
+        Returns
+        -------
+        TensorParallelLayerResult
+            Modeled accounting components with unit-bearing sizes and times; ratios
+            are dimensionless. These components do not certify deployment feasibility.
+
+        Notes
+        -----
+        Equation: Compute = 2(P/L) tokens/(TP peak efficiency); bytes = collectives tokens hidden_dim FP16_bytes 2(TP-1)/TP.
+
+        Assumptions: Equal parameter share per layer and FP16 activation collectives.
+
+        Excludes: Attention quadratic work, startup, overlap scheduling, and capacity.
+
+        References
+        ----------
+        Derivation: Compute = 2(P/L) tokens/(TP peak efficiency); bytes = collectives tokens hidden_dim FP16_bytes 2(TP-1)/TP. The class documentation describes
+        the accounting sequence and its modeling context.
+
+        Examples
+        --------
+        >>> from mlsysim.core.units import Q_
+        >>> from mlsysim import Models
+        >>> r = TensorParallelLayerModel().solve(Models.Language.Llama3_8B, 2, 128, Q_('100 TFLOP/s'), 0.5, {'link': Q_('100 GB/s')})
+        >>> r.transfer_times['link'].m_as('ms') > 0
+        True
+        """
         flops = Q_(2 * (model.parameters.to(param).magnitude / model.layers) * tokens, "flop")
         compute = (flops / tp_size / (peak_flops * local_efficiency)).to("ms")
         layer_bytes = (collectives_per_layer * tokens * model.hidden_dim * BYTES_FP16
@@ -241,6 +441,52 @@ class AlignmentMemoryModel(ForwardModel):
     def solve(self, policy: TransformerWorkload, critic: Workload, tp_size: int, pp_size: int,
               rollout_sequences: int, rollout_tokens: int,
               device_memory: Optional[Quantity] = None) -> AlignmentMemoryResult:
+        """Compare PPO and DPO model-state storage.
+
+        Parameters
+        ----------
+        policy : TransformerWorkload
+            Transformer policy supplying parameters and KV-cache geometry.
+        critic : Workload
+            Value/reward workload supplying parameter count.
+        tp_size : int
+            Positive tensor-parallel group size.
+        pp_size : int
+            Positive pipeline stage count.
+        rollout_sequences : int
+            Nonnegative concurrent rollout sequence count.
+        rollout_tokens : int
+            Nonnegative cached tokens per rollout sequence.
+        device_memory : Optional[Quantity]
+            Optional positive memory capacity in bytes for a state-only device-count bound.
+
+        Returns
+        -------
+        AlignmentMemoryResult
+            Modeled accounting components with unit-bearing sizes and times; ratios
+            are dimensionless. These components do not certify deployment feasibility.
+
+        Notes
+        -----
+        Equation: PPO = policy_train + reference + reward + value_train; DPO = policy_train + reference; KV is divided by TP PP.
+
+        Assumptions: Mixed-precision Adam trainable state and FP16 frozen state; equal model partitions.
+
+        Excludes: Training activations, rollout compute, workspace, and deployment feasibility.
+
+        References
+        ----------
+        Derivation: PPO = policy_train + reference + reward + value_train; DPO = policy_train + reference; KV is divided by TP PP. The class documentation describes
+        the accounting sequence and its modeling context.
+
+        Examples
+        --------
+        >>> from mlsysim.core.units import Q_
+        >>> from mlsysim import Models
+        >>> r = AlignmentMemoryModel().solve(Models.Language.Llama3_8B, Models.Language.Llama3_8B, 1, 1, 1, 128)
+        >>> r.ppo_total > r.dpo_total
+        True
+        """
         state_bpp, _ = _adam_bytes()
         infer = BYTES_FP16 / param
         pol = memory_from_params(policy.parameters, state_bpp)

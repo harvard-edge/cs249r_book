@@ -167,3 +167,72 @@ def test_monitoring_is_separate_from_model_quality():
 def test_invalid_or_out_of_bounds_inputs_fail_explicitly(kwargs):
     with pytest.raises(ValueError):
         evaluate(**kwargs)
+
+
+@pytest.mark.parametrize("track_id", TRACKS)
+def test_intro_candidates_keep_all_requirements_fixed_under_population_changes(track_id):
+    limits = ("memory_limit_mb", "latency_limit_ms", "energy_limit_mj", "quality_floor_pct")
+    baseline = evaluate(track_id)
+    for candidate in ("compact", "balanced", "large"):
+        result = evaluate(track_id, candidate=candidate, shift_pct=25)
+        assert {key: result[key] for key in limits} == {key: baseline[key] for key in limits}
+
+
+@pytest.mark.parametrize("term", ["movement", "compute", "overhead"])
+def test_intro_one_term_counterfactual_preserves_other_phases_and_quality(term):
+    baseline = evaluate("mobile")
+    changed = evaluate("mobile", **{f"{term}_scale": 4})
+    for phase in ("movement", "compute", "overhead"):
+        expected = baseline[f"{phase}_ms"] / 4 if phase == term else baseline[f"{phase}_ms"]
+        assert changed[f"{phase}_ms"] == pytest.approx(expected)
+    assert changed["quality_pct"] == baseline["quality_pct"]
+    assert changed["memory_mb"] == baseline["memory_mb"]
+
+
+@pytest.mark.parametrize("track_id", TRACKS)
+def test_intro_task_factors_have_independent_supplied_quality(track_id):
+    from mlsysim.engine.constraint_explorer import task_factors
+    base = task_factors(track_id)
+    fewer = task_factors(track_id, "data")
+    algorithm = task_factors(track_id, "algorithm")
+    machine = task_factors(track_id, "execution")
+    unknown = task_factors(track_id, "unverified")
+    assert fewer["duration_seconds"] == algorithm["duration_seconds"] == machine["duration_seconds"]
+    assert fewer["quality_pct"] != algorithm["quality_pct"]
+    assert not fewer["feasible"] and algorithm["feasible"] and machine["feasible"]
+    assert unknown["quality_pct"] is None and not unknown["feasible"]
+    assert machine["total_operations"] == base["total_operations"]
+    assert algorithm["samples_per_task"] == base["samples_per_task"]
+    assert fewer["operations_per_sample"] == base["operations_per_sample"]
+    assert machine["duration_seconds"] == pytest.approx(machine["total_operations"] * machine["seconds_per_operation"])
+
+
+def test_intro_task_replay_is_closed_and_capstone_preserves_missing_evidence():
+    from mlsysim.engine.constraint_explorer import replay, task_factors
+    from mlsysim.labs.experiments.v1_16_experiments import replay_evidence_arm
+    result = task_factors("tinyml", "unverified")
+    assert replay("constraint_explorer.task_factors.v1", result["inputs"]) == result
+    assert replay_evidence_arm("constraint_explorer", "constraint_explorer.task_factors.v1", result) == result
+    with pytest.raises(ValueError):
+        replay("invented", result["inputs"])
+    with pytest.raises(ValueError):
+        task_factors("tinyml", "invented")
+
+
+def test_intro_versioned_replay_rejects_a_changed_scenario_and_preserves_legacy_inputs():
+    from mlsysim.engine.constraint_explorer import INTRO_SCENARIO_VERSION, replay, task_factors
+    from mlsysim.engine.scenarios import Scenarios
+    study = Scenarios.ControlledTaskFactors
+    assert study.quality_floor_pct == 82.0
+    assert study.provenance.kind.value == "illustrative"
+    task = task_factors("tinyml")
+    assert task["inputs"]["scenario_version"] == INTRO_SCENARIO_VERSION
+    with pytest.raises(ValueError, match="version differs"):
+        replay("constraint_explorer.task_factors.v1", {**task["inputs"], "scenario_version": "obsolete"})
+    deployment = evaluate("mobile", scenario_version=INTRO_SCENARIO_VERSION)
+    assert replay("constraint_explorer.evaluate", deployment["inputs"]) == deployment
+    with pytest.raises(ValueError, match="version differs"):
+        replay("constraint_explorer.evaluate", {**deployment["inputs"], "scenario_version": "obsolete"})
+    legacy = evaluate("mobile")
+    assert "scenario_version" not in legacy["inputs"]
+    assert replay("constraint_explorer.evaluate", legacy["inputs"]) == legacy

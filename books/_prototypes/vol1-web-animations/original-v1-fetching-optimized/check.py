@@ -37,6 +37,7 @@ with sync_playwright() as pw:
    assert float(widths[0])>0 and abs(float(widths[0])-float(widths[1]))<.00001,widths
    root.screenshot(path=str(shots/f'{engine}-{width}-{theme}-concurrent-paused.png'))
    frozen=root.locator('[data-mechanism-values]').inner_html();page.wait_for_timeout(250);assert root.locator('[data-mechanism-values]').inner_html()==frozen
-   page.keyboard.press('Escape');assert page.locator('dialog[open]').count()==0
+   # Round four (2026-10-30): one Escape does one thing; a hovered tooltip takes the first Escape. Move the pointer off the bar so this Escape closes Expand.
+   page.mouse.move(2,2);page.keyboard.press('Escape');assert page.locator('dialog[open]').count()==0
    page.emulate_media(media='print');assert not root.is_visible();page.emulate_media(media='screen');assert not errors,errors;print(engine,width,theme,'PASS',count,'states');page.close()
   browser.close()

@@ -627,6 +627,118 @@ def evaluate_client_selection(
     }
 
 
+# Explicit protocol/release fixtures, not measured fleet traces or cryptography.
+# A contribution must match all four fields; a larger version number proves
+# neither array compatibility nor safe migration of personal/replay state.
+_ADAPTIVE_RELEASE = ("base-7", "adapter-r8", "features-3", "policy-2")
+_UPDATE_RELEASES = {
+    "c01": _ADAPTIVE_RELEASE, "c02": ("base-6", "adapter-r8", "features-3", "policy-2"),
+    "c03": _ADAPTIVE_RELEASE, "c04": _ADAPTIVE_RELEASE,
+    "c05": _ADAPTIVE_RELEASE, "c06": ("base-7", "adapter-r4", "features-2", "policy-1"),
+    "c07": _ADAPTIVE_RELEASE, "c08": _ADAPTIVE_RELEASE,
+}
+_RELEASE_EVIDENCE = {
+    "shadow": {"shadow_divergence": True, "validated_outcome": None, "hardware_pass": True,
+               "all_cohorts_report": True},
+    "validated": {"shadow_divergence": True, "validated_outcome": "pass", "hardware_pass": True,
+                  "all_cohorts_report": True},
+    "regression": {"shadow_divergence": True, "validated_outcome": "regression", "hardware_pass": True,
+                   "all_cohorts_report": True},
+    "missing_cohort": {"shadow_divergence": False, "validated_outcome": "pass", "hardware_pass": True,
+                       "all_cohorts_report": False},
+    "hardware_failure": {"shadow_divergence": False, "validated_outcome": "pass", "hardware_pass": False,
+                         "all_cohorts_report": True},
+}
+
+
+def evaluate_fleet_round(
+    track_id: str, *, max_evidence_age_hours: float = 12,
+    require_charging: bool = False, max_clients: int = 4, min_uplink_mbps: float = 0,
+    selection_policy: str = "coverage", survivor_floor: int = 3,
+    dropout_case: str = "none", release_state: str = "matched",
+    validation_evidence: str = "shadow",
+) -> dict:
+    """Trace eligibility → compatible uploads → recovery → release gates.
+
+    This finite protocol trace models only declared acceptance conditions. No
+    keys, masks, secret shares, leakage bounds, adversaries, or privacy proof
+    are simulated. Recovery has one extra exchange when material is available.
+    Validation records are supplied matched deployment fixtures, not outcomes
+    inferred from shadow disagreement or hardware speed.
+    """
+    if type(survivor_floor) is not int or survivor_floor < 2:
+        raise ValueError("survivor_floor must be an integer of at least two")
+    if dropout_case not in {"none", "recoverable", "missing_shares"}:
+        raise ValueError("unknown dropout_case")
+    if release_state not in {"matched", "base_only"}:
+        raise ValueError("unknown release_state")
+    if validation_evidence not in _RELEASE_EVIDENCE:
+        raise ValueError("unknown validation_evidence")
+    selection = evaluate_client_selection(
+        track_id, max_evidence_age_hours=max_evidence_age_hours,
+        require_charging=require_charging, max_clients=max_clients, min_uplink_mbps=min_uplink_mbps,
+        selection_policy=selection_policy,
+    )
+    compatible = [cid for cid in selection["selected_ids"] if _UPDATE_RELEASES[cid] == _ADAPTIVE_RELEASE]
+    incompatible = [cid for cid in selection["selected_ids"] if cid not in compatible]
+    # Last compatible uploader disappears after mask setup, before upload.
+    dropped = compatible[-1:] if dropout_case != "none" else []
+    survivors = [cid for cid in compatible if cid not in dropped]
+    floor_pass = len(survivors) >= survivor_floor
+    recovery_required = bool(dropped)
+    recovery_pass = not recovery_required or dropout_case == "recoverable"
+    aggregate_available = floor_pass and recovery_pass
+    record = _RELEASE_EVIDENCE[validation_evidence]
+    represented = {c.cohort for c in client_records(track_id) if c.client_id in survivors}
+    all_cohorts = {c.cohort for c in client_records(track_id)}
+    participation_coverage_pass = represented == all_cohorts
+    coverage_pass = record["all_cohorts_report"]
+    reasons = []
+    if not floor_pass:
+        reasons.append("survivor floor")
+    if not recovery_pass:
+        reasons.append("dropout recovery shares unavailable")
+    if release_state != "matched":
+        reasons.append("base, adapter, schema and policy set incompatible")
+    if not participation_coverage_pass:
+        reasons.append("surviving cohort representation")
+    if not coverage_pass:
+        reasons.append("cohort reporting coverage")
+    if not record["hardware_pass"]:
+        reasons.append("target hardware validation")
+    if record["validated_outcome"] is None:
+        reasons.append("shadow change is not validated task outcome")
+    elif record["validated_outcome"] == "regression":
+        reasons.append("validated task regression")
+    release_action = "restore compatible baseline" if record["validated_outcome"] == "regression" else (
+        "promote matched policy" if not reasons else "hold candidate"
+    )
+    return {
+        **selection,
+        "model_key": f"{MODEL_ID}.evaluate_fleet_round",
+        "inputs": dict(track_id=track_id, max_evidence_age_hours=max_evidence_age_hours,
+                       require_charging=require_charging, max_clients=max_clients, min_uplink_mbps=min_uplink_mbps,
+                       selection_policy=selection_policy, survivor_floor=survivor_floor,
+                       dropout_case=dropout_case, release_state=release_state,
+                       validation_evidence=validation_evidence),
+        "release_tuple": dict(zip(("base", "adapter", "schema", "policy"), _ADAPTIVE_RELEASE)),
+        "update_versions": {cid: list(_UPDATE_RELEASES[cid]) for cid in selection["selected_ids"]},
+        "compatible_ids": compatible, "incompatible_ids": incompatible,
+        "dropped_ids": dropped, "survivor_ids": survivors,
+        "survivor_floor": survivor_floor, "survivor_floor_pass": floor_pass,
+        "recovery_required": recovery_required, "recovery_pass": recovery_pass,
+        "recovery_extra_exchanges": int(recovery_required),
+        "aggregate_available": aggregate_available,
+        "survivor_cohorts": sorted(represented), "participation_coverage_pass": participation_coverage_pass,
+        "reporting_coverage_pass": coverage_pass,
+        "validation_record": dict(record), "release_state_compatible": release_state == "matched",
+        "promotion_allowed": not reasons, "release_action": release_action,
+        "release_blockers": reasons,
+        "privacy_assurance": "not evaluated; declared threshold/recovery conditions only",
+        "evidence_kind": "finite illustrative protocol and matched release-evidence fixture",
+    }
+
+
 __all__ = [
     "HETEROGENEITY_LEVELS",
     "LOCAL_EPOCHS",
@@ -641,5 +753,6 @@ __all__ = [
     "evaluate_architecture",
     "evaluate_client_selection",
     "evaluate_federation",
+    "evaluate_fleet_round",
     "evaluate_replay",
 ]

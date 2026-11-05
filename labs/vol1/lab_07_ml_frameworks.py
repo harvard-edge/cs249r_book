@@ -13,7 +13,7 @@ async def _():
     if sys.platform == "emscripten":
         import micropip
         await micropip.install(["pydantic", "pint", "plotly", "pandas"], keep_going=False)
-        await micropip.install("../../wheels/mlsysim-0.3.0-py3-none-any.whl", keep_going=False)
+        await micropip.install("../../wheels/mlsysim-0.3.1-py3-none-any.whl", keep_going=False)
         await micropip.install("../../wheels/mlsysbook_labs-0.1.0-py3-none-any.whl", keep_going=False)
     else:
         labs_dir = Path(__file__).resolve().parents[1]
@@ -26,7 +26,7 @@ async def _():
     from mlsysim.labs.experiments.v1_07_experiments import (
         MODEL_KEY, OPERATION_GRAPH, TRACKS, compare_dispatch,
         evaluate_compilation, evaluate_fusion, evaluate_operator_support,
-        evaluate_recomputation,
+        evaluate_recomputation, runtime_decision_supported, execution_plan_supported,
     )
     from mlsysim.labs.state import DesignLedger
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
@@ -45,6 +45,7 @@ async def _():
         capture_evidence, compare_dispatch, evaluate_compilation,
         evaluate_fusion, evaluate_operator_support, evaluate_recomputation,
         get_lab_metadata, go, ledger, mo, report_export_panel,
+        runtime_decision_supported, execution_plan_supported,
     )
 
 
@@ -55,10 +56,12 @@ def _(mo):
 
 
 @app.cell
-def _(mo, set_evidence):
+def _(mo, set_evidence, ledger):
+    from mlsysbook_labs.contexts import preferred_context as _preferred_context
+    _track_labels = {"tinyml": "TinyML", "mobile": "Mobile", "edge": "Edge", "cloud": "Cloud"}
     track = mo.ui.dropdown(
         {"TinyML": "tinyml", "Mobile": "mobile", "Edge": "edge", "Cloud": "cloud"},
-        value="TinyML", label="Deployment track",
+        value=_track_labels[_preferred_context(ledger)], label="Deployment track",
         on_change=lambda _value: set_evidence({}),
     )
     return (track,)
@@ -90,6 +93,7 @@ def _(mo, track_id):
         {"Retain alternate activations": "alternate", "Retain input only": "input_only"},
         value="Retain alternate activations", label="Recomputation policy",
     )
+    d_regenerate = mo.ui.switch(value=True, label="Regenerate discarded backward operands")
     d_batch = mo.ui.slider(1, 64, value=8, step=1, label="Training batch")
     e_operator = mo.ui.dropdown(
         {
@@ -111,7 +115,7 @@ def _(mo, track_id):
         },
         label="Runtime decision",
     )
-    return a_dispatches, b_executions, b_recompiles, c_breaks, d_batch, d_policy, e_decision, e_operator, e_shape
+    return a_dispatches, b_executions, b_recompiles, c_breaks, d_batch, d_policy, d_regenerate, e_decision, e_operator, e_shape
 
 
 @app.cell
@@ -180,7 +184,7 @@ def _(mo, track_id):
 @app.cell
 def _(
     OPERATION_GRAPH, a_dispatches, b_executions, b_recompiles, c_breaks,
-    compare_dispatch, d_batch, d_policy, e_operator, e_shape,
+    compare_dispatch, d_batch, d_policy, d_regenerate, e_operator, e_shape,
     evaluate_compilation, evaluate_fusion, evaluate_operator_support,
     evaluate_recomputation, track_id,
 ):
@@ -191,7 +195,7 @@ def _(
     c_baseline = evaluate_fusion(track_id, graph_breaks=operation_count - 1)
     c_result = evaluate_fusion(track_id, graph_breaks=c_breaks.value)
     d_baseline = evaluate_recomputation(track_id, "retain_all", batch_size=d_batch.value)
-    d_result = evaluate_recomputation(track_id, d_policy.value, batch_size=d_batch.value)
+    d_result = evaluate_recomputation(track_id, d_policy.value, batch_size=d_batch.value, regenerate=d_regenerate.value)
     e_baseline = evaluate_operator_support(track_id, "relu", "static")
     e_result = evaluate_operator_support(track_id, e_operator.value, e_shape.value)
     return a_comparison, b_baseline, b_result, c_baseline, c_result, d_baseline, d_result, e_baseline, e_result, operation_count
@@ -202,9 +206,9 @@ def _(
     MODEL_KEY, a_comparison, a_dispatches, a_prediction, b_baseline,
     b_executions, b_prediction, b_recompiles, b_result, c_baseline,
     c_breaks, c_prediction, c_result, capture_evidence, d_baseline,
-    d_batch, d_policy, d_prediction, d_result, e_baseline, e_decision, e_operator,
+    d_batch, d_policy, d_regenerate, d_prediction, d_result, e_baseline, e_decision, e_operator,
     e_prediction, e_result, e_shape, mo, operation_count, set_evidence,
-    track_id,
+    track_id, runtime_decision_supported,
 ):
     def store(part, capture):
         set_evidence(lambda current: {**current, part: capture})
@@ -212,7 +216,7 @@ def _(
     a_upstream = {"baseline_dispatches": operation_count, "intervention_dispatches": a_dispatches.value}
     b_upstream = {"executions": b_executions.value, "recompilations": b_recompiles.value}
     c_upstream = {"baseline_breaks": operation_count - 1, "intervention_breaks": c_breaks.value}
-    d_upstream = {"batch_size": d_batch.value, "policy": d_policy.value}
+    d_upstream = {"batch_size": d_batch.value, "policy": d_policy.value, "regenerate": d_regenerate.value}
     e_upstream = {"operator": e_operator.value, "shape_mode": e_shape.value, "decision": e_decision.value}
 
     a_capture = mo.ui.button(
@@ -253,7 +257,7 @@ def _(
         )),
     )
     e_same = e_operator.value == "relu" and e_shape.value == "static"
-    e_invalid_decision = e_decision.value is None or (e_decision.value == "none" and e_result["executable"])
+    e_invalid_decision = not runtime_decision_supported(e_result, e_decision.value)
     e_chosen = e_baseline if e_decision.value == "hold" else e_result
     e_result_role = "rejected alternative" if e_decision.value == "hold" else "tested intervention"
     e_capture = mo.ui.button(
@@ -271,25 +275,34 @@ def _(
 
 
 @app.cell
-def _(ACADEMIC_LAB_CSS, LAB_CSS, mo, profile, track):
-    css = """
-    <style>
-    .pilot-head{background:linear-gradient(135deg,#101827,#1d4f78);color:white;border-radius:14px;padding:clamp(18px,4vw,32px);margin-bottom:14px}
-    .pilot-top{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font:700 .72rem ui-monospace;letter-spacing:.08em}
-    .pilot-head h1{font-size:clamp(1.65rem,5vw,2.65rem);line-height:1.05;margin:16px 0 8px}.pilot-head p{color:#dbeafe;max-width:780px}
-    .pilot-meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:9px;margin-top:17px}.pilot-meta div{background:#ffffff14;border:1px solid #ffffff26;padding:9px 11px;border-radius:8px}
-    .pilot-note{color:#475569;font-size:.9rem;line-height:1.5;margin:0;padding:0 2px}.saved{border-left:4px solid #2ca02c;background:#f0fdf4;padding:9px 12px;border-radius:7px}
-    .lab-hud{display:flex;align-items:center;flex-wrap:wrap;gap:10px;background:#101827!important;color:#fff;padding:14px 18px;border-radius:9px}.lab-hud .hud-label{color:#a7b9cf}.lab-hud .hud-value{color:#fff}.lab-hud .hud-active{color:#86efac}
-    .table-wrap{max-width:100%;overflow-x:auto}@media(max-width:520px){.pilot-head{border-radius:9px;margin-top:30px}.pilot-meta{grid-template-columns:1fr}}
-    </style>"""
-    header = mo.Html(
-        f"""{css}<section class="pilot-head"><div class="pilot-top"><span>VOLUME I · LAB 07</span><span>ABOUT 50–55 MIN</span></div><h1>The Framework Tax</h1><p>When does an execution path earn its setup and memory costs, and when does target support make the decision for us?</p><div class="pilot-meta"><div><b>Track</b><br>{profile.display}</div><div><b>Workload</b><br>{profile.workload}</div><div><b>Output</b><br>Runtime-path recommendation</div></div></section>"""
+def _(get_lab_metadata, mo, track, track_id, profile):
+    from mlsysbook_labs.notebook import notebook_scenario as _scenario
+    from mlsysim import Scenarios as _Scenarios
+    from mlsysbook_labs.learning_paths import get_learning_path as _get_learning_path
+    from mlsysbook_labs.notebook import (
+        notebook_bridge as _bridge, notebook_header as _header,
+        notebook_learning_map as _learning_map, notebook_shell as _opening_shell,
     )
-    mo.vstack([
-        LAB_CSS, ACADEMIC_LAB_CSS, header, track,
-        mo.Html('<p class="pilot-note">Graph shape, tensor scale, compilation work, and runtime support are illustrative scenario assumptions. Hardware limits and runtime overhead anchors come from MLSysIM.</p>'),
-    ], gap=0.5)
-    return
+
+    learning_contract = _get_learning_path("vol1", 7)
+    _journey = _Scenarios.DeploymentJourneys.get(track_id)
+    _episode = _journey.episode(7)
+    learning_contract["narrative"] = {
+        "project": _journey.mission,
+        "scene": _episode.scene,
+        "carry_forward": _episode.handoff,
+        "scope": _journey.boundary,
+    }
+    _opening_shell([
+        _header(get_lab_metadata("vol1/lab_07_ml_frameworks.py"), _episode.question,
+                topics=[part["label"] for part in learning_contract["parts"]]),
+        track,
+        _scenario(learning_contract, track=track_id, scene=_episode.scene),
+        _learning_map(learning_contract),
+        mo.md(f"**Reference used in today’s instruments:** {profile.workload}. This controlled case tests the chapter’s mechanism; transfer the reasoning to your project without treating the result as project validation."),
+        mo.callout(mo.md("These are supplied, controlled reference studies. Their results do not validate the deployment project. Choose a prediction in Part A to open its live experiment; a wrong prediction still opens the evidence."), kind="info"),
+    ])
+    return (learning_contract,)
 
 
 @app.cell
@@ -304,11 +317,16 @@ def _(
     apply_plotly_theme, audit_evidence, b_baseline, b_capture, b_executions,
     b_prediction, b_recompiles, b_result, b_upstream, c_baseline, c_breaks,
     c_capture, c_prediction, c_result, c_upstream, d_baseline, d_batch,
-    d_capture, d_policy, d_prediction, d_result, d_upstream, e_baseline,
+    d_capture, d_policy, d_regenerate, d_prediction, d_result, d_upstream, e_baseline,
     e_capture, e_decision, e_operator, e_prediction, e_result, e_shape, e_upstream,
     final_choice, final_rejected, final_risk, final_trigger, get_evidence,
     go, mo, operation_count, profile, rationale, track_id,
+    learning_contract, execution_plan_supported,
 ):
+    from mlsysbook_labs.notebook import notebook_shell as _shell, notebook_learning_part as _learning_part, notebook_tab_hint as _tab_hint
+    _route = {part["id"]: part for part in learning_contract["parts"]}
+
+
     _captures = get_evidence()
     _upstream = {"A": a_upstream, "B": b_upstream, "C": c_upstream, "D": d_upstream, "E": e_upstream}
     audit = audit_evidence(
@@ -318,9 +336,8 @@ def _(
     )
 
     def table(rows):
-        return mo.vstack([mo.ui.table(rows, pagination=False)]).style(
-            {"max-width": "100%", "overflow-x": "auto"}
-        )
+        from mlsysbook_labs.notebook import notebook_table as _compact_table
+        return _compact_table(rows)
 
     def saved(part):
         capture = _captures.get(part)
@@ -338,7 +355,7 @@ def _(
 
     def part_a():
         intro = mo.md(
-            f"### A · Why can small operations waste the machine? (9 min)\nMaya, the performance engineer, keeps arithmetic and payload fixed on **{profile.target.name}** while changing only the number of dispatches."
+            f"Maya, the performance engineer, keeps arithmetic and payload fixed on **{profile.target.name}** while changing only the number of dispatches."
         )
         if a_prediction.value is None:
             return mo.vstack([intro, a_prediction])
@@ -366,7 +383,7 @@ def _(
             else "guard-triggered recompilation count"
         )
         intro = mo.md(
-            f"### B · When does compilation repay setup? (9 min)\n"
+            f""
             f"Ishan, the compiler engineer, separates repeated execution count from {recompile_context}."
         )
         if b_prediction.value is None:
@@ -389,8 +406,8 @@ def _(
             b_capture, saved("B"),
             mo.accordion({
                 "Calculation Notes": mo.md(
-                    "Compiled total = compilation count × setup time + repetitions × fused execution time. "
-                    "Eager total = repetitions × unfused execution time. Break-even is the first repetition that recovers all setup work. "
+                    "Compiled total = compilation count × setup time + repetitions × one-dispatch execution time. "
+                    "Eager total = repetitions × multi-dispatch execution time. Both arms hold arithmetic and input/output traffic fixed; this part changes dispatch only, not fusion. Break-even is the first repetition that recovers all setup work. "
                     "Setup time uses a shared illustrative compiler pass assumption (constant framework dispatch tax across analysis passes, "
                     "not measured on the named host). For TinyML, compilation is ahead-of-time (AOT) host compilation; recompilation represents "
                     "an offline host rebuild and redeployment rather than a dynamic native JIT."
@@ -399,7 +416,7 @@ def _(
         ])
 
     def part_c():
-        intro = mo.md(f"### C · What does fusion eliminate? (9 min)\nSofia, the runtime engineer, compares the same {operation_count}-operation graph before and after fusion. Graph breaks split the fused region.")
+        intro = mo.md(f"Sofia, the runtime engineer, compares the same {operation_count}-operation graph before and after fusion. Graph breaks split the fused region.")
         if c_prediction.value is None:
             return mo.vstack([intro, c_prediction])
         figure = go.Figure()
@@ -417,28 +434,42 @@ def _(
         ])
 
     def part_d():
-        intro = mo.md(f"### D · Which activations should remain stored? (9 min)\nNoah, the training engineer, runs this track on **{d_baseline['training_host']}** and compares saved activations against repeated forward work.")
+        intro = mo.md(f"Noah, the training engineer, runs this track on **{d_baseline['training_host']}** and compares saved activations against repeated forward work.")
         if d_prediction.value is None:
-            return mo.vstack([intro, mo.hstack([d_policy, d_batch], widths="equal", wrap=True), d_prediction])
+            return mo.vstack([intro, mo.hstack([d_policy, d_batch, d_regenerate], widths="equal", wrap=True), d_prediction])
         figure = go.Figure()
         figure.add_bar(name="Retained activations", x=["Retain all", d_result["policy"]], y=[d_baseline["retained_activation_mb"], d_result["retained_activation_mb"]], marker_color=COLORS["BlueLine"])
         figure.add_bar(name="Step time", x=["Retain all", d_result["policy"]], y=[d_baseline["step_time_ms"], d_result["step_time_ms"]], marker_color=COLORS["OrangeLine"], yaxis="y2")
         figure.update_layout(height=275, margin=dict(l=20, r=20, t=20, b=20), yaxis=dict(title="Retained activations (MB)"), yaxis2=dict(title="Analytical step time (ms)", overlaying="y", side="right"), legend_orientation="h")
         feasible = d_result["memory_feasible"]
+        trace = d_result["dependency_trace"]
+        trace_rows = [{"Backward rule": row["derivative"], "Reads": ", ".join(row["required_operands"]),
+                       "Missing": ", ".join(row["missing_operands"]) or "—",
+                       "Derivative": "Unavailable" if row["value"] is None else row["value"]}
+                      for row in trace["backward_trace"]]
         return mo.vstack([
-            intro, d_prediction, mo.hstack([d_policy, d_batch], widths="equal", wrap=True),
+            intro, d_prediction, mo.hstack([d_policy, d_batch, d_regenerate], widths="equal", wrap=True),
             apply_plotly_theme(figure),
             table([
                 {"Policy": "Retain all", "Stored": f"{d_baseline['retained_activation_mb']:.3f} MB", "Repeated ops": d_baseline["recomputed_operation_count"], "Step": f"{d_baseline['step_time_ms']:.3f} ms"},
                 {"Policy": d_result["policy"], "Stored": f"{d_result['retained_activation_mb']:.3f} MB", "Repeated ops": d_result["recomputed_operation_count"], "Step": f"{d_result['step_time_ms']:.3f} ms"},
             ]),
             mo.callout(mo.md(f"**Prediction:** {d_prediction.value}. **Observed analytically:** stored activations fall to **{d_result['retained_activation_mb']:.3f} MB**, while **{d_result['recomputed_operation_count']}** operations repeat and step time becomes **{d_result['step_time_ms']:.3f} ms**. Memory status: **{'PASS' if feasible else 'OOM — training infeasible on this host'}**."), kind="success" if feasible else "danger"),
+            mo.md("#### Exact dependency check · Return to the Lab 05 graph"),
+            table([{"Forward operation": equation} for equation in trace["graph"].split("; ")]),
+            mo.md("The scalar trace below checks differentiation, independently of the activation cost chart above. Keep input and weights fixed; discard forward operands, then toggle regeneration to see why dropping state alone breaks backward."),
+            table([{"Discarded": ", ".join(trace["discarded_operands"]) or "None",
+                    "Regenerated": ", ".join(row["operand"] for row in trace["regenerated_values"]) or "None",
+                    "Still missing": ", ".join(trace["missing_operands"]) or "None"}]),
+            table(trace_rows),
+            mo.callout(mo.md(f"**Backward {'valid' if trace['backward_valid'] else 'unavailable'}**. Retain-all gradients: **{trace['reference_gradients']}**. Current gradients: **{trace['gradients']}**. {'Derivatives are exactly equal after valid regeneration.' if trace['derivatives_equal'] else 'A required operand is missing; an unavailable derivative is not zero. Restore regeneration before treating this as a valid training policy.'}"), kind="success" if trace["backward_valid"] else "danger"),
+            mo.accordion({"Regeneration trace": table(trace["regenerated_values"]) if trace["regenerated_values"] else mo.md("No forward values regenerated.")}),
             d_capture, saved("D"),
-            mo.accordion({"Calculation Notes": mo.md("Training counts one forward pass and a two-forward-equivalent backward pass. A discarded activation repeats its forward operation during backward. Retained bytes are checked directly against the selected training host's memory capacity.")}),
+            mo.accordion({"Calculation Notes": mo.md("Training counts one forward pass and a two-forward-equivalent backward pass. This six-operation cost surrogate is separate from the exact scalar dependency trace; it is not a measured training step or a correctness proof. Retained bytes are checked directly against the selected training host's memory capacity.")}),
         ])
 
     def part_e():
-        intro = mo.md("### E · Can the runtime execute the actual graph? (9 min)\nPriya, the deployment engineer, inserts one operator and shape behavior into a known-native baseline. Unsupported work must follow a visible fallback path or fail.")
+        intro = mo.md("Priya, the deployment engineer, inserts one operator and shape behavior into a known-native baseline. Unsupported work must follow a visible fallback path or fail.")
         if e_prediction.value is None:
             return mo.vstack([intro, mo.hstack([e_operator, e_shape], widths="equal", wrap=True), e_prediction])
         if e_result["status"] == "native":
@@ -479,14 +510,8 @@ def _(
                 "Evidence": "CURRENT" if capture and part not in audit.stale and (part, part) not in audit.identical_pairs else ("STALE" if capture else "MISSING"),
             })
         e_snapshot = _captures["E"].to_dict() if "E" in _captures else None
-        no_path_supported = e_snapshot is not None and e_snapshot["decision"] == "none" and not e_snapshot["result"]["executable"]
-        hold_supported = e_snapshot is not None and e_snapshot["decision"] == "hold"
         distinct = final_choice.value is not None and final_rejected.value is not None and final_choice.value != final_rejected.value
-        choice_supported = (
-            (final_choice.value == "none" and no_path_supported)
-            or (final_choice.value == "hold" and hold_supported)
-            or final_choice.value in {"eager", "compiled", "compiled_fused"}
-        )
+        choice_supported = execution_plan_supported(e_snapshot, final_choice.value, _captures["D"].to_dict()["result"] if "D" in _captures else {})
         complete = audit.complete and distinct and choice_supported and final_trigger.value is not None and final_risk.value is not None and bool(rationale.value.strip())
         return mo.vstack([
             mo.md("### Synthesis · Defend one execution plan (5 min)\nChoose a tested path, quantify a rejected tested alternative, state the remaining limitation, and name the condition that would reopen the decision."),
@@ -494,32 +519,34 @@ def _(
             mo.hstack([final_choice, final_rejected], widths="equal", wrap=True),
             mo.hstack([final_trigger, final_risk], widths="equal", wrap=True),
             rationale,
-            mo.callout(mo.md("**Ready for the local evidence report.**" if complete else "Complete five current contrasts. Choose two different tested paths; use hold when the baseline remains viable but evidence is insufficient, and select no feasible path only after an unsupported result. Then add a quantified rationale, limitation, and trigger."), kind="success" if complete else "warn"),
+            mo.callout(mo.md("**Ready for the local evidence report.**" if complete else "Complete five current contrasts. Choose two different tested paths. An execution recommendation requires Part E to select an executable operator/shape identity and Part D to restore valid backward operands; use hold when the baseline remains viable but evidence is insufficient, and select no feasible path only after an unsupported result. Then add a quantified rationale, limitation, and trigger."), kind="success" if complete else "warn"),
         ])
 
     tabs = mo.ui.tabs({
-        "Part A": part_a(), "Part B": part_b(), "Part C": part_c(),
-        "Part D": part_d(), "Part E": part_e(), "Synthesis": build_synthesis(),
+        "Part A": _learning_part(learning_contract, "A", part_a()), "Part B": _learning_part(learning_contract, "B", part_b()), "Part C": _learning_part(learning_contract, "C", part_c()),
+        "Part D": _learning_part(learning_contract, "D", part_d()), "Part E": _learning_part(learning_contract, "E", part_e()), "Synthesis": build_synthesis(),
     })
-    tabs
+    _shell([_tab_hint(), tabs])
     return (audit,)
+
+
+@app.cell(hide_code=True)
+def _():
+    from mlsysbook_labs.learning_paths import get_learning_path as _submission_path
+    from mlsysbook_labs.notebook import notebook_shell as _submission_shell, notebook_submission as _submission
+    _submission_shell([_submission(_submission_path(1, 7))])
+    return
 
 
 @app.cell
 def _(
     audit, build_lab_report, final_choice, final_rejected, final_risk,
     final_trigger, get_evidence, get_lab_metadata, mo, profile, rationale,
-    report_export_panel, track_id,
+    report_export_panel, track_id, execution_plan_supported,
 ):
     _captures = get_evidence()
     _e_snapshot = _captures["E"].to_dict() if "E" in _captures else None
-    _no_path_supported = _e_snapshot is not None and _e_snapshot["decision"] == "none" and not _e_snapshot["result"]["executable"]
-    _hold_supported = _e_snapshot is not None and _e_snapshot["decision"] == "hold"
-    _choice_supported = (
-        (final_choice.value == "none" and _no_path_supported)
-        or (final_choice.value == "hold" and _hold_supported)
-        or final_choice.value in {"eager", "compiled", "compiled_fused"}
-    )
+    _choice_supported = execution_plan_supported(_e_snapshot, final_choice.value, _captures["D"].to_dict()["result"] if "D" in _captures else {})
     _ready = (
         audit.complete and final_choice.value is not None
         and final_rejected.value is not None
@@ -528,7 +555,8 @@ def _(
         and final_trigger.value is not None and final_risk.value is not None
         and bool(rationale.value.strip())
     )
-    mo.stop(not _ready)
+    from mlsysbook_labs.notebook import notebook_download_readiness as _download_readiness
+    mo.stop(not _ready, _download_readiness(volume=1))
     _snapshots = {part: _captures[part].to_dict() for part in "ABCDE"}
     _chosen_e = _snapshots["E"]["chosen_result"] or _snapshots["E"]["result"]
     report = build_lab_report(
@@ -542,7 +570,7 @@ def _(
         predictions={part: _snapshots[part]["prediction"] for part in "ABCDE"},
         knob_settings={part: _snapshots[part]["inputs"] for part in "ABCDE"},
         evidence_summary={part: {"baseline": _snapshots[part]["baseline"], "result": _snapshots[part]["result"], "alternatives": _snapshots[part]["alternatives"]} for part in "ABCDE"},
-        binding_constraints={"runtime_path": _chosen_e["status"], "activation_memory": "PASS" if _snapshots["D"]["result"]["memory_feasible"] else "OOM"},
+        binding_constraints={"runtime_path": _chosen_e["status"], "activation_memory": "PASS" if _snapshots["D"]["result"]["memory_feasible"] else "OOM", "backward_valid": _snapshots["D"]["result"]["dependency_trace"]["backward_valid"]},
         decisions={"recommendation": final_choice.value, "rejected_alternative": final_rejected.value, "reevaluation_trigger": final_trigger.value},
         final_decision={"recommendation": final_choice.value, "rejected_alternative": final_rejected.value, "rationale": rationale.value},
         big_takeaways=[
@@ -555,26 +583,36 @@ def _(
         result_snapshot={"track": track_id, "captures": _snapshots, "recommendation": final_choice.value, "rejected_alternative": final_rejected.value, "reevaluation_trigger": final_trigger.value, "residual_risk": final_risk.value},
         source_trace={"scenario": "Illustrative operation graph and support fixture.", "calculations": "MLSysIM v1_07_experiments evaluators."},
     )
-    mo.vstack([mo.md("## Local evidence report"), report_export_panel(report)])
+    from mlsysbook_labs.notebook import notebook_shell as _report_shell
+    _report_shell([report_export_panel(report)])
     return (report,)
+
+
+
+
+@app.cell
+def _(mo, get_evidence, final_choice, final_rejected, final_risk, final_trigger, rationale, audit):
+    from mlsysbook_labs.notebook import notebook_shell as _save_shell
+    _draft_identity = (audit.to_dict(), get_evidence(), final_choice.value, final_rejected.value, final_risk.value, final_trigger.value, rationale.value)
+    save_discussion = mo.ui.run_button(label="Save discussion")
+    _save_shell([
+        save_discussion,
+        mo.md("Save your completed discussion locally. Editing a decision, rationale, or saved comparison requires saving again. Download remains available independently of local storage."),
+    ])
+    return (save_discussion,)
 
 
 @app.cell
 async def _(
     audit, final_choice, final_rejected, final_risk, final_trigger,
     get_evidence, ledger, mo, rationale, track_id,
+    save_discussion, execution_plan_supported,
 ):
     import html as _html
 
     _captures = get_evidence()
     _e_snapshot = _captures["E"].to_dict() if "E" in _captures else None
-    _no_path_supported = _e_snapshot is not None and _e_snapshot["decision"] == "none" and not _e_snapshot["result"]["executable"]
-    _hold_supported = _e_snapshot is not None and _e_snapshot["decision"] == "hold"
-    _choice_supported = (
-        (final_choice.value == "none" and _no_path_supported)
-        or (final_choice.value == "hold" and _hold_supported)
-        or final_choice.value in {"eager", "compiled", "compiled_fused"}
-    )
+    _choice_supported = execution_plan_supported(_e_snapshot, final_choice.value, _captures["D"].to_dict()["result"] if "D" in _captures else {})
     _ready = (
         audit.complete and final_choice.value is not None
         and final_rejected.value is not None
@@ -585,7 +623,7 @@ async def _(
     )
     _save_error = None
     _save_succeeded = False
-    if _ready:
+    if _ready and save_discussion.value:
         try:
             ledger.save(chapter=7, design={
                 "schema_version": 1, "lab_id": "v1_07", "track_id": track_id,
@@ -606,10 +644,9 @@ async def _(
     elif _save_error is not None:
         _status = f"SAVE FAILED: {_html.escape(_save_error)}"
     else:
-        _status = "EVIDENCE IN PROGRESS"
-    mo.Html(
-        f'<div class="lab-hud"><span>LAB 07 · The Framework Tax · STATUS: {_status}</span></div>'
-    )
+        _status = "DRAFT READY · SAVE DISCUSSION TO RECORD" if _ready else "EVIDENCE IN PROGRESS"
+    from mlsysbook_labs.notebook import notebook_shell as _status_shell, notebook_status as _status_view
+    _status_shell([_status_view("Lab 07", _status)])
     return
 
 

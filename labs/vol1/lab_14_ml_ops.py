@@ -13,7 +13,7 @@ async def _():
     if sys.platform == "emscripten":
         import micropip
         await micropip.install(["pydantic", "pint", "plotly", "pandas"], keep_going=False)
-        await micropip.install("../../wheels/mlsysim-0.3.0-py3-none-any.whl", keep_going=False)
+        await micropip.install("../../wheels/mlsysim-0.3.1-py3-none-any.whl", keep_going=False)
         await micropip.install("../../wheels/mlsysbook_labs-0.1.0-py3-none-any.whl", keep_going=False)
     else:
         labs_dir = Path(__file__).resolve().parents[1]
@@ -27,17 +27,28 @@ async def _():
         TRACKS, canary_experiment, experiment_options, get_track_scenario,
         incident_experiment, monitoring_experiment, retraining_experiment,
     )
+    from mlsysim.labs.experiments.v1_14_experiments import parity_experiment
+    from mlsysim.labs.experiments.v1_14_experiments import rollout_experiment, release_recovery_experiment
+    from mlsysim import fmt_memory, fmt_time
+    from mlsysim.core.units import Q_
     from mlsysim.labs.state import DesignLedger
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
     from mlsysbook_labs import (
         ACADEMIC_LAB_CSS, build_lab_report, get_lab_metadata, report_export_panel,
+    )
+    from mlsysim import Scenarios
+    from mlsysbook_labs.learning_paths import get_learning_path
+    from mlsysbook_labs.notebook import (
+        notebook_bridge, notebook_header, notebook_learning_map, notebook_learning_part, notebook_tab_hint,
+        notebook_shell, notebook_status, notebook_table,
     )
     from mlsysbook_labs.experiment_evidence import audit_evidence, capture_evidence
 
     ledger = DesignLedger(volume="vol1")
     if ledger.is_wasm:
         _loaded = await ledger.load_async()
-    return (
+    return (rollout_experiment, release_recovery_experiment, fmt_memory, fmt_time, Q_, parity_experiment, Scenarios, get_learning_path, notebook_bridge, notebook_header,
+            notebook_learning_map, notebook_learning_part, notebook_tab_hint, notebook_shell, notebook_status, notebook_table,
         ACADEMIC_LAB_CSS, COLORS, LAB_CSS, TRACKS, apply_plotly_theme,
         audit_evidence, build_lab_report, canary_experiment, capture_evidence,
         experiment_options, get_lab_metadata, get_track_scenario, go,
@@ -53,10 +64,11 @@ def _(mo):
 
 
 @app.cell
-def _(mo, set_evidence):
+def _(ledger, mo, set_evidence):
+    from mlsysbook_labs.contexts import CONTEXT_OPTIONS as _options, get_context as _context, preferred_context as _preferred
     track = mo.ui.dropdown(
-        {"TinyML": "tinyml", "Mobile": "mobile", "Edge": "edge", "Cloud": "cloud"},
-        value="TinyML", label="Deployment track",
+        _options,
+        value=_context(_preferred(ledger)).label, label="Deployment track",
         on_change=lambda _value: set_evidence({}),
     )
     return (track,)
@@ -69,6 +81,40 @@ def _(TRACKS, experiment_options, get_track_scenario, track):
     options = experiment_options(track_id)
     assert track_id in TRACKS
     return options, scenario, track_id
+
+
+@app.cell
+def _(mo, track_id):
+    _selected_project = track_id
+    parity_transform = mo.ui.dropdown({"Original fitted transformation": "matched", "Swap request values": "swapped", "Refit preprocessing": "refitted"},
+                                     value="Swap request values", label="Serving transformation")
+    parity_bundle = mo.ui.dropdown({"Compatible complete bundle": "compatible", "Weights-only rollback": "weights_only", "Missing fitted state": "missing_state"},
+                                  value="Compatible complete bundle", label="Bundle available for replay")
+    return parity_transform, parity_bundle
+
+
+@app.cell
+def _(parity_experiment, parity_transform, parity_bundle, track_id):
+    parity_baseline = parity_experiment(track_id, serving_transform="matched", release_bundle="compatible")
+    parity_changed = parity_experiment(track_id, serving_transform=parity_transform.value,
+                                       release_bundle=parity_bundle.value)
+    return parity_baseline, parity_changed
+
+
+@app.cell
+def _(mo, track_id):
+    _project = track_id
+    d_reservation = mo.ui.dropdown({"Overlap background reservation": "overlap", "Wait for background reservation to finish": "wait"},
+                                   value="Overlap background reservation", label="Candidate staging plan")
+    e_restore = mo.ui.dropdown({"Restore weights only": "weights_only", "Restore weights and transform": "weights_transform", "Restore complete release bundle": "complete_bundle"},
+                              value="Restore weights only", label="Rollback unit")
+    e_inflight = mo.ui.dropdown({"Reuse the mutated global bundle": "reuse_mutated", "Drain requests with their pinned bundle": "drain_pinned", "Confirm cancellation of admitted requests": "cancel_confirmed"},
+                               value="Reuse the mutated global bundle", label="Already-admitted requests")
+    e_logs = mo.ui.dropdown({"Retain degraded-window logs for training": "retain", "Quarantine degraded-window logs": "quarantine"},
+                           value="Retain degraded-window logs for training", label="Degraded data")
+    e_cause = mo.ui.dropdown({"Release contract incompatibility": "release_contract", "Population shift after a compatible release": "population_shift"},
+                            value="Release contract incompatibility", label="Incident cause")
+    return d_reservation, e_restore, e_inflight, e_logs, e_cause
 
 
 @app.cell
@@ -116,25 +162,23 @@ def _(mo, track_id):
         "Delayed labels arrive before proxy alerts": "labels_first",
     }, label="What will the sensitive proxy threshold establish?").form(submit_button_label="Lock Part A prediction")
     b_prediction = mo.ui.radio({
-        "Fewer misses, more investigations": "misses_down_investigations_up",
-        "Fewer misses, lower telemetry cost": "misses_down_cost_down",
-        "No operational consequence": "no_change",
-    }, label="What is the main cost of greater monitoring sensitivity?").form(submit_button_label="Lock Part B prediction")
+        "Matching aggregate values establish parity": "aggregate", "Request-keyed comparison is needed": "keyed", "A version label alone establishes replay": "version",
+    }, label="Which evidence tests the serving transformation?").form(submit_button_label="Lock Part B prediction")
     c_prediction = mo.ui.radio({
         "Scheduled always costs less": "scheduled_cheaper",
         "Evidence-triggered may wait longer but launch fewer jobs": "triggered_tradeoff",
         "Retraining changes quality when the job starts": "changes_at_start",
     }, label="How will delayed evidence change retraining?").form(submit_button_label="Lock Part C prediction")
     d_prediction = mo.ui.radio({
-        "Zero traffic is safest and still proves readiness": "zero_certifies",
-        "More traffic always lowers exposure": "more_always_safer",
-        "Traffic trades faster evidence against candidate exposure": "evidence_exposure",
-    }, label="What does canary fraction control?").form(submit_button_label="Lock Part D prediction")
+        "A smaller traffic share installs a smaller candidate": "shrinks_copy",
+        "Traffic share changes exposure while full copies stay resident": "full_copy",
+        "Waiting releases capacity without delaying evidence": "free_wait",
+    }, label="What changes when the canary fraction becomes smaller?").form(submit_button_label="Lock Part D prediction")
     e_prediction = mo.ui.radio({
-        "Detection alone completes recovery": "detection_is_recovery",
-        "Recovery is the sum of response stages": "sequential_stages",
-        "Rollback duration cannot affect exposure": "rollback_noncausal",
-    }, label="What determines verified recovery time?").form(submit_button_label="Lock Part E prediction")
+        "Fast weights-only rollback restores every request": "weights_only",
+        "New and already-admitted requests need compatible bundles": "bundle",
+        "A complete bundle repairs every possible incident cause": "universal",
+    }, label="What establishes recovery after routing is reverted?").form(submit_button_label="Lock Part E prediction")
     return a_prediction, b_prediction, c_prediction, d_prediction, e_prediction
 
 
@@ -167,7 +211,7 @@ def _(mo, track_id):
 
 
 @app.cell
-def _(
+def _(rollout_experiment, release_recovery_experiment, d_reservation, e_restore, e_inflight, e_logs, e_cause,
     a_threshold, b_interval, b_threshold, canary_experiment, c_interval,
     d_choice, d_rejected, e_rollback, incident_experiment,
     monitoring_experiment, options, retraining_experiment, track_id,
@@ -191,7 +235,7 @@ def _(
         track_id, policy="evidence_triggered", scheduled_interval_hours=None,
     )
     d_results = {
-        fraction: canary_experiment(track_id, canary_fraction=fraction, stop_on_decision=False)
+        fraction: rollout_experiment(track_id, canary_fraction=fraction, reservation_plan=d_reservation.value)
         for fraction in options["canary_candidates"].values()
     }
     if d_choice.value not in (None, "none") and d_results[d_choice.value]["decision"] == "promote":
@@ -202,21 +246,26 @@ def _(
         e_affected_fraction = d_rejected.value
     else:
         e_affected_fraction = 0.25
-    e_base = incident_experiment(
-        track_id, proxy_threshold=b_threshold.value,
-        sampling_interval_hours=b_interval.value, rollback_minutes=30.0,
-        affected_fraction=e_affected_fraction,
-    )
-    e_result = incident_experiment(
+    _comparison_fraction = d_choice.value if d_choice.value not in (None, "none") else (d_rejected.value or 0.25)
+    d_capacity_pair = {plan: rollout_experiment(track_id, canary_fraction=_comparison_fraction, reservation_plan=plan)
+                       for plan in ("overlap", "wait")}
+    e_base = release_recovery_experiment(
         track_id, proxy_threshold=b_threshold.value,
         sampling_interval_hours=b_interval.value, rollback_minutes=e_rollback.value,
-        affected_fraction=e_affected_fraction,
+        affected_fraction=e_affected_fraction, incident_cause=e_cause.value,
     )
-    return a_base, a_result, b_base, b_result, c_scheduled, c_triggered, d_results, e_affected_fraction, e_base, e_result
+    e_result = release_recovery_experiment(
+        track_id, proxy_threshold=b_threshold.value,
+        sampling_interval_hours=b_interval.value, rollback_minutes=e_rollback.value,
+        affected_fraction=e_affected_fraction, restore=e_restore.value,
+        inflight=e_inflight.value, logs=e_logs.value, incident_cause=e_cause.value,
+    )
+
+    return a_base, a_result, b_base, b_result, c_scheduled, c_triggered, d_results, d_capacity_pair, e_affected_fraction, e_base, e_result
 
 
 @app.cell
-def _(
+def _(d_capacity_pair, d_reservation, parity_baseline, parity_changed,
     a_base, a_prediction, a_result, b_base, b_prediction, b_result,
     c_choice, c_prediction, c_scheduled, c_triggered, capture_evidence,
     d_choice, d_prediction, d_rejected, d_results, e_base, e_prediction,
@@ -226,9 +275,9 @@ def _(
         set_evidence(lambda current: {**current, part: capture})
 
     a_upstream = {"baseline": a_base["inputs"], "result": a_result["inputs"]}
-    b_upstream = {"baseline": b_base["inputs"], "result": b_result["inputs"]}
+    b_upstream = {"baseline": parity_baseline["inputs"], "result": parity_changed["inputs"]}
     c_upstream = {"choice": c_choice.value, "scheduled": c_scheduled["inputs"], "evidence_triggered": c_triggered["inputs"]}
-    d_upstream = {"choice": d_choice.value, "rejected": d_rejected.value}
+    d_upstream = {"choice": d_choice.value, "rejected": d_rejected.value, "reservation_plan": d_reservation.value}
     e_upstream = {"rollout": d_upstream, "baseline": e_base["inputs"], "result": e_result["inputs"]}
 
     a_capture = mo.ui.button(
@@ -241,12 +290,12 @@ def _(
         )),
     )
     b_capture = mo.ui.button(
-        label="Capture sensitivity comparison", kind="success",
-        disabled=b_prediction.value is None or b_base["inputs"] == b_result["inputs"],
+        label="Capture keyed replay comparison", kind="success",
+        disabled=b_prediction.value is None or parity_baseline["inputs"] == parity_changed["inputs"],
         on_click=lambda _value: store("B", capture_evidence(
             track=track_id, part="B", prediction=b_prediction.value,
-            inputs=b_upstream, baseline=b_base, result=b_result,
-            upstream_inputs=b_upstream, model_key="v1_14.monitoring",
+            inputs=b_upstream, baseline=parity_baseline, result=parity_changed,
+            upstream_inputs=b_upstream, model_key="v1_14.parity",
         )),
     )
     c_chosen_result = (
@@ -267,6 +316,7 @@ def _(
     d_invalid = (
         d_prediction.value is None or d_choice.value is None or d_rejected.value is None
         or d_choice.value == d_rejected.value
+        or (d_choice.value not in (None, "none") and d_results[d_choice.value]["decision"] != "promote")
     )
     d_baseline = d_results[d_rejected.value] if d_rejected.value is not None else d_results[0.10]
     if d_choice.value == "none":
@@ -288,8 +338,8 @@ def _(
             track=track_id, part="D", prediction=d_prediction.value,
             inputs={**d_upstream, "baseline": d_baseline["inputs"], "result": d_result["inputs"], "chosen_result": d_chosen_result["inputs"]},
             baseline=d_baseline, result=d_result, upstream_inputs=d_upstream,
-            alternatives=tuple(d_results.values()), decision=d_choice.value,
-            model_key="v1_14.canary", chosen_result=d_chosen_result,
+            alternatives=(*tuple(d_results.values()), {"supplemental_reference": {plan: {"model_key": "v1_14.rollout", "inputs": value["inputs"], "result": value} for plan, value in d_capacity_pair.items()}}), decision=d_choice.value,
+            model_key="v1_14.rollout", chosen_result=d_chosen_result,
             result_role=d_result_role,
         )),
     )
@@ -304,34 +354,36 @@ def _(
             inputs={"baseline": e_base["inputs"], "result": e_result["inputs"]},
             baseline=e_base, result=e_result, upstream_inputs=e_upstream,
             alternatives=(e_base, e_result), decision=e_result["met_recovery_objective"],
-            model_key="v1_14.incident",
+            model_key="v1_14.release_recovery",
         )),
     )
     return a_capture, a_upstream, b_capture, b_upstream, c_capture, c_upstream, d_capture, d_upstream, e_capture, e_upstream
 
 
 @app.cell
-def _(ACADEMIC_LAB_CSS, LAB_CSS, mo, scenario, track):
-    css = mo.Html("""
-    <style>
-    .pilot-head{background:linear-gradient(135deg,#101827,#1d4f78);color:white;border-radius:14px;padding:clamp(18px,4vw,32px);margin-bottom:14px}
-    .pilot-top{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font:700 .72rem ui-monospace;letter-spacing:.08em}
-    .pilot-head h1{font-size:clamp(1.65rem,5vw,2.65rem);line-height:1.05;margin:16px 0 8px}.pilot-head p{color:#dbeafe;max-width:760px}
-    .pilot-note{color:#475569;font-size:.9rem;line-height:1.5;margin:0;padding:0 2px}.track-control{margin:0 0 10px 2px;max-width:330px}
-    .lab-hud{display:flex;align-items:center;flex-wrap:wrap;gap:10px;background:#101827!important;color:#fff;padding:14px 18px;border-radius:9px}
-    .lab-hud .hud-label{color:#a7b9cf}.lab-hud .hud-value{color:#fff}.lab-hud .hud-active{color:#86efac}.lab-hud .hud-failed{color:#fca5a5}
-    .pilot-meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:9px;margin-top:17px}.pilot-meta div{background:#ffffff14;border:1px solid #ffffff26;padding:9px 11px;border-radius:8px}
-    .saved{border-left:4px solid #2ca02c;background:#f0fdf4;padding:9px 12px;border-radius:7px}.table-wrap{max-width:100%;overflow-x:auto}
-    @media(max-width:520px){.pilot-head{border-radius:9px;margin-top:30px}.pilot-meta{grid-template-columns:1fr}}
-    </style>""")
-    header = mo.Html(f"""<section class="pilot-head"><div class="pilot-top"><span>VOLUME I · LAB 14</span><span>ABOUT 50–55 MIN</span></div><h1>Evidence-Driven Operations</h1><p>Which monitoring, retraining, release, and recovery policy keeps a deployed model useful?</p><div class="pilot-meta"><div><b>Track</b><br>{scenario.label}</div><div><b>Investigation</b><br>One production ML node</div><div><b>Deliverable</b><br>Operations runbook memo</div></div></section>""")
-    mo.vstack([
-        LAB_CSS, ACADEMIC_LAB_CSS, css,
-        mo.Html('<div class="track-control"><b>Choose a deployment track</b></div>'),
-        track, header,
-        mo.Html('<p class="pilot-note">All tracks use illustrative outcome-labeled scenarios. The values are teaching fixtures, not measurements of a named production system. On-device tracks (TinyML/Mobile) evaluate single-node inference with companion-host retraining and local partition rollback.</p>'),
-    ], gap=0.5)
-    return
+def _(Scenarios, get_lab_metadata, get_learning_path, mo, notebook_bridge,
+      notebook_header, notebook_learning_map, notebook_shell, track, track_id):
+    from mlsysbook_labs.notebook import notebook_scenario as _scenario
+    learning_path = get_learning_path(1, 14)
+    journey = Scenarios.DeploymentJourneys.get(track_id)
+    episode = journey.episode(14)
+    learning_path["narrative"] = {
+        "project": journey.mission,
+        "scene": episode.scene,
+        "carry_forward": episode.handoff,
+        "scope": 'The supplied outcome traces are controlled operations fixtures. TinyML and MobileML use a companion host for retraining. Finite label gates, declared allocation screens, and request-bundle retests do not certify a deployed release.',
+    }
+    _previous = journey.episode(13).handoff
+    notebook_shell([
+        notebook_header(get_lab_metadata("vol1/lab_14_ml_ops.py"),
+                        'Which observations justify changing the deployed system?',
+                        topics=episode.core_concepts),
+        track,
+        _scenario(learning_path, track=track_id, scene=episode.scene),
+        notebook_learning_map(learning_path),
+    ], volume=1)
+    return (learning_path,)
+
 
 
 @app.cell
@@ -341,7 +393,7 @@ def _(mo):
 
 
 @app.cell
-def _(
+def _(fmt_memory, fmt_time, Q_, d_reservation, d_capacity_pair, e_restore, e_inflight, e_logs, e_cause, notebook_tab_hint, notebook_learning_part, parity_baseline, parity_changed, parity_transform, parity_bundle, learning_path, notebook_shell, notebook_status, notebook_table,
     COLORS, a_base, a_capture, a_prediction, a_result, a_threshold, a_upstream,
     apply_plotly_theme, audit_evidence, b_base, b_capture, b_interval,
     b_prediction, b_result, b_threshold, b_upstream, c_capture, c_choice,
@@ -360,7 +412,7 @@ def _(
     )
 
     def table(rows):
-        return mo.vstack([mo.ui.table(rows, pagination=False)]).style({"max-width": "100%", "overflow-x": "auto"})
+        return notebook_table(rows)
 
     def saved(part):
         capture = _captures.get(part)
@@ -369,56 +421,55 @@ def _(
         if part in audit.stale or (part, part) in audit.identical_pairs:
             return mo.callout(mo.md("**STALE OR NON-CONTRASTING EVIDENCE.** Recapture after changing the live comparison."), kind="danger")
         data = capture.to_dict()
-        return mo.Html(f'<div class="saved"><b>Saved snapshot</b> · original prediction: {data["prediction"]}<br><small>Track {data["track"]}; saved values remain fixed when live controls move.</small></div>')
+        return mo.Html(f'<div style="border-left:3px solid #247a4d;padding:8px 12px;background:#f8fafc"><b>Saved snapshot</b> · original prediction: {data["prediction"]}<br><small>Track {data["track"]}; saved values remain fixed when live controls move.</small></div>')
 
     def part_a():
-        intro = mo.md(f"### A · Does drift prove the model is wrong? (9 min)\nThe {scenario.label} proxy rises before delayed outcomes arrive. Choose a threshold, commit a prediction, and compare proxy alerts with eventual labels.")
+        intro = mo.md(f"The {scenario.label} proxy rises before delayed outcomes arrive. Choose a threshold, commit a prediction, and compare proxy alerts with eventual labels.")
         if a_prediction.value is None:
             return mo.vstack([intro, a_threshold, a_prediction])
         figure = go.Figure()
         figure.add_scatter(x=a_result["time_hours"], y=a_result["outcome_quality_pct"], name="Outcome quality", line={"color": COLORS["BlueLine"]})
         figure.add_scatter(x=a_result["time_hours"], y=a_result["proxy_values"], name="Proxy", yaxis="y2", line={"color": COLORS["OrangeLine"]})
-        figure.update_layout(height=285, margin=dict(l=20, r=55, t=20, b=35), xaxis_title="Event time (hours)", yaxis_title="Outcome quality (%)", yaxis2=dict(title="Proxy value", overlaying="y", side="right"), legend_orientation="h")
+        figure = apply_plotly_theme(figure)
+        figure.update_layout(
+            height=350, margin=dict(l=20, r=55, t=20, b=110),
+            xaxis_title="Event time (hours)", yaxis_title="Outcome quality (%)",
+            yaxis2=dict(title="Proxy value", overlaying="y", side="right"),
+            legend=dict(orientation="h", x=0.5, xanchor="center", y=-0.30, yanchor="top"),
+        )
         rows = [
             {"Run": "Balanced baseline", "Alerts": a_base["investigations"], "False investigations": a_base["false_investigations"], "Missed failures": a_base["missed_failures"], "Label confirmation": f'{a_base["first_outcome_confirmation_hours"]:g} h'},
             {"Run": "Selected threshold", "Alerts": a_result["investigations"], "False investigations": a_result["false_investigations"], "Missed failures": a_result["missed_failures"], "Label confirmation": f'{a_result["first_outcome_confirmation_hours"]:g} h'},
         ]
         return mo.vstack([
-            intro, a_threshold, a_prediction, apply_plotly_theme(figure), table(rows),
+            intro, a_threshold, a_prediction, figure, table(rows),
             mo.callout(mo.md(f"**Your prediction:** {a_prediction.value}. **Observed replay:** the selected proxy produced **{a_result['false_investigations']} false investigations** and **{a_result['missed_failures']} missed failure observations**. Outcome confirmation remained delayed until **{a_result['first_outcome_confirmation_hours']:g} h**."), kind="info"),
             a_capture, saved("A"),
             mo.accordion({"Calculation Notes": mo.md("MLSysIM compares each sampled proxy event with its supplied eventual outcome. A proxy alert starts an investigation; it does not change or prove the outcome. Label availability equals event time plus the scenario's label delay.")}),
         ])
 
     def part_b():
-        intro = mo.md("### B · How sensitive should monitoring be? (10 min)\nCompare one selected threshold and cadence with the balanced baseline. The operating costs are investigations, missed failures, observation delay, and telemetry expense.")
+        intro = mo.md("The release owner has a plausible version name and a matching aggregate screen. Predict what establishes per-request parity, then test a transformation and the bundle retained for recovery.")
+        controls = mo.hstack([parity_transform, parity_bundle], widths="equal", wrap=True)
         if b_prediction.value is None:
-            return mo.vstack([intro, mo.hstack([b_threshold, b_interval], widths="equal", wrap=True), b_prediction])
-        figure = go.Figure([
-            go.Bar(name="False investigations", x=["Balanced", "Selected"], y=[b_base["false_investigations"], b_result["false_investigations"]], marker_color=COLORS["OrangeLine"]),
-            go.Bar(name="Missed failures", x=["Balanced", "Selected"], y=[b_base["missed_failures"], b_result["missed_failures"]], marker_color=COLORS["RedLine"]),
-        ])
-        figure.update_layout(barmode="group", height=270, margin=dict(l=20, r=20, t=20, b=30), yaxis_title="Event count", legend_orientation="h")
-        b_base_delay_str = "undetected" if b_base["detection_delay_hours"][0] is None else f'{b_base["detection_delay_hours"][0]:g} h'
-        b_res_delay_str = "undetected" if b_result["detection_delay_hours"][0] is None else f'{b_result["detection_delay_hours"][0]:g} h'
-        rows = [
-            {"Run": "Balanced", "Observations": b_base["observations_collected"], "Investigations": b_base["investigations"], "Telemetry cost": f'${b_base["telemetry_cost_usd"]:,.2f}', "Detection delay": b_base_delay_str},
-            {"Run": "Selected", "Observations": b_result["observations_collected"], "Investigations": b_result["investigations"], "Telemetry cost": f'${b_result["telemetry_cost_usd"]:,.2f}', "Detection delay": b_res_delay_str},
-        ]
-        return mo.vstack([
-            intro, mo.hstack([b_threshold, b_interval], widths="equal", wrap=True), b_prediction,
-            apply_plotly_theme(figure), table(rows),
-            mo.callout(mo.md(f"**Your prediction:** {b_prediction.value}. **Selected result:** **{b_result['false_investigations']} false investigations**, **{b_result['missed_failures']} misses**, and **${b_result['telemetry_cost_usd']:,.2f}** in direct scenario cost. Monitoring changes observation and response; the supplied model outcomes stay fixed."), kind="danger" if b_result["missed_failures"] else "info"),
-            b_capture, saved("B"),
-            mo.accordion({"Calculation Notes": mo.md("MLSysIM samples the same outcome-labeled trace at the selected cadence. Direct cost equals collected observations plus investigations under the track's illustrative cost assumptions. No readiness score is used.")}),
-        ])
+            return mo.vstack([intro, controls, b_prediction])
+        rows = [{"Request": row["request_id"], "Raw": row["raw_value"], "Training": row["training_value"], "Serving": row["serving_value"], "Parity": "PASS" if row["matches"] else "FAIL"} for row in parity_changed["rows"]]
+        outcomes = table([{"Check": "Aggregate values", "Selected": "match" if parity_changed["aggregate_distribution_matches"] else "differ"},
+                          {"Check": "Keyed mismatches", "Selected": parity_changed["mismatch_count"]},
+                          {"Check": "Replay available", "Selected": parity_changed["replay_available"]},
+                          {"Check": "Compatible retest", "Selected": parity_changed["compatible_retest_passes"]}])
+        return mo.vstack([intro, controls, b_prediction, table(rows), outcomes,
+            mo.callout(mo.md(f"The selected path has **{parity_changed['mismatch_count']} keyed mismatches**. Aggregate agreement is **{parity_changed['aggregate_distribution_matches']}**; compatible replay passes **{parity_changed['compatible_retest_passes']}**. Those checks answer different questions."), kind="info"),
+            b_capture, saved("B"), mo.md("**Explain:** which exact request or missing artifact changes your diagnosis? Try a compatible restoration and a weights-only rollback before deciding what the team can reproduce."),
+            mo.accordion({"Monitoring policy for subsequent operations": mo.vstack([b_threshold, b_interval, table([{"Policy": "Baseline", "False investigations": b_base["false_investigations"], "Missed failures": b_base["missed_failures"]}, {"Policy": "Selected", "False investigations": b_result["false_investigations"], "Missed failures": b_result["missed_failures"]}])]),
+                          "Calculation Notes": mo.md(parity_changed["limitation"] + " A complete release identity binds code, data, configuration, environment, weights, and fitted state. An identity alone does not establish that a missing artifact can be recovered.")})])
 
     def part_c():
         host_note = (
             f" Retraining for on-device models executes on a companion development host (1 core for {scenario.retraining.training_duration.to('hour').magnitude:g} hours), not on the microcontroller."
             if track_id in ("tinyml", "mobile") else ""
         )
-        intro = mo.md(f"### C · When should we retrain? (10 min)\nCompare a calendar schedule with a policy that waits for delayed failure evidence.{host_note} Both policies use the same job duration, resources, and supplied candidate outcome traces.")
+        intro = mo.md(f"Compare a calendar schedule with a policy that waits for delayed failure evidence.{host_note} Both policies use the same job duration, resources, and supplied candidate outcome traces.")
         controls = mo.hstack([c_interval, c_choice], widths="equal", wrap=True)
         if c_prediction.value is None:
             return mo.vstack([intro, controls, c_prediction])
@@ -449,79 +500,58 @@ def _(
         ])
 
     def part_d():
-        lens_note = (
-            " On single embedded devices, canary request-splitting represents local shadow execution or session staging, as microcontrollers lack reverse-proxy traffic routers."
-            if track_id in ("tinyml", "mobile") else ""
-        )
-        intro = mo.md(f"### D · What evidence justifies promotion? (11 min)\nCompare the tested canary fractions under one common horizon.{lens_note} The gate requires labeled candidate and baseline outcomes plus minimum coverage in every required cohort. It is an operational evidence rule, not a claim of statistical significance.")
-        rows = [
-            {"Canary": f"{result['canary_fraction_pct']:g}%", "Exposed": result["exposed_requests"], "Candidate labels": result["candidate_labeled"], "Exposed failures": result["exposed_failures"], "Cohort gate": "PASS" if result["evidence_requirements_met"] else "FAIL", "Decision": result["decision"].upper()}
-            for result in d_results.values()
-        ]
+        intro = mo.md("The team proposes a tiny canary while another job owns part of the available allocation. Predict what traffic splitting changes, then test whether two complete artifacts fit. Waiting can recover capacity, but the observation deadline stays fixed. These are declared shared-pool allocations, not measured deployment capacity; the TinyML reference reserves flash banks rather than simultaneous inference SRAM.")
         if d_prediction.value is None:
-            return mo.vstack([intro, d_prediction])
-        figure = go.Figure([
-            go.Bar(name="Candidate labels", x=[f"{result['canary_fraction_pct']:g}%" for result in d_results.values()], y=[result["candidate_labeled"] for result in d_results.values()], marker_color=COLORS["BlueLine"]),
-            go.Bar(name="Exposed failures", x=[f"{result['canary_fraction_pct']:g}%" for result in d_results.values()], y=[result["exposed_failures"] for result in d_results.values()], marker_color=COLORS["RedLine"]),
-        ])
-        figure.update_layout(barmode="group", height=285, margin=dict(l=20, r=20, t=20, b=30), xaxis_title="Canary traffic", yaxis_title="Observed request count", legend_orientation="h")
+            return mo.vstack([intro, d_reservation, d_prediction])
+        profile = d_capacity_pair["overlap"]["allocation"]
+        allocations = table([{"Reservation": "Physical device / bank capacity", "Amount": profile["physical_display"]},
+                             {"Reservation": "Protected other work", "Amount": profile["protected_display"]},
+                             {"Reservation": "One complete artifact", "Amount": profile["copy_display"]},
+                             {"Reservation": "Active background job", "Amount": profile["background_display"]}])
+        capacity_rows = [{"Plan": plan, "Full copies": result["resident_copies"], "Required": fmt_memory(Q_(result["required_bytes"], "byte")),
+                          "Available": fmt_memory(Q_(result["available_bytes"], "byte")), "Capacity": "PASS" if result["capacity_fits"] else "FAIL",
+                          "Launch delay": fmt_time(Q_(result["launch_delay_hours"], "hour"), unit="hour", precision=None), "Mature candidate labels": result["candidate_labeled"]} for plan, result in d_capacity_pair.items()]
+        rows = [{"Canary": f"{result['canary_fraction_pct']:g}%", "Full copies": result["resident_copies"], "Capacity": "PASS" if result["capacity_fits"] else "FAIL",
+                 "Exposed": result["exposed_requests"], "Candidate labels": result["candidate_labeled"], "Cohort gate": "PASS" if result["evidence_requirements_met"] else "FAIL", "Decision": result["decision"].replace("_", " ")} for result in d_results.values()]
+        figure = go.Figure()
+        for label, color in (("Required", COLORS["RedLine"]), ("Available", COLORS["BlueLine"])):
+            key = "required_bytes" if label == "Required" else "available_bytes"
+            figure.add_bar(name=label, x=list(d_capacity_pair), y=[result[key] for result in d_capacity_pair.values()], marker_color=color)
+        figure.update_layout(barmode="group", height=260, yaxis_title="Declared allocation (bytes)", margin=dict(l=35,r=15,t=15,b=30),legend_orientation="h")
         _selected = d_results[0.0] if d_choice.value in (None, "none") else d_results[d_choice.value]
-        if d_choice.value == "none":
-            _banner = "HOLD RECOMMENDED — candidate outcomes do not justify promotion."
-            _callout_kind = "info"
-        elif d_choice.value is None:
-            _banner = "Select a promotion recommendation to compare against your rejected alternative."
-            _callout_kind = "info"
-        elif _selected["decision"] == "promote":
-            _banner = f"Selected gate decision: PROMOTE after {_selected['candidate_labeled']} candidate labels."
-            _callout_kind = "success"
-        else:
-            _banner = f"Selected gate decision: {_selected['decision'].upper()}."
-            _callout_kind = "danger"
-        calc_note = (
-            "MLSysIM routes the selected traffic fraction, waits for the scenario's delayed labels, counts observed successes, checks required cohort coverage, and applies the stated minimum-evidence margins. More samples alone do not certify significance."
-            + (" For single-node embedded systems, canary fractions simulate shadow mode or dual-slot trials without requiring a cloud reverse proxy." if track_id in ("tinyml", "mobile") else "")
-        )
-        return mo.vstack([
-            intro, d_prediction, apply_plotly_theme(figure), table(rows),
-            mo.hstack([d_choice, d_rejected], widths="equal", wrap=True),
-            mo.callout(mo.md(f"**Your prediction:** {d_prediction.value}. **{_banner}** Record a different tested alternative; a no-feasible conclusion is valid only when none of the tested positive fractions supports promotion."), kind=_callout_kind),
-            d_capture, saved("D"),
-            mo.accordion({"Calculation Notes": mo.md(calc_note)}),
-        ])
+        _message = ("Hold the rollout; no candidate is installed for the zero-traffic baseline." if d_choice.value == "none" else
+                    "Choose a rollout or a justified hold after comparing capacity and evidence." if d_choice.value is None else
+                    f"Selected case: {_selected['decision'].replace('_', ' ')}. Capacity and outcome evidence must both permit promotion.")
+        return mo.vstack([intro, d_reservation, d_prediction, mo.md(f"**Allocation reference:** {profile['artifact']} · {profile['resource']}"),
+            apply_plotly_theme(figure), table(capacity_rows), table(rows), mo.hstack([d_choice,d_rejected],widths="equal",wrap=True),
+            mo.callout(mo.md(_message + " A failed allocation executes no candidate requests; its absent labels cannot justify a release."),kind="info"),
+            mo.md("**Explain:** lower the nonzero traffic share without changing the staging plan. Does the candidate copy shrink? Then wait for the reservation: what capacity is recovered, and which labels miss the unchanged observation deadline?"),
+            d_capture,saved("D"),mo.accordion({"Allocation and calculation notes":mo.vstack([allocations,mo.md(d_capacity_pair["wait"]["limitation"])])})])
 
     def part_e():
-        intro = mo.md(f"### E · Does the runbook survive an incident? (8 min)\nReplay the selected monitoring policy and a rollback affecting **{100 * e_affected_fraction:g}%** of requests. Compare the 30-minute rollback baseline with a tested recovery stage.")
+        intro = mo.md("An incident commander offers a fast weights-only rollback. The release owner asks what a new request and an already-admitted candidate request will actually execute. Keep the rollback duration fixed while repairing the release unit, request handling, and degraded-data obligation. A separate cause change tests whether rollback addresses this incident at all.")
+        controls = mo.vstack([mo.hstack([e_restore,e_inflight],widths="equal",wrap=True),mo.hstack([e_logs,e_cause],widths="equal",wrap=True),e_rollback])
         if e_prediction.value is None:
-            return mo.vstack([intro, e_rollback, e_prediction])
-        figure = go.Figure()
-        figure.add_scatter(
-            x=[e_result["incident_started_hours"], e_result["detected_hours"], e_result["triage_completed_hours"], e_result["rollback_completed_hours"], e_result["recovery_validated_hours"]],
-            y=["Start", "Detect", "Triage", "Rollback", "Validate"], mode="lines+markers",
-            marker={"size": 11, "color": COLORS["BlueLine"]}, name="Selected runbook",
-        )
-        figure.update_layout(height=275, margin=dict(l=70, r=20, t=20, b=35), xaxis_title="Event time (hours)", showlegend=False)
-        mttr_base_str = f'{e_base["mean_time_to_recovery_hours"]:.2f} h' if e_base["mean_time_to_recovery_hours"] is not None else "unrecovered"
-        mttr_res_str = f'{e_result["mean_time_to_recovery_hours"]:.2f} h' if e_result["mean_time_to_recovery_hours"] is not None else "unrecovered"
-        rows = [
-            {"Runbook": "30-minute rollback", "MTTR": mttr_base_str, "Exposed requests": e_base["exposed_requests"], "Exposure cost": f'${e_base["exposure_cost_usd"]:,.2f}', "Objective": "PASS" if e_base["met_recovery_objective"] else "FAIL"},
-            {"Runbook": "Selected rollback", "MTTR": mttr_res_str, "Exposed requests": e_result["exposed_requests"], "Exposure cost": f'${e_result["exposure_cost_usd"]:,.2f}', "Objective": "PASS" if e_result["met_recovery_objective"] else "FAIL"},
-        ]
-        callout_msg = (
-            f"recovery was verified in **{mttr_res_str}**"
-            if e_result["mean_time_to_recovery_hours"] is not None
-            else "incident was not recovered"
-        )
-        calc_note = (
-            "MLSysIM orders detection, triage, rollback, and validation in sequence. Exposure ends only when rollback completes. Total incident cost adds harmful-request exposure and response labor once; it contains no overlapping risk score."
-            + (" Rapid rollback on embedded or mobile devices relies on local dual-partition (A/B bank) firmware/model switching rather than multi-hour OTA reflashing." if track_id in ("tinyml", "mobile") else "")
-        )
-        return mo.vstack([
-            intro, e_rollback, e_prediction, apply_plotly_theme(figure), table(rows),
-            mo.callout(mo.md(f"**Your prediction:** {e_prediction.value}. **Selected replay:** {callout_msg}, with **{e_result['exposed_requests']:,} exposed requests** and **${e_result['total_incident_cost_usd']:,.2f}** direct incident cost."), kind="success" if e_result["met_recovery_objective"] else "danger"),
-            e_capture, saved("E"),
-            mo.accordion({"Calculation Notes": mo.md(calc_note)}),
-        ])
+            return mo.vstack([intro,controls,e_prediction])
+        requests = []
+        for row in e_result["requests"]:
+            requests.append({"Request":row["request_id"],"Expected": "/".join(row["expected_bundle"].values()),
+                             "Actually selected": "/".join(row["actual_bundle"].values()),
+                             "Disposition":"Cancellation confirmed" if row["canceled_confirmed"] else "Completed",
+                             "Contract":"Not executed" if row["compatible"] is None else "PASS" if row["compatible"] else "FAIL"})
+        checks = table([{"Gate":"Serving request contract","Result":e_result["serving_contract_restored"]},
+                        {"Gate":"Cause addressed by rollback","Result":e_result["cause_repaired"]},
+                        {"Gate":"Degraded logs quarantined","Result":e_result["degraded_logs_quarantined"]},
+                        {"Gate":"Fixture recovery verified","Result":e_result["verified_recovery"]}])
+        rows = [{"Policy":label,"Verified recovery":result["verified_recovery"],
+                 "Recovery time": "Unavailable" if result["mean_time_to_recovery_hours"] is None else fmt_time(Q_(result["mean_time_to_recovery_hours"],"hour"),unit="hour", precision=None),
+                 "Candidate copies retained while draining":result["retained_candidate_copies"],"Confirmed cancellations":result["confirmed_cancellations"]}
+                for label,result in (("Weights-only baseline",e_base),("Selected response",e_result))]
+        _failed = "; ".join(e_result["failure_explanations"]) or "none in the declared fixture"
+        return mo.vstack([intro,controls,e_prediction,table(requests),checks,table(rows),
+            mo.callout(mo.md(f"**Observed blockers:** {_failed}. The nominal route-change duration is not proof that request contracts or future training data were repaired."),kind="success" if e_result["verified_recovery"] else "warn"),
+            mo.md("**Explain:** restore the complete bundle but mishandle the in-flight request; then compare pinned drain with confirmed cancellation. Which work is retained or lost? Finally change the incident cause: which valid contract still lacks behavioral evidence?"),
+            e_capture,saved("E"),mo.accordion({"Calculation notes":mo.md(e_result["limitation"] + " These are component-version compatibility checks, not request-output or cache-content replay. The drain uses the supplied validation duration as an additional declared wait; cancellation is assumed confirmed. End-to-end cancellation protocols and unknown post-cutover harm are not modeled.")})])
 
     def build_synthesis():
         rows = []
@@ -549,15 +579,23 @@ def _(
         ])
 
     tabs = mo.ui.tabs({
-        "Part A": part_a(), "Part B": part_b(), "Part C": part_c(),
-        "Part D": part_d(), "Part E": part_e(), "Synthesis": build_synthesis(),
+        "Part A": notebook_learning_part(learning_path, "A", part_a()), "Part B": notebook_learning_part(learning_path, "B", part_b()), "Part C": notebook_learning_part(learning_path, "C", part_c()),
+        "Part D": notebook_learning_part(learning_path, "D", part_d()), "Part E": notebook_learning_part(learning_path, "E", part_e()), "Synthesis": build_synthesis(),
     })
-    tabs
+    notebook_shell([notebook_tab_hint(), tabs], volume=1)
     return (audit,)
 
 
+@app.cell(hide_code=True)
+def _():
+    from mlsysbook_labs.learning_paths import get_learning_path as _submission_path
+    from mlsysbook_labs.notebook import notebook_shell as _submission_shell, notebook_submission as _submission
+    _submission_shell([_submission(_submission_path(1, 14))])
+    return
+
+
 @app.cell
-def _(
+def _(learning_path, notebook_shell,
     audit, build_lab_report, final_choice, final_rejected, final_risk,
     final_trigger, get_evidence, get_lab_metadata, mo, rationale,
     report_export_panel, scenario, track_id,
@@ -570,22 +608,19 @@ def _(
         and bool(rationale.value.strip()) and final_choice.value != final_rejected.value
         and final_choice.value == _d_decision
     )
-    mo.stop(not _ready)
+    from mlsysbook_labs.notebook import notebook_download_readiness as _download_readiness
+    mo.stop(not _ready, _download_readiness(volume=1))
     snapshots = {part: _captures[part].to_dict() for part in "ABCDE"}
     c_reported = snapshots["C"]["chosen_result"] or snapshots["C"]["result"]
     report = build_lab_report(
         get_lab_metadata("vol1/lab_14_ml_ops.py"), track=track_id, scenario=scenario.label,
-        learning_objectives=[
-            "Compare drift proxies with delayed outcome labels",
-            "Balance monitoring sensitivity, retraining cost, and stale-outcome loss",
-            "Require rollout evidence and verify incident recovery",
-        ],
+        learning_objectives=learning_path["learning_objectives"],
         predictions={part: snapshots[part]["prediction"] for part in "ABCDE"},
         knob_settings={part: snapshots[part]["inputs"] for part in "ABCDE"},
         evidence_summary={part: {"baseline": snapshots[part]["baseline"], "result": snapshots[part]["result"], "alternatives": snapshots[part]["alternatives"]} for part in "ABCDE"},
         binding_constraints={
             "A": {"false_investigations": snapshots["A"]["result"]["false_investigations"], "missed_failures": snapshots["A"]["result"]["missed_failures"]},
-            "B": {"false_investigations": snapshots["B"]["result"]["false_investigations"], "missed_failures": snapshots["B"]["result"]["missed_failures"]},
+            "B": {"keyed_mismatches": snapshots["B"]["result"]["mismatch_count"], "compatible_retest_passes": snapshots["B"]["result"]["compatible_retest_passes"]},
             "C": {"jobs": c_reported["job_count"], "stale_outcome_loss_usd": c_reported["stale_outcome_loss_usd"]},
             "D": {"decision": snapshots["D"]["decision"], "cohort_gate": (snapshots["D"]["chosen_result"] or snapshots["D"]["result"])["evidence_requirements_met"]},
             "E": {"verified_recovery": snapshots["E"]["result"]["verified_recovery"], "met_objective": snapshots["E"]["result"]["met_recovery_objective"]},
@@ -602,12 +637,14 @@ def _(
         result_snapshot={"track": track_id, "captures": snapshots, "recommendation": final_choice.value, "rejected_alternative": final_rejected.value, "reevaluation_trigger": final_trigger.value, "residual_risk": final_risk.value},
         source_trace={"scenario": scenario.scenario_note, "calculations": "MLSysIM outcome-labeled operations replay."},
     )
-    mo.vstack([mo.md("## Local evidence report"), report_export_panel(report)])
+    notebook_shell([report_export_panel(report)], volume=1)
     return (report,)
 
 
+
+
 @app.cell
-async def _(
+def _(notebook_shell,
     audit, final_choice, final_rejected, final_risk, final_trigger,
     get_evidence, ledger, mo, rationale, track_id,
 ):
@@ -619,9 +656,27 @@ async def _(
         and bool(rationale.value.strip()) and final_choice.value != final_rejected.value
         and final_choice.value == _d_decision
     )
-    _save_status = "EVIDENCE IN PROGRESS"
+    save_discussion = mo.ui.run_button(label="Save discussion", disabled=not _ready)
+    notebook_shell([save_discussion, mo.md("When ready, downloading is separate from saving locally. Editing your evidence or discussion requires saving again.")], volume=1)
+    return (save_discussion,)
+
+
+@app.cell
+async def _(notebook_shell, notebook_status, save_discussion,
+    audit, final_choice, final_rejected, final_risk, final_trigger,
+    get_evidence, ledger, mo, rationale, track_id,
+):
+    _captures = get_evidence()
+    _d_decision = _captures["D"].to_dict()["decision"] if "D" in _captures else None
+    _ready = (
+        audit.complete
+        and all(widget.value is not None for widget in (final_choice, final_rejected, final_trigger, final_risk))
+        and bool(rationale.value.strip()) and final_choice.value != final_rejected.value
+        and final_choice.value == _d_decision
+    )
+    _save_status = ("Ready to save" if _ready else "Evidence in progress")
     _status_class = "hud-active"
-    if _ready:
+    if _ready and save_discussion.value:
         try:
             ledger.save(chapter=14, design={
                 "schema_version": 1, "lab_id": "v1_14", "track_id": track_id,
@@ -637,7 +692,7 @@ async def _(
         except Exception:
             _save_status = "SAVE FAILED — REPORT STILL AVAILABLE"
             _status_class = "hud-failed"
-    mo.Html(f'<div class="lab-hud"><span class="hud-label">LAB</span><span class="hud-value">14 · Evidence-Driven Operations</span><span aria-hidden="true"> · STATUS: </span><span class="{_status_class}">{_save_status}</span></div>')
+    notebook_shell([notebook_status(_save_status, "Editing requires saving again; the downloaded discussion is separate from local storage.")], volume=1)
     return
 
 

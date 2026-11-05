@@ -409,7 +409,7 @@ def emit_taxonomy_labels(vault_dir: Path, output: Path) -> dict[str, Any]:
 
     Questions carry identities (``taxonomy_subject``, ``taxonomy_concepts``);
     this maps them to display codes and labels, read from the repo's
-    ``taxonomy/ml-systems-taxonomy.yml`` via the canonical release builder so
+    ``taxonomy/taxonomy.yml`` via the canonical release builder so
     the site never drifts from the taxonomy.
     """
     from vault_cli.ml_systems_taxonomy import build_staffml_labels_payload

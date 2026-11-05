@@ -260,3 +260,71 @@ def test_selective_prediction_preserves_dynamic_units_and_cohort_breakdown(track
     assert res["unit"]
     assert res["cohort_fallback_arrivals"]
     assert sum(res["cohort_fallback_arrivals"].values()) == res["fallback_arrivals"]
+
+
+def test_ordered_pipeline_blind_spots_and_legitimate_quarantine():
+    from mlsysim.labs.experiments.v2_14_experiments import poisoning_experiment_payload
+    runs = [poisoning_experiment_payload(layer_count=n, lineage=False)["result"] for n in range(1,5)]
+    assert [run["retained_poison_records"] for run in runs] == [3, 2, 1, 1]
+    assert [run["quarantined_legitimate_records"] for run in runs] == [0, 1, 1, 1]
+    assert [run["promotion_blocked"] for run in runs] == [False, False, False, True]
+    assert {run["clean_probe_correct"] for run in runs} == {11}
+    assert {run["trigger_probe_correct"] for run in runs} == {0}
+    # A post-training check blocks the candidate, rather than rewriting rows or outcomes.
+    assert runs[2]["record_trace"] == runs[3]["record_trace"]
+
+
+def test_lineage_bounds_historical_reversal_without_repairing_weights():
+    from mlsysim.labs.experiments.v2_14_experiments import poisoning_experiment_payload
+    no = poisoning_experiment_payload(layer_count=4, lineage=False)["result"]
+    yes = poisoning_experiment_payload(layer_count=4, lineage=True)["result"]
+    assert no["identified_descendants"] == [] and not no["descendant_scope_known"]
+    assert yes["identified_descendants"] == ["checkpoint-from-batch", "deployed-descendant"]
+    assert not yes["descendant_weights_repaired"]
+    for key in ("record_trace", "retained_poison_records", "promotion_blocked"):
+        assert no[key] == yes[key]
+
+
+@pytest.mark.parametrize("value", [True, 1.0, 0, 5, "4"])
+def test_poisoning_layers_reject_invalid_controls(value):
+    from mlsysim.labs.experiments.v2_14_experiments import poisoning_experiment_payload
+    with pytest.raises(ValueError):
+        poisoning_experiment_payload(layer_count=value, lineage=True)
+
+
+def test_generation_agreement_and_entropy_can_accept_same_false_answers():
+    from mlsysim.labs.experiments.v2_14_experiments import generative_reliability_payload
+    entropy = generative_reliability_payload(routing="entropy", evidence_source="current")["result"]
+    agreement = generative_reliability_payload(routing="consistency", evidence_source="current")["result"]
+    evidence = generative_reliability_payload(routing="evidence", evidence_source="current")["result"]
+    assert entropy["current_reference_errors_accepted"] == agreement["current_reference_errors_accepted"] == 2
+    assert evidence["current_reference_errors_accepted"] == 0
+    assert agreement["decode_sequences"] == 3 * entropy["decode_sequences"]
+    assert evidence["review_arrivals"] > entropy["review_arrivals"]
+    assert evidence["evidence_checks"] == evidence["requests"]
+    assert evidence["retrieval_gap_cases"] == evidence["generation_gap_cases"] == 1
+
+
+def test_archived_evidence_can_support_obsolete_advice_without_changing_answers():
+    from mlsysim.labs.experiments.v2_14_experiments import generative_reliability_payload
+    current = generative_reliability_payload(routing="evidence", evidence_source="current")["result"]
+    old = generative_reliability_payload(routing="evidence", evidence_source="archived")["result"]
+    assert current["unsupported_accepted"] == old["unsupported_accepted"] == 0
+    assert current["current_reference_errors_accepted"] == 0
+    assert old["current_reference_errors_accepted"] == 1
+    assert [row["answer"] for row in current["cases"]] == [row["answer"] for row in old["cases"]]
+
+
+def test_combined_reviews_round_trip_replay_and_do_not_conflate_guarantees():
+    from mlsysim.labs.experiments.v2_14_experiments import robustness_review_payload, competence_review_payload
+    pipeline = robustness_review_payload("edge", "input_filter", "concept_drift", layer_count=4, lineage=True)
+    assert pipeline["result"]["stressed_accuracy"] is None
+    assert pipeline["result"]["poisoning"]["promotion_blocked"]
+    competence = competence_review_payload([0.1,0.2,0.3], [0.2,0.8], alpha=0.1,
+                                         exchangeability_assumed=False, routing="consistency", evidence_source="current")
+    assert competence["result"]["full_set_required"]
+    assert not competence["result"]["exchangeability_assumed"]
+    assert competence["result"]["generation"]["current_reference_errors_accepted"] == 2
+    for function, payload in ((robustness_review_payload,pipeline),(competence_review_payload,competence)):
+        restored = json.loads(json.dumps(payload,allow_nan=False))
+        assert function(**restored["inputs"]) == restored

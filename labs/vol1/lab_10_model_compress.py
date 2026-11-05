@@ -14,7 +14,7 @@ async def _():
         import micropip
 
         await micropip.install(["pydantic", "pint", "plotly", "pandas"], keep_going=False)
-        await micropip.install("../../wheels/mlsysim-0.3.0-py3-none-any.whl", keep_going=False)
+        await micropip.install("../../wheels/mlsysim-0.3.1-py3-none-any.whl", keep_going=False)
         await micropip.install("../../wheels/mlsysbook_labs-0.1.0-py3-none-any.whl", keep_going=False)
     else:
         labs_dir = Path(__file__).resolve().parents[1]
@@ -59,10 +59,15 @@ def _(mo):
 
 
 @app.cell
-def _(mo, set_evidence):
+def _(ledger, mo, set_evidence):
+    from mlsysbook_labs.contexts import preferred_context as _preferred_context
+
+    _track_options = {"TinyML": "tinyml", "Mobile": "mobile", "Edge": "edge", "Cloud": "cloud"}
+    _preferred_track = _preferred_context(ledger)
+    _initial_label = next(label for label, identifier in _track_options.items() if identifier == _preferred_track)
     track = mo.ui.dropdown(
-        {"TinyML": "tinyml", "Mobile": "mobile", "Edge": "edge", "Cloud": "cloud"},
-        value="TinyML", label="Deployment track", on_change=lambda _value: set_evidence({}),
+        _track_options,
+        value=_initial_label, label="Deployment track", on_change=lambda _value: set_evidence({}),
     )
     return (track,)
 
@@ -328,25 +333,25 @@ def _(
 
 
 @app.cell
-def _(ACADEMIC_LAB_CSS, LAB_CSS, mo, profile, scenario, track, track_context):
-    css = mo.Html("""
-    <style>
-    .pilot-head{background:linear-gradient(135deg,#101827,#1d4f78);color:white;border-radius:14px;padding:clamp(18px,4vw,32px);margin-bottom:14px}
-    .pilot-top{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font:700 .72rem ui-monospace;letter-spacing:.08em}
-    .pilot-head h1{font-size:clamp(1.65rem,5vw,2.65rem);line-height:1.05;margin:16px 0 8px}.pilot-head p{color:#dbeafe;max-width:780px}
-    .pilot-note{color:#475569;font-size:.9rem;line-height:1.5;margin:0;padding:0 2px}
-    .lab-hud{display:flex;align-items:center;flex-wrap:wrap;gap:10px;background:#101827!important;color:#fff;padding:14px 18px;border-radius:9px}
-    .lab-hud .hud-label{color:#a7b9cf}.lab-hud .hud-value{color:#fff}.lab-hud .hud-active{color:#86efac}
-    .pilot-meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:9px;margin-top:17px}.pilot-meta div{background:#ffffff14;border:1px solid #ffffff26;padding:9px 11px;border-radius:8px}
-    .saved{border-left:4px solid #2ca02c;background:#f0fdf4;padding:9px 12px;border-radius:7px}.table-wrap{max-width:100%;overflow-x:auto}
-    @media(max-width:520px){.pilot-head{border-radius:9px;margin-top:30px}.pilot-meta{grid-template-columns:1fr}}
-    </style>""")
-    header = mo.Html(f"""<section class="pilot-head"><div class="pilot-top"><span>VOLUME I · LAB 10</span><span>ABOUT 50–55 MIN</span></div><h1>Compression That Executes</h1><p>When does a smaller representation improve the deployed system, and when does it only move the bottleneck?</p><div class="pilot-meta"><div><b>Track</b><br>{profile.label}</div><div><b>Task evidence</b><br>{scenario.quality_metric}</div><div><b>Deliverable</b><br>Compression release recipe</div></div></section>""")
-    mo.vstack([
-        LAB_CSS, ACADEMIC_LAB_CSS, css, header, track, track_context(profile),
-        mo.Html('<p class="pilot-note">All task outcomes and effective execution paths are illustrative scenario evidence. Physical sizes, metadata, state, latency, and ordered composition are calculated in MLSysIM. Open Calculation Notes in each part for assumptions.</p>'),
-    ], gap=0.5)
-    return
+def _(get_lab_metadata, mo, track, track_id):
+    from mlsysbook_labs.notebook import notebook_scenario as _scenario
+    from mlsysbook_labs.notebook import notebook_header, notebook_learning_map, notebook_learning_part, notebook_shell, notebook_table, notebook_tab_hint
+    from mlsysbook_labs.learning_paths import get_learning_path
+    from mlsysim import Scenarios
+
+    _mission = Scenarios.DeploymentJourneys.get(track_id)
+    _episode = _mission.episode(10)
+    _metadata = get_lab_metadata("vol1/lab_10_model_compress.py")
+    learning_contract = get_learning_path("vol1", 10)
+    notebook_shell([
+        notebook_header(_metadata, _episode.question, topics=_episode.core_concepts),
+        track,
+        _scenario(learning_contract, track=track_id, scene=_episode.scene),
+        notebook_learning_map(learning_contract),
+        mo.md('Task outcomes and execution paths are supplied teaching scenarios. Resource sizes, state, latency, and composition are computed from the selected case. Open Calculation Notes for the comparison boundary.'),
+    ])
+    return learning_contract, notebook_learning_part, notebook_shell, notebook_table, notebook_tab_hint
+
 
 
 @app.cell
@@ -365,6 +370,11 @@ def _(
     d_upstream, d_volume, e_alternatives, e_capture, e_prediction, e_recipe,
     e_release, e_result, e_upstream, final_choice, final_rejected, final_risk,
     final_trigger, get_evidence, go, mo, rationale, scenario, track_id,
+    notebook_shell,
+    learning_contract,
+    notebook_learning_part,
+    notebook_table,
+    notebook_tab_hint,
 ):
     _captures = get_evidence()
     _upstream = {"A": a_upstream, "B": b_upstream, "C": c_upstream, "D": d_upstream, "E": e_upstream}
@@ -391,7 +401,7 @@ def _(
         return "PASS" if result.feasible else "FAIL · " + ", ".join(result.violations)
 
     def table(rows):
-        return mo.vstack([mo.ui.table(rows, pagination=False)]).style({"max-width": "100%", "overflow-x": "auto"})
+        return notebook_table(rows)
 
     def saved(part):
         _capture = _captures.get(part)
@@ -461,9 +471,17 @@ def _(
         _complete = audit.complete and all(_widget.value is not None for _widget in (final_choice, final_rejected, final_trigger, final_risk)) and bool(rationale.value.strip()) and final_choice.value != final_rejected.value and final_choice.value == _saved_decision
         return mo.vstack([mo.md("### Synthesis · Defend one release decision (5 min)\nUse saved evidence to name the chosen recipe, quantify one tested rejected alternative, state the remaining limitation, and name the condition that forces reevaluation."), table(_rows), mo.callout(mo.md("A chosen recipe must compare with another tested recipe. A hold/no-change conclusion must still name the tested alternative that came closest or failed most instructively."), kind="info"), mo.hstack([final_choice, final_rejected], widths="equal", wrap=True), mo.hstack([final_trigger, final_risk], widths="equal", wrap=True), rationale, mo.callout(mo.md("**Ready for the local report.**" if _complete else "Capture five current contrasts, match the recommendation to the saved Part E conclusion, select a different tested alternative, and add the rationale."), kind="success" if _complete else "warn")])
 
-    tabs = mo.ui.tabs({"Part A": part_a(), "Part B": part_b(), "Part C": part_c(), "Part D": part_d(), "Part E": part_e(), "Synthesis": build_synthesis()})
-    tabs
+    tabs = mo.ui.tabs({"Part A": notebook_learning_part(learning_contract, "A", part_a()), "Part B": notebook_learning_part(learning_contract, "B", part_b()), "Part C": notebook_learning_part(learning_contract, "C", part_c()), "Part D": notebook_learning_part(learning_contract, "D", part_d()), "Part E": notebook_learning_part(learning_contract, "E", part_e()), "Synthesis": build_synthesis()})
+    notebook_shell([notebook_tab_hint(), tabs])
     return (audit,)
+
+
+@app.cell(hide_code=True)
+def _():
+    from mlsysbook_labs.learning_paths import get_learning_path as _submission_path
+    from mlsysbook_labs.notebook import notebook_shell as _submission_shell, notebook_submission as _submission
+    _submission_shell([_submission(_submission_path(1, 10))])
+    return
 
 
 @app.cell
@@ -471,16 +489,19 @@ def _(
     audit, build_lab_report, final_choice, final_rejected, final_risk,
     final_trigger, get_evidence, get_lab_metadata, mo, profile, rationale,
     report_export_panel, track_id,
+    notebook_shell,
+    learning_contract,
 ):
     _captures = get_evidence()
     _saved_decision = _captures["E"].to_dict()["decision"] if "E" in _captures else None
     _ready = audit.complete and all(_widget.value is not None for _widget in (final_choice, final_rejected, final_trigger, final_risk)) and bool(rationale.value.strip()) and final_choice.value != final_rejected.value and final_choice.value == _saved_decision
-    mo.stop(not _ready)
+    from mlsysbook_labs.notebook import notebook_download_readiness as _download_readiness
+    mo.stop(not _ready, _download_readiness(volume=1))
     _snapshots = {_part: _captures[_part].to_dict() for _part in "ABCDE"}
     report = build_lab_report(
         get_lab_metadata("vol1/lab_10_model_compress.py"), track=track_id,
         scenario=profile.narrative,
-        learning_objectives=["Separate stored weights, runtime state, and executable precision", "Evaluate quantization, sparse layouts, and dense students with task evidence", "Compose an ordered compression recipe against deployment constraints"],
+        learning_objectives=learning_contract["learning_objectives"],
         predictions={_part: _snapshots[_part]["prediction"] for _part in "ABCDE"},
         knob_settings={_part: _snapshots[_part]["inputs"] for _part in "ABCDE"},
         evidence_summary={_part: {"baseline": _snapshots[_part]["baseline"], "result": _snapshots[_part]["result"], "alternatives": _snapshots[_part]["alternatives"]} for _part in "ABCDE"},
@@ -492,20 +513,39 @@ def _(
         result_snapshot={"track": track_id, "captures": _snapshots, "recommendation": final_choice.value, "rejected": final_rejected.value, "trigger": final_trigger.value, "residual_risk": final_risk.value},
         source_trace={"scenario": "Illustrative matched-task outcomes and execution assumptions.", "calculations": "MLSysIM Chapter 10 compression experiments."},
     )
-    mo.vstack([mo.md("## Local evidence report"), report_export_panel(report)])
+    notebook_shell([report_export_panel(report)])
     return (report,)
+
+
+
+
+@app.cell
+def _(
+    MODEL_ID, audit, final_choice, final_rejected, final_risk, final_trigger,
+    get_evidence, ledger, mo, rationale, track_id,
+    notebook_shell,
+):
+    _captures = get_evidence()
+    _saved_decision = _captures["E"].to_dict()["decision"] if "E" in _captures else None
+    _ready = audit.complete and all(_widget.value is not None for _widget in (final_choice, final_rejected, final_trigger, final_risk)) and bool(rationale.value.strip()) and final_choice.value != final_rejected.value and final_choice.value == _saved_decision
+    _status = "READY TO SAVE" if _ready else "EVIDENCE IN PROGRESS"
+    save_discussion = mo.ui.run_button(label="Save discussion", disabled=not _ready)
+    notebook_shell([save_discussion, mo.md("When ready, downloading is separate from saving locally. Editing evidence or your discussion requires saving again.")])
+    return (save_discussion,)
 
 
 @app.cell
 async def _(
     MODEL_ID, audit, final_choice, final_rejected, final_risk, final_trigger,
     get_evidence, ledger, mo, rationale, track_id,
+    notebook_shell,
+    save_discussion,
 ):
     _captures = get_evidence()
     _saved_decision = _captures["E"].to_dict()["decision"] if "E" in _captures else None
     _ready = audit.complete and all(_widget.value is not None for _widget in (final_choice, final_rejected, final_trigger, final_risk)) and bool(rationale.value.strip()) and final_choice.value != final_rejected.value and final_choice.value == _saved_decision
-    _status = "EVIDENCE IN PROGRESS"
-    if _ready:
+    _status = "READY TO SAVE" if _ready else "EVIDENCE IN PROGRESS"
+    if _ready and save_discussion.value:
         try:
             ledger.save(chapter=10, design={
                 "schema_version": 1, "lab_id": "v1_10", "track_id": track_id,
@@ -521,7 +561,7 @@ async def _(
             _status = "LOCAL SAVE FAILED · DOWNLOAD THE REPORT TO KEEP YOUR EVIDENCE"
         else:
             _status = "SAVED"
-    mo.Html(f'<div class="lab-hud"><span class="hud-label">LAB</span><span class="hud-value">10 · Compression That Executes · STATUS: </span><span class="hud-active">{_status}</span></div>')
+    notebook_shell([mo.Html(f'<div class="lab-hud"><span class="hud-label">LAB</span><span class="hud-value">10 · Compression That Executes · STATUS: </span><span class="hud-active">{_status}</span></div>')])
     return
 
 

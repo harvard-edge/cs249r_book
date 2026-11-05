@@ -46,12 +46,16 @@ window.MLSysFigureLessons[NAME]=async(root,{outer,verifiedArtwork})=>{
  const ceiling=svg('line',{x1:rx,y1:ry,x2:cx1,y2:ry,stroke:'#e67817','stroke-width':44,'stroke-opacity':.3,'stroke-linecap':'round','data-rb-binding':'compute'});
  // The printed batch-32 dot stays visible but faded once the marker leaves it.
  const[gx,gy]=D.states[0].xy,fade=svg('circle',{cx:gx,cy:gy,r:R.dot+3,fill:'#fff','fill-opacity':.7}),ghost=svg('circle',{cx:gx,cy:gy,r:R.halo,fill:'none',stroke:'#555','stroke-width':6,'stroke-dasharray':'14 10'});
- const halo=svg('circle',{r:R.halo,fill:'#ffd34d',stroke:'#7a5a00','stroke-width':4}),dot=svg('circle',{r:R.dot,fill:'#333','data-motion-object':'true'});
- const panel=svg('g',{'data-rb-panel':'true'}),plate=svg('rect',{x:PANEL.x,y:PANEL.y,width:PANEL.w,height:PANEL.h,rx:18,fill:'#fff','fill-opacity':.94,stroke:'#7a5a00','stroke-width':5});
+ const halo=svg('circle',{r:R.halo,fill:'#ffd34d',stroke:'#7a5a00','stroke-width':4,'data-mlsys-focus':''}),dot=svg('circle',{r:R.dot,fill:'#333','data-motion-object':'true'});
+ // The inline readout plate is step-critical: the dock and the jump pill never cover it.
+ const panel=svg('g',{'data-rb-panel':'true','data-mlsys-keep':''}),plate=svg('rect',{x:PANEL.x,y:PANEL.y,width:PANEL.w,height:PANEL.h,rx:18,fill:'#fff','fill-opacity':.94,stroke:'#7a5a00','stroke-width':5});
  // A swatch matching the moving marker ties the plate to it without a leader crossing printed labels.
  const swatch=[svg('circle',{cx:PANEL.x+66,cy:PANEL.y+62,r:30,fill:'#ffd34d',stroke:'#7a5a00','stroke-width':4}),svg('circle',{cx:PANEL.x+66,cy:PANEL.y+62,r:19,fill:'#333'})];
  const lines=[0,1,2,3].map(k=>svg('text',{x:PANEL.x+(k?36:116),y:PANEL.y+82+k*76,'font-size':k?56:58,'font-weight':k?400:700,fill:'#1d1d1d','font-family':'Helvetica Neue, Helvetica, Arial, sans-serif'}));
- panel.append(plate,...swatch,...lines);layer.append(slope,ceiling,fade,ghost,halo,dot,panel);
+ panel.append(plate,...swatch,...lines);
+ // The x-axis tick labels and title (below the measured frame) stay readable under the dock and pill.
+ const axisKeep=svg('rect',{x:D.art.frame.x0,y:D.art.frame.y1,width:D.art.frame.x1-D.art.frame.x0,height:D.art.height-D.art.frame.y1,fill:'none','data-mlsys-keep':''});
+ layer.append(slope,ceiling,fade,ghost,halo,dot,panel,axisKeep);
  const box=html('div','rb-plot');box.append(plot);
  // Readable values at every width: the same committed endpoint as the plot.
  const readout=html('div','rb-readout');readout.setAttribute('aria-live','off');
@@ -74,12 +78,17 @@ window.MLSysFigureLessons[NAME]=async(root,{outer,verifiedArtwork})=>{
   tNote.textContent=`Weights ${t.weight_mb} MB + activations ${t.act_mb} MB = ${t.total_mb} MB for ${t.mflop} MFLOP.`;
   root.dataset.ledger=JSON.stringify(D.ledgers[i]);root.dataset.batch=String(s.batch);root.dataset.bound=s.bound;delete root.dataset.pending;
  }
- const steps=L.map(({label,text},i)=>({label,get description(){return committed===i?text:'On arrival: '+text;}}));
+ // Mid-move the player shows the target step's own text under a "Next ·" heading; the plate and
+ // readout keep the committed endpoint until arrival.
+ const steps=L.map(({label,text})=>({label,description:text}));
  small.addEventListener?.('change',sizes);sizes();
  return window.MLSysOriginalPlayer.create({root,outer,title:'Where does batching move the classifier on the H100 roofline?',
   scope:`H100 values from MLSysIM: ${D.h100.text.bw} TB/s HBM bandwidth, ${D.h100.text.peak} TFLOP/s dense FP16 peak, FP16 ridge ${D.h100.text.ridge} FLOP/byte. ResNet-50 classifier head, ${D.head.inputs.toLocaleString('en-US')} inputs to ${D.head.outputs.toLocaleString('en-US')} outputs, FP16 weights and activations, one read of input and weights and one write of output per call (the chapter's batch-intensity equation and dense-layer notebook). Only this marker moves; every other printed point, both ceilings, and both ridges stay as printed. The INT8 ceiling is not used for this FP16 marker. Attainable throughput is the roofline bound, not a measured rate, and motion speed represents no time.`,
   steps,
-  render(i,{stage}){if(!mounted){stage.append(box,readout,traffic);mounted=true;}commit(i);},
+  // Compact layout: the plot leads; the value cells and byte bar follow the narration.
+  // Intro numbers come from the same calc.py states as the step labels.
+  layout:'compact',intro:`Move the Classifier (FC head) marker from the batch-${D.states[0].text.batch} point to batch ${D.states[1].text.batch}, then to batch ${D.states[5].text.batch}, and watch it climb the bandwidth slope to the dense FP16 ceiling.`,
+  render(i,{stage,details}){if(!mounted){stage.append(box);details.append(readout,traffic);mounted=true;}commit(i);},
   transition({from,to,onFrame}){
    root.dataset.pending=String(to);const a=Math.log(L[from].s.ai),b=Math.log(L[to].s.ai);
    // Committed values stay in the plate and readout; only the marker and the pending batch label move.

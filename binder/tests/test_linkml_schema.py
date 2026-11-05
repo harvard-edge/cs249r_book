@@ -33,7 +33,7 @@ from core.taxonomy_schema import (
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 AUTHORED_MODEL_CASES = [
-    ("taxonomy/ml-systems-taxonomy.yml", "UnifiedTaxonomyModel"),
+    ("taxonomy/taxonomy.yml", "UnifiedTaxonomyModel"),
     ("taxonomy/mlsysbook-alignment.yml", "BookAlignmentModel"),
     ("taxonomy/coverage-ledger.yml", "CoverageLedgerModel"),
     *[
@@ -86,23 +86,23 @@ def test_unified_taxonomy_projections_conform_to_aspect_models(tmp_path: Path):
     validate_linkml(bundle["guides"], "GuidesModel", REPO_ROOT, "projected guides")
     validate_linkml(bundle["skos"], "TaxonomyHierarchyModel", REPO_ROOT, "projected skos")
 
-    raw = load_taxonomy_yaml(REPO_ROOT / "taxonomy/ml-systems-taxonomy.yml")
+    raw = load_taxonomy_yaml(REPO_ROOT / "taxonomy/taxonomy.yml")
     no_home = deepcopy(raw)
     no_home["concepts"][0].pop("home")
     with pytest.raises(ConceptGraphError, match=r"home.*required"):
-        validate_linkml(no_home, "UnifiedTaxonomyModel", REPO_ROOT, "taxonomy/ml-systems-taxonomy.yml")
+        validate_linkml(no_home, "UnifiedTaxonomyModel", REPO_ROOT, "taxonomy/taxonomy.yml")
 
     tax_dir = tmp_path / "taxonomy"
     tax_dir.mkdir(parents=True)
     with_row_concepts = deepcopy(raw)
     with_row_concepts["areas"][0]["rows"][0]["concepts"] = ["mlsys.requirements"]
-    (tax_dir / "ml-systems-taxonomy.yml").write_text(yaml.safe_dump(with_row_concepts, sort_keys=False))
+    (tax_dir / "taxonomy.yml").write_text(yaml.safe_dump(with_row_concepts, sort_keys=False))
     with pytest.raises(ConceptGraphError, match="must not hand-list concepts"):
         load_unified_taxonomy(tmp_path)
 
     with_all_view = deepcopy(raw)
     with_all_view["views"].append({"id": "all", "title": "All", "concepts": ["mlsys.requirements"]})
-    (tax_dir / "ml-systems-taxonomy.yml").write_text(yaml.safe_dump(with_all_view, sort_keys=False))
+    (tax_dir / "taxonomy.yml").write_text(yaml.safe_dump(with_all_view, sort_keys=False))
     with pytest.raises(ConceptGraphError, match="must not hand-list 'all'"):
         load_unified_taxonomy(tmp_path)
 
@@ -279,7 +279,7 @@ def test_staffml_loader_rejects_duplicate_concepts_bad_placement_and_relation_dr
         sys.path.insert(0, str(vault_cli_src))
     from vault_cli.ml_systems_taxonomy import load_taxonomy
 
-    raw = load_taxonomy_yaml(REPO_ROOT / "taxonomy/ml-systems-taxonomy.yml")
+    raw = load_taxonomy_yaml(REPO_ROOT / "taxonomy/taxonomy.yml")
     tax_dir = tmp_path / "taxonomy"
     schema_dir = tax_dir / "schema"
     vault_dir = tmp_path / "staffml/vault"
@@ -290,21 +290,21 @@ def test_staffml_loader_rejects_duplicate_concepts_bad_placement_and_relation_dr
     # 1. Duplicate concept ID rejected
     dup_conc = deepcopy(raw)
     dup_conc["concepts"].append(deepcopy(dup_conc["concepts"][0]))
-    (tax_dir / "ml-systems-taxonomy.yml").write_text(yaml.dump(dup_conc, Dumper=yaml.SafeDumper, sort_keys=False))
+    (tax_dir / "taxonomy.yml").write_text(yaml.dump(dup_conc, Dumper=yaml.SafeDumper, sort_keys=False))
     with pytest.raises(ValueError, match="duplicate concept"):
         load_taxonomy(vault_dir)
 
     # 2. Mismatched placement_examples home rejected
     bad_place = deepcopy(raw)
     bad_place["placement_examples"][0]["home"] = bad_place["areas"][0]["rows"][0]["id"]
-    (tax_dir / "ml-systems-taxonomy.yml").write_text(yaml.dump(bad_place, Dumper=yaml.SafeDumper, sort_keys=False))
+    (tax_dir / "taxonomy.yml").write_text(yaml.dump(bad_place, Dumper=yaml.SafeDumper, sort_keys=False))
     with pytest.raises(ValueError, match="placement"):
         load_taxonomy(vault_dir)
 
     # 3. Drifted relation meaning rejected
     bad_rel = deepcopy(raw)
     bad_rel["relations"][0]["meaning"] = "drifted relation meaning"
-    (tax_dir / "ml-systems-taxonomy.yml").write_text(yaml.dump(bad_rel, Dumper=yaml.SafeDumper, sort_keys=False))
+    (tax_dir / "taxonomy.yml").write_text(yaml.dump(bad_rel, Dumper=yaml.SafeDumper, sort_keys=False))
     with pytest.raises(ValueError, match="relation .* disagrees"):
         load_taxonomy(vault_dir)
 
@@ -322,7 +322,7 @@ def test_load_taxonomy_yaml_rejects_duplicate_keys_and_aliases(tmp_path: Path):
 
 
 def test_placement_examples_validated_against_concept_home(tmp_path: Path):
-    raw = load_taxonomy_yaml(REPO_ROOT / "taxonomy/ml-systems-taxonomy.yml")
+    raw = load_taxonomy_yaml(REPO_ROOT / "taxonomy/taxonomy.yml")
     bundle = load_unified_taxonomy(REPO_ROOT)
     assert bundle is not None
     tax_dir = tmp_path / "taxonomy"
@@ -336,7 +336,7 @@ def test_placement_examples_validated_against_concept_home(tmp_path: Path):
             row.pop("book_chapters", None)
     wrong_home = bad_example["areas"][0]["rows"][0]["id"]
     bad_example["placement_examples"][0]["home"] = wrong_home
-    (tax_dir / "ml-systems-taxonomy.yml").write_text(
+    (tax_dir / "taxonomy.yml").write_text(
         yaml.dump(bad_example, Dumper=yaml.SafeDumper, sort_keys=False)
     )
     with pytest.raises(ConceptGraphError, match=f"placement example for .* claims home {wrong_home}"):
@@ -436,4 +436,33 @@ def test_compiler_cache_immutability_and_fail_closed_metamodel_keys(tmp_path: Pa
         compile_json_schema(tmp_path)
 
 
+def test_version_patterns_float_overflow_and_status_coupling(tmp_path: Path):
+    """LinkML version regexes, YAML non-finite scalar checks, and version-status coupling hold."""
+    import re
+    from core.taxonomy_schema import expected_status_for_version
 
+    raw_schema = yaml.safe_load(resolve_schema_path(REPO_ROOT).read_text())
+    for cls_name in ("Concept", "UnifiedConcept", "ReleaseConcept"):
+        pat = raw_schema["classes"][cls_name]["attributes"]["added_in"]["pattern"]
+        assert re.match(pat, "0.4-draft")
+        assert re.match(pat, "1.0")
+        assert re.match(pat, "1.0.1")
+        assert re.match(pat, "1.2.3-rc1")
+        assert not re.match(pat, "1.0-alpha")
+    for cls_name in ("Concept", "ReleaseConcept"):
+        desc = raw_schema["classes"][cls_name]["attributes"]["aliases"]["description"]
+        assert "named system exemplars" not in desc
+
+    for bad_scalar in ("1.0e+999", "1e999", "-1e999", "+1e999"):
+        overflow_yml = tmp_path / "overflow.yml"
+        overflow_yml.write_text(f"id: mlsys-taxonomy\nscore: {bad_scalar}\n")
+        with pytest.raises(ConceptGraphError, match="non-finite"):
+            load_taxonomy_yaml(overflow_yml)
+
+    pv = set(get_enum_values("ModelStatusEnum", REPO_ROOT))
+    assert pv == {"editorial-draft", "release-candidate", "normative-release"}
+    assert expected_status_for_version("0.4-draft") == "editorial-draft"
+    assert expected_status_for_version("1.0-draft") == "editorial-draft"
+    assert expected_status_for_version("1.0-rc1") == "release-candidate"
+    assert expected_status_for_version("1.0") == "normative-release"
+    assert expected_status_for_version("1.0.1") == "normative-release"

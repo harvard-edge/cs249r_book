@@ -87,10 +87,11 @@ with sync_playwright() as pw:
     assert root.get_attribute('data-step')=='0' and root.get_attribute('data-pending')=='1'
     dot=root.locator('[data-motion-object]');snap=lambda:(dot.get_attribute('cx'),dot.get_attribute('cy'),root.get_attribute('data-ledger'),root.locator('.rb-readout').inner_text(),root.locator('.mlsys-original-narration').inner_text())
     before=snap();x=float(before[0]);assert STATES[1]['xy'][0]<x<STATES[0]['xy'][0],x
-    assert json.loads(before[2])==LEDGERS[0],'committed ledger must not advance while moving';assert 'On arrival' in before[4],before[4]
+    assert json.loads(before[2])==LEDGERS[0],'committed ledger must not advance while moving';assert 'Next · Drop to batch 1' in before[4] and 'On arrival' not in before[4],before[4]
     page.screenshot(path=str(shots/f'{engine}-{width}-paused-motion.png'));page.wait_for_timeout(450);assert snap()==before,'pause must freeze the state'
     root.get_by_role('button',name='Play',exact=True).click();page.wait_for_function("window.fixtureRoot.dataset.step==='1'",timeout=12000);root.get_by_role('button',name='Pause',exact=True).click()
-    assert json.loads(root.get_attribute('data-ledger'))==LEDGERS[1];page.keyboard.press('Escape');page.emulate_media(reduced_motion='reduce')
+    # Round four (2026-10-30): one Escape does one thing; a hovered tooltip takes the first Escape. Move the pointer off the bar so this Escape closes Expand.
+    assert json.loads(root.get_attribute('data-ledger'))==LEDGERS[1];page.mouse.move(2,2);page.keyboard.press('Escape');page.emulate_media(reduced_motion='reduce')
    page.get_by_role('tab',name='Diagram',exact=True).click();assert not root.is_visible();page.screenshot(path=str(shots/f'{engine}-{width}-{theme}-static.png'))
    page.get_by_role('tab',name='Explore',exact=True).click();assert not errors,errors
    # WebKit's print reflow makes the chapter's own Quarto sidebar ResizeObserver report a benign loop notice

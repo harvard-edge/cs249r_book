@@ -121,9 +121,16 @@
   const conceptHref = (id) => `#concept=${encodeURIComponent(id)}`;
   const conceptLink = (id) => `<a href="${conceptHref(id)}"${concepts.get(id)?.scope === 'background' ? ' class="is-background"' : ''}>${esc(concepts.get(id)?.label || id)}</a>`;
   const subjectLink = (row) => `<a href="${subjectHref(row)}">${code(row.code)}${esc(row.label)}</a>`;
-  const verb = (rel, direction = 'out') => {
-    const r = relations.get(rel.relation);
-    return r ? (direction === 'out' ? r.forward : r.inverse) : rel.predicate;
+  // Preserve the reviewed proposition; a relation category can be broader.
+  const verb = (rel) => rel.predicate || relations.get(rel.relation)?.forward || rel.relation || '';
+  const verbMeasure = document.createElement('canvas').getContext('2d');
+  const shortVerb = (rel, width = 90) => {
+    const text = verb(rel);
+    verbMeasure.font = '500 10.5px Inter, -apple-system, BlinkMacSystemFont, sans-serif';
+    if (verbMeasure.measureText(text).width <= width) return text;
+    let shortened = text;
+    while (shortened && verbMeasure.measureText(shortened + '…').width > width) shortened = shortened.slice(0, -1);
+    return shortened.trimEnd() + '…';
   };
   const crossStepRelationships = (stepIndex) => {
     const matches = [];
@@ -141,6 +148,7 @@
   function renderMeta() {
     const fw = data.framework;
     $('bok-stats').textContent = `${areas.length} areas · ${rows.size} subjects · ${concepts.size} concepts · ${data.relationships.length} relationships`;
+    $('bok-overview').textContent = `${areas.length} areas · ${rows.size} subjects · ${concepts.size} concepts · Editorial draft for review`;
     $('bok-version').textContent = fw.version ? `v${fw.version.replace(/-draft$/, '')}` : '';
     const gapList = (fw.gaps || []).map((g) => {
       const row = rows.get(g.subject_row);
@@ -154,7 +162,7 @@
     if (rules) $('bok-tagging').innerHTML = `<p><strong>How to tag with it.</strong> Chapters, quizzes, questions, slides, and labs are tagged with the same concepts and subjects:</p><ul class="bok-cases">${rules}</ul>`
       + (home ? `<p><strong>Where a concept lives.</strong> ${esc(home.replace(/^Home rule\. /, ''))}</p>` : '')
       + (cases ? `<ul class="bok-cases">${cases}</ul>` : '');
-    $('bok-method').textContent = `Version ${fw.version}. Built from the single source file taxonomy/ml-systems-taxonomy.yml and checked against taxonomy/schema/mlsys-taxonomy.linkml.yml.`;
+    $('bok-method').textContent = `Version ${fw.version}. Definitions, relationships, and downloads are generated from the same maintained vocabulary.`;
   }
 
   // -------------------------------------------------------------------- matrix
@@ -342,7 +350,7 @@
   // --------------------------------------------------------------- entry pages
   // Sidebar tree: groups, areas, and the subjects of the current area.
   function renderTree(activeArea, activeSubject) {
-    $('bok-tree').innerHTML = `<details class="bok-tree-box" open><summary>Browse the taxonomy</summary>` + bandOrder().map((id) => {
+    $('bok-tree').innerHTML = `<details class="bok-tree-box"${window.matchMedia('(min-width: 901px)').matches ? ' open' : ''}><summary>Browse the taxonomy</summary>` + bandOrder().map((id) => {
       const group = groups.find((g) => g.id === id);
       return `<p class="bok-tree-group">${esc(group.label)}</p><ul>${areas.filter((a) => a.group === id).map((area) => {
         const open = area.id === activeArea;
@@ -432,6 +440,7 @@
       } },
       { selector: 'node[?background]', style: { 'border-style': 'dashed', color: c.muted } },
       { selector: 'node.center', style: { height: 38, 'background-color': c.ink, 'border-color': c.ink, color: c.bg, 'font-size': 15, 'font-weight': 700 } },
+      { selector: 'node.group-heading', style: { 'border-width': 0, 'background-opacity': 0, color: c.muted, 'font-size': 12, 'font-weight': 700, events: 'no' } },
       { selector: 'node.more', style: { 'border-width': 0, 'background-opacity': 0, color: c.faint, 'font-size': 12, events: 'no' } },
       { selector: 'edge', style: { width: 1.2, 'line-color': c.edge, 'target-arrow-color': c.edge, 'target-arrow-shape': 'triangle', 'arrow-scale': 0.7,
         'curve-style': 'taxi', 'taxi-direction': 'horizontal', 'taxi-turn': '50%' } },
@@ -465,7 +474,7 @@
 
   const chipWidth = (label, max = 220) => Math.min(max, Math.round(label.length * 7.1 + 26));
 
-  // Causes on the left, effects on the right, grouped by relation; at most
+  // Incoming links on the left, outgoing links on the right, grouped by relation; at most
   // MAP_LIMIT per group, with every relationship in the table below. Text
   // stays at full size: the canvas grows to fit instead of zooming out.
   const COLUMN = 360;
@@ -498,6 +507,12 @@
     const place = (blocks, x, top) => {
       let y = top;
       for (const block of blocks) {
+        const relation = relations.get(block.title);
+        const heading = block.direction === 'in' ? relation?.inverse : relation?.forward;
+        if (heading) {
+          els.push({ group: 'nodes', classes: 'group-heading', position: { x, y }, data: { id: `heading-${block.direction}-${block.title}`, label: cap(heading), w: 200, tw: 200 } });
+          y += 32;
+        }
         for (const rel of block.rels.slice(0, MAP_LIMIT)) {
           const other = block.direction === 'in' ? rel.source : rel.target;
           if (seen.has(other)) continue;
@@ -510,7 +525,7 @@
           // The outer segment runs from the concept to the spine; the verb sits on it.
           const segment = COLUMN - w / 2 - SPINE;
           els.push({ group: 'edges', classes: into ? 'into' : 'from', data: { id: rel.id, source: rel.source, target: rel.target,
-            label: verb(rel), offset: segment / 2, turn: into ? segment : SPINE - centerHalf } });
+            label: shortVerb(rel, segment - 24), offset: segment / 2, turn: into ? segment : SPINE - centerHalf } });
           y += 44;
         }
         if (block.rels.length > MAP_LIMIT) {
@@ -605,7 +620,7 @@
       const x2 = x1 + gapW;
       const mx = (x1 + x2) / 2;
       const dirOut = s.rel.source === s.from;
-      const vText = verb(s.rel, dirOut ? 'out' : 'in');
+      const vText = shortVerb(s.rel);
       const lineX1 = dirOut ? x1 : x1 + 5;
       const lineX2 = dirOut ? x2 - 5 : x2;
       svg += `<line x1="${lineX1}" y1="${cy}" x2="${lineX2}" y2="${cy}" stroke="var(--bok-ink)" stroke-width="1.25" stroke-opacity="0.55"/>`;
@@ -637,7 +652,7 @@
     if (state.to && state.to !== id) {
       const found = paths(id, state.to);
       result = found.length ? found.map((p, i) => `<div class="bok-path"><p class="bok-text-label">${i ? 'Another route' : 'Shortest chain'} · ${p.steps.length} step${p.steps.length > 1 ? 's' : ''}</p>${i === 0 ? renderPathChainSvg(p.steps) : ''}<ol>${p.steps.map((s) =>
-        `<li>${conceptLink(s.from)} <span class="bok-verb">${esc(verb(s.rel, s.rel.source === s.from ? 'out' : 'in'))}</span> ${conceptLink(s.to)}<p class="bok-cond">${esc(s.rel.conditions || '')}</p></li>`).join('')}</ol></div>`).join('')
+        `<li>${conceptLink(s.rel.source)} <span class="bok-verb">${esc(verb(s.rel))}</span> ${conceptLink(s.rel.target)}<p class="bok-cond">${esc(s.rel.conditions || '')}</p></li>`).join('')}</ol></div>`).join('')
         : '<p class="bok-text">No chain of relationships links these concepts yet.</p>';
     }
     return `<section class="bok-relate"><h3 class="bok-section">How does this relate to…</h3>
@@ -659,22 +674,44 @@
     const passages = (linksOf.get(id) || []).map((l) => `<tr><td>${esc(VOLUME[l.volume] || l.volume)}</td><td><a href="${esc(l.url)}">${esc(l.chapter_title)}</a></td><td>${esc(l.label)}</td></tr>`).join('');
     const chapters = (row?.book_chapters || []).map((ch) => `<tr><td>${esc(VOLUME[ch.volume] || ch.volume)}</td><td><a href="${esc(ch.url)}">${esc(ch.title)}</a></td><td>Teaches ${esc(row.label)}</td></tr>`).join('');
     const links = (outgoing.get(id)?.length || 0) + (incoming.get(id)?.length || 0);
+    const feedback = new URL('https://github.com/harvard-edge/cs249r_book/issues/new');
+    feedback.search = new URLSearchParams({ template: 'taxonomy_feedback.yml', title: `[Taxonomy] ${c.label}`, target: `${id} (version ${data.framework.version})` }).toString();
     $('bok-entry-body').innerHTML = `<div class="bok-entry-head">
         <div><h2>${esc(c.label)}</h2>
-          ${c.aliases?.length ? `<p class="bok-aliases">Also known as ${c.aliases.map(esc).join(', ')}</p>` : ''}
+          ${c.aliases?.length ? `<p class="bok-aliases">Search terms: ${c.aliases.map(esc).join(', ')}</p>` : ''}
           <p class="bok-lead">${esc(c.definition)}</p>
+          <div class="bok-entry-actions" aria-label="Use this concept">
+            <button type="button" data-copy-concept="link">Copy link</button>
+            <button type="button" data-copy-concept="id">Copy ID</button>
+            <a href="${esc(feedback.href)}">Suggest a correction</a>
+          </div>
+          <p class="bok-action-status" id="bok-action-status" role="status"></p>
           ${c.scope === 'background' ? '<p class="bok-text">A background concept, from an adjacent discipline that ML systems build on.</p>' : ''}</div>
         ${facts([['Identifier', `<code>${esc(id)}</code>`], ['Subject', row ? subjectLink(row) : ''], ['Area', area ? `<a href="#area=${esc(area.id)}">${esc(area.code || '')} ${esc(area.label)}</a>` : ''],
           ['Also part of', also], ['Relationships', String(links)]])}
       </div>
       <figure class="bok-mapbox"><div class="bok-canvas" id="bok-canvas" role="img" aria-label="Concept map of ${esc(c.label)}; the relationships table lists the same links as text"></div>
-        <figcaption>What acts on ${esc(c.label)} (left) and what it acts on (right). Select a concept to move to it, or open the <a href="#view=concept" style="text-decoration:underline">full field coupling map</a>.</figcaption></figure>
+        <figcaption>Read each group from the selected concept: for example, “is limited by” names its constraints. Incoming relationships are on the left and outgoing relationships on the right. Full statements and conditions appear below. Select a concept to move to it, or open the <a href="#view=concept" style="text-decoration:underline">full field coupling map</a>.</figcaption></figure>
       ${relationshipTable(id)}
       ${passages || chapters ? `<h3 class="bok-section">In the books</h3><table class="bok-table"><thead><tr><th>Volume</th><th>Chapter</th><th>${passages ? 'Passage' : 'Scope'}</th></tr></thead><tbody>${passages || chapters}</tbody></table>` : ''}
       ${relateHtml(id)}
       ${visited.length > 1 ? `<p class="bok-trail"><span>Your path</span>${visited.slice(-8).map((x) => conceptLink(x)).join('<span aria-hidden="true">→</span>')}</p>` : ''}
       <p class="bok-note">Relationships are editorial drafts, each holding under its stated condition. Book links do not assess teaching depth.</p>`;
     wirePicker('bok-relate', 'bok-relate-list', (r) => { location.hash = `${conceptHref(id)}&to=${encodeURIComponent(r.id)}`; }, ['Concept']);
+    document.querySelectorAll('[data-copy-concept]').forEach((button) => button.addEventListener('click', async () => {
+      const value = button.dataset.copyConcept === 'id' ? id : new URL(conceptHref(id), location.href).href;
+      const status = $('bok-action-status');
+      try {
+        await navigator.clipboard.writeText(value);
+        status.textContent = button.dataset.copyConcept === 'id' ? 'Concept ID copied.' : 'Concept link copied.';
+      } catch {
+        status.innerHTML = '<label>Copy this value: <input class="bok-copy-fallback" readonly></label>';
+        const field = status.querySelector('input');
+        field.value = value;
+        field.focus();
+        field.select();
+      }
+    }));
     drawMap(id, $('bok-canvas'));
   }
 
@@ -1065,7 +1102,7 @@
         const fillOp = isDiag ? '1' : (cnt > 0 ? String(binOpacities[bIdx]) : '0.45');
         const showNum = cnt > 0 || isSelected;
         const textFill = !isDiag && bIdx >= 3 ? 'var(--bok-surface)' : 'var(--bok-ink)';
-        cellsHtml += `<g class="viz-dsm-cell${isSelected ? ' is-selected' : ''}" data-dsm-from="${esc(ar.id)}" data-dsm-to="${esc(ac.id)}" role="button" tabindex="0" aria-label="${esc(ar.code)} to ${esc(ac.code)}: ${cnt} relationships">
+        cellsHtml += `<g class="viz-dsm-cell${isSelected ? ' is-selected' : ''}" data-grid-row="${r}" data-grid-col="${c}" data-dsm-from="${esc(ar.id)}" data-dsm-to="${esc(ac.id)}" role="button" tabindex="${(sel?.kind === 'pair' ? isSelected : r === 0 && c === 0) ? 0 : -1}" aria-label="${esc(ar.label)} to ${esc(ac.label)}: ${cnt} recorded relationships">
           <title>${esc(ar.code)} (${esc(ar.display_label || ar.label)}) → ${esc(ac.code)} (${esc(ac.display_label || ac.label)}): ${cnt} relationships</title>
           <rect class="viz-dsm-bg" x="${cx}" y="${ry}" width="${cell - 1}" height="${cell - 1}" fill="${fill}" fill-opacity="${fillOp}" stroke="${isSelected ? 'var(--bok-accent)' : 'none'}"/>
           ${showNum ? `<text x="${cx + (cell - 1) / 2}" y="${ry + 14}" text-anchor="middle" class="bok-svg-mono" style="font-size:8.5px;fill:${textFill};font-weight:${isSelected ? '700' : '500'}">${cnt}</text>` : ''}
@@ -1106,6 +1143,12 @@
       headersHtml += `<text x="${x0 + p + 10}" y="${y0 + gridSpan + 18 + cBarH}" text-anchor="middle" class="bok-svg-mono" style="font-size:7.5px;fill:var(--bok-faint)">${cTot}</text>`;
     }
 
+    const selectedRow = orderedAreas.findIndex((a) => a.id === (sel?.fromArea || sel?.id));
+    const selectedCol = orderedAreas.findIndex((a) => a.id === (sel?.toArea || sel?.id));
+    const crosshair = [
+      selectedRow >= 0 ? `<rect x="${x0}" y="${y0 + pos[selectedRow]}" width="${gridSpan}" height="${cell - 1}"/>` : '',
+      selectedCol >= 0 ? `<rect x="${x0 + pos[selectedCol]}" y="${y0}" width="${cell - 1}" height="${gridSpan}"/>` : '',
+    ].join('');
     stageEl.innerHTML = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="group" aria-labelledby="dsm-title dsm-desc">
       <title id="dsm-title">Relationships between the ${orderedAreas.length} areas</title>
       <desc id="dsm-desc">Rows are source areas and columns are target areas across ${rels.length} relationships.</desc>
@@ -1119,6 +1162,7 @@
       <text x="${x0 - 8}" y="${y0 + gridSpan + 18}" text-anchor="end" class="bok-svg-mono" style="font-size:8.5px;fill:var(--bok-faint)">In</text>
       <g>${rulesHtml}</g>
       <g>${cellsHtml}</g>
+      <g fill="none" stroke="var(--bok-accent)" stroke-width="1" pointer-events="none">${crosshair}</g>
       <g>${headersHtml}</g>
     </svg>`;
   }
@@ -1297,6 +1341,9 @@
     const panelEl = $('bok-coupling-panel');
     const capEl = $('bok-coupling-caption');
     if (!stageEl || !panelEl) return;
+    const focused = stageEl.contains(document.activeElement) ? document.activeElement : null;
+    const focusAttributes = focused ? [...focused.attributes].filter((a) => a.name.startsWith('data-')) : [];
+    const focusSelector = focusAttributes.map((a) => `[${a.name}="${CSS.escape(a.value)}"]`).join('');
     for (const b of document.querySelectorAll('[data-coupling-mode]')) {
       b.setAttribute('aria-pressed', String(b.dataset.couplingMode === state.couplingMode));
     }
@@ -1305,12 +1352,23 @@
     }
     if (state.couplingMode === 'dsm') {
       drawCouplingDsm(stageEl);
-      if (capEl) capEl.innerHTML = `<strong>Relationships between the ${areas.length} areas (row acts on column).</strong> Each cell counts relationships from concepts in the row area to concepts in the column area; hatched diagonal cells count relationships within the same area. Bars on the right and bottom show each area's total outgoing and incoming links with other areas. Select any cell or area label to read the relationships on the right.`;
+      if (capEl) capEl.innerHTML = `<strong>Relationships between the ${areas.length} areas (row acts on column).</strong> Each cell counts relationships from concepts in the row area to concepts in the column area; hatched diagonal cells count relationships within the same area. Bars on the right and bottom show each area's total outgoing and incoming links with other areas. Select any cell or area label to read the relationships on the right. With a cell focused, use arrow keys to move and Enter to select. Counts describe recorded links, not importance or completeness.`;
     } else {
       drawCouplingWheel(stageEl);
       if (capEl) capEl.innerHTML = `<strong>Relationships across the ${groups.length} groups, ${areas.length} areas, and ${rows.size} subjects.</strong> Thicker curves show more relationships between two subjects. Select a subject or an area on the ring to show what it acts on (crimson) and what acts on it (ink), and to list the relationships on the right.`;
     }
+    const fromPicker = $('bok-explore-area');
+    const toPicker = $('bok-explore-target');
+    if (fromPicker && toPicker) {
+      $('bok-explore-label').textContent = state.couplingMode === 'dsm' ? 'From area' : 'Focus area';
+      $('bok-explore-target-wrap').hidden = state.couplingMode !== 'dsm';
+      fromPicker.value = state.couplingSel?.kind === 'pair' ? state.couplingSel.fromArea
+        : state.couplingSel?.kind === 'area' ? state.couplingSel.id : '';
+      toPicker.value = state.couplingSel?.kind === 'pair' ? state.couplingSel.toArea : '';
+      toPicker.disabled = !fromPicker.value;
+    }
     renderCouplingPanel(panelEl);
+    if (focusSelector) stageEl.querySelector(focusSelector)?.focus({ preventScroll: true });
   }
 
   function renderConceptLanding() {
@@ -1323,7 +1381,7 @@
       `<button type="button" data-coupling-fam="${esc(k)}" aria-pressed="${String(state.couplingFamily === k)}">${esc(lbl)}</button>`).join('');
 
     $('bok-entry-body').innerHTML = `<div class="bok-entry-head"><div><h2>Concept map</h2>
-      <p class="bok-lead">Every concept is linked to what it depends on, enables, limits, or mitigates. Use the figure below to see how the ${areas.length} areas and ${rows.size} subjects connect across the taxonomy, or open any concept for its local neighborhood map.</p>
+      <p class="bok-lead">Recorded relationships show what concepts depend on, enable, limit, or mitigate. Some concepts do not yet have reviewed relationships. Use the figure below to see how the ${areas.length} areas and ${rows.size} subjects connect across the taxonomy, or open any concept for its local neighborhood map.</p>
       ${lastVisited && concepts.has(lastVisited) ? `<p class="bok-text" style="margin-top:0.4rem !important">Recently viewed: ${conceptLink(lastVisited)} &rarr;</p>` : ''}
       </div></div>
       <figure class="bok-viz-figure" id="bok-coupling-figure">
@@ -1332,7 +1390,7 @@
             <span class="bok-filter-label">View</span>
             <div class="bok-viz-seg" role="group" aria-label="Coupling diagram type">
               <button type="button" data-coupling-mode="wheel" aria-pressed="${String(state.couplingMode === 'wheel')}">Circular map (${rows.size} subjects)</button>
-              <button type="button" data-coupling-mode="dsm" aria-pressed="${String(state.couplingMode === 'dsm')}">Area matrix (${areas.length} × ${areas.length})</button>
+              <button type="button" data-coupling-mode="dsm" aria-pressed="${String(state.couplingMode === 'dsm')}">Relationship grid (${areas.length} × ${areas.length})</button>
             </div>
           </div>
           <div class="bok-viz-controls">
@@ -1340,6 +1398,10 @@
             <div class="bok-viz-seg" role="group" aria-label="Filter by relationship family">${famBtns}</div>
           </div>
           ${expandBtn('bok-coupling-figure')}
+        </div>
+        <div class="bok-area-pickers">
+          <label><span id="bok-explore-label">Focus area</span><select id="bok-explore-area"><option value="">All areas</option>${areas.map((a) => `<option value="${esc(a.id)}">${esc(a.code)} · ${esc(a.label)}</option>`).join('')}</select></label>
+          <label id="bok-explore-target-wrap" hidden>To area<select id="bok-explore-target" disabled><option value="">All connections</option>${areas.map((a) => `<option value="${esc(a.id)}">${esc(a.code)} · ${esc(a.label)}</option>`).join('')}</select></label>
         </div>
         <div class="bok-viz-split">
           <div class="bok-viz-stage" id="bok-coupling-stage"></div>
@@ -1775,8 +1837,8 @@
         activeNode ? (isDirect ? 'is-active' : (isVia ? 'is-active is-via' : 'is-dim')) : '',
       ].filter(Boolean).join(' ');
       const markerUrl = isEdgeActive ? 'url(#bok-diag-arrow-on)' : 'url(#bok-diag-arrow)';
-      const vStr = verb(rel);
-      edgesHtml += `<path class="${cls}" d="${d}" marker-end="${markerUrl}"><title>${esc(concepts.get(rel.source)?.label)} ${esc(vStr)} ${esc(concepts.get(rel.target)?.label)}</title></path>`;
+      const vStr = shortVerb(rel);
+      edgesHtml += `<path class="${cls}" d="${d}" marker-end="${markerUrl}"><title>${esc(concepts.get(rel.source)?.label)} ${esc(verb(rel))} ${esc(concepts.get(rel.target)?.label)}</title></path>`;
       if (isEdgeActive && !sameCol) {
         const hubId = cSet.has(rel.source) ? rel.source : rel.target;
         const gk = `${u.col}__${v.col}__${hubId}__${vStr}`;
@@ -2044,15 +2106,15 @@
     };
     if (kinds.includes('Concept')) for (const c of concepts.values()) {
       const s = Math.max(score(c.label, 1.2), ...(c.aliases || []).map((a) => score(a, 1.1)), score(c.definition, 0.3));
-      if (s) scored.push({ s, kind: 'Concept', id: c.id, label: c.label, where: homeOf.get(c.id)?.code || '' });
+      if (s) scored.push({ s, kind: 'Concept', id: c.id, label: c.label, where: homeOf.get(c.id)?.code || '', description: c.definition, subject: homeOf.get(c.id)?.label || '', matched: (c.aliases || []).find((a) => score(a, 1.1) > score(c.label, 1.2)) || '' });
     }
     if (kinds.includes('Subject')) for (const r of rows.values()) {
       const s = Math.max(score(r.label, 1), score(r.code, 1.5), score(r.definition, 0.25));
-      if (s) scored.push({ s, kind: 'Subject', id: r.id, label: r.label, where: r.code || '' });
+      if (s) scored.push({ s, kind: 'Subject', id: r.id, label: r.label, where: r.code || '', description: r.definition });
     }
     if (kinds.includes('Area')) for (const a of areas) {
       const s = Math.max(score(a.label, 1.3), score(a.code, 1.5));
-      if (s) scored.push({ s, kind: 'Area', id: a.id, label: a.label, where: a.code || '' });
+      if (s) scored.push({ s, kind: 'Area', id: a.id, label: a.label, where: a.code || '', description: a.question || a.scope });
     }
     return scored.sort((a, b) => b.s - a.s || a.label.localeCompare(b.label)).slice(0, 10);
   }
@@ -2061,36 +2123,55 @@
     const input = $(inputId);
     const list = $(listId);
     let found = [];
-    let active = 0;
+    let active = -1;
+    input.setAttribute('role', 'combobox');
+    input.setAttribute('aria-autocomplete', 'list');
+    input.setAttribute('aria-controls', listId);
+    input.setAttribute('aria-expanded', 'false');
+    if (inputId === 'bok-search') input.addEventListener('focus', () => {
+      if (input.getBoundingClientRect().bottom > window.innerHeight * 0.55) {
+        input.closest('.bok-toolbar').scrollIntoView({ block: 'start' });
+      }
+    });
+    const close = () => {
+      list.hidden = true;
+      input.setAttribute('aria-expanded', 'false');
+      input.removeAttribute('aria-activedescendant');
+    };
     const show = () => {
-      list.innerHTML = found.map((r, i) => `<li role="option" aria-selected="${i === active}" data-i="${i}"><span class="bok-res-kind">${r.kind}</span><span class="bok-res-label">${esc(r.label)}</span><span class="bok-res-where">${esc(r.where)}</span></li>`).join('')
-        || (input.value.trim().length >= 2 ? '<li class="bok-noresult">No matches</li>' : '');
+      list.innerHTML = found.map((r, i) => `<li id="${listId}-${i}" role="option" aria-selected="${i === active}" data-i="${i}"><span class="bok-res-kind">${r.kind}</span><span class="bok-res-label">${esc(r.label)}</span><span class="bok-res-where">${esc(r.where)}</span><span class="bok-res-description">${esc(r.description || '')}</span>${r.subject || r.matched ? `<span class="bok-res-context">${esc(r.subject || '')}${r.matched ? ` · Matched search term: ${esc(r.matched)}` : ''}</span>` : ''}</li>`).join('')
+        || (input.value.trim().length >= 2 ? '<li class="bok-noresult" role="option" aria-disabled="true">No matches. Try a broader term or a subject code.</li>' : '');
       list.hidden = !list.innerHTML;
       input.setAttribute('aria-expanded', String(!list.hidden));
+      if (active >= 0 && found[active]) {
+        input.setAttribute('aria-activedescendant', `${listId}-${active}`);
+        document.getElementById(`${listId}-${active}`)?.scrollIntoView({ block: 'nearest' });
+      } else input.removeAttribute('aria-activedescendant');
     };
-    input.addEventListener('input', () => { found = search(input.value, kinds); active = 0; show(); });
+    input.addEventListener('input', () => { found = search(input.value, kinds); active = -1; show(); });
     input.addEventListener('keydown', (e) => {
       if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && found.length) {
         e.preventDefault();
-        active = (active + (e.key === 'ArrowDown' ? 1 : found.length - 1)) % found.length;
+        active = active < 0 ? (e.key === 'ArrowDown' ? 0 : found.length - 1)
+          : (active + (e.key === 'ArrowDown' ? 1 : found.length - 1)) % found.length;
         show();
-      } else if (e.key === 'Enter' && found[active]) {
+      } else if (e.key === 'Enter' && !list.hidden && found.length) {
         e.preventDefault();
-        list.hidden = true;
+        close();
         input.blur();
-        onPick(found[active]);
+        onPick(found[Math.max(0, active)]);
       } else if (e.key === 'Escape') {
-        input.value = '';
-        found = [];
-        show();
-      }
+        e.preventDefault();
+        e.stopPropagation();
+        close();
+      } else if (e.key === 'Tab') close();
     });
-    input.addEventListener('blur', () => setTimeout(() => { list.hidden = true; }, 150));
+    input.addEventListener('blur', () => setTimeout(close, 150));
     list.addEventListener('mousedown', (e) => {
       const item = e.target.closest('[data-i]');
       if (!item) return;
       e.preventDefault();
-      list.hidden = true;
+      close();
       input.blur();
       onPick(found[Number(item.dataset.i)]);
     });
@@ -2340,7 +2421,17 @@
   }
 
   function bind() {
+    const siteHeader = document.getElementById('quarto-header');
+    if (siteHeader) {
+      const updateHeaderOffset = () => $('bok-root').style.setProperty('--bok-header-offset', `${siteHeader.getBoundingClientRect().height + 16}px`);
+      updateHeaderOffset();
+      new ResizeObserver(updateHeaderOffset).observe(siteHeader);
+    }
     window.addEventListener('hashchange', restore);
+    window.matchMedia('(min-width: 901px)').addEventListener('change', (event) => {
+      const tree = document.querySelector('.bok-tree-box');
+      if (tree) tree.open = event.matches;
+    });
     document.querySelectorAll('[data-try-lens]').forEach((a) => a.addEventListener('click', (e) => {
       e.preventDefault();
       if (location.hash !== '#view=matrix') {
@@ -2383,6 +2474,14 @@
         state.pathStep = Math.max(0, state.pathStep + Number(deltaBtn.dataset.stepDelta));
         renderMatrix();
       }
+    });
+    document.addEventListener('change', (e) => {
+      if (!e.target.matches('#bok-explore-area, #bok-explore-target')) return;
+      const fromArea = $('bok-explore-area').value;
+      const toArea = $('bok-explore-target').value;
+      state.couplingSel = !fromArea ? null : state.couplingMode === 'dsm' && toArea
+        ? { kind: 'pair', fromArea, toArea } : { kind: 'area', id: fromArea };
+      refreshCouplingFigure();
     });
     $('bok-show-concepts').addEventListener('click', () => { state.showConcepts = !state.showConcepts; renderMatrix(); });
     $('bok-gloss-filter').addEventListener('input', filterGlossary);
@@ -2561,9 +2660,39 @@
     });
     wirePicker('bok-search', 'bok-results', choose);
     document.addEventListener('keydown', (e) => {
+      if (e.key === 'Tab' && state.vizFull) {
+        const figure = document.getElementById(state.vizFull);
+        const items = [...figure.querySelectorAll('button, a[href], input, select, [tabindex]')]
+          .filter((el) => el.tabIndex >= 0 && !el.disabled && el.getClientRects().length && !el.closest('[hidden], [inert]'));
+        const first = items[0], last = items[items.length - 1];
+        if (!figure.contains(document.activeElement) || (e.shiftKey && document.activeElement === first) || (!e.shiftKey && document.activeElement === last)) {
+          e.preventDefault();
+          (e.shiftKey ? last : first)?.focus();
+        }
+      }
+      const gridCell = document.activeElement?.closest('[data-grid-row]');
+      if (gridCell && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) {
+        e.preventDefault();
+        let row = Number(gridCell.dataset.gridRow), col = Number(gridCell.dataset.gridCol);
+        if (e.key === 'ArrowUp') row--;
+        if (e.key === 'ArrowDown') row++;
+        if (e.key === 'ArrowLeft') col--;
+        if (e.key === 'ArrowRight') col++;
+        if (e.key === 'Home') col = 0;
+        if (e.key === 'End') col = areas.length - 1;
+        row = Math.max(0, Math.min(areas.length - 1, row));
+        col = Math.max(0, Math.min(areas.length - 1, col));
+        const next = document.querySelector(`[data-grid-row="${row}"][data-grid-col="${col}"]`);
+        if (next) {
+          document.querySelectorAll('[data-grid-row]').forEach((cell) => cell.setAttribute('tabindex', '-1'));
+          next.setAttribute('tabindex', '0');
+          next.focus({ preventScroll: true });
+        }
+        return;
+      }
       if ((e.key === 'Enter' || e.key === ' ') && document.activeElement?.matches('[role="button"]:not(button)')) {
         e.preventDefault();
-        document.activeElement.click();
+        document.activeElement.dispatchEvent(new MouseEvent('click', { bubbles: true }));
         return;
       }
       if (e.key === '/' && !state.vizFull && !/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName)) {
@@ -2571,7 +2700,7 @@
         $('bok-search').focus();
         $('bok-search').select();
       } else if (e.key === 'Escape') {
-        if (clearVizSelection(state.vizFull)) return;
+        if (!state.vizFull && clearVizSelection(null)) return;
         if (state.vizFull) {
           const btn = document.querySelector(`[data-viz-expand="${state.vizFull}"]`);
           state.vizFull = null;

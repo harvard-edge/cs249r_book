@@ -1,4 +1,4 @@
-"""Reconcile declared chapter concepts against `taxonomy/ml-systems-taxonomy.yml` and `taxonomy/coverage-ledger.yml`.
+"""Reconcile declared chapter concepts against `taxonomy/taxonomy.yml` and `taxonomy/coverage-ledger.yml`.
 
 Validates `taxonomy/coverage-ledger.yml` against `CoverageLedgerModel` in
 `taxonomy/schema/mlsys-taxonomy.linkml.yml`, verifies manuscript evidence quotes and

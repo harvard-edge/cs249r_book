@@ -69,6 +69,7 @@ from .transformer import (
     calc_transformer_training_flops,
     calc_transformer_decode_flops,
     calc_transformer_prefill_flops,
+    calc_attention_matmul_flops,
     calc_transformer_block_weights,
     calc_attention_score_macs,
     calc_attention_crossover,

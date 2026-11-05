@@ -1,0 +1,83 @@
+---
+title: "Teach the Decisions an AI Engineer Must Make"
+date: "2026-11-19"
+author: "Vijay Janapa Reddi"
+categories: ["essay"]
+description: "If industry is deploying turnkey token factories, universities cannot stop at step-by-step notebook tutorials. A rigorous AI engineering education gives learners a constrained system to build, a physical limit to measure, and a trade-off to defend."
+draft: true
+image: "figures/gtc-berlin-robotics.jpg"
+---
+
+<!-- buttondown-editor-mode: plaintext -->
+
+*From the Author's Desk at [MLSysBook.ai](https://mlsysbook.ai) · Field notes on building **AI Engineering** as a teachable discipline, connecting how modern AI systems are built and operated in industry to the first principles we teach the next generation.*
+
+---
+
+## Up the Eastern Shore of Lake Zürich
+
+Since my last note from Rapperswil, my weekend runs have started climbing north along the eastern shore of Lake Zürich, where the S-Bahn tracks hug the water between vineyards and lakeside towns. Each station check-in with the kids brings the loop a little closer to home, and the rhythm of predicting the pace, measuring the splits, and adjusting for the hills feels fitting for the final essay in this GTC Berlin series.
+
+## Moving Beyond Notebook Recipes
+
+The [first essay](https://mlsysbook.ai/newsletter/) in this series examined why containerized token factories still depend on human engineering judgment, and the [second essay](https://mlsysbook.ai/newsletter/) traced how an AI engineer diagnoses a single request across the layers of a live service. Those two observations point to an immediate educational challenge: preparing learners to make and defend those systems decisions before they ever step into a production facility.
+
+As researchers from Universidad Autónoma de Occidente observed in an earlier community issue ([From Tool Training to Process Thinking](https://mlsysbook.ai/newsletter/posts/2026/2026-04-14_team-newsletter-from-tool-training-to-process-thinking-a-spiral-model-for-ai-in.html)), training that stops at tool familiarity rarely changes how courses are designed or what students can build when the tools change. A traditional machine learning assignment starts with a dataset and grades the student on validation accuracy.
+
+An AI engineering assignment can instead begin with a model that already achieves acceptable accuracy, and then place that model inside a physical environment with a strict memory budget, a latency deadline, and a power envelope. Once those constraints are introduced, the learner's job shifts from following a recipe to making an engineering decision that holds the system together.
+
+![A robotics demonstration photographed at GTC Berlin.](figures/gtc-berlin-robotics.jpg)
+
+**Physical applications make systems constraints visible.** A robotics demonstration on the floor at GTC Berlin, where model predictions must arrive within strict mechanical and real-time deadlines.
+
+## Give the Learner a Decision Rather Than a Recipe
+
+A software tutorial supplies a fixed sequence of steps that leads every student to the same output. An engineering exercise supplies a constrained system and requires the student to use measurements to choose the next step.
+
+Suppose an instructor asks students to deploy a working vision or language model onto a target device and record three baseline metrics: peak memory footprint, end-to-end latency, and task accuracy. Once the baseline works, the assignment changes one condition, such as doubling the input resolution, lengthening the prompt context, or cutting available device memory in half. Under the tighter constraint, the baseline configuration fails. Each student must identify which physical limit caused the failure, select an intervention, and demonstrate with measurements that the modified system satisfies the task requirements. The exercise does not need a large cluster to teach genuine systems judgment, so long as the constraint is real and every optimization carries a measurable cost.
+
+![Make the reasoning visible.](figures/essay-07-engineering-judgment.png)
+
+**Make the reasoning visible.** Learners predict a physical limit, implement an intervention, measure the resulting system, and defend the trade-off with evidence.
+
+## Designing an Assignment Around a Real Trade-Off
+
+Consider a classroom lab built around visual defect inspection on a manufacturing line, using a camera-equipped edge board or a local workstation. Before touching the model configuration, the student must state what counts as a useful output for the task: which defect classes must be caught, what false-negative rate is acceptable, and how quickly each frame must be processed before the part moves down the line. Those requirements belong to the application before they become hyperparameters in code.
+
+Next, the student deploys the baseline model, measures its memory use and frame latency, and documents the exact hardware, numerical precision, and batch size used during testing. Recording those conditions turns a one-off demonstration into an interpretable engineering baseline. The instructor then tightens the latency deadline or restricts available memory so that the baseline model either misses the deadline or fails to load.
+
+To restore operation, a student might reduce image resolution, quantize weights from 32-bit floating point to 8-bit integers, or prune channels from the network. Each option resolves the hardware constraint in a different way while introducing a distinct risk to task quality.
+
+Lowering input resolution reduces arithmetic and memory traffic across every layer, but it may erase the fine surface detail needed to spot a hairline crack. Quantizing weights cuts model memory by a factor of four and accelerates integer execution, yet it may degrade accuracy on low-contrast defects unless calibration data is chosen carefully. Because no single choice is free, the student has a genuine engineering decision to defend using evidence from both the hardware and the application.
+
+## Assessing the Explanation Alongside the Result
+
+Grading an engineering assignment requires evaluating how the student reasoned alongside whether the final script ran without errors. A complete submission allows another engineer to reconstruct the decision chain: which physical limit the student predicted before running the test, what the boundary measurements showed, why a specific intervention was selected, and which secondary metric paid the price for that improvement.
+
+Under this standard, an initial intervention that fails to meet the deadline can still earn high marks if the student diagnoses why it failed and uses that measurement to select the next experiment. Conversely, a configuration that happens to pass the latency check through trial and error, without an explanation of which bottleneck moved, shows that the student has not yet learned how to reason about the stack.
+
+Industry engineering teams rely on this same distinction during design reviews and technical interviews. As educator Jeremy Ellis demonstrated in [Beyond the Spiral: TinyML Pedagogy at the Hardware Edge](https://mlsysbook.ai/newsletter/posts/2026/2026-05-22_team-newsletter-beyond-the-spiral-tinyml-pedagogy-at-the-hardware-edge.html), when an automated coding assistant can generate a working script in seconds, the classroom and the engineering lab alike must rely on explicit verification gates before physical resources are committed. The human engineer's value lies in verifying whether measurements support the design choice and identifying where the system will break next when traffic or hardware conditions change.
+
+## Connecting First Principles to Hands-On Construction
+
+Building this judgment across a curriculum requires pairing analytical models with hands-on construction so that students see the same constraint from multiple angles, climbing the six rungs we named in [From the Builder's Gap to a Builder's Stack](https://mlsysbook.ai/newsletter/posts/2026/2026-05-19_from-the-builders-gap-to-a-builders-stack.html). A textbook gives precise names and equations to memory hierarchies, arithmetic intensity, and queueing delay. Implementing part of a framework exposes the memory allocations and data movement that high-level library calls normally hide. Deploying onto physical hardware proves that memory ceilings and thermal limits do not negotiate.
+
+That progression organizes [Machine Learning Systems](https://mlsysbook.ai). Instructors use the [ML Systems Taxonomy](https://mlsysbook.ai/taxonomy/) and the [Instructor Hub](https://mlsysbook.ai/instructors/) to map course syllabi across 101 subjects and 735 concepts, while learners use [MLSys·im](https://mlsysbook.ai/mlsysim/), [TinyTorch](https://mlsysbook.ai/tinytorch/), and edge hardware kits to predict bottlenecks, build framework components from scratch, and deploy under real physical limits.
+
+The AI factories unveiled in Berlin will employ specialists across energy systems, silicon architecture, distributed runtimes, and machine learning models. Giving those specialists a common foundation in AI engineering begins by teaching the decisions an AI engineer must make: facing a physical constraint, choosing a trade-off, and defending it with numbers.
+
+## Continuing the Conversation
+
+I want this newsletter to be a two-way exchange with the engineers, researchers, students, and educators who read it. Whether you are designing a course or interviewing candidates for AI engineering roles, selecting one of the options below records your perspective in a single click:
+
+{{ survey.essay_07_interview_poll }}
+
+If you have a minute, reply directly to this email to share the single systems trade-off you want every graduate or engineering candidate to be able to diagnose and defend with evidence. I read every reply, and your examples will help shape the next leg of our work around the lake.
+
+Vijay
+
+---
+
+*P.S. If you found this series useful, please feel free to share it with a colleague who is designing an AI systems course or hiring AI engineers around [MLSysBook](https://mlsysbook.ai), the [ML Systems Taxonomy](https://mlsysbook.ai/taxonomy/), and the [Instructor Hub](https://mlsysbook.ai/instructors/).*
+
+[MLSysBook](https://mlsysbook.ai) · [Taxonomy](https://mlsysbook.ai/taxonomy/) · [TinyTorch](https://mlsysbook.ai/tinytorch/) · [MLSys·im](https://mlsysbook.ai/mlsysim/) · [StaffML](https://mlsysbook.ai/staffml/) · [Instructor Hub](https://mlsysbook.ai/instructors/) · [Subscribe](https://mlsysbook.ai/newsletter/) · [GitHub](https://github.com/harvard-edge/cs249r_book)

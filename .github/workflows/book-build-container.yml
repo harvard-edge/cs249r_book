@@ -96,6 +96,11 @@ on:
         default: false
   workflow_call:
     inputs:
+      source_ref:
+        description: 'Exact source commit; target remains the artifact/deployment branch label'
+        required: false
+        type: string
+        default: ''
       build_linux:
         required: false
         type: boolean
@@ -489,7 +494,7 @@ jobs:
         if: matrix.enabled
         uses: actions/checkout@v6
         with:
-          ref: ${{ inputs.target }}
+          ref: ${{ inputs.source_ref || inputs.target }}
           fetch-depth: 0
 
       - name: 🔍 Debug build configuration
@@ -544,6 +549,18 @@ jobs:
       - name: 🐳 Pull Docker Image
         if: matrix.platform == 'windows' && matrix.enabled
         run: docker pull ${{ env.CONTAINER_IMAGE }}
+
+      - name: 🔎 Prepare PDF verification (Linux)
+        if: matrix.platform == 'linux' && matrix.format_name == 'PDF' && matrix.enabled
+        run: |
+          # Linux jobs run as root inside the book container, without sudo.
+          if ! command -v pdftotext >/dev/null 2>&1; then
+            apt-get update
+            apt-get install -y --no-install-recommends poppler-utils
+          fi
+          pdftotext -v
+          python3 -m pip install 'PyMuPDF==1.26.7' pytest
+          python3 "$GITHUB_WORKSPACE/binder/binder" check pdf --scope compression-contract
 
       - name: 🧪 Preflight toolchain (Linux)
         if: matrix.platform == 'linux' && matrix.enabled
@@ -807,6 +824,7 @@ jobs:
         if: matrix.platform == 'linux' && matrix.format_name == 'PDF' && matrix.enabled
         working-directory: books/${{ matrix.output_dir }}
         run: |
+          python3 "$GITHUB_WORKSPACE/binder/binder" check pdf --scope verify "--${{ matrix.volume }}"
           PDF_FILE=$(find . -maxdepth 1 -name "*.pdf" -type f | head -1)
           if [ -n "$PDF_FILE" ]; then
             PDF_NAME=$(basename "$PDF_FILE")
@@ -819,7 +837,7 @@ jobs:
             python3 "$SCRIPT_PATH" \
               --input "$PDF_NAME" \
               --output "compressed.pdf" \
-              --quality minimal \
+              --quality lossless \
               --verbose
             mv compressed.pdf "$PDF_NAME"
             echo "✅ PDF compression completed: $PDF_NAME"
@@ -836,6 +854,12 @@ jobs:
 
           $scriptContent = @'
           $ErrorActionPreference = 'Stop'
+          python -m pip install 'PyMuPDF==1.26.7' pytest
+          if ($LASTEXITCODE -ne 0) { throw 'PDF compression dependencies failed to install' }
+          python C:\workspace\binder\binder check pdf --scope compression-contract
+          if ($LASTEXITCODE -ne 0) { throw 'PDF compression preservation contract failed' }
+          python C:\workspace\binder\binder check pdf --scope verify '--${{ matrix.volume }}'
+          if ($LASTEXITCODE -ne 0) { throw 'Rendered PDF validation failed' }
           $pdfFile = Get-ChildItem -Filter '*.pdf' -File | Select-Object -First 1
           if ($pdfFile) {
             $pdfName = $pdfFile.Name
@@ -846,7 +870,7 @@ jobs:
               $scriptPath = 'C:\workspace\books\shared\publish\compress_pdf.py'
             }
 
-            python $scriptPath --input $pdfName --output 'compressed.pdf' --quality minimal --verbose
+            python $scriptPath --input $pdfName --output 'compressed.pdf' --quality lossless --verbose
             if ($LASTEXITCODE -ne 0) { Write-Error "PDF compression failed"; exit $LASTEXITCODE }
 
             if (Test-Path 'compressed.pdf') {
@@ -968,6 +992,16 @@ jobs:
         with:
           name: ${{ matrix.artifact_name }}
           path: books/${{ matrix.output_dir }}
+
+      - name: 📤 Preserve failed PDF render diagnostics
+        uses: actions/upload-artifact@v7
+        if: failure() && matrix.enabled && matrix.format_name == 'PDF'
+        with:
+          name: ${{ matrix.artifact_name }}-diagnostics
+          path: |
+            books/*.tex
+            books/*.log
+            books/${{ matrix.output_dir }}/**
 
   collect-outputs:
     name: '📊 Collect Outputs'

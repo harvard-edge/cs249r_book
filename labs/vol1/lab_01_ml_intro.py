@@ -9,11 +9,10 @@ async def _():
     import sys
     from pathlib import Path
     import marimo as mo
-
     if sys.platform == "emscripten":
         import micropip
         await micropip.install(["pydantic", "pint", "plotly", "pandas"], keep_going=False)
-        await micropip.install("../../wheels/mlsysim-0.3.0-py3-none-any.whl", keep_going=False)
+        await micropip.install("../../wheels/mlsysim-0.3.1-py3-none-any.whl", keep_going=False)
         await micropip.install("../../wheels/mlsysbook_labs-0.1.0-py3-none-any.whl", keep_going=False)
     else:
         labs_dir = Path(__file__).resolve().parents[1]
@@ -21,427 +20,391 @@ async def _():
             sys.path.insert(0, str(labs_dir))
         from bootstrap import native_bootstrap
         native_bootstrap(__file__)
-
     import plotly.graph_objects as go
     from mlsysim.engine.constraint_explorer import (
-        TRACKS, compare, evaluate, margins, monitoring_plan, population_compare,
-        speedup, stress_compare,
+        INTRO_SCENARIO_VERSION, INTRO_TASK_OPTIONS, evaluate,
+        introductory_profile, speedup, task_factors,
     )
+    from mlsysim.core.units import Q_
+    from mlsysim.fmt import fmt, fmt_count, fmt_energy, fmt_memory, fmt_percent, fmt_time
     from mlsysim.labs.state import DesignLedger
-    from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
-    from mlsysbook_labs import (
-        ACADEMIC_LAB_CSS, build_lab_report, get_lab_metadata, report_export_panel,
-    )
+    from mlsysim.labs.style import COLORS, apply_plotly_theme
+    from mlsysbook_labs.notebook import notebook_bridge, notebook_header, notebook_shell, notebook_status, notebook_table
+    from mlsysbook_labs import build_lab_report, get_lab_metadata, report_export_panel
+    from mlsysbook_labs.contexts import CONTEXT_OPTIONS, get_context, preferred_context
     from mlsysbook_labs.experiment_evidence import capture_evidence, audit_evidence
-
     ledger = DesignLedger(volume="vol1")
     if ledger.is_wasm:
         _loaded = await ledger.load_async()
     return (
-        ACADEMIC_LAB_CSS, COLORS, LAB_CSS, TRACKS, apply_plotly_theme,
-        audit_evidence, build_lab_report, capture_evidence, compare, evaluate,
-        get_lab_metadata, go, ledger, margins, mo, monitoring_plan,
-        population_compare, report_export_panel, speedup, stress_compare,
+        COLORS, CONTEXT_OPTIONS, INTRO_SCENARIO_VERSION, INTRO_TASK_OPTIONS,
+        Q_, apply_plotly_theme, audit_evidence, build_lab_report,
+        capture_evidence, evaluate, fmt, fmt_count, fmt_energy, fmt_memory,
+        fmt_percent, fmt_time, get_context, get_lab_metadata, go,
+        introductory_profile, ledger, mo, notebook_bridge, notebook_header, notebook_shell, notebook_status, notebook_table,
+        preferred_context, report_export_panel,
+        speedup, task_factors,
     )
+
 
 
 @app.cell
 def _(mo):
     get_evidence, set_evidence = mo.state({})
-    return get_evidence, set_evidence
+    get_pinned, set_pinned = mo.state({})
+    return get_evidence, get_pinned, set_evidence, set_pinned
 
 
 @app.cell
-def _(mo, set_evidence):
-    track = mo.ui.dropdown(
-        {"TinyML": "tinyml", "Mobile": "mobile", "Edge": "edge", "Cloud": "cloud"},
-        value="TinyML", label="Deployment track",
-        on_change=lambda _value: set_evidence({}),
-    )
+def _(CONTEXT_OPTIONS, get_context, ledger, mo, preferred_context, set_evidence, set_pinned):
+    def reset_context(_value):
+        set_evidence({})
+        set_pinned({})
+    track = mo.ui.dropdown(CONTEXT_OPTIONS, value=get_context(preferred_context(ledger)).label,
+                           label="Deployment context", on_change=reset_context)
     return (track,)
 
 
 @app.cell
-def _(TRACKS, mo, track_id):
-    _track_key = track_id
-    a_shift = mo.ui.slider(0, 30, value=20, step=5, label="Difficult-cohort increase (points)")
-    c_budget = mo.ui.slider(0.75, 1.25, value=1.0, step=0.05, label="Deployment-envelope scale")
-    c_candidate = mo.ui.dropdown(
-        {"Compact": "compact", "Balanced": "balanced", "Large": "large"},
-        value="Balanced", label="Candidate to carry forward",
-    )
-    c_conclusion = mo.ui.radio(
-        {"Compact": "compact", "Balanced": "balanced", "Large": "large", "None feasible": "none"},
-        label="Deployability conclusion",
-    )
-    d_choice = mo.ui.radio(
-        {"Data": "data", "Model": "model", "Machine": "machine", "No action": "none"},
-        label="First action",
-    )
-    d_rejected = mo.ui.radio(
-        {"Data": "data", "Model": "model", "Machine": "machine"},
-        label="Rejected alternative",
-    )
-    e_condition = mo.ui.dropdown(
-        {"More serialized work": "demand", "Harder population": "population"},
-        value="More serialized work", label="Stress condition",
-    )
-    e_demand = mo.ui.slider(1.05, 2.0, value=1.5, step=0.05, label="Work multiplier")
-    e_shift = mo.ui.slider(5, 30, value=15, step=5, label="Additional difficult share (points)")
-    e_interval = mo.ui.slider(20, 240, value=int(TRACKS[track_id]["monitor_interval_ms"]), step=20, label="Monitoring interval (ms)")
-    return a_shift, c_budget, c_candidate, c_conclusion, d_choice, d_rejected, e_condition, e_demand, e_interval, e_shift
-
-
-@app.cell
-def _(mo, track_id):
-    _track_key = track_id
-    a_prediction = mo.ui.radio(
-        {"Quality passes; runtime passes": "Quality passes; runtime passes", "Quality fails; runtime passes": "Quality fails; runtime passes", "Runtime fails": "Runtime fails"},
-        label="After the stated shift, what crosses a requirement?",
-    ).form(submit_button_label="Lock Part A prediction")
-    b_prediction = mo.ui.radio(
-        {"1.00–1.24×": "1.00-1.24", "1.25–1.49×": "1.25-1.49", "1.50–1.99×": "1.50-1.99", "Exactly 2.00×": "2.00"},
-        label="End-to-end speedup after 2× compute capability",
-    ).form(submit_button_label="Lock Part B prediction")
-    c_prediction = mo.ui.radio(
-        {"Compact · quality": "Compact: quality", "Balanced · quality/resource": "Balanced: quality or resources", "Large · memory/latency/energy": "Large: memory, latency, or energy", "No candidate fails": "No candidate fails"},
-        label="Which candidate is most likely to fail, and why?",
-    ).form(submit_button_label="Lock Part C prediction")
-    d_prediction = mo.ui.radio(
-        {"Data": "data", "Model": "model", "Machine": "machine", "None": "none"},
-        label="Which equal-budget action should come first?",
-    ).form(submit_button_label="Lock Part D prediction")
-    e_prediction = mo.ui.radio(
-        {"Quality": "quality", "Memory": "memory", "Latency": "latency", "Energy": "energy", "No crossing": "none"},
-        label="Which requirement will the stated stress violate?",
-    ).form(submit_button_label="Lock Part E prediction")
-    return a_prediction, b_prediction, c_prediction, d_prediction, e_prediction
-
-
-@app.cell
-def _(mo, track_id):
-    _track_key = track_id
-    final_choice = mo.ui.radio(
-        {"Improve data first": "data", "Change model first": "model", "Change machine first": "machine", "No change / hold for more evidence": "none"},
-        label="Recommendation",
-    )
-    final_rejected = mo.ui.radio(
-        {"Data": "data", "Model": "model", "Machine": "machine"}, label="Rejected alternative",
-    )
-    final_trigger = mo.ui.radio(
-        {"Quality below floor": "quality", "Latency above limit": "latency", "Memory or energy above limit": "resource"},
-        label="Reevaluation trigger",
-    )
-    final_risk = mo.ui.radio(
-        {"Population coverage": "coverage", "Demand growth": "demand", "Energy assumptions": "energy"},
-        label="Residual risk",
-    )
-    rationale = mo.ui.text_area(
-        label="Concise rationale",
-        placeholder="Connect requirement, baseline, intervention consequence, and rejected alternative.",
-    )
-    return final_choice, final_rejected, final_risk, final_trigger, rationale
-
-
-@app.cell
-def _(TRACKS, track):
+def _(get_context, introductory_profile, track):
     track_id = track.value
-    profile = TRACKS[track_id]
-    return profile, track_id
+    context = get_context(track_id)
+    profile = introductory_profile(track_id)
+    project = context.scenario
+    episode = project.episode(1)
+    return context, episode, profile, project, track_id
 
 
 @app.cell
-def _(
-    a_shift, c_budget, c_candidate, compare, d_choice, e_condition,
-    e_demand, e_interval, e_shift, evaluate, monitoring_plan, population_compare,
-    stress_compare, track_id,
-):
-    a_base = evaluate(track_id, candidate="balanced")
-    a_result = evaluate(track_id, candidate="balanced", shift_pct=a_shift.value)
-    b_base = evaluate(track_id, candidate="balanced")
-    b_compute = compare(track_id, baseline=b_base, candidate="balanced", compute_scale=2.0)
-    b_movement = compare(track_id, baseline=b_base, candidate="balanced", movement_scale=2.0)
-    c_results = {
-        name: evaluate(track_id, candidate=name, shift_pct=a_shift.value, budget_scale=c_budget.value)
-        for name in ("compact", "balanced", "large")
-    }
-    d_base = c_results[c_candidate.value]
-    d_results = {
-        action: compare(
-            track_id, baseline=d_base, candidate=c_candidate.value,
-            shift_pct=a_shift.value, budget_scale=c_budget.value, intervention=action,
-        )
-        for action in ("data", "model", "machine")
-    }
-    carried_action = d_choice.value or "none"
-    e_base = evaluate(
-        track_id, candidate=c_candidate.value, shift_pct=a_shift.value,
-        budget_scale=c_budget.value, intervention=carried_action,
-    )
-    if e_condition.value == "demand":
-        e_comparison = stress_compare(
-            track_id, candidate=c_candidate.value, shift_pct=a_shift.value,
-            intervention=carried_action, condition="demand", scale=e_demand.value,
-            budget_scale=c_budget.value,
-        )
-        e_setting = e_demand.value
-    else:
-        e_comparison = population_compare(
-            track_id, candidate=c_candidate.value, shift_pct=a_shift.value,
-            shift_delta_pct=e_shift.value, budget_scale=c_budget.value,
-            intervention=carried_action,
-        )
-        e_setting = e_shift.value
-    monitor = monitoring_plan(
-        track_id, demand_scale=e_demand.value if e_condition.value == "demand" else 1.0,
-        check_interval_ms=e_interval.value,
-    )
-    return a_base, a_result, b_base, b_compute, b_movement, c_results, carried_action, d_base, d_results, e_base, e_comparison, e_setting, monitor
+def _(INTRO_TASK_OPTIONS, mo, profile, track_id):
+    _context_reset = track_id
+    a_shift = mo.ui.slider(steps=list(profile["shift_options"]), value=profile["shift_options"][-2],
+                           label="Increase difficult-cohort share (percentage points)")
+    a_labels = mo.ui.checkbox(label="Reveal the supplied labeled-outcome study")
+    a_interpretation = mo.ui.radio(["Investigate population coverage", "Investigate execution", "Evidence remains insufficient"],
+                                    label="What should we investigate first?")
+    b_term = mo.ui.dropdown({"Data movement": "movement", "Arithmetic": "compute", "Fixed overhead": "overhead"},
+                            value="Arithmetic", label="Improve one execution term")
+    b_scale = mo.ui.slider(steps=list(profile["capability_options"]), value=profile["capability_options"][1],
+                           label="Capability multiplier (×; only selected term changes)")
+    c_candidate = mo.ui.dropdown({name.title(): name for name in profile["candidates"]},
+                                 value="Balanced", label="Candidate to investigate")
+    c_rejected = mo.ui.dropdown({name.title(): name for name in profile["candidates"]},
+                                value="Large", label="Compared alternative")
+    c_decision = mo.ui.radio(["Advance this candidate for further validation", "Hold: requirements or evidence unresolved"],
+                             label="Deployment recommendation")
+    d_card = mo.ui.dropdown(INTRO_TASK_OPTIONS, value=next(iter(INTRO_TASK_OPTIONS)), label="Host study intervention")
+    d_choice = mo.ui.dropdown({"Keep baseline / no action": "baseline", **INTRO_TASK_OPTIONS},
+                              value="Keep baseline / no action", label="Which tested host option would you retain?")
+    final_trigger = mo.ui.radio(["Population or outcome evidence changes", "Execution requirements or workload changes", "Host study quality evidence changes"],
+                               label="Revisit this recommendation when…")
+    rationale = mo.ui.text_area(label="Your discussion: recommendation and evidence",
+                               placeholder="Use your saved contrasts: benefit, cost, rejected alternative, and remaining uncertainty.")
+    return (a_interpretation, a_labels, a_shift, b_scale, b_term, c_candidate,
+            c_decision, c_rejected, d_card, d_choice, final_trigger, rationale)
 
 
 @app.cell
-def _(
-    a_base, a_prediction, a_result, a_shift, b_base, b_compute,
-    b_movement, b_prediction, c_budget, c_candidate, c_conclusion,
-    c_prediction, c_results, capture_evidence, carried_action, d_base, d_choice,
-    d_prediction, d_rejected, d_results, e_base, e_comparison, e_condition,
-    e_interval, e_prediction, e_setting, mo, monitor, set_evidence, track_id,
-):
-    def store(part, capture):
-        set_evidence(lambda current: {**current, part: capture})
-
-    a_upstream = {"candidate": "balanced", "shift_pct": a_shift.value}
-    b_upstream = {"candidate": "balanced", "workload": "fixed", "capability": "compute", "scale": 2.0}
-    c_upstream = {"shift_pct": a_shift.value, "budget_scale": c_budget.value, "candidate": c_candidate.value, "conclusion": c_conclusion.value}
-    d_upstream = {**c_upstream, "choice": d_choice.value, "rejected": d_rejected.value}
-    e_upstream = {**d_upstream, "intervention": carried_action, "condition": e_condition.value, "setting": e_setting, "monitor_interval_ms": e_interval.value}
-
-    a_capture = mo.ui.button(
-        label="Capture population contrast", kind="success",
-        disabled=a_prediction.value is None or a_shift.value == 0,
-        on_click=lambda _v: store("A", capture_evidence(
-            track=track_id, part="A", prediction=a_prediction.value,
-            inputs={"shift_pct": a_shift.value}, baseline=a_base, result=a_result,
-            upstream_inputs=a_upstream, model_key="constraint_explorer.evaluate",
-        )),
-    )
-    b_capture = mo.ui.button(
-        label="Capture capability contrast", kind="success", disabled=b_prediction.value is None,
-        on_click=lambda _v: store("B", capture_evidence(
-            track=track_id, part="B", prediction=b_prediction.value,
-            inputs={"capability": "compute", "scale": 2.0}, baseline=b_base, result=b_compute["result"],
-            upstream_inputs=b_upstream, alternatives=(b_compute, b_movement), model_key="constraint_explorer.evaluate",
-        )),
-    )
-    c_capture = mo.ui.button(
-        label="Capture candidate comparison", kind="success",
-        disabled=c_prediction.value is None or c_conclusion.value is None,
-        on_click=lambda _v: store("C", capture_evidence(
-            track=track_id, part="C", prediction=c_prediction.value,
-            inputs={"conclusion": c_conclusion.value, "carried_candidate": c_candidate.value},
-            baseline=c_results["compact"], result=c_results["large"],
-            upstream_inputs=c_upstream, alternatives=tuple(c_results.values()),
-            decision=c_conclusion.value, model_key="constraint_explorer.evaluate",
-            chosen_result=c_results[c_candidate.value],
-        )),
-    )
-    d_invalid = d_prediction.value is None or d_choice.value is None or d_rejected.value is None or d_choice.value == d_rejected.value
-    if d_choice.value is None:
-        d_selected = d_base
-    elif d_choice.value == "none":
-        d_selected = d_results[d_rejected.value]["result"] if d_rejected.value in d_results else d_base
-    else:
-        d_selected = d_results[d_choice.value]["result"]
-    d_capture = mo.ui.button(
-        label="Capture equal-budget decision", kind="success", disabled=d_invalid,
-        on_click=lambda _v: store("D", capture_evidence(
-            track=track_id, part="D", prediction=d_prediction.value,
-            inputs={"choice": d_choice.value, "rejected": d_rejected.value, "tested_action": d_rejected.value if d_choice.value == "none" else d_choice.value},
-            baseline=d_base, result=d_selected, upstream_inputs=d_upstream,
-            alternatives=tuple(d_results.values()), decision=d_choice.value, model_key="constraint_explorer.evaluate",
-            chosen_result=d_base if d_choice.value == "none" else d_selected,
-            result_role="rejected alternative" if d_choice.value == "none" else "chosen intervention",
-        )),
-    )
-    e_capture = mo.ui.button(
-        label="Capture stress evidence", kind="success",
-        disabled=e_prediction.value is None or d_choice.value is None or (e_condition.value == "population" and e_setting == 0),
-        on_click=lambda _v: store("E", capture_evidence(
-            track=track_id, part="E", prediction=e_prediction.value,
-            inputs={"condition": e_condition.value, "setting": e_setting, "monitor_interval_ms": e_interval.value},
-            baseline=e_base, result=e_comparison["result"], upstream_inputs=e_upstream,
-            alternatives=(monitor,), decision=e_prediction.value, model_key="constraint_explorer.evaluate",
-        )),
-    )
-    return a_capture, a_upstream, b_capture, b_upstream, c_capture, c_upstream, d_capture, d_upstream, e_capture, e_upstream
+def _(mo, track_id):
+    _context_reset = track_id
+    a_prediction = mo.ui.radio(["Quality only", "Execution only", "Both", "Neither"],
+                               label="With fixed weights and execution, what might fail under the stated population change?").form(submit_button_label="Lock A prediction")
+    b_prediction = mo.ui.radio(["Movement", "Arithmetic", "Overhead", "Need more evidence"],
+                               label="Which term should give the largest end-to-end benefit at the same capability multiplier?").form(submit_button_label="Lock B prediction")
+    c_prediction = mo.ui.radio(["Highest quality is deployable", "Higher quality can violate a resource requirement", "Quality evidence alone is insufficient"],
+                               label="Does higher quality establish deployment readiness?").form(submit_button_label="Lock C prediction")
+    d_prediction = mo.ui.radio(["Fewer samples", "Fewer operations per sample", "Fewer realized seconds per operation", "Cannot infer quality from any factor alone"],
+                               label="Which efficiency change would you investigate first?").form(submit_button_label="Lock D prediction")
+    return a_prediction, b_prediction, c_prediction, d_prediction
 
 
 @app.cell
-def _(ACADEMIC_LAB_CSS, LAB_CSS, mo, profile, track):
-    css = mo.Html("""
-    <style>
-    .pilot-head{background:linear-gradient(135deg,#101827,#1d4f78);color:white;border-radius:14px;padding:clamp(18px,4vw,32px);margin-bottom:14px}
-    .pilot-top{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font:700 .72rem ui-monospace;letter-spacing:.08em}
-    .pilot-head h1{font-size:clamp(1.65rem,5vw,2.65rem);line-height:1.05;margin:16px 0 8px}.pilot-head p{color:#dbeafe;max-width:760px}
-    .pilot-head select{color:#0f172a;background:#fff;min-width:95px;max-width:100%}
-    .pilot-note{color:#475569;font-size:.9rem;line-height:1.5;margin:0;padding:0 2px}
-    .lab-hud{display:flex;align-items:center;flex-wrap:wrap;gap:10px;background:#101827!important;color:#fff;padding:14px 18px;border-radius:9px}
-    .lab-hud .hud-label{color:#a7b9cf}.lab-hud .hud-value{color:#fff}.lab-hud .hud-active{color:#86efac}
-    .pilot-meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:9px;margin-top:17px}.pilot-meta div{background:#ffffff14;border:1px solid #ffffff26;padding:9px 11px;border-radius:8px}
-    .saved{border-left:4px solid #2ca02c;background:#f0fdf4;padding:9px 12px;border-radius:7px}.table-wrap{max-width:100%;overflow-x:auto}
-    @media(max-width:520px){.pilot-head{border-radius:9px;margin-top:30px}.pilot-meta{grid-template-columns:1fr}}
-    </style>""")
-    header = mo.Html(f"""<section class="pilot-head"><div class="pilot-top"><span>VOLUME I · LAB 01</span><span>ABOUT 50–55 MIN</span></div><h1>Evidence Before Optimization</h1><p>What should we improve first, and what evidence makes that choice defensible?</p><div class="pilot-meta"><div><b>Track</b><br>{profile['display']}</div><div><b>Context</b><br>{profile['scenario']}</div><div><b>Deliverable</b><br>Evidence-backed recommendation</div></div></section>""")
-    mo.vstack([LAB_CSS, ACADEMIC_LAB_CSS, css, header, track, mo.Html('<p class="pilot-note">All tracks use illustrative workloads and quality rates. Equations and assumptions are available in each part’s Calculation Notes.</p>')], gap=0.5)
+def _(INTRO_SCENARIO_VERSION, a_shift, b_scale, b_term, c_candidate, c_rejected, d_card, evaluate,
+      get_evidence, get_pinned, task_factors, track_id):
+    baseline = evaluate(track_id, scenario_version=INTRO_SCENARIO_VERSION)
+    a_result = evaluate(track_id, scenario_version=INTRO_SCENARIO_VERSION, shift_pct=a_shift.value)
+    b_result = evaluate(track_id, scenario_version=INTRO_SCENARIO_VERSION, **{f"{b_term.value}_scale": b_scale.value})
+    captures = get_evidence()
+    pins = get_pinned()
+    saved_population = captures["A"].to_dict()["result"]["shift_pct"] if "A" in captures else None
+    c_results = {name: evaluate(track_id, scenario_version=INTRO_SCENARIO_VERSION, candidate=name, shift_pct=saved_population or 0)
+                 for name in ("compact", "balanced", "large")}
+    c_result = c_results[c_candidate.value]
+    c_other = c_results[c_rejected.value]
+    d_base = task_factors(track_id)
+    d_result = task_factors(track_id, d_card.value)
+    return (a_result, b_result, baseline, c_other, c_result, c_results,
+            captures, d_base, d_result, pins, saved_population)
+
+
+@app.cell
+def _(INTRO_SCENARIO_VERSION, a_interpretation, a_labels, a_prediction,
+      a_result, a_shift, b_prediction, b_result, b_scale, b_term, baseline,
+      c_decision, c_other, c_prediction, c_result, capture_evidence, captures,
+      d_base, d_choice, d_prediction, d_result, mo, pins, saved_population,
+      set_evidence, set_pinned, task_factors, track_id):
+    def store(part, prediction, inputs, base, result, *, alternatives=(), decision=None,
+              chosen=None, model_key="constraint_explorer.evaluate", upstream=None):
+        snapshot = capture_evidence(track=track_id, part=part, prediction=prediction,
+            inputs={"scenario_version": INTRO_SCENARIO_VERSION, **inputs},
+            baseline=base, result=result, alternatives=alternatives, decision=decision,
+            chosen_result=chosen, upstream_inputs=upstream, model_key=model_key)
+        set_evidence(lambda current: {**current, part: snapshot})
+    a_upstream = {"version": INTRO_SCENARIO_VERSION}
+    b_upstream = {"version": INTRO_SCENARIO_VERSION}
+    c_upstream = {"version": INTRO_SCENARIO_VERSION, "saved_population": saved_population}
+    d_upstream = {"version": INTRO_SCENARIO_VERSION}
+    a_capture = mo.ui.button(label="Save population contrast", kind="success",
+        disabled=a_prediction.value is None or not a_labels.value or a_shift.value == 0 or a_interpretation.value is None,
+        on_click=lambda _v: store("A", a_prediction.value, {"shift_pct": a_shift.value}, baseline, a_result,
+                                  decision=a_interpretation.value, upstream=a_upstream))
+    b_pin = mo.ui.button(label="Pin this execution alternative",
+        disabled=b_prediction.value is None or b_scale.value == 1,
+        on_click=lambda _v: set_pinned(lambda current: {**current, "B": b_result}))
+    b_pair = pins.get("B")
+    b_different = b_pair is not None and b_pair["inputs"].get(f"{b_term.value}_scale", 1) == 1 and b_scale.value != 1
+    b_capture = mo.ui.button(label="Save two execution alternatives", kind="success",
+        disabled=b_prediction.value is None or not b_different,
+        on_click=lambda _v: store("B", b_prediction.value, {"term": b_term.value, "scale": b_scale.value},
+                                  baseline, b_result, alternatives=(b_pair, b_result), upstream=b_upstream))
+    c_capture = mo.ui.button(label="Save candidate decision", kind="success",
+        disabled=c_prediction.value is None or saved_population is None or c_decision.value is None
+                 or c_result["candidate"] == c_other["candidate"]
+                 or (c_decision.value.startswith("Advance") and not c_result["feasible"]),
+        on_click=lambda _v: store("C", c_prediction.value, {"candidate": c_result["candidate"], "rejected": c_other["candidate"]},
+                                  c_other, c_result, alternatives=(c_other, c_result),
+                                  decision=c_decision.value, chosen=c_result, upstream=c_upstream))
+    d_pin = mo.ui.button(label="Pin this host study",
+        disabled=d_prediction.value is None,
+        on_click=lambda _v: set_pinned(lambda current: {**current, "D": d_result}))
+    d_pair = pins.get("D")
+    tested = {"baseline", d_result["card_id"]} | ({d_pair["card_id"]} if d_pair else set())
+    d_selected = task_factors(track_id, d_choice.value)
+    d_capture = mo.ui.button(label="Save host-study decision", kind="success",
+        disabled=d_prediction.value is None or d_pair is None or d_pair["card_id"] == d_result["card_id"]
+                 or d_choice.value not in tested or not d_selected["feasible"],
+        on_click=lambda _v: store("D", d_prediction.value, {"tested": [d_pair["card_id"], d_result["card_id"]], "choice": d_choice.value},
+                                  d_base, d_result, alternatives=(d_pair, d_result), decision=d_choice.value,
+                                  chosen=d_selected, model_key="constraint_explorer.task_factors.v1", upstream=d_upstream))
+    return (a_capture, a_upstream, b_capture, b_pair, b_pin, b_upstream,
+            c_capture, c_upstream, d_capture, d_pair, d_pin, d_selected, d_upstream)
+
+
+@app.cell
+def _(context, episode, get_lab_metadata, mo, notebook_bridge, notebook_header, notebook_shell, project, track):
+    from mlsysbook_labs.notebook import notebook_scenario as _scenario
+    from mlsysbook_labs.learning_paths import get_learning_path
+    from mlsysbook_labs.notebook import notebook_learning_map
+    _learning = get_learning_path(1, 1)
+    _learning["next_lab"]["question"] = project.episode(2).question
+    notebook_shell([
+        notebook_header(get_lab_metadata("vol1/lab_01_ml_intro.py"),
+            episode.question,
+            label="Lab 01 · Introduction", topics=("Outcome evidence", "Execution costs", "Deployment requirements", "Efficiency levers")),
+        mo.hstack([track, mo.md(f"**Project:** {project.title}")], justify="start", gap=1, wrap=True),
+        _scenario(_learning, track=track.value, scene=episode.scene),
+        mo.md("**Starting case:** supplied mechanism studies. Earlier lab completion is optional."),
+        notebook_learning_map(_learning),
+        mo.accordion({"Project brief and reading": mo.md(f"**This episode:** {episode.task}\n\n{project.mission}\n\n{project.study_boundary}\n\n**Read first:** the introduction’s sections on silent degradation, the iron law, and three dimensions of efficiency. [Open the chapter](https://mlsysbook.ai/vol1/introduction/introduction.html).\n\nThese are supplied illustrative studies, not device benchmarks. Any prediction unlocks exploration. Capture contrasting runs, explain your decision in Synthesis, and download the report. A justified hold is a valid conclusion. Your project continues even in a fresh session; prior chapter completion is not required. Changing context resets this lab’s captures and predictions rather than carrying another project’s evidence forward.")}),
+    ])
     return
 
 
-@app.cell
-def _(mo):
-    mo.sidebar([mo.md("## Lab navigation"), mo.outline(label="Sections")])
-    return
-
 
 @app.cell
-def _(
-    COLORS, a_base, a_capture, a_prediction, a_result, a_shift, a_upstream,
-    apply_plotly_theme, audit_evidence, b_base, b_capture, b_compute,
-    b_movement, b_prediction, b_upstream, c_budget, c_candidate, c_capture,
-    c_conclusion, c_prediction, c_results, c_upstream, carried_action, d_base,
-    d_capture, d_choice, d_prediction, d_rejected, d_results, d_upstream,
-    e_base, e_capture, e_comparison, e_condition, e_demand, e_interval,
-    e_prediction, e_shift, e_upstream, final_choice, final_rejected, final_risk,
-    final_trigger, get_evidence, go, mo, monitor, profile, rationale, track_id,
-):
-    _captures = get_evidence()
-    upstream = {"A":a_upstream,"B":b_upstream,"C":c_upstream,"D":d_upstream,"E":e_upstream}
-    audit = audit_evidence(_captures, track=track_id, required_parts=tuple("ABCDE"), per_part_upstream_inputs=upstream, contrast_required_parts=("A","B","C","D","E"))
-
-    def verdict(r):
-        return "PASS" if r["feasible"] else "FAIL · " + ", ".join(r["violations"])
+def _(COLORS, Q_, a_capture, a_interpretation, a_labels, a_prediction,
+      a_result, a_shift, a_upstream, apply_plotly_theme, audit_evidence,
+      b_capture, b_pair, b_pin, b_prediction, b_result, b_scale, b_term,
+      b_upstream, baseline, c_candidate, c_capture, c_decision, c_other,
+      c_prediction, c_rejected, c_result, c_results, c_upstream, captures,
+      d_base, d_capture, d_card, d_choice, d_pair, d_pin, d_prediction,
+      d_result, d_selected, d_upstream, final_trigger, fmt, fmt_count,
+      fmt_energy, fmt_memory, fmt_percent, fmt_time, go, mo, profile, project, episode,
+      rationale, saved_population, speedup, track_id, notebook_shell, notebook_bridge, notebook_table):
+    upstream = {"A": a_upstream, "B": b_upstream, "C": c_upstream, "D": d_upstream}
+    audit = audit_evidence(captures, track=track_id, required_parts=tuple("ABCD"),
+        per_part_upstream_inputs=upstream, contrast_required_parts=tuple("ABCD"))
     def table(rows):
-        return mo.vstack([mo.ui.table(rows, pagination=False)]).style({"max-width":"100%", "overflow-x":"auto"})
+        return notebook_table(rows)
+    def time(value, unit="millisecond"):
+        return fmt_time(Q_(value, unit), unit=unit, precision=None)
+    def percent(value):
+        return "Unknown" if value is None else fmt_percent(value / 100, style="symbol")
+    def memory(value):
+        return fmt_memory(Q_(value, "megabyte"), unit="megabyte", precision=None)
+    def energy(value):
+        return fmt_energy(Q_(value, "millijoule"), unit="millijoule", precision=None)
+    def verdict(result):
+        return "Requirements pass" if result["feasible"] else "FAIL · " + ", ".join(result["violations"])
     def saved(part):
-        cap = _captures.get(part)
-        if cap is None:
-            return mo.callout(mo.md("No saved evidence for this part."), kind="warn")
-        if part in audit.stale or (part, part) in audit.identical_pairs:
-            return mo.callout(mo.md("**STALE OR NON-CONTRASTING EVIDENCE.** Live dependencies changed, or the saved runs are identical. Recapture."), kind="danger")
-        data = cap.to_dict()
-        return mo.Html(f'<div class="saved"><b>Saved snapshot</b> · original prediction: {data["prediction"]}<br><small>Track {data["track"]}; the report uses this saved result, not later live controls.</small></div>')
-
+        if part not in captures:
+            return mo.md("*No saved contrast yet.*")
+        if part in audit.stale:
+            return mo.callout("Saved evidence is stale: an upstream saved population changed. Revisit and recapture.", kind="warn")
+        return mo.callout(f"Saved contrast · original prediction: {captures[part].to_dict()['prediction']}", kind="success")
+    def latency_chart(rows):
+        fig = go.Figure()
+        for label, result in rows:
+            for field, color in (("movement_ms", "BlueLine"), ("compute_ms", "OrangeLine"), ("overhead_ms", "GreenLine")):
+                fig.add_bar(x=[label], y=[result[field]], name=field.removesuffix("_ms").title(),
+                    marker_color=COLORS[color], legendgroup=field, showlegend=label == rows[0][0])
+        fig.add_hline(y=baseline["latency_limit_ms"], line_dash="dash", annotation_text="Deadline")
+        apply_plotly_theme(fig)
+        fig.update_layout(barmode="stack", yaxis_title="Sequential execution time (ms)",
+                          height=350, margin=dict(l=40, r=20, t=25, b=100),
+                          legend=dict(orientation="h", yanchor="top", y=-0.24,
+                                      xanchor="center", x=0.5))
+        return fig
+    def investigate(prompts):
+        return mo.accordion({"Investigate before you decide": mo.md("\n\n".join(f"- {prompt}" for prompt in prompts))})
     def part_a():
-        preface = mo.md(f"### A · Can behavior fail without a code change? (8 min)\nBaseline difficult share: **{a_base['difficult_share_pct']:.0f}%**. Easy/difficult assumed quality: **{a_base['easy_quality_pct']:.0f}% / {a_base['difficult_quality_pct']:.0f}%**. Quality floor: **{a_base['quality_floor_pct']:.0f}%**.")
+        opening = mo.md(f"### A · Healthy runtime, changed behavior (9 min)\nKeep the **balanced model, weights, and execution** fixed. Compare {profile['cohorts'][0]} with {profile['cohorts'][1]}. The slider changes their mix, not either cohort's supplied quality rate.")
         if a_prediction.value is None:
-            return mo.vstack([preface, a_shift, a_prediction])
-        fig=go.Figure([go.Bar(name="Difficult cohort",x=["Baseline","Changed"],y=[a_base["difficult_share_pct"],a_result["difficult_share_pct"]],marker_color=COLORS["OrangeLine"])])
-        fig.update_layout(height=245,margin=dict(l=20,r=20,t=20,b=20),yaxis_title="Difficult-cohort share (%)",showlegend=False)
-        rows=[{"Run":"Baseline","Weighted quality":f"{a_base['quality_pct']:.1f}%","Floor":f"{a_base['quality_floor_pct']:.1f}%","Runtime":"PASS" if a_base["runtime_feasible"] else "FAIL"},{"Run":"Changed","Weighted quality":f"{a_result['quality_pct']:.1f}%","Floor":f"{a_result['quality_floor_pct']:.1f}%","Runtime":"PASS" if a_result["runtime_feasible"] else "FAIL"}]
-        return mo.vstack([preface,a_shift,a_prediction,apply_plotly_theme(fig),table(rows),mo.callout(mo.md(f"**Your prediction:** {a_prediction.value}. **Result:** quality {a_base['quality_pct']:.1f}% → {a_result['quality_pct']:.1f}%; runtime remains {'healthy' if a_result['runtime_feasible'] else 'failed'}. Monitoring observes outcomes; it does not repair the model."),kind="info"),a_capture,saved("A"),mo.accordion({"Calculation Notes":mo.md("Quality = easy-cohort share × easy-cohort quality + difficult-cohort share × difficult-cohort quality. These are supplied scenario rates, not a claim that every population change reduces accuracy. The model, weights, and machine stay fixed. Explain which additional cohort evidence you would collect before blaming model capacity.")})])
-
+            return mo.vstack([opening, a_shift, a_prediction])
+        mix = go.Figure([go.Bar(x=["Baseline", "Changed"], y=[baseline["difficult_share_pct"], a_result["difficult_share_pct"]], marker_color=COLORS["OrangeLine"])])
+        mix.update_layout(yaxis_title="Difficult-cohort share (%)", height=230, margin=dict(l=25, r=20, t=15, b=25))
+        items = [opening, a_shift, a_prediction, apply_plotly_theme(mix), a_labels,
+            investigate(("Before revealing outcomes, what can the population change establish—and what is still unknown?", "Find a changed mixture with healthy runtime. Reveal outcomes: does the task still meet its requirement?", f"For {project.title.lower()}, what project-specific labeled outcomes would you collect before claiming the same failure mechanism?"))]
+        if not a_labels.value:
+            items.append(mo.callout("The population changed. Predictive quality remains unknown until outcome evidence is available. Execution remains unchanged.", kind="info"))
+            return mo.vstack(items)
+        quality = go.Figure([go.Bar(x=["Baseline", "Changed"], y=[baseline["quality_pct"], a_result["quality_pct"]], marker_color=[COLORS["BlueLine"], COLORS["OrangeLine"]])])
+        quality.add_hline(y=baseline["quality_floor_pct"], line_dash="dash", annotation_text="Quality floor")
+        quality.update_layout(yaxis_title="Supplied weighted quality (%)", height=250, margin=dict(l=25, r=20, t=30, b=25))
+        items.extend([apply_plotly_theme(quality), table([{"Run": label, "Quality": percent(r["quality_pct"]), "Latency": time(r["latency_ms"]), "Runtime": "PASS" if r["runtime_feasible"] else "FAIL"} for label, r in (("Baseline", baseline), ("Changed", a_result))]),
+            mo.callout(f"Your prediction: {a_prediction.value}. Supplied cohort rates give {percent(a_result['quality_pct'])} quality; runtime is unchanged. A population warning alone would not establish this loss.", kind="danger" if not a_result["feasible"] else "info"), a_interpretation, a_capture, saved("A"),
+            mo.accordion({"Calculation Notes": mo.md(f"Weighted quality uses population shares and supplied cohort rates: ordinary **{percent(baseline['easy_quality_pct'])}**, difficult **{percent(baseline['difficult_quality_pct'])}**. This is an illustrative outcome study, not a universal drift-to-accuracy law. Move back toward the original mixture to recover; save the population you want to investigate in Part C.")})])
+        return mo.vstack(items)
     def part_b():
+        opening = mo.md("### B · Improve the right part of time (11 min)\nDouble or quadruple one capability. What remains untouched? Pin one alternative, then test a different one. These counterfactuals show possible benefit, not the price or power of an actual upgrade.")
+        pre = table([{"Movement": time(baseline["movement_ms"]), "Arithmetic": time(baseline["compute_ms"]), "Overhead": time(baseline["overhead_ms"])}])
         if b_prediction.value is None:
-            return mo.vstack([mo.md(f"### B · Which improvement speeds up the whole system? (10 min)\nBaseline terms: movement **{b_base['movement_ms']:.1f} ms**, compute **{b_base['compute_ms']:.1f} ms**, overhead **{b_base['overhead_ms']:.1f} ms**. Predict the result of 2× compute capability."),b_prediction])
-        fig=go.Figure()
-        for label,r in (("Baseline",b_base),("2× compute",b_compute["result"]),("2× movement",b_movement["result"])):
-            for term,color in (("movement_ms",COLORS["BlueLine"]),("compute_ms",COLORS["OrangeLine"]),("overhead_ms",COLORS["GreenLine"])):
-                fig.add_bar(name=term[:-3].title(),x=[label],y=[r[term]],marker_color=color,legendgroup=term,showlegend=label=="Baseline")
-        fig.update_layout(barmode="stack",height=270,margin=dict(l=20,r=20,t=20,b=20),yaxis_title="Additive latency (ms)",legend_orientation="h")
-        rows=[{"Case":"2× compute","Latency":f"{b_compute['result']['latency_ms']:.2f} ms","Speedup":f"{b_compute['speedup']:.2f}×"},{"Case":"2× movement","Latency":f"{b_movement['result']['latency_ms']:.2f} ms","Speedup":f"{b_movement['speedup']:.2f}×"}]
-        return mo.vstack([mo.md("### B · Which improvement speeds up the whole system? (10 min)"),b_prediction,apply_plotly_theme(fig),table(rows),mo.callout(mo.md(f"**Your prediction:** {b_prediction.value}. **Result:** 2× compute produces **{b_compute['speedup']:.2f}×** end-to-end speedup; the equal capability change to movement produces **{b_movement['speedup']:.2f}×**."),kind="info"),b_capture,saved("B"),mo.accordion({"Calculation Notes":mo.vstack([mo.md("No-overlap assumption: time = bytes moved / bandwidth + operations / effective compute rate + overhead. Doubling capability halves only its term. Speedup = baseline time / changed time. Explain why the same component improvement has a different payoff when another term dominates."), table([{"Bytes moved": f"{b_base['movement_volume_mb']:.2f} MB", "Bandwidth": f"{b_base['bandwidth_mb_per_ms']:.2f} MB/ms", "Operations": f"{b_base['ops_mflop']:.2f} MFLOP", "Effective compute rate": f"{b_base['effective_rate_mflop_per_ms']:.2f} MFLOP/ms"}])])})])
-
+            return mo.vstack([opening, pre, b_prediction])
+        rows = [("Baseline", baseline)] + ([("Pinned alternative", b_pair)] if b_pair else []) + [("Live alternative", b_result)]
+        return mo.vstack([opening, b_prediction, mo.hstack([b_term, b_scale], wrap=True), latency_chart(rows),
+            mo.callout(f"Your prediction: {b_prediction.value}. Live end-to-end speedup: {fmt(speedup(baseline, b_result), precision=None)}×. Only the selected term changed; the untouched terms cap the benefit.", kind="info"),
+            b_pin, b_capture, saved("B"), investigate(("Pin an arithmetic improvement, then give movement the same multiplier. Which yields more end-to-end benefit?", "Increase the winning capability again. Which untouched cost now limits the improvement?", "Would this evidence justify buying an upgrade? Name the missing cost or power evidence before recommending one.")), mo.accordion({"Calculation Notes": mo.md("Sequential time = bytes moved / bandwidth + operations / effective arithmetic rate + fixed overhead. A capability multiplier divides only its term. This experiment does not model queues, overlap, upgrade cost, or hardware energy changes. Pinning preserves settings while the live comparison changes.")})])
     def part_c():
-        preview=table([{"Candidate":n.title(),"Modeled work scale":f"{r['candidate_scale']:.2f}×","Modeled operations":f"{r['ops_mflop']:.1f} MFLOP","Modeled memory":f"{r['memory_mb']:.1f} MB"} for n,r in c_results.items()])
+        opening = mo.md("### C · Better quality, deployable system? (10 min)\nAll requirements stay fixed. A higher-quality candidate still has to fit memory, latency, and energy limits. Compare two candidates, then choose advance or hold.")
+        if saved_population is None:
+            return mo.vstack([opening, mo.callout("Save the labeled population contrast in Part A first. This part uses that snapshot, not the current slider.", kind="warn")])
         if c_prediction.value is None:
-            return mo.vstack([mo.md("### C · Is the higher-quality model deployable? (10 min)\nUse the visible candidate scale and deployment envelope to predict a likely failure."),preview,c_prediction])
-        rows=[{"Candidate":n.title(),"Quality":f"{r['quality_pct']:.1f}/{r['quality_floor_pct']:.1f}%","Memory":f"{r['memory_mb']:.1f}/{r['memory_limit_mb']:.1f} MB","Latency":f"{r['latency_ms']:.1f}/{r['latency_limit_ms']:.1f} ms","Energy":f"{r['energy_mj']:.2f}/{r['energy_limit_mj']:.2f} mJ","Outcome":verdict(r)} for n,r in c_results.items()]
-        chosen=c_results[c_candidate.value]
-        return mo.vstack([mo.md("### C · Is the higher-quality model deployable? (10 min)\nQuality percentages apply only to this shared task and population."),c_prediction,mo.hstack([c_budget,c_candidate],widths="equal",wrap=True),table(rows),c_conclusion,mo.callout(mo.md(f"**Your prediction:** {c_prediction.value}. **Carried candidate:** {c_candidate.value}; {verdict(chosen)}. Higher modeled quality carries visible memory, latency, and energy costs. If none is feasible, carry one candidate into Part D to test whether any action rescues it."),kind="success" if chosen["feasible"] else "danger"),c_capture,saved("C"),mo.accordion({"Calculation Notes":mo.md("The deployment-envelope scale changes the scenario limits. Candidate scale changes model memory, operations, and movement volume; overhead stays fixed. Quality comes from supplied cohort rates for each candidate, not a universal size-to-accuracy law. Every requirement must pass. Explain which requirement rules out the attractive alternative and which assumption you would verify on a real device.")})])
-
+            return mo.vstack([opening, mo.md(f"Saved difficult-cohort increase: **{fmt(saved_population, precision=0)} percentage points**."), c_prediction])
+        fig = go.Figure()
+        for name, result in c_results.items():
+            fig.add_scatter(x=[result["latency_ms"]], y=[result["quality_pct"]], mode="markers+text", text=[name.title()], textposition="top center", name=name.title(), marker=dict(size=14, symbol="circle" if result["feasible"] else "x"))
+        fig.add_vline(x=baseline["latency_limit_ms"], line_dash="dash", annotation_text="Deadline")
+        fig.add_hline(y=baseline["quality_floor_pct"], line_dash="dash", annotation_text="Quality floor")
+        fig.update_layout(xaxis_title="Modeled request latency (ms)", yaxis_title="Supplied quality (%)", height=310, margin=dict(l=30, r=30, t=30, b=30), showlegend=False)
+        rows = [{"Candidate": name.title(), "Quality / floor": f"{percent(r['quality_pct'])} / {percent(r['quality_floor_pct'])}", "Memory / limit": f"{memory(r['memory_mb'])} / {memory(r['memory_limit_mb'])}", "Latency / limit": f"{time(r['latency_ms'])} / {time(r['latency_limit_ms'])}", "Energy / limit": f"{energy(r['energy_mj'])} / {energy(r['energy_limit_mj'])}", "Outcome": verdict(r)} for name, r in c_results.items()]
+        return mo.vstack([opening, c_prediction, mo.md(f"Using saved population increase: **{fmt(saved_population, precision=0)} points**. Recapturing A updates this experiment and makes its old decision stale."),
+            apply_plotly_theme(fig), table(rows), mo.hstack([c_candidate, c_rejected], wrap=True),
+            mo.callout(f"Your prediction: {c_prediction.value}. Selected candidate: {c_result['candidate']} · {verdict(c_result)}.", kind="success" if c_result["feasible"] else "danger"), c_decision, c_capture, saved("C"),
+            investigate(("Compare a higher-quality candidate with a smaller alternative under exactly the same saved population and requirements.", "Find the binding requirement for each rejected candidate. Would relaxing a different requirement actually help?", f"What additional validation would {project.stakeholder} need before a modeled pass could become a deployment decision?")),
+            mo.accordion({"Calculation Notes": mo.md("Every requirement must pass. Quality rates are supplied for this task and population. Candidate size changes illustrative work, traffic, and memory together; it does not derive accuracy. Energy is a bounded phase-cost assumption, not measured device battery life. If no candidate passes, hold and state which evidence or requirement must change.")})])
     def part_d():
+        opening = mo.md("### D · Three routes to efficiency (11 min)\nSwitch to a **separate illustrative single-host training study**. Every deployment context uses this same study. It does not train on the endpoint or improve Part C's candidate automatically. Which task factor changes, and does supplied quality evidence justify keeping the change?")
         if d_prediction.value is None:
-            return mo.vstack([mo.md(f"### D · What should we improve first? (10 min)\nAll actions start from **{c_candidate.value}** with a {a_shift.value:.0f}-point population shift and cost one budget unit."),d_prediction])
-        rows=[{"Action":"No change","Cost":f"0/{d_base['budget']:.1f}","Quality":f"{d_base['quality_pct']:.1f}%","Latency":f"{d_base['latency_ms']:.1f} ms","Energy":f"{d_base['energy_mj']:.2f} mJ","Outcome":verdict(d_base)}]
-        rows += [{"Action":name.title(),"Cost":f"{cmp['result']['intervention_cost']:.1f}/{cmp['result']['budget']:.1f}","Quality":f"{cmp['result']['quality_pct']:.1f}%","Latency":f"{cmp['result']['latency_ms']:.1f} ms","Energy":f"{cmp['result']['energy_mj']:.2f} mJ","Outcome":verdict(cmp['result'])} for name,cmp in d_results.items()]
-        chosen=d_base if d_choice.value in (None,"none") else d_results[d_choice.value]["result"]
-        return mo.vstack([mo.md("### D · What should we improve first? (10 min)\nCompare all three complete outcomes against one equal-budget baseline."),d_prediction,table(rows),mo.hstack([d_choice,d_rejected],widths="equal",wrap=True),mo.callout(mo.md(f"**Your prediction:** {d_prediction.value}. **Chosen live outcome:** {verdict(chosen)}. Record a different rejected action and the requirement it leaves unresolved or worsens."),kind="info"),d_capture,saved("D"),mo.accordion({"Calculation Notes":mo.vstack([mo.md("Actions share the same baseline candidate, population, envelope, and intervention budget. The following assumed outcomes define this experiment; they are not guarantees about an actual optimization. Explain what the selected action improves, what it costs, and why another action is less defensible."), table([{"Action": name.title(), "Scenario assumption": cmp["result"]["intervention_assumption"]} for name, cmp in d_results.items()])])})])
+            return mo.vstack([opening, d_prediction])
+        rows = [("Baseline", d_base)] + ([("Pinned study", d_pair)] if d_pair else []) + [("Live study", d_result)]
+        fig = go.Figure([go.Bar(x=[label for label, _r in rows], y=[r["duration_seconds"] for _label, r in rows], marker_color=COLORS["BlueLine"])])
+        fig.update_layout(yaxis_title="Illustrative task duration (s)", height=240, margin=dict(l=25, r=20, t=15, b=25))
+        factor_rows = [{"Study": label, "Changed factor": r["changed_factor"], "Samples/task": fmt_count(r["samples_per_task"]), "Operations/sample": fmt_count(r["operations_per_sample"]), "Realized time/operation": fmt_time(Q_(r["seconds_per_operation"], "second"), unit="nanosecond", precision=None, per="operation"), "Duration": time(r["duration_seconds"], "second"), "Quality / floor": f"{percent(r['quality_pct'])} / {percent(r['quality_floor_pct'])}", "Outcome": verdict(r)} for label, r in rows]
+        return mo.vstack([opening, d_prediction, d_card, apply_plotly_theme(fig), table(factor_rows),
+            mo.callout(f"Your prediction: {d_prediction.value}. Live study changes {d_result['changed_factor']}. {verdict(d_result)}. Equal task durations do not imply equal quality evidence.", kind="success" if d_result["feasible"] else "danger"),
+            d_pin, mo.md("Pin one card and inspect another before saving. Keeping the original host study is a valid no-action decision."), d_choice,
+            mo.callout(f"Selected host option: {d_selected['label']} · {verdict(d_selected)}", kind="info"), d_capture, saved("D"),
+            investigate(("Pin one intervention, then find another with a different changed task factor. Compare duration and supplied quality together.", "Inspect the option with missing quality evidence. Can its duration establish that it is the better choice?", "Choose an intervention or keep baseline. Explain what host-study evidence transfers to your deployment project and what does not.")),
+            mo.accordion({"Calculation Notes": mo.md("Task time = samples/task × operations/sample × realized seconds/operation. The last factor includes execution costs, so movement is not added again. Quality is supplied independently; missing evaluation stays unknown. These cards do not simulate training or selection overhead, predict accuracy, or establish an optimization recipe.")})])
+    def synthesis():
+        rows = [{"Part": p, "Saved prediction": captures[p].to_dict()["prediction"] if p in captures else "—", "Evidence": "STALE" if p in audit.stale else ("CURRENT" if p in captures else "MISSING")} for p in "ABCD"]
+        c_saved = captures["C"].to_dict() if "C" in captures else None
+        d_saved = captures["D"].to_dict() if "D" in captures else None
+        decisions = mo.md(f"**Deployment:** {c_saved['decision'] if c_saved else 'not captured'}. **Host study:** {d_saved['decision'] if d_saved else 'not captured'}. These are separate decisions; the host cards do not repair deployment evidence.")
+        return mo.vstack([mo.md("### Synthesis · Defend the next step (6 min)\nUse the saved results to connect **requirement → evidence → benefit and cost → rejected alternative → next investigation**. A well-supported hold completes the lab."),
+            table(rows), decisions,
+            notebook_bridge("Current outcome, execution and candidate comparisons." if audit.complete else "Finish the missing or stale comparisons.",
+                "Target validation and the transfer from host study to deployment.",
+                project.episode(2).question, labels=("Carry forward", "Still open", "Next")),
+            mo.accordion({"Project handoff": mo.md(episode.handoff)}),
+            mo.md(f"In your discussion, distinguish what the supplied studies establish from what remains untested for **{project.title.lower()}**. Include one tempting intervention you rejected and a next measurement that could change your recommendation."), final_trigger, rationale,
+            mo.callout("Four current contrasts are ready. Add your recommendation and revisit trigger to export and save." if audit.complete else "Finish missing or stale contrasts. Changing live controls does not rewrite saved evidence.", kind="success" if audit.complete else "warn"),
+            mo.md("**Takeaways:** runtime health is not quality evidence; a component speedup leaves untouched time; better quality must fit fixed requirements; efficiency factors do not predict accuracy.\n\n**Next:** the system-paradigms lab tests where inference should run. TinyTorch builds model machinery; StaffML rehearses explaining your decisions.")])
+    tabs = mo.ui.tabs({"Part A": part_a(), "Part B": part_b(), "Part C": part_c(), "Part D": part_d(), "Synthesis": synthesis()})
+    ready = audit.complete and final_trigger.value is not None and bool(rationale.value.strip())
+    from mlsysbook_labs.notebook import notebook_tab_hint as _tab_hint
+    notebook_shell([_tab_hint(), tabs])
+    return audit, ready
 
-    def part_e():
-        stress_control=e_demand if e_condition.value=="demand" else e_shift
-        context=mo.md(f"### E · Does the decision survive changed conditions? (7 min)\nPreserved design: **{c_candidate.value}**, population shift **{a_shift.value:.0f} points**, intervention **{carried_action}**. Set one stress before locking the boundary prediction.")
-        if e_prediction.value is None:
-            return mo.vstack([context,e_condition,stress_control,e_prediction])
-        stressed=e_comparison["result"]
-        rows=[{"Condition":"Preserved design","Quality":f"{e_base['quality_pct']:.1f}%","Latency":f"{e_base['latency_ms']:.1f} ms","Outcome":verdict(e_base)},{"Condition":"Stress","Quality":f"{stressed['quality_pct']:.1f}%","Latency":f"{stressed['latency_ms']:.1f} ms","Outcome":verdict(stressed)}]
-        monitor_rows=[{"Expected delay":f"{monitor['detection_delay_ms']:.0f} ms","Maximum delay":f"{monitor['maximum_detection_delay_ms']:.0f} ms","Checks/window":f"{monitor['checks_per_window']:.1f}","Monitoring effort":f"{monitor['total_check_effort_mj']:.3f} mJ"}]
-        return mo.vstack([context,e_condition,stress_control,e_prediction,table(rows),mo.callout(mo.md(f"**Your prediction:** {e_prediction.value}. **Stress result:** {verdict(stressed)}. Monitoring leaves quality at {stressed['quality_pct']:.1f}%; it changes detection delay and inspection effort."),kind="danger" if not stressed["feasible"] else "success"),mo.hstack([e_interval,table(monitor_rows)],widths="equal",wrap=True),e_capture,saved("E"),mo.accordion({"Calculation Notes":mo.md("Demand multiplies serialized operations, movement, and overhead; this is not a queue model. Population stress changes cohort weighting while holding the chosen intervention fixed. Monitoring assumes uniform failure arrival between instantaneous checks: expected delay is half the interval and maximum delay is one interval. Shorter intervals cost more checks without repairing quality. Explain which observed signal would justify revisiting the decision, and what evidence is still missing before repair.")})])
 
-    def build_synthesis():
-        rows=[]
-        for p in "ABCDE":
-            cap=_captures.get(p)
-            rows.append({"Part":p,"Original prediction":cap.to_dict()["prediction"] if cap else "—","Evidence":"CURRENT" if cap and p not in audit.stale and (p,p) not in audit.identical_pairs else ("STALE" if cap else "MISSING")})
-        _d_decision = _captures["D"].to_dict()["decision"] if "D" in _captures else None
-        complete=audit.complete and all(w.value is not None for w in (final_choice,final_rejected,final_trigger,final_risk)) and bool(rationale.value.strip()) and final_choice.value!=final_rejected.value and final_choice.value==_d_decision
-        return mo.vstack([mo.md("### Synthesis · Defend one recommendation (5 min)\nBuild the chain: **requirement → baseline → hypothesis → intervention → consequence → rejected alternative → remaining constraint → reevaluation trigger**."),table(rows),mo.callout(mo.md("Saved snapshots remain fixed while live controls move. Recapture stale evidence before generating the report."),kind="info"),mo.hstack([final_choice,final_rejected],widths="equal",wrap=True),mo.hstack([final_trigger,final_risk],widths="equal",wrap=True),rationale,mo.callout(mo.md("**Ready for the local report.**" if complete else "Complete five current contrasts, match the recommendation to the saved Part D decision, choose a different rejected action, and add the rationale."),kind="success" if complete else "warn")])
-
-    tabs = mo.ui.tabs({"Part A":part_a(),"Part B":part_b(),"Part C":part_c(),"Part D":part_d(),"Part E":part_e(),"Synthesis":build_synthesis()})
-    tabs
-    return (audit,)
-
-
-@app.cell
-def _(
-    audit, build_lab_report, final_choice, final_rejected, final_risk,
-    final_trigger, get_evidence, get_lab_metadata, mo, profile, rationale,
-    report_export_panel, track_id,
-):
-    _captures=get_evidence()
-    _d_decision=_captures["D"].to_dict()["decision"] if "D" in _captures else None
-    _ready=audit.complete and all(w.value is not None for w in (final_choice,final_rejected,final_trigger,final_risk)) and bool(rationale.value.strip()) and final_choice.value!=final_rejected.value and final_choice.value==_d_decision
-    mo.stop(not _ready)
-    snapshots={p:_captures[p].to_dict() for p in "ABCDE"}
-    report=build_lab_report(
-        get_lab_metadata("vol1/lab_01_ml_intro.py"), track=track_id, scenario=profile["scenario"],
-        learning_objectives=["Diagnose data, model, and machine constraints with controlled contrasts","Compare component changes from one baseline","Defend a bounded recommendation and reevaluation trigger"],
-        predictions={p:snapshots[p]["prediction"] for p in "ABCDE"},
-        knob_settings={p:snapshots[p]["inputs"] for p in "ABCDE"},
-        evidence_summary={p:{"baseline":snapshots[p]["baseline"],"result":snapshots[p]["result"],"result_role":snapshots[p]["result_role"],"chosen_result":snapshots[p]["chosen_result"],"alternatives":snapshots[p]["alternatives"]} for p in "ABCDE"},
-        binding_constraints={p:(snapshots[p]["chosen_result"] or snapshots[p]["result"])["violations"] for p in "ACDE"},
-        decisions={"recommendation":final_choice.value,"rejected_alternative":final_rejected.value,"reevaluation_trigger":final_trigger.value},
-        final_decision={"recommendation":final_choice.value,"rejected_alternative":final_rejected.value,"rationale":rationale.value},
-        big_takeaways=["Population changes can alter learned behavior with fixed code.","Sequential time limits component-only speedups.","Deployability requires quality and operational evidence together."],
-        reflections={"rationale":rationale.value,"monitor_trigger":final_trigger.value}, residual_risk=final_risk.value,
-        result_snapshot={"track":track_id,"captures":snapshots,"recommendation":final_choice.value,"rejected":final_rejected.value,"trigger":final_trigger.value,"residual_risk":final_risk.value},
-        source_trace={"scenario":"Illustrative assumptions; not a hardware benchmark.","calculations":"MLSysIM constraint explorer equations."},
-    )
-    mo.vstack([mo.md("## Local evidence report"),report_export_panel(report)])
-    return (report,)
+@app.cell(hide_code=True)
+def _():
+    from mlsysbook_labs.learning_paths import get_learning_path as _submission_path
+    from mlsysbook_labs.notebook import notebook_shell as _submission_shell, notebook_submission as _submission
+    _submission_shell([_submission(_submission_path(1, 1))])
+    return
 
 
 @app.cell
-async def _(audit, final_choice, final_rejected, final_risk, final_trigger, get_evidence, ledger, mo, rationale, track_id):
-    _captures=get_evidence()
-    _d_decision=_captures["D"].to_dict()["decision"] if "D" in _captures else None
-    _ready=audit.complete and all(w.value is not None for w in (final_choice,final_rejected,final_trigger,final_risk)) and bool(rationale.value.strip()) and final_choice.value!=final_rejected.value and final_choice.value==_d_decision
-    _status = "EVIDENCE IN PROGRESS"
-    if _ready:
+def _(INTRO_SCENARIO_VERSION, build_lab_report, captures, context, final_trigger,
+      get_lab_metadata, mo, notebook_shell, project, rationale, ready, report_export_panel, save_discussion, track_id):
+    from mlsysbook_labs.notebook import notebook_download_readiness as _download_readiness
+    mo.stop(not ready, _download_readiness(volume=1))
+    snapshots = {part: captures[part].to_dict() for part in "ABCD"}
+    final_decision = {"deployment": snapshots["C"]["decision"],
+                      "candidate": snapshots["C"]["chosen_result"]["candidate"],
+                      "host_study": snapshots["D"]["decision"],
+                      "rationale": rationale.value, "revisit_trigger": final_trigger.value,
+                      "deployment_scenario_id": project.scenario_id, "deployment_scenario_version": project.version}
+    from mlsysbook_labs.learning_paths import get_learning_path as _get_learning_path
+    report = build_lab_report(get_lab_metadata("vol1/lab_01_ml_intro.py"), track=track_id, scenario=project.title,
+        predictions={p: s["prediction"] for p, s in snapshots.items()},
+        knob_settings={p: s["inputs"] for p, s in snapshots.items()}, evidence_summary=snapshots,
+        final_decision=final_decision, decisions=final_decision,
+        learning_objectives=_get_learning_path(1, 1)["learning_objectives"],
+        big_takeaways=["Population signals require outcome evidence.", "Untouched execution costs remain.", "Quality and resource requirements must pass together.", "Task-factor changes do not predict accuracy."],
+        reflections={"remaining_risk": rationale.value}, residual_risk=rationale.value,
+        source_trace={
+            "engine": "mlsysim.engine.constraint_explorer",
+            "deployment_journey": {"scenario_id": project.scenario_id, "version": project.version},
+            "deployment_profile": f"constraint_explorer.TRACKS[{track_id}] · illustrative envelope",
+            "host_study": "Scenarios.ControlledTaskFactors · independent supplied task factors and quality observations",
+            "scenario_version": INTRO_SCENARIO_VERSION,
+            "captured_models": {part: snapshot["model_key"] for part, snapshot in snapshots.items()},
+            "scenario_assumptions": {part: snapshot["result"]["provenance"] for part, snapshot in snapshots.items()},
+        },
+        result_snapshot={"scenario_version": INTRO_SCENARIO_VERSION, "captures": snapshots, **final_decision})
+    notebook_shell([report_export_panel(report), save_discussion,
+        mo.md("When ready, downloading is separate from saving locally. Save discussion keeps your completed work locally; save again after making changes.")])
+    return final_decision, report
+
+
+
+
+@app.cell
+def _(captures, final_trigger, mo, rationale, ready, track_id):
+    # Recreate the deliberate action when evidence or discussion inputs change.
+    _reset = (track_id, captures, final_trigger.value, rationale.value)
+    save_discussion = mo.ui.run_button(label="Save discussion", disabled=not ready)
+    return (save_discussion,)
+
+
+@app.cell
+async def _(INTRO_SCENARIO_VERSION, captures, final_trigger, ledger, notebook_shell, notebook_status, project, rationale, ready, save_discussion, track_id):
+    _status = "Ready to save" if ready else "Evidence in progress"
+    if ready and save_discussion.value:
         try:
-            ledger.save(chapter=1, design={
-                "schema_version": 1, "lab_id": "v1_01", "track_id": track_id,
-                "model_id": "constraint_explorer",
-                "recommendation": final_choice.value,
-                "rejected_alternative": final_rejected.value,
-                "reevaluation_trigger": final_trigger.value,
-                "residual_risk": final_risk.value, "rationale": rationale.value,
-                "evidence": {p: c.to_dict() for p, c in _captures.items()},
-            })
-            await ledger.flush()
+            await ledger.load_async()
+            await ledger.asave(track=track_id, chapter=1, design={"schema_version": 1, "lab_id": "v1_01", "track_id": track_id,
+                "model_id": "constraint_explorer", "scenario_version": INTRO_SCENARIO_VERSION,
+                "deployment_scenario_id": project.scenario_id, "deployment_scenario_version": project.version,
+                "recommendation": captures["C"].to_dict()["decision"], "rejected_alternative": captures["C"].to_dict()["baseline"]["candidate"],
+                "reevaluation_trigger": final_trigger.value, "residual_risk": rationale.value,
+                "rationale": rationale.value, "evidence": {p: captures[p].to_dict() for p in "ABCD"}})
+            _status = "Saved"
         except Exception:
-            _status = "LOCAL SAVE FAILED · DOWNLOAD THE REPORT TO KEEP YOUR EVIDENCE"
-        else:
-            _status = "SAVED"
-    mo.Html(f'<div class="lab-hud" style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;background:#101827;color:#fff;padding:14px 18px;border-radius:9px;font-family:ui-monospace,monospace"><span>LAB 01 · Evidence Before Optimization · STATUS: {_status}</span></div>')
+            _status = "Storage unavailable · keep the download and retry saving"
+    notebook_shell([notebook_status(_status, "When your discussion is ready, downloading is separate from saving locally.")])
     return
 
 

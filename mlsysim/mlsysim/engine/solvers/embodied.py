@@ -13,7 +13,7 @@ from typing import Optional
 
 from ..results import StoppingBudgetResult, TakeoverBudgetResult, TractionLossResult
 from ..results import ShieldCoverageBillResult  # added 2026-10-20
-from ..results import OnsetTrialResult, RailHoldUpResult, StoppingBudgetResult, TractionLossResult
+from ..results import OnsetTrialResult, RailHoldUpResult
 from ...core.types import Quantity
 from ...core.units import ureg
 from ...physics.drivetrain import calc_required_friction, calc_traction_deceleration_limit
@@ -77,6 +77,59 @@ class StoppingBudgetModel(ForwardModel):
               jerk: Optional[Quantity] = None,
               tracking_bound: Optional[Quantity] = None,
               approach_speed: Optional[Quantity] = None) -> StoppingBudgetResult:
+        """Compose delay, braking, and clearance budgets.
+
+        Parameters
+        ----------
+        speed : Quantity
+            Entry speed in m/s; positive for inverse budgets.
+        delay : Quantity
+            Pre-braking latency in seconds; nonnegative.
+        deceleration : Quantity
+            Available braking magnitude in m/s**2; positive.
+        clear_distance : Optional[Quantity]
+            Available clearance in meters; None omits clearance checks.
+        speed_at_delay_end : Optional[Quantity]
+            Recorded terminal delay speed in m/s; None uses entry speed.
+        loc_margin : Optional[Quantity]
+            Localization allowance in meters; None contributes zero.
+        physical_margin : Optional[Quantity]
+            Protective allowance in meters; None contributes zero.
+        added_delay : Optional[Quantity]
+            Extra delay to price as travel, in seconds; None omits that output.
+        jerk : Optional[Quantity]
+            Positive acceleration slew limit in m/s**3; None uses constant deceleration.
+        tracking_bound : Optional[Quantity]
+            Tracking inset in meters; None contributes zero.
+        approach_speed : Optional[Quantity]
+            Closing speed of the other body in m/s; None contributes zero.
+
+        Returns
+        -------
+        StoppingBudgetResult
+            Distances in meters, times in milliseconds, speed ceilings in m/s,
+            and signed clearance margins; optional fits compares required clearance.
+
+        Notes
+        -----
+        Equation: d_required = (v + v_end) tau / 2 + d_brake + margins + v_approach (tau + t_stop).
+
+        Assumptions: The constant-deceleration branch brakes from entry speed, even when the delay endpoint differs. Optional jerk selects the S-curve branch.
+
+        Excludes: Terrain changes, controller transients outside the stated delay, and safety certification.
+
+        References
+        ----------
+        Derivation: Distances are integrated over the stated delay and braking profile; inverse budgets solve the same distance inequality.
+
+        Examples
+        --------
+        >>> from mlsysim.engine.solvers.embodied import StoppingBudgetModel
+        >>> from mlsysim.core.units import ureg
+        >>> r = StoppingBudgetModel().solve(ureg('1 m/s'), ureg('0.1 s'), ureg('1 m/s**2'))
+>>> round(r.stop_distance.m_as('m'), 2)
+0.6
+        """
         m = ureg.meter
         end = speed if speed_at_delay_end is None else speed_at_delay_end
         delay_travel = calc_travel_between_speeds(speed, end, delay).to(m)
@@ -177,6 +230,45 @@ class TractionLossModel(ForwardModel):
 
     def solve(self, mu_before: float, mu_after: float, deceleration: Quantity,
               drive_load_share: float = 1.0) -> TractionLossResult:
+        """Compare a friction change with required deceleration.
+
+        Parameters
+        ----------
+        mu_before : float
+            Positive dimensionless friction coefficient before the change.
+        mu_after : float
+            Positive dimensionless friction coefficient after the change.
+        deceleration : Quantity
+            Available braking magnitude in m/s**2; positive.
+        drive_load_share : float
+            Fraction of normal load on driven wheels, in (0, 1].
+
+        Returns
+        -------
+        TractionLossResult
+            Dimensionless braking-distance ratio and required friction, acceleration
+            ceiling in m/s**2, and a friction-premise comparison.
+
+        Notes
+        -----
+        Equation: d_after / d_before = mu_before / mu_after; a_max = mu_after g drive_load_share.
+
+        Assumptions: Coulomb friction and unchanged speed and load distribution.
+
+        Excludes: Slip dynamics, slope, tire deformation, and safety certification.
+
+        References
+        ----------
+        Derivation: The constant-deceleration distance ``v**2/(2`` a) is inversely proportional to friction-limited acceleration.
+
+        Examples
+        --------
+        >>> from mlsysim.engine.solvers.embodied import TractionLossModel
+        >>> from mlsysim.core.units import ureg
+        >>> r = TractionLossModel().solve(0.8, 0.4, ureg('1 m/s**2'))
+>>> r.braking_distance_ratio
+2.0
+        """
         required = calc_required_friction(deceleration, drive_load_share)
         return TractionLossResult(
             braking_distance_ratio=mu_before / mu_after,
@@ -218,6 +310,65 @@ class TakeoverBudgetModel(ForwardModel):
               configured_timeout: Optional[Quantity] = None, tick: Optional[Quantity] = None,
               manual_lease: Optional[Quantity] = None,
               chunk_lease: Optional[Quantity] = None) -> TakeoverBudgetResult:
+        """Charge takeover latency against the machine stopping reserve.
+
+        Parameters
+        ----------
+        speed : Quantity
+            Entry speed in m/s; positive for inverse budgets.
+        delay : Quantity
+            Pre-braking latency in seconds; nonnegative.
+        deceleration : Quantity
+            Available braking magnitude in m/s**2; positive.
+        clear_distance : Quantity
+            Available clearance in meters; None omits clearance checks.
+        takeover : Quantity
+            Human response and transport duration in seconds; nonnegative.
+        loc_margin : Optional[Quantity]
+            Localization allowance in meters; None contributes zero.
+        physical_margin : Optional[Quantity]
+            Protective allowance in meters; None contributes zero.
+        jerk : Optional[Quantity]
+            Positive acceleration slew limit in m/s**3; None uses constant deceleration.
+        tracking_bound : Optional[Quantity]
+            Tracking inset in meters; None contributes zero.
+        dispatch_to_admission : Optional[Quantity]
+            Additional admission delay in seconds; None contributes zero.
+        configured_timeout : Optional[Quantity]
+            Requested timeout in seconds; requires positive tick when supplied.
+        tick : Optional[Quantity]
+            Permission tick period in seconds; positive when timeout is supplied.
+        manual_lease : Optional[Quantity]
+            Manual command lease in seconds; requires chunk_lease when supplied.
+        chunk_lease : Optional[Quantity]
+            Reference command lease in seconds.
+
+        Returns
+        -------
+        TakeoverBudgetResult
+            Stopping budgets, travel in millimeters, and deadlines, timeouts, and
+            time reserves in milliseconds; permission counts are dimensionless.
+
+        Notes
+        -----
+        Equation: T_latest = (D_clear - overhead - d_brake) / v - tau; timeout = max(0, min(T_configured, T_latest)).
+
+        Assumptions: The same speed, braking profile, and margins apply to all four compared budgets. Inputs must leave an available delay_spare on the underlying stopping result.
+
+        Excludes: Human-response distributions, changing approach speed, and safety certification.
+
+        References
+        ----------
+        Derivation: Subtract the common stopping budget from clearance and convert remaining travel into waiting time at entry speed.
+
+        Examples
+        --------
+        >>> from mlsysim.engine.solvers.embodied import TakeoverBudgetModel
+        >>> from mlsysim.core.units import ureg
+        >>> r = TakeoverBudgetModel().solve(ureg('1 m/s'), ureg('0.1 s'), ureg('1 m/s**2'), ureg('2 m'), ureg('0.2 s'))
+>>> round(r.takeover_travel.m_as('m'), 2)
+0.2
+        """
         ms, mm = ureg.millisecond, ureg.millimeter
         da = 0 * ms if dispatch_to_admission is None else dispatch_to_admission.to(ms)
         stop = StoppingBudgetModel()
@@ -283,6 +434,49 @@ class OnsetTrialModel(ForwardModel):
 
     def solve(self, onset_bound: Quantity, onset: Quantity, speed: Quantity, resident_stop: Quantity,
               travel_bound: Quantity, stop_time: Quantity) -> OnsetTrialResult:
+        """Score one observed onset against precommitted bounds.
+
+        Parameters
+        ----------
+        onset_bound : Quantity
+            Positive permitted onset delay in seconds, fixed before scoring.
+        onset : Quantity
+            Observed powered-braking onset in seconds after the reference event.
+        speed : Quantity
+            Entry speed in m/s; positive for inverse budgets.
+        resident_stop : Quantity
+            Braking travel after onset in meters; nonnegative.
+        travel_bound : Quantity
+            Positive allowed total travel in meters, fixed before scoring.
+        stop_time : Quantity
+            Braking duration after onset in seconds; nonnegative.
+
+        Returns
+        -------
+        OnsetTrialResult
+            Onset/time margins in milliseconds, travel margins in millimeters,
+            normalized margins, and the conjunction of the two bound checks.
+
+        Notes
+        -----
+        Equation: travel = speed onset + resident_stop; passes = (onset <= onset_bound) and (travel <= travel_bound).
+
+        Assumptions: The observed and reference cases share the resident braking profile; the two bounds are fixed externally.
+
+        Excludes: Statistical confidence across trials and any inference of certified safety.
+
+        References
+        ----------
+        Derivation: Each signed margin subtracts the observed quantity from its precommitted bound; normalized margins divide by that same bound.
+
+        Examples
+        --------
+        >>> from mlsysim.engine.solvers.embodied import OnsetTrialModel
+        >>> from mlsysim.core.units import ureg
+        >>> r = OnsetTrialModel().solve(ureg('0.2 s'), ureg('0.1 s'), ureg('1 m/s'), ureg('0.5 m'), ureg('1 m'), ureg('1 s'))
+>>> r.passes
+True
+        """
         ms, mm = ureg.millisecond, ureg.millimeter
         onset_margin = (onset_bound - onset).to(ms)
         travel = (speed * onset + resident_stop).to(mm)
@@ -313,6 +507,49 @@ class RailHoldUpModel(ForwardModel):
 
     def solve(self, flag_path: Quantity, speed: Quantity, deceleration: Quantity, jerk: Quantity,
               engage: Quantity, holdup: Quantity) -> RailHoldUpResult:
+        """Compare rail hold-up time with the protective stop duration.
+
+        Parameters
+        ----------
+        flag_path : Quantity
+            Loss-of-feed flag to brake-onset latency in seconds.
+        speed : Quantity
+            Entry speed in m/s; positive for inverse budgets.
+        deceleration : Quantity
+            Available braking magnitude in m/s**2; positive.
+        jerk : Quantity
+            Positive acceleration slew limit in m/s**3; None uses constant deceleration.
+        engage : Quantity
+            Holding-brake engagement duration in seconds.
+        holdup : Quantity
+            Available rail hold-up duration in seconds.
+
+        Returns
+        -------
+        RailHoldUpResult
+            Phase durations and remaining hold-up margin in milliseconds;
+            a negative margin means the stated supply duration is insufficient.
+
+        Notes
+        -----
+        Equation: t_set = flag_path + t_scurve + engage; margin = holdup - t_set.
+
+        Assumptions: Serial flag, stopping, and engagement phases; the supplied jerk and deceleration remain available during hold-up.
+
+        Excludes: Rail voltage trajectories, capacitor sizing, and safety certification.
+
+        References
+        ----------
+        Derivation: Serial response durations add; the S-curve stopping helper supplies the powered-stop duration.
+
+        Examples
+        --------
+        >>> from mlsysim.engine.solvers.embodied import RailHoldUpModel
+        >>> from mlsysim.core.units import ureg
+        >>> r = RailHoldUpModel().solve(ureg('0.1 s'), ureg('1 m/s'), ureg('1 m/s**2'), ureg('2 m/s**3'), ureg('0.1 s'), ureg('3 s'))
+>>> r.margin.m_as('s') > 0
+True
+        """
         ms = ureg.millisecond
         stop = calc_scurve_stop_time(speed, deceleration, jerk).to(ms)
         t_set = (flag_path + stop + engage).to(ms)
@@ -343,6 +580,51 @@ class ShieldCoverageBillModel(ForwardModel):
 
     def solve(self, fleet_units: int, cycle_days: Quantity, hours_per_day: Quantity, coverage: float,
               common_cause_rate: Quantity, target_rate: Quantity, confidence: float) -> ShieldCoverageBillResult:
+        """Compute exposure and coverage requirements for a hazard-rate bound.
+
+        Parameters
+        ----------
+        fleet_units : int
+            Positive number of machines contributing exposure.
+        cycle_days : Quantity
+            Release-cycle duration in days; positive.
+        hours_per_day : Quantity
+            Logging rate in hours/day; positive.
+        coverage : float
+            Hazard rejection fraction, strictly between zero and one.
+        common_cause_rate : Quantity
+            Nonnegative common-cause hazard rate in 1/hour.
+        target_rate : Quantity
+            Target hazard rate in 1/hour, above the common-cause rate.
+        confidence : float
+            One-sided confidence in (0, 1).
+
+        Returns
+        -------
+        ShieldCoverageBillResult
+            Exposure in hours, rate bounds in inverse hours, campaign duration
+            in days, trial counts, and the comparison with the stated rate target.
+
+        Notes
+        -----
+        Equation: T = fleet_units cycle_days hours_per_day; lambda_upper = -log(1-confidence)/T; lambda_residual = (1-coverage) lambda_upper + common_cause_rate.
+
+        Assumptions: Zero observed hazardous proposals under a stationary Poisson process and representative seeded coverage trials. Joint bounds split the error budget equally.
+
+        Excludes: Nonstationary hazards, unmodeled dependence, experimental evidence collection, and safety certification.
+
+        References
+        ----------
+        Derivation: For zero Poisson events, exp(-lambda T) equals the tail probability. Residual proposals multiply by the uncovered fraction; the joint bounds use a union-bound allocation.
+
+        Examples
+        --------
+        >>> from mlsysim.engine.solvers.embodied import ShieldCoverageBillModel
+        >>> from mlsysim.core.units import ureg
+        >>> r = ShieldCoverageBillModel().solve(10, ureg('30 day'), ureg('8 hour/day'), 0.9, ureg('0 / hour'), ureg('0.001 / hour'), 0.95)
+>>> r.exposure.m_as('hour')
+2400.0
+        """
         from ...physics.robotics.assurance import (
             calc_empirical_testing_exposure,
             calc_shielded_system_hazard_rate,

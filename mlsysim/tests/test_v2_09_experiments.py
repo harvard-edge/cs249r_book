@@ -260,3 +260,33 @@ def test_explicit_config_comparison_preserves_causal_baseline_and_finite_failure
 def test_invalid_or_unsupported_inputs_fail_explicitly(kwargs):
     with pytest.raises((TypeError, ValueError)):
         evaluate(**kwargs)
+
+
+def test_hierarchical_profile_scope_exposes_local_events_hidden_by_average():
+    from mlsysim.labs.experiments.v2_09_experiments import sample_fleet_profile
+    coarse = sample_fleet_profile(target="fleet_average", cadence=1)
+    fine = sample_fleet_profile(target="all_ranks", cadence=1)
+    assert coarse["missed_events"] == 2
+    assert all(row["reason"] == "diluted below threshold" for row in coarse["observations"])
+    assert fine["detected_events"] == ["input stall", "slow-rank burst"]
+    assert fine["collection_cost_s"] > coarse["collection_cost_s"]
+
+
+def test_sparse_profile_aliasing_and_wrong_rank_are_distinct_omissions():
+    from mlsysim.labs.experiments.v2_09_experiments import sample_fleet_profile
+    sparse = sample_fleet_profile(target="all_ranks", cadence=8)
+    healthy = sample_fleet_profile(target="rank_0", cadence=1)
+    suspect = sample_fleet_profile(target="rank_3", cadence=1)
+    assert sparse["missed_events"] == healthy["missed_events"] == 2
+    assert {row["reason"] for row in sparse["observations"]} == {"no temporal overlap"}
+    assert {row["reason"] for row in healthy["observations"]} == {"rank outside sample"}
+    assert suspect["detected_events"] == ["input stall"]
+    assert suspect["collection_cost_s"] < sample_fleet_profile(target="all_ranks", cadence=1)["collection_cost_s"]
+    assert sparse["sample_ticks"] == [0, 8, 16]
+
+
+@pytest.mark.parametrize("target,cadence", [("unknown",1), ("all_ranks",0), ("all_ranks",True), ("all_ranks",3)])
+def test_profile_rejects_unsupported_sampling_policies(target, cadence):
+    from mlsysim.labs.experiments.v2_09_experiments import sample_fleet_profile
+    with pytest.raises(ValueError):
+        sample_fleet_profile(target=target, cadence=cadence)

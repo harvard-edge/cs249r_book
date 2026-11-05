@@ -13,7 +13,7 @@ async def _():
     if sys.platform == "emscripten":
         import micropip
         await micropip.install(["pydantic", "pint", "plotly", "pandas"], keep_going=False)
-        await micropip.install("../../wheels/mlsysim-0.3.0-py3-none-any.whl", keep_going=False)
+        await micropip.install("../../wheels/mlsysim-0.3.1-py3-none-any.whl", keep_going=False)
         await micropip.install("../../wheels/mlsysbook_labs-0.1.0-py3-none-any.whl", keep_going=False)
     else:
         labs_dir = Path(__file__).resolve().parents[1]
@@ -77,10 +77,12 @@ def _(mo):
 
 
 @app.cell
-def _(mo, set_evidence):
+def _(mo, set_evidence, ledger):
+    from mlsysbook_labs.contexts import preferred_context as _preferred_context
+    _track_labels = {"tinyml": "TinyML", "mobile": "Mobile", "edge": "Edge", "cloud": "Cloud"}
     track = mo.ui.dropdown(
         {"TinyML": "tinyml", "Mobile": "mobile", "Edge": "edge", "Cloud": "cloud"},
-        value="TinyML", label="Deployment track", on_change=lambda _value: set_evidence({}),
+        value=_track_labels[_preferred_context(ledger)], label="Deployment track", on_change=lambda _value: set_evidence({}),
     )
     return (track,)
 
@@ -130,6 +132,14 @@ def _(default_batch, mo, track_id):
 
 
 @app.cell
+def _(mo):
+    nonlinearity_choice = mo.ui.dropdown({"ReLU between layers": "relu", "Affine layers only": "linear"}, value="ReLU between layers", label="Fixed network representation")
+    discarded_operand = mo.ui.dropdown({"Keep all forward operands": "keep", "Discard the input": "x", "Discard the preactivation": "z1", "Discard the hidden activation": "h", "Discard the prediction": "prediction"}, value="Keep all forward operands", label="Forward value to discard")
+    dependency_input = mo.ui.dropdown({"Active ReLU input": 2.0, "Inactive ReLU input": -1.0}, value="Active ReLU input", label="Chain-rule input case")
+    return nonlinearity_choice, discarded_operand, dependency_input
+
+
+@app.cell
 def _(mo, track_id):
     _track_key = track_id
     a_prediction = mo.ui.radio(
@@ -141,7 +151,7 @@ def _(mo, track_id):
         label="Which added state will dominate training memory?",
     ).form(submit_button_label="Lock Part B prediction")
     c_prediction = mo.ui.radio(
-        {"Throughput rises; batch latency rises": "tradeoff", "Throughput rises; batch latency falls": "both_improve", "Throughput falls; batch latency rises": "both_worsen", "Neither changes": "unchanged"},
+        {"Throughput rises; batch latency rises": "tradeoff", "Throughput rises; batch latency falls": "both_improve", "Throughput falls; batch latency rises": "both_worsen", "Neither changes": "unchanged", "Batch exceeds memory; no executable result": "infeasible"},
         label="What happens when the batch grows from one?",
     ).form(submit_button_label="Lock Part C prediction")
     d_prediction = mo.ui.radio(
@@ -200,13 +210,17 @@ def _(
     b_precision, b_prediction, b_training, c_baseline, c_batch, c_prediction,
     c_result, capture_evidence, d_baseline, d_case, d_format, d_prediction,
     d_result, e_choice, e_prediction, e_rejected, e_results, mo, serial,
-    set_evidence, track_id,
+    set_evidence, track_id, nonlinearity_choice, discarded_operand, dependency_input,
 ):
+    from mlsysim.labs.experiments.v1_05_experiments import run_dependency_trace as _saved_dependency, run_nonlinearity_case as _saved_nonlinearity
+    _nonlinear_ref = _saved_nonlinearity(nonlinearity_choice.value)
+    _dependency_ref = _saved_dependency(discarded=() if discarded_operand.value == "keep" else (discarded_operand.value,), x=dependency_input.value)
+
     def store(part, capture):
         set_evidence(lambda current: {**current, part: capture})
 
-    a_upstream = {"target": a_target.value, "factor": a_factor.value}
-    b_upstream = {"precision": b_precision.value, "optimizer": b_optimizer.value}
+    a_upstream = {"target": a_target.value, "factor": a_factor.value, "reference_activation": nonlinearity_choice.value}
+    b_upstream = {"precision": b_precision.value, "optimizer": b_optimizer.value, "reference_discarded": discarded_operand.value, "reference_input": dependency_input.value}
     c_upstream = {"baseline_batch": 1, "result_batch": c_batch.value}
     d_upstream = {"case": d_case.value, "format": d_format.value}
     e_upstream = {"choice": e_choice.value, "rejected": e_rejected.value}
@@ -215,7 +229,7 @@ def _(
         label="Capture tensor-growth contrast", kind="success", disabled=a_prediction.value is None,
         on_click=lambda _value: store("A", capture_evidence(
             track=track_id, part="A", prediction=a_prediction.value, inputs=a_upstream,
-            baseline=serial(a_comparison["baseline"]), result=serial(a_comparison["result"]),
+            baseline=serial(a_comparison["baseline"]), result={**serial(a_comparison["result"]), "supplemental_reference": _nonlinear_ref},
             upstream_inputs=a_upstream, model_key="v1_05.evaluate_track",
         )),
     )
@@ -223,7 +237,7 @@ def _(
         label="Capture phase contrast", kind="success", disabled=b_prediction.value is None,
         on_click=lambda _value: store("B", capture_evidence(
             track=track_id, part="B", prediction=b_prediction.value, inputs=b_upstream,
-            baseline=serial(b_inference), result=serial(b_training),
+            baseline=serial(b_inference), result={**serial(b_training), "supplemental_reference": _dependency_ref},
             upstream_inputs=b_upstream, model_key="v1_05.evaluate_track",
         )),
     )
@@ -270,23 +284,34 @@ def _(
 
 
 @app.cell
-def _(ACADEMIC_LAB_CSS, LAB_CSS, mo, profile, track):
-    css = mo.Html("""
-    <style>
-    .pilot-head{background:linear-gradient(135deg,#101827,#174e63);color:white;border-radius:14px;padding:clamp(18px,4vw,32px);margin-bottom:14px}
-    .pilot-top{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font:700 .72rem ui-monospace;letter-spacing:.08em}
-    .pilot-head h1{font-size:clamp(1.65rem,5vw,2.65rem);line-height:1.05;margin:16px 0 8px}.pilot-head p{color:#dbeafe;max-width:780px}
-    .pilot-meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:9px;margin-top:17px}.pilot-meta div{background:#ffffff14;border:1px solid #ffffff26;padding:9px 11px;border-radius:8px}
-    .pilot-note{color:#475569;font-size:.9rem;line-height:1.5;margin:0;padding:0 2px}.saved{border-left:4px solid #2ca02c;background:#f0fdf4;padding:9px 12px;border-radius:7px}
-    .table-wrap{max-width:100%;overflow-x:auto}.lab-hud{display:flex;align-items:center;flex-wrap:wrap;gap:10px;background:#101827!important;color:#fff;padding:14px 18px;border-radius:9px}.lab-hud .hud-label{color:#a7b9cf}.lab-hud .hud-value{color:#fff}.lab-hud .hud-active{color:#86efac}
-    @media(max-width:520px){.pilot-head{border-radius:9px;margin-top:30px}.pilot-meta{grid-template-columns:1fr}}
-    </style>""")
-    header = mo.Html(f"""<section class="pilot-head"><div class="pilot-top"><span>VOLUME I · LAB 05</span><span>ABOUT 50 MIN</span></div><h1>Tensor Costs</h1><p>Which tensor choice causes the workload to cross a compute, memory, or numerical boundary?</p><div class="pilot-meta"><div><b>Track</b><br>{profile['display']}</div><div><b>Context</b><br>{profile['scenario']}</div><div><b>Output</b><br>Evidence-backed tensor decision</div></div></section>""")
-    mo.vstack([
-        LAB_CSS, ACADEMIC_LAB_CSS, css, header, track,
-        mo.Html('<p class="pilot-note">The workloads and execution rates are illustrative analytical scenarios, not device measurements. Each Calculation Notes panel states the counted tensors and exclusions.</p>'),
-    ], gap=0.5)
-    return
+def _(get_lab_metadata, mo, track, track_id, profile):
+    from mlsysbook_labs.notebook import notebook_scenario as _scenario
+    from mlsysim import Scenarios as _Scenarios
+    from mlsysbook_labs.learning_paths import get_learning_path as _get_learning_path
+    from mlsysbook_labs.notebook import (
+        notebook_bridge as _bridge, notebook_header as _header,
+        notebook_learning_map as _learning_map, notebook_shell as _opening_shell,
+    )
+
+    learning_contract = _get_learning_path("vol1", 5)
+    _journey = _Scenarios.DeploymentJourneys.get(track_id)
+    _episode = _journey.episode(5)
+    learning_contract["narrative"] = {
+        "project": _journey.mission,
+        "scene": _episode.scene,
+        "carry_forward": _episode.handoff,
+        "scope": _journey.boundary,
+    }
+    _opening_shell([
+        _header(get_lab_metadata("vol1/lab_05_nn_compute.py"), _episode.question,
+                topics=[part["label"] for part in learning_contract["parts"]]),
+        track,
+        _scenario(learning_contract, track=track_id, scene=_episode.scene),
+        _learning_map(learning_contract),
+        mo.md(f"**Reference used in today’s instruments:** {profile['scenario']}. This controlled case tests the chapter’s mechanism; transfer the reasoning to your project without treating the result as project validation."),
+        mo.callout(mo.md("These are supplied, controlled reference studies. Their results do not validate the deployment project. Choose a prediction in Part A to open its live experiment; a wrong prediction still opens the evidence."), kind="info"),
+    ])
+    return (learning_contract,)
 
 
 @app.cell
@@ -305,7 +330,34 @@ def _(
     e_capture, e_choice, e_prediction, e_rejected, e_results, e_upstream,
     final_choice, final_rejected, final_risk, final_trigger, get_evidence, go,
     mo, profile, rationale, track_id,
+    nonlinearity_choice, discarded_operand, dependency_input,
+    learning_contract,
 ):
+    from mlsysbook_labs.notebook import notebook_shell as _shell, notebook_learning_part as _learning_part, notebook_tab_hint as _tab_hint
+    from mlsysim.labs.experiments.v1_05_experiments import run_dependency_trace as _dependency, run_nonlinearity_case as _nonlinearity
+
+    def _nonlinearity_view():
+        _result = _nonlinearity(nonlinearity_choice.value)
+        return mo.vstack([
+            mo.md("#### What does the activation add?\nThis exact mathematical reference uses the same fixed weights for both choices. Change the activation, inspect each input, and explain whether stacking affine layers preserved the required mapping."),
+            nonlinearity_choice,
+            table([{"Input": str(row["input"]), "Hidden values": str(row["hidden"]), "Output": row["output"], "Required output": row["target"], "Matches": row["matches"]} for row in _result["rows"]]),
+            mo.md(_result["scope_note"]),
+        ])
+
+    def _dependency_view():
+        _discarded = () if discarded_operand.value == "keep" else (discarded_operand.value,)
+        _result = _dependency(discarded=_discarded, x=dependency_input.value)
+        return mo.vstack([
+            mo.md("#### Why retain forward values?\nCompare keeping and discarding one operand. Then try the inactive input. Which derivative is unavailable, and which is actually zero? No recomputation is allowed in this reference."),
+            mo.hstack([discarded_operand, dependency_input], wrap=True),
+            table([{"Derivative": row["derivative"], "Needs": ", ".join(row["required_operands"]), "Value": "Unavailable" if row["value"] is None else row["value"], "Missing": ", ".join(row["missing_operands"]) or "None"} for row in _result["backward_trace"]]),
+            mo.md(_result["scope_note"]),
+        ])
+
+    _route = {part["id"]: part for part in learning_contract["parts"]}
+
+
     captures = get_evidence()
     upstream = {"A": a_upstream, "B": b_upstream, "C": c_upstream, "D": d_upstream, "E": e_upstream}
     audit = audit_evidence(
@@ -323,7 +375,8 @@ def _(
         return result["throughput"].to("1 / second").magnitude
 
     def table(rows):
-        return mo.vstack([mo.ui.table(rows, pagination=False)]).style({"max-width": "100%", "overflow-x": "auto"})
+        from mlsysbook_labs.notebook import notebook_table as _compact_table
+        return _compact_table(rows)
 
     def saved(part):
         capture = captures.get(part)
@@ -335,7 +388,7 @@ def _(
         return mo.Html(f'<div class="saved"><b>Saved snapshot</b> · original prediction: {data["prediction"]}<br><small>Track {data["track"]}; later control changes do not rewrite this evidence.</small></div>')
 
     def part_a():
-        intro = mo.md("### A · What becomes expensive when a tensor dimension grows? (9 min)\nChoose one dimension and predict the largest proportional change before opening the operation ledger.")
+        intro = mo.md("Choose one dimension and predict the largest proportional change before opening the operation ledger.")
         if a_prediction.value is None:
             return mo.vstack([intro, mo.hstack([a_target, a_factor], wrap=True), a_prediction])
         base, changed = a_comparison["baseline"], a_comparison["result"]
@@ -351,11 +404,11 @@ def _(
         return mo.vstack([
             intro, mo.hstack([a_target, a_factor], wrap=True), a_prediction, table(layer_rows), table(summary),
             mo.callout(mo.md(f"**Your prediction:** {a_prediction.value}. The intervention changed only **{a_target.value}**; parameter count, batch work, activation state, and traffic follow their tensor dimensions."), kind="info"),
-            a_capture, saved("A"), mo.accordion({"Calculation Notes": mo.md("Each dense layer counts its weight matrix and bias vector. One weight application is one MAC; the ledger uses two FLOPs per MAC and reports bias additions separately. Minimum traffic reads each layer input, weights, and biases once and writes its output once.")}),
+            a_capture, saved("A"), _nonlinearity_view(), mo.accordion({"Calculation Notes": mo.md("Each dense layer counts its weight matrix and bias vector. One weight application is one MAC; the ledger uses two FLOPs per MAC and reports bias additions separately. Minimum traffic reads each layer input, weights, and biases once and writes its output once.")}),
         ])
 
     def part_b():
-        intro = mo.md("### B · Why can inference fit while training fails? (9 min)\nChoose a tensor format and optimizer. Predict which added state dominates before comparing phases.")
+        intro = mo.md("Choose a tensor format and optimizer. Predict which added state dominates before comparing phases.")
         if b_prediction.value is None:
             return mo.vstack([intro, mo.hstack([b_precision, b_optimizer], wrap=True), b_prediction])
         rows = []
@@ -371,29 +424,42 @@ def _(
         return mo.vstack([
             intro, mo.hstack([b_precision, b_optimizer], wrap=True), b_prediction, table(rows),
             mo.callout(mo.md(f"**Your prediction:** {b_prediction.value}. Inference uses {memory_kib(b_inference):.1f} KiB; training uses {memory_kib(b_training):.1f} KiB and **{'fits' if b_training['fits_memory'] else 'crosses'}** the scenario memory envelope.{host_context}"), kind="success" if b_training["fits_memory"] else "danger"),
-            b_capture, saved("B"), mo.accordion({"Calculation Notes": mo.md(f"Inference uses an exact two-buffer activation schedule. Training retains the batch input and each layer output, adds parameter gradients, and adds zero, one, or two optimizer slots per parameter. For microcontroller and mobile tracks, optimizer state and retained activations can exceed embedded memory, clarifying why training is hosted on a development workstation while only the inference runtime fits on-device. The selected tensors use **{b_training['bytes_per_element']} byte(s) per element**; optimizer slots use **{b_training['optimizer_bytes_per_element']} bytes per element**. The FP16 case keeps gradients in FP16 and two Adam slots in FP32; it does **not** include a separate FP32 master copy of the weights. Transient activation-gradient scratch and runtime workspaces are outside this analytical state inventory.")}),
+            b_capture, saved("B"), _dependency_view(), mo.accordion({"Calculation Notes": mo.md(f"Inference uses an exact two-buffer activation schedule. Training retains the batch input and each layer output, adds parameter gradients, and adds zero, one, or two optimizer slots per parameter. For microcontroller and mobile tracks, optimizer state and retained activations can exceed embedded memory, clarifying why training is hosted on a development workstation while only the inference runtime fits on-device. The selected tensors use **{b_training['bytes_per_element']} byte(s) per element**; optimizer slots use **{b_training['optimizer_bytes_per_element']} bytes per element**. The FP16 case keeps gradients in FP16 and two Adam slots in FP32; it does **not** include a separate FP32 master copy of the weights. Transient activation-gradient scratch and runtime workspaces are outside this analytical state inventory.")}),
         ])
 
     def part_c():
-        intro = mo.md(f"### C · Does batching make every request faster? (10 min)\nCompare a fixed batch-one baseline with a larger batch under the same network and execution assumptions (track-native batch is {profile['batch_size']}).")
+        intro = mo.md(f"Compare a fixed batch-one baseline with a larger batch under the same network and execution assumptions (track-native batch is {profile['batch_size']}).")
         if c_prediction.value is None:
             return mo.vstack([intro, c_batch, c_prediction])
         figure = go.Figure()
-        figure.add_bar(name="Batch latency (ms)", x=["Batch 1", f"Batch {c_batch.value}"], y=[milliseconds(c_baseline, "batch_latency"), milliseconds(c_result, "batch_latency")], marker_color=COLORS["OrangeLine"])
-        figure.update_layout(height=260, margin=dict(l=20, r=20, t=30, b=20), yaxis_title="Batch latency (ms)", legend_orientation="h")
-        rows = [
-            {"Batch": c_baseline["batch_size"], "Batch latency ms": f"{milliseconds(c_baseline, 'batch_latency'):.4f}", "Samples/s": f"{per_second(c_baseline):,.0f}", "Traffic/sample KiB": f"{memory_kib(c_baseline, 'minimum_forward_traffic_per_sample'):.2f}", "Activation KiB": f"{memory_kib(c_baseline, 'activation_memory'):.2f}", "Fits": "PASS" if c_baseline["fits_memory"] else "FAIL · memory"},
-            {"Batch": c_result["batch_size"], "Batch latency ms": f"{milliseconds(c_result, 'batch_latency'):.4f}", "Samples/s": f"{per_second(c_result):,.0f}", "Traffic/sample KiB": f"{memory_kib(c_result, 'minimum_forward_traffic_per_sample'):.2f}", "Activation KiB": f"{memory_kib(c_result, 'activation_memory'):.2f}", "Fits": "PASS" if c_result["fits_memory"] else "FAIL · memory"},
-        ]
-        mem_status = f" Warning: Batch {c_result['batch_size']} exceeds the {profile['display']} memory limit ({memory_kib(c_result):.1f} KiB vs {memory_kib(c_result, 'memory_limit'):.1f} KiB limit)." if not c_result["fits_memory"] else ""
+        _results = (c_baseline, c_result)
+        figure.add_bar(
+            name="Modeled batch latency (ms)",
+            x=[f"Batch {result['batch_size']}" for result in _results],
+            y=[milliseconds(result, "batch_latency") if result["fits_memory"] else None for result in _results],
+            marker_color=COLORS["OrangeLine"],
+        )
+        figure.update_layout(height=260, margin=dict(l=20, r=20, t=30, b=20), yaxis_title="Modeled batch latency (ms)", legend_orientation="h")
+        rows = [{
+            "Batch": result["batch_size"],
+            "Modeled batch ms": f"{milliseconds(result, 'batch_latency'):.4f}" if result["fits_memory"] else "Unavailable · memory failure",
+            "Modeled samples/s": f"{per_second(result):,.0f}" if result["fits_memory"] else "Unavailable · memory failure",
+            "Minimum traffic/sample KiB": f"{memory_kib(result, 'minimum_forward_traffic_per_sample'):.2f}",
+            "Activation KiB": f"{memory_kib(result, 'activation_memory'):.2f}",
+            "Fits": "PASS" if result["fits_memory"] else "FAIL · memory",
+        } for result in _results]
+        if all(result["fits_memory"] for result in _results):
+            feedback = f"Modeled throughput changes from {per_second(c_baseline):,.0f} to {per_second(c_result):,.0f} samples/s, while modeled batch latency changes from {milliseconds(c_baseline, 'batch_latency'):.4f} to {milliseconds(c_result, 'batch_latency'):.4f} ms. These are analytical estimates, not measurements."
+        else:
+            feedback = f"Batch {c_result['batch_size']} exceeds the {profile['display']} memory envelope ({memory_kib(c_result):.1f} KiB required; {memory_kib(c_result, 'memory_limit'):.1f} KiB available). It cannot execute under these assumptions, so it has no modeled service latency or throughput and cannot win a performance comparison. The minimum tensor-traffic count remains informative; it does not establish an executable design."
         return mo.vstack([
             intro, c_batch, c_prediction, apply_plotly_theme(figure), table(rows),
-            mo.callout(mo.md(f"**Your prediction:** {c_prediction.value}. Throughput changes from {per_second(c_baseline):,.0f} to {per_second(c_result):,.0f} samples/s, while the complete batch takes {milliseconds(c_baseline, 'batch_latency'):.4f} to {milliseconds(c_result, 'batch_latency'):.4f} ms.{mem_status}"), kind="warn" if not c_result["fits_memory"] else "info"),
-            c_capture, saved("C"), mo.accordion({"Calculation Notes": mo.md(f"The sequential analytical time adds batch FLOPs divided by an illustrative effective compute rate of **{c_baseline['effective_compute_rate']:~P}**, counted tensor bytes divided by **{c_baseline['effective_bandwidth']:~P}**, and **{c_baseline['launch_overhead']:~P}** launch overhead per layer. The experiment compares a fixed batch-one baseline against the chosen batch to evaluate latency and throughput amortization, alongside the track-native operating batch ({profile['batch_size']}). If activation state exceeds available memory, the batch is physically infeasible without streaming or memory expansion. Weights and launch overhead are amortized across the batch; work and activations scale with batch. The model excludes overlap, arrivals, queue delay, and latency percentiles.")}),
+            mo.callout(mo.md(f"**Your prediction:** {c_prediction.value}. {feedback}"), kind="warn" if not c_result["fits_memory"] else "info"),
+            c_capture, saved("C"), mo.accordion({"Calculation Notes": mo.md(f"For memory-feasible batches, sequential analytical time adds batch FLOPs divided by an illustrative effective compute rate of **{c_baseline['effective_compute_rate']:~P}**, counted tensor bytes divided by **{c_baseline['effective_bandwidth']:~P}**, and **{c_baseline['launch_overhead']:~P}** launch overhead per layer. This compares batch one against the selected batch; the track-native batch is {profile['batch_size']}. Service metrics are unavailable when state exceeds memory. A streaming or memory-expansion repair would require its own traffic and timing model. Weights and launch overhead are amortized across a feasible batch; work and activations scale with batch. The model excludes overlap, arrivals, queue delay, and latency percentiles.")}),
         ])
 
     def part_d():
-        intro = mo.md("### D · Can fewer bytes produce an invalid answer? (9 min)\nChoose a curated numerical case and predict the observed low-precision behavior.")
+        intro = mo.md("Choose a curated numerical case and predict the observed low-precision behavior.")
         if d_prediction.value is None:
             return mo.vstack([intro, mo.hstack([d_case, d_format], wrap=True), d_prediction])
         rows = []
@@ -419,7 +485,7 @@ def _(
         ])
 
     def part_e():
-        intro = mo.md(f"### E · Which intervention fixes the observed failure? (8 min)\nThe held-out scenario is a fixed-batch baseline (FP32 Adam training at batch eight, held constant across tracks rather than track-native batch {profile['batch_size']}). Predict a repair, then compare all three actions from that same failed baseline.")
+        intro = mo.md(f"The held-out scenario is a fixed-batch baseline (FP32 Adam training at batch eight, held constant across tracks rather than track-native batch {profile['batch_size']}). Predict a repair, then compare all three actions from that same failed baseline.")
         if e_prediction.value is None:
             return mo.vstack([intro, e_prediction])
         baseline = e_results["tensor"]["baseline"]
@@ -429,11 +495,25 @@ def _(
             result = comparison["result"]
             rows.append({"Design": labels[action], "Parameters": f"{result['parameters']:,}", "Batch": result["batch_size"], "Format": result["precision"].upper(), "State KiB": f"{memory_kib(result):.1f}", "Outcome": "PASS" if result["fits_memory"] else "FAIL · memory"})
         valid = e_choice.value is not None and e_rejected.value is not None and e_choice.value != e_rejected.value
+        selected = e_results[e_choice.value]["result"] if e_choice.value in e_results else baseline
+        rejected = e_results[e_rejected.value]["result"] if e_rejected.value in e_results else None
+        active_rows = [{"Role": "Selected", "Design": labels.get(e_choice.value, "Hold failed baseline" if e_choice.value == "none" else "No decision yet"),
+                        "State KiB": f"{memory_kib(selected):.1f}",
+                        "Memory fit": "PASS" if selected["fits_memory"] else "FAIL · memory"}]
+        if rejected is not None:
+            active_rows.append({"Role": "Rejected", "Design": labels[e_rejected.value],
+                                "State KiB": f"{memory_kib(rejected):.1f}",
+                                "Memory fit": "PASS" if rejected["fits_memory"] else "FAIL · memory"})
         return mo.vstack([
             intro, e_prediction, table(rows),
             mo.callout(mo.md(f"**Your prediction:** {e_prediction.value}. Choose a decision and a different, quantified rejected alternative. A no-change decision still requires one tested alternative as evidence. On constrained device tracks, all tested single repairs may fail the memory envelope; a failed repair is a valid outcome showing why training remains on a development host."), kind="info"),
             mo.hstack([e_choice, e_rejected], widths="equal", wrap=True),
-            mo.callout(mo.md("Decision contrast is complete." if valid else "Select a decision and a different rejected alternative."), kind="success" if valid else "warn"),
+            table(active_rows),
+            mo.callout(mo.md(
+                ("The selected repair fits the memory envelope under the stated assumptions. " if selected["fits_memory"]
+                 else "The selected design still fails the memory envelope; it does not establish a repaired training run. A combined change, development host, or explicit hold remains necessary. ")
+                + ("The distinct comparison is ready to capture." if valid else "Select a decision and a different rejected alternative.")
+            ), kind="success" if valid and selected["fits_memory"] else "warn"),
             e_capture, saved("E"), mo.accordion({"Calculation Notes": mo.md(f"All repairs start from the identical failed training state (fixed batch eight). The tensor action halves hidden widths, the batch action reduces batch eight to one, and the format action uses FP16 weights and gradients with two FP32 Adam slots and no separate FP32 master-weight copy. A repair that still exceeds the memory envelope remains a failed repair; combined changes or a development host may be needed. Passing the resource envelope establishes memory fit under those assumptions; it does not validate training accuracy, convergence, or numerical behavior beyond the tested cases. The comparison reports consequences rather than an aggregate score.")}),
         ])
 
@@ -451,8 +531,16 @@ def _(
             mo.callout(mo.md("**Ready for the local report.**" if ready else "Complete five current contrasts, match the recommendation to saved Part E, choose a different rejected alternative, and add the rationale."), kind="success" if ready else "warn"),
         ])
 
-    mo.ui.tabs({"Part A": part_a(), "Part B": part_b(), "Part C": part_c(), "Part D": part_d(), "Part E": part_e(), "Synthesis": build_synthesis()})
+    _shell([_tab_hint(), mo.ui.tabs({"Part A": _learning_part(learning_contract, "A", part_a()), "Part B": _learning_part(learning_contract, "B", part_b()), "Part C": _learning_part(learning_contract, "C", part_c()), "Part D": _learning_part(learning_contract, "D", part_d()), "Part E": _learning_part(learning_contract, "E", part_e()), "Synthesis": build_synthesis()})])
     return (audit,)
+
+
+@app.cell(hide_code=True)
+def _():
+    from mlsysbook_labs.learning_paths import get_learning_path as _submission_path
+    from mlsysbook_labs.notebook import notebook_shell as _submission_shell, notebook_submission as _submission
+    _submission_shell([_submission(_submission_path(1, 5))])
+    return
 
 
 @app.cell
@@ -464,7 +552,8 @@ def _(
     _captures = get_evidence()
     _saved_decision = _captures["E"].to_dict()["decision"] if "E" in _captures else None
     _ready = audit.complete and all(widget.value is not None for widget in (final_choice, final_rejected, final_trigger, final_risk)) and bool(rationale.value.strip()) and final_choice.value != final_rejected.value and final_choice.value == _saved_decision
-    mo.stop(not _ready)
+    from mlsysbook_labs.notebook import notebook_download_readiness as _download_readiness
+    mo.stop(not _ready, _download_readiness(volume=1))
     snapshots = {part: _captures[part].to_dict() for part in "ABCDE"}
     report = build_lab_report(
         get_lab_metadata("vol1/lab_05_nn_compute.py"), track=track_id, scenario=profile["scenario"],
@@ -480,20 +569,36 @@ def _(
         result_snapshot={"track": track_id, "captures": snapshots, "recommendation": final_choice.value, "rejected": final_rejected.value, "trigger": final_trigger.value, "residual_risk": final_risk.value},
         source_trace={"scenario": "Illustrative analytical scenarios, not device measurements.", "calculations": "MLSysIM v1_05_experiments evaluator."},
     )
-    mo.vstack([mo.md("## Local evidence report"), report_export_panel(report)])
+    from mlsysbook_labs.notebook import notebook_shell as _report_shell
+    _report_shell([report_export_panel(report)])
     return (report,)
+
+
+
+
+@app.cell
+def _(mo, get_evidence, final_choice, final_rejected, final_risk, final_trigger, rationale, audit):
+    from mlsysbook_labs.notebook import notebook_shell as _save_shell
+    _draft_identity = (audit.to_dict(), get_evidence(), final_choice.value, final_rejected.value, final_risk.value, final_trigger.value, rationale.value)
+    save_discussion = mo.ui.run_button(label="Save discussion")
+    _save_shell([
+        save_discussion,
+        mo.md("Save your completed discussion locally. Editing a decision, rationale, or saved comparison requires saving again. Download remains available independently of local storage."),
+    ])
+    return (save_discussion,)
 
 
 @app.cell
 async def _(
     audit, final_choice, final_rejected, final_risk, final_trigger,
     get_evidence, ledger, mo, rationale, track_id,
+    save_discussion,
 ):
     _captures = get_evidence()
     _saved_decision = _captures["E"].to_dict()["decision"] if "E" in _captures else None
     _ready = audit.complete and all(widget.value is not None for widget in (final_choice, final_rejected, final_trigger, final_risk)) and bool(rationale.value.strip()) and final_choice.value != final_rejected.value and final_choice.value == _saved_decision
-    _status = "EVIDENCE IN PROGRESS"
-    if _ready:
+    _status = "DRAFT READY · SAVE DISCUSSION TO RECORD" if _ready else "EVIDENCE IN PROGRESS"
+    if _ready and save_discussion.value:
         try:
             ledger.save(chapter=5, design={
                 "schema_version": 1, "lab_id": "v1_05", "track_id": track_id,
@@ -507,7 +612,8 @@ async def _(
             _status = "LOCAL SAVE FAILED · DOWNLOAD THE REPORT TO KEEP YOUR EVIDENCE"
         else:
             _status = "SAVED"
-    mo.Html(f'<div class="lab-hud"><span>LAB 05 · Tensor Costs · STATUS: {_status}</span></div>')
+    from mlsysbook_labs.notebook import notebook_shell as _status_shell, notebook_status as _status_view
+    _status_shell([_status_view("Lab 05", _status)])
     return
 
 

@@ -16,6 +16,8 @@ OVERFULL_RE = re.compile(
 VOLUME_OUTPUTS = {
     "vol1": "Machine-Learning-Systems-Vol1",
     "vol2": "Machine-Learning-Systems-Vol2",
+    "vol3": "Machine-Learning-Systems-Vol3",
+    "vol4": "Machine-Learning-Systems-Vol4",
 }
 
 
@@ -24,19 +26,24 @@ def _active_volume(script_dir: Path) -> str | None:
     config = script_dir / "_quarto.yml"
     if not config.is_file():
         return None
-    with config.open(encoding="utf-8") as fh:
-        source = fh.readline().lower()
-    return next((volume for volume in VOLUME_OUTPUTS if volume in source), None)
+    text = config.read_text(encoding="utf-8").lower()
+    source = text.splitlines()[0] if text else ""
+    recorded = re.search(r"_quarto-pdf-(vol[1-4])\.yml", source)
+    if recorded:
+        return recorded.group(1)
+    # Container builds copy the canonical YAML directly, without Binder's
+    # provenance comment. Its output directory still identifies the PDF volume.
+    direct = re.search(r"^\s*output-dir:\s*['\"]?_build/pdf-(vol[1-4])['\"]?\s*$", text, re.MULTILINE)
+    return direct.group(1) if direct else None
 
 
 def _find_intermediate(script_dir: Path, stem: str, suffix: str) -> Path | None:
     """Find a Quarto/LaTeX intermediate before post-render cleanup."""
-    for candidate in (script_dir / f"{stem}{suffix}", script_dir / f"index{suffix}"):
-        if candidate.is_file():
-            return candidate
-    return next(iter(script_dir.glob(f".quarto/**/{stem}{suffix}")), None) or next(
-        iter(script_dir.glob(f".quarto/**/index{suffix}")), None
-    )
+    candidates = [script_dir / f"{stem}{suffix}", script_dir / f"index{suffix}"]
+    candidates.extend(script_dir.glob(f".quarto/**/{stem}{suffix}"))
+    candidates.extend(script_dir.glob(f".quarto/**/index{suffix}"))
+    return max((path for path in candidates if path.is_file()),
+               key=lambda path: path.stat().st_mtime_ns, default=None)
 
 
 def _is_current_for_tex(intermediate: Path | None, tex_path: Path) -> bool:
@@ -82,10 +89,10 @@ def _regenerate_auxiliary_files(
     return True
 
 def main():
-    script_dir = Path(__file__).resolve().parent.parent  # quarto/
+    script_dir = Path(__file__).resolve().parents[2]  # books/shared/scripts -> books/
     volume = _active_volume(script_dir)
     if volume is None:
-        print("[latex-build] No active Volume I/II PDF config found")
+        print("[latex-build] No active volume PDF config found")
         return
 
     stem = VOLUME_OUTPUTS[volume]
@@ -96,10 +103,10 @@ def main():
     # hooks even when keep-tex is enabled. A stale file from an earlier build
     # is equally unsafe. Regenerate unless the discovered AUX is at least as
     # new as the exact retained TeX.
-    tex_path = script_dir / f"{stem}.tex"
+    tex_path = _find_intermediate(script_dir, stem, ".tex") or script_dir / f"{stem}.tex"
     aux_before = _find_intermediate(script_dir, stem, ".aux")
     if not _is_current_for_tex(aux_before, tex_path):
-        if _regenerate_auxiliary_files(script_dir, stem):
+        if _regenerate_auxiliary_files(script_dir, tex_path.stem):
             print(
                 "[latex-build] Regenerated converged AUX/log from retained TeX "
                 "(3 draft-mode passes)"

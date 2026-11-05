@@ -640,6 +640,66 @@ def overlap_timeline(
     }
 
 
+
+# Exact scalar teaching sequence from the chapter's error-feedback trace.
+# This is a dimensionless worked example, not an observed gradient distribution.
+_RESIDUAL_GRADIENTS = (0.4, 0.3, 0.2, 0.4, 0.3)
+
+
+def compression_residual_trace(
+    *, steps: int = 5, carry_residual: bool = True, reset_after: int | None = None,
+) -> dict[str, Any]:
+    """Evolve rounding-compressor state and account for every omitted update.
+
+    The chapter recurrence is e_next = g + e - round(g + e). Ties use
+    Python's nearest-even rule. The finite sequence repeats for longer horizons.
+    Resetting residual state is a deliberate failure intervention, not a claim
+    about optimizer convergence. Discarded state remains visible in accounting.
+    """
+    steps = _integer(steps, "steps")
+    if steps > 1000:
+        raise ValueError("steps must not exceed 1000")
+    if not isinstance(carry_residual, bool):
+        raise ValueError("carry_residual must be boolean")
+    if reset_after is not None:
+        reset_after = _integer(reset_after, "reset_after")
+        if reset_after >= steps:
+            raise ValueError("reset_after must precede the final step")
+    residual = transmitted = true_total = discarded = 0.0
+    rows = []
+    for index in range(steps):
+        gradient = _RESIDUAL_GRADIENTS[index % len(_RESIDUAL_GRADIENTS)]
+        entering = residual
+        corrected = gradient + entering
+        sent = float(round(corrected))
+        remainder = corrected - sent
+        true_total += gradient
+        transmitted += sent
+        residual = remainder if carry_residual else 0.0
+        lost = 0.0 if carry_residual else remainder
+        reset = reset_after == index + 1
+        if reset:
+            lost += residual
+            residual = 0.0
+        discarded += lost
+        rows.append({
+            "step": index + 1, "gradient": gradient, "entering_residual": entering,
+            "corrected_gradient": corrected, "transmitted": sent,
+            "retained_residual": residual, "discarded_this_step": lost,
+            "cumulative_true": true_total, "cumulative_transmitted": transmitted,
+            "cumulative_discarded": discarded, "state_reset": reset,
+        })
+    return {
+        "inputs": {"steps": steps, "carry_residual": carry_residual, "reset_after": reset_after},
+        "rows": rows, "true_total": true_total, "transmitted_total": transmitted,
+        "retained_residual": residual, "discarded_total": discarded,
+        "accounting_error": true_total - transmitted - residual - discarded,
+        "untransmitted_total": true_total - transmitted,
+        "provenance": "Exact chapter scalar rounding example; dimensionless synthetic gradients.",
+        "limitation": "Conservation of gradient information is not a model-quality or optimizer-convergence guarantee.",
+    }
+
+
 def compression_comparison(
     track_id: str,
     *,
@@ -648,9 +708,19 @@ def compression_comparison(
     baseline_compute_ms: float | None = None,
     baseline_target_steps: int = 1_000,
     evidence: Mapping[str, Any] | None = None,
+    residual_steps: int = 5,
+    reset_residual: bool = False,
 ) -> dict[str, Any]:
     """Evaluate byte savings, codec work, and supplied target-quality evidence."""
     track = _track(track_id)
+    if not isinstance(reset_residual, bool):
+        raise ValueError("reset_residual must be boolean")
+    mechanism = {
+        "naive": compression_residual_trace(steps=residual_steps, carry_residual=False),
+        "feedback": compression_residual_trace(
+            steps=residual_steps, reset_after=3 if reset_residual else None,
+        ),
+    }
     if method not in _COMPRESSION_EVIDENCE:
         raise ValueError(f"method must be one of {', '.join(_COMPRESSION_EVIDENCE)}")
     fixture = dict(_COMPRESSION_EVIDENCE[method] if evidence is None else evidence)
@@ -715,6 +785,8 @@ def compression_comparison(
         "baseline_compute_ms": compute_ms,
         "baseline_target_steps": target_steps,
         "evidence": fixture,
+        "residual_steps": residual_steps,
+        "reset_residual": reset_residual,
     }
 
     return {
@@ -737,6 +809,7 @@ def compression_comparison(
         "time_to_target_ms": round(time_to_target_ms, 6) if time_to_target_ms is not None else None,
         "quality_target_reached": reached,
         "quality_gap_pp": quality_gap,
+        "mechanism_study": mechanism,
         "error_feedback": bool(fixture["error_feedback"]),
         "evidence": fixture,
         "evidence_provenance": "Supplied illustrative convergence fixture; not a universal compression-quality law or live measurement.",
@@ -760,6 +833,7 @@ def compression_comparison(
             "time_to_target_ms": round(time_to_target_ms, 6) if time_to_target_ms is not None else None,
             "quality_target_reached": reached,
             "quality_gap_pp": quality_gap,
+            "mechanism_study": mechanism,
         },
     }
 
@@ -769,6 +843,7 @@ __all__ = [
     "algorithm_cases",
     "algorithm_crossover",
     "compression_comparison",
+    "compression_residual_trace",
     "overlap_timeline",
     "overlap_bucket_options",
     "routing_cases",

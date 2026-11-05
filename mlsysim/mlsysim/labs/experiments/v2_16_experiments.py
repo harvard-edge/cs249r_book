@@ -83,6 +83,7 @@ class CapacityResult:
     explanation_utilization: float
     review_utilization: float
     feasible: bool
+    feedback: dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -98,6 +99,7 @@ class AuditEvidence:
     population_assessment: FairnessAssessment
     evidence_complete: bool
     limitations: tuple[str, ...]
+    uncertainty: dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -125,6 +127,7 @@ class PrivacyCheck:
     violations: tuple[str, ...]
     track_id: str = ""
     scope: str = ""
+    unlearning: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -432,6 +435,82 @@ def assess_fairness(
     )
 
 
+def feedback_and_oversight(*, exploration_per_group=0, review_order="fifo"):
+    """Replay fixed potential labels and alert evidence, not human psychology.
+
+    Selection changes which outcomes become future training evidence. The
+    hidden alternating streams are identical, while historical samples differ.
+    Independent checks consume an explicitly bounded portion of each round.
+    """
+    if not isinstance(exploration_per_group, int) or isinstance(exploration_per_group, bool) or exploration_per_group not in (0, 2, 5):
+        raise ValueError("exploration_per_group must be 0, 2, or 5")
+    if review_order not in ("fifo", "independent_signal"):
+        raise ValueError("unknown review_order")
+    counts = {"A": [8, 10], "B": [1, 4]}
+    cursors = {"A": 0, "B": 0}
+    trace = []
+    for turn in range(1, 5):
+        winner = max(counts, key=lambda g: counts[g][0] / counts[g][1])
+        allocation = {g: exploration_per_group + (20 - 2 * exploration_per_group if g == winner else 0)
+                      for g in counts}
+        for group, trials in allocation.items():
+            positives = sum(index % 2 == 0 for index in range(cursors[group], cursors[group]+trials))
+            cursors[group] += trials
+            counts[group][0] += positives
+            counts[group][1] += trials
+        trace.append(dict(round=turn, winner_before_labels=winner,
+                          exposures_A=allocation["A"], exposures_B=allocation["B"],
+                          observed_rate_A=counts["A"][0]/counts["A"][1],
+                          observed_rate_B=counts["B"][0]/counts["B"][1],
+                          new_labels_A=cursors["A"], new_labels_B=cursors["B"]))
+    # (alert id, actual issue, independent corroborating signal). Fixed cases;
+    # the signal is imperfect and supplied as evidence, never inferred from truth.
+    alarms = [("a1", False, False), ("a2", False, False), ("a3", False, False),
+              ("a4", True, True), ("a5", False, True), ("a6", True, True)]
+    ordered = sorted(alarms, key=lambda a: not a[2]) if review_order == "independent_signal" else alarms
+    reviewed = ordered[:3]
+    return dict(exploration_per_group=exploration_per_group, review_order=review_order,
+                exposure_trace=trace, alerts=[dict(id=a[0], issue=a[1], independent_signal=a[2],
+                                                 reviewed=a in reviewed) for a in alarms],
+                review_budget=3, detected_issues=sum(a[1] for a in reviewed),
+                unreviewed_issues=sum(a[1] for a in alarms if a not in reviewed),
+                scope="Finite selection-feedback and review-order trace. Fixed potential outcomes do not change. No fitted fatigue or automation-bias law; no population fairness inference.")
+
+
+def unlearning_trace(*, method="logs_only"):
+    """Exact deletion comparison for a toy additive trained state.
+
+    The trained state sums per-record scalar contributions. Shards store
+    separate sums, so rebuilding the affected shard is exactly equivalent to
+    rebuilding the whole remaining corpus for this model only. Work counts
+    record contributions processed, not GPU time or deep-model complexity.
+    """
+    if method not in ("logs_only", "full_retrain", "shard_retrain"):
+        raise ValueError("unknown removal method")
+    records = tuple(range(1, 17))
+    shards = tuple(records[start:start+4] for start in range(0, len(records), 4))
+    target = 4
+    reference = sum(value for value in records if value != target)
+    original_shards = tuple(sum(shard) for shard in shards)
+    if method == "full_retrain":
+        rebuilt = tuple(sum(value for value in shard if value != target) for shard in shards)
+        work = len(records)-1
+    elif method == "shard_retrain":
+        rebuilt = tuple(sum(value for value in shard if value != target) if target in shard else old
+                        for shard, old in zip(shards, original_shards))
+        work = next(len(shard)-1 for shard in shards if target in shard)
+    else:
+        rebuilt, work = original_shards, 0
+    state = sum(rebuilt)
+    return dict(method=method, training_records=list(records), shard_membership=[list(shard) for shard in shards],
+                deleted_record=target, log_record_removed=True,
+                original_state=sum(original_shards), resulting_state=state,
+                retrain_without_record_state=reference, processed_contributions=work,
+                rebuilt_shard_states=list(rebuilt), matches_retrain_reference=state == reference,
+                residual_contribution=state-reference,
+                scope="Exact only for the stated additive toy model. Real trained weights need method-specific removal evidence, artifact/cache invalidation and validation; deleting a log or passing retention checks proves none of those.")
+
+
 def evaluate_capacity(
     track_id: str,
     *,
@@ -443,6 +522,8 @@ def evaluate_capacity(
     explanation_service_time=None,
     review_service_time=None,
     target_utilization: float = 0.85,
+    exploration_per_group: int = 0,
+    review_order: str = "fifo",
 ) -> CapacityResult:
     """Size explanation and human-review queues from workload and service time."""
     profile = track_profile(track_id)
@@ -503,7 +584,58 @@ def evaluate_capacity(
         explanation_utilization=explanation_utilization,
         review_utilization=review_utilization,
         feasible=explanation_utilization <= 1.0 and review_utilization <= 1.0,
+        feedback=feedback_and_oversight(exploration_per_group=exploration_per_group, review_order=review_order),
     )
+
+
+# Hypothetical independent audit ledgers, not replicated scored_fixture records.
+# Each (successes, trials) records selections from a named cohort/context.
+AUDIT_COUNT_DOSSIERS = {
+    "pilot": {"A / routine": (66, 90), "A / constrained": (4, 10),
+              "B / routine": (63, 90), "B / constrained": (7, 10)},
+    "expanded": {"A / routine": (6600, 9000), "A / constrained": (400, 1000),
+                 "B / routine": (6300, 9000), "B / constrained": (700, 1000)},
+}
+
+
+def disparity_uncertainty(*, dossier="pilot", intersections=True, confidence=0.95):
+    """Simultaneous Hoeffding bounds for explicit hypothetical audit counts.
+
+    For m rates, epsilon_i=sqrt(log(2m/alpha)/(2n_i)); a union bound
+    covers all rates with probability >=1-alpha under independent,
+    representative Bernoulli trials within each cell (Hoeffding 1963,
+    doi:10.1080/01621459.1963.10500830, Theorem 2). Independence between
+    cells is not required. This is conservative, not a causal estimate or
+    a guarantee for the deterministic delayed-label fixture.
+    """
+    if dossier not in AUDIT_COUNT_DOSSIERS:
+        raise ValueError("unknown audit dossier")
+    confidence = _fraction(confidence, "confidence")
+    if confidence == 0 or confidence == 1:
+        raise ValueError("confidence must be strictly between 0 and 1")
+    if not isinstance(intersections, bool):
+        raise ValueError("intersections must be boolean")
+    cells = AUDIT_COUNT_DOSSIERS[dossier]
+    if not intersections:
+        cells = {group: tuple(sum(cells[f"{group} / {context}"][i] for context in ("routine", "constrained"))
+                              for i in (0, 1)) for group in ("A", "B")}
+    rows = []
+    for name, (successes, trials) in cells.items():
+        rate = successes / trials
+        radius = math.sqrt(math.log(2 * len(cells) / (1 - confidence)) / (2 * trials))
+        rows.append(dict(cell=name, successes=successes, trials=trials, rate=rate,
+                         lower=max(0.0, rate-radius), upper=min(1.0, rate+radius)))
+    indexed = {row["cell"]: row for row in rows}
+    gaps = []
+    for context in (("routine", "constrained") if intersections else (None,)):
+        a, b = (indexed[f"{group} / {context}" if context else group] for group in ("A", "B"))
+        low, high = a["lower"] - b["upper"], a["upper"] - b["lower"]
+        gaps.append(dict(context=context or "all contexts", observed_gap=abs(a["rate"]-b["rate"]),
+                         lower=0.0 if low <= 0 <= high else min(abs(low), abs(high)),
+                         upper=min(1.0, max(abs(low), abs(high)))))
+    return dict(dossier=dossier, intersections=intersections, confidence=confidence,
+                rates=rows, gaps=gaps, method="simultaneous Hoeffding bounds",
+                assumptions="Independent representative Bernoulli trials within each cell; hypothetical audit ledgers, not repeated copies of scored cases. No causal attribution.")
 
 
 def audit_evidence(
@@ -515,6 +647,9 @@ def audit_evidence(
     sampling_fraction: float,
     label_delay=Q_(24, "hour"),
     cases: Iterable[ScoredCase] | None = None,
+    audit_dossier: str = "pilot",
+    audit_intersections: bool = True,
+    confidence: float = 0.95,
 ) -> AuditEvidence:
     """Apply delayed-label eligibility and deterministic cohort sampling.
 
@@ -562,6 +697,7 @@ def audit_evidence(
         population_assessment=population,
         evidence_complete=len(sampled) == len(records),
         limitations=tuple(limitations),
+        uncertainty=disparity_uncertainty(dossier=audit_dossier, intersections=audit_intersections, confidence=confidence),
     )
 
 
@@ -572,6 +708,7 @@ def check_privacy_profile(
     require_case_review: bool,
     max_retention=Q_(30, "day"),
     max_deletion_window=Q_(7, "day"),
+    removal_method: str = "logs_only",
 ) -> PrivacyCheck:
     """Check explicit data-handling obligations and evidence availability.
 
@@ -612,6 +749,7 @@ def check_privacy_profile(
         violations=tuple(violations),
         track_id=canonical_track,
         scope=fleet_scope,
+        unlearning=unlearning_trace(method=removal_method),
     )
 
 

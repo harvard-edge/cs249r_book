@@ -73,6 +73,47 @@ def extract_slider_ranges(source: str) -> list[dict]:
     return results
 
 
+def find_free_text_predictions(source: str) -> list[tuple[int, str]]:
+    """Identify text widgets whose own assignment or label requests a prediction.
+
+    A nearby structured prediction does not turn an interpretation field into
+    a prediction. Inspect the widget's AST instead of a source-text window.
+    """
+    tree = ast.parse(source)
+    parents = {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
+    violations = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if not (
+            isinstance(func, ast.Attribute) and func.attr in {"text", "text_area"}
+            and isinstance(func.value, ast.Attribute) and func.value.attr == "ui"
+            and isinstance(func.value.value, ast.Name) and func.value.value.id == "mo"
+        ):
+            continue
+        ancestor = parents.get(node)
+        while ancestor is not None and not isinstance(ancestor, ast.stmt):
+            ancestor = parents.get(ancestor)
+        targets = []
+        if isinstance(ancestor, ast.Assign):
+            targets = ancestor.targets
+        elif isinstance(ancestor, ast.AnnAssign):
+            targets = [ancestor.target]
+        names = [child.id for target in targets for child in ast.walk(target)
+                 if isinstance(child, ast.Name)]
+        prediction_name = any(re.search(r"(?:^|_)predict(?:ion)?(?:_|$)", name.lower())
+                              for name in names)
+        label = next((keyword.value for keyword in node.keywords if keyword.arg == "label"), None)
+        label_text = " ".join(child.value for child in ast.walk(label)
+                              if isinstance(child, ast.Constant) and isinstance(child.value, str)) if label else ""
+        reflective_label = re.match(r"\s*(?:explain|interpret|reflect|compare|why)\b", label_text, re.I)
+        prediction_label = bool(re.search(r"\bpredict(?:ion|ed|ing)?\b", label_text, re.I)) and not reflective_label
+        if prediction_name or prediction_label:
+            violations.append((node.lineno, ", ".join(names) or label_text))
+    return violations
+
+
 # ── Test: Widget Structure ───────────────────────────────────────────────────
 
 class TestWidgetStructure:
@@ -119,13 +160,28 @@ class TestWidgetStructure:
         Check that mo.ui.text_area() and mo.ui.text() are not used for predictions.
         """
         source = Path(lab_path).read_text()
-        # Look for text inputs near "predict" keywords
-        lines = source.split("\n")
-        for i, line in enumerate(lines, 1):
-            if "mo.ui.text" in line and "predict" in source[max(0, source.find(line)-200):source.find(line)+200].lower():
-                pytest.fail(
-                    f"Line {i}: Free-text prediction found. Use mo.ui.radio() or mo.ui.number() instead."
-                )
+        violations = find_free_text_predictions(source)
+        assert not violations, (
+            f"Free-text prediction widgets found: {violations}. "
+            "Use mo.ui.radio() or mo.ui.number() instead."
+        )
+
+    @pytest.mark.parametrize("source", [
+        "a_prediction = mo.ui.text_area(label='Before running')",
+        "answer = mo.ui.text(label='Your prediction')",
+        "answer = mo.ui.text_area(label=f'Predict the result for {track}').form()",
+    ])
+    def test_free_text_prediction_detector_rejects_prediction_widgets(self, source):
+        assert len(find_free_text_predictions(source)) == 1
+
+    def test_free_text_prediction_detector_allows_adjacent_interpretation(self):
+        source = """
+prediction_b = mo.ui.radio(['Comparable', 'Different contract'], label='What do you predict?').form()
+explanation_b = mo.ui.text_area(label='Part B interpretation', placeholder='Explain your prediction against the result.')
+reflection = mo.ui.text(label='Explain why the prediction changed')
+# ignored_prediction = mo.ui.text_area(label='Your prediction')
+"""
+        assert not find_free_text_predictions(source)
 
 
 # ── Test: Interactive State Engine ─────────────────────────────────────────────
@@ -134,6 +190,31 @@ class MockWidget:
     """Mocks a marimo mo.ui element by satisfying the `.value` access."""
     def __init__(self, value):
         self.value = value
+
+
+def preserved_cell_definition(definition):
+    """Keep valid defaults when Marimo prunes a whole widget-defining cell.
+
+    Missing companion controls have not been selected by this test. Inventing
+    numeric values for them violates typed enums and does not simulate a click.
+    """
+    return MockWidget(definition.value) if hasattr(definition, "value") else definition
+
+
+def test_pruned_control_preserves_its_valid_enum_default():
+    from mlsysim.labs.experiments.v1_16_experiments import behavioral_transfer_trial
+    cause = preserved_cell_definition(MockWidget("population_shift"))
+    result = behavioral_transfer_trial("tinyml", "mobile", cause=cause.value)
+    assert result["inputs"]["cause"] == "population_shift"
+
+
+def test_pruned_unanswered_control_stays_unanswered():
+    assert preserved_cell_definition(MockWidget(None)).value is None
+
+
+def test_pruned_nonwidget_definition_is_not_replaced_with_a_number():
+    options = {"Earlier source": "source", "Current bundle": "current"}
+    assert preserved_cell_definition(options) is options
 
 
 class TestInteractiveState:
@@ -231,7 +312,7 @@ class TestInteractiveState:
                         missing_vars = [v.strip().strip("'").strip('"') for v in missing_vars_str.split(",")]
                         for mv in missing_vars:
                             if mv:
-                                current_defs[mv] = MockWidget(1)
+                                current_defs[mv] = preserved_cell_definition(default_defs[mv])
                     else:
                         raise e # If we can't parse it, fail
         except Exception as e:
