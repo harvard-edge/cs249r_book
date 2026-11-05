@@ -130,6 +130,7 @@ export class AnkiConverter {
         
         const processedCards = cards.map(card => ({
             id: crypto.randomUUID(),
+            chapter: chapter.chapter,
             question: this.processAnkiField(card.question, headers.html),
             answer: this.processAnkiField(card.answer, headers.html),
             created: new Date().toISOString(),

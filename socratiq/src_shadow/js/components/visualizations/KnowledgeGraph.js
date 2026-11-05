@@ -894,8 +894,10 @@ export class KnowledgeGraph {
         graphContainer.style.cssText = `
             flex: 1;
             position: relative;
-            min-height: 500px; // Ensure minimum height
+            min-width: 0;
+            min-height: 0;
             height: 100%;
+            overflow: hidden;
         `;
         wrapper.appendChild(graphContainer);
 
@@ -1223,15 +1225,11 @@ export class KnowledgeGraph {
         // Add legend with detail level buttons
         const legend = document.createElement('div');
         legend.style.cssText = `
-            position: absolute;
-            top: 20px;
-            left: 20px;
             background: rgba(255, 255, 255, 0.9);
-            padding: 15px;
+            padding: 10px 0;
             border-radius: 8px;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
             z-index: 2;
-            min-width: 200px;
         `;
 
         const legendTitle = document.createElement('h3');
@@ -1282,16 +1280,19 @@ export class KnowledgeGraph {
             legend.appendChild(itemDiv);
         });
 
-        graphContainer.appendChild(legend);
+        const guide = document.createElement('details');
+        guide.style.cssText = 'flex: 0 0 auto; margin: 12px 0; max-height: 220px; overflow: auto;';
+        const guideSummary = document.createElement('summary');
+        guideSummary.textContent = 'Graph legend and guide';
+        guideSummary.style.cssText = 'cursor: pointer; font-size: 12px; color: #2d3748;';
+        guide.append(guideSummary, legend);
+        sidebar.insertBefore(guide, quizItemsContainer);
 
         // After adding the legend to graphContainer, add the explanation card
         const explanation = document.createElement('div');
         explanation.style.cssText = `
-            position: absolute;
-            top: ${legend.offsetHeight + 40}px;
-            left: 20px;
             background: rgba(255, 255, 255, 0.9);
-            padding: 15px;
+            padding: 10px 0;
             border-radius: 8px;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
             z-index: 2;
@@ -1322,7 +1323,7 @@ export class KnowledgeGraph {
             </p>
         `;
 
-        graphContainer.appendChild(explanation);
+        guide.appendChild(explanation);
     }
 
     addViewToggle(container) {
@@ -1911,7 +1912,7 @@ export class KnowledgeGraph {
             .attr('width', width)
             .attr('height', height)
             .attr('viewBox', [-cx, -cy, width, height])
-            .attr('style', 'width: 100%; height: auto; font: 12px sans-serif;');
+            .attr('style', 'display: block; width: 100%; height: 100%; font: 12px sans-serif;');
 
         // Add zoom behavior
         const g = svg.append('g');

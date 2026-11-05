@@ -1,11 +1,109 @@
-# Socratiq — AI Learning Widget
+# SocratiQ
+
+## Focused reading companion
+
+The four-volume book integration uses `src_reader/`, a standalone entry point for
+**select text → Explain this → follow-up questions**. It reuses the existing
+Cloudflare streaming service and the project's Markdown, sanitization, and math
+libraries, without initializing the legacy quiz widget, accounts, or IndexedDB.
+
+The reader also offers **Simplify**, **Show an example**, and **Check my
+understanding**. The last action requests a conceptual question, waits for an
+attempt, and uses the conversation for feedback. **Start over** clears the
+conversation for the current passage; **Copy answer** preserves Markdown and
+source provenance in study notes. These are model-assisted learning interactions,
+not graded assessments or evidence of mastery.
+
+```bash
+cd socratiq
+npm ci
+npm run build:reader
+npm run test:reader
+npx playwright install chromium
+npm run test:reader:browser
+```
+
+The build writes `books/shared/assets/scripts/socratiq/reader.js`. Commit this
+artifact with source changes: Quarto stages it as a shared resource in every
+volume. `socratiq-reader.yml` checks artifact presence, build drift, transport,
+browser behavior, and Quarto's deployed asset paths. The legacy bundle has a
+separate build and drift check.
+
+- `src_reader/context.js`: bounded passage and local section capture, source link,
+  volume, and optional release identity. Navigation and forms are excluded.
+- `src_reader/transport.mjs`: grounded prompts, bounded conversation history,
+  streaming, timeouts, cancellation, and useful service errors.
+- `src_reader/ui.js`, `render.js`, `styles.js`: accessible selection action,
+  responsive panel, sanitized Markdown, and KaTeX math.
+- `tests/reader-browser.spec.mjs`: constructed response fixtures for deterministic
+  browser checks; these are not evidence of model quality or live availability.
+
+To verify live inference without publishing anything, inject the locally built
+reader into an isolated browser on a public chapter:
+
+```bash
+node tests/reader-live-smoke.mjs /tmp/socratiq-live-REPLACE-WITH-TIMESTAMP
+```
+
+For optional grounding probes with author-constructed passages, run
+`node tests/reader-quality-probes.mjs /tmp/socratiq-probes-REPLACE-WITH-TIMESTAMP`.
+The inputs and human review criteria are saved before the live answers; these
+probes are unscored and do not establish learning effectiveness.
+
+The live smoke check explicitly sends one public passage to the existing AI service. It saves
+request/response evidence, screenshots, and a manifest. Review screenshots and
+answer fidelity before release. It does not modify the public website.
+
+### Deployment and operations
+
+The script tags in `books/config/_quarto-html-vol{1,2,3,4}.yml` carry `data-volume`
+and `data-endpoint`. No frontend API key is required or permitted. Build and
+publish through the existing book release process after review. To roll back,
+remove the reader includes in those four configs; book content remains usable.
+
+The current service is the existing `proxy-worker-streaming.mlsysbook.workers.dev`
+endpoint, with `openai/gpt-oss-120b` as the reader default. This choice followed
+manual review of small live grounding probes, not a learning-effectiveness
+evaluation. Rate-limit failures remain visible rather than silently switching to
+a weaker model. Its deployed source and account configuration are **not present in this
+repository**. Restoring the worker source, confirming ownership, inspecting
+server-side rate limits/provider allowlists and provider retention, and setting
+an operating budget remain release operations checks. Frontend bounds are not
+server-side abuse controls. Do not treat the historical backend directory paths
+below as available deployment instructions.
+
+The reader sends context only when asked, holds conversation state only in page
+memory, and exposes no usage/learning analytics. It deliberately leaves the older
+quizzes, dashboards, and flashcards separate. Existing chapter quizzes are
+unchanged.
+
+## Legacy full widget (historical reference)
+
+The remaining documentation describes `src_shadow/`, not the focused reader now
+included by the book configs. Its Cloudflare source directories are absent here.
+
+The legacy widget is not enabled by the four-volume integration. Its controls
+can open without establishing that every workflow or external service works.
+The reader's browser tests do not cover legacy workflows. Run
+`node --test tests/legacy-offline-quiz.test.mjs` for the local quiz distractor
+regression check and `node --test tests/legacy-study.test.mjs` for flashcard
+import/export, review scheduling, and stored conversation checks. The latter
+uses Chromium and an isolated local Vite server with constructed study data.
+Do not treat the historical feature list below as a release
+readiness checklist.
+
+Legacy quiz-result submission to the server is explicitly disabled; local quiz
+storage does not imply cloud synchronization. The missing backend source and
+ownership must be resolved before restoring any server-dependent study features.
+
+### Legacy AI Learning Widget
 
 Socratiq is an AI-powered learning widget that injects itself into any static HTML page (Quarto books, textbooks, documentation sites) via a single `<script>` tag. It runs entirely in a Shadow DOM so it never conflicts with the host page's styles or scripts.
 
 ## What it does
 
 - **AI Chat** — Ask questions about the page content. The widget reads the surrounding text as context and streams answers using configurable LLM providers (Cloudflare AI Gateway, Gemini, Groq).
-- **Quiz generation** — Generates contextual quizzes from selected text or entire sections. Supports multiple-choice, short-answer, and spaced repetition (flashcard) modes.
+- **Quiz generation** — Generates contextual multiple-choice quizzes from selected text or entire sections, with a separate spaced repetition (flashcard) workflow.
 - **Highlight & ask** — Select any text on the page to instantly ask a follow-up question or generate a quiz about that passage.
 - **Knowledge graph** — Visualizes relationships between concepts on the current page.
 - **Progress tracking** — Tracks quiz scores and chapter visits in a local IndexedDB database, with a spaced repetition scheduler for revisiting weak areas.

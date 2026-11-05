@@ -1,0 +1,51 @@
+name: SocratiQ reader
+
+on:
+  pull_request:
+    paths:
+      - 'socratiq/**'
+      - 'books/shared/assets/scripts/socratiq/**'
+      - 'books/config/_quarto-html-vol*.yml'
+      - 'binder/tests/test_socratiq_html_integration.py'
+      - '.github/workflows/socratiq-reader.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  reader:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: socratiq/package-lock.json
+      - run: npm ci
+        working-directory: socratiq
+      - run: npm run build:reader
+        working-directory: socratiq
+      - name: Check published reader matches source
+        run: |
+          git ls-files --error-unmatch books/shared/assets/scripts/socratiq/reader.js
+          git diff --exit-code -- books/shared/assets/scripts/socratiq
+      - run: npm run test:reader
+        working-directory: socratiq
+      - name: Check legacy offline quiz choices
+        run: node --test tests/legacy-offline-quiz.test.mjs
+        working-directory: socratiq
+      - run: npx playwright install --with-deps chromium
+        working-directory: socratiq
+      - run: npm run test:reader:browser
+        working-directory: socratiq
+      - name: Check legacy study persistence and review scheduling
+        run: node --test tests/legacy-study.test.mjs
+        working-directory: socratiq
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: quarto-dev/quarto-actions/setup@v2
+      - run: python -m pip install pytest PyYAML
+      - run: python -m pytest -q binder/tests/test_socratiq_html_integration.py --confcutdir=binder/tests

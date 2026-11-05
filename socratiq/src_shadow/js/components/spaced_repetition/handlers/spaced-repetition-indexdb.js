@@ -1755,6 +1755,12 @@ export class SpacedRepetitionIndexDBHandler extends SpacedRepetitionStorageHandl
                 };
             }
         });
+        if (chapterRecord.is_current === 1) {
+            await this.dbManager.performTransaction('current_chapter', 'readwrite', (store) => {
+                store.clear();
+                return store.add({chapter: chapterRecord.chapter, title: chapterRecord.title});
+            });
+        }
         return true;
     } catch (error) {
         console.error("❌ IDB Error in addChapter:", error);
