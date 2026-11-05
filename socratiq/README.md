@@ -1,4 +1,81 @@
-# Socratiq — AI Learning Widget
+# SocratiQ
+
+## Focused reading companion
+
+The four-volume book integration uses `src_reader/`, a standalone entry point for
+**select text → Explain this → follow-up questions**. It reuses the existing
+Cloudflare streaming service and the project's Markdown, sanitization, and math
+libraries, without initializing the legacy quiz widget, accounts, or IndexedDB.
+
+```bash
+cd socratiq
+npm ci
+npm run build:reader
+npm run test:reader
+npx playwright install chromium
+npm run test:reader:browser
+```
+
+The build writes `books/shared/assets/scripts/socratiq/reader.js`. Commit this
+artifact with source changes: Quarto stages it as a shared resource in every
+volume. `socratiq-reader.yml` checks artifact presence, build drift, transport,
+browser behavior, and Quarto's deployed asset paths. The legacy bundle has a
+separate build and drift check.
+
+- `src_reader/context.js`: bounded passage and local section capture, source link,
+  volume, and optional release identity. Navigation and forms are excluded.
+- `src_reader/transport.mjs`: grounded prompts, bounded conversation history,
+  streaming, timeouts, cancellation, and useful service errors.
+- `src_reader/ui.js`, `render.js`, `styles.js`: accessible selection action,
+  responsive panel, sanitized Markdown, and KaTeX math.
+- `tests/reader-browser.spec.mjs`: constructed response fixtures for deterministic
+  browser checks; these are not evidence of model quality or live availability.
+
+To verify live inference without publishing anything, inject the locally built
+reader into an isolated browser on a public chapter:
+
+```bash
+node tests/reader-live-smoke.mjs /tmp/socratiq-live-REPLACE-WITH-TIMESTAMP
+```
+
+For optional grounding probes with author-constructed passages, run
+`node tests/reader-quality-probes.mjs /tmp/socratiq-probes-REPLACE-WITH-TIMESTAMP`.
+The inputs and human review criteria are saved before the live answers; these
+probes are unscored and do not establish learning effectiveness.
+
+The live smoke check explicitly sends one public passage to the existing AI service. It saves
+request/response evidence, screenshots, and a manifest. Review screenshots and
+answer fidelity before release. It does not modify the public website.
+
+### Deployment and operations
+
+The script tags in `books/config/_quarto-html-vol{1,2,3,4}.yml` carry `data-volume`
+and `data-endpoint`. No frontend API key is required or permitted. Build and
+publish through the existing book release process after review. To roll back,
+remove the reader includes in those four configs; book content remains usable.
+
+The current service is the existing `proxy-worker-streaming.mlsysbook.workers.dev`
+endpoint, with `openai/gpt-oss-120b` as the reader default. This choice followed
+manual review of small live grounding probes, not a learning-effectiveness
+evaluation. Rate-limit failures remain visible rather than silently switching to
+a weaker model. Its deployed source and account configuration are **not present in this
+repository**. Restoring the worker source, confirming ownership, inspecting
+server-side rate limits/provider allowlists and provider retention, and setting
+an operating budget remain release operations checks. Frontend bounds are not
+server-side abuse controls. Do not treat the historical backend directory paths
+below as available deployment instructions.
+
+The reader sends context only when asked, holds conversation state only in page
+memory, and exposes no usage/learning analytics. It deliberately leaves the older
+quizzes, dashboards, and flashcards separate. Existing chapter quizzes are
+unchanged.
+
+## Legacy full widget (historical reference)
+
+The remaining documentation describes `src_shadow/`, not the focused reader now
+included by the book configs. Its Cloudflare source directories are absent here.
+
+### Legacy AI Learning Widget
 
 Socratiq is an AI-powered learning widget that injects itself into any static HTML page (Quarto books, textbooks, documentation sites) via a single `<script>` tag. It runs entirely in a Shadow DOM so it never conflicts with the host page's styles or scripts.
 
