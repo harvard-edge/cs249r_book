@@ -301,11 +301,36 @@ Two earlier-stage experiments also live here. [SocratiQ](socratiq/README.md) is 
 
 Where to begin depends on what you want from the curriculum.
 
-| If you are... | Start here | Then go deeper |
-|---|---|---|
-| **A student or self-learner** | [Read Volume I](https://mlsysbook.ai/vol1/) | Build [TinyTorch](https://mlsysbook.ai/tinytorch/), model systems with [MLSys·im](https://mlsysbook.ai/mlsysim/), try the [labs](https://mlsysbook.ai/labs/) (early release), and practice with [StaffML](https://mlsysbook.ai/staffml/) |
-| **An instructor** | Open the [Instructor Hub](https://mlsysbook.ai/instructors/) | Pick a course and use its syllabus, [slides](https://mlsysbook.ai/slides/), kits, and labs |
-| **A contributor** | Find the guide for your component under [Contributing](#contributing) | Report problems through [GitHub Issues](https://github.com/harvard-edge/cs249r_book/issues) |
+<table width="100%" style="width:100%">
+  <thead>
+    <tr>
+      <th width="5%"></th>
+      <th width="20%">If you are...</th>
+      <th width="30%">Start here</th>
+      <th width="45%">Then go deeper</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td align="center">📖</td>
+      <td><b>A student or self-learner</b></td>
+      <td><a href="https://mlsysbook.ai/vol1/">Read Volume I</a></td>
+      <td>Build <a href="https://mlsysbook.ai/tinytorch/">TinyTorch</a>, model systems with <a href="https://mlsysbook.ai/mlsysim/">MLSys·im</a>, try the <a href="https://mlsysbook.ai/labs/">labs</a> (early release), and practice with <a href="https://mlsysbook.ai/staffml/">StaffML</a></td>
+    </tr>
+    <tr>
+      <td align="center">🎓</td>
+      <td><b>An instructor</b></td>
+      <td>Open the <a href="https://mlsysbook.ai/instructors/">Instructor Hub</a></td>
+      <td>Pick a course and use its syllabus, <a href="https://mlsysbook.ai/slides/">slides</a>, kits, and labs</td>
+    </tr>
+    <tr>
+      <td align="center">🤝</td>
+      <td><b>A contributor</b></td>
+      <td>Find the guide for your component under <a href="#contributing">Contributing</a></td>
+      <td>Report problems through <a href="https://github.com/harvard-edge/cs249r_book/issues">GitHub Issues</a></td>
+    </tr>
+  </tbody>
+</table>
 
 ---
 
@@ -567,16 +592,66 @@ If this curriculum has helped you, there are two simple ways to help it grow.
 
 This is a multi-component repository, and **each component is released under its own license** to match its purpose. The license file inside each directory, such as `tinytorch/LICENSE` or `staffml/app/LICENSE`, is authoritative.
 
-| Component | License | What it means |
-|---|---|---|
-| Textbook (`books/`) | [CC BY-NC-ND 4.0](https://creativecommons.org/licenses/by-nc-nd/4.0/) | The license of the MIT Press edition. Share for **non-commercial** use with attribution. Modified versions, including translations, need permission. |
-| Labs (`labs/`), Kits (`kits/`), Slides (`slides/`), Instructors (`instructors/`) | [CC-BY-NC-SA 4.0](LICENSE.md) | Share and adapt for **non-commercial** use, with attribution and same-license sharing. |
-| [TinyTorch](tinytorch/LICENSE) | MIT | Permissive. Use, modify, and redistribute, including commercially. |
-| [MLSys·im](mlsysim/LICENSE.md) | Apache 2.0 | Permissive with explicit patent grant. |
-| [StaffML](staffml/app/LICENSE) | AGPL v3 | Strong copyleft. Modifications to deployed services must be published. Commercial licenses are available from the authors. |
-| [StaffML question corpus](staffml/vault/questions/LICENSE) | CC BY-NC 4.0 | Research and educational use. Commercial use requires permission. |
-| [TinyDigits dataset](tinytorch/LICENSE) | BSD 3-Clause | Permissive (matches sklearn ancestry). |
-| [TinyTalks dataset](tinytorch/LICENSE) | CC BY 4.0 | Permissive with attribution. Commercial use is allowed. |
+<table width="100%" style="width:100%">
+  <thead>
+    <tr>
+      <th width="5%"></th>
+      <th width="30%">Component</th>
+      <th width="15%">License</th>
+      <th width="50%">What it means</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td align="center">📖</td>
+      <td><b>Textbook</b><br><code>books/</code></td>
+      <td><a href="https://creativecommons.org/licenses/by-nc-nd/4.0/">CC BY-NC-ND 4.0</a></td>
+      <td>The license of the MIT Press edition. Share for <b>non-commercial</b> use with attribution. Modified versions, including translations, need permission.</td>
+    </tr>
+    <tr>
+      <td align="center">🧰</td>
+      <td><b>Labs, Kits, Slides, Instructor Hub</b><br><code>labs/</code> · <code>kits/</code> · <code>slides/</code> · <code>instructors/</code></td>
+      <td><a href="LICENSE.md">CC BY-NC-SA 4.0</a></td>
+      <td>Share and adapt for <b>non-commercial</b> use, with attribution and same-license sharing.</td>
+    </tr>
+    <tr>
+      <td align="center">🔥</td>
+      <td><a href="tinytorch/LICENSE"><b>TinyTorch</b></a></td>
+      <td>MIT</td>
+      <td>Permissive. Use, modify, and redistribute, including commercially.</td>
+    </tr>
+    <tr>
+      <td align="center">🔮</td>
+      <td><a href="mlsysim/LICENSE.md"><b>MLSys·im</b></a></td>
+      <td>Apache 2.0</td>
+      <td>Permissive with explicit patent grant.</td>
+    </tr>
+    <tr>
+      <td align="center">💼</td>
+      <td><a href="staffml/app/LICENSE"><b>StaffML</b></a></td>
+      <td>AGPL v3</td>
+      <td>Strong copyleft. Modifications to deployed services must be published. Commercial licenses are available from the authors.</td>
+    </tr>
+    <tr>
+      <td align="center">🗃️</td>
+      <td><a href="staffml/vault/questions/LICENSE"><b>StaffML question corpus</b></a></td>
+      <td>CC BY-NC 4.0</td>
+      <td>Research and educational use. Commercial use requires permission.</td>
+    </tr>
+    <tr>
+      <td align="center">🔢</td>
+      <td><a href="tinytorch/LICENSE"><b>TinyDigits dataset</b></a></td>
+      <td>BSD 3-Clause</td>
+      <td>Permissive (matches sklearn ancestry).</td>
+    </tr>
+    <tr>
+      <td align="center">🗣️</td>
+      <td><a href="tinytorch/LICENSE"><b>TinyTalks dataset</b></a></td>
+      <td>CC BY 4.0</td>
+      <td>Permissive with attribution. Commercial use is allowed.</td>
+    </tr>
+  </tbody>
+</table>
 
 A shorter summary for readers is at [mlsysbook.ai/about/license](https://mlsysbook.ai/about/license.html).
 
