@@ -1,15 +1,14 @@
 """Keep volume-owned sources and generated entry points aligned (2026-09-11)."""
 
-from pathlib import Path
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 import yaml
 
 from binder.cli.core.config import ConfigManager
 from binder.cli.core.volume_index import volume_index_source, write_volume_index
-
 
 ROOT = Path(__file__).resolve().parents[2]
 FORMATS = ("html", "pdf", "epub")
@@ -67,7 +66,7 @@ def test_ci_entrypoint_uses_same_selection(tmp_path, format_type):
     result = subprocess.run(
         [sys.executable, str(ROOT / "binder/cli/core/volume_index.py"),
          "--volume", "vol4", "--format", format_type.upper()],
-        cwd=tmp_path, capture_output=True, text=True,
+        cwd=tmp_path, capture_output=True, text=True, check=False,
     )
     assert result.returncode == 0, result.stderr
     assert (tmp_path / "index.qmd").read_bytes() == source.read_bytes()
@@ -102,3 +101,32 @@ def test_both_ci_platforms_use_shared_generator():
                if "run" in step and "volume_index.py" in step["run"]]
     assert len(scripts) == 2
     assert all('--volume' in script and '--format' in script for script in scripts)
+
+
+@pytest.mark.parametrize("format_type", FORMATS)
+@pytest.mark.parametrize("quoted", (False, True))
+def test_relocated_preface_includes_still_reach_canonical_files(tmp_path, quoted, format_type):
+    import re
+
+    books = tmp_path / "books"
+    source = books / "vol4/frontmatter/about.qmd"
+    included = books / "shared/_includes/living textbook.qmd"
+    (books / "config").mkdir(parents=True)
+    source.parent.mkdir(parents=True)
+    included.parent.mkdir(parents=True)
+    included.write_text("Canonical included content.\n")
+    relative = "../../shared/_includes/living textbook.qmd" if quoted else "../../shared/_includes/living.qmd"
+    if not quoted:
+        included = included.with_name("living.qmd")
+        included.write_text("Canonical included content.\n")
+    argument = f'"{relative}"' if quoted else relative
+    original = f"# Preface\r\n\r\n{{{{< include {argument} >}}}}\r\n".encode()
+    source.write_bytes(original)
+    write_volume_index(books, "vol4", format_type)
+    copied = (books / "index.qmd").read_text()
+    target = re.search(r'\{\{< include (.*?) >\}\}', copied).group(1).strip('"')
+    assert (books / target).resolve() == included.resolve()
+    assert (books / target).is_file()
+    assert source.read_bytes() == original
+    assert ConfigManager(tmp_path).active_index_source() == "vol4/frontmatter/about.qmd"
+    assert b"\r\n" in (books / "index.qmd").read_bytes()
