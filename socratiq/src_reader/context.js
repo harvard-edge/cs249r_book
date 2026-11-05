@@ -1,5 +1,8 @@
 // Capture only the reader's selection and its local section, never navigation or forms.
-const EXCLUDED = 'nav, aside, form, fieldset, script, style, button, input, textarea, select, [contenteditable="true"], #socratiq-reader';
+const EXCLUDED = 'nav, aside, form, fieldset, script, style, button, input, textarea, select, [contenteditable]:not([contenteditable="false"]), #socratiq-reader';
+const PARAGRAPH_INTERACTIVE = 'a, button, input, textarea, select, option, label, summary, iframe, object, embed, audio[controls], video[controls], [role="button"], [role="link"], [role="textbox"], [contenteditable]:not([contenteditable="false"])';
+const PARAGRAPH_CONTROLS = PARAGRAPH_INTERACTIVE.replace(/^a, /, '').replace(', [role="link"]', '');
+const elementOf = node => node?.nodeType === 1 ? node : node?.parentElement;
 // DOM references stay local: source snapshots remain plain JSON for transport.
 const sourceRanges = new WeakMap();
 
@@ -104,7 +107,21 @@ export function captureSelection({document: doc = document, window: win = window
   const selection = win.getSelection();
   if (!selection || selection.isCollapsed || !selection.rangeCount) return null;
   const range = selection.getRangeAt(0);
-  const elementOf = node => node.nodeType === 1 ? node : node.parentElement;
+  return captureRange(range, {document: doc, window: win, volume, version});
+}
+
+// Capture a paragraph with a detached Range; the reader's native selection is untouched.
+export function captureParagraph(node, {document: doc = document, window: win = doc.defaultView, volume, version = ''} = {}) {
+  const target = elementOf(node);
+  if (!target?.isConnected || target.ownerDocument !== doc || target.closest(EXCLUDED) || target.closest(PARAGRAPH_INTERACTIVE)) return null;
+  const paragraph = target.closest('p');
+  if (!paragraph?.closest('main, article') || paragraph.closest(EXCLUDED) || paragraph.querySelector(`${EXCLUDED}, ${PARAGRAPH_CONTROLS}`)) return null;
+  const range = doc.createRange();
+  range.selectNodeContents(paragraph);
+  return captureRange(range, {document: doc, window: win, volume, version});
+}
+
+function captureRange(range, {document: doc, window: win, volume, version}) {
   const start = elementOf(range.startContainer);
   const end = elementOf(range.endContainer);
   const main = start?.closest('main, article');

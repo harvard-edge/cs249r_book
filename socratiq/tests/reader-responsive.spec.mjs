@@ -69,5 +69,22 @@ test.describe('responsive Chromium',()=>{
 for(const v of viewports.filter(v=>['phone','tablet-portrait','tablet-landscape'].includes(v.name))) test(`WebKit ${v.name} touch smoke`, async ({}, info) => {
   test.skip(!existsSync(webkit.executablePath()), 'WebKit executable not installed; Safari remains untested.');
   const browser=await webkit.launch();
-  try {const context=await browser.newContext({viewport:{width:v.width,height:v.height},hasTouch:true,reducedMotion:'reduce',baseURL:'http://127.0.0.1:4176'});const page=await context.newPage();await open(page);await receipt(page,info,'webkit-answer');const g=await geometry(page);contained(g.panel,{left:0,top:0,...v});expect(g.scrollWidth).toBeLessThanOrEqual(g.clientWidth+1);await page.locator('.reader-answer pre').scrollIntoViewIfNeeded();await receipt(page,info,'webkit-wide-code');await page.getByRole('button',{name:'Close SocratiQ reader'}).tap();await expect(page.getByRole('region',{name:'SocratiQ focused reader',exact:true})).toBeHidden();} finally {await browser.close();}
+  try {
+    const context=await browser.newContext({viewport:{width:v.width,height:v.height},hasTouch:true,reducedMotion:'reduce',baseURL:'http://127.0.0.1:4176'});
+    const page=await context.newPage();
+    await open(page);await receipt(page,info,'webkit-answer');
+    const g=await geometry(page);contained(g.panel,{left:0,top:0,...v});
+    expect(g.scrollWidth).toBeLessThanOrEqual(g.clientWidth+1);
+    await page.locator('.reader-answer pre').scrollIntoViewIfNeeded();await receipt(page,info,'webkit-wide-code');
+    await page.getByRole('button',{name:'Close SocratiQ reader'}).tap();
+    await select(page,'math');
+    await page.getByRole('button',{name:'Explain this',exact:true}).tap();
+    const recent=page.getByRole('combobox',{name:'Recent passages'});
+    await expect(recent).toBeVisible();
+    // Native WebKit select appearance can ignore min-height on touch controls.
+    expect((await recent.boundingBox()).height).toBeGreaterThanOrEqual(44);
+    await receipt(page,info,'webkit-recent');
+    await page.getByRole('button',{name:'Close SocratiQ reader'}).tap();
+    await expect(page.getByRole('region',{name:'SocratiQ focused reader',exact:true})).toBeHidden();
+  } finally {await browser.close();}
 });
