@@ -18,23 +18,6 @@
   <a href="https://opencollective.com/mlsysbook"><img src="https://img.shields.io/badge/Fund%20Us-Open%20Collective-blue.svg?logo=open-collective" alt="Fund Us"></a>
 </p>
 
-<p align="center"><sub><b>Build status on <code>dev</code></b></sub></p>
-
-<p align="center">
-  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/book-validate-dev.yml"><img src="https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fharvard-edge%2Fcs249r_book%2Fgh-pages%2Fstatus%2Fvol1.json&logo=book&cacheSeconds=300" alt="Vol I"></a>
-  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/book-validate-dev.yml"><img src="https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fharvard-edge%2Fcs249r_book%2Fgh-pages%2Fstatus%2Fvol2.json&logo=book&cacheSeconds=300" alt="Vol II"></a>
-  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/book-validate-dev.yml"><img src="https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fharvard-edge%2Fcs249r_book%2Fgh-pages%2Fstatus%2Fvol3.json&logo=robot&cacheSeconds=300" alt="Vol III"></a>
-  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/book-validate-dev.yml"><img src="https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fharvard-edge%2Fcs249r_book%2Fgh-pages%2Fstatus%2Fvol4.json&logo=gear&cacheSeconds=300" alt="Vol IV"></a>
-  <br>
-  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/tinytorch-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/tinytorch-validate-dev.yml?branch=dev&event=push&label=TinyTorch&logo=python&cacheSeconds=300" alt="TinyTorch"></a>
-  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/mlsysim-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/mlsysim-validate-dev.yml?branch=dev&event=push&label=MLSys%C2%B7im&logo=python&cacheSeconds=300" alt="MLSys·im"></a>
-  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/labs-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/labs-validate-dev.yml?branch=dev&event=push&label=Labs&logo=jupyter&cacheSeconds=300" alt="Labs"></a>
-  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/kits-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/kits-validate-dev.yml?branch=dev&event=push&label=Kits&logo=arduino&cacheSeconds=300" alt="Kits"></a>
-  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/slides-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/slides-validate-dev.yml?branch=dev&event=push&label=Slides&logo=googleslides&cacheSeconds=300" alt="Slides"></a>
-  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/instructors-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/instructors-validate-dev.yml?branch=dev&event=push&label=Instructors&logo=googleclassroom&cacheSeconds=300" alt="Instructors"></a>
-  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/staffml-preview-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/staffml-preview-dev.yml?branch=dev&event=push&label=StaffML&logo=target&cacheSeconds=300" alt="StaffML"></a>
-</p>
-
 <p align="center">
   <b><a href="https://mlsysbook.ai">📘 Textbook Series</a></b> •
   <b><a href="https://mlsysbook.ai/vol1/">📗 Vol I</a></b> •
@@ -67,19 +50,11 @@
 
 A model that scores well on a benchmark still has to fit in memory, meet a latency budget, stay within a power limit, and fail safely in front of real people. Those constraints decide the architecture, and they follow laws that outlast any framework or chip. Memory bandwidth, network latency, energy, and failure rates govern a microcontroller with 256 KB of memory and an accelerator in a datacenter alike, even though the two differ in scale by many orders of magnitude. I learned this while working on TinyML at Google, and it became the idea that runs through every volume: **constraints drive architecture.**
 
-**AI engineering** is the discipline of building efficient, reliable, and safe intelligent systems that operate in the real world, not just models in isolation. My aim is to help establish it alongside software engineering and computer engineering, and to teach it the way computer architecture has long been taught, from first principles and with numbers a student can recompute.
+**AI engineering** is the discipline of building efficient, reliable, and safe intelligent systems that operate in the real world, not models in isolation. My aim is to help establish it alongside software engineering and computer engineering, and to teach it the way computer architecture has long been taught, from first principles and with numbers a student can recompute.
 
-Everything lives in one repository because each part teaches something the others cannot. Students who only read do not internalize, and students who only code do not generalize. The textbook builds the mental model, TinyTorch makes it concrete by having students build the machinery themselves, and the hardware kits and the MLSys·im simulator show where the model breaks, on devices students can hold and at scales they cannot rent.
+Everything lives in one repository because each part teaches something the others cannot. Students who only read do not internalize, and students who only code do not generalize. The textbook builds the mental model, TinyTorch makes it concrete by having students build the machinery themselves, and the hardware kits and the MLSys·im simulator show where the model breaks, on devices students can hold and at scales beyond any one lab.
 
-<div align="center">
-  <blockquote>
-    <b>The repository is the curriculum.</b>
-  </blockquote>
-</div>
-
-The work began in a classroom. In 2023, the students in CS249r at Harvard wrote the first class notes together, one topic per group, and we published them on GitHub. Those notes have been rewritten every semester since, and the HarvardX TinyML course that preceded them reached more than 100,000 learners. The goal now is one million learners by 2030.
-
-There is also a personal reason, which the FAQ tells in full. As an undergraduate, I wrote to a professor I had never met and received a VHS tape in the mail that changed what I studied. This curriculum is my way of sending that package back out.
+The work began in a classroom. In 2023, the students in CS249r at Harvard wrote the first class notes together, one topic per group, and we published them on GitHub. The HarvardX TinyML course that preceded them reached more than 100,000 learners. The goal now is one million learners by 2030.
 
 ---
 
@@ -112,9 +87,9 @@ Each chapter connects an idea a reader may already know from machine learning to
       <td><b>Why the KV cache dominates memory at inference</b></td>
     </tr>
     <tr>
-      <td>Models run on GPUs</td>
+      <td>Models run on accelerators</td>
       <td align="center">→</td>
-      <td><b>How schedulers balance latency against throughput</b></td>
+      <td><b>How serving systems batch requests to balance latency against throughput</b></td>
     </tr>
     <tr>
       <td>Models need good data</td>
@@ -158,7 +133,7 @@ Each chapter connects an idea a reader may already know from machine learning to
 
 ## The Four Volumes
 
-Each volume widens the boundary of the system and raises the cost of failure. The distinction between volumes is scope, not depth; every volume is equally quantitative.
+Each volume widens the boundary of the system and raises the cost of failure. The volumes differ in scope, not in depth.
 
 <table width="100%" style="width:100%">
   <thead>
@@ -202,25 +177,19 @@ Each volume widens the boundary of the system and raises the cost of failure. Th
   </tbody>
 </table>
 
-Each volume answers a question the previous one leaves open:
+Each volume answers a question the previous one leaves open.
 
 * **Vol I → Vol II, when one machine is not enough.** Volume I covers single-machine execution, memory walls, and kernel efficiency. Volume II carries those foundations across thousands of accelerators, collective communication, fault-tolerant networks, and datacenter orchestration.
 * **Vol II → Vol III, when a stateless response is not enough.** Volume II serves stateless requests at scale. Volume III adds stateful, multi-step loops that manage context memory, call tools, run in sandboxes, and recover from nondeterministic failures.
 * **Vol III → Vol IV, when software acts on the physical world.** Volume III governs software environments. Volume IV crosses into physical systems, where computational latency becomes distance traveled and a failure cannot be undone.
 
-> ⚠️ *Volumes III and IV are open drafts. Chapters are added, reorganized, and rewritten as I iterate, so please do not cite or teach from them yet. Feedback is welcome through the [book feedback](https://github.com/harvard-edge/cs249r_book/issues/new/choose) issue forms.*
+> ⚠️ *Volumes III and IV are open drafts. Chapters are added, reorganized, and rewritten as I revise them, so please do not cite or teach from them yet. Feedback is welcome through the [book feedback](https://github.com/harvard-edge/cs249r_book/issues/new/choose) issue forms.*
 
 ---
 
-## Start Here
+## What's in the Repository
 
 The pieces are designed to work together, but none of them requires the others.
-
-| If you are... | Start here | Then go deeper |
-|---|---|---|
-| **A student or self-learner** | [Read Volume I](https://mlsysbook.ai/vol1/) | Build [TinyTorch](https://mlsysbook.ai/tinytorch/), model systems with [MLSys·im](https://mlsysbook.ai/mlsysim/), try the [labs](https://mlsysbook.ai/labs/) (early release), and practice with [StaffML](https://mlsysbook.ai/staffml/) |
-| **An instructor** | Open the [Instructor Hub](https://mlsysbook.ai/instructors/) | Pick a course and use its syllabus, [slides](https://mlsysbook.ai/slides/), kits, and labs |
-| **A contributor** | Pick the component you use most | See [Contributing](#contributing) |
 
 <p align="center">
   <img src="README/curriculum-map.svg?v=6" alt="Curriculum map showing how the textbook, labs, TinyTorch, hardware kits, MLSys·im, and StaffML connect" width="760">
@@ -241,7 +210,7 @@ The pieces are designed to work together, but none of them requires the others.
       <td align="center">📖</td>
       <td><b>Textbook</b></td>
       <td>Four volumes that build the mental models, from one machine to fleets, agents, and physical systems.</td>
-      <td>See above</td>
+      <td>Vol I released</td>
       <td><a href="https://mlsysbook.ai">Read online</a></td>
     </tr>
     <tr>
@@ -254,7 +223,7 @@ The pieces are designed to work together, but none of them requires the others.
     <tr>
       <td align="center">🔮</td>
       <td><b>MLSys·im</b></td>
-      <td>Model memory, compute, network, and energy limits at scales no student can rent. The textbook's calculations are built on it.</td>
+      <td>Model memory, compute, network, and energy limits for systems too large to run in a classroom. The textbook's calculations are built on it.</td>
       <td>Released</td>
       <td><a href="https://mlsysbook.ai/mlsysim/">Use simulator</a> · <a href="mlsysim/README.md">Repo guide</a></td>
     </tr>
@@ -303,7 +272,17 @@ The pieces are designed to work together, but none of them requires the others.
   </tbody>
 </table>
 
-Two projects are earlier-stage experiments: [SocratiQ](socratiq/README.md), an AI tutor that adds guided reading, quizzes, and spaced repetition to static learning sites, and [MLPerf EDU](mlperf-edu/README.md), a teaching benchmark suite aligned with MLCommons MLPerf.
+Two earlier-stage experiments also live here. [SocratiQ](socratiq/README.md) is an AI tutor that adds guided reading, quizzes, and spaced repetition to static learning sites. [MLPerf EDU](mlperf-edu/README.md) is a teaching benchmark suite aligned with MLCommons MLPerf.
+
+---
+
+## Start Here
+
+| If you are... | Start here | Then go deeper |
+|---|---|---|
+| **A student or self-learner** | [Read Volume I](https://mlsysbook.ai/vol1/) | Build [TinyTorch](https://mlsysbook.ai/tinytorch/), model systems with [MLSys·im](https://mlsysbook.ai/mlsysim/), try the [labs](https://mlsysbook.ai/labs/) (early release), and practice with [StaffML](https://mlsysbook.ai/staffml/) |
+| **An instructor** | Open the [Instructor Hub](https://mlsysbook.ai/instructors/) | Pick a course and use its syllabus, [slides](https://mlsysbook.ai/slides/), kits, and labs |
+| **A contributor** | Find the guide for your component under [Contributing](#contributing) | Report problems through [GitHub Issues](https://github.com/harvard-edge/cs249r_book/issues) |
 
 ---
 
@@ -311,19 +290,15 @@ Two projects are earlier-stage experiments: [SocratiQ](socratiq/README.md), an A
 
 No chapter is written once. Each one goes through a cycle that repeats as the field changes.
 
-1. **Watch the field.** I follow where machine learning systems are going through the research and industry venues where that work appears: ISCA, MICRO, HPCA, ASPLOS, ISPASS, MLSys, NeurIPS, ICML, ICLR, Hot Chips, and industry summits.
-2. **Distill.** A chapter keeps the principles and leaves out the variations. Quantization has been implemented in countless ways, and the principles that explain all of them are what a student needs. David Patterson, who wrote the foreword to Volume I, gave me the test for what belongs: a technique earns a place only when several companies use it in practice. That test keeps the material tied to systems that exist, so a student can connect what they learn to the real world.
+1. **Watch the field.** I follow the field through the venues where its research and industry work appear: ISCA, MICRO, HPCA, ASPLOS, ISPASS, MLSys, NeurIPS, ICML, ICLR, Hot Chips, and industry summits.
+2. **Distill.** A chapter keeps the principles and leaves out the variations. Quantization has been implemented in dozens of ways, and the principles that explain all of them are what a student needs. David Patterson, who wrote the foreword to Volume I, gave me the test for what belongs. A technique earns a place only when several companies use it in practice. That test keeps the material tied to systems that exist, so a student can connect what they learn to systems in production.
 3. **Review with practitioners.** I review chapters one-on-one with the engineers who build these systems inside large companies: hyperscale infrastructure engineers and model developers. Practitioners at Arm, Google, Intel, Meta, Microsoft, Qualcomm, STMicroelectronics, and other organizations have reviewed the material, and academic reviewers in Europe, Asia, and the Americas have tested it against their own research and teaching.
 4. **Teach it.** Volume I has been taught at Harvard through CS249r since 2023 and adopted by instructors at UC Berkeley, Columbia, Georgia Tech, IIT Bombay, and universities across Europe, Latin America, Africa, and Asia. The classroom shows where students get stuck.
 5. **Revise.** Reader issues, reviewer notes, and classroom experience go back into the next draft.
 
-Reviewers do more than check facts; they change what the book covers. Conversations with industry experts on sustainable AI, who kept asking where the data comes from and what a system costs over its full lifecycle, led to a chapter I had not planned. That chapter was written in 2023, before sustainable AI was a common topic.
-
-The cycle leaves a record. Eleven of Volume I's sixteen chapters began as the 2023 class notes, three were added in 2026 as the field moved, and the chapters have been revised in more than 16,000 commits, all public.
+Reviewers do more than check facts. They change what the book covers. Conversations with industry experts on sustainable AI, who kept asking where the data comes from and what a system costs over its full lifecycle, led to a chapter I had not planned. That chapter was written in 2023, before sustainable AI was a common topic.
 
 **Numbers are computed, not typed.** Every derived quantity in the books comes from Python code that ships with the text, built on [MLSys·im](https://mlsysbook.ai/mlsysim/), whose hardware and model specifications trace to cited sources. A test suite runs on every commit and checks unit consistency, cross-references, notation, and citations.
-
-**AI tools are part of the workflow, and the responsibility is mine.** I researched, wrote, and rewrote every chapter. I used AI tools throughout: to write code and checks, to survey literature I then read in the original, to draft passages I then rewrote substantially, and to audit the manuscript for consistency. AI-generated material can be plausible and still be wrong, which is why the standard is traceability rather than trust. Volumes III and IV are released earlier, as drafts, before they go through the classroom teaching and expert review that Volumes I and II have had. Each volume includes a full [Note on AI Assistance](https://mlsysbook.ai/vol1/frontmatter/ai_use.html).
 
 **Readers are part of the review.** Every chapter is open. When something is wrong, unclear, or missing, the [book feedback](https://github.com/harvard-edge/cs249r_book/issues/new/choose) forms send it straight into the next revision.
 
@@ -338,7 +313,7 @@ The cycle leaves a record. Eleven of Volume I's sixteen chapters began as the 20
 
 I have always learned best by building from scratch and teaching others.
 
-When I want to understand an emerging or complex systems area, writing about it and writing code for it forces me to slow down. It forces me to find the core invariants, work through the math, and separate what is fundamentally true about physics and hardware from whatever happens to be trending this week.
+When I want to understand an emerging or complex systems area, writing about it and writing code for it forces me to slow down. It forces me to find the core invariants, work through the math, and separate what is fundamentally true about physics and hardware from what is merely current.
 
 This repository is my open workshop and teaching lab. It is how I clarify my own thinking for my students at Harvard, my research lab, and open benchmarking efforts like MLPerf.
 
@@ -353,7 +328,7 @@ Students write to me now the way I once wrote to that professor, far more than I
 
 <br>
 
-It is for anyone who wants to understand how intelligent systems actually run, not only how models are trained: students, software engineers moving into ML infrastructure, hardware architects, and educators designing courses.
+It is for anyone who wants to understand how intelligent systems run, not only how models are trained: students, software engineers moving into ML infrastructure, hardware architects, and educators designing courses.
 
 The only assumptions are that the reader can program in Python and has met basic machine learning ideas, such as a neural network or a loss function. The systems concepts are built from the ground up. No prior background in computer architecture, networking, or distributed systems is needed.
 
@@ -419,11 +394,26 @@ Barroso, Hölzle, and Clidaras give a firsthand account of how one organization 
 </details>
 
 <details>
+<summary><b>Do you use AI tools to write the books?</b></summary>
+
+<br>
+
+Yes. I use AI tools throughout the work: to write code and checks, to survey literature that I then read in the original, to draft passages that I then rewrite substantially, and to audit the manuscript for consistency. I researched, wrote, and rewrote every chapter, and the responsibility for what the books say is mine.
+
+AI-generated text can be fluent and still be wrong, so the standard is traceability rather than trust. Every derived number in the books is computed by Python code that ships with the text, and automated checks test units, cross-references, notation, and citations on every change. Practitioners review the chapters, and the classroom tests them.
+
+Volumes III and IV are released earlier, as drafts, before they receive the classroom teaching and expert review that Volumes I and II have had.
+
+Each volume includes a full [Note on AI Assistance](https://mlsysbook.ai/vol1/frontmatter/ai_use.html) that describes how the tools were used and how their output was checked.
+
+</details>
+
+<details>
 <summary><b>Why read a textbook in the age of LLMs?</b></summary>
 
 <br>
 
-Language models are very good at retrieval, code generation, and summarizing facts. A paragraph that only delivers a fact a reader could look up in seconds has not earned its place in a textbook.
+Language models are good at retrieval, code generation, and summarizing facts. A paragraph that only delivers a fact a reader could look up in seconds has not earned its place in a textbook.
 
 What a textbook provides is perspective and a coherent mental model: the order in which to learn ideas, how trade-offs constrain one another, and what not to worry about. Deciding what to leave out is one of the most important choices an author makes.
 
@@ -461,7 +451,7 @@ The textbook is released under a Creative Commons license ([CC BY-NC-ND 4.0](htt
     <tr>
       <td width="50%" align="center">
         <b>Star the repository</b><br>
-        Stars help show universities and foundations that this work matters, and that support funds workshops and hardware kits for classrooms that cannot buy them.<br><br>
+        Stars help show universities and foundations that this work matters, and their support funds workshops and hardware kits for classrooms that cannot buy them.<br><br>
         <a href="https://star-history.com/#harvard-edge/cs249r_book&Date">
           <picture>
             <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=harvard-edge/cs249r_book&type=date&theme=dark&legend=top-left">
@@ -537,32 +527,49 @@ The textbook is released under a Creative Commons license ([CC BY-NC-ND 4.0](htt
 
 **Branches.** Development happens on `dev`, which this page shows. The `main` branch holds what is live on [mlsysbook.ai](https://mlsysbook.ai), and the publish workflow promotes `dev` to `main` at each release.
 
+<p align="center"><sub><b>Build status on <code>dev</code></b></sub></p>
+
+<p align="center">
+  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/book-validate-dev.yml"><img src="https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fharvard-edge%2Fcs249r_book%2Fgh-pages%2Fstatus%2Fvol1.json&logo=book&cacheSeconds=300" alt="Vol I"></a>
+  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/book-validate-dev.yml"><img src="https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fharvard-edge%2Fcs249r_book%2Fgh-pages%2Fstatus%2Fvol2.json&logo=book&cacheSeconds=300" alt="Vol II"></a>
+  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/book-validate-dev.yml"><img src="https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fharvard-edge%2Fcs249r_book%2Fgh-pages%2Fstatus%2Fvol3.json&logo=robot&cacheSeconds=300" alt="Vol III"></a>
+  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/book-validate-dev.yml"><img src="https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fharvard-edge%2Fcs249r_book%2Fgh-pages%2Fstatus%2Fvol4.json&logo=gear&cacheSeconds=300" alt="Vol IV"></a>
+  <br>
+  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/tinytorch-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/tinytorch-validate-dev.yml?branch=dev&event=push&label=TinyTorch&logo=python&cacheSeconds=300" alt="TinyTorch"></a>
+  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/mlsysim-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/mlsysim-validate-dev.yml?branch=dev&event=push&label=MLSys%C2%B7im&logo=python&cacheSeconds=300" alt="MLSys·im"></a>
+  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/labs-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/labs-validate-dev.yml?branch=dev&event=push&label=Labs&logo=jupyter&cacheSeconds=300" alt="Labs"></a>
+  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/kits-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/kits-validate-dev.yml?branch=dev&event=push&label=Kits&logo=arduino&cacheSeconds=300" alt="Kits"></a>
+  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/slides-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/slides-validate-dev.yml?branch=dev&event=push&label=Slides&logo=googleslides&cacheSeconds=300" alt="Slides"></a>
+  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/instructors-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/instructors-validate-dev.yml?branch=dev&event=push&label=Instructors&logo=googleclassroom&cacheSeconds=300" alt="Instructors"></a>
+  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/staffml-preview-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/staffml-preview-dev.yml?branch=dev&event=push&label=StaffML&logo=target&cacheSeconds=300" alt="StaffML"></a>
+</p>
+
 ---
 
 ## License
 
-This is a multi-component repository, and **each component is released under its own license** to match its purpose. The file inside each directory (e.g. `tinytorch/LICENSE`, `staffml/app/LICENSE`) is authoritative.
+This is a multi-component repository, and **each component is released under its own license** to match its purpose. The license file inside each directory, such as `tinytorch/LICENSE` or `staffml/app/LICENSE`, is authoritative.
 
 | Component | License | What it means |
 |---|---|---|
 | Textbook (`books/`) | [CC BY-NC-ND 4.0](https://creativecommons.org/licenses/by-nc-nd/4.0/) | The license of the MIT Press edition. Share for **non-commercial** use with attribution; modified versions, including translations, need permission. |
 | Labs (`labs/`), Kits (`kits/`), Slides (`slides/`), Instructors (`instructors/`) | [CC-BY-NC-SA 4.0](LICENSE.md) | Share and adapt for **non-commercial** use, with attribution and same-license sharing. |
-| [TinyTorch](tinytorch/LICENSE) | MIT | Permissive — use, modify, redistribute, including commercially. |
+| [TinyTorch](tinytorch/LICENSE) | MIT | Permissive. Use, modify, and redistribute, including commercially. |
 | [MLSys·im](mlsysim/LICENSE.md) | Apache 2.0 | Permissive with explicit patent grant. |
-| [StaffML](staffml/app/LICENSE) | AGPL v3 | Strong copyleft — modifications to deployed services must be published. Commercial licensing available; contact the authors. |
+| [StaffML](staffml/app/LICENSE) | AGPL v3 | Strong copyleft. Modifications to deployed services must be published. Commercial licenses are available from the authors. |
 | [StaffML question corpus](staffml/vault/questions/LICENSE) | CC BY-NC 4.0 | Research and educational use; commercial use requires permission. |
 | [TinyDigits dataset](tinytorch/LICENSE) | BSD 3-Clause | Permissive (matches sklearn ancestry). |
 | [TinyTalks dataset](tinytorch/LICENSE) | CC BY 4.0 | Permissive with attribution; commercial use allowed. |
 
 A user-facing summary lives at [mlsysbook.ai/about/license](https://mlsysbook.ai/about/license.html).
 
-If you are an institution considering adoption, or a company interested in commercial terms for a copyleft component, please reach out to [edu@tinyML.org](mailto:edu@tinyML.org).
+If you are an institution considering adoption, or a company interested in commercial terms for a copyleft component, please write to [edu@tinyML.org](mailto:edu@tinyML.org).
 
 ---
 
 ## Contributors
 
-Thanks goes to these wonderful people who have contributed to making this resource better for everyone!
+These people have improved the textbooks, the software, and the teaching materials.
 
 **Legend:** 🪲 Bug Hunter · 🧑‍💻 Code Contributor · ✍️ Doc Wizard · 🎨 Design Artist · 🧠 Idea Spark · 🔎 Code Reviewer · 🧪 Test Tinkerer · 🛠️ Tool Builder
 
