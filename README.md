@@ -52,11 +52,11 @@
 
 A model that scores well on a benchmark still has to fit in memory, meet a latency budget, stay within a power limit, and fail safely in front of real people. Those constraints decide the architecture, and they follow laws that outlast any framework or chip. Memory bandwidth, network latency, energy, and failure rates govern a microcontroller with 256 KB of memory and an accelerator in a datacenter alike, even though the two differ in scale by many orders of magnitude. I learned this while working on TinyML at Google, and it became the idea that runs through every volume: **constraints drive architecture.**
 
-**AI engineering** is the discipline of building efficient, reliable, and safe intelligent systems that operate in the real world, not models in isolation. My aim is to help establish it alongside software engineering and computer engineering, and to teach it the way computer architecture has long been taught, from first principles and with numbers a student can recompute.
+**AI engineering** is the discipline that works within those constraints to build efficient, reliable, and safe intelligent systems that operate in the real world, not models in isolation. My aim is to help establish it alongside software engineering and computer engineering, and to teach it the way computer architecture has long been taught, from first principles and with numbers a student can recompute.
 
-Everything lives in one repository because each part teaches something the others cannot. Students who only read do not internalize, and students who only code do not generalize. The textbook builds the mental model, TinyTorch makes it concrete by having students build the machinery themselves, and the hardware kits and the MLSys·im simulator show where the model breaks, on devices students can hold and at scales beyond any one lab.
+Teaching it that way takes more than a book, which is why everything lives in one repository. Each part teaches something the others cannot. Students who only read do not internalize, and students who only code do not generalize. The textbook builds the mental model, TinyTorch makes it concrete by having students build the machinery themselves, and the hardware kits and the MLSys·im simulator show where the model breaks, on devices students can hold and at scales beyond any one lab.
 
-The work began in a classroom. In 2023, the students in CS249r at Harvard wrote the first class notes together, one topic per group, and we published them on GitHub. The HarvardX TinyML course that preceded them reached more than 100,000 learners. The goal now is one million learners by 2030.
+The work began in a classroom. The HarvardX TinyML course came first and reached more than 100,000 learners. In 2023, the students in CS249r at Harvard wrote the first class notes for this curriculum together, one topic per group, and we published them on GitHub. The goal now is to reach one million learners by 2030.
 
 ---
 
@@ -294,17 +294,17 @@ Two earlier-stage experiments also live here. [SocratiQ](socratiq/README.md) is 
 
 No chapter is written once. Each one goes through a cycle that repeats as the field changes.
 
-1. **Watch the field.** I follow the field through the venues where its research and industry work appear: ISCA, MICRO, HPCA, ASPLOS, ISPASS, MLSys, NeurIPS, ICML, ICLR, Hot Chips, and industry summits.
-2. **Distill.** A chapter keeps the principles and leaves out the variations. Quantization has been implemented in dozens of ways, and the principles that explain all of them are what a student needs. David Patterson, who wrote the foreword to Volume I, gave me the test for what belongs. A technique earns a place only when several companies use it in practice. That test keeps the material tied to systems that exist, so a student can connect what they learn to systems in production.
-3. **Review with practitioners.** I review chapters one-on-one with the engineers who build these systems inside large companies: hyperscale infrastructure engineers and model developers. Practitioners at Arm, Google, Intel, Meta, Microsoft, Qualcomm, STMicroelectronics, and other organizations have reviewed the material, and academic reviewers in Europe, Asia, and the Americas have tested it against their own research and teaching.
+1. **Watch the field.** I follow the research and industry venues where new work appears: ISCA, MICRO, HPCA, ASPLOS, ISPASS, MLSys, NeurIPS, ICML, ICLR, Hot Chips, and industry summits.
+2. **Distill.** A chapter keeps the principles and leaves out the variations. Quantization, for example, has been implemented in dozens of ways, and a student needs the principles that explain all of them. To decide what belongs, I use a test that David Patterson, who wrote the foreword to Volume I, gave me. A technique earns a place only when several companies use it in practice. That test ties the material to systems that exist, so what a student learns connects to systems in production.
+3. **Review with practitioners.** I review chapters one-on-one with the engineers who build these systems inside large companies, from hyperscale infrastructure engineers to model developers. Practitioners at Arm, Google, Intel, Meta, Microsoft, Qualcomm, STMicroelectronics, and other organizations have reviewed the material, and academic reviewers in Europe, Asia, and the Americas have tested it against their own research and teaching.
 4. **Teach it.** Volume I has been taught at Harvard through CS249r since 2023 and adopted by instructors at UC Berkeley, Columbia, Georgia Tech, IIT Bombay, and universities across Europe, Latin America, Africa, and Asia. The classroom shows where students get stuck.
 5. **Revise.** Reader issues, reviewer notes, and classroom experience go back into the next draft.
 
-Reviewers do more than check facts. They change what the book covers. Conversations with industry experts on sustainable AI, who kept asking where the data comes from and what a system costs over its full lifecycle, led to a chapter I had not planned. That chapter was written in 2023, before sustainable AI was a common topic.
+Reviewers do more than check facts, and sometimes they change what the book covers. Industry experts on sustainable AI kept asking me where the data comes from and what a system costs over its full lifecycle. Their questions led to a chapter I had not planned, and I wrote it in 2023, before sustainable AI was a common topic.
 
 **Numbers are computed, not typed.** Every derived quantity in the books comes from Python code that ships with the text, built on [MLSys·im](https://mlsysbook.ai/mlsysim/), whose hardware and model specifications trace to cited sources. A test suite runs on every commit and checks unit consistency, cross-references, notation, and citations.
 
-**Readers are part of the review.** Every chapter is open. When something is wrong, unclear, or missing, the [book feedback](https://github.com/harvard-edge/cs249r_book/issues/new/choose) forms send it straight into the next revision.
+**Readers are part of the review.** Every chapter is open, and when something is wrong, unclear, or missing, the [book feedback](https://github.com/harvard-edge/cs249r_book/issues/new/choose) forms send it straight into the next revision.
 
 ---
 
@@ -319,9 +319,9 @@ I have always learned best by building from scratch and teaching others.
 
 When I want to understand an emerging or complex systems area, writing about it and writing code for it forces me to slow down. It forces me to find the core invariants, work through the math, and separate what is fundamentally true about physics and hardware from what is merely current.
 
-This repository is my open workshop and teaching lab. It is how I clarify my own thinking for my students at Harvard, my research lab, and open benchmarking efforts like MLPerf. Volumes III and IV are that process happening in public.
+This repository is my open workshop and teaching lab. It is where I work out ideas for my students at Harvard, my research lab, and open benchmarking efforts like MLPerf. Volumes III and IV are that process happening in public.
 
-There is also a deeper reason. In the late 1990s, as an undergraduate, I wrote to a professor at Stanford because I was fascinated by genetic algorithms. I did not expect an answer. Then a brown package arrived at my house with a VHS tape on genetic algorithms inside. I never learned who sent it, so I never got to say thank you. But I have not forgotten what it felt like to have someone I had never met take the time to share what they knew with a curious student. It sparked my curiosity, and it stayed with me.
+There is also a deeper reason. In the late 1990s, as an undergraduate, I wrote to a professor at Stanford because I was fascinated by genetic algorithms. I did not expect an answer. Then a brown package arrived at my house with a VHS tape on genetic algorithms inside. I never learned who sent it, so I never got to say thank you, but I have not forgotten what it felt like to have someone I had never met take the time to share what they knew with a curious student. That package sparked my curiosity, and the feeling has stayed with me.
 
 Students write to me now the way I once wrote to that professor, far more than I can answer one by one. This curriculum is my way of sending the package back out, to a much bigger classroom than any lecture hall can hold.
 
@@ -343,7 +343,7 @@ The only assumptions are that the reader can program in Python and has met basic
 
 <br>
 
-No. The two volumes differ in scope, not in depth or rigor, and both are equally quantitative.
+No. The two volumes differ in scope, not in depth or rigor.
 
 Volume I is the single-machine world: how an ML system works on one machine with a handful of accelerators, from the memory hierarchy and kernel efficiency to quantization and on-device deployment. Volume II is the fleet: thousands of accelerators connected by high-speed networks, parallelism across them, fault tolerance, and serving at datacenter scale.
 
@@ -404,7 +404,7 @@ Barroso, Hölzle, and Clidaras give a firsthand account of how one organization 
 
 Yes, and I would rather say so plainly than leave readers to guess. I use AI tools to write code and the checks that test it, to survey the literature before I read the papers myself, to draft passages that I then rewrite, and to audit four volumes for consistency. I use them on the companions as well, from TinyTorch and the labs to the slides and the StaffML question bank. The tools take on mechanical work, which leaves my time for the parts that need a teacher: what to include, how to explain it, and whether it is right.
 
-A tool can write text that sounds right and is wrong, so I do not take its output on trust. Every number in the books is computed by code that ships with the text. Automated checks test units, cross-references, notation, and citations whenever something changes. Engineers who build these systems review the chapters, and students test them in class. In StaffML, each question records whether it began as a machine draft and whether a person has reviewed it.
+A tool can write text that sounds right and is wrong, so I do not take its output on trust. I check the work in ways that do not depend on the tool. Every number in the books is computed by code that ships with the text. Automated checks test units, cross-references, notation, and citations whenever something changes. Engineers who build these systems review the chapters, and students test them in class. In StaffML, each question records whether it began as a machine draft and whether a person has reviewed it.
 
 I researched, wrote, and rewrote every chapter. The decisions about what goes in, what stays out, and how an idea is taught are mine, and so is every mistake. Because all of the work is open, anyone can check it, and the [book feedback](https://github.com/harvard-edge/cs249r_book/issues/new/choose) forms send what you find straight to me.
 
@@ -434,7 +434,7 @@ The two are not in opposition. The book provides the structure and the quantitat
 
 Yes. Every volume is free to read online at [mlsysbook.ai](https://mlsysbook.ai).
 
-The textbook is released under a Creative Commons license ([CC BY-NC-ND 4.0](https://creativecommons.org/licenses/by-nc-nd/4.0/)), the same license as the MIT Press print edition. It may be read and shared for non-commercial use with attribution; translations and other modified versions need permission. The companion software is open source under its own licenses, listed under [License](#license).
+The textbook is released under a Creative Commons license ([CC BY-NC-ND 4.0](https://creativecommons.org/licenses/by-nc-nd/4.0/)), the same license as the MIT Press print edition. It may be read and shared for non-commercial use with attribution. Translations and other modified versions need permission. The companion software is open source under its own licenses, listed under [License](#license).
 
 </details>
 
