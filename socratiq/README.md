@@ -7,6 +7,13 @@ The four-volume book integration uses `src_reader/`, a standalone entry point fo
 Cloudflare streaming service and the project's Markdown, sanitization, and math
 libraries, without initializing the legacy quiz widget, accounts, or IndexedDB.
 
+The reader also offers **Simplify**, **Show an example**, and **Check my
+understanding**. The last action requests a conceptual question, waits for an
+attempt, and uses the conversation for feedback. **Start over** clears the
+conversation for the current passage; **Copy answer** preserves Markdown and
+source provenance in study notes. These are model-assisted learning interactions,
+not graded assessments or evidence of mastery.
+
 ```bash
 cd socratiq
 npm ci
@@ -75,6 +82,20 @@ unchanged.
 The remaining documentation describes `src_shadow/`, not the focused reader now
 included by the book configs. Its Cloudflare source directories are absent here.
 
+The legacy widget is not enabled by the four-volume integration. Its controls
+can open without establishing that every workflow or external service works.
+The reader's browser tests do not cover legacy workflows. Run
+`node --test tests/legacy-offline-quiz.test.mjs` for the local quiz distractor
+regression check and `node --test tests/legacy-study.test.mjs` for flashcard
+import/export, review scheduling, and stored conversation checks. The latter
+uses Chromium and an isolated local Vite server with constructed study data.
+Do not treat the historical feature list below as a release
+readiness checklist.
+
+Legacy quiz-result submission to the server is explicitly disabled; local quiz
+storage does not imply cloud synchronization. The missing backend source and
+ownership must be resolved before restoring any server-dependent study features.
+
 ### Legacy AI Learning Widget
 
 Socratiq is an AI-powered learning widget that injects itself into any static HTML page (Quarto books, textbooks, documentation sites) via a single `<script>` tag. It runs entirely in a Shadow DOM so it never conflicts with the host page's styles or scripts.
@@ -82,7 +103,7 @@ Socratiq is an AI-powered learning widget that injects itself into any static HT
 ## What it does
 
 - **AI Chat** — Ask questions about the page content. The widget reads the surrounding text as context and streams answers using configurable LLM providers (Cloudflare AI Gateway, Gemini, Groq).
-- **Quiz generation** — Generates contextual quizzes from selected text or entire sections. Supports multiple-choice, short-answer, and spaced repetition (flashcard) modes.
+- **Quiz generation** — Generates contextual multiple-choice quizzes from selected text or entire sections, with a separate spaced repetition (flashcard) workflow.
 - **Highlight & ask** — Select any text on the page to instantly ask a follow-up question or generate a quiz about that passage.
 - **Knowledge graph** — Visualizes relationships between concepts on the current page.
 - **Progress tracking** — Tracks quiz scores and chapter visits in a local IndexedDB database, with a spaced repetition scheduler for revisiting weak areas.

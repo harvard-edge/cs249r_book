@@ -2905,8 +2905,7 @@ this.createModal().then(async () => {
           clickedButton.style.border = borderStyle + ' !important';
         }
 
-        // Process the review
-        this.reviewCard(index, quality);
+        // Scheduling is handled by the single listener installed below.
       });
 
       // Rest of your existing event listeners...
@@ -3025,43 +3024,47 @@ this.createModal().then(async () => {
         });
     });
 
-    // Inside showCard method, after creating the modal
-    modal.addEventListener("reviewCard", (event) => {
-      const { index, quality } = event.detail;
-      this.reviewCard(index, quality);
+    // Reopening or navigating the existing modal must not add another review.
+    if (!modal.dataset.reviewHandlerAttached) {
+      modal.dataset.reviewHandlerAttached = "true";
+      modal.addEventListener("reviewCard", (event) => {
+        const { index, quality } = event.detail;
+        this.reviewCard(index, quality);
 
-      // Show feedback based on quality
-      let message = "";
-      switch (quality) {
-        case 0:
-          message = "Card reset";
-          break;
-        case 2:
-          message = "Marked as hard";
-          break;
-        case 3:
-          message = "Marked as good";
-          break;
-        case 5:
-          message = "Marked as memorized";
-          break;
-      }
+        // Show feedback based on quality
+        let message = "";
+        switch (quality) {
+          case 0:
+            message = "Card reset";
+            break;
+          case 2:
+            message = "Marked as hard";
+            break;
+          case 3:
+            message = "Marked as good";
+            break;
+          case 5:
+            message = "Marked as memorized";
+            break;
+        }
 
-      showPopover(
-        this.shadowRoot,
-        message,
-        quality === 0 ? "warning" : "success"
-      );
+        showPopover(
+          this.shadowRoot,
+          message,
+          quality === 0 ? "warning" : "success"
+        );
 
-      // Move to next card if not the last one
-      const cards = this.chapterSets.get(
-        parseInt(this.currentReview.chapterNum)
-      );
-      if (this.currentReview.currentIndex < cards.length - 1) {
-      } else {
-        showPopover(this.shadowRoot, "Review completed!", "success");
-      }
-    });
+        // Move to next card if not the last one
+        const cards = this.chapterSets.get(
+          parseInt(this.currentReview.chapterNum)
+        );
+        if (this.currentReview.currentIndex < cards.length - 1) {
+        } else {
+          showPopover(this.shadowRoot, "Review completed!", "success");
+        }
+      });
+
+    }
 
     // Update navigation handlers
     this.shadowRoot

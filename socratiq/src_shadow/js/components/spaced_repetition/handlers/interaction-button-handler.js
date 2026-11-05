@@ -73,12 +73,12 @@ export class SpacedRepetitionInteractionHandler {
                         }
                         
                         // Show loading state
-                        const loadingId = this.modal.notificationHandler.showLoadingState('Importing flashcards...');
+                        const loadingId = this.storageHandler.notificationHandler.showLoadingState('Importing flashcards...');
 
                         try {
                             await this.storageHandler.mergeImportedData(importedData);
                             
-                            this.modal.notificationHandler.updateNotification(
+                            this.storageHandler.notificationHandler.updateNotification(
                                 loadingId,
                                 'Flashcards imported successfully!',
                                 'success'
@@ -91,7 +91,7 @@ export class SpacedRepetitionInteractionHandler {
                             showPopover(this.shadowRoot, 'Data imported successfully!', 'success');
                         } catch (importError) {
                             console.error('Error importing data:', importError);
-                            this.modal.notificationHandler.updateNotification(
+                            this.storageHandler.notificationHandler.updateNotification(
                                 loadingId,
                                 'Failed to import flashcards',
                                 'error'

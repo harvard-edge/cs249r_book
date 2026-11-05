@@ -160,6 +160,7 @@ export const readerStyles = `
   }
 
   .reader-body { min-height: 0; flex: 1 1 auto; overflow: auto; overscroll-behavior: contain; }
+  .reader-body:focus-visible { outline: 2px solid #d88ea4; outline-offset: -2px; }
   .reader-source { position: sticky; top: 0; z-index: 1; padding: 13px 16px 12px; border-bottom: 1px solid #eee7e9; background: #fffdfd; }
   .reader-shell[data-theme="dark"] .reader-source { background: #211e22; }
   .reader-shell[data-theme="dark"] .reader-source { border-color: #3d373d; }
@@ -169,6 +170,22 @@ export const readerStyles = `
   .reader-shell[data-theme="dark"] .reader-source-link { color: #f1a2b8; }
   .reader-quote { display: -webkit-box; margin: 7px 0 0; overflow: hidden; color: #60575d; font-size: 12px; line-height: 1.45; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
   .reader-shell[data-theme="dark"] .reader-quote { color: #c6bbc2; }
+
+  .reader-caution { margin: 7px 0 0; color: #766e73; font-size: 10px; }
+  .reader-shell[data-theme="dark"] .reader-caution { color: #c0b6bd; }
+  .reader-learning { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 16px 0; }
+  .reader-learning button, .reader-copy {
+    min-height: 36px; padding: 6px 9px; border: 1px solid #dfd2d8; border-radius: 8px;
+    background: transparent; color: #781632; cursor: pointer; font-size: 11px; line-height: 1.3;
+  }
+  .reader-learning button:hover, .reader-copy:hover { background: #fbf1f4; }
+  .reader-learning .reader-reset { color: #665b61; }
+  .reader-learning button:disabled { opacity: .5; cursor: default; }
+  .reader-copy { margin-top: 7px; min-height: 32px; }
+  .reader-shell[data-theme="dark"] .reader-learning button,
+  .reader-shell[data-theme="dark"] .reader-copy { border-color: #60404b; color: #f1a2b8; }
+  .reader-shell[data-theme="dark"] .reader-learning button:hover,
+  .reader-shell[data-theme="dark"] .reader-copy:hover { background: #382830; }
 
   .reader-instruction { padding: 20px 20px 22px; color: #70666c; font-size: 13px; text-align: center; }
   .reader-instruction strong { display: block; margin-bottom: 5px; color: #3d3339; font-size: 14px; }
@@ -256,6 +273,15 @@ export const readerStyles = `
     .reader-source { padding-inline: 14px; }
     .reader-thread { padding-inline: 14px; }
   }
+
+  /* Short windows and the mobile keyboard must leave the answer scrollable. */
+  .reader-shell[data-compact="true"] .reader-panel {
+    bottom: calc(var(--reader-bottom-clearance) + max(12px, env(safe-area-inset-bottom)));
+    max-height: calc(var(--reader-visible-height) - 24px);
+  }
+  .reader-shell[data-compact="true"] .reader-header { padding-block: 8px; }
+  .reader-shell[data-compact="true"] .reader-header-note { display: none; }
+  .reader-shell[data-compact="true"] .reader-source { position: static; }
 
   @media (prefers-reduced-motion: reduce) {
     .reader-launcher { transition: none; }

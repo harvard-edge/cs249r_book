@@ -30,24 +30,12 @@ function generateQuestions(data) {
       let correctAnswer = entityOrNoun;
 
       // Combine entities, nouns, and additional words to form choices for wrong answers
-      let choices = primarySource
-        .filter((item) => item !== entityOrNoun)
-        .concat(
-          nouns.filter((noun) => noun !== entityOrNoun),
-          words
-        );
+      const choices = [...new Set([...primarySource, ...nouns, ...words])]
+        .filter((item) => item !== correctAnswer);
 
       // Shuffle and pick up to three unique wrong answers
       shuffleArray(choices);
       let wrongAnswers = choices.slice(0, 3);
-
-      // Ensure there are enough choices, fall back to other words in the sentence if necessary
-      while (wrongAnswers.length < 3 && words.length > 0) {
-        let additionalChoice = words.pop();
-        if (!wrongAnswers.includes(additionalChoice)) {
-          wrongAnswers.push(additionalChoice);
-        }
-      }
 
       let question = {
         question: questionText,

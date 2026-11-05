@@ -28,15 +28,50 @@ const probes = [
     question: 'Are FLOPs and FLOP/s interchangeable?',
     reviewCriterion: 'Keep work distinct from rate, preserve the units, and avoid invented hardware performance numbers.',
   },
+  {
+    name: 'intensity-qualified-example',
+    source: {quote: 'Arithmetic intensity is the ratio of operations a kernel performs to bytes it transfers across the memory interface being modeled, in FLOP/byte.', volume: 'vol1'},
+    question: 'I am new to systems. Explain arithmetic intensity in plain language with a qualitative example.',
+    reviewCriterion: 'Label the example illustrative, use no invented numerical quantities, preserve work per transferred byte, and do not infer a compute or memory bottleneck or elapsed-time split without machine balance.',
+  },
+  {
+    name: 'fleet-check-understanding',
+    source: {quote: 'A faster device may finish its local work sooner yet spend the saved time waiting for other machines. Adding devices can increase capacity while creating more shared work to coordinate and more components to recover.', volume: 'vol2'},
+    question: 'Check my understanding.',
+    reviewCriterion: 'Ask one conceptual question and wait for an attempt without giving the answer.',
+  },
+  {
+    name: 'fleet-attempt-feedback',
+    follows: 'fleet-check-understanding',
+    source: {quote: 'A faster device may finish its local work sooner yet spend the saved time waiting for other machines. Adding devices can increase capacity while creating more shared work to coordinate and more components to recover.', volume: 'vol2'},
+    question: 'My answer: adding accelerators always makes a job faster because each one computes independently.',
+    reviewCriterion: 'Address the actual always-faster misconception with specific feedback and a useful hint rather than generic praise or another unrelated question.',
+  },
+  {
+    name: 'model-call-scope',
+    source: {quote: 'A single model call reads a static prompt, returns one completion, and leaves the outside world untouched. When a runtime instead stretches execution across many turns, carries files and memory forward, and invokes tools that modify external systems, a mistaken proposal can compound across steps or corrupt shared state.', volume: 'vol3'},
+    question: 'Explain this to a beginner using one qualitative example. What is different from a single model call?',
+    reviewCriterion: 'Explain persistent state and tool effects without calling all single-call outputs harmless or instantaneous; mark the example illustrative.',
+  },
+  {
+    name: 'physical-rollback',
+    source: {quote: 'Once a command produces motion or heat, replacing the prediction cannot undo the work already delivered. An independent permission path must be able to refuse a proposal and carry out a feasible fallback even when the model stalls.', volume: 'vol4'},
+    question: 'If my robot makes a mistake, why not just roll back the model to its previous version and undo the action?',
+    reviewCriterion: 'Distinguish changing software from reversing physical consequences, and prevention or mitigation from retroactive undo.',
+  },
 ];
 // Persist the inputs and human review criteria before obtaining any answers.
 await writeFile(resolve(output, 'inputs.json'), JSON.stringify(probes, null, 2));
 const model = process.env.SOCRATIQ_PROBE_MODEL;
 const request = createExplanationRequest(model ? {model} : {});
+const completed = new Map();
 for (const probe of probes) {
   const chunks = [];
   try {
-    const answer = await request({...probe, onChunk: value => chunks.push(value)});
+    const prior = completed.get(probe.follows);
+    const history = prior ? [{role: 'user', content: prior.question}, {role: 'assistant', content: prior.answer}] : [];
+    const answer = await request({...probe, history, onChunk: value => chunks.push(value)});
+    completed.set(probe.name, {question: probe.question, answer});
     await writeFile(resolve(output, `${probe.name}.json`), JSON.stringify({answer, chunks}, null, 2));
   } catch (error) {
     await writeFile(resolve(output, `${probe.name}.json`), JSON.stringify({error: error.message, chunks}, null, 2));
