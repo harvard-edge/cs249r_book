@@ -11,6 +11,15 @@
   const layer=el('svg',{viewBox:'0 0 1000 1000',width:vb.width,height:vb.height,preserveAspectRatio:'none','aria-hidden':'true'});art.append(layer);
   const scene=el('svg',{viewBox:'0 0 680 185',role:'img','aria-label':'Synchronized mechanism assembly',class:NAME+'-scene'});const proof=document.createElement('p');proof.className=NAME+'-proof';
   let mounted=false,current=0,stageNode;
+  // Repaint the exact paused frame after a width/context change, never on scroll.
+  let lastFrame=null, resizeFrame=0, resizeGeometry='';
+  const resizeObserver=new ResizeObserver(()=>{
+   cancelAnimationFrame(resizeFrame);resizeFrame=requestAnimationFrame(()=>{
+    if(!stageNode||!lastFrame||!root.isConnected)return;
+    const geometry=[root.clientWidth,stageNode.clientWidth,art.getBoundingClientRect().width,!!root.closest('dialog')].join(':');
+    if(geometry===resizeGeometry)return;resizeGeometry=geometry;draw(...lastFrame);
+   });
+  });resizeObserver.observe(root);
   const D={
   "rows": 3040,
   "row_ms": 0.005460526315789474,
@@ -20,6 +29,7 @@
 }
 ;
   function draw(from,to,p){
+   lastFrame=[from,to,p];
    layer.replaceChildren();root.dataset.animationProgress=String(p);
    const f=(from+(to-from)*p)/2,row=Math.round((D.rows-1)*f),t=row*D.row_ms,x=t*D.v_mm_ms,px=286+x*12.45,py=153.2+(837.6-153.2)*(row+D.rows*.03)/(D.rows*1.06);layer.append(el('line',{x1:112,x2:980,y1:py,y2:py,stroke:'#B87333','stroke-width':2,'stroke-dasharray':'5 4','data-motion-object':'true'}),el('line',{x1:px-D.blur_mm*12.45/2,x2:px+D.blur_mm*12.45/2,y1:py,y2:py,stroke:'#007A87','stroke-width':10,'stroke-opacity':.5,'data-motion-object':'true'}),el('circle',{cx:px,cy:py,r:7,fill:'#B87333',stroke:'#fff','stroke-width':2,'data-motion-object':'true'}));proof.textContent=`Row ${row}: read offset = row × ${D.row_ms.toFixed(6)} ms = ${t.toFixed(3)} ms; camera displacement = ${x.toFixed(2)} mm. Within-row blur stays ${D.blur_mm.toFixed(1)} mm over ${D.exposure_ms.toFixed(1)} ms exposure.`;root.dataset.row=String(row);root.dataset.readMs=String(t);root.dataset.displacementMm=String(x);
    scene.replaceChildren();const cameraX=35+f*180;scene.append(el('text',{x:12,y:18,'font-size':13,fill:'#1A202C'},'Camera travels while rows accumulate (schematic geometry)'));scene.append(el('line',{x1:25,x2:310,y1:110,y2:110,stroke:'#4A5568'}),el('rect',{x:cameraX,y:80,width:36,height:24,fill:'#E3F3F5',stroke:'#007A87','data-motion-object':'true'}),el('circle',{cx:cameraX+30,cy:92,r:6,fill:'#007A87'}),el('line',{x1:380,x2:380,y1:32,y2:125,stroke:'#1A4D3E','stroke-width':8}),el('line',{x1:cameraX+36,x2:380,y1:92,y2:35+85*f,stroke:'#B87333','stroke-width':2,'data-motion-object':'true'}),el('text',{x:340,y:148,'font-size':12,fill:'#1A202C'},'rack upright'),el('text',{x:20,y:148,'font-size':12,fill:'#1A202C'},`travel ${x.toFixed(2)} mm`),el('text',{x:490,y:35,'font-size':12,fill:'#1A202C'},'representative rows'));for(let j=0;j<16;j++){const ff=j/15;if(ff<=f)scene.append(el('line',{x1:510+ff*D.v_mm_ms*D.row_ms*(D.rows-1),x2:510+ff*D.v_mm_ms*D.row_ms*(D.rows-1),y1:45+j*6,y2:50+j*6,stroke:'#007A87','stroke-width':5,'data-assembled-row':j}));}scene.append(el('text',{x:470,y:161,'font-size':11,fill:'#4A5568'},'retained samples shear the post'));
@@ -30,6 +40,6 @@
   const player=window.MLSysOriginalPlayer.create({root,outer:context.outer,title:CFG.question,scope:CFG.scope,steps,
    render(index,{stage,details}){current=index;root.dataset.step=String(index);if(!mounted){const artScroll=document.createElement('div');artScroll.className=NAME+'-art-scroll';stageNode=artScroll;stage.tabIndex=0;stage.setAttribute('aria-label','Original diagram; scroll horizontally or use Expand for dense artwork');stage.classList.add(NAME+'-stage');artScroll.append(art);stage.append(artScroll,scene);details.append(proof);mounted=true;}draw(index,index,1);root.dataset.originalState=JSON.stringify({index,kind:CFG.key});},
    transition({from,to,onFrame}){if(to!==from+1)return;onFrame(p=>draw(from,to,p));}
-  });return{pause:()=>player.pause(),destroy:()=>player.destroy()};
+  });return{pause:()=>player.pause(),destroy:()=>{resizeObserver.disconnect();cancelAnimationFrame(resizeFrame);player.destroy();}};
  };
 })();

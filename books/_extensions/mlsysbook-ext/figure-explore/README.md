@@ -14,14 +14,34 @@ default and the complete print/no-JavaScript fallback.
 
 `mechanisms/implementations.json` selects the original-art factories for
 computation, memory, communication, coordination, and physical action across
-the four volumes. The current manifest contains 100 original-art implementations:
-86 newly authored modules and 14 retained implementations. The other 637
-cataloged figures remain static. There is no animation quota. The convolution
+the four volumes. This manifest and `figure-registry.json` identify the current
+roster; unselected catalog figures remain static. There is no animation quota. The convolution
 prototype retains its separate accepted-prototype label; the remaining reviewed
 implementations use hash-bound records in the original-art catalog.
 Enrollment alone is not acceptance. Source, artwork, module, shared-runtime,
 and timing changes invalidate the relevant current review evidence.
-Historical tests below apply only to their recorded snapshots.
+Historical counts and tests below apply only to their recorded snapshots.
+
+### Shareable step-by-step previews
+
+`binder/tools/scripts/export_figure_animation.py` exports a finite GIF from a
+rendered shared-player lesson. It captures committed states, preserves the
+diagram, and includes the current explanation, assumptions, book credit, and
+canonical chapter link. It does not capture interpolated movement or retain
+interactive controls. The chapter player remains the primary learning surface.
+
+```sh
+python3 binder/tools/scripts/export_figure_animation.py \
+  --url 'http://127.0.0.1:8891/PATH/TO/CHAPTER.html?view=explore#fig-allocator-live-cached-blocks' \
+  --key vol1:fig-allocator-live-cached-blocks \
+  --output /tmp/allocator-preview.gif
+```
+
+Use a new output filename for each export. The exporter retains raw PNG frames
+and a JSON manifest with input, fetched-resource, and output hashes. Reading
+pauses are constructed display allowances, not measured execution times.
+Inspect the decoded GIF before sharing. An export from a QA fixture remains a
+preview; the command does not publish a download or add a book download button.
 
 The selected set includes two native original-art factories: asynchronous
 host–accelerator timing and the two-link arm’s singularity comparison. These

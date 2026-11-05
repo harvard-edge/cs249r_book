@@ -14,7 +14,7 @@
     {label:'Publish the manifest last',description:'Publish the complete, verified g1 manifest atomically. Restore stays on g0 until publication finishes; the committed g1 manifest then permits restoration of step i.'},
     {label:'Release local staging',description:'After publication, release local g1 staging. The committed snapshot remains on the parallel file system; releasing local staging does not delete the previous generation.'},
   ];
-  const phaseX=[230,350,350,326,326,527,525,615,615];
+  const phaseX=[230,350,350,326,527,527,525,615,615];
   const state=index=>({local:index>=1&&index<8,live:index>=2?'i+1':'i',running:index>=2,copiedA:index>=4,copiedB:index>=5,verified:index>=6,committed:index>=7});
   window.MLSysFigureLessons=window.MLSysFigureLessons||{};
   window.MLSysFigureLessons['original-checkpoint-staging']=async(root,context)=>{
@@ -87,7 +87,7 @@
     function keepLabels(){if(!stageNode)return;const scale=art.getBoundingClientRect().width/680;const offset=scale?stageNode.scrollLeft/scale:0;labelLayer.setAttribute('transform',`translate(${offset},0)`);liveBadge.setAttribute('transform',`translate(${Math.max(282,Math.min(550,offset+138))-282},0)`);}
     function center(index){if(!stageNode)return;const scale=art.getBoundingClientRect().width/680;stageNode.scrollLeft=Math.max(0,phaseX[index]*scale-(stageNode.clientWidth+125*scale)/2);keepLabels();}
     function opacity(index,key){
-      const visible={previous:true,pause:index<2,live:index>=2,write:index>=1,local:index>=1,clear:index>=8,copy:index>=3,durable:index>=5,wait:index>=3,verify:index>=6,publish:index>=7};
+      const visible={previous:true,pause:index<2,live:index>=2,write:index>=1,local:index>=1,clear:index>=8,copy:index>=3,durable:index>=4,wait:index>=3,verify:index>=6,publish:index>=7};
       if(!visible[key])return .1;
       if(key==='pause'||key==='write')return index>=2?.4:1;
       if(key==='copy'||key==='wait')return index>=5?.4:1;
@@ -113,7 +113,7 @@
       copyTitle.style.visibility='visible';copyTitle.setAttribute('y',progress?'155':'163');copyTitle.setAttribute('font-size',progress?'10':'12.5');copyTitle.textContent=progress?'PFS write receipts':'Async copy to PFS';
       copySub.style.visibility=progress?'hidden':'visible';
       receipts.forEach((item,i)=>{const durable=i===0?s.copiedA:s.copiedB;item.group.style.visibility=progress?'visible':'hidden';item.group.dataset.durable=String(durable);item.progress.setAttribute('width','0');item.text.textContent=`${i===0?'A':'B'}: ${durable?'durable':'pending'}`;item.rect.setAttribute('fill',durable?'#dcfce7':'#fff');item.rect.setAttribute('stroke-dasharray',durable?'none':'3,2');});
-      durableShards.forEach(item=>{item.group.style.visibility=s.copiedB?'visible':'hidden';item.group.dataset.resident=String(s.copiedB);item.group.dataset.durable=String(s.copiedB);item.group.style.opacity='1';});
+      durableShards.forEach((item,i)=>{const durable=i===0?s.copiedA:s.copiedB;item.group.style.visibility=durable?'visible':'hidden';item.group.dataset.resident=String(durable);item.group.dataset.durable=String(durable);item.group.style.opacity='1';});
       groups.verify.group.dataset.verified=String(s.verified);groups.publish.group.dataset.committed=String(s.committed);
       restore.textContent=s.committed?'Restore point: g1 · snapshot at step i':'Restore point: g0 · previous committed generation';
       restore.dataset.restoreGeneration=s.committed?'g1':'g0';

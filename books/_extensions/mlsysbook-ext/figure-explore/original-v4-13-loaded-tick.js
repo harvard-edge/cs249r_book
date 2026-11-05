@@ -11,6 +11,15 @@
   const layer=el('svg',{viewBox:'0 0 1000 1000',width:vb.width,height:vb.height,preserveAspectRatio:'none','aria-hidden':'true'});art.append(layer);
   const scene=el('svg',{viewBox:'0 0 680 235',role:'img','aria-label':'Synchronized mechanism assembly',class:NAME+'-scene'});const proof=document.createElement('p');proof.className=NAME+'-proof';
   let mounted=false,current=0,stageNode;
+  // Repaint the exact paused frame after a width/context change, never on scroll.
+  let lastFrame=null, resizeFrame=0, resizeGeometry='';
+  const resizeObserver=new ResizeObserver(()=>{
+   cancelAnimationFrame(resizeFrame);resizeFrame=requestAnimationFrame(()=>{
+    if(!stageNode||!lastFrame||!root.isConnected)return;
+    const geometry=[root.clientWidth,stageNode.clientWidth,art.getBoundingClientRect().width,!!root.closest('dialog')].join(':');
+    if(geometry===resizeGeometry)return;resizeGeometry=geometry;draw(...lastFrame);
+   });
+  });resizeObserver.observe(root);
   const D={
   "rows": [
     {
@@ -51,6 +60,7 @@
 }
 ;
   function draw(from,to,p){
+   lastFrame=[from,to,p];
    layer.replaceChildren();root.dataset.animationProgress=String(p);
    const row=to===0?0:to<=4?1:to-3,r=D.rows[row],x0=150,scale=.81,y=[306,429,552,675,798][row],end=r.wait+r.read+r.compute;const stops=[0,r.wait,r.wait+r.read,end],target=to>=1&&to<=4?stops[to-1]:end,start=from===to?target:from>=1&&from<=4&&to<=4?stops[from-1]:0,t=start+(target-start)*p;layer.append(el('line',{x1:x0+scale*t,x2:x0+scale*t,y1:80,y2:920,stroke:'#B87333','stroke-width':2,'stroke-dasharray':'6 5','data-motion-object':'true'}),el('line',{x1:x0,x2:x0+scale*Math.min(t,r.wait),y1:y,y2:y,stroke:'#007A87','stroke-width':17,'stroke-opacity':.45,'data-motion-object':'true'}));if(t>r.wait)layer.append(el('line',{x1:x0+scale*r.wait,x2:x0+scale*Math.min(t,r.wait+r.read),y1:y,y2:y,stroke:'#007A87','stroke-width':17,'data-motion-object':'true'}));if(t>r.wait+r.read)layer.append(el('line',{x1:x0+scale*(r.wait+r.read),x2:x0+scale*t,y1:y,y2:y,stroke:'#B87333','stroke-width':17,'stroke-opacity':.65,'data-motion-object':'true'}));proof.textContent=`${r.label}: cursor ${t.toFixed(3)} µs into this row (${t<r.wait?'queued wait':t<r.wait+r.read?'snapshot read':t<end?'later computation':'complete'}). Full-row modeled summary: queue ${r.wait.toFixed(3)} µs + snapshot ${r.read.toFixed(3)} µs + later work ${r.compute.toFixed(0)} µs = ${end.toFixed(3)} µs. Declared WCET ${end<=D.wcet_us?'holds':'is exceeded'}; deadline including B + I ${end+D.reserve_us<=D.deadline_us?'holds':'is exceeded'}; period ${end<D.period_us?'holds':'is exceeded'}. Period pass alone does not establish the timing premise.`;root.dataset.row=String(row);root.dataset.tickEndUs=String(end);root.dataset.wcetPass=String(end<=D.wcet_us);
    scene.replaceChildren();scene.append(el('text',{x:12,y:18,'font-size':13,fill:'#1A202C'},'One permission tick: memory service precedes the unchanged work'));const labels=['queued tile / camera / telemetry','snapshot → permission core','constraints → drive-frame write'];const boundaries=[0,r.wait,r.wait+r.read,end];for(let j=0;j<3;j++){const xx=12+j*222,done=t>=boundaries[j+1],active=t>=boundaries[j]&&t<boundaries[j+1];scene.append(el('rect',{x:xx,y:40,width:208,height:100,fill:done?'#E8F0EC':active?'#E3F3F5':'#F8FAFC',stroke:active?'#007A87':'#4A5568'}),el('text',{x:xx+8,y:59,'font-size':10,fill:'#1A202C'},labels[j]),el('text',{x:xx+8,y:86,'font-size':11,fill:'#1A202C'},j===0?`FIFO wait ${r.wait.toFixed(3)} µs`:j===1?`read ${r.read.toFixed(3)} µs`:`later work ${r.compute.toFixed(0)} µs`),el('text',{x:xx+8,y:112,'font-size':12,fill:done?'#1A4D3E':'#4A5568'},done?'complete':active?'owns service now':'blocked by predecessor'));if(active)scene.append(el('rect',{x:xx+8,y:121,width:190*Math.min(1,(t-boundaries[j])/Math.max(.0001,boundaries[j+1]-boundaries[j])),height:6,fill:'#007A87','data-motion-object':'true'}));}scene.append(el('text',{x:12,y:163,'font-size':12,fill:'#1A202C'},`cursor ${t.toFixed(3)} µs / modeled row ${end.toFixed(3)} µs; all thresholds above retain their original meaning`));
@@ -62,6 +72,6 @@
   const player=window.MLSysOriginalPlayer.create({root,outer:context.outer,title:CFG.question,scope:CFG.scope,steps,
    render(index,{stage,details}){current=index;root.dataset.step=String(index);if(!mounted){const artScroll=document.createElement('div');artScroll.className=NAME+'-art-scroll';stageNode=artScroll;stage.tabIndex=0;stage.setAttribute('aria-label','Original diagram; scroll horizontally or use Expand for dense artwork');stage.classList.add(NAME+'-stage');artScroll.append(art);stage.append(artScroll,scene);details.append(proof);mounted=true;}draw(index,index,1);root.dataset.originalState=JSON.stringify({index,kind:CFG.key});},
    transition({from,to,onFrame}){if(to!==from+1)return;onFrame(p=>draw(from,to,p));}
-  });return{pause:()=>player.pause(),destroy:()=>player.destroy()};
+  });return{pause:()=>player.pause(),destroy:()=>{resizeObserver.disconnect();cancelAnimationFrame(resizeFrame);player.destroy();}};
  };
 })();

@@ -59,7 +59,7 @@
     function follow(x, y) {active = [x, y]; const scale = svg.getBoundingClientRect().width / 680; if (canvas.scrollWidth > canvas.clientWidth) canvas.scrollLeft = Math.max(0, x * scale - canvas.clientWidth / 2); if (canvas.scrollHeight > canvas.clientHeight) canvas.scrollTop = Math.max(0, y * scale - canvas.clientHeight / 2);}
     const cameras = [[340, 145], [490, 145], [490, 220], [438, 220], [340, 220], [490, 220], [340, 300], [238, 300], [185, 300], [340, 300], [490, 300]];
     function render(i, {stage, details}) {
-      if (!canvas.isConnected) stage.append(cue, canvas, legend, readout);
+      if (!canvas.isConnected) {stage.append(cue, canvas); details.append(legend, readout);}
       overlay.querySelectorAll('.oci-reuse-link,.oci-reuse-tag,.oci-compare').forEach(n => n.remove()); front.setAttribute('visibility', 'hidden');
       const m = model(i);
       groups.forEach((g, r) => g.setAttribute('opacity', m.exists[r] ? 1 : .25));
@@ -78,7 +78,7 @@
       values[4].textContent = m.cutoff === 'trunk' ? 'Trunk: u → v' : m.cutoff === 'leaf' ? 'Leaf: a → b' : 'Not compared yet';
       root.dataset.contextStep = String(i); root.dataset.contextStates = JSON.stringify(m.status); root.dataset.contextT = JSON.stringify(m.t); root.dataset.contextCutoff = m.cutoff || '';
       follow(...cameras[i]);
-      if (!details.firstChild) {const p = document.createElement('p'); p.textContent = 'Scope: compatible resident cache, matching model weights, position offsets, and attention configuration are assumed. Actual block alignment and serving policy may shorten reuse. Token letters illustrate identity, not tokenization or token counts. Historical rows do not prescribe physical residency or cleanup. The output reserve remains future capacity. Motion duration is illustrative.'; details.append(p);}
+      if (!details.querySelector('.oci-scope-note')) {const p = document.createElement('p'); p.className = 'oci-scope-note'; p.textContent = 'Scope: compatible resident cache, matching model weights, position offsets, and attention configuration are assumed. Actual block alignment and serving policy may shorten reuse. Token letters illustrate identity, not tokenization or token counts. Historical rows do not prescribe physical residency or cleanup. The output reserve remains future capacity. Motion duration is illustrative.'; details.append(p);}
     }
     function transition({from, to, onFrame, animate}) {
       if (to !== from + 1) return;
