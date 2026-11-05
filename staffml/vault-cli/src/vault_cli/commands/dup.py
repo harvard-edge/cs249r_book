@@ -11,7 +11,6 @@ Closes Gemini R5-H-4.
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import typer
@@ -119,5 +118,5 @@ def register(app: typer.Typer) -> None:
             console.print(f"[red]un-acknowledged[/red]: {a} ↔ {b}")
             return
 
-        console.print("usage: vault dup --ack <a> <b> | --unack <a> <b> | --show", file=sys.stderr)
+        Console(stderr=True).print("usage: vault dup --ack <a> <b> | --unack <a> <b> | --show")
         raise typer.Exit(code=ExitCode.USAGE_ERROR)
