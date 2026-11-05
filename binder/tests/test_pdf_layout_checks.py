@@ -1131,6 +1131,142 @@ def test_default_log_path_discovers_sibling_log(tmp_path):
     assert default_log_path(tmp_path, "vol2") is None
 
 
+def test_default_log_path_discovers_preserved_volume_log_and_rejects_stale(tmp_path):
+    import os
+
+    from binder.cli.commands._pdf_checks import default_log_path, default_pdf_path
+
+    pdf = default_pdf_path(tmp_path, "vol2")
+    pdf.parent.mkdir(parents=True)
+    pdf.write_bytes(b"%PDF-1.7\n")
+    log = pdf.parent / "latex-build.log"
+    log.write_text("Current post-render log")
+    os.utime(pdf, (1_700_000_000, 1_700_000_000))
+    os.utime(log, (1_700_000_002, 1_700_000_002))
+    assert default_log_path(tmp_path, "vol2") == log
+    assert default_log_path(tmp_path, "vol1") is None
+    os.utime(log, (1_699_996_400, 1_699_996_400))
+    assert default_log_path(tmp_path, "vol2") is None
+
+
+def test_volume_verification_uses_preserved_log_without_explicit_argument(tmp_path):
+    import fitz
+
+    from binder.cli.commands._pdf_checks import default_pdf_path, verify_volume_pdf
+
+    pdf = default_pdf_path(tmp_path, "vol2")
+    pdf.parent.mkdir(parents=True)
+    with fitz.open() as document:
+        document.new_page().insert_text((72, 72), "PDF verification fixture")
+        document.save(pdf)
+    (pdf.parent / "latex-build.log").write_text(
+        "Missing character: There is no 𝛷 (U+1D6F7) in font [TeXGyrePagellaX-Bold.otf]!\n"
+    )
+    result = verify_volume_pdf(tmp_path, "vol2")
+    assert not result.ok
+    glyph_check = next(check for check in result.checks if check.check_id == "missing-glyph")
+    assert not glyph_check.skipped and not glyph_check.passed
+    assert any(issue.code == "missing-glyph" for issue in result.issues)
+
+
+def test_inline_code_wrap_preserves_escaping_and_html_literal_text():
+    import html
+    import re
+    import subprocess
+
+    filter_path = Path(__file__).resolve().parents[2] / "books/shared/filters/inline-code-wrap.lua"
+    code = r'package_search(query="pool timeout") a.b x_{a}\b%#&'
+    source = f"`{code}`\n"
+
+    def render(format_name, filtered=True):
+        command = ["quarto", "pandoc", "--from", "markdown", "--to", format_name]
+        if filtered:
+            command.extend(["--lua-filter", str(filter_path)])
+        return subprocess.run(command, input=source, text=True, capture_output=True, check=True).stdout
+
+    latex = render("latex")
+    assert "a.\\allowbreak{}b" in latex
+    assert '"pool timeout"' in latex
+    assert latex.replace("\\allowbreak{}", "") == render("latex", False).replace("\\ ", " ")
+    output_html = render("html")
+    literal = re.search(r"<code>(.*?)</code>", output_html).group(1)
+    assert html.unescape(literal) == code
+    assert output_html == render("html", False)
+    source = "`task.grant.permits`{#api.anchor .custom}\n"
+    assert render("latex") == render("latex", False)
+
+
+def test_build_postflight_does_not_substitute_console_output_for_latex_log(tmp_path):
+    from types import SimpleNamespace
+
+    import fitz
+
+    from binder.cli.commands._pdf_checks import default_pdf_path
+    from binder.cli.commands.build import BuildCommand
+
+    pdf = default_pdf_path(tmp_path, "vol2")
+    pdf.parent.mkdir(parents=True)
+    with fitz.open() as document:
+        document.new_page().insert_text((72, 72), "Postflight fixture")
+        document.save(pdf)
+    (pdf.parent / "latex-build.log").write_text(
+        "Missing character: There is no 𝛷 (U+1D6F7) in font [TeXGyrePagellaX-Bold.otf]!\n"
+    )
+    console_log = tmp_path / "quarto-console.log"
+    console_log.write_text("Output created: Machine-Learning-Systems-Vol2.pdf\n")
+    command = object.__new__(BuildCommand)
+    command.config_manager = SimpleNamespace(book_dir=tmp_path)
+    assert not command._postflight_pdf_validation("vol2", log_path=console_log)
+    # The independent Quarto warning stream must still be checked when LaTeX
+    # itself reports no defect.
+    (pdf.parent / "latex-build.log").write_text("LaTeX finished without warnings\n")
+    console_log.write_text("WARNING: Unable to resolve crossref @fig-missing\n")
+    assert not command._postflight_pdf_validation("vol2", log_path=console_log)
+
+
+def test_unnumbered_chapter_preserves_objects_and_numbered_chapter_resets_them(tmp_path):
+    import subprocess
+
+    helper = Path(__file__).resolve().parents[2] / "books/shared/tex/unnumbered-chapter-counters.tex"
+    counts = {"table": 18, "figure": 7, "equation": 4, "algorithm": 3, "codelisting": 2}
+    source = (
+        r"\documentclass{scrbook}" "\n"
+        r"\usepackage{longtable}" "\n"
+        r"\newcounter{algorithm}[chapter]\newcounter{codelisting}[chapter]" "\n"
+        + r"\input{" + str(helper) + "}\n"
+        + r"\begin{document}\chapter{First}" "\n"
+    )
+    for counter, value in counts.items():
+        source += rf"\setcounter{{{counter}}}{{{value}}}" + "\n"
+    source += (
+        r"\mlsysSaveChapterObjectCounters\chapter*{Principles}\mlsysRestoreChapterObjectCounters" "\n"
+    )
+    for counter in counts:
+        source += rf"\typeout{{PRESERVED-{counter}: \arabic{{{counter}}}}}" + "\n"
+    source += (
+        r"\begin{longtable}{l}\caption{Continued}\label{tbl-continued}\\Example\\\end{longtable}" "\n"
+        r"\chapter{Second}" "\n"
+    )
+    for counter in counts:
+        source += rf"\typeout{{RESET-{counter}: \arabic{{{counter}}}}}" + "\n"
+    source += (
+        r"\begin{longtable}{l}\caption{New chapter}\label{tbl-new}\\Example\\\end{longtable}" "\n"
+        r"\end{document}" "\n"
+    )
+    (tmp_path / "counter.tex").write_text(source)
+    subprocess.run(
+        ["lualatex", "-draftmode", "-interaction=nonstopmode", "-halt-on-error", "counter.tex"],
+        cwd=tmp_path, capture_output=True, text=True, check=True,
+    )
+    log = (tmp_path / "counter.log").read_text()
+    for counter, value in counts.items():
+        assert f"PRESERVED-{counter}: {value}" in log
+        assert f"RESET-{counter}: 0" in log
+    aux = (tmp_path / "counter.aux").read_text()
+    assert r"\newlabel{tbl-continued}{{1." + str(counts["table"] + 1) + "}" in aux
+    assert r"\newlabel{tbl-new}{{2.1}" in aux
+
+
 def test_missing_glyph_survives_wrapped_log_lines(tmp_path):
     """A wrap that hides 'in font' must not turn a defect into a silent pass."""
     log = _write_log(

@@ -135,7 +135,7 @@ async def exercise(page, volume: int, base: str, output: Path, timeout: int) -> 
     result = {"volume": volume, "route": ROUTES[volume], "scope": "Part A runtime smoke; not a complete lab submission", "causal_instrument_update": True,
               "before": before, "after": after, "download": "not exercised"}
     if volume in (3, 4):
-        name = "Download draft and available evidence" if volume == 3 else "Download discussion"
+        name = "Download discussion draft" if volume == 3 else "Download discussion"
         async with page.expect_download(timeout=timeout) as event:
             await frame.get_by_role("link", name=name, exact=True).click()
         download = await event.value
@@ -146,8 +146,17 @@ async def exercise(page, volume: int, base: str, output: Path, timeout: int) -> 
         if volume == 4:
             assert "Status: incomplete discussion draft" in content, "Unsaved physical work must be labeled as a draft"
         if volume == 3:
-            payload = json.loads(content)
+            assert "Draft; some comparisons are still missing" in content, "Unsaved agentic work must retain draft status"
+            assert "Parts still needing evidence:" in content
+            await frame.get_by_text("Full evidence JSON", exact=True).click()
+            async with page.expect_download(timeout=timeout) as evidence_event:
+                await frame.get_by_role("link", name="Download full evidence JSON", exact=True).click()
+            evidence_download = await evidence_event.value
+            evidence_path = output / evidence_download.suggested_filename
+            await evidence_download.save_as(evidence_path)
+            payload = json.loads(evidence_path.read_text())
             assert payload["chapter"] == 1 and payload["missing_parts"], "Draft must honestly retain incomplete status"
+            result["evidence_download"] = str(evidence_path)
         result["download"] = str(path)
     await settled(page, frame)
     (output / f"volume-{volume}-runtime.txt").write_text(await frame.locator("body").inner_text())

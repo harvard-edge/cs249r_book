@@ -281,10 +281,22 @@ class BuildCommand:
 
         console.print(f"[cyan]🔍 Post-build PDF validation ({format_volume_display_name(volume)})[/cyan]")
 
-        from ._pdf_checks import format_checklist, verify_volume_pdf
+        from ._pdf_checks import default_log_path, format_checklist, scan_build_log, verify_volume_pdf
 
         quarto_dir = self.config_manager.book_dir
-        result = verify_volume_pdf(quarto_dir, volume, log_path=log_path)
+        latex_log = default_log_path(quarto_dir, volume)
+        result = verify_volume_pdf(quarto_dir, volume, log_path=latex_log)
+        # Quarto stdout contains its own cross-reference warnings, but is not
+        # the LuaLaTeX log: treating it as that log hides dropped glyphs and
+        # overfull boxes. Check both independent evidence sources.
+        if log_path and log_path != latex_log:
+            for issue in scan_build_log(log_path):
+                if issue not in result.issues:
+                    result.issues.append(issue)
+                for check in result.checks:
+                    if check.check_id == issue.code:
+                        check.passed = False
+                        check.skipped = False
         console.print(format_checklist(result))
 
         # Rendered geometry detail. Physical trim crossings are release

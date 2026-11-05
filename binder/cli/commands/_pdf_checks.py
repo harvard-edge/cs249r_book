@@ -201,9 +201,9 @@ def default_pdf_path(quarto_dir: Path, volume: str) -> Path:
 def default_log_path(quarto_dir: Path, volume: str) -> Path | None:
     """Locate the LuaLaTeX log for ``volume``, or None when it cannot be trusted.
 
-    ``keep-tex`` leaves ``Machine-Learning-Systems-VolN.tex`` in the Quarto
-    directory, and with ``latex-clean: false`` the sibling ``.log`` survives
-    alongside it. Auto-discovering it means the log-based gates (crossref
+    The post-render hook saves the current log beside the volume PDF as
+    ``latex-build.log``. Older builds may retain a named sibling log in the
+    Quarto directory. Auto-discovering either means the log-based gates (crossref
     warnings, overfull boxes, missing glyphs) run on a normal
     ``binder check pdf`` without the caller remembering ``--log``.
 
@@ -214,10 +214,15 @@ def default_log_path(quarto_dir: Path, volume: str) -> Path | None:
     log-based checks report as skipped, which is honest rather than wrong. An
     explicit ``--log`` bypasses this and is always trusted.
     """
-    candidate = quarto_dir / Path(PDF_BY_VOLUME[volume]).with_suffix(".log").name
-    if not candidate.is_file():
-        return None
     pdf_path = default_pdf_path(quarto_dir, volume)
+    candidates = (
+        pdf_path.parent / "latex-build.log",
+        quarto_dir / Path(PDF_BY_VOLUME[volume]).with_suffix(".log").name,
+    )
+    candidate = max((path for path in candidates if path.is_file()),
+                    key=lambda path: path.stat().st_mtime_ns, default=None)
+    if candidate is None:
+        return None
     if pdf_path.is_file():
         if candidate.stat().st_mtime < pdf_path.stat().st_mtime - LOG_STALENESS_TOLERANCE_S:
             return None
@@ -1004,6 +1009,7 @@ def verify_volume_pdf(
     log_path: Path | None = None,
 ) -> PdfValidationResult:
     """Verify the default built PDF for ``volume`` (a key of ``PDF_BY_VOLUME``)."""
+    log_path = log_path or default_log_path(quarto_dir, volume)
     pdf_path = default_pdf_path(quarto_dir, volume)
     issues = verify_pdf(pdf_path, log_path=log_path)
     geom_summary = scan_margin_geometry_summary(pdf_path) if pdf_path.is_file() else None
