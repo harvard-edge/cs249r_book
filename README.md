@@ -152,7 +152,7 @@ Each chapter connects an idea a reader may already know from machine learning to
 
 ## The Four Volumes
 
-Each volume widens the boundary of the system and raises the cost of failure. The volumes differ in scope, not in depth.
+The textbook spans four volumes. Each one widens the boundary of the system and raises the cost of failure, so the volumes differ in scope, not in depth.
 
 <table width="100%" style="width:100%">
   <thead>
@@ -210,7 +210,7 @@ I am writing Volumes III and IV because I plan to teach both subjects, and becau
 
 ## What's in the Repository
 
-The pieces are designed to work together, but none of them requires the others.
+Around the textbook sit the companion tools that let students build, measure, and practice what they read. The pieces are designed to work together, but none of them requires the others.
 
 <p align="center">
   <img src="README/curriculum-map.svg?v=6" alt="Curriculum map showing how the textbook, labs, TinyTorch, hardware kits, MLSys·im, and StaffML connect" width="760">
@@ -299,6 +299,8 @@ Two earlier-stage experiments also live here. [SocratiQ](socratiq/README.md) is 
 
 ## Start Here
 
+Where to begin depends on what you want from the curriculum.
+
 | If you are... | Start here | Then go deeper |
 |---|---|---|
 | **A student or self-learner** | [Read Volume I](https://mlsysbook.ai/vol1/) | Build [TinyTorch](https://mlsysbook.ai/tinytorch/), model systems with [MLSys·im](https://mlsysbook.ai/mlsysim/), try the [labs](https://mlsysbook.ai/labs/) (early release), and practice with [StaffML](https://mlsysbook.ai/staffml/) |
@@ -321,9 +323,9 @@ Reviewers do more than check facts, and sometimes they change what the book cove
 
 Engineers in industry also urged me to teach responsible AI. It can look like a subject outside traditional engineering, but the systems in this book make decisions that affect people, and more and more of them act on their own. The engineers who build such systems are responsible for how they behave, so the book teaches that responsibility as part of the engineering.
 
-**Numbers are computed, not typed.** Every derived quantity in the books comes from Python code that ships with the text. That code draws on [MLSys·im](https://mlsysbook.ai/mlsysim/), which I wrote for this series so that every chapter and every volume takes its numbers from a single source of truth. Each hardware and model specification in MLSys·im traces to a cited source, and when a value changes there, every chapter that uses it changes with it. A test suite runs on every commit and checks unit consistency, cross-references, notation, and citations.
+**Readers are part of the review, too.** Every chapter is open, and when something is wrong, unclear, or missing, the [book feedback](https://github.com/harvard-edge/cs249r_book/issues/new/choose) forms send it straight into the next revision.
 
-**Readers are part of the review.** Every chapter is open, and when something is wrong, unclear, or missing, the [book feedback](https://github.com/harvard-edge/cs249r_book/issues/new/choose) forms send it straight into the next revision.
+**Numbers are computed, not typed.** Every derived quantity in the books comes from Python code that ships with the text. I learned the need for this the hard way. In early drafts I typed numbers by hand, made mistakes, and watched the same quantity drift apart from one chapter and one volume to the next. No author can hold every number in four volumes in mind at once, so I wrote [MLSys·im](https://mlsysbook.ai/mlsysim/) to hold them instead. It is the single source of truth for every chapter and every volume. Each hardware and model specification in it traces to a cited source, and when a value changes there, every chapter that uses it changes with it. A test suite runs on every commit and checks unit consistency, cross-references, notation, and citations.
 
 ---
 
@@ -399,7 +401,7 @@ MLOps books, such as Chip Huyen's *Designing Machine Learning Systems*, focus on
 
 This curriculum focuses on what lies underneath: the hardware limits, quantitative trade-offs, and first principles that explain why those tools are designed as they are, and the limits no tool escapes, such as memory bandwidth, network latency, energy, and failure rates.
 
-It is the difference between a recipe and an understanding of how heat, salt, fat, and time interact. A recipe works until the oven changes or the batch grows tenfold. Understanding the chemistry lets a cook work in any kitchen, fix a dish that went wrong, and invent new ones.
+The two differ the way a recipe differs from an understanding of how heat, salt, fat, and time interact. A recipe works until the oven changes or the batch grows tenfold. Understanding the chemistry lets a cook work in any kitchen, fix a dish that went wrong, and invent new ones.
 
 </details>
 
