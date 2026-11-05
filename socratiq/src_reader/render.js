@@ -113,6 +113,11 @@ export function renderSafeMarkdown(source = '') {
   });
   const container = document.createElement('div');
   container.innerHTML = safeHtml;
+  // Following a reference should not discard the in-memory conversation.
+  container.querySelectorAll('a[href]').forEach(link => {
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+  });
   const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
   const textNodes = [];
   while (walker.nextNode()) textNodes.push(walker.currentNode);

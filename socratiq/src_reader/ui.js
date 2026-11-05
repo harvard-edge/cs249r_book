@@ -4,6 +4,11 @@ import { renderSafeMarkdown } from './render.js';
 const MAX_HISTORY_MESSAGES = 12;
 const MAX_VISIBLE_TURNS = 12;
 const INITIAL_QUESTION = 'Explain this passage.';
+const LEARNING_QUESTIONS = {
+  simplify: 'Explain this passage in simpler language, defining any essential technical terms.',
+  example: 'Show a concrete example that helps me understand this passage.',
+  check: 'Check my understanding of this passage. Ask me one conceptual question at a time. Do not reveal the answer until I respond; then give feedback before asking another question.',
+};
 
 /**
  * Mount the focused SocratiQ reader.
@@ -53,12 +58,19 @@ export function mountReader({ captureSelection, requestExplanation }) {
         </button>
       </header>
       <p class="reader-privacy">The selected passage and surrounding section are sent for AI explanation when you ask.</p>
-      <div class="reader-body">
+      <div class="reader-body" role="region" aria-label="Selected passage and answers" tabindex="0">
         <section class="reader-source" aria-label="Selected source" hidden>
           <p class="reader-source-label">Selected passage</p>
           <a class="reader-source-link" target="_blank" rel="noopener noreferrer"></a>
           <p class="reader-quote"></p>
+          <p class="reader-caution">AI explanations can be wrong. Check them against the source.</p>
         </section>
+        <div class="reader-learning" role="group" aria-label="Learning actions" hidden>
+          <button type="button" data-learning="simplify">Simplify</button>
+          <button type="button" data-learning="example">Show an example</button>
+          <button type="button" data-learning="check">Check my understanding</button>
+          <button type="button" class="reader-reset">Start over</button>
+        </div>
         <div class="reader-instruction">
           <strong>Select a passage to begin.</strong>
           Highlight text in the book, then choose “Explain this” or press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>E</kbd>.
@@ -89,6 +101,9 @@ export function mountReader({ captureSelection, requestExplanation }) {
   const sourceLink = shell.querySelector('.reader-source-link');
   const sourceQuote = shell.querySelector('.reader-quote');
   const instruction = shell.querySelector('.reader-instruction');
+  const learningActions = shell.querySelector('.reader-learning');
+  const learningButtons = [...shell.querySelectorAll('[data-learning]')];
+  const resetButton = shell.querySelector('.reader-reset');
   const thread = shell.querySelector('.reader-thread');
   const status = shell.querySelector('.reader-status');
   const errorBox = shell.querySelector('.reader-error');
@@ -135,6 +150,15 @@ export function mountReader({ captureSelection, requestExplanation }) {
     void submitQuestion(INITIAL_QUESTION, { initial: true });
   });
 
+  learningButtons.forEach(button => button.addEventListener('click', () => {
+    void submitQuestion(LEARNING_QUESTIONS[button.dataset.learning]);
+  }));
+  resetButton.addEventListener('click', () => {
+    clearConversation();
+    updateComposerState();
+    status.textContent = 'Conversation cleared. Ask about the same passage.';
+    input.focus({ preventScroll: true });
+  });
   closeButton.addEventListener('click', closePanel);
   stopButton.addEventListener('click', () => stopRequest('Response stopped.'));
   retryButton.addEventListener('click', () => {
@@ -235,7 +259,7 @@ export function mountReader({ captureSelection, requestExplanation }) {
     stopButton.hidden = true;
     sendButton.hidden = false;
     input.disabled = !activeSource;
-    sendButton.disabled = !activeSource;
+    updateComposerState();
     status.textContent = message;
   }
 
@@ -351,9 +375,15 @@ export function mountReader({ captureSelection, requestExplanation }) {
     status.textContent = '';
     lastFailedQuestion = null;
     failedUserTurn = null;
+    input.value = '';
+    input.style.height = '';
+    errorText.textContent = '';
   }
 
   function updateComposerState() {
+    learningActions.hidden = !activeSource;
+    learningButtons.forEach(button => { button.disabled = !activeSource || Boolean(activeController); });
+    // Stop remains available while the input and send controls are disabled.
     composer.setAttribute('aria-disabled', String(!activeSource));
     input.disabled = !activeSource || Boolean(activeController);
     sendButton.disabled = !activeSource || Boolean(activeController);
@@ -403,13 +433,15 @@ export function mountReader({ captureSelection, requestExplanation }) {
     sendButton.hidden = true;
     stopButton.hidden = false;
     sendButton.disabled = true;
+    const requestSource = activeSource;
     const controller = new AbortController();
     activeController = controller;
+    updateComposerState();
     updateViewportVars();
 
     try {
       const answer = await requestExplanation({
-        source: activeSource,
+        source: requestSource,
         question,
         history: boundHistory(history),
         signal: controller.signal,
@@ -422,6 +454,7 @@ export function mountReader({ captureSelection, requestExplanation }) {
       if (controller.signal.aborted || activeController !== controller) return;
       const completeAnswer = String(answer || '').trim();
       answerNode.innerHTML = renderSafeMarkdown(completeAnswer || 'SocratiQ did not return an explanation.');
+      if (completeAnswer) addCopyButton(answerNode, completeAnswer, requestSource);
       history.push({ role: 'user', content: question }, { role: 'assistant', content: completeAnswer });
       history = boundHistory(history);
       trimVisibleTurns();
@@ -430,7 +463,7 @@ export function mountReader({ captureSelection, requestExplanation }) {
       status.textContent = 'Explanation ready.';
     } catch (error) {
       if (controller.signal.aborted || activeController !== controller) {
-        answerNode.textContent = 'Response stopped.';
+        if (answerNode.isConnected && answerNode.textContent === 'Thinking…') answerNode.textContent = 'Response stopped.';
         return;
       }
       answerNode.closest('.reader-turn')?.remove();
@@ -446,9 +479,36 @@ export function mountReader({ captureSelection, requestExplanation }) {
         stopButton.hidden = true;
         sendButton.hidden = false;
         updateComposerState();
-      if (followStream) scrollThreadToEnd();
+        if (followStream) scrollThreadToEnd();
       }
     }
+  }
+
+  function addCopyButton(answerNode, markdown, source) {
+    const title = String(source.section || source.title || 'Textbook passage');
+    const url = safeSourceUrl(source.url);
+    const quote = String(source.quote || '').split('\n').map(line => `> ${line}`).join('\n');
+    const notes = `SocratiQ AI explanation — check against the source.\n\n${markdown}\n\nSource: ${title}${url ? ` — ${url}` : ''}\n\n${quote}`;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'reader-copy';
+    button.textContent = 'Copy answer';
+    button.setAttribute('aria-label', 'Copy answer as Markdown');
+    button.addEventListener('click', async () => {
+      button.disabled = true;
+      try {
+        if (!navigator.clipboard?.writeText) throw new Error('Clipboard unavailable');
+        await navigator.clipboard.writeText(notes);
+        if (!button.isConnected) return;
+        status.textContent = 'Answer copied as Markdown.';
+      } catch {
+        if (!button.isConnected) return;
+        status.textContent = 'Could not copy the answer. Select the answer text and copy it manually.';
+      } finally {
+        button.disabled = false;
+      }
+    });
+    answerNode.after(button);
   }
 
   function trimVisibleTurns() {
@@ -489,7 +549,8 @@ export function mountReader({ captureSelection, requestExplanation }) {
     const body = shell.querySelector('.reader-body');
     const bodyTop = body.getBoundingClientRect().top;
     const answerTop = answerNode.getBoundingClientRect().top;
-    const sourceHeight = sourceCard.hidden ? 0 : sourceCard.getBoundingClientRect().height;
+    const sourceHeight = !sourceCard.hidden && getComputedStyle(sourceCard).position === 'sticky'
+      ? sourceCard.getBoundingClientRect().height : 0;
     body.scrollTop = Math.max(0, body.scrollTop + answerTop - bodyTop - sourceHeight);
   }
 
@@ -519,6 +580,7 @@ export function mountReader({ captureSelection, requestExplanation }) {
     const bottomClearance = Math.max(0, window.innerHeight - visibleBottom);
     host.style.setProperty('--reader-visible-height', `${visibleHeight}px`);
     host.style.setProperty('--reader-bottom-clearance', `${bottomClearance}px`);
+    shell.dataset.compact = String(visibleHeight < 540);
   }
 
   function detectTheme() {

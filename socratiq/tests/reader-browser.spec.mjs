@@ -78,7 +78,7 @@ test('unavailable service offers retry without fabricating an explanation', asyn
 });
 
 test('model HTML is inert; math and code remain distinct', async ({page}) => {
-  const malicious = '<img src=x onerror="window.readerInjected=true"><script>window.readerInjected=true</script>\n\n![tracking image](https://example.com/tracker.png)\n\n[unsafe](javascript:alert(1))\n\n`$code$` and \\(t = D/B\\)';
+  const malicious = '<img src=x onerror="window.readerInjected=true"><script>window.readerInjected=true</script>\n\n![tracking image](https://example.com/tracker.png)\n\n[unsafe](javascript:alert(1))\n\n[Source](https://example.com/source)\n\n`$code$` and \\(t = D/B\\)';
   await page.route('https://proxy-worker-streaming.mlsysbook.workers.dev/**', route => route.fulfill({contentType: 'text/event-stream', body: sse(malicious)}));
   await page.goto('/vol2/chapter/'); await explain(page);
   await expect(page.getByText('Explanation ready.', {exact: true})).toBeVisible();
@@ -87,6 +87,8 @@ test('model HTML is inert; math and code remain distinct', async ({page}) => {
   expect(await page.locator('#socratiq-reader .reader-thread [onerror], #socratiq-reader .reader-thread script, #socratiq-reader .reader-thread a[href^="javascript:"]').count()).toBe(0);
   await expect(page.locator('#socratiq-reader .reader-thread code')).toHaveText('$code$');
   await expect(page.locator('#socratiq-reader .reader-thread .katex')).toBeVisible();
+  await expect(page.getByRole('link', {name: 'Source', exact: true})).toHaveAttribute('target', '_blank');
+  await expect(page.getByRole('link', {name: 'Source', exact: true})).toHaveAttribute('rel', 'noopener noreferrer');
 });
 
 test('context excludes navigation, preserves TeX, and rejects oversized selections', async ({page}) => {
