@@ -8,7 +8,7 @@ from pathlib import Path
 from .cli_contract import Violation
 
 TEST_FILES = ("binder/tests/test_pdf_compression.py", "binder/tests/test_pdf_layout_checks.py",
-              "binder/tests/test_save_latex_log.py")
+              "binder/tests/test_save_latex_log.py", "binder/tests/test_figure_list_export.py")
 
 
 def run_contract(root: Path) -> list[Violation]:
