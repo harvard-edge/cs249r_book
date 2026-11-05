@@ -39,8 +39,8 @@
   <b><a href="https://mlsysbook.ai">📘 Textbook Series</a></b> •
   <b><a href="https://mlsysbook.ai/vol1/">📗 Vol I</a></b> •
   <b><a href="https://mlsysbook.ai/vol2/">📘 Vol II (Preview)</a></b> •
-  <b><a href="books/vol3/">🟣 Vol III (Draft)</a></b> •
-  <b><a href="books/vol4/">🌲 Vol IV (Draft)</a></b>
+  <b><a href="books/vol3/">🟣 Vol III (Dev)</a></b> •
+  <b><a href="books/vol4/">🌲 Vol IV (Dev)</a></b>
   <br>
   <b><a href="https://mlsysbook.ai/tinytorch/">🔥 TinyTorch</a></b> •
   <b><a href="https://mlsysbook.ai/labs/">🔬 Labs</a></b> •
@@ -144,12 +144,12 @@ Each chapter connects an idea a reader may already know from machine learning to
     <tr>
       <td>How to prompt an LLM</td>
       <td align="center">→</td>
-      <td><b>How to architect agent loops, tool sandboxes, and context memory</b> <i>(Vol III, draft)</i></td>
+      <td><b>How to architect agent loops, tool sandboxes, and context memory</b> <i>(Vol III, in development)</i></td>
     </tr>
     <tr>
       <td>How vision and robotics models infer</td>
       <td align="center">→</td>
-      <td><b>How to close real-time sensor-actuator loops under physical constraints</b> <i>(Vol IV, draft)</i></td>
+      <td><b>How to close real-time sensor-actuator loops under physical constraints</b> <i>(Vol IV, in development)</i></td>
     </tr>
   </tbody>
 </table>
@@ -190,14 +190,14 @@ Each volume widens the boundary of the system and raises the cost of failure. Th
       <td><a href="books/vol3/"><b>III. Agentic Machine Learning Systems</b></a></td>
       <td>The trajectory</td>
       <td>How is intelligence governed when it acts autonomously over long horizons?</td>
-      <td><b>Draft</b>; changes often</td>
+      <td><b>In development</b>; changes often</td>
     </tr>
     <tr>
       <td align="center">🌲</td>
       <td><a href="books/vol4/"><b>IV. Physical AI: Machine Learning Systems That Sense and Act</b></a></td>
       <td>The physical action</td>
       <td>How can intelligence act safely on matter and physical systems?</td>
-      <td><b>Draft</b>; changes often</td>
+      <td><b>In development</b>; changes often</td>
     </tr>
   </tbody>
 </table>
