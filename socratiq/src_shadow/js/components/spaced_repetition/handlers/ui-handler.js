@@ -1,3 +1,4 @@
+import { escapeSidebarText } from '../utils/sidebar-text.js';
 export class SpacedRepetitionUIHandler {
     constructor(modal) {
         this.modal = modal;
@@ -198,13 +199,13 @@ export class SpacedRepetitionUIHandler {
                     ${currentChapter?.chapter === chapter.chapter ? 
                     themeClasses.buttonActive : 
                     themeClasses.buttonHover}"
-                    data-chapter="${chapter.chapter}">
+                    data-chapter="${escapeSidebarText(chapter.chapter)}">
                     <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
                             d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
                     </svg>
                     <div class="flex-1 flex justify-between items-center">
-                        <span>${chapter.title}</span>
+                        <span>${escapeSidebarText(chapter.title)}</span>
                         <span class="text-xs text-gray-500 dark:text-gray-400">${chapter.cardCount} cards</span>
                     </div>
                 </button>
@@ -293,13 +294,13 @@ export class SpacedRepetitionUIHandler {
                 ${currentTag?.tag === tag.tag ? 
                 themeClasses.buttonActive : 
                 themeClasses.buttonHover}"
-                data-tag="${tag}">
+                data-tag="${escapeSidebarText(tag)}">
                 <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
                         d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
                 </svg>
                 <div class="flex-1 flex justify-between items-center">
-                    <span>${tag}</span>
+                    <span>${escapeSidebarText(tag)}</span>
                     <span class="text-xs text-gray-500 dark:text-gray-400">${count} cards</span>
                 </div>
             </button>

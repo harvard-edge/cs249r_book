@@ -1,3 +1,4 @@
+import { validateFlashcardImport } from '../utils/import-validation.js';
 import { jsonrepair } from 'jsonrepair';
 import { UINotificationHandler } from "./ui-notification-handler";
 import { DuckAI } from "../../../libs/agents/duck-ai-cloudflare.js";
@@ -619,61 +620,12 @@ export class SpacedRepetitionStorageHandler extends EventTarget {
         }
     }
 
-    // // Add this method to the SpacedRepetitionStorageHandler class
-    // async mergeImportedData(importedData) {
-    //     try {
-    //         // Validate imported data structure
-    //         if (!importedData.chapter_card_sets) {
-    //             throw new Error('Invalid import data structure');
-    //         }
-
-    //         // Get existing data
-    //         const existingSets = JSON.parse(localStorage.getItem('chapter_card_sets') || '[]');
-    //         const existingMap = new Map(existingSets.map(set => [set.chapter, set]));
-
-    //         // Merge imported card sets
-    //         importedData.chapter_card_sets.forEach(importedSet => {
-    //             if (existingMap.has(importedSet.chapter)) {
-    //                 // Merge cards for existing chapters
-    //                 const existingSet = existingMap.get(importedSet.chapter);
-    //                 const existingCards = new Map(existingSet.cards.map(card => [card.id, card]));
-                    
-    //                 importedSet.cards.forEach(card => {
-    //                     if (!existingCards.has(card.id)) {
-    //                         existingSet.cards.push(card);
-    //                     }
-    //                 });
-    //             } else {
-    //                 // Add new chapters directly
-    //                 existingMap.set(importedSet.chapter, importedSet);
-    //             }
-    //         });
-
-    //         // Convert back to array and save
-    //         const mergedSets = Array.from(existingMap.values());
-    //         localStorage.setItem('chapter_card_sets', JSON.stringify(mergedSets));
-
-    //         // Reload current chapter if needed
-    //         if (this.inMemoryData.currentChapter) {
-    //             this.loadChapter(this.inMemoryData.currentChapter.chapter);
-    //         }
-
-    //         return true;
-    //     } catch (error) {
-    //         console.error('Error merging imported data:', error);
-    //         throw error;
-    //     }
-    // }
-
     async mergeImportedData(importedData) {
         try {
-            // Validate imported data structure
-            if (!importedData.chapter_card_sets) {
-                throw new Error('Invalid import data structure');
-            }
+            importedData = validateFlashcardImport(importedData);
 
             // Get existing data
-            const existingSets = JSON.parse(localStorage.getItem('chapter_card_sets') || '[]');
+            const existingSets = validateFlashcardImport({ chapter_card_sets: JSON.parse(localStorage.getItem('chapter_card_sets') || '[]') }).chapter_card_sets;
             const existingMap = new Map(existingSets.map(set => [set.chapter, set]));
 
             // Merge imported card sets

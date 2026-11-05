@@ -22,7 +22,7 @@ export class CustomAPIAdapter {
     const config = this.getCustomAPIConfig(settings);
     
     try {
-      console.log(`[CUSTOM_API] Using custom API: ${config.provider} at ${config.endpoint}`);
+
       
       if (isStreaming) {
         yield* this._callCustomAPIStreaming(prompt, config);
@@ -31,7 +31,7 @@ export class CustomAPIAdapter {
       }
     } catch (error) {
       console.error('[CUSTOM_API] Custom API failed, falling back to default:', error);
-      return null; // Signal fallback
+      throw error; // The caller decides whether it is safe to fall back.
     }
   }
   

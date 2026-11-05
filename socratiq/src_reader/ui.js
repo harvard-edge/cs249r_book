@@ -1,10 +1,11 @@
 import { completeReaderStyles } from './styles.js';
 import { renderSafeMarkdown } from './render.js';
 import { createParagraphPicker } from './picker.js';
+import { createPassageSessions, passageKey } from './passage-sessions.js';
+import { createReaderEnvironment } from './environment.js';
 
 const MAX_HISTORY_MESSAGES = 12;
 const MAX_VISIBLE_TURNS = 12;
-const MAX_PASSAGE_SESSIONS = 5;
 const INITIAL_QUESTION = 'Explain this passage.';
 const LEARNING_QUESTIONS = {
   simplify: 'Explain this passage in simpler language, defining any essential technical terms.',
@@ -22,7 +23,7 @@ const LEARNING_QUESTIONS = {
  * prior turns only; the current `question` is passed separately. Each history
  * item has the shape `{ role: 'user' | 'assistant', content: string }`.
  */
-export function mountReader({ captureSelection, captureParagraph, requestExplanation, onRevealSource }) {
+export function mountReader({ captureSelection, captureParagraph, requestExplanation, onRevealSource, onOpenStudy }) {
   if (typeof captureSelection !== 'function' || typeof requestExplanation !== 'function') {
     throw new TypeError('mountReader requires captureSelection and requestExplanation functions.');
   }
@@ -38,7 +39,6 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
 
   const shell = document.createElement('div');
   shell.className = 'reader-shell';
-  shell.dataset.theme = detectTheme();
   shell.innerHTML = `
     <button class="reader-launcher" type="button" aria-expanded="false" aria-controls="reader-panel">
       <span class="reader-mark" aria-hidden="true">S</span>
@@ -64,6 +64,10 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
       </label>
       <p class="reader-privacy">The selected passage and surrounding section are sent for AI explanation when you ask.</p>
       <div class="reader-body" role="region" aria-label="Selected passage and answers" tabindex="0">
+      <div class="reader-tools" hidden>
+        <button class="reader-study" type="button">Study tools</button>
+        <span class="reader-study-status" role="status" aria-live="polite"></span>
+      </div>
         <section class="reader-source" aria-label="Selected source" hidden>
           <p class="reader-source-label">Selected passage</p>
           <a class="reader-source-link" target="_blank" rel="noopener noreferrer"></a>
@@ -102,8 +106,10 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
   root.appendChild(shell);
 
   const sessionPicker = shell.querySelector('.reader-session-select');
+  const studyButton = shell.querySelector('.reader-study');
+  const studyStatus = shell.querySelector('.reader-study-status');
+  shell.querySelector('.reader-tools').hidden = typeof onOpenStudy !== 'function';
   const sessionControl = shell.querySelector('.reader-sessions');
-  const sessions = new Map();
   const launcher = shell.querySelector('.reader-launcher');
   const panel = shell.querySelector('.reader-panel');
   const closeButton = shell.querySelector('.reader-close');
@@ -127,6 +133,12 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
   input.maxLength = 2000;
   const sendButton = shell.querySelector('.reader-send');
   const stopButton = shell.querySelector('.reader-stop');
+  const readerBody = shell.querySelector('.reader-body');
+  const sessions = createPassageSessions({
+    thread, body: readerBody, input, status, errorText, errorBox, retryButton,
+    select: sessionPicker, control: sessionControl,
+  });
+  const environment = createReaderEnvironment({ host, shell });
 
   let pendingSource = null;
   let activeSource = null;
@@ -138,15 +150,64 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
   let visibleTurns = 0;
   let selectionTimer = 0;
   let selectionActionPressed = false;
+  let studyBusy = false;
+  let studyActive = false;
+  let destroyed = false;
+
+  studyButton.addEventListener('click', async () => {
+    if (studyBusy || studyActive || typeof onOpenStudy !== 'function') return;
+    studyBusy = true;
+    studyButton.disabled = true;
+    studyStatus.textContent = 'Loading study tools…';
+    stopRequest('Response stopped because study tools were opened.');
+    clearTimeout(selectionTimer);
+    picker?.stop();
+    pendingSource = null;
+    hideSelectionAction();
+    try {
+      await onOpenStudy();
+      if (!destroyed) suspendForStudy();
+    } catch {
+      if (destroyed) return;
+      studyStatus.textContent = 'Study tools could not open. Check your connection and try again.';
+      studyButton.textContent = 'Retry study tools';
+    } finally {
+      studyBusy = false;
+      studyButton.disabled = false;
+    }
+  });
+
+  function suspendForStudy() {
+    if (destroyed) return;
+    studyActive = true;
+    clearTimeout(selectionTimer);
+    picker?.stop();
+    pendingSource = null;
+    hideSelectionAction();
+    closePanel({restoreFocus: false});
+    shell.hidden = true;
+  }
+
+  function resumeFromStudy() {
+    if (!studyActive || destroyed) return;
+    studyActive = false;
+    shell.hidden = false;
+    studyStatus.textContent = '';
+    studyButton.textContent = 'Study tools';
+    openPanel('study');
+    requestAnimationFrame(() => studyButton.focus({preventScroll: true}));
+  }
+  window.addEventListener('socratiq:open', suspendForStudy);
+  window.addEventListener('socratiq:close', resumeFromStudy);
 
   const picker = typeof captureParagraph === 'function' ? createParagraphPicker({
     shell, host, captureParagraph,
     onPick(source) {
       setActiveSource(source);
-      openPanel(launcher, 'picker');
+      openPanel('picker');
       if (!visibleTurns) status.textContent = 'Passage ready. Choose Explain passage or ask a question.';
     },
-    onCancel() { openPanel(launcher, 'launcher'); },
+    onCancel() { openPanel('launcher'); },
   }) : null;
   chooseButtons.forEach(button => {
     button.hidden = !picker;
@@ -162,16 +223,15 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
   explainButton.addEventListener('click', () => void submitQuestion(INITIAL_QUESTION, {initial: true}));
 
   sessionPicker.addEventListener('change', () => {
-    const saved = sessions.get(sessionPicker.value);
-    if (saved) setActiveSource(saved.source);
+    const source = sessions.sourceForKey(sessionPicker.value);
+    if (source) setActiveSource(source);
     pendingSource = null;
     hideSelectionAction();
   });
 
-  updateViewportVars();
   launcher.addEventListener('click', () => {
     if (pendingSource) setActiveSource(pendingSource);
-    openPanel(launcher, 'launcher');
+    openPanel('launcher');
   });
 
   selectionButton.addEventListener('pointerdown', (event) => {
@@ -189,7 +249,7 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
     const source = pendingSource;
     setActiveSource(source);
     selectionButton.hidden = true;
-    openPanel(selectionButton, 'selection');
+    openPanel('selection');
     if (!history.length && !thread.childElementCount) void submitQuestion(INITIAL_QUESTION, { initial: true });
   });
 
@@ -245,11 +305,9 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
   document.addEventListener('scroll', hideSelectionAction, { capture: true, passive: true });
   document.addEventListener('keydown', handleEscape, true);
   document.addEventListener('keydown', handleSelectionShortcut, true);
-  window.addEventListener('resize', updateViewportVars, { passive: true });
-  window.visualViewport?.addEventListener('resize', updateViewportVars, { passive: true });
-  window.visualViewport?.addEventListener('scroll', updateViewportVars, { passive: true });
 
-  function openPanel(opener, origin) {
+  function openPanel(origin) {
+    if (studyActive) return;
     panel.dataset.launchOrigin = origin;
     panel.hidden = false;
     launcher.hidden = true;
@@ -260,7 +318,7 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
       if (!panel.hidden && activeSource) {
         // Reading an explanation on touch should not open the software keyboard.
         const target = !input.disabled && !window.matchMedia('(pointer: coarse)').matches
-          ? input : shell.querySelector('.reader-body');
+          ? input : readerBody;
         target.focus({ preventScroll: true });
       }
       else if (!panel.hidden) closeButton.focus({ preventScroll: true });
@@ -290,7 +348,7 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
   }
 
   function handleSelectionShortcut(event) {
-    if (picker?.active) return;
+    if (picker?.active || studyBusy || studyActive) return;
     if (event.key.toLowerCase() !== 'e' || !event.ctrlKey || !event.shiftKey || event.altKey || event.metaKey) return;
     let source;
     try {
@@ -304,7 +362,7 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
     pendingSource = source;
     setActiveSource(source);
     selectionButton.hidden = true;
-    openPanel(launcher, 'selection');
+    openPanel('selection');
     if (!history.length && !thread.childElementCount) void submitQuestion(INITIAL_QUESTION, { initial: true });
   }
 
@@ -323,7 +381,7 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
   }
 
   function scheduleSelectionCapture(event) {
-    if (picker?.active) return;
+    if (picker?.active || studyBusy || studyActive) return;
     if (event?.composedPath?.().includes(host)) return;
     if (selectionActionPressed) return;
     if (selectionIsInsideReader()) return;
@@ -332,6 +390,7 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
   }
 
   function readSelection() {
+    if (studyBusy || studyActive) return;
     try {
       const source = captureSelection();
       if (!source || !String(source.quote || '').trim()) {
@@ -342,11 +401,11 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
       }
       pendingSource = source;
       selectionButton.hidden = false;
-      positionSelectionAction(source.rect);
+      environment.positionSelectionAction(selectionButton, source.rect);
     } catch (error) {
       pendingSource = null;
       hideSelectionAction();
-      openPanel(launcher, 'launcher');
+      openPanel('launcher');
       showCaptureError(error);
     }
   }
@@ -360,91 +419,25 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
     selectionButton.hidden = true;
   }
 
-  function positionSelectionAction(rect = {}) {
-    const viewport = window.visualViewport;
-    const leftEdge = viewport?.offsetLeft ?? 0;
-    const topEdge = viewport?.offsetTop ?? 0;
-    const width = viewport?.width ?? window.innerWidth;
-    const height = viewport?.height ?? window.innerHeight;
-    const buttonWidth = selectionButton.offsetWidth || 144;
-    const buttonHeight = selectionButton.offsetHeight || 44;
-    const selectionLeft = Number(rect.left ?? rect.x ?? 0);
-    const selectionTop = Number(rect.top ?? rect.y ?? 0);
-    const selectionWidth = Number(rect.width ?? Math.max(0, Number(rect.right) - selectionLeft));
-    const selectionBottom = Number(rect.bottom ?? (selectionTop + Number(rect.height ?? 0)));
-    let left = selectionLeft + Math.max(0, (selectionWidth - buttonWidth) / 2);
-    let top = selectionTop - buttonHeight - 9;
-    if (top < topEdge + 8) top = selectionBottom + 9;
-    left = Math.min(Math.max(left, leftEdge + 8), leftEdge + width - buttonWidth - 8);
-    top = Math.min(Math.max(top, topEdge + 8), topEdge + height - buttonHeight - 8);
-    selectionButton.style.left = `${left}px`;
-    selectionButton.style.top = `${top}px`;
-  }
-
   function setActiveSource(source) {
     if (!source) return;
     pendingSource = null;
     clearTimeout(selectionTimer);
-    const key = sourceKey(source);
-    if (key !== sourceKey(activeSource)) {
+    if (passageKey(source) !== passageKey(activeSource)) {
       stopRequest('Response stopped.');
-      if (activeSource) {
-        sessions.set(sourceKey(activeSource), {
-          source: activeSource, nodes: [...thread.childNodes], history, visibleTurns,
-          draft: input.value, draftHeight: input.style.height,
-          lastFailedQuestion, failedUserTurn, status: status.textContent,
-          error: errorText.textContent, errorHidden: errorBox.hidden,
-          retryHidden: retryButton.hidden,
-          scrollTop: shell.querySelector('.reader-body').scrollTop,
-        });
-      }
-      const saved = sessions.get(key);
+      sessions.save(activeSource, { history, visibleTurns, lastFailedQuestion, failedUserTurn });
       clearConversation();
-      activeSource = saved?.source || source;
-      if (saved) {
-        thread.replaceChildren(...saved.nodes);
-        history = saved.history;
-        visibleTurns = saved.visibleTurns;
-        input.value = saved.draft;
-        input.style.height = saved.draftHeight;
-        lastFailedQuestion = saved.lastFailedQuestion;
-        failedUserTurn = saved.failedUserTurn;
-        status.textContent = saved.status;
-        errorText.textContent = saved.error;
-        errorBox.hidden = saved.errorHidden;
-        retryButton.hidden = saved.retryHidden;
-        shell.querySelector('.reader-body').scrollTop = saved.scrollTop;
+      const restored = sessions.activate(source);
+      activeSource = restored.source;
+      if (restored.conversation) {
+        ({ history, visibleTurns, lastFailedQuestion, failedUserTurn } = restored.conversation);
       }
-      // Insertion order tracks the least recently visited inactive passage.
-      sessions.delete(key);
-      sessions.set(key, {source: activeSource});
-      while (sessions.size > MAX_PASSAGE_SESSIONS) sessions.delete(sessions.keys().next().value);
     } else {
       activeSource = source;
     }
     renderSource(activeSource);
-    renderSessionPicker();
+    sessions.render(activeSource);
     updateComposerState();
-  }
-
-  function renderSessionPicker() {
-    sessionControl.hidden = sessions.size < 2;
-    sessionPicker.replaceChildren();
-    for (const [key, session] of sessions) {
-      const option = document.createElement('option');
-      option.value = key;
-      const source = session.source;
-      const heading = String(source.section || source.title || 'Textbook passage').replace(/\s+/g, ' ').trim().slice(0, 45);
-      const quote = String(source.quote || '').replace(/\s+/g, ' ').trim();
-      option.textContent = `${heading} — ${quote.slice(0, 85)}${quote.length > 85 ? '…' : ''}`;
-      option.selected = key === sourceKey(activeSource);
-      sessionPicker.appendChild(option);
-    }
-  }
-
-  function sourceKey(source) {
-    if (!source) return '';
-    return [source.url, source.section, source.quote].map((value) => String(value || '')).join('\u0000');
   }
 
   function renderSource(source) {
@@ -463,8 +456,7 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
     const volumeNumber = {vol1: 'I', vol2: 'II', vol3: 'III', vol4: 'IV'}[source.volume] || String(source.volume || '');
     const volumeLabel = source.volume ? ` · Volume ${volumeNumber || source.volume}` : '';
     sourceCard.title = source.version ? `Published version: ${source.version}` : '';
-    const versionLabel = '';
-    sourceCard.querySelector('.reader-source-label').textContent = `Selected passage${volumeLabel}${versionLabel}`;
+    sourceCard.querySelector('.reader-source-label').textContent = `Selected passage${volumeLabel}`;
     sourceQuote.textContent = String(source.quote || '');
     sourceCard.hidden = false;
     instruction.hidden = true;
@@ -537,8 +529,7 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
 
   async function submitQuestion(question, { initial = false, reuseUserTurn = null } = {}) {
     if (!activeSource || activeController) return;
-    const body = shell.querySelector('.reader-body');
-    const followStream = !initial && isAtBottom(body);
+    const followStream = !initial && isAtBottom(readerBody);
     const userTurn = reuseUserTurn || appendUserTurn(question);
     const answerNode = appendAssistantTurn();
     answerNode.textContent = 'Thinking…';
@@ -554,7 +545,7 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
     activeController = controller;
     activeAnswerNode = answerNode;
     updateComposerState();
-    updateViewportVars();
+    environment.updateViewport();
 
     try {
       const answer = await requestExplanation({
@@ -652,8 +643,7 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
   }
 
   function scrollThreadToEnd() {
-    const body = shell.querySelector('.reader-body');
-    body.scrollTop = body.scrollHeight;
+    readerBody.scrollTop = readerBody.scrollHeight;
   }
 
   function isAtBottom(body) {
@@ -661,12 +651,11 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
   }
 
   function scrollAnswerToStart(answerNode) {
-    const body = shell.querySelector('.reader-body');
-    const bodyTop = body.getBoundingClientRect().top;
+    const bodyTop = readerBody.getBoundingClientRect().top;
     const answerTop = answerNode.getBoundingClientRect().top;
     const sourceHeight = !sourceCard.hidden && getComputedStyle(sourceCard).position === 'sticky'
       ? sourceCard.getBoundingClientRect().height : 0;
-    body.scrollTop = Math.max(0, body.scrollTop + answerTop - bodyTop - sourceHeight);
+    readerBody.scrollTop = Math.max(0, readerBody.scrollTop + answerTop - bodyTop - sourceHeight);
   }
 
   function showCaptureError(error) {
@@ -688,62 +677,12 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
       : 'The explanation could not be completed. Check your connection and try again.';
   }
 
-  function updateViewportVars() {
-    const viewport = window.visualViewport;
-    const visibleHeight = viewport?.height ?? window.innerHeight;
-    const visibleBottom = (viewport?.offsetTop ?? 0) + visibleHeight;
-    const bottomClearance = Math.max(0, window.innerHeight - visibleBottom);
-    const visibleWidth = viewport?.width ?? window.innerWidth;
-    const visibleRight = (viewport?.offsetLeft ?? 0) + visibleWidth;
-    host.style.setProperty('--reader-visible-height', `${visibleHeight}px`);
-    host.style.setProperty('--reader-visible-width', `${visibleWidth}px`);
-    host.style.setProperty('--reader-right-clearance', `${Math.max(0, window.innerWidth - visibleRight)}px`);
-    host.style.setProperty('--reader-bottom-clearance', `${bottomClearance}px`);
-    shell.dataset.compact = String(visibleHeight < 540);
-  }
-
-  function detectTheme() {
-    const override = window.SocratiqWidgetTheme;
-    if (override === 'dark' || override === 'light') return override;
-    if (document.documentElement.matches('.quarto-dark, [data-bs-theme="dark"]') || document.body?.classList.contains('dark-mode')) return 'dark';
-    let background = [255, 255, 255];
-    let hasBackground = false;
-    for (const element of [document.documentElement, document.body].filter(Boolean)) {
-      const color = window.getComputedStyle(element).backgroundColor;
-      const rgb = color.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:\s*,\s*([\d.]+))?\s*\)/i);
-      if (!rgb) continue;
-      const [red, green, blue] = rgb.slice(1, 4).map(Number);
-      const alpha = rgb[4] === undefined ? 1 : Number(rgb[4]);
-      if (alpha <= 0) continue;
-      hasBackground = true;
-      background = [red, green, blue].map((channel, index) => channel * alpha + background[index] * (1 - alpha));
-    }
-    if (hasBackground) {
-      const [red, green, blue] = background;
-      const luminance = (0.2126 * red + 0.7152 * green + 0.0722 * blue) / 255;
-      if (luminance < 0.43) return 'dark';
-      if (luminance > 0.57) return 'light';
-    }
-    return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-  }
-
-  function updateTheme() {
-    shell.dataset.theme = detectTheme();
-  }
-
-  const themeObserver = installThemeTracking();
-
-  function installThemeTracking() {
-    const observer = new MutationObserver(updateTheme);
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style', 'data-bs-theme'] });
-    if (document.body) observer.observe(document.body, { attributes: true, attributeFilter: ['class', 'style'] });
-    document.addEventListener('socratiqThemeChanged', updateTheme);
-    return observer;
-  }
-
   return {
     host,
     destroy() {
+      destroyed = true;
+      window.removeEventListener('socratiq:open', suspendForStudy);
+      window.removeEventListener('socratiq:close', resumeFromStudy);
       picker?.destroy();
       stopRequest('Response stopped.');
       clearTimeout(selectionTimer);
@@ -753,11 +692,7 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
       document.removeEventListener('scroll', hideSelectionAction, true);
       document.removeEventListener('keydown', handleEscape, true);
       document.removeEventListener('keydown', handleSelectionShortcut, true);
-      document.removeEventListener('socratiqThemeChanged', updateTheme);
-      window.removeEventListener('resize', updateViewportVars);
-      window.visualViewport?.removeEventListener('resize', updateViewportVars);
-      window.visualViewport?.removeEventListener('scroll', updateViewportVars);
-      themeObserver.disconnect();
+      environment.destroy();
       host.remove();
     },
   };

@@ -84,7 +84,7 @@ test('sends a fixed Groq target and returns accumulated SSE text', async () => {
   assert.match(body.messages[1].content, /untrusted\.example/);
 });
 
-test('uses the live proxy endpoint by default', async () => {
+test('uses the configured default proxy URL with constructed transport', async () => {
   let requested;
   const fetchImpl = async (url) => {
     requested = new URL(url);
@@ -204,4 +204,35 @@ test('bounds source, question, and history input', async () => {
   await assert.rejects(request({ source: source({ quote: 'x'.repeat(8_001) }), question: 'Explain.' }), /Source quote exceeds/);
   await assert.rejects(request({ source: source(), question: 'x'.repeat(2_001) }), /Question exceeds/);
   await assert.rejects(request({ source: source(), question: 'Explain.', history: Array(13).fill({ role: 'user', content: 'x' }) }), /12-message limit/);
+});
+
+test('caller abort during the final buffered content event rejects instead of returning success', async () => {
+  const controller = new AbortController();
+  const request = createExplanationRequest({
+    endpoint: 'https://proxy.example.test/ai/stream',
+    fetchImpl: async () => responseFromChunks([
+      sseEvent(delta('Buffered answer.', 'stop')) + 'data: [DONE]\n\n',
+    ]),
+  });
+  await assert.rejects(request({
+    source: source(), question: 'Explain the passage.', signal: controller.signal,
+    onChunk: () => controller.abort(),
+  }), /cancelled/);
+});
+
+test('rejects oversized answers and unterminated events without rendering unbounded text', async () => {
+  for (const [stream, expected] of [
+    [sseEvent(delta('x'.repeat(64_001), 'stop')) + 'data: [DONE]\n\n', /response limit/],
+    ['data: ' + 'x'.repeat(128_001), /oversized stream event/],
+  ]) {
+    const chunks = [];
+    const request = createExplanationRequest({
+      endpoint: 'https://proxy.example.test/ai/stream',
+      fetchImpl: async () => responseFromChunks([stream]),
+    });
+    await assert.rejects(request({
+      source: source(), question: 'Explain.', onChunk: text => chunks.push(text),
+    }), expected);
+    assert.equal(chunks.length, 0);
+  }
 });

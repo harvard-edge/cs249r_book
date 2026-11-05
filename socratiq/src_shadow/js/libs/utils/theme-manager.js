@@ -95,7 +95,8 @@ class ThemeManager {
         }
 
         // Notify all callbacks
-        this.themeChangeCallbacks.forEach(callback => {
+        // A subscription created by a callback belongs to the next change.
+        [...this.themeChangeCallbacks].forEach(callback => {
             try {
                 callback(this.currentTheme);
             } catch (error) {
@@ -233,7 +234,7 @@ class ThemeManager {
         const themeClasses = this.getThemeClasses();
         Object.entries(classMap).forEach(([key, classes]) => {
             if (themeClasses[key]) {
-                element.classList.add(themeClasses[key]);
+                element.classList.add(...themeClasses[key].split(/\s+/));
             }
         });
     }
@@ -275,9 +276,9 @@ class ThemeManager {
         
         // Add appropriate theme classes
         if (isActive) {
-            button.classList.add(themeClasses.buttonActive);
+            button.classList.add(...themeClasses.buttonActive.split(/\s+/));
         } else {
-            button.classList.add(themeClasses.buttonHover);
+            button.classList.add(...themeClasses.buttonHover.split(/\s+/));
         }
     }
 
@@ -297,9 +298,9 @@ class ThemeManager {
         
         // Add appropriate theme classes
         if (isActive) {
-            button.classList.add(themeClasses.buttonActive);
+            button.classList.add(...themeClasses.buttonActive.split(/\s+/));
         } else {
-            button.classList.add(themeClasses.buttonHover);
+            button.classList.add(...themeClasses.buttonHover.split(/\s+/));
         }
     }
 

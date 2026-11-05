@@ -13,6 +13,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 VOLUMES = ("vol1", "vol2", "vol3", "vol4")
 READER_SRC = "/shared/assets/scripts/socratiq/reader.js"
+STUDY_SRC = "/shared/assets/scripts/socratiq/study.js"
 READER_RESOURCE = "/shared/assets/scripts/socratiq/**"
 READER_ENDPOINT = "https://proxy-worker-streaming.mlsysbook.workers.dev/ai/stream"
 
@@ -41,6 +42,8 @@ def test_html_config_loads_and_stages_socratiq_reader(volume):
     # exists and maps to the URL requested by the HTML include.
     source = books / READER_SRC.lstrip("/")
     assert source.is_file(), f"missing Quarto resource source: {source}"
+    study_source = books / STUDY_SRC.lstrip("/")
+    assert study_source.is_file(), f"missing lazy study resource: {study_source}"
     staged_path = Path(READER_SRC.lstrip("/"))
     assert staged_path.as_posix() == "shared/assets/scripts/socratiq/reader.js"
 
@@ -78,6 +81,9 @@ def test_quarto_stages_reader_under_site_root(tmp_path):
     staged_source = project / READER_SRC.lstrip("/")
     staged_source.parent.mkdir(parents=True)
     shutil.copy2(source, staged_source)
+    study_source = books / STUDY_SRC.lstrip("/")
+    assert study_source.is_file(), f"missing lazy study resource: {study_source}"
+    shutil.copy2(study_source, project / STUDY_SRC.lstrip("/"))
     (project / "index.qmd").write_text("# Resource staging check\n", encoding="utf-8")
     chapter = project / "vol1" / "01_chapter" / "01_chapter.qmd"
     chapter.parent.mkdir(parents=True)
@@ -129,6 +135,8 @@ def test_quarto_stages_reader_under_site_root(tmp_path):
     staged_reader = output / READER_SRC.lstrip("/")
     assert staged_reader.is_file()
     assert staged_reader.read_bytes() == source.read_bytes()
+    staged_study = output / STUDY_SRC.lstrip("/")
+    assert staged_study.read_bytes() == study_source.read_bytes()
 
     root_html = (output / "index.html").read_text(encoding="utf-8")
     chapter_html = (output / "01_chapter" / "01_chapter.html").read_text(encoding="utf-8")
@@ -150,5 +158,11 @@ def test_quarto_stages_reader_under_site_root(tmp_path):
     expected_asset_url = "https://mlsysbook.ai/vol1/shared/assets/scripts/socratiq/reader.js"
     assert root_asset_url == expected_asset_url
     assert chapter_asset_url == expected_asset_url
+    # The study loader resolves a sibling of the actual reader script URL,
+    # retaining the deployed volume prefix after Quarto URL flattening.
+    for reader_url in (root_asset_url, chapter_asset_url):
+        assert urljoin(reader_url, "study.js") == (
+            "https://mlsysbook.ai/vol1/shared/assets/scripts/socratiq/study.js"
+        )
     deployed_asset_path = f"vol1/{READER_SRC.lstrip('/')}"
     assert urlparse(root_asset_url).path.lstrip("/") == deployed_asset_path

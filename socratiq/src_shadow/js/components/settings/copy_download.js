@@ -5,20 +5,11 @@ import { enableTooltip } from '../../components/tooltip/tooltip.js';
 // import { SpacedRepetitionModal } from '../../components/spaced_repetition/modal.js';
 import { SpacedRepetitionModal } from '../../components/spaced_repetition/spaced-repetition-modal-handler.js';
 
-function cleanMarkdownFragment(markdown) {
-    const template = document.createElement('template');
-    template.innerHTML = markdown;
-
-    template.content.querySelectorAll('script, style').forEach((node) => node.remove());
-    template.content.querySelectorAll('[style], [id], [class]').forEach((node) => {
-        node.removeAttribute('style');
-        node.removeAttribute('id');
-        node.removeAttribute('class');
-    });
-
-    return (template.content.textContent || '')
-        .replace(/\s+/g, ' ')
-        .trim();
+const initializedButtons = new WeakSet();
+function initializeButton(button) {
+    if (!button || initializedButtons.has(button)) return false;
+    initializedButtons.add(button);
+    return true;
 }
 
 // Add the back button creation function (same as in create_quiz_button_grp.js)
@@ -54,15 +45,17 @@ export function copy_download(shadowEle, clone) {
     // Get markdown content if available, fallback to text content if not
     const getMarkdownContent = () => {
         const markdown = clone.getAttribute('data-markdown');
-        if (markdown) {
-            return cleanMarkdownFragment(markdown);
+        if (markdown !== null) {
+            // Export the original Markdown as text. HTML sanitization belongs
+            // to rendering; parsing here destroys fenced code and line breaks.
+            return markdown;
         }
         
         const textSource = clone.querySelector('.text-sm.text-zinc-800');
         return textSource ? textSource.textContent.trim() : '';
     };
 
-    if (copyButton) {
+    if (initializeButton(copyButton)) {
         copyButton.addEventListener('click', function() {
             const originalHTML = copyButton.innerHTML;
             copyButton.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="icons">
@@ -81,7 +74,7 @@ export function copy_download(shadowEle, clone) {
         });
     }
 
-    if (downloadButton) {
+    if (initializeButton(downloadButton)) {
         downloadButton.addEventListener('click', function() {
             const markdownContent = getMarkdownContent();
             const blob = new Blob([markdownContent], {type: 'text/markdown'});
@@ -96,7 +89,7 @@ export function copy_download(shadowEle, clone) {
         });
     }
 
-    if (shareButton) {
+    if (initializeButton(shareButton)) {
         shareButton.addEventListener('click', (e) => {
             e.preventDefault();
             const aiMessage = e.currentTarget.closest('.p-3.relative.max-w-xs.bg-white, .p-3.max-w-xs.bg-white');
@@ -150,7 +143,7 @@ export function copy_download(shadowEle, clone) {
         });
     }
 
-    if (highlightButton) {
+    if (initializeButton(highlightButton)) {
         highlightButton.addEventListener('click', (e) => {
             e.preventDefault();
             
@@ -182,7 +175,7 @@ export function copy_download(shadowEle, clone) {
     }
 
     // Add SR button handler
-    if (srButton) {
+    if (initializeButton(srButton)) {
         srButton.addEventListener('click', async (e) => {
             e.preventDefault();
             
@@ -214,7 +207,8 @@ export function copy_download(shadowEle, clone) {
                 const result = await modal.storageHandler.addFlashcardsFromText(content);
 
                 if (result.success) {
-                    showPopover(shadowEle, `Created ${result.flashcards.length} flashcards!`, "success", 3000);
+                    const count = result.flashcards.length;
+                    showPopover(shadowEle, `Created ${count} flashcard${count === 1 ? '' : 's'}!`, "success", 3000);
                 } else {
                     showPopover(shadowEle, "Failed to create flashcards", "error", 3000);
                 }

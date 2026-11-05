@@ -148,6 +148,15 @@ export const readerStyles = `
   .reader-icon-button:hover { background: #f3e9ec; }
   .reader-shell[data-theme="dark"] .reader-icon-button:hover { background: #393139; }
 
+  .reader-tools { display: flex; align-items: center; gap: 10px; padding: 4px 17px; border-bottom: 1px solid #eee7e9; }
+  .reader-study { min-height: 44px; flex: 0 0 auto; padding: 5px 10px; border: 0; border-radius: 7px; background: transparent; color: #781632; font-size: 12px; font-weight: 650; cursor: pointer; }
+  .reader-study:hover { background: #f3e9ec; }
+  .reader-study:disabled { opacity: .6; cursor: wait; }
+  .reader-study-status { font-size: 11px; line-height: 1.4; }
+  .reader-shell[data-theme="dark"] .reader-tools { border-color: #3d373d; }
+  .reader-shell[data-theme="dark"] .reader-study { color: #e99bb2; }
+  .reader-shell[data-theme="dark"] .reader-study:hover { background: #393139; }
+
   .reader-privacy {
     margin: 0;
     padding: 9px 17px;

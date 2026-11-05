@@ -10,26 +10,19 @@ const url_conversational_memory = BASEURL + "api/query_agent_conversational_memo
 
 export async function* query_agent(query, token, isMorePowerful=false, conversational = false) {
 
-  // DEACTIVATED: Primary agent is disabled due to "No data received from primary agent" errors
-  // Skipping directly to backup system
-  console.log("[AI_TRACE] chat_agent_yield.js - PRIMARY AGENT DEACTIVATED - Using backup system directly", {
-    isMorePowerful,
-    conversational,
-    queryPreview: query?.prompt?.substring(0, 100) + '...' || 'No prompt'
-  });
-
   // Skip primary agent entirely and go straight to backup system
   try {
     const promptText = query.prompt || '';
 
     const formattedPrompt = {
       prompt: promptText,
-      messages: [{
+      systemPrompt: query.systemPrompt,
+      messages: query.messages?.length ? query.messages : [{
         role: "user",
         content: promptText
       }]
     };
-    console.log("Calling backup with formatted prompt:", formattedPrompt);
+
 
     const generator = tryMultipleProvidersStream(formattedPrompt, null, true);
     

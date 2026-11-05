@@ -53,7 +53,7 @@ export function openFeedback(shadowRoot) {
 
     // Open modal
     openModalButton.addEventListener('click', () => {
-        if (iframe && !iframe.src) {
+        if (iframe && !iframe.getAttribute('src')) {
             iframe.src = "https://docs.google.com/forms/d/e/1FAIpQLSeK8RXgc6kbT1IbWVLjyUhwowp3x1ySbAjUQQqztdDs5ccmmQ/viewform?embedded=true";
         }
         modal.classList.remove('hidden');

@@ -1,4 +1,5 @@
 // index.js
+import { DEFAULT_PROVIDER } from "../configs/env_configs.js";
 import { htmlContent } from "../indexHtml.js";
 import { styles } from "../cssStyles.js";
 
@@ -39,7 +40,7 @@ import {
   // query_agent_json,
 } from "./libs/agents/chat_agent_yield.js";
 
-import { query_agent_gemini_serverless, query_agent_groq_serverless } from "./libs/agents/chat_agent_json_serverless.js";
+import { query_agent_groq_serverless } from "./libs/agents/chat_agent_json_serverless.js";
 
 // import {
 //   initiateMarkdown,
@@ -103,7 +104,7 @@ import { createThemeManager } from "./libs/utils/theme-manager.js";
 // import {makeGenerativeAIPage} from './components/generative_page/genAI/initiateGenerativeAIPage.js'
 // import {comingSoon, comingSoon2} from './components/generative_page/genAI/comingSoon/comingSoon.js'
 // import {makeGenerativeAIPagev2} from './components/genAI_v2/initiate.js'
-import { injectSvgButtons } from "./components/quizBtns/injectQuizBtn.js";
+import { injectSvgButtons, indexPageSections } from "./components/quizBtns/injectQuizBtn.js";
 // import {initiateStudyBtn} from './components/quiz/studyPastQuizzes.js'
 import { initStatsDisplay } from "./components/quiz/showQuizStats.js";
 import {
@@ -134,7 +135,6 @@ import { renderMermaidDiagram } from "./libs/diagram/mermaid.js";
 import { renderMermaidFlow } from "./libs/diagram/mermaid_flow.js";
 import {
   initializeSocratiqDB,
-  forceInitializeSocratiqDB,
   setDBInstance,
   verifyStores,
 } from "./libs/utils/indexDb.js";
@@ -147,7 +147,7 @@ import { initializeOnboarding } from "./components/onboarding/socratiq-onboardin
 import { enableTooltip } from "./components/tooltip/tooltip.js";
 import { initializePersistentTooltips } from "./components/tooltip/persistentTooltip.js";
 import { reinitializeButtonListeners } from './components/quiz/create_quiz_button_grp.js';
-import { extractTOCAsync, extractTOCWithDebug, saveTOCToChapterMap, getTOCFromChapterMap, getAllChapterMapEntries, shouldExtractTOC, testTOCDatabaseConnection } from "./libs/utils/tocExtractor.js";
+import { extractTOCAsync, extractTOCWithDebug, saveTOCToChapterMap, getTOCFromChapterMap, getAllChapterMapEntries, shouldExtractTOC } from "./libs/utils/tocExtractor.js";
 
 const loaderMarkdown = `::: loader
 :::
@@ -178,67 +178,48 @@ const diagramElementMap = new Map();
 // Add this at the top level of the file
 let dbInstance = null;
 
-// Add these constants at the top of the file
-const DB_VERSION_KEY = "socratiqDB_version";
-const FIRST_VISIT_KEY = "socratiqDB_first_visit";
-const REQUIRED_VERSION = "1.1"; // Update this when schema changes
-
 async function initializeDatabase() {
-  try {
-    const currentVersion = localStorage.getItem(DB_VERSION_KEY);
-    const firstVisit = localStorage.getItem(FIRST_VISIT_KEY);
-
-    // Check if this is the first visit
-    if (!firstVisit) {
-      // Set first visit date
-      localStorage.setItem(FIRST_VISIT_KEY, new Date().toISOString());
-      localStorage.setItem(DB_VERSION_KEY, REQUIRED_VERSION);
-
-      // Force fresh start for first-time visitors
-      dbInstance = await forceInitializeSocratiqDB();
-    }
-    // Check if version needs updating
-    else if (currentVersion !== REQUIRED_VERSION) {
-      // Before forcing update, check if we have existing data
-      const existingDb = await getDBInstance();
-      const existingChats =
-        (await existingDb?.getAll("tinyMLDB_chats").catch(() => [])) || [];
-
-      // Force update
-      dbInstance = await forceInitializeSocratiqDB();
-
-      // Restore existing chats if any
-      if (existingChats.length > 0) {
-        const store = dbInstance.db
-          .transaction(["tinyMLDB_chats"], "readwrite")
-          .objectStore("tinyMLDB_chats");
-
-        for (const chat of existingChats) {
-          await store.put(chat);
-        }
-      }
-
-      // Update version in localStorage
-      localStorage.setItem(DB_VERSION_KEY, REQUIRED_VERSION);
-    } else {
-      dbInstance = await initializeSocratiqDB();
-    }
-
-    // Store the instance globally
-    setDBInstance(dbInstance);
-
-    // Verify stores were created
-    const stores = await verifyStores();
-
-    return dbInstance;
-  } catch (error) {
-    console.error("Failed to initialize database:", error);
-    throw error;
-  }
+  // Schema upgrades belong to the database manager. Preference markers must not
+  // reset a reader's saved chats, quizzes, or flashcards.
+  dbInstance = await initializeSocratiqDB();
+  setDBInstance(dbInstance);
+  await verifyStores();
+  return dbInstance;
 }
 
 // Guard to prevent multiple main() executions
 let mainExecuted = false;
+let toggleInitialized = false;
+let initializationPromise = null;
+const embeddedMode = window.__SOCRATIQ_EMBEDDED__ === true;
+let embeddedVisible = false;
+let listenersInitialized = false;
+
+// Reader-owned activation never changes the legacy opt-in cookie.
+const studyAPI = {
+  ready: null,
+  async open() {
+    await main();
+    const host = document.getElementById("widget-chat-container");
+    if (!host?.shadowRoot) throw new Error("SocratiQ Study did not initialize");
+    host.hidden = false;
+    menu_slide_on(shadowRoot, true);
+    if (!embeddedVisible) {
+      embeddedVisible = true;
+      window.dispatchEvent(new CustomEvent("socratiq:open"));
+    }
+    return studyAPI;
+  },
+  close() {
+    const host = document.getElementById("widget-chat-container");
+    if (host) host.hidden = true;
+    if (embeddedVisible) {
+      embeddedVisible = false;
+      window.dispatchEvent(new CustomEvent("socratiq:close"));
+    }
+  },
+};
+if (embeddedMode) window.SocratiqStudy = studyAPI;
 
 function showSocratiqLoader() {
   const loader = document.createElement("div");
@@ -299,81 +280,25 @@ function hideSocratiqLoader() {
 }
 
 async function main(isReEntry = false) {
-  if (mainExecuted && !isReEntry) {
-    return;
+  if (mainExecuted) return;
+  if (initializationPromise) return initializationPromise;
+  if (!embeddedMode) {
+    initializeSocratiqToggle();
+    if (!checkWidgetAccess()) return;
   }
-  mainExecuted = true;
-  
+  initializationPromise = initializeApplication(isReEntry);
   try {
-    if (isReEntry) {
-      showSocratiqLoader();
-    }
+    await initializationPromise;
+    mainExecuted = true;
+  } finally {
+    initializationPromise = null;
+  }
+}
 
-    // Initialize database as the first operation
-    if (!isReEntry) {
-      await initializeDatabase();
-    }
-    
-    // Verify database initialization
-    const db = await getDBInstance();
-    console.log('🔍 Database initialization check:', {
-      hasDB: !!db,
-      hasDBInstance: !!db?.db,
-      storeNames: db?.db ? Array.from(db.db.objectStoreNames) : 'N/A',
-      chapterMapExists: db?.db ? db.db.objectStoreNames.contains('chapterMap') : false
-    });
-
-    // Load Collaborative Widget as a background process
-    // try {
-    //   await loadCollaborativeWidget();
-    // } catch (error) {
-    //   console.warn(`⚠️ Collaborative Widget failed to load and will be unavailable:`, error.message);
-    //   // Don't re-throw; allow the main application to continue.
-    // }
-    
-    // Test database write capability
-    if (db && db.db && db.db.objectStoreNames.contains('chapterMap')) {
-      try {
-        const testEntry = {
-          url: 'test-url',
-          title: 'Test Title',
-          tocData: [{ id: 'test', text: 'Test', level: 1 }],
-          lastUpdated: new Date().toISOString(),
-          headingCount: 1,
-          pageType: 'test',
-          domain: 'test.com'
-        };
-        await db.put('chapterMap', testEntry);
-        
-        // Clean up test entry
-        await db.delete('chapterMap', 'test-url');
-      } catch (error) {
-        console.error('❌ Database write test failed:', error);
-      }
-    } else {
-      console.error('❌ Database not ready for testing - chapterMap store missing');
-    }
-    
-    // Test TOC-specific database connection
-    const tocDbTest = await testTOCDatabaseConnection();
-
-    // Always initialize the toggle button listener if present
-    if (!isReEntry) {
-      initializeSocratiqToggle();
-    }
-
-    if (!checkWidgetAccess()) {
-      // Clean up URL if we are disabling/not loading the widget
-      const params = new URLSearchParams(window.location.search);
-      // If we have socratiq=false or widget_access=false (checked by checkWidgetAccess), 
-      // we should clean the URL similar to how normalizeUrlAfterScroll does it.
-      if (params.has('socratiq') || params.has('widget_access')) {
-        const cleanUrl = window.location.pathname;
-        window.history.replaceState({}, '', cleanUrl);
-      }
-      if (isReEntry) hideSocratiqLoader();
-      return;
-    }
+async function initializeApplication(isReEntry) {
+  try {
+    if (isReEntry) showSocratiqLoader();
+    await initializeDatabase();
     currentUrl = window.location.href;
     
     // Extract TOC from the page asynchronously (non-blocking)
@@ -416,7 +341,7 @@ async function main(isReEntry = false) {
       }
     }, 500); // Increased delay from 100ms to 500ms
     // Store scroll parameters for later use after full initialization
-    const params = new URLSearchParams(window.location.search);
+    const params = new URLSearchParams(embeddedMode ? "" : window.location.search);
     const x = params.get("x");
     const y = params.get("y");
     const scrollTo = params.get("scroll-to");
@@ -424,27 +349,29 @@ async function main(isReEntry = false) {
     // Store scroll parameters globally for use after initialization
     window.scrollParams = { x, y, scrollTo };
 
-    // Check if the document is already loaded
     if (document.readyState === "loading") {
-      // Loading hasn't finished yet
-      document.addEventListener("DOMContentLoaded", async () => {
-        await inject();
-        if (isReEntry) hideSocratiqLoader();
-      });
-    } else {
-      // `DOMContentLoaded` has already fired
-      await inject();
-      if (isReEntry) hideSocratiqLoader();
+      await new Promise(resolve => document.addEventListener("DOMContentLoaded", resolve, { once: true }));
     }
+    await inject();
   } catch (error) {
+    document.getElementById("widget-chat-container")?.remove();
+    shadowRoot = null;
     console.error("Failed to initialize application:", error);
+    throw error;
+  } finally {
     if (isReEntry) hideSocratiqLoader();
   }
 }
 
-main();
+const initialReady = main();
+if (embeddedMode) studyAPI.ready = initialReady.then(() => studyAPI);
+// Consumers can still await ready and observe failure; this handler prevents an
+// unhandled rejection if a page loads the script without immediately awaiting it.
+(embeddedMode ? studyAPI.ready : initialReady).catch(() => {});
 
 function initializeSocratiqToggle() {
+  if (toggleInitialized) return;
+  toggleInitialized = true;
   // Function to set up the button when it's found
   const setupButton = () => {
     const toggleButton = document.querySelector("#socratiq-toggle");
@@ -482,8 +409,11 @@ function initializeSocratiqToggle() {
               }));
           }
 
-          if (!document.querySelector("#widget-chat-container")) {
-            main(true);
+          const existingHost = document.querySelector("#widget-chat-container");
+          if (existingHost) {
+            existingHost.hidden = false;
+          } else {
+            main(true).catch(() => {});
           }
         } else {
           // Remove cookie and widget
@@ -492,7 +422,7 @@ function initializeSocratiqToggle() {
             "#widget-chat-container"
           );
           if (widgetContainer) {
-            widgetContainer.remove();
+            widgetContainer.hidden = true;
           }
         }
       }, 100);
@@ -520,6 +450,7 @@ function initializeSocratiqToggle() {
 }
 
 function checkWidgetAccess() {
+  if (embeddedMode) return true;
   const params = new URLSearchParams(window.location.search);
 
   // Check for both parameters in the URL
@@ -544,9 +475,10 @@ function checkWidgetAccess() {
 
 async function inject() {
   try {
-    console.log('[BUILD LOG] Current build: 2024-12-19-v2 - Theme fixes and New Deck button');
+
     const hostElement = document.createElement("div");
     hostElement.id = "widget-chat-container";
+    hostElement.hidden = embeddedMode;
     // Add styles directly to the hostElement to ensure it has the highest z-index and is fixed
     hostElement.style.position = "fixed";
     hostElement.style.zIndex = "9999";
@@ -565,11 +497,25 @@ async function inject() {
     precomputeParagraphFingerprints();
     new MessageObserver(shadowRoot);
     setListeners();
+    // Despite its legacy name, highlight binds the workspace composer only.
     highlight(shadowRoot);
     initiateMarkdown(shadowRoot);
     // reinitializeEditableInputs(shadowRoot);
     setupModal(shadowRoot);
-    initializeMenuSlide(shadowRoot);
+    if (embeddedMode) {
+      shadowRoot.getElementById("toggleButton").style.display = "none";
+      const closeStudyButton = document.createElement("button");
+      closeStudyButton.id = "socratiq-study-close";
+      closeStudyButton.type = "button";
+      closeStudyButton.setAttribute("aria-label", "Close study tools");
+      closeStudyButton.title = "Return to reading";
+      closeStudyButton.textContent = "×";
+      closeStudyButton.style.cssText = "font-size:24px;line-height:24px;min-width:32px;min-height:32px;color:inherit;cursor:pointer;flex-shrink:0";
+      closeStudyButton.addEventListener("click", () => studyAPI.close());
+      shadowRoot.querySelector("#text-selection-menu h2")?.parentElement.appendChild(closeStudyButton);
+    } else {
+      initializeMenuSlide(shadowRoot);
+    }
     parseNavigation();
 
     injectFeedback(shadowRoot);
@@ -611,14 +557,17 @@ async function inject() {
         }
     }, 100);
 
-    injectSvgButtons(shadowRoot);
+    if (embeddedMode) indexPageSections();
+    else injectSvgButtons(shadowRoot);
     get_text_ref();
     // initiateStudyBtn(shadowRoot)
     initStatsDisplay(shadowRoot);
-    highlight_click(shadowRoot);
+    if (!embeddedMode) {
+      highlight_click(shadowRoot);
+    }
     insertContextButton(shadowRoot);
     // initiate_clear_chats(shadowRoot)
-    shortcutKeys(shadowRoot);
+    if (!embeddedMode) shortcutKeys(shadowRoot);
     setupAtMentions(shadowRoot);
     ensureButtonsInitialized();
     // initializeAllMessageButtons(shadowRoot);
@@ -634,7 +583,7 @@ async function inject() {
 
     SpacedRepetitionModal.initialize(shadowRoot);
     initializeImageZoom(shadowRoot);
-    initializeOnboarding(shadowRoot);
+    if (!embeddedMode) initializeOnboarding(shadowRoot);
 
     addToolTips();
     
@@ -643,7 +592,7 @@ async function inject() {
     handleScrollToElement();
     
   } catch (error) {
-    console.error("Failed to initialize application:", error);
+    throw error;
   }
 }
 
@@ -1507,6 +1456,7 @@ async function handleProgressReport(text, xyChart, quadrantChart, ele = "") {
         await dbManager.add("progressReports", reportData);
       } catch (error) {
         console.error("Error processing streamed response:", error);
+        updateMarkdownPreview(new_ans || "The progress report could not be generated. Please try again.", clone);
         alert(shadowRoot, error + ". Please try again.", "error");
       }
     }
@@ -1517,7 +1467,7 @@ async function handleProgressReport(text, xyChart, quadrantChart, ele = "") {
     );
 
     // Create and insert XY Chart
-    if (markdownContainer) {
+    if (markdownContainer && xyChart && quadrantChart) {
       // Create and insert XY Chart
       const xyChartResult = await createXYChart(xyChart);
       const quadrantChartResult = await createQuadrantChart(quadrantChart);
@@ -1568,6 +1518,7 @@ async function handleSummativeAction(
   const maxRetries = 2;
   
   // Get the current prompt
+  getConfig_summative.reset_fields();
   const currentPrompt = getConfig_summative.get_field("prompt");
 
   if (tempDifficultyLevel) {
@@ -1605,23 +1556,9 @@ async function handleSummativeAction(
   showProgressItem(progress, progressCount);
   
   try {
-    // Try GROQ (Llama) first
-    try {
-      quizRespnse = await query_agent_groq_serverless(params);
-      apiUsed = "groq";
-    } catch (groqError) {
-      console.warn("GROQ endpoint failed, trying Gemini:", groqError);
-      
-      // Try Gemini as fallback (both Cloudflare endpoints)
-      try {
-        quizRespnse = await query_agent_gemini_serverless(params);
-        apiUsed = "gemini";
-      } catch (geminiError) {
-        console.error("Both Cloudflare endpoints failed:", geminiError);
-        throw new Error("All Cloudflare endpoints failed. Please try again later.");
-      }
-    }
-    
+    quizRespnse = await query_agent_groq_serverless(params);
+    apiUsed = DEFAULT_PROVIDER.toLowerCase();
+
     // Validate the response before proceeding
     
     if (!quizRespnse || (!Array.isArray(quizRespnse) && typeof quizRespnse !== 'object')) {
@@ -1879,15 +1816,13 @@ async function handleMermaidDiagramAction(text, id) {
     const prompt = getConfig_mermaid.get_field("prompt") + "\n" + text;
     let response = "";
 
-    const preferredOrder = ["GROQ", "HUGGINGFACE", "OPEN", "MISTRAL", "GEMINI"];
+    const preferredOrder = [DEFAULT_PROVIDER];
     let lastError = null;
 
     for (const provider of preferredOrder) {
       try {
         // Get complete response from provider
-        for await (let chunk of callProviderSingle(prompt, provider, null)) {
-          response += chunk;
-        }
+        response = await callProviderSingle(prompt, provider, null);
 
         // Try to render the diagram with the complete response
         const result = await renderMermaidFlow(response);
@@ -1963,7 +1898,9 @@ async function handleQuizAction(
   tempDifficultyLevel = "",
   context = null
 ) {
-  // Get the current prompt
+  // Each request starts with the base instructions, rather than accumulating
+  // earlier difficulty and system prompts across quiz generations.
+  getConfig_quiz.reset_fields();
   const currentPrompt = getConfig_quiz.get_field("prompt");
 
   if (tempDifficultyLevel) {
@@ -2046,22 +1983,6 @@ async function handleQuizAction(
         }
       }
       
-      // If we get here, all GROQ retries failed, try Gemini
-      console.warn("All GROQ attempts failed, trying Gemini as fallback");
-      try {
-        quizRespnse = await query_agent_gemini_serverless(params, token);
-        apiUsed = "gemini";
-        
-        // Validate Gemini response
-        if (Array.isArray(quizRespnse) && quizRespnse.length > 0) {
-          break; // Success
-        } else {
-          console.warn(`⚠️ Gemini returned unexpected response: ${typeof quizRespnse}`, quizRespnse);
-        }
-      } catch (geminiError) {
-        console.error("Gemini fallback also failed:", geminiError);
-      }
-      
       break; // Exit retry loop
     }
     
@@ -2112,7 +2033,7 @@ async function handleQuizAction(
   
       isOffline = true;
       quizRespnse = createQuiz(text);
-      await ini_quiz(clone, quizRespnse, title, chapterTitle);
+      await ini_quiz(clone, quizRespnse, title, chapterTitle, '', null, context);
       if (isOffline) {
         injectOfflineWarning(clone);
       }
@@ -2130,7 +2051,7 @@ async function handleQuizAction(
     isOffline = true;
     const quizRespnse = createQuiz(text);
     const _ = showQuiz(clone);
-    await ini_quiz(clone, quizRespnse, title, chapterTitle);
+    await ini_quiz(clone, quizRespnse, title, chapterTitle, '', null, context);
     if (isOffline) {
       injectOfflineWarning(clone);
     }
@@ -2149,6 +2070,8 @@ async function handleQuizAction(
 }
 
 export function setListeners() {
+  if (listenersInitialized) return;
+  listenersInitialized = true;
   window.addEventListener("resetAIChat", (e) => {
     // Assuming 'e.detail.containerId' holds the ID of the message container
     // You need to ensure that the event dispatching this carries such a detail or adjust accordingly
@@ -2257,10 +2180,10 @@ export function setListeners() {
         // Store custom API settings globally for access by API adapters
         if (settings.customAPI) {
           window.customAPISettings = settings.customAPI;
-          console.log('[CUSTOM_API] Custom API settings updated:', settings.customAPI);
+
         } else {
           window.customAPISettings = null;
-          console.log('[CUSTOM_API] Custom API settings cleared');
+
         }
         break;
 
@@ -2273,16 +2196,7 @@ export function setListeners() {
   // Add this near your other event listeners
   window.addEventListener("editedTextSubmitted", (event) => {
     const newText = event.detail.text;
-    handleQueryActionStream(
-      newText,
-      false,
-      "",
-      tempDifficultyLevel,
-      "",
-      handleExplainAction,
-      understanding,
-      power_up
-    );
+    handleQueryActionStream(newText);
   });
 
   // Handle navigation to source with position
@@ -2727,9 +2641,26 @@ export function setListeners() {
       drawSelectBtn.classList.add('active');
       moreOptionsButton.classList.add('draw-active');
 
-      startDrawSelect((capturedText) => {
+      // The drawing canvas lives on document.body, outside the workspace host.
+      // Reveal the page on phones and restore the same host after every exit,
+      // including Escape and a lasso that captured no text.
+      const workspaceHost = shadowRoot.host;
+      const wasHidden = workspaceHost.hidden;
+      const restoreWorkspace = () => {
+        workspaceHost.hidden = wasHidden;
         drawSelectBtn.classList.remove('active');
         moreOptionsButton.classList.remove('draw-active');
+        drawLifecycleObserver.disconnect();
+      };
+      const drawLifecycleObserver = new MutationObserver(() => {
+        if (!isDrawSelectActive()) restoreWorkspace();
+      });
+      drawLifecycleObserver.observe(document.body, { childList: true });
+      workspaceHost.hidden = true;
+
+      try {
+      startDrawSelect((capturedText) => {
+        restoreWorkspace();
 
         if (!capturedText) return;
 
@@ -2748,6 +2679,10 @@ export function setListeners() {
           }
         }));
       });
+      } catch (error) {
+        restoreWorkspace();
+        throw error;
+      }
     });
   }
 }
@@ -2892,5 +2827,3 @@ setTimeout(() => {
     window.currentChapterInfo = {};
   }
 }, 100);
-console.log('🔥 HMR TEST - 01  - Updated at', new Date().toLocaleTimeString());
-console.log('✅ Your edit was detected! Comment change at line 2357:', 'kkj Show initial loading state');

@@ -1,6 +1,5 @@
 import { Boarding } from "boarding.js";
-import "boarding.js/styles/main.css";
-import "boarding.js/styles/themes/basic.css";
+import {ensureBoardingStyles} from '../../libs/utils/boarding-styles.js';
 
 const ONBOARDING_KEY = 'socratiq_onboarding_completed';
 
@@ -61,6 +60,7 @@ export function initializeOnboarding(shadowRoot) {
 }
 
 function startOnboarding(shadowRoot) {
+    ensureBoardingStyles();
     if (isOnboardingActive) {
         return;
     }

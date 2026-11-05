@@ -125,11 +125,15 @@ function handleMouseEnter(event) {
     });
 }
 
-function handleMouseLeave() {
+function handleMouseLeave(event) {
     // Look for tooltip in document.body
     const tooltip = document.querySelector('.tooltip-container-socratiQ');
     if (tooltip) {
         tooltip.style.opacity = '0';
+        if (event?.type === 'click') {
+            tooltip.style.display = 'none';
+            return;
+        }
         setTimeout(() => {
             tooltip.style.display = 'none';
         }, 200);
@@ -153,11 +157,13 @@ export function enableTooltip(element, text, shadowRoot) {
     // Clean up existing listeners if any
     element.removeEventListener('mouseenter', handleMouseEnter);
     element.removeEventListener('mouseleave', handleMouseLeave);
+    element.removeEventListener('click', handleMouseLeave);
     
     // Set tooltip text and add listeners
     element.setAttribute('data-tooltip-text-socratiQ', text);
     element.addEventListener('mouseenter', handleMouseEnter);
     element.addEventListener('mouseleave', handleMouseLeave);
+    element.addEventListener('click', handleMouseLeave);
     
     
     element.style.cursor = 'pointer';
