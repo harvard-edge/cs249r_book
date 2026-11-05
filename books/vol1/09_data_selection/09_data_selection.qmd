@@ -2124,41 +2124,64 @@ ActiveLearningRoi.cost_per_label_math_expr = ActiveLearningRoi.cost_per_label_ma
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ ACTIVE LEARNING CURVE GAP
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Paragraph introducing @fig-active-learning-multiplier.
+# │ Context: @fig-active-learning-multiplier and its introductory paragraph.
 # │
-# │ Goal: State the label-efficiency gap the illustrative learning curves show.
-# │ Show: 2,500 vs. 10,000 labels to reach 90 percent accuracy, a 4× gap.
-# │ How:  Ratio of the two illustrative label counts read at the target accuracy.
+# │ Goal: Compute the label-efficiency gap of the illustrative learning curves.
+# │ Show: Labels needed by each curve at the target accuracy and their ratio.
+# │ How: Invert the logarithmic and exponential curves at the same threshold.
 # │
-# │ Note:    The label counts match the arrow drawn in the figure cell below;
-# │          keep the two in step.
+# │ Note: Author-constructed curves, not measured learning performance.
 # └─────────────────────────────────────────────────────────────────────────────
+import numpy as np
 from mlsysim.fmt import fmt_count, fmt_multiple, fmt_percent, check
 
 class ActiveLearningCurveGap:
-    """Illustrative labels needed to reach the target accuracy, active vs. random."""
+    """Modeled threshold crossings for author-constructed learning curves."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    target_accuracy = 0.90  # scenario assumption: accuracy where the curves are read
-    active_labels = 2_500  # scenario assumption: illustrative active-learning curve
-    random_labels = 10_000  # scenario assumption: illustrative random-sampling curve
+    target_accuracy = 0.90  # scenario assumption: accuracy where curves are read
+    baseline_pct = 50  # illustrative starting accuracy, percentage points
+    random_gain_pct = 40  # illustrative logarithmic-curve gain
+    random_scale = 100  # illustrative label-count scale
+    random_normalizer = 101  # illustrative logarithmic normalization
+    active_gain_pct = 45  # illustrative exponential-curve gain
+    active_scale = 1_000  # illustrative label-count scale
+    ceiling_pct = 95  # illustrative accuracy ceiling
+    sample_min, sample_max = 100, 10_000  # displayed label-count range
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    target_pct = target_accuracy * 100
+    random_labels = random_scale * (random_normalizer ** ((target_pct - baseline_pct) / random_gain_pct) - 1)
+    active_labels = -active_scale * np.log(1 - (target_pct - baseline_pct) / active_gain_pct)
     label_gap_value = random_labels / active_labels
+    # Include the exact crossings so the plotted lines meet the arrow endpoints.
+    samples = np.unique(np.r_[np.geomspace(sample_min, sample_max, 100), active_labels, random_labels])
+    acc_random = np.minimum(baseline_pct + random_gain_pct * np.log10(samples / random_scale + 1) / np.log10(random_normalizer), ceiling_pct)
+    acc_active = np.minimum(baseline_pct + active_gain_pct * (1 - np.exp(-samples / active_scale)), ceiling_pct)
+    arrow_label_x = np.sqrt(active_labels * random_labels)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(abs(label_gap_value - 4) < 1e-9, f"Prose and figure caption say a 4x gap, got {label_gap_value:.2f}.")
+    check(
+        baseline_pct < target_pct < min(ceiling_pct, baseline_pct + active_gain_pct),
+        "The target must be reachable below the active-learning asymptote.",
+    )
+    check(sample_min < active_labels < random_labels <= sample_max, "The displayed range must contain both crossings, active before random.")
+    check(
+        np.isclose(np.interp(active_labels, samples, acc_active), target_pct)
+        and np.isclose(np.interp(random_labels, samples, acc_random), target_pct),
+        "Both arrow endpoints must lie on their curves at the target accuracy.",
+    )
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     target_accuracy_pct_str = fmt_percent(target_accuracy, precision=0, commas=False, style='prose')
-    active_labels_str = fmt_count(active_labels, precision=0)
-    random_labels_str = fmt_count(random_labels, precision=0)
-    label_gap_mult_str = fmt_multiple(label_gap_value, precision=0)
+    active_labels_str = fmt_count(round(active_labels), precision=0)
+    random_labels_str = fmt_count(round(random_labels), precision=0)
+    label_gap_mult_str = fmt_multiple(label_gap_value, precision=1)
 ```
 
-The notebook's `{python} ActiveLearningRoi.speedup_mult_str` label reduction is an assumption, and the size of that multiplier is what decides the outcome. In the illustrative learning curves of @fig-active-learning-multiplier, uncertainty sampling reaches `{python} ActiveLearningCurveGap.target_accuracy_pct_str` accuracy with roughly `{python} ActiveLearningCurveGap.active_labels_str` annotations while uniform random sampling needs about `{python} ActiveLearningCurveGap.random_labels_str`, a `{python} ActiveLearningCurveGap.label_gap_mult_str` gap.
+The notebook's `{python} ActiveLearningRoi.speedup_mult_str` label reduction is an assumption, and the size of that multiplier is what decides the outcome. In the illustrative learning curves of @fig-active-learning-multiplier, uncertainty sampling reaches `{python} ActiveLearningCurveGap.target_accuracy_pct_str` accuracy with roughly `{python} ActiveLearningCurveGap.active_labels_str` annotations while uniform random sampling needs about `{python} ActiveLearningCurveGap.random_labels_str`, an approximately `{python} ActiveLearningCurveGap.label_gap_mult_str` gap. These curves are constructed to illustrate label efficiency, not fitted to measured learning performance.
 
-::: {#fig-active-learning-multiplier fig-env="figure" fig-pos="htb" fig-cap="**The Active Learning Multiplier**: Model accuracy is plotted against labeled samples on a logarithmic axis. In this illustrative scenario, active learning (green solid) reaches the same accuracy with fewer labels than random sampling (gray dashed); the arrow marks an approximately 4$\times$ label-efficiency gap near 90 percent accuracy." fig-alt="Line chart with labeled samples from 100 to 10,000 on a logarithmic x-axis and accuracy on the y-axis. A green active-learning curve rises above a gray dashed random-sampling curve, the area between them is shaded green, and a horizontal arrow near 90 percent accuracy is labeled 4 times data efficiency."}
+::: {#fig-active-learning-multiplier fig-env="figure" fig-pos="htb" fig-cap="**The Active Learning Multiplier**: Model accuracy is plotted against labeled samples on a logarithmic axis. In this illustrative scenario, active learning (green solid) reaches the same accuracy with fewer labels than random sampling (gray dashed); the arrow connects the curve intersections at `{python} ActiveLearningCurveGap.target_accuracy_pct_str` accuracy, an approximately `{python} ActiveLearningCurveGap.label_gap_mult_str` label-efficiency gap. The curves are illustrative, not measured." fig-alt="Line chart with labeled samples from 100 to 10,000 on a logarithmic x-axis and accuracy on the y-axis. A green active-learning curve rises above a gray dashed random-sampling curve. The area between them is shaded green, and a horizontal arrow connects the curves at the target accuracy, with a label giving their label-count ratio."}
 
 ```{python}
 #| echo: false
@@ -2169,7 +2192,7 @@ The notebook's `{python} ActiveLearningRoi.speedup_mult_str` label reduction is 
 # │ Context: @fig-active-learning-multiplier (Active Learning section)
 # │
 # │ Goal: Visualize the data efficiency advantage of active learning.
-# │ Show: That active learning reaches 90% accuracy 4× faster than random sampling.
+# │ Show: The modeled label-count gap at a shared target accuracy.
 # │ How: Plot learning curves showing accuracy vs. labeled sample count.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
@@ -2182,11 +2205,9 @@ fig, ax, COLORS, plt = book_style.setup_plot(figsize=(6.2, 4))
 # —Plot: Active Learning vs Random Sampling ---
 
 # ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
-samples = np.logspace(2, 4, 100)
-acc_random = 50 + 40 * np.log10(samples / 100 + 1) / np.log10(101)
-acc_active = 50 + 45 * (1 - np.exp(-samples / 1000))
-acc_active = np.minimum(acc_active, 95)
-acc_random = np.minimum(acc_random, 95)
+samples = ActiveLearningCurveGap.samples
+acc_random = ActiveLearningCurveGap.acc_random
+acc_active = ActiveLearningCurveGap.acc_active
 
 # ┌── 3. RENDER ────────────────────────────────────────────────────────────────
 ax.plot(samples, acc_random, '--', color=COLORS['grid'], label='Random Sampling', linewidth=2)
@@ -2197,8 +2218,21 @@ ax.fill_between(samples, acc_random, acc_active, color=COLORS['GreenL'], alpha=0
 ax.set_xscale('log')
 ax.set_xlabel('Labeled Samples')
 ax.set_ylabel('Accuracy (%)')
-ax.annotate("", xy=(2500, 90), xytext=(9000, 90), arrowprops=dict(arrowstyle="->", color='black'))
-ax.text(5000, 91, "4× Data Efficiency", ha='center', fontsize=9, bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=0.5))
+ax.annotate(
+    "",
+    xy=(ActiveLearningCurveGap.active_labels, ActiveLearningCurveGap.target_pct),
+    xytext=(ActiveLearningCurveGap.random_labels, ActiveLearningCurveGap.target_pct),
+    arrowprops=dict(arrowstyle="<->", color=COLORS['primary'], shrinkA=0, shrinkB=0),
+)
+ax.text(
+    ActiveLearningCurveGap.arrow_label_x,
+    ActiveLearningCurveGap.target_pct - 3,
+    str(ActiveLearningCurveGap.label_gap_mult_str),
+    ha='center',
+    va='top',
+    fontsize=9,
+    bbox=dict(facecolor='white', alpha=0.95, edgecolor='none', pad=0.5),
+)
 
 ax.legend(loc='upper left', fontsize=9, frameon=True, facecolor='white', framealpha=0.95, edgecolor='gray', fancybox=True, borderpad=0.6)
 plt.show()

@@ -74,7 +74,7 @@
     }
     const camera = [[404, 140], [404, 100], [550, 205], [550, 249], [580, 477], [580, 477], [556, 477], [568, 477], [610, 477], [610, 477]];
     function render(i, {stage, details}) {
-      if (!canvas.isConnected) stage.append(cue, canvas, state);
+      if (!canvas.isConnected) {stage.append(cue, canvas); details.append(state);}
       const m = model(i);
       overlay.querySelectorAll('.okv-reference-copy').forEach(n => n.remove());
       packet.setAttribute('visibility', 'hidden');
@@ -101,8 +101,8 @@
       root.dataset.cowAllocated = String(m.allocated); root.dataset.cowReferences = JSON.stringify(m.refs);
       root.dataset.cowSource = sourceValues.map(n => n.textContent).join(',');
       follow(...camera[i]);
-      if (!details.firstChild) {
-        const p = document.createElement('p');
+      if (!details.querySelector('.okv-scope-note')) {
+        const p = document.createElement('p'); p.className = 'okv-scope-note';
         p.textContent = 'Digits inside green cells label the token positions whose KV records are initialized; they are not scalar key or value contents. Table numbers are physical block IDs. Green-outlined empty cells are allocated but unwritten; gray dashed block 14 is free before reservation. Purple moving labels carry table metadata; green labels carry KV records. Reference counts here count A/B tables, not outstanding device operations. The example assumes no concurrent consumers or eviction.';
         details.append(p);
       }

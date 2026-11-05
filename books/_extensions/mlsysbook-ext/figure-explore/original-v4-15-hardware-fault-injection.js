@@ -11,6 +11,15 @@
   const layer=el('svg',{viewBox:'0 0 1000 1000',width:vb.width,height:vb.height,preserveAspectRatio:'none','aria-hidden':'true'});art.append(layer);
   const scene=el('svg',{viewBox:'0 0 680 185',role:'img','aria-label':'Synchronized mechanism assembly',class:NAME+'-scene'});const proof=document.createElement('p');proof.className=NAME+'-proof';
   let mounted=false,current=0,stageNode;
+  // Repaint the exact paused frame after a width/context change, never on scroll.
+  let lastFrame=null, resizeFrame=0, resizeGeometry='';
+  const resizeObserver=new ResizeObserver(()=>{
+   cancelAnimationFrame(resizeFrame);resizeFrame=requestAnimationFrame(()=>{
+    if(!stageNode||!lastFrame||!root.isConnected)return;
+    const geometry=[root.clientWidth,stageNode.clientWidth,art.getBoundingClientRect().width,!!root.closest('dialog')].join(':');
+    if(geometry===resizeGeometry)return;resizeGeometry=geometry;draw(...lastFrame);
+   });
+  });resizeObserver.observe(root);
   const D={
   "v": 1.3,
   "a": 2.0,
@@ -29,6 +38,7 @@
 }
 ;const times=[0,D.frame_ms,D.onset_ms,D.late_ms,D.rest_late_ms];
   function draw(from,to,p){
+   lastFrame=[from,to,p];
    layer.replaceChildren();root.dataset.animationProgress=String(p);
    const t=times[from]+(times[to]-times[from])*p,topx=251+Math.min(t,130)*5.48,bottomx=236.13+(Math.min(t,1200)+3)/1253*(966.7-236.13);layer.append(el('line',{x1:topx,x2:topx,y1:75,y2:397,stroke:'#B87333','stroke-width':2,'stroke-dasharray':'6 4','data-motion-object':'true'}),el('line',{x1:bottomx,x2:bottomx,y1:645,y2:921,stroke:'#B87333','stroke-width':2,'stroke-dasharray':'6 4','data-motion-object':'true'}));function speed(t,onset){const s=Math.max(0,(t-onset)/1000),t1=D.a/D.j,t2=D.stop_s-2*t1;if(s<=t1)return D.v-.5*D.j*s*s;if(s<=t1+t2)return D.v-.5*D.j*t1*t1-D.a*(s-t1);if(s<=D.stop_s){const z=s-t1-t2;return Math.max(0,D.v-.5*D.j*t1*t1-D.a*t2-D.a*z+.5*D.j*z*z);}return 0;}for(const [onset,color]of[[D.onset_ms,'#009E73'],[D.late_ms,'#A51C30']])layer.append(el('circle',{cx:bottomx,cy:909.4-speed(t,onset)/(D.v*1.18)*(909.4-604.0),r:6,fill:color,stroke:'#fff','stroke-width':2,'data-motion-object':'true'}));const phase=p<1?from:to;proof.textContent=phase<4?`Time from renewal ${t.toFixed(1)} ms. Lease ${t>=D.lease_ms?'expired':'active'}; stop command ${t>=D.command_ms?'issued':'pending'}; drive frame ${t>=D.frame_ms?'delivered':'pending'}. Green physical onset ${t>=D.onset_ms?'modeled onset reached':'pending'}; dashed physical onset ${t>=D.late_ms?'modeled onset reached':'pending'}. The software channels do not substitute for the physical witness.`:`Dashed trace: onset margin ${D.onset_margin_ms.toFixed(0)} ms (FAIL); travel margin +${D.travel_margin_mm.toFixed(1)} mm (PASS). Nominal travel ${D.travel_late_mm.toFixed(1)} mm; independent travel oracle ${D.travel_bound_mm.toFixed(1)} mm. Combined requirement FAILS. Tracking allowance is not added to travel.`;root.dataset.timeMs=String(t);root.dataset.onsetMarginMs=String(D.onset_margin_ms);root.dataset.travelMarginMm=String(D.travel_margin_mm);
    scene.replaceChildren();function distance(ms,onset){const n=1000,dt=ms/n;let total=0;for(let z=0;z<n;z++)total+=(speed(z*dt,onset)+speed((z+1)*dt,onset))*.5*dt;return total;}scene.append(el('text',{x:12,y:18,'font-size':13,fill:'#1A202C'},'Powered base travel integrates the two original speed traces (model)'));for(const [j,onset,color]of[[0,D.onset_ms,'#009E73'],[1,D.late_ms,'#A51C30']]){const yy=55+j*65,d=distance(t,onset),xx=150+d*.45;scene.append(el('line',{x1:150,x2:510,y1:yy+24,y2:yy+24,stroke:'#4A5568'}),el('line',{x1:150+D.travel_bound_mm*.45,x2:150+D.travel_bound_mm*.45,y1:yy-17,y2:yy+24,stroke:'#A51C30','stroke-dasharray':'4 3'}),el('rect',{x:xx-15,y:yy-4,width:30,height:19,fill:color,'fill-opacity':.2,stroke:color,'data-motion-object':'true'}),el('circle',{cx:xx-8,cy:yy+18,r:4,fill:'#4A5568'}),el('circle',{cx:xx+8,cy:yy+18,r:4,fill:'#4A5568'}),el('text',{x:12,y:yy,'font-size':11,fill:color},j?'late onset':'on-time onset'),el('text',{x:535,y:yy,'font-size':11,fill:'#1A202C'},`${d.toFixed(1)} mm traveled`),el('text',{x:535,y:yy+17,'font-size':10,fill:color},t<onset?'powered coast':speed(t,onset)>0?'powered deceleration':'rest'));}scene.append(el('text',{x:12,y:174,'font-size':11,fill:'#1A202C'},`lease ${t>=D.lease_ms?'expired':'active'} → command ${t>=D.command_ms?'issued':'pending'} → bus ${t>=D.frame_ms?'delivered':'pending'}; late onset fails independently of the travel limit`));
@@ -39,6 +49,6 @@
   const player=window.MLSysOriginalPlayer.create({root,outer:context.outer,title:CFG.question,scope:CFG.scope,steps,
    render(index,{stage,details}){current=index;root.dataset.step=String(index);if(!mounted){const artScroll=document.createElement('div');artScroll.className=NAME+'-art-scroll';stageNode=artScroll;stage.tabIndex=0;stage.setAttribute('aria-label','Original diagram; scroll horizontally or use Expand for dense artwork');stage.classList.add(NAME+'-stage');artScroll.append(art);stage.append(artScroll,scene);details.append(proof);mounted=true;}draw(index,index,1);root.dataset.originalState=JSON.stringify({index,kind:CFG.key});},
    transition({from,to,onFrame}){if(to!==from+1)return;onFrame(p=>draw(from,to,p));}
-  });return{pause:()=>player.pause(),destroy:()=>player.destroy()};
+  });return{pause:()=>player.pause(),destroy:()=>{resizeObserver.disconnect();cancelAnimationFrame(resizeFrame);player.destroy();}};
  };
 })();
