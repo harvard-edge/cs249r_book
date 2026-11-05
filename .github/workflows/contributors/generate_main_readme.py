@@ -157,7 +157,7 @@ def generate_sectioned_contributors(repo_root: Path) -> str:
     return (
         "## Contributors\n"
         "\n"
-        "Thanks goes to these wonderful people who have contributed to making this resource better for everyone!\n"
+        "These people have improved the textbooks, the software, and the teaching materials.\n"
         "\n"
         f"**Legend:** {legend}\n"
         "\n"
