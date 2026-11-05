@@ -324,6 +324,13 @@ local function render_pseudocode_block_latex(global_options)
       end
 
       options["pdf-placement"] = nil_to_default(options["pdf-placement"], "H")
+      if options["pdf-font-size"] then
+        local font_size = string.lower(options["pdf-font-size"])
+        if font_size ~= "normalsize" and font_size ~= "small" and font_size ~= "footnotesize" then
+          error("pseudocode pdf-font-size must be normalsize, small, or footnotesize")
+        end
+        algpseudocodex_options = "\\" .. font_size .. "\n" .. algpseudocodex_options
+      end
       source_code = string.gsub(
         source_code,
         "\\begin{algorithm}%s*\n",
