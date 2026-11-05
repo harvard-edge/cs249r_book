@@ -62,9 +62,10 @@ def evaluate_volume_status(volume: dict, jobs: list[dict]) -> dict:
     def badge(message: str, color: str) -> dict:
         return {"schemaVersion": 1, "label": volume["label"], "message": message, "color": color}
 
+    shared_markers = ("Pre-commit Checks", "Collect Results", "EPUB validate")
     shared_gates = [j for j in jobs if any(
         marker in j.get("name", "")
-        for marker in ("Pre-commit Checks", "Collect Results", "EPUB validate")
+        for marker in shared_markers
     )]
     if any(j.get("conclusion") in {"failure", "timed_out", "action_required", "startup_failure"}
            for j in shared_gates):
@@ -83,6 +84,22 @@ def evaluate_volume_status(volume: dict, jobs: list[dict]) -> dict:
         return badge("cancelled", "orange")
     if any(j.get("conclusion") != "success" for j in vol_jobs):
         return badge("not validated", "lightgrey")
+    if any(not any(marker in j.get("name", "") for j in shared_gates)
+           for marker in shared_markers):
+        return badge("not validated", "lightgrey")
+    if any(j.get("status") != "completed" for j in shared_gates):
+        return badge("building", "yellow")
+    if any(j.get("conclusion") == "cancelled" for j in shared_gates):
+        return badge("cancelled", "orange")
+    if any(j.get("conclusion") != "success" for j in shared_gates):
+        return badge("not validated", "lightgrey")
+    # Disabled matrix entries finish successfully after a skip step. Require
+    # executed build steps for every published format, not just green job headers.
+    for format_name in ("HTML", "PDF", "EPUB"):
+        if not any(f"Build {format_name}" in step.get("name", "")
+                   and step.get("status") == "completed" and step.get("conclusion") == "success"
+                   for job in vol_jobs for step in job.get("steps", [])):
+            return badge("not validated", "lightgrey")
     return badge("passing", "brightgreen")
 
 

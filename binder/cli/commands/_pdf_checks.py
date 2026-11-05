@@ -22,6 +22,7 @@ import re
 import shutil
 import subprocess
 from collections import Counter
+from importlib.util import find_spec
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -981,20 +982,19 @@ def scan_purpose_overflow(
 def scan_margin_geometry_summary(pdf_path: Path):
     """Return the Binder-native margin geometry summary, or ``None``.
 
-    ``None`` means PyMuPDF is unavailable or the scan failed; callers should
-    treat that as skipped rather than as a clean geometry result.
+    ``None`` means the optional PyMuPDF dependency is unavailable. A failure
+    after the dependency is present is an error, never a skipped clean result.
     """
-    try:
-        try:
-            from cli.checks.margin_geometry import scan_pdf
-        except ImportError:
-            from binder.cli.checks.margin_geometry import scan_pdf
-    except ImportError:
+    if find_spec("pymupdf") is None and find_spec("fitz") is None:
         return None
+    try:
+        from cli.checks.margin_geometry import scan_pdf
+    except ImportError:
+        from binder.cli.checks.margin_geometry import scan_pdf
     try:
         return scan_pdf(pdf_path)
-    except Exception:
-        return None
+    except Exception as exc:
+        raise RuntimeError(f"Rendered PDF geometry scan failed: {pdf_path}: {exc}") from exc
 
 
 def verify_volume_pdf(
