@@ -1,5 +1,34 @@
 // Capture only the reader's selection and its local section, never navigation or forms.
 const EXCLUDED = 'nav, aside, form, fieldset, script, style, button, input, textarea, select, [contenteditable="true"], #socratiq-reader';
+// DOM references stay local: source snapshots remain plain JSON for transport.
+const sourceRanges = new WeakMap();
+
+export function revealSource(source, {document: doc = document, window: win = doc.defaultView} = {}) {
+  if (!source || typeof source !== 'object') return false;
+  const saved = sourceRanges.get(source);
+  const node = saved?.range.startContainer;
+  let target = saved?.element.isConnected && node?.isConnected && node.ownerDocument === doc
+    ? (node.nodeType === 1 ? node : node.parentElement) : null;
+  if (target) target = target.closest('p, li, blockquote, pre, figure, h1, h2, h3, h4, h5, h6, section, main, article') || target;
+  if (!target) {
+    try {
+      const url = new URL(source.url, win.location.href);
+      const current = new URL(win.location.href);
+      if (url.origin !== current.origin || url.pathname !== current.pathname) return false;
+      const id = decodeURIComponent(url.hash.slice(1));
+      target = id ? doc.getElementById(id) : null;
+    } catch { return false; }
+  }
+  if (!target?.isConnected || !target.closest('main, article') || target.closest(EXCLUDED)) return false;
+  target.scrollIntoView({block: 'center', behavior: win.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth'});
+  const tabindex = target.getAttribute('tabindex');
+  if (tabindex === null) {
+    target.setAttribute('tabindex', '-1');
+    target.addEventListener('blur', () => target.removeAttribute('tabindex'), {once: true});
+  }
+  target.focus({preventScroll: true});
+  return true;
+}
 
 function mathItemsWithin(win, element) {
   try {
@@ -129,10 +158,12 @@ export function captureSelection({document: doc = document, window: win = window
     context = context.slice(begin, begin + 12000);
   }
   const rect = range.getBoundingClientRect();
-  return {
+  const source = {
     quote, context, title: doc.querySelector('h1')?.textContent.trim() || doc.title,
     section: heading?.textContent.trim() || '', url: url.href,
     volume: volume || win.location.pathname.match(/(?:^|\/)(vol[1-4])(?:\/|$)/)?.[1] || '',
     version, rect: {top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right, width: rect.width, height: rect.height},
   };
+  sourceRanges.set(source, {range: range.cloneRange(), element: start});
+  return source;
 }

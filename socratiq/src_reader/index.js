@@ -1,4 +1,4 @@
-import {captureSelection} from './context.js';
+import {captureSelection, revealSource} from './context.js';
 import {createExplanationRequest} from './transport.mjs';
 import {mountReader} from './ui.js';
 
@@ -10,6 +10,7 @@ function start() {
   if (document.getElementById('socratiq-reader')) return;
   mountReader({
     captureSelection: () => captureSelection({volume: config.volume, version}),
+    onRevealSource: revealSource,
     requestExplanation: createExplanationRequest({endpoint: config.endpoint}),
   });
   // Release identity is best effort and must never block reading assistance.

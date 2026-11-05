@@ -19,7 +19,7 @@ cd socratiq
 npm ci
 npm run build:reader
 npm run test:reader
-npx playwright install chromium
+npx playwright install chromium webkit
 npm run test:reader:browser
 ```
 
@@ -37,6 +37,11 @@ separate build and drift check.
   responsive panel, sanitized Markdown, and KaTeX math.
 - `tests/reader-browser.spec.mjs`: constructed response fixtures for deterministic
   browser checks; these are not evidence of model quality or live availability.
+- `tests/reader-responsive.spec.mjs`: phone and tablet orientations, touch targets,
+  wide math/code, and modeled keyboard/zoom viewports; includes WebKit smoke tests.
+  These do not replace physical-device checks of native text-selection handles.
+- `tests/reader-return.spec.mjs`: returning to the selected passage in the same tab
+  preserves the page and conversation. DOM references stay local to the page.
 
 To verify live inference without publishing anything, inject the locally built
 reader into an isolated browser on a public chapter:
