@@ -5,6 +5,8 @@ export const readerStyles = `
     all: initial;
     --reader-bottom-clearance: 0px;
     --reader-visible-height: 100dvh;
+    --reader-visible-width: 100vw;
+    --reader-right-clearance: 0px;
     color-scheme: light;
     font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   }
@@ -12,6 +14,7 @@ export const readerStyles = `
   *, *::before, *::after { box-sizing: border-box; }
 
   .reader-shell {
+    --reader-edge: max(16px, env(safe-area-inset-left), env(safe-area-inset-right));
     position: fixed;
     inset: 0;
     z-index: 10000;
@@ -35,7 +38,7 @@ export const readerStyles = `
 
   .reader-launcher {
     position: fixed;
-    right: max(16px, env(safe-area-inset-right));
+    right: calc(var(--reader-right-clearance) + var(--reader-edge));
     bottom: calc(var(--reader-bottom-clearance) + max(16px, env(safe-area-inset-bottom)));
     display: inline-flex;
     align-items: center;
@@ -76,10 +79,10 @@ export const readerStyles = `
 
   .reader-panel {
     position: fixed;
-    right: max(16px, env(safe-area-inset-right));
+    right: calc(var(--reader-right-clearance) + var(--reader-edge));
     bottom: calc(var(--reader-bottom-clearance) + max(72px, calc(env(safe-area-inset-bottom) + 68px)));
     display: flex;
-    width: min(390px, calc(100vw - 32px));
+    width: min(390px, calc(var(--reader-visible-width) - var(--reader-edge) - var(--reader-edge)));
     max-height: min(660px, calc(var(--reader-visible-height) - 104px));
     flex-direction: column;
     overflow: hidden;
@@ -173,7 +176,7 @@ export const readerStyles = `
 
   .reader-caution { margin: 7px 0 0; color: #766e73; font-size: 10px; }
   .reader-shell[data-theme="dark"] .reader-caution { color: #c0b6bd; }
-  .reader-learning { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 16px 0; }
+  .reader-learning { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 16px 14px; }
   .reader-learning button, .reader-copy {
     min-height: 36px; padding: 6px 9px; border: 1px solid #dfd2d8; border-radius: 8px;
     background: transparent; color: #781632; cursor: pointer; font-size: 11px; line-height: 1.3;
@@ -265,8 +268,9 @@ export const readerStyles = `
   .selection-action .reader-mark { width: 18px; height: 18px; font-size: 12px; }
 
   @media (max-width: 600px) {
-    .reader-launcher { right: max(12px, env(safe-area-inset-right)); bottom: calc(var(--reader-bottom-clearance) + max(12px, env(safe-area-inset-bottom))); min-height: 42px; padding-inline: 13px; }
-    .reader-panel { right: max(12px, env(safe-area-inset-right)); bottom: calc(var(--reader-bottom-clearance) + max(12px, env(safe-area-inset-bottom))); width: min(440px, calc(100vw - 24px)); max-height: calc(var(--reader-visible-height) - 24px); border-radius: 15px; }
+    .reader-shell { --reader-edge: max(12px, env(safe-area-inset-left), env(safe-area-inset-right)); }
+    .reader-launcher { bottom: calc(var(--reader-bottom-clearance) + max(12px, env(safe-area-inset-bottom))); min-height: 42px; padding-inline: 13px; }
+    .reader-panel { bottom: calc(var(--reader-bottom-clearance) + max(12px, env(safe-area-inset-bottom))); width: min(440px, calc(var(--reader-visible-width) - var(--reader-edge) - var(--reader-edge))); max-height: calc(var(--reader-visible-height) - 24px); border-radius: 15px; }
     .reader-panel[data-launch-origin="launcher"] { bottom: calc(var(--reader-bottom-clearance) + max(64px, calc(env(safe-area-inset-bottom) + 60px))); max-height: calc(var(--reader-visible-height) - 80px); }
     .reader-header { padding: 14px 14px 11px; }
     .reader-privacy { padding-inline: 14px; }
@@ -282,6 +286,11 @@ export const readerStyles = `
   .reader-shell[data-compact="true"] .reader-header { padding-block: 8px; }
   .reader-shell[data-compact="true"] .reader-header-note { display: none; }
   .reader-shell[data-compact="true"] .reader-source { position: static; }
+
+  @media (pointer: coarse) {
+    .reader-panel button, .reader-launcher, .selection-action { min-height: 44px; min-width: 44px; }
+    .reader-panel textarea { font-size: 16px; }
+  }
 
   @media (prefers-reduced-motion: reduce) {
     .reader-launcher { transition: none; }

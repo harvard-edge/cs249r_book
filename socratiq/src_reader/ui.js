@@ -20,7 +20,7 @@ const LEARNING_QUESTIONS = {
  * prior turns only; the current `question` is passed separately. Each history
  * item has the shape `{ role: 'user' | 'assistant', content: string }`.
  */
-export function mountReader({ captureSelection, requestExplanation }) {
+export function mountReader({ captureSelection, requestExplanation, onRevealSource }) {
   if (typeof captureSelection !== 'function' || typeof requestExplanation !== 'function') {
     throw new TypeError('mountReader requires captureSelection and requestExplanation functions.');
   }
@@ -65,17 +65,17 @@ export function mountReader({ captureSelection, requestExplanation }) {
           <p class="reader-quote"></p>
           <p class="reader-caution">AI explanations can be wrong. Check them against the source.</p>
         </section>
+        <div class="reader-instruction">
+          <strong>Select a passage to begin.</strong>
+          Highlight text in the book, then choose “Explain this” or press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>E</kbd>.
+        </div>
+        <div class="reader-thread" role="log" aria-label="Explanation conversation" aria-live="off"></div>
         <div class="reader-learning" role="group" aria-label="Learning actions" hidden>
           <button type="button" data-learning="simplify">Simplify</button>
           <button type="button" data-learning="example">Show an example</button>
           <button type="button" data-learning="check">Check my understanding</button>
           <button type="button" class="reader-reset">Start over</button>
         </div>
-        <div class="reader-instruction">
-          <strong>Select a passage to begin.</strong>
-          Highlight text in the book, then choose “Explain this” or press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>E</kbd>.
-        </div>
-        <div class="reader-thread" role="log" aria-label="Explanation conversation" aria-live="off"></div>
       </div>
       <p class="reader-status" role="status" aria-live="polite"></p>
       <div class="reader-error" role="alert" hidden>
@@ -160,6 +160,14 @@ export function mountReader({ captureSelection, requestExplanation }) {
     input.focus({ preventScroll: true });
   });
   closeButton.addEventListener('click', closePanel);
+  sourceLink.addEventListener('click', event => {
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    if (typeof onRevealSource !== 'function' || !activeSource) return;
+    if (onRevealSource(activeSource)) {
+      event.preventDefault();
+      closePanel({restoreFocus: false});
+    }
+  });
   stopButton.addEventListener('click', () => stopRequest('Response stopped.'));
   retryButton.addEventListener('click', () => {
     if (!lastFailedQuestion || !activeSource) return;
@@ -206,19 +214,24 @@ export function mountReader({ captureSelection, requestExplanation }) {
     selectionButton.hidden = true;
     updateComposerState();
     requestAnimationFrame(() => {
-      if (!panel.hidden && activeSource) input.focus({ preventScroll: true });
+      if (!panel.hidden && activeSource) {
+        // Reading an explanation on touch should not open the software keyboard.
+        const target = !input.disabled && !window.matchMedia('(pointer: coarse)').matches
+          ? input : shell.querySelector('.reader-body');
+        target.focus({ preventScroll: true });
+      }
       else if (!panel.hidden) closeButton.focus({ preventScroll: true });
     });
   }
 
-  function closePanel() {
+  function closePanel({restoreFocus = true} = {}) {
     if (panel.hidden) return;
     stopRequest('Response stopped because the reader was closed.');
     panel.hidden = true;
     launcher.hidden = false;
     launcher.setAttribute('aria-expanded', 'false');
     selectionButton.hidden = true;
-    requestAnimationFrame(() => launcher.focus({ preventScroll: true }));
+    if (restoreFocus) requestAnimationFrame(() => launcher.focus({ preventScroll: true }));
   }
 
   function handleEscape(event) {
@@ -281,8 +294,8 @@ export function mountReader({ captureSelection, requestExplanation }) {
         return;
       }
       pendingSource = source;
-      positionSelectionAction(source.rect);
       selectionButton.hidden = false;
+      positionSelectionAction(source.rect);
     } catch (error) {
       pendingSource = null;
       hideSelectionAction();
@@ -306,8 +319,8 @@ export function mountReader({ captureSelection, requestExplanation }) {
     const topEdge = viewport?.offsetTop ?? 0;
     const width = viewport?.width ?? window.innerWidth;
     const height = viewport?.height ?? window.innerHeight;
-    const buttonWidth = 144;
-    const buttonHeight = 42;
+    const buttonWidth = selectionButton.offsetWidth || 144;
+    const buttonHeight = selectionButton.offsetHeight || 44;
     const selectionLeft = Number(rect.left ?? rect.x ?? 0);
     const selectionTop = Number(rect.top ?? rect.y ?? 0);
     const selectionWidth = Number(rect.width ?? Math.max(0, Number(rect.right) - selectionLeft));
@@ -339,6 +352,8 @@ export function mountReader({ captureSelection, requestExplanation }) {
     const url = safeSourceUrl(source.url);
     const heading = String(source.section || source.title || 'Textbook passage');
     sourceLink.textContent = heading;
+    sourceLink.setAttribute('aria-label', `Return to passage: ${heading}`);
+    sourceLink.title = 'Return to this passage in the book';
     if (url) {
       sourceLink.href = url;
       sourceLink.hidden = false;
@@ -578,7 +593,11 @@ export function mountReader({ captureSelection, requestExplanation }) {
     const visibleHeight = viewport?.height ?? window.innerHeight;
     const visibleBottom = (viewport?.offsetTop ?? 0) + visibleHeight;
     const bottomClearance = Math.max(0, window.innerHeight - visibleBottom);
+    const visibleWidth = viewport?.width ?? window.innerWidth;
+    const visibleRight = (viewport?.offsetLeft ?? 0) + visibleWidth;
     host.style.setProperty('--reader-visible-height', `${visibleHeight}px`);
+    host.style.setProperty('--reader-visible-width', `${visibleWidth}px`);
+    host.style.setProperty('--reader-right-clearance', `${Math.max(0, window.innerWidth - visibleRight)}px`);
     host.style.setProperty('--reader-bottom-clearance', `${bottomClearance}px`);
     shell.dataset.compact = String(visibleHeight < 540);
   }
