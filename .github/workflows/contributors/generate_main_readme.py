@@ -18,6 +18,10 @@ import re
 import sys
 from pathlib import Path
 
+
+# Listed first in every contributor table.
+MAINTAINER_LOGIN = "profvjreddi"
+
 # Local import: projects.py sits next to this file.
 sys.path.insert(0, str(Path(__file__).parent))
 from projects import projects as get_projects  # noqa: E402
@@ -86,11 +90,11 @@ def generate_contributor_table(contributors: list, show_badges: bool = True, col
     if not contributors:
         return "<p><em>Coming soon!</em></p>"
 
-    # Sort by contribution count (most contributions first)
+    # The maintainer leads each table; everyone else follows by number of
+    # contribution types (most first), ties keeping the config order.
     sorted_contributors = sorted(
         contributors,
-        key=lambda c: len(c.get("contributions", [])),
-        reverse=True
+        key=lambda c: (c.get("login") != MAINTAINER_LOGIN, -len(c.get("contributions", []))),
     )
 
     # Calculate width percentage based on columns

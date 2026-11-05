@@ -423,7 +423,7 @@ Barroso, Hölzle, and Clidaras give a firsthand account of how one organization 
 
 <br>
 
-Yes, and I would rather say so plainly than leave readers to guess. I use AI tools to write code and the checks that test it, to survey the literature before I read the papers myself, to draft passages that I then rewrite, and to audit four volumes for consistency. I use them on the companions as well, from TinyTorch and the labs to the slides and the StaffML question bank. The tools take on mechanical work, which leaves my time for the parts that need a teacher: what to include, how to explain it, and whether it is right.
+Yes, and I would rather say so plainly than leave readers to guess. I use generative AI tools to write code and the checks that test it, to survey the literature before I read the papers myself, to draft passages that I then rewrite, to help produce figures that I once drew by hand, and to audit four volumes for consistency. I use them on the companions as well, from TinyTorch and the labs to the slides and the StaffML question bank. They are also how I learn a new area quickly. The tools take on mechanical work, which leaves my time for the parts that need a teacher: what to include, how to explain it, and whether it is right.
 
 A tool can write text that sounds right and is wrong, so I do not take its output on trust. I check the work in ways that do not depend on the tool. Every number in the books is computed by code that ships with the text. Automated checks test units, cross-references, notation, and citations whenever something changes. Engineers who build these systems review the chapters, and students test them in class. In StaffML, each question records whether it began as a machine draft and whether a person has reviewed it.
 
@@ -463,20 +463,20 @@ The textbook is released under a Creative Commons license ([CC BY-NC-ND 4.0](htt
 
 ## Support This Work
 
-<div align="center">
+If this curriculum has helped you, there are two simple ways to help it grow.
 
-<a href="https://github.com/harvard-edge/cs249r_book/stargazers"><img src="https://img.shields.io/github/stars/harvard-edge/cs249r_book?style=for-the-badge&logo=github&color=gold" alt="Stars"></a>
-&nbsp;&nbsp;
-<a href="https://opencollective.com/mlsysbook"><img src="https://img.shields.io/badge/Fund-Open%20Collective-blue.svg?style=for-the-badge&logo=open-collective" alt="Open Collective"></a>
-
-</div>
+<p align="center">
+  <a href="https://github.com/harvard-edge/cs249r_book/stargazers"><img src="https://img.shields.io/github/stars/harvard-edge/cs249r_book?style=for-the-badge&logo=github&color=gold" alt="Stars"></a>
+  &nbsp;&nbsp;
+  <a href="https://opencollective.com/mlsysbook"><img src="https://img.shields.io/badge/Fund-Open%20Collective-blue.svg?style=for-the-badge&logo=open-collective" alt="Open Collective"></a>
+</p>
 
 <table width="100%" style="width:100%">
   <tbody>
     <tr>
-      <td width="50%" align="center">
+      <td width="50%" align="center" valign="top">
         <b>Star the repository</b><br>
-        Stars help show universities and foundations that this work matters, and their support funds workshops and hardware kits for classrooms that cannot buy them.<br><br>
+        A star takes one click and sends a signal. It shows universities and foundations that this work matters, and their support pays for workshops and hardware kits in classrooms that could not otherwise afford them.<br><br>
         <a href="https://star-history.com/#harvard-edge/cs249r_book&Date">
           <picture>
             <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=harvard-edge/cs249r_book&type=date&theme=dark&legend=top-left">
@@ -485,9 +485,9 @@ The textbook is released under a Creative Commons license ([CC BY-NC-ND 4.0](htt
           </picture>
         </a>
       </td>
-      <td width="50%" align="center">
-        <b>Fund the mission</b><br>
-        Contributions go to <a href="https://opencollective.com/mlsysbook">Open Collective</a>, a transparent fund for educational outreach, where every expense is public.<br><br>
+      <td width="50%" align="center" valign="top">
+        <b>Fund the work</b><br>
+        Contributions go to <a href="https://opencollective.com/mlsysbook">Open Collective</a>, a transparent fund for educational outreach where every expense is public. The money goes back into the work: reaching more students and improving the material they learn from.<br><br>
         <a href="https://opencollective.com/mlsysbook"><img src="https://opencollective.com/mlsysbook/tiers/badge.svg" alt="Open Collective"></a>
       </td>
     </tr>
@@ -502,49 +502,58 @@ The textbook is released under a Creative Commons license ([CC BY-NC-ND 4.0](htt
   <thead>
     <tr>
       <th width="5%"></th>
-      <th width="40%">I want to...</th>
-      <th width="55%">Go here</th>
+      <th width="20%">Area</th>
+      <th width="50%">What you can do</th>
+      <th width="25%">Where to start</th>
     </tr>
   </thead>
   <tbody>
     <tr>
       <td align="center">📖</td>
-      <td><b>Fix a typo or improve a chapter</b></td>
-      <td><a href="binder/docs/CONTRIBUTING.md">Textbook contributing guide</a></td>
+      <td><b>Textbook</b></td>
+      <td>Fix an error, clarify an explanation, or suggest material for any chapter.</td>
+      <td><a href="binder/docs/CONTRIBUTING.md">Textbook guide</a></td>
     </tr>
     <tr>
       <td align="center">🔥</td>
-      <td><b>Add a TinyTorch module or fix a bug</b></td>
-      <td><a href="tinytorch/CONTRIBUTING.md">TinyTorch contributing guide</a></td>
+      <td><b>TinyTorch</b></td>
+      <td>Add a module, fix a bug, or improve the tests and documentation.</td>
+      <td><a href="tinytorch/CONTRIBUTING.md">TinyTorch guide</a></td>
     </tr>
     <tr>
       <td align="center">🛠️</td>
-      <td><b>Improve the hardware kits</b></td>
-      <td><a href="kits/README.md">Hardware kits guide</a></td>
+      <td><b>Hardware Kits</b></td>
+      <td>Improve the deployment guides for Arduino, Seeed, Grove, and Raspberry Pi devices.</td>
+      <td><a href="kits/README.md">Kits guide</a></td>
     </tr>
     <tr>
       <td align="center">🔬</td>
-      <td><b>Improve the labs or simulator models</b></td>
+      <td><b>Labs and MLSys·im</b></td>
+      <td>Improve the interactive labs or the simulator&#39;s hardware and model data.</td>
       <td><a href="labs/README.md">Labs guide</a> · <a href="mlsysim/README.md">MLSys·im guide</a></td>
     </tr>
     <tr>
       <td align="center">💼</td>
-      <td><b>Improve assessment or interview content</b></td>
+      <td><b>StaffML</b></td>
+      <td>Improve the systems design questions, answers, and interview practice.</td>
       <td><a href="staffml/README.md">StaffML guide</a></td>
     </tr>
     <tr>
       <td align="center">🧠</td>
-      <td><b>Improve AI learning tools</b></td>
+      <td><b>SocratiQ</b></td>
+      <td>Improve the AI tutor that adds guided reading and quizzes to the sites.</td>
       <td><a href="socratiq/README.md">SocratiQ guide</a></td>
     </tr>
     <tr>
       <td align="center">🐛</td>
       <td><b>Report an issue</b></td>
+      <td>Tell us about an error, a broken link, or something that is unclear.</td>
       <td><a href="https://github.com/harvard-edge/cs249r_book/issues">GitHub Issues</a></td>
     </tr>
     <tr>
       <td align="center">💬</td>
       <td><b>Ask a question</b></td>
+      <td>Ask about the material or share what you are building with it.</td>
       <td><a href="https://github.com/harvard-edge/cs249r_book/discussions">GitHub Discussions</a></td>
     </tr>
   </tbody>
@@ -569,7 +578,7 @@ This is a multi-component repository, and **each component is released under its
 | [TinyDigits dataset](tinytorch/LICENSE) | BSD 3-Clause | Permissive (matches sklearn ancestry). |
 | [TinyTalks dataset](tinytorch/LICENSE) | CC BY 4.0 | Permissive with attribution; commercial use allowed. |
 
-A user-facing summary lives at [mlsysbook.ai/about/license](https://mlsysbook.ai/about/license.html).
+A shorter summary for readers is at [mlsysbook.ai/about/license](https://mlsysbook.ai/about/license.html).
 
 If you are an institution considering adoption, or a company interested in commercial terms for a copyleft component, please write to [edu@tinyML.org](mailto:edu@tinyML.org).
 
@@ -862,9 +871,9 @@ These people have improved the textbooks, the software, and the teaching materia
 <table width="100%" style="width:100%">
   <tbody>
     <tr>
+      <td align="center" valign="top" width="14.29%"><a href="https://github.com/profvjreddi"><img src="https://avatars.githubusercontent.com/profvjreddi?v=4?s=50" width="50px;" alt="Vijay Janapa Reddi"/><br /><sub><b>Vijay Janapa Reddi</b></sub></a><br />🎨 ✍️ 🧠</td>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/Shashank-Tripathi-07"><img src="https://avatars.githubusercontent.com/u/178375647?v=4?v=4?s=50" width="50px;" alt="Rocky"/><br /><sub><b>Rocky</b></sub></a><br />🪲 🧑‍💻 🎨 🧪 🛠️</td>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/farhan523"><img src="https://avatars.githubusercontent.com/u/62025759?v=4?v=4?s=50" width="50px;" alt="Farhan Asghar"/><br /><sub><b>Farhan Asghar</b></sub></a><br />🪲 🧑‍💻 🎨 ✍️ 🧪</td>
-      <td align="center" valign="top" width="14.29%"><a href="https://github.com/profvjreddi"><img src="https://avatars.githubusercontent.com/profvjreddi?v=4?s=50" width="50px;" alt="Vijay Janapa Reddi"/><br /><sub><b>Vijay Janapa Reddi</b></sub></a><br />🎨 ✍️ 🧠</td>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/pelinbalci"><img src="https://avatars.githubusercontent.com/u/26349040?v=4?v=4?s=50" width="50px;" alt="Pelin Balcı"/><br /><sub><b>Pelin Balcı</b></sub></a><br />🎨 🧠 🧪</td>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/torrresagus"><img src="https://avatars.githubusercontent.com/u/69726650?v=4?v=4?s=50" width="50px;" alt="Agustin Torres"/><br /><sub><b>Agustin Torres</b></sub></a><br />🪲 🧑‍💻 ✍️</td>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/DIYA73"><img src="https://avatars.githubusercontent.com/u/174887077?v=4?v=4?s=50" width="50px;" alt="didi"/><br /><sub><b>didi</b></sub></a><br />🧑‍💻 🎨</td>
@@ -911,9 +920,9 @@ These people have improved the textbooks, the software, and the teaching materia
 <table width="100%" style="width:100%">
   <tbody>
     <tr>
+      <td align="center" valign="top" width="14.29%"><a href="https://github.com/profvjreddi"><img src="https://avatars.githubusercontent.com/profvjreddi?v=4?s=50" width="50px;" alt="Vijay Janapa Reddi"/><br /><sub><b>Vijay Janapa Reddi</b></sub></a><br />🧑‍💻 🎨 ✍️</td>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/Shashank-Tripathi-07"><img src="https://avatars.githubusercontent.com/u/178375647?v=4?v=4?s=50" width="50px;" alt="Rocky"/><br /><sub><b>Rocky</b></sub></a><br />🪲 🧑‍💻 🎨 ✍️ 🧪</td>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/farhan523"><img src="https://avatars.githubusercontent.com/u/62025759?v=4?v=4?s=50" width="50px;" alt="Farhan Asghar"/><br /><sub><b>Farhan Asghar</b></sub></a><br />🪲 🧑‍💻 🎨 ✍️</td>
-      <td align="center" valign="top" width="14.29%"><a href="https://github.com/profvjreddi"><img src="https://avatars.githubusercontent.com/profvjreddi?v=4?s=50" width="50px;" alt="Vijay Janapa Reddi"/><br /><sub><b>Vijay Janapa Reddi</b></sub></a><br />🧑‍💻 🎨 ✍️</td>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/aadityansha06"><img src="https://avatars.githubusercontent.com/u/96714228?v=4?v=4?s=50" width="50px;" alt="Aadityansha "/><br /><sub><b>Aadityansha </b></sub></a><br />🪲 🧑‍💻 🧪</td>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/asgalon"><img src="https://avatars.githubusercontent.com/u/45242704?v=4?v=4?s=50" width="50px;" alt="Peter Koellner"/><br /><sub><b>Peter Koellner</b></sub></a><br />🪲 🧑‍💻</td>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/salmanmkc"><img src="https://avatars.githubusercontent.com/u/32169182?v=4?v=4?s=50" width="50px;" alt="Salman Chishti"/><br /><sub><b>Salman Chishti</b></sub></a><br />🧑‍💻</td>
@@ -936,8 +945,8 @@ These people have improved the textbooks, the software, and the teaching materia
 <table width="100%" style="width:100%">
   <tbody>
     <tr>
-      <td align="center" valign="top" width="14.29%"><a href="https://github.com/Shashank-Tripathi-07"><img src="https://avatars.githubusercontent.com/u/178375647?v=4?v=4?s=50" width="50px;" alt="Rocky"/><br /><sub><b>Rocky</b></sub></a><br />🪲 🧑‍💻 🎨 ✍️</td>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/profvjreddi"><img src="https://avatars.githubusercontent.com/profvjreddi?v=4?s=50" width="50px;" alt="Vijay Janapa Reddi"/><br /><sub><b>Vijay Janapa Reddi</b></sub></a><br />🧑‍💻 🎨 ✍️</td>
+      <td align="center" valign="top" width="14.29%"><a href="https://github.com/Shashank-Tripathi-07"><img src="https://avatars.githubusercontent.com/u/178375647?v=4?v=4?s=50" width="50px;" alt="Rocky"/><br /><sub><b>Rocky</b></sub></a><br />🪲 🧑‍💻 🎨 ✍️</td>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/farhan523"><img src="https://avatars.githubusercontent.com/u/62025759?v=4?v=4?s=50" width="50px;" alt="Farhan Asghar"/><br /><sub><b>Farhan Asghar</b></sub></a><br />🪲 🧑‍💻 🎨</td>
     </tr>
   </tbody>
@@ -957,9 +966,9 @@ These people have improved the textbooks, the software, and the teaching materia
 <table width="100%" style="width:100%">
   <tbody>
     <tr>
+      <td align="center" valign="top" width="14.29%"><a href="https://github.com/profvjreddi"><img src="https://avatars.githubusercontent.com/profvjreddi?v=4?s=50" width="50px;" alt="Vijay Janapa Reddi"/><br /><sub><b>Vijay Janapa Reddi</b></sub></a><br />🧑‍💻 🎨 ✍️</td>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/farhan523"><img src="https://avatars.githubusercontent.com/u/62025759?v=4?v=4?s=50" width="50px;" alt="Farhan Asghar"/><br /><sub><b>Farhan Asghar</b></sub></a><br />🪲 🧑‍💻 🎨 ✍️ 🧪</td>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/Shashank-Tripathi-07"><img src="https://avatars.githubusercontent.com/u/178375647?v=4?v=4?s=50" width="50px;" alt="Rocky"/><br /><sub><b>Rocky</b></sub></a><br />🪲 🧑‍💻 🎨 ✍️ 🔎</td>
-      <td align="center" valign="top" width="14.29%"><a href="https://github.com/profvjreddi"><img src="https://avatars.githubusercontent.com/profvjreddi?v=4?s=50" width="50px;" alt="Vijay Janapa Reddi"/><br /><sub><b>Vijay Janapa Reddi</b></sub></a><br />🧑‍💻 🎨 ✍️</td>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/coyaSONG"><img src="https://avatars.githubusercontent.com/u/66289470?v=4?v=4?s=50" width="50px;" alt="coyaSONG"/><br /><sub><b>coyaSONG</b></sub></a><br />🪲 🧑‍💻 ✍️</td>
     </tr>
   </tbody>
