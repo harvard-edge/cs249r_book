@@ -205,4 +205,3 @@ test('bounds source, question, and history input', async () => {
   await assert.rejects(request({ source: source(), question: 'x'.repeat(2_001) }), /Question exceeds/);
   await assert.rejects(request({ source: source(), question: 'Explain.', history: Array(13).fill({ role: 'user', content: 'x' }) }), /12-message limit/);
 });
-
