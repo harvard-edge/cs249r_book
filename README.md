@@ -2,9 +2,11 @@
 
 <p align="center">
   <a href="README.md">English</a> •
-  <a href="README/README_zh.md">中文 (earlier version)</a> •
-  <a href="README/README_ja.md">日本語 (earlier version)</a> •
-  <a href="README/README_ko.md">한국어 (earlier version)</a>
+  <a href="README/README_zh.md">中文</a> •
+  <a href="README/README_ja.md">日本語</a> •
+  <a href="README/README_ko.md">한국어</a>
+  <br>
+  <sub>The translations follow an earlier version of this page. Help bringing them up to date is welcome.</sub>
 </p>
 
 <div align="center">
@@ -183,7 +185,9 @@ Each volume answers a question the previous one leaves open.
 * **Vol II → Vol III, when a stateless response is not enough.** Volume II serves stateless requests at scale. Volume III adds stateful, multi-step loops that manage context memory, call tools, run in sandboxes, and recover from nondeterministic failures.
 * **Vol III → Vol IV, when software acts on the physical world.** Volume III governs software environments. Volume IV crosses into physical systems, where computational latency becomes distance traveled and a failure cannot be undone.
 
-> ⚠️ *Volumes III and IV are open drafts. I am writing them because I plan to teach agentic and physical AI systems, and writing a book is how I learn a subject well enough to teach it. Chapters are added, reorganized, and rewritten as my understanding grows, so please do not cite or teach from them yet. Feedback is welcome through the [book feedback](https://github.com/harvard-edge/cs249r_book/issues/new/choose) issue forms.*
+I am writing Volumes III and IV because I plan to teach both subjects, and because they are where machine learning systems are heading. The progression is a natural one. Volumes I and II run in an open loop, where a request goes in and a response comes out. Volume III closes the loop in software, where an agent acts, observes the result, and acts again. Volume IV closes it through the physical world. Writing a book is how I learn a subject well enough to teach it.
+
+> ⚠️ *Volumes III and IV are open drafts. Chapters are added, reorganized, and rewritten as my understanding grows, so please do not cite or teach from them yet. Feedback is welcome through the [book feedback](https://github.com/harvard-edge/cs249r_book/issues/new/choose) issue forms.*
 
 ---
 
@@ -398,11 +402,11 @@ Barroso, Hölzle, and Clidaras give a firsthand account of how one organization 
 
 <br>
 
-Yes, and for much of the work. I use them to write code and the checks that test it, to survey the literature before I read the papers myself, to draft passages that I then rewrite, and to audit four volumes for consistency. I use them on the companions as well, from TinyTorch and the labs to the slides and the StaffML question bank. Without these tools, I could not build a curriculum of this size alongside full-time teaching and research.
+Yes, and I would rather say so plainly than leave readers to guess. I use AI tools to write code and the checks that test it, to survey the literature before I read the papers myself, to draft passages that I then rewrite, and to audit four volumes for consistency. I use them on the companions as well, from TinyTorch and the labs to the slides and the StaffML question bank. The tools take on mechanical work, which leaves my time for the parts that need a teacher: what to include, how to explain it, and whether it is right.
 
 A tool can write text that sounds right and is wrong, so I do not take its output on trust. Every number in the books is computed by code that ships with the text. Automated checks test units, cross-references, notation, and citations whenever something changes. Engineers who build these systems review the chapters, and students test them in class. In StaffML, each question records whether it began as a machine draft and whether a person has reviewed it.
 
-I researched, wrote, and rewrote every chapter. The decisions about what goes in, what stays out, and how an idea is taught are mine, and so is every mistake. If you find one, the [book feedback](https://github.com/harvard-edge/cs249r_book/issues/new/choose) forms send it straight to me.
+I researched, wrote, and rewrote every chapter. The decisions about what goes in, what stays out, and how an idea is taught are mine, and so is every mistake. Because all of the work is open, anyone can check it, and the [book feedback](https://github.com/harvard-edge/cs249r_book/issues/new/choose) forms send what you find straight to me.
 
 Volumes III and IV have not yet been through the classroom or practitioner review, which is why they are marked as drafts. Each volume includes a full [Note on AI Assistance](https://mlsysbook.ai/vol1/frontmatter/ai_use.html).
 
@@ -419,7 +423,7 @@ What a textbook provides is perspective and a coherent mental model: the order i
 
 Bruce Davie made this point in his essay [“Textbooks in Tokenland”](https://systemsapproach.org/2026/06/01/textbooks-in-tokenland/) (Systems Approach). A language model generates text without communicative intent, he writes, while a textbook is a deliberate path from a teacher to a student toward a shared understanding of how the world works.
 
-The two are not in opposition. The book provides the structure and the quantitative argument, and interactive tools such as the Marimo labs let a reader ask questions and test understanding.
+The two are not in opposition. The book provides the structure and the quantitative argument, and interactive tools let a reader test that understanding. The Marimo labs ask a reader to predict an outcome and then check it, and the SocratiQ tutor answers questions about the page being read.
 
 </details>
 
@@ -966,6 +970,6 @@ These people have improved the textbooks, the software, and the teaching materia
 
 <b><a href="https://buttondown.email/mlsysbook">✉️ Subscribe</a> • <a href="https://github.com/harvard-edge/cs249r_book/discussions">💬 Join discussions</a> • <a href="https://mlsysbook.ai/">🌐 Visit mlsysbook.ai</a></b>
 
-<b>Made with ❤️ for AI engineers</b><br>
-<i>in the making, around the world</i> 🌎
+<b>Made with ❤️ for AI engineers in the making, around the world 🌎</b><br>
+<i>If this material helped you, pass it on to the next curious student.</i>
 </div>
