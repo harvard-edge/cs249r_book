@@ -52,7 +52,7 @@
 
 **AI engineering** is the discipline of building efficient, reliable, and safe intelligent systems that operate in the real world, not models in isolation. It deserves a place alongside software engineering and computer engineering, and this curriculum teaches it the way computer architecture has long been taught, from first principles and with numbers a student can recompute.
 
-Those numbers come from constraints. A model that scores well on a benchmark still has to fit in memory, meet a latency budget, stay within a power limit, and fail safely in front of real people. Those constraints decide the architecture, and they follow laws that outlast any framework or chip. Memory bandwidth, network latency, energy, and failure rates govern a microcontroller with 256 KB of memory and an accelerator in a datacenter alike, even though the two differ in scale by many orders of magnitude. I learned this while working on TinyML at Google, and it became the idea that runs through every volume: **constraints drive architecture.**
+Those numbers come from constraints. A model that scores well on a benchmark still has to fit in memory, meet a latency budget, stay within a power limit, and fail safely in front of real people. These constraints decide the architecture, and they follow laws that outlast any framework or chip. Memory bandwidth, network latency, energy, and failure rates govern a microcontroller with 256 KB of memory and an accelerator in a datacenter alike, even though the two differ in scale by many orders of magnitude. I learned this while working on TinyML at Google, and it became the idea that runs through every volume: **constraints drive architecture.**
 
 Teaching AI engineering this way takes more than a book, which is why everything lives in one repository. Each part teaches something the others cannot. Students who only read do not internalize, and students who only code do not generalize. The textbook builds the mental model, TinyTorch makes it concrete by having students build the machinery themselves, and the hardware kits and the MLSys·im simulator show where the model breaks, on devices students can hold and at scales beyond any one lab.
 
@@ -295,7 +295,7 @@ Two earlier-stage experiments also live here. [SocratiQ](socratiq/README.md) is 
 No chapter is written once. Each one goes through a cycle that repeats as the field changes.
 
 1. **Watch the field.** I follow the research and industry venues where new work appears: ISCA, MICRO, HPCA, ASPLOS, ISPASS, MLSys, NeurIPS, ICML, ICLR, Hot Chips, and industry summits.
-2. **Distill.** A chapter keeps the principles and leaves out the variations. Quantization, for example, has been implemented in dozens of ways, and a student needs the principles that explain all of them. To decide what belongs, I use a test that David Patterson, who wrote the foreword to Volume I, gave me. A technique earns a place only when several companies use it in practice. That test ties the material to systems that exist, so what a student learns connects to systems in production.
+2. **Distill.** A chapter keeps the principles and leaves out the variations. Quantization, for example, has been implemented in dozens of ways, and a student needs the principles that explain all of them. To decide what belongs, I use a test that David Patterson, who wrote the foreword to Volume I, gave me. A technique earns a place only when several companies use it in practice. That test ties the material to systems in production, so what a student learns carries over to practice.
 3. **Review with practitioners.** I review chapters one-on-one with the engineers who build these systems inside large companies, from hyperscale infrastructure engineers to model developers. Practitioners at Arm, Google, Intel, Meta, Microsoft, Qualcomm, STMicroelectronics, and other organizations have reviewed the material, and academic reviewers in Europe, Asia, and the Americas have tested it against their own research and teaching.
 4. **Teach it.** Volume I has been taught at Harvard through CS249r since 2023 and adopted by instructors at UC Berkeley, Columbia, Georgia Tech, IIT Bombay, and universities across Europe, Latin America, Africa, and Asia. The classroom shows where students get stuck.
 5. **Revise.** Reader issues, reviewer notes, and classroom experience go back into the next draft.
@@ -319,7 +319,7 @@ Responsible AI entered the book the same way, at the urging of engineers in indu
 
 When I began teaching machine learning systems, there was no textbook for the course. Books covered the models, and papers covered individual systems, but nothing taught the infrastructure underneath them as one subject. The field was changing too quickly for anyone to have written one. So I started writing it myself, because I have always learned best by building from scratch and teaching others.
 
-When I want to understand an emerging or complex systems area, writing about it and writing code for it forces me to slow down. It forces me to find the core invariants, work through the math, and separate what is fundamentally true about physics and hardware from what is merely current.
+When I want to understand an emerging or complex systems area, writing about it and writing code for it force me to slow down. They force me to find the core invariants, work through the math, and separate what is fundamentally true about physics and hardware from what is merely current.
 
 This repository is my open workshop and teaching lab. It is where I work out ideas for my students at Harvard, my research lab, and open benchmarking efforts like MLPerf. Volumes III and IV are that process happening in public.
 
@@ -382,7 +382,7 @@ MLOps books, such as Chip Huyen's *Designing Machine Learning Systems*, focus on
 
 This curriculum focuses on what lies underneath: the hardware limits, quantitative trade-offs, and first principles that explain why those tools are designed as they are, and the limits no tool escapes, such as memory bandwidth, network latency, energy, and failure rates.
 
-The difference resembles that between a recipe and an understanding of how heat, salt, fat, and time interact. A recipe works until the oven changes or the batch grows tenfold. Understanding the chemistry lets a cook work in any kitchen, fix a dish that went wrong, and invent new ones.
+It is the difference between a recipe and an understanding of how heat, salt, fat, and time interact. A recipe works until the oven changes or the batch grows tenfold. Understanding the chemistry lets a cook work in any kitchen, fix a dish that went wrong, and invent new ones.
 
 </details>
 
