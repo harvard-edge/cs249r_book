@@ -164,6 +164,16 @@ export const readerStyles = `
 
   .reader-body { min-height: 0; flex: 1 1 auto; overflow: auto; overscroll-behavior: contain; }
   .reader-body:focus-visible { outline: 2px solid #d88ea4; outline-offset: -2px; }
+  .reader-sessions { display: flex; align-items: center; gap: 8px; padding: 8px 16px; font-size: 12px; }
+  .reader-session-select { min-width: 0; flex: 1; height: 44px; min-height: 44px; max-width: 100%; font: inherit; color: inherit; background-color: transparent; border: 1px solid #b9a8b0; border-radius: 8px; padding: 6px 26px 6px 6px; appearance: none; -webkit-appearance: none; background-image: linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%); background-position: calc(100% - 14px) center, calc(100% - 9px) center; background-size: 5px 5px; background-repeat: no-repeat; }
+  .reader-picker { position: fixed; right: calc(var(--reader-right-clearance) + var(--reader-edge)); bottom: calc(var(--reader-bottom-clearance) + 12px); width: min(440px, calc(var(--reader-visible-width) - var(--reader-edge) - var(--reader-edge))); padding: 12px; background: #fffdfd; color: #272329; border: 1px solid #b9a8b0; border-radius: 12px; box-shadow: 0 5px 20px #0003; pointer-events: auto; }
+  .reader-picker p { margin: 0 0 8px; }
+  .reader-picker button, .reader-instruction button { min-height: 44px; padding: 6px 12px; font: inherit; color: #781632; background: #fffdfd; border: 1px solid #b9a8b0; border-radius: 8px; cursor: pointer; }
+  .reader-instruction button { margin-top: 12px; }
+  .reader-shell[data-theme="dark"] .reader-picker,
+  .reader-shell[data-theme="dark"] .reader-picker button,
+  .reader-shell[data-theme="dark"] .reader-instruction button { background: #211e22; color: #f5f0f2; }
+  .reader-picker button:focus-visible, .reader-session-select:focus-visible { outline: 3px solid #d88ea4; outline-offset: 2px; }
   .reader-source { position: sticky; top: 0; z-index: 1; padding: 13px 16px 12px; border-bottom: 1px solid #eee7e9; background: #fffdfd; }
   .reader-shell[data-theme="dark"] .reader-source { background: #211e22; }
   .reader-shell[data-theme="dark"] .reader-source { border-color: #3d373d; }
@@ -290,6 +300,7 @@ export const readerStyles = `
   @media (pointer: coarse) {
     .reader-panel button, .reader-launcher, .selection-action { min-height: 44px; min-width: 44px; }
     .reader-panel textarea { font-size: 16px; }
+    .reader-session-select { font-size: 16px; }
   }
 
   @media (prefers-reduced-motion: reduce) {

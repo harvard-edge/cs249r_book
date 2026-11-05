@@ -1,8 +1,10 @@
 import { completeReaderStyles } from './styles.js';
 import { renderSafeMarkdown } from './render.js';
+import { createParagraphPicker } from './picker.js';
 
 const MAX_HISTORY_MESSAGES = 12;
 const MAX_VISIBLE_TURNS = 12;
+const MAX_PASSAGE_SESSIONS = 5;
 const INITIAL_QUESTION = 'Explain this passage.';
 const LEARNING_QUESTIONS = {
   simplify: 'Explain this passage in simpler language, defining any essential technical terms.',
@@ -20,7 +22,7 @@ const LEARNING_QUESTIONS = {
  * prior turns only; the current `question` is passed separately. Each history
  * item has the shape `{ role: 'user' | 'assistant', content: string }`.
  */
-export function mountReader({ captureSelection, requestExplanation, onRevealSource }) {
+export function mountReader({ captureSelection, captureParagraph, requestExplanation, onRevealSource }) {
   if (typeof captureSelection !== 'function' || typeof requestExplanation !== 'function') {
     throw new TypeError('mountReader requires captureSelection and requestExplanation functions.');
   }
@@ -57,6 +59,9 @@ export function mountReader({ captureSelection, requestExplanation, onRevealSour
           <span aria-hidden="true">×</span>
         </button>
       </header>
+      <label class="reader-sessions" hidden>Recent passages
+        <select class="reader-session-select" aria-label="Recent passages"></select>
+      </label>
       <p class="reader-privacy">The selected passage and surrounding section are sent for AI explanation when you ask.</p>
       <div class="reader-body" role="region" aria-label="Selected passage and answers" tabindex="0">
         <section class="reader-source" aria-label="Selected source" hidden>
@@ -68,13 +73,16 @@ export function mountReader({ captureSelection, requestExplanation, onRevealSour
         <div class="reader-instruction">
           <strong>Select a passage to begin.</strong>
           Highlight text in the book, then choose “Explain this” or press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>E</kbd>.
+          <button class="reader-choose" type="button">Choose a paragraph</button>
         </div>
         <div class="reader-thread" role="log" aria-label="Explanation conversation" aria-live="off"></div>
         <div class="reader-learning" role="group" aria-label="Learning actions" hidden>
+          <button class="reader-explain" type="button">Explain passage</button>
           <button type="button" data-learning="simplify">Simplify</button>
           <button type="button" data-learning="example">Show an example</button>
           <button type="button" data-learning="check">Check my understanding</button>
           <button type="button" class="reader-reset">Start over</button>
+          <button class="reader-choose" type="button">Choose another paragraph</button>
         </div>
       </div>
       <p class="reader-status" role="status" aria-live="polite"></p>
@@ -93,6 +101,9 @@ export function mountReader({ captureSelection, requestExplanation, onRevealSour
   `;
   root.appendChild(shell);
 
+  const sessionPicker = shell.querySelector('.reader-session-select');
+  const sessionControl = shell.querySelector('.reader-sessions');
+  const sessions = new Map();
   const launcher = shell.querySelector('.reader-launcher');
   const panel = shell.querySelector('.reader-panel');
   const closeButton = shell.querySelector('.reader-close');
@@ -104,6 +115,8 @@ export function mountReader({ captureSelection, requestExplanation, onRevealSour
   const learningActions = shell.querySelector('.reader-learning');
   const learningButtons = [...shell.querySelectorAll('[data-learning]')];
   const resetButton = shell.querySelector('.reader-reset');
+  const explainButton = shell.querySelector('.reader-explain');
+  const chooseButtons = [...shell.querySelectorAll('.reader-choose')];
   const thread = shell.querySelector('.reader-thread');
   const status = shell.querySelector('.reader-status');
   const errorBox = shell.querySelector('.reader-error');
@@ -119,11 +132,41 @@ export function mountReader({ captureSelection, requestExplanation, onRevealSour
   let activeSource = null;
   let history = [];
   let activeController = null;
+  let activeAnswerNode = null;
   let lastFailedQuestion = null;
   let failedUserTurn = null;
   let visibleTurns = 0;
   let selectionTimer = 0;
   let selectionActionPressed = false;
+
+  const picker = typeof captureParagraph === 'function' ? createParagraphPicker({
+    shell, host, captureParagraph,
+    onPick(source) {
+      setActiveSource(source);
+      openPanel(launcher, 'picker');
+      if (!visibleTurns) status.textContent = 'Passage ready. Choose Explain passage or ask a question.';
+    },
+    onCancel() { openPanel(launcher, 'launcher'); },
+  }) : null;
+  chooseButtons.forEach(button => {
+    button.hidden = !picker;
+    button.addEventListener('click', () => {
+      clearTimeout(selectionTimer);
+      pendingSource = null;
+      hideSelectionAction();
+      closePanel({restoreFocus: false});
+      launcher.hidden = true;
+      picker.start();
+    });
+  });
+  explainButton.addEventListener('click', () => void submitQuestion(INITIAL_QUESTION, {initial: true}));
+
+  sessionPicker.addEventListener('change', () => {
+    const saved = sessions.get(sessionPicker.value);
+    if (saved) setActiveSource(saved.source);
+    pendingSource = null;
+    hideSelectionAction();
+  });
 
   updateViewportVars();
   launcher.addEventListener('click', () => {
@@ -147,7 +190,7 @@ export function mountReader({ captureSelection, requestExplanation, onRevealSour
     setActiveSource(source);
     selectionButton.hidden = true;
     openPanel(selectionButton, 'selection');
-    void submitQuestion(INITIAL_QUESTION, { initial: true });
+    if (!history.length && !thread.childElementCount) void submitQuestion(INITIAL_QUESTION, { initial: true });
   });
 
   learningButtons.forEach(button => button.addEventListener('click', () => {
@@ -247,6 +290,7 @@ export function mountReader({ captureSelection, requestExplanation, onRevealSour
   }
 
   function handleSelectionShortcut(event) {
+    if (picker?.active) return;
     if (event.key.toLowerCase() !== 'e' || !event.ctrlKey || !event.shiftKey || event.altKey || event.metaKey) return;
     let source;
     try {
@@ -261,7 +305,7 @@ export function mountReader({ captureSelection, requestExplanation, onRevealSour
     setActiveSource(source);
     selectionButton.hidden = true;
     openPanel(launcher, 'selection');
-    void submitQuestion(INITIAL_QUESTION, { initial: true });
+    if (!history.length && !thread.childElementCount) void submitQuestion(INITIAL_QUESTION, { initial: true });
   }
 
   function stopRequest(message) {
@@ -269,6 +313,8 @@ export function mountReader({ captureSelection, requestExplanation, onRevealSour
     const controller = activeController;
     activeController = null;
     controller.abort();
+    if (activeAnswerNode?.textContent === 'Thinking…') activeAnswerNode.textContent = 'Response stopped.';
+    activeAnswerNode = null;
     stopButton.hidden = true;
     sendButton.hidden = false;
     input.disabled = !activeSource;
@@ -277,6 +323,7 @@ export function mountReader({ captureSelection, requestExplanation, onRevealSour
   }
 
   function scheduleSelectionCapture(event) {
+    if (picker?.active) return;
     if (event?.composedPath?.().includes(host)) return;
     if (selectionActionPressed) return;
     if (selectionIsInsideReader()) return;
@@ -336,11 +383,63 @@ export function mountReader({ captureSelection, requestExplanation, onRevealSour
 
   function setActiveSource(source) {
     if (!source) return;
-    const isNewSource = sourceKey(activeSource) !== sourceKey(source);
-    activeSource = source;
-    if (isNewSource) clearConversation();
-    renderSource(source);
+    pendingSource = null;
+    clearTimeout(selectionTimer);
+    const key = sourceKey(source);
+    if (key !== sourceKey(activeSource)) {
+      stopRequest('Response stopped.');
+      if (activeSource) {
+        sessions.set(sourceKey(activeSource), {
+          source: activeSource, nodes: [...thread.childNodes], history, visibleTurns,
+          draft: input.value, draftHeight: input.style.height,
+          lastFailedQuestion, failedUserTurn, status: status.textContent,
+          error: errorText.textContent, errorHidden: errorBox.hidden,
+          retryHidden: retryButton.hidden,
+          scrollTop: shell.querySelector('.reader-body').scrollTop,
+        });
+      }
+      const saved = sessions.get(key);
+      clearConversation();
+      activeSource = saved?.source || source;
+      if (saved) {
+        thread.replaceChildren(...saved.nodes);
+        history = saved.history;
+        visibleTurns = saved.visibleTurns;
+        input.value = saved.draft;
+        input.style.height = saved.draftHeight;
+        lastFailedQuestion = saved.lastFailedQuestion;
+        failedUserTurn = saved.failedUserTurn;
+        status.textContent = saved.status;
+        errorText.textContent = saved.error;
+        errorBox.hidden = saved.errorHidden;
+        retryButton.hidden = saved.retryHidden;
+        shell.querySelector('.reader-body').scrollTop = saved.scrollTop;
+      }
+      // Insertion order tracks the least recently visited inactive passage.
+      sessions.delete(key);
+      sessions.set(key, {source: activeSource});
+      while (sessions.size > MAX_PASSAGE_SESSIONS) sessions.delete(sessions.keys().next().value);
+    } else {
+      activeSource = source;
+    }
+    renderSource(activeSource);
+    renderSessionPicker();
     updateComposerState();
+  }
+
+  function renderSessionPicker() {
+    sessionControl.hidden = sessions.size < 2;
+    sessionPicker.replaceChildren();
+    for (const [key, session] of sessions) {
+      const option = document.createElement('option');
+      option.value = key;
+      const source = session.source;
+      const heading = String(source.section || source.title || 'Textbook passage').replace(/\s+/g, ' ').trim().slice(0, 45);
+      const quote = String(source.quote || '').replace(/\s+/g, ' ').trim();
+      option.textContent = `${heading} — ${quote.slice(0, 85)}${quote.length > 85 ? '…' : ''}`;
+      option.selected = key === sourceKey(activeSource);
+      sessionPicker.appendChild(option);
+    }
   }
 
   function sourceKey(source) {
@@ -397,6 +496,8 @@ export function mountReader({ captureSelection, requestExplanation, onRevealSour
 
   function updateComposerState() {
     learningActions.hidden = !activeSource;
+    explainButton.hidden = !activeSource || visibleTurns > 0;
+    explainButton.disabled = !activeSource || Boolean(activeController);
     learningButtons.forEach(button => { button.disabled = !activeSource || Boolean(activeController); });
     // Stop remains available while the input and send controls are disabled.
     composer.setAttribute('aria-disabled', String(!activeSource));
@@ -451,6 +552,7 @@ export function mountReader({ captureSelection, requestExplanation, onRevealSour
     const requestSource = activeSource;
     const controller = new AbortController();
     activeController = controller;
+    activeAnswerNode = answerNode;
     updateComposerState();
     updateViewportVars();
 
@@ -477,10 +579,7 @@ export function mountReader({ captureSelection, requestExplanation, onRevealSour
       failedUserTurn = null;
       status.textContent = 'Explanation ready.';
     } catch (error) {
-      if (controller.signal.aborted || activeController !== controller) {
-        if (answerNode.isConnected && answerNode.textContent === 'Thinking…') answerNode.textContent = 'Response stopped.';
-        return;
-      }
+      if (controller.signal.aborted || activeController !== controller) return;
       answerNode.closest('.reader-turn')?.remove();
       lastFailedQuestion = question;
       failedUserTurn = userTurn;
@@ -491,6 +590,7 @@ export function mountReader({ captureSelection, requestExplanation, onRevealSour
     } finally {
       if (activeController === controller) {
         activeController = null;
+        activeAnswerNode = null;
         stopButton.hidden = true;
         sendButton.hidden = false;
         updateComposerState();
@@ -644,6 +744,7 @@ export function mountReader({ captureSelection, requestExplanation, onRevealSour
   return {
     host,
     destroy() {
+      picker?.destroy();
       stopRequest('Response stopped.');
       clearTimeout(selectionTimer);
       document.removeEventListener('selectionchange', scheduleSelectionCapture);

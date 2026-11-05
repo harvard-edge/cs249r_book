@@ -14,6 +14,12 @@ conversation for the current passage; **Copy answer** preserves Markdown and
 source provenance in study notes. These are model-assisted learning interactions,
 not graded assessments or evidence of mastery.
 
+**Choose a paragraph** provides an opt-in tap/click alternative to text selection.
+It previews the paragraph before **Explain passage** sends a request; navigation
+links and controls retain their normal behavior. **Recent passages** restores up
+to five discussions and drafts on the current page, with separate source/history
+per discussion. These are memory-only and disappear on reload or navigation.
+
 ```bash
 cd socratiq
 npm ci
