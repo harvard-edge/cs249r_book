@@ -983,6 +983,8 @@ class ValidateCommand:
             Scope("epubcheck", "_run_epubcheck", default=False),
         ],
         "pdf": [
+            Scope("compression-contract", "_run_pdf_compression_contract", default=False,
+                  note="lossless compression preserves rendered pages and document navigation; requires PyMuPDF and pytest"),
             # Scans the built _build/pdf-volN/ artifact. Volumes come from
             # --volN (or the --path volume); with neither, vol1 and vol2.
             Scope("verify", "_run_pdf_verify"),
@@ -1699,6 +1701,16 @@ class ValidateCommand:
         issues = self._issues_from_records(volume_entrypoints.run_contract(repo_root))
         return self._result("volume-entrypoints", "Canonical volume entry points and relative includes",
                             len(volume_entrypoints.TEST_FILES), issues, start)
+
+    def _run_pdf_compression_contract(self, root: Path, **flags: bool) -> ValidationRunResult:
+        """Exercise the compressor through Binder's canonical check surface."""
+        start = time.time()
+        from cli.checks import pdf_compression
+
+        repo_root = Path(__file__).resolve().parents[3]
+        issues = self._issues_from_records(pdf_compression.run_contract(repo_root))
+        return self._result("pdf-compression-contract", "Lossless PDF preservation regression contract",
+                            len(pdf_compression.TEST_FILES), issues, start)
 
     def _run_binder_canonical(self, root: Path) -> ValidationRunResult:
         """Assert book-content pre-commit hooks dispatch through ./binder/binder."""
