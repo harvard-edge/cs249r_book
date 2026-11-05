@@ -88,7 +88,7 @@
       name.textContent = label; item.append(name, value); readout.append(item); return value;
     });
     function render(i, {stage, details}) {
-      if (!readout.isConnected) stage.append(swipe, canvas, readout);
+      if (!readout.isConnected) {stage.append(swipe, canvas); details.append(readout);}
       const s = snapshots[i], current = i > 0 && !s.staged ? BYTES[i - 1] : null;
       packet.setAttribute('visibility', 'hidden');
       headValues.forEach((n, j) => {n.textContent = s.head[j] || '·'; n.dataset.byte = s.head[j] || '';});

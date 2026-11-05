@@ -51,6 +51,7 @@ def _is_current_for_tex(intermediate: Path | None, tex_path: Path) -> bool:
     return bool(
         intermediate
         and intermediate.is_file()
+        and tex_path.is_file()
         and intermediate.stat().st_mtime_ns >= tex_path.stat().st_mtime_ns
     )
 

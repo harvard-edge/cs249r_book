@@ -105,6 +105,12 @@ def test_regenerate_auxiliary_files_uses_draft_mode(tmp_path: Path, monkeypatch)
     assert all(kwargs["cwd"] == tmp_path for _, kwargs in observed)
 
 
+def test_missing_retained_tex_does_not_crash_chapter_postrender(tmp_path):
+    aux = tmp_path / "index.aux"
+    aux.write_text("Chapter metadata")
+    assert not save_latex_log._is_current_for_tex(aux, tmp_path / "Book-Vol1.tex")
+
+
 def test_regenerate_auxiliary_files_stops_after_failed_pass(
     tmp_path: Path, monkeypatch
 ) -> None:

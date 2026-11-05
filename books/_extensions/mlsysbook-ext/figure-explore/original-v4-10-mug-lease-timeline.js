@@ -11,6 +11,15 @@
   const layer=el('svg',{viewBox:'0 0 1000 1000',width:vb.width,height:vb.height,preserveAspectRatio:'none','aria-hidden':'true'});art.append(layer);
   const scene=el('svg',{viewBox:'0 0 680 185',role:'img','aria-label':'Synchronized mechanism assembly',class:NAME+'-scene'});const proof=document.createElement('p');proof.className=NAME+'-proof';
   let mounted=false,current=0,stageNode;
+  // Repaint the exact paused frame after a width/context change, never on scroll.
+  let lastFrame=null, resizeFrame=0, resizeGeometry='';
+  const resizeObserver=new ResizeObserver(()=>{
+   cancelAnimationFrame(resizeFrame);resizeFrame=requestAnimationFrame(()=>{
+    if(!stageNode||!lastFrame||!root.isConnected)return;
+    const geometry=[root.clientWidth,stageNode.clientWidth,art.getBoundingClientRect().width,!!root.closest('dialog')].join(':');
+    if(geometry===resizeGeometry)return;resizeGeometry=geometry;draw(...lastFrame);
+   });
+  });resizeObserver.observe(root);
   const D={
   "untracked_ms": 60.0,
   "tracked_ms": 219.08902300206645,
@@ -24,6 +33,7 @@
 }
 ;const times=[0,D.untracked_ms,D.stall_ms,D.tracked_ms,D.inference_ms];
   function draw(from,to,p){
+   lastFrame=[from,to,p];
    layer.replaceChildren();root.dataset.animationProgress=String(p);
    const t=times[from]+(times[to]-times[from])*p,x=167+t*1.462,eu=D.e0_mm+D.belt_mm_ms*t,et=D.e0_mm+.5*D.slip_mm_ms2*t*t;layer.append(el('line',{x1:x,x2:x,y1:22,y2:900,stroke:'#4A5568','stroke-width':2,'stroke-dasharray':'7 5','data-motion-object':'true'}));for(const [e,c]of[[eu,'#B87333'],[et,'#007A87']])if(e<=50)layer.append(el('circle',{cx:x,cy:501.45-e*(501.45-21.4)/50,r:7,fill:c,stroke:'#fff','stroke-width':2,'data-motion-object':'true'}));for(const [expiry,y]of[[D.untracked_ms,707.5],[D.tracked_ms,826.8]]){if(t>=expiry)layer.append(el('line',{x1:167+expiry*1.462,x2:167+Math.min(t,expiry+D.stop_after_ms)*1.462,y1:y,y2:y,stroke:'#A51C30','stroke-width':12,'data-motion-object':'true'}));}proof.textContent=`Evidence age ${t.toFixed(1)} ms: untracked error ${eu.toFixed(1)} mm; tracked error ${et.toFixed(1)} mm; tolerance ${D.tolerance_mm.toFixed(1)} mm. Host inference ${t<D.inference_ms?'continues':'completes'}. Untracked evidence ${t>=D.untracked_ms?'expired':'valid'}; tracked evidence ${t>=D.tracked_ms?'expired':'valid'}. Stop onset follows each expiry by ${D.stop_after_ms.toFixed(0)} ms.`;root.dataset.evidenceAgeMs=String(t);root.dataset.untrackedExpired=String(t>=D.untracked_ms);root.dataset.trackedExpired=String(t>=D.tracked_ms);
    scene.replaceChildren();scene.append(el('text',{x:12,y:18,'font-size':13,fill:'#1A202C'},'Same capture: moving mug, stale goal, local expiry (schematic)'));for(const [j,error,expiry,label]of[[0,eu,D.untracked_ms,'untracked'],[1,et,D.tracked_ms,'tracked']]){const yy=55+j*65,mugX=190+D.belt_mm_ms*t*2,goalX=mugX+17-error*2;scene.append(el('text',{x:12,y:yy,'font-size':12,fill:'#1A202C'},label),el('line',{x1:145,x2:400,y1:yy+25,y2:yy+25,stroke:'#4A5568','stroke-width':3}),el('rect',{x:mugX-12,y:yy-9,width:24,height:26,fill:'#E3F3F5',stroke:'#007A87','data-motion-object':'true'}),el('circle',{cx:mugX+17,cy:yy+2,r:6,fill:'none',stroke:'#007A87'}),el('ellipse',{cx:goalX,cy:yy+2,rx:D.tolerance_mm*2,ry:20,fill:'none',stroke:'#A51C30','stroke-dasharray':'3 3'}),el('path',{d:`M${goalX-8} ${yy-19}v20h5m6 0h5v-20`,fill:'none',stroke:t>=expiry?'#A51C30':'#1A4D3E','stroke-width':3,'data-motion-object':'true'}),el('text',{x:425,y:yy,'font-size':11,fill:t>=expiry?'#A51C30':'#1A4D3E'},t<expiry?'evidence valid':t<expiry+D.stop_after_ms?'expired → local stop pending':'expired → stop onset reached'),el('text',{x:425,y:yy+17,'font-size':11,fill:'#1A202C'},`goal-to-handle bound ${error.toFixed(1)} mm`));}scene.append(el('rect',{x:145,y:164,width:255*Math.min(1,t/D.inference_ms),height:7,fill:'#B87333','data-motion-object':'true'}),el('text',{x:425,y:172,'font-size':11,fill:'#1A202C'},t<D.inference_ms?'host inference still running':'host inference complete'));
@@ -34,6 +44,6 @@
   const player=window.MLSysOriginalPlayer.create({root,outer:context.outer,title:CFG.question,scope:CFG.scope,steps,
    render(index,{stage,details}){current=index;root.dataset.step=String(index);if(!mounted){const artScroll=document.createElement('div');artScroll.className=NAME+'-art-scroll';stageNode=artScroll;stage.tabIndex=0;stage.setAttribute('aria-label','Original diagram; scroll horizontally or use Expand for dense artwork');stage.classList.add(NAME+'-stage');artScroll.append(art);stage.append(artScroll,scene);details.append(proof);mounted=true;}draw(index,index,1);root.dataset.originalState=JSON.stringify({index,kind:CFG.key});},
    transition({from,to,onFrame}){if(to!==from+1)return;onFrame(p=>draw(from,to,p));}
-  });return{pause:()=>player.pause(),destroy:()=>player.destroy()};
+  });return{pause:()=>player.pause(),destroy:()=>{resizeObserver.disconnect();cancelAnimationFrame(resizeFrame);player.destroy();}};
  };
 })();

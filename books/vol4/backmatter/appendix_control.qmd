@@ -87,6 +87,82 @@ Consider an undamped harmonic physical oscillator $\OscillatorAcceleration + \Os
    $$ \SymplecticEulerTransitionMatrix = \begin{bmatrix} 1 - \OscillatorNaturalFrequency^2 \SamplingPeriod^2 & \SamplingPeriod \\ -\OscillatorNaturalFrequency^2 \SamplingPeriod & 1 \end{bmatrix} $$
    The determinant evaluates to $\det(\SymplecticEulerTransitionMatrix) = (1 - \OscillatorNaturalFrequency^2 \SamplingPeriod^2)(1) - (\SamplingPeriod)(-\OscillatorNaturalFrequency^2 \SamplingPeriod) = 1$ identically for all $\SamplingPeriod > 0$. For this oscillator, the method is symplectic and preserves phase-space area. It conserves a modified quadratic energy rather than the original energy exactly; determinant one alone does not establish symplecticity in higher dimensions. For stable step sizes ($\OscillatorNaturalFrequency \SamplingPeriod < 2$), physical energy oscillates within bounded limits over infinite horizons rather than exploding or vanishing. The bounded energy error makes this method useful for conservative mechanical models, although contact, damping, and solver choices require separate analysis.
 
+The spectral radius, the largest eigenvalue magnitude, puts these updates on a shared scale in @fig-appdx-control-integrator-stability. The horizontal axis is the dimensionless product $\OscillatorNaturalFrequency \SamplingPeriod$.
+
+::: {#fig-appdx-control-integrator-stability fig-env="figure" fig-pos="htb" fig-cap="**Oscillator Integrator Spectral Radius**: Analytic curves from the undamped oscillator model compare growth and decay of discrete modes. Exact zero-order hold and Tustin coincide on the unit-radius line; symplectic Euler joins them below its step-size boundary. The marked boundary has unit spectral radius but a defective repeated eigenvalue, so generic motion is unbounded there. These modeled curves do not measure energy or phase error." fig-alt="Spectral radius against dimensionless step size. Forward Euler rises above the horizontal unit-radius line, while backward Euler falls below it. Exact zero-order hold and Tustin share the horizontal line. Dashed symplectic Euler follows that line up to a diamond at step size two, then rises sharply. A dotted vertical line marks the diamond's step size."}
+```{python}
+#| echo: false
+#| label: appdx-control-integrator-stability-plot
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ OSCILLATOR INTEGRATOR SPECTRAL RADIUS
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-appdx-control-integrator-stability.
+# │ Goal: Compare numerical growth and decay without conflating phase or energy.
+# │ Show: Analytic spectral radii over dimensionless oscillator step size.
+# │ How: Evaluate the five preceding transition eigenvalue formulas.
+# │ Provenance: Modeled, not measured; the five oscillator discretizations in
+# │             this subsection supply the equations. The dimensionless range
+# │             0 ≤ ωT ≤ 2.5 is a display choice spanning the boundary ωT = 2.
+# │ Imports: NumPy; binder.tools.figures.style.
+# │ Exports: OscillatorIntegratorSweep arrays; the spectral-radius figure.
+# └─────────────────────────────────────────────────────────────────────────────
+import numpy as np
+from binder.tools.figures import style as book_style
+
+class OscillatorIntegratorSweep:
+    # LOAD: dimensionless plotting domain and resolution, not physical inputs.
+    step = np.linspace(0.0, 2.5, 501)
+    boundary = 2.0  # repeated-root boundary of the preceding symplectic matrix
+
+    # EXECUTE: analytic radii; trace/determinant gives the symplectic roots.
+    exact = np.abs(np.exp(1j * step))
+    forward = np.sqrt(1.0 + step**2)
+    backward = 1.0 / forward
+    tustin = np.abs((1.0 + 1j * step / 2.0) / (1.0 - 1j * step / 2.0))
+    half_trace = 1.0 - step**2 / 2.0
+    root = np.sqrt(half_trace**2 - 1.0 + 0j)
+    symplectic = np.maximum(np.abs(half_trace + root), np.abs(half_trace - root))
+
+    # GUARD: the displayed modal-growth claims, including both sides of the limit.
+    assert np.all(forward[step > 0] > 1.0)
+    assert np.all(backward[step > 0] < 1.0)
+    assert np.allclose(exact, 1.0) and np.allclose(tustin, 1.0)
+    assert np.allclose(symplectic[step <= boundary], 1.0)
+    assert np.all(symplectic[step > boundary] > 1.0)
+
+fig, ax, COLORS, plt = book_style.setup_plot()
+sweep = OscillatorIntegratorSweep
+ax.plot(sweep.step, sweep.forward, color=COLORS['RedLine'], lw=2)
+ax.plot(sweep.step, sweep.backward, color=COLORS['secondary'], lw=2)
+# Coincident exact/Tustin curves share one line, identified explicitly.
+ax.plot(sweep.step, sweep.exact, color=COLORS['primary'], lw=2)
+inside = sweep.step <= sweep.boundary
+ax.plot(sweep.step[inside], sweep.symplectic[inside], color=COLORS['secondary'], ls='--', lw=2.5)
+ax.plot(sweep.step[~inside], sweep.symplectic[~inside], color=COLORS['RedLine'], ls='--', lw=2.5)
+ax.axvline(sweep.boundary, color=COLORS['secondary'], ls=':', lw=1)
+ax.plot(sweep.boundary, 1.0, marker='D', ms=7, color=COLORS['RedLine'], markerfacecolor='white', zorder=5)
+ax.text(0.62, 2.42, 'Forward Euler', color=COLORS['RedLine'])
+ax.text(0.93, 0.24, 'Backward Euler', color=COLORS['secondary'])
+ax.text(1.02, 1.17, 'Exact ZOH / Tustin', color=COLORS['primary'])
+ax.text(2.42, 3.64, 'Symplectic Euler', ha='right', color=COLORS['RedLine'])
+ax.annotate(
+    'Unit radius;\nunbounded at the boundary',
+    xy=(sweep.boundary, 1.0),
+    xytext=(0.18, 3.55),
+    va='top',
+    arrowprops=dict(arrowstyle='->', color=COLORS['secondary'], connectionstyle='angle,angleA=0,angleB=90,rad=5'),
+)
+ax.set_xlabel(r'Dimensionless step size, $\omega T_s$')
+ax.set_ylabel('Spectral radius (largest eigenvalue magnitude)')
+ax.set_xlim(-0.03, 2.58)
+ax.set_ylim(0.0, 4.25)
+fig.tight_layout()
+plt.show()
+```
+:::
+
+Unit spectral radius alone does not establish energy or phase fidelity. Tustin changes phase advance even while preserving this oscillator's energy; symplectic Euler preserves a modified quadratic energy below the boundary. At $\OscillatorNaturalFrequency \SamplingPeriod = 2$, its repeated eigenvalue is defective: repeated steps can grow despite unit spectral radius.
+
 The integrator and step size must preserve the behavior needed by the application. Forward Euler can be adequate for sufficiently resolved dissipative dynamics; this undamped oscillator shows why a small step alone does not guarantee long-horizon energy fidelity. Sampling adds a separate phase effect (@sec-appendix-control-zoh).
 
 ### Controllability and the Kalman rank condition

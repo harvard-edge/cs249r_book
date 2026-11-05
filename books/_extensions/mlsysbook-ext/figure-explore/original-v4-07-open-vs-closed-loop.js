@@ -14,7 +14,13 @@ window.MLSysFigureLessons["original-v4-07-open-vs-closed-loop"]=async(root,conte
  const equation=document.createElement('p');equation.className='v4b-equation';
  const note=document.createElement('p');note.className='v4b-note';note.textContent='Scroll the original artwork to inspect labels, or use Expand. Playback duration is illustrative.';
  const width=+originalView.split(' ')[2],height=+originalView.split(' ')[3];
- function follow(x,y){const scale=svg.getBoundingClientRect().width/width;canvas.scrollLeft=Math.max(0,x*scale-canvas.clientWidth/2);canvas.scrollTop=Math.max(0,y*scale-canvas.clientHeight/2);}
+ // Keep the endpoint in view when Expand or rotation changes the artwork scale.
+ // Scrolling alone does not trigger this observer, so manual inspection persists.
+ let focus=null,resizeFrame=0,disposed=false;
+ function recenter(){if(!focus||disposed)return;const scale=svg.getBoundingClientRect().width/width;canvas.scrollLeft=Math.max(0,focus[0]*scale-canvas.clientWidth/2);canvas.scrollTop=Math.max(0,focus[1]*scale-canvas.clientHeight/2);}
+ function follow(x,y){focus=[x,y];recenter();}
+ const cameraResize=typeof ResizeObserver==='function'?new ResizeObserver(()=>{if(!disposed&&!resizeFrame)resizeFrame=requestAnimationFrame(()=>{resizeFrame=0;recenter();});}):null;
+ cameraResize?.observe(canvas);cameraResize?.observe(svg);
  function mount(stage,details){if(!canvas.isConnected)stage.append(canvas,note);if(!readout.isConnected)details.append(readout,equation);}
  function dot(x,y,color='#007A87',r=5){return add('circle',{cx:x,cy:y,r,fill:color,stroke:'#fff','stroke-width':r/3,'data-motion-object':'true'});}
  function route(token,points,p){const lens=points.slice(1).map((b,i)=>Math.hypot(b[0]-points[i][0],b[1]-points[i][1]));let rem=p*lens.reduce((a,b)=>a+b,0),j=0;while(j<lens.length-1&&rem>lens[j]){rem-=lens[j];j++;}const q=lens[j]?rem/lens[j]:1,a=points[j],b=points[j+1];token.setAttribute('cx',a[0]+(b[0]-a[0])*q);token.setAttribute('cy',a[1]+(b[1]-a[1])*q);}
@@ -41,5 +47,6 @@ window.MLSysFigureLessons["original-v4-07-open-vs-closed-loop"]=async(root,conte
  function render(i,{stage,details}){root.dataset.lessonCommittedIndex=String(i);mount(stage,details);frame(positions[i]);follow(X(positions[i]),Y(positions[i]*Math.tan(D.theta)));}
  function transition({from,to,onFrame}){if(to!==from+1)return;onFrame(p=>{frame(positions[from]+(positions[to]-positions[from])*p);root.dataset.animationProgress=String(p);});}
 
- return window.MLSysOriginalPlayer.create({root,outer:context.outer,title:"Why does the same heading error spend physical clearance?",scope:"Original two-panel plot, exact fixed one-degree heading series and axes. Navigation-stack illustration; base icon position follows the plotted trajectory, icon size is schematic. No feedback correction or stopping intervention is simulated.",steps,render,transition});
+ const player=window.MLSysOriginalPlayer.create({root,outer:context.outer,title:"Why does the same heading error spend physical clearance?",scope:"Original two-panel plot, exact fixed one-degree heading series and axes. Navigation-stack illustration; base icon position follows the plotted trajectory, icon size is schematic. No feedback correction or stopping intervention is simulated.",steps,render,transition});
+ const destroy=player.destroy;player.destroy=()=>{disposed=true;cameraResize?.disconnect();cancelAnimationFrame(resizeFrame);destroy();};return player;
 };})();

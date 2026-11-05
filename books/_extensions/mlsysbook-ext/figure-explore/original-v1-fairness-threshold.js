@@ -66,7 +66,7 @@ window.MLSysFigureLessons[NAME]=async(root,{outer,verifiedArtwork})=>{
  if(verifiedArtwork.getAttribute('viewBox')!==D.viewBox)throw Error('Fairness-threshold artwork geometry changed; review the mappings');
  root.classList.add(NAME);
  const art=verifiedArtwork.cloneNode(true);art.removeAttribute('width');art.removeAttribute('height');
- art.setAttribute('role','img');art.setAttribute('aria-label','Original two-subgroup score diagram. A shared decision boundary moves from the 75 percent line to the 81.25 percent line, then Subgroup B receives its own cutoff; misclassified markers are ringed.');
+ art.setAttribute('data-mlsys-keep','');art.setAttribute('role','img');art.setAttribute('aria-label','Original two-subgroup score diagram. A shared decision boundary moves from the 75 percent line to the 81.25 percent line, then Subgroup B receives its own cutoff; misclassified markers are ringed.');
  // Bind the sixteen drawn markers (not the four legend glyphs) in TikZ order; verify against the calc export.
  const drawn=[...art.querySelectorAll('path')].filter(p=>/69\.999695%|100%, 0%, 0%/.test(p.getAttribute('stroke')||'')).slice(0,16);
  if(drawn.length!==16)throw Error('Expected sixteen drawn markers');
@@ -167,7 +167,7 @@ window.MLSysFigureLessons[NAME]=async(root,{outer,verifiedArtwork})=>{
  const steps=states.map(([label,describe],i)=>({label,get description(){return committed===i?describe(ledgers[i]):'In progress: '+label+'. The rings and counts still describe the last completed step.';}}));
  return window.MLSysOriginalPlayer.create({root,outer,title:'Where do the errors go when the boundary moves?',
   scope:'Illustrative toy: the original drawing\'s 16 applicants, 8 per subgroup, each with 4 repayers (circles) and 4 defaulters (plus markers). Horizontal position is score order only: markers further left have higher scores, so a boundary approves the markers to its left and moving it right is more lenient. The dashed labels are the accuracy each candidate boundary achieves, not score cutoffs. Steps 2 to 9 use one shared boundary for both rows; steps 10 to 12 keep Subgroup A on the 81.25% line and give Subgroup B its own cutoff, the threshold adjustment discussed after the figure, which is legally restricted and shown here only to expose its trade-off. Every number is a count of drawn markers or a ratio of those counts, not the credit-service metrics in the chapter\'s table. Intermediate stops sit between drawn markers so each move crosses one marker (the first B-only move crosses two repayers). Animation speed represents nothing.',steps,
-  render(i,{stage}){committed=i;if(!mounted){stage.append(source,ledgerBox);mounted=true;}paint(D.stops[i]);commit(i);delete root.dataset.pending;},
+  render(i,{stage,details}){committed=i;if(!mounted){stage.append(source);details.append(ledgerBox);mounted=true;}paint(D.stops[i]);commit(i);delete root.dataset.pending;},
   transition({from,to,onFrame}){root.dataset.pending=String(to);const a=D.stops[from],b=D.stops[to];
    onFrame(p=>{if(a==null)paint(b,p);else if(b==null)paint(a,1-p);else paint([0,1].map(g=>a[g]+(b[g]-a[g])*p));root.dataset.animationProgress=String(p);});}
  });
