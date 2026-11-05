@@ -38,7 +38,8 @@ export function highlight(shadowRoot) {
 
   autoresizingTextarea.addEventListener("keydown", (e) => {
     const text_combo = autoresizingTextarea.value;
-    const dropupContainer = shadowRoot.querySelector(".at-mentions-dropup");
+    const contextMenuOpen = Array.from(shadowRoot.querySelectorAll(".at-mentions-dropup"))
+      .some(menu => !menu.classList.contains("hidden") && window.getComputedStyle(menu).display !== "none");
    
 
     // Only proceed with Enter handling if dropup is hidden
@@ -46,8 +47,7 @@ export function highlight(shadowRoot) {
       e.key === "Enter" &&
       !e.shiftKey &&
       !e.ctrlKey &&
-      (dropupContainer.classList.contains("hidden") ||
-        dropupContainer.style.display === "none")
+      !contextMenuOpen
     ) {
 
       let diagramId = '';

@@ -96,7 +96,7 @@ markdown.inline.ruler.before('escape', 'reader_math_inline', (state, silent) => 
 const mathRenderer = (tokens, index, options, env) => {
   const item = tokens[index];
   const id = env.readerMath.push({ tex: item.content, displayMode: Boolean(item.meta?.displayMode) }) - 1;
-  return `SQRMTOKEN${id}END`;
+  return `<span data-reader-math="${id}"></span>`;
 };
 markdown.renderer.rules.reader_math_inline = mathRenderer;
 markdown.renderer.rules.reader_math_block = (tokens, index, options, env) => {
@@ -118,41 +118,23 @@ export function renderSafeMarkdown(source = '') {
     link.target = '_blank';
     link.rel = 'noopener noreferrer';
   });
-  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
-  const textNodes = [];
-  while (walker.nextNode()) textNodes.push(walker.currentNode);
-  const markerPattern = /SQRMTOKEN(\d+)END/g;
-  for (const textNode of textNodes) {
-    const text = textNode.textContent || '';
-    markerPattern.lastIndex = 0;
-    let match;
-    let cursor = 0;
-    const fragment = document.createDocumentFragment();
-    let replaced = false;
-    while ((match = markerPattern.exec(text))) {
-      const item = env.readerMath[Number(match[1])];
-      if (!item) continue;
-      replaced = true;
-      if (match.index > cursor) fragment.appendChild(document.createTextNode(text.slice(cursor, match.index)));
-      const mathNode = document.createElement('span');
-      try {
-        katex.render(item.tex, mathNode, {
-          displayMode: item.displayMode,
-          throwOnError: false,
-          trust: false,
-        });
-      } catch {
-        const fallback = document.createElement('code');
-        fallback.className = 'reader-math-error';
-        fallback.textContent = item.tex;
-        mathNode.appendChild(fallback);
-      }
-      fragment.appendChild(mathNode);
-      cursor = match.index + match[0].length;
-    }
-    if (replaced) {
-      if (cursor < text.length) fragment.appendChild(document.createTextNode(text.slice(cursor)));
-      textNode.parentNode.replaceChild(fragment, textNode);
+  // HTML input is disabled: only our Markdown math renderer can create these
+  // placeholders. Literal text, code, and decoded entities cannot collide.
+  for (const placeholder of container.querySelectorAll('[data-reader-math]')) {
+    const item = env.readerMath[Number(placeholder.dataset.readerMath)];
+    if (!item) continue;
+    placeholder.removeAttribute('data-reader-math');
+    try {
+      katex.render(item.tex, placeholder, {
+        displayMode: item.displayMode,
+        throwOnError: false,
+        trust: false,
+      });
+    } catch {
+      const fallback = document.createElement('code');
+      fallback.className = 'reader-math-error';
+      fallback.textContent = item.tex;
+      placeholder.replaceChildren(fallback);
     }
   }
 

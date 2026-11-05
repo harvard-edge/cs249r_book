@@ -2,6 +2,7 @@
 import { defineConfig } from 'vite';
 import { resolve } from 'path';
 import { fileURLToPath } from 'url';
+import tailwindcss from 'tailwindcss';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 
@@ -57,7 +58,7 @@ export default defineConfig({
       generateScopedName: '[name]__[local]___[hash:base64:5]',
     },
     postcss: {
-      plugins: [],
+      plugins: [tailwindcss(resolve(__dirname, 'tailwind.config.cjs'))],
     },
   },
   

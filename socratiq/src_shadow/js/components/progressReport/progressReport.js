@@ -40,7 +40,7 @@ async function getNewQuizAttempts(lastReportDate) {
             });
 
             if (filteredAttempts.length > 0) {
-                newAttempts[quiz.quizTitle] = filteredAttempts;
+                newAttempts[quiz.pageUrl ? `${quiz.quizTitle} (${quiz.pageUrl})` : quiz.quizTitle] = filteredAttempts;
             }
         });
 
@@ -100,7 +100,7 @@ async function getAllQuizHistory() {
         const quizHistory = {};
         
         allQuizzes.forEach(quiz => {
-            quizHistory[quiz.quizTitle] = quiz.attempts;
+            quizHistory[quiz.pageUrl ? `${quiz.quizTitle} (${quiz.pageUrl})` : quiz.quizTitle] = quiz.attempts;
         });
         
         return quizHistory;

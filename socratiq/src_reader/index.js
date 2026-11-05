@@ -1,9 +1,11 @@
 import {captureSelection, captureParagraph, revealSource} from './context.js';
 import {createExplanationRequest} from './transport.mjs';
 import {mountReader} from './ui.js';
+import {createStudyTools} from './study.js';
 
 const script = document.currentScript;
 const config = script?.dataset || {};
+const study = createStudyTools({scriptUrl: script?.src});
 let version = '';
 
 function start() {
@@ -13,6 +15,7 @@ function start() {
     captureParagraph: element => captureParagraph(element, {volume: config.volume, version}),
     onRevealSource: revealSource,
     requestExplanation: createExplanationRequest({endpoint: config.endpoint}),
+    onOpenStudy: () => study.open(),
   });
   // Release identity is best effort and must never block reading assistance.
   const manifest = document.querySelector('meta[name="release-manifest"]')?.content;

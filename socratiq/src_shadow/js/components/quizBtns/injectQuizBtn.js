@@ -5,6 +5,30 @@ import {QuizStorage} from '../../libs/memory/quizStorage.js'
 import { ChapterDataCollector } from '../../libs/memory/chapterDataCollector.js';
 
 
+// Index context independently of the optional controls inserted into the book.
+// Embedded Study uses this data for Add Context and @ mentions without adding
+// another set of quiz buttons to the reader page.
+export function indexPageSections() {
+  const contentRoot = document.querySelector('main, article') || document.body;
+  const quartoSections = contentRoot.querySelectorAll('section.level2');
+  const sections = quartoSections.length ? quartoSections : contentRoot.querySelectorAll('section');
+  const entries = [];
+  for (const section of sections) {
+    const heading = section.querySelector('h2.anchored, h2');
+    if (!heading || heading.textContent.trim().includes('Resources')) continue;
+    const dataNumber = heading.getAttribute('data-number') || '';
+    const headingText = heading.textContent.trim();
+    const title = dataNumber && !headingText.startsWith(dataNumber + ' ') ? `${dataNumber} ${headingText}` : headingText;
+    const sectionId = section.id || heading.id || `section-${entries.length + 1}`;
+    const copy = section.cloneNode(true);
+    copy.querySelectorAll('script, style, nav, aside, button, input, textarea, select, [hidden], [aria-hidden="true"]').forEach(element => element.remove());
+    const sectionText = copy.textContent.trim();
+    entries.push({ section, sectionId, title, sectionText, dataNumber });
+  }
+  window.sectionData = Object.fromEntries(entries.map(entry => [entry.sectionId, { title: entry.title, content: entry.sectionText }]));
+  return entries;
+}
+
 export function injectSvgButtons(shadowRoot) {
   const collector = new ChapterDataCollector(); // Initialize the collector
   const currentUrl = window.location.href;
@@ -29,39 +53,11 @@ export function injectSvgButtons(shadowRoot) {
   let quizTitles = [];
   const quizStorage = new QuizStorage();
 
-  // Initialize data structure in the window object
-  if (!window.sectionData) {
-    window.sectionData = {};
-  }
-
-  level2Sections.forEach((section, index) => {
-    const h2 = section.querySelector('h2.anchored');
-    if (!h2 || h2.textContent.trim().includes('Resources')) {
-        return;
-    }
-
-    const sectionText = section.textContent.trim();
-    const sectionId = section.id;
-    const dataNumber = h2.getAttribute('data-number');
-    const titleText = h2.textContent.trim();
-    const title = dataNumber + ' ' + titleText.replace(`${dataNumber} `, '');
+  const sectionEntries = indexPageSections();
+  sectionEntries.forEach(entry => {
+    const { section, sectionId, title, sectionText } = entry;
     quizTitles.push(title);
-
-    // Save data to the window's data structure
-    window.sectionData[sectionId] = {
-      title: title,
-      content: sectionText
-    };
-
-    scheduleBackgroundCollection(collector, {
-      section,
-      sectionId,
-      title,
-      sectionText,
-      dataNumber
-    });
-
-    // Create and append the quiz button directly to the end of the section
+    scheduleBackgroundCollection(collector, entry);
     const iconWrapper = createIconWrapper(title, sectionText, sectionId, shadowRoot);
     section.appendChild(iconWrapper);
   });

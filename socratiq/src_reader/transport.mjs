@@ -16,6 +16,8 @@ const LIMITS = Object.freeze({
   historyMessages: 12,
   historyMessage: 6_000,
   historyTotal: 24_000,
+  answer: 64_000,
+  streamEvent: 128_000,
 });
 
 const SYSTEM_PROMPT = `You are SocratiQ, a concise assistant for readers of a machine-learning-systems textbook. Use American English.
@@ -246,9 +248,13 @@ export function createExplanationRequest({
         }
         if (parsed.finishReason) finishReason = parsed.finishReason;
         if (parsed.content) {
+          if (accumulated.length + parsed.content.length > LIMITS.answer) {
+            throw new Error('The explanation exceeded the response limit. Please try a narrower question.');
+          }
           sawContent = true;
           accumulated += parsed.content;
           if (onChunk) await onChunk(accumulated);
+          if (controller.signal.aborted) throw abortError(controller.signal, timedOut, cancelledByCaller);
         }
       };
 
@@ -287,6 +293,9 @@ export function createExplanationRequest({
         if (done) break;
         pending += decoder.decode(value, { stream: true });
         await drainLines();
+        if (pending.length + eventData.reduce((total, part) => total + part.length, 0) > LIMITS.streamEvent) {
+          throw new Error('The explanation service returned an oversized stream event. Please try again.');
+        }
       }
       if (!sawDone) {
         pending += decoder.decode();
@@ -294,6 +303,7 @@ export function createExplanationRequest({
         await consumeEvent();
       }
 
+      if (controller.signal.aborted) throw abortError(controller.signal, timedOut, cancelledByCaller);
       if (!sawContent) throw new Error('The explanation service returned no answer. Please try again.');
       if (finishReason === 'length') throw new Error('The explanation was cut off before it finished. Please try again.');
       if (finishReason && finishReason !== 'stop') {

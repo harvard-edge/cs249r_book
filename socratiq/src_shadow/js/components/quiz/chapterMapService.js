@@ -8,72 +8,44 @@ import { getDBInstance } from '../../libs/utils/indexDb.js';
  * @param {Array} chapterMapEntries - Array of chapterMap entries
  * @returns {Object|null} - The matching page or null
  */
-function matchQuizToPage(quizTitle, chapterMapEntries) {
-    if (!quizTitle || !chapterMapEntries || chapterMapEntries.length === 0) {
-        return null;
+function matchQuizToPage(score, chapterMapEntries) {
+    if (!score || !Array.isArray(chapterMapEntries)) return null;
+    const pageUrl = score.pageUrl || score.originalUrl || score.normalizedUrl || score.url;
+    if (score.quizId && !pageUrl) return null;
+    if (Array.isArray(score.sourcePageUrls) && score.sourcePageUrls.some(url =>
+        normalizeUrlForCumulativeQuiz(url) !== normalizeUrlForCumulativeQuiz(pageUrl))) return null;
+    if (pageUrl) {
+        const canonical = normalizeUrlForCumulativeQuiz(pageUrl);
+        return chapterMapEntries.find(page => normalizeUrlForCumulativeQuiz(page.url) === canonical) || null;
     }
+    // Older records have only a title. Assign them only when the complete title
+    // or section heading identifies one page across all visited volumes.
+    const title = normalizeQuizTitle(score.title || score.displayTitle || score.quizTitle);
+    if (!title) return null;
+    const exact = chapterMapEntries.filter(page => {
+        const headings = page.tocData || page.toc || [];
+        return normalizeQuizTitle(page.title) === title || (Array.isArray(headings) &&
+            headings.some(heading => normalizeQuizTitle(heading.text || heading.title) === title));
+    });
+    if (exact.length) return exact.length === 1 ? exact[0] : null;
 
-    // Strategy 1: Extract numbers from quiz title (e.g., "11.4 System Benchmarking" -> ["11", "4"])
-    const quizNumbers = quizTitle.match(/\d+/g);
-    
-    // Strategy 2: Find page with matching numbers in title
-    if (quizNumbers && quizNumbers.length > 0) {
-        const matchingPage = chapterMapEntries.find(page => {
-            const pageNumbers = page.title.match(/\d+/g);
-            if (!pageNumbers) return false;
-            
-            // Check if any quiz number appears in page numbers
-            return quizNumbers.some(qNum => pageNumbers.includes(qNum));
-        });
-        
-        if (matchingPage) {
-            return matchingPage;
-        }
-    }
-    
-    // Strategy 3: Fallback to title similarity (fuzzy matching)
-    return findBestTitleMatch(quizTitle, chapterMapEntries);
+    // Retain matching numbered section titles to their chapter only when both
+    // the chapter number and meaningful title words agree, with no ambiguity.
+    const words = title.replace(/\d+/g, '').split(/\s+/).filter(word => word.length > 2);
+    const chapterNumber = title.match(/^(\d+)\./)?.[1];
+    const matches = chapterMapEntries.filter(page => {
+        const pageTitle = normalizeQuizTitle(page.title);
+        const pageNumber = pageTitle.match(/^(\d+)(?:\.|\s)/)?.[1];
+        return chapterNumber && pageNumber === chapterNumber && words.length > 0 &&
+            words.every(word => pageTitle.split(/\s+/).includes(word));
+    });
+    return matches.length === 1 ? matches[0] : null;
 }
 
-/**
- * Find the best title match using fuzzy string matching
- * @param {string} quizTitle - The quiz title to match
- * @param {Array} chapterMapEntries - Array of chapterMap entries
- * @returns {Object|null} - The best matching page or null
- */
-function findBestTitleMatch(quizTitle, chapterMapEntries) {
-    if (!quizTitle || !chapterMapEntries || chapterMapEntries.length === 0) {
-        return null;
-    }
-
-    // Extract key words from quiz title (remove numbers and common words)
-    const quizWords = quizTitle.toLowerCase()
-        .replace(/\d+/g, '')
-        .replace(/[^\w\s]/g, '')
-        .split(/\s+/)
-        .filter(word => word.length > 2 && !['the', 'and', 'or', 'of', 'in', 'on', 'at', 'to', 'for'].includes(word));
-
-    let bestMatch = null;
-    let bestScore = 0;
-
-    chapterMapEntries.forEach(page => {
-        const pageWords = page.title.toLowerCase()
-            .replace(/\d+/g, '')
-            .replace(/[^\w\s]/g, '')
-            .split(/\s+/)
-            .filter(word => word.length > 2);
-
-        // Calculate similarity score
-        const commonWords = quizWords.filter(word => pageWords.includes(word));
-        const score = commonWords.length / Math.max(quizWords.length, pageWords.length);
-
-        if (score > bestScore && score > 0.3) { // Minimum 30% similarity
-            bestScore = score;
-            bestMatch = page;
-        }
-    });
-
-    return bestMatch;
+function normalizeQuizTitle(title) {
+    return typeof title === 'string' ? title.toLowerCase()
+        .replace(/^cumulative quiz\s*-\s*/i, '').replace(/[^\w.\s]/g, '')
+        .replace(/\s+/g, ' ').trim() : '';
 }
 
 /**
@@ -84,106 +56,50 @@ function findBestTitleMatch(quizTitle, chapterMapEntries) {
  * @param {Array} cumulativeQuizScores - Array of cumulative quiz scores
  * @returns {Object} - Progress data for the page
  */
-function calculatePageProgress(page, quizScores, pageCompletions = [], cumulativeQuizScores = []) {
-    if (!page || !quizScores) {
-        return {
-            pageUrl: page?.url || '',
-            pageTitle: page?.title || '',
-            passedQuizzes: 0,
-            totalAttempted: 0,
-            completionPercentage: 0
-        };
-    }
-
-    // Check if page is completed by cumulative quiz using the enhanced table
-    const enhancedRecord = cumulativeQuizScores.find(record => {
-        // Normalize both URLs for comparison
-        const recordUrl = record.normalizedUrl || record.originalUrl;
-        const pageUrl = page.url;
-        
-        // Try exact match first
-        if (recordUrl === pageUrl) return true;
-        
-        // Try normalized comparison
-        try {
-            const normalizedPageUrl = normalizeUrlForCumulativeQuiz(pageUrl);
-            return recordUrl === normalizedPageUrl;
-        } catch (error) {
-            return false;
-        }
+function calculatePageProgress(page, quizScores, pageCompletions = [], cumulativeQuizScores = [], chapterMapEntries = []) {
+    const pageUrl = page?.url || '';
+    const enhancedRecord = cumulativeQuizScores.find(record =>
+        normalizeUrlForCumulativeQuiz(record.normalizedUrl || record.originalUrl) === normalizeUrlForCumulativeQuiz(pageUrl));
+    const pageCompletion = pageCompletions.find(record =>
+        normalizeUrlForCumulativeQuiz(record.pageUrl) === normalizeUrlForCumulativeQuiz(pageUrl));
+    const history = Array.isArray(enhancedRecord?.quizHistory) ? enhancedRecord.quizHistory : [];
+    const sectionHistory = history.filter(quiz => quiz.quizType === 'section');
+    const relatedQuizzes = quizScores.filter(score => {
+        const matchingPage = matchQuizToPage(score, chapterMapEntries);
+        return matchingPage?.url === pageUrl && !score.isCumulative && score.quizType !== 'cumulative';
     });
-
-    // If page is completed by cumulative quiz, mark as 100% complete
-    if (enhancedRecord && enhancedRecord.completedByCumulativeQuiz) {
-        return {
-            pageUrl: page.url,
-            pageTitle: page.title,
-            passedQuizzes: 10, // Full completion
-            totalAttempted: 1, // One cumulative quiz
-            completionPercentage: 100,
-            totalQuizzes: 10,
-            lastUpdated: page.lastUpdated,
-            completedByCumulativeQuiz: true,
-            cumulativeQuizTitle: enhancedRecord.cumulativeQuizTitle,
-            cumulativeScore: enhancedRecord.lastQuizScore?.percentage || 0
-        };
+    const results = sectionHistory.length ? sectionHistory : relatedQuizzes;
+    const passedQuizzes = sectionHistory.length
+        ? sectionHistory.filter(quiz => quiz.score?.passed).length
+        : relatedQuizzes.filter(score => Number.parseFloat(score.percentageScore) >= 60).length;
+    const completedByCumulativeQuiz = Boolean(enhancedRecord?.completedByCumulativeQuiz || pageCompletion?.completedByCumulativeQuiz);
+    const cumulativeResult = [...history].reverse().find(quiz =>
+        quiz.quizType === 'cumulative' && (!completedByCumulativeQuiz || quiz.score?.passed));
+    const legacyCompletion = pageCompletion?.completedByCumulativeQuiz ? pageCompletion : null;
+    const cumulativeScoreRecord = cumulativeResult ? cumulativeResult.score : legacyCompletion?.score;
+    let cumulativeScore = null;
+    if (Number.isFinite(cumulativeScoreRecord?.percentage)) {
+        cumulativeScore = cumulativeScoreRecord.percentage;
+    } else if (Number.isFinite(cumulativeScoreRecord?.correct) &&
+        Number.isFinite(cumulativeScoreRecord?.total) && cumulativeScoreRecord.total > 0) {
+        cumulativeScore = (cumulativeScoreRecord.correct / cumulativeScoreRecord.total) * 100;
     }
-
-    // Fallback: Check old pageCompletions system
-    const pageCompletion = pageCompletions.find(completion => 
-        completion.pageUrl === page.url
-    );
-
-    if (pageCompletion && pageCompletion.completedByCumulativeQuiz) {
-        return {
-            pageUrl: page.url,
-            pageTitle: page.title,
-            passedQuizzes: 10, // Full completion
-            totalAttempted: 1, // One cumulative quiz
-            completionPercentage: 100,
-            totalQuizzes: 10,
-            lastUpdated: page.lastUpdated,
-            completedByCumulativeQuiz: true,
-            cumulativeQuizTitle: pageCompletion.cumulativeQuizTitle
-        };
-    }
-
-    // Calculate section quiz progress from enhanced table
-    let sectionQuizProgress = { passedQuizzes: 0, totalAttempted: 0 };
-    
-    if (enhancedRecord && enhancedRecord.quizHistory) {
-        const sectionQuizzes = enhancedRecord.quizHistory.filter(quiz => quiz.quizType === 'section');
-        sectionQuizProgress.totalAttempted = sectionQuizzes.length;
-        sectionQuizProgress.passedQuizzes = sectionQuizzes.filter(quiz => quiz.score.passed).length;
-    } else {
-        // Fallback to old system for section quizzes
-        const relatedQuizzes = quizScores.filter(score => {
-            const matchingPage = matchQuizToPage(score.quizTitle, [page]);
-            return matchingPage && matchingPage.url === page.url && !score.isCumulative;
-        });
-
-        sectionQuizProgress.totalAttempted = relatedQuizzes.length;
-        sectionQuizProgress.passedQuizzes = relatedQuizzes.filter(score => 
-            parseFloat(score.percentageScore) >= 60
-        ).length;
-    }
-
-    // Assume 10 quizzes per "chapter" for now (can be made dynamic later)
-    const totalQuizzes = 10;
-    const completionPercentage = Math.min((sectionQuizProgress.passedQuizzes / totalQuizzes) * 100, 100);
-
     return {
-        pageUrl: page.url,
-        pageTitle: page.title,
-        passedQuizzes: sectionQuizProgress.passedQuizzes,
-        totalAttempted: sectionQuizProgress.totalAttempted,
-        completionPercentage: completionPercentage,
-        totalQuizzes: totalQuizzes,
-        lastUpdated: page.lastUpdated,
-        completedByCumulativeQuiz: false,
-        hasSectionQuizzes: sectionQuizProgress.totalAttempted > 0,
-        hasCumulativeQuiz: enhancedRecord && enhancedRecord.quizHistory && 
-            enhancedRecord.quizHistory.some(quiz => quiz.quizType === 'cumulative')
+        pageUrl,
+        pageTitle: page?.title || '',
+        passedQuizzes,
+        totalAttempted: results.length,
+        // Section results do not establish how many quizzes a chapter contains.
+        totalQuizzes: null,
+        completionPercentage: completedByCumulativeQuiz ? 100 : null,
+        completionBasis: completedByCumulativeQuiz ? 'cumulative-quiz' : null,
+        passRate: results.length ? (passedQuizzes / results.length) * 100 : null,
+        lastUpdated: page?.lastUpdated,
+        completedByCumulativeQuiz,
+        cumulativeQuizTitle: cumulativeResult ? cumulativeResult.quizTitle ?? null : legacyCompletion?.cumulativeQuizTitle ?? null,
+        cumulativeScore,
+        hasSectionQuizzes: results.length > 0,
+        hasCumulativeQuiz: completedByCumulativeQuiz || history.some(quiz => quiz.quizType === 'cumulative'),
     };
 }
 
@@ -251,7 +167,7 @@ export async function getChaptersFromChapterMap() {
             url: page.url,
             originalPage: page, // Keep reference to original data
             quizzesTaken: 0, // Will be updated by progress calculation
-            totalQuizzes: 10, // Default assumption
+            totalQuizzes: null, // The complete quiz inventory is unknown
             passedQuizzes: 0 // Will be updated by progress calculation
         }));
 
@@ -287,13 +203,18 @@ export async function getChapterProgressFromChapterMap() {
 
         // Process each page in chapterMap
         chapterMapEntries.forEach(page => {
-            const progress = calculatePageProgress(page, quizScores, pageCompletions, cumulativeQuizScores);
+            const progress = calculatePageProgress(page, quizScores, pageCompletions, cumulativeQuizScores, chapterMapEntries);
             
             // Use page URL as key for the progress map
             chapterProgress.set(page.url, {
                 passedQuizzes: progress.passedQuizzes,
                 totalAttempted: progress.totalAttempted,
                 completionPercentage: progress.completionPercentage,
+                completionBasis: progress.completionBasis,
+                totalQuizzes: progress.totalQuizzes,
+                passRate: progress.passRate,
+                hasSectionQuizzes: progress.hasSectionQuizzes,
+                hasCumulativeQuiz: progress.hasCumulativeQuiz,
                 pageTitle: progress.pageTitle,
                 pageUrl: progress.pageUrl,
                 completedByCumulativeQuiz: progress.completedByCumulativeQuiz,
@@ -395,7 +316,9 @@ export async function getDashboardChapterData() {
                 ...chapter,
                 quizzesTaken: pageProgress?.totalAttempted || 0,
                 passedQuizzes: pageProgress?.passedQuizzes || 0,
-                completionPercentage: pageProgress?.completionPercentage || 0
+                totalQuizzes: pageProgress?.totalQuizzes ?? null,
+                completionPercentage: pageProgress?.completionPercentage ?? null,
+                completedByCumulativeQuiz: Boolean(pageProgress?.completedByCumulativeQuiz)
             };
         });
 

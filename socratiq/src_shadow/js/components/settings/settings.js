@@ -36,6 +36,7 @@ export class SettingsManager {
 
   // Initialize settings from the UI components
   init() {
+    this.isInitializing = true;
     if (!this.isNoSlider) {
       // Set up the slider
       const slider = this.shadowEle.querySelector("#understanding-slider");
@@ -55,6 +56,9 @@ export class SettingsManager {
         checkbox.addEventListener("change", (event) => {
           this.updateCheckbox(checkbox.id, event.target.checked);
         });
+        if (typeof this.settings.checkboxes[checkbox.id] === "boolean") {
+          checkbox.checked = this.settings.checkboxes[checkbox.id];
+        }
         this.updateCheckbox(checkbox.id, checkbox.checked);
       });
 
@@ -76,6 +80,7 @@ export class SettingsManager {
         this.initializeSingleDropdown(dropdown, true);
       });
     }
+    this.isInitializing = false;
   }
 
   // Dispatch highlight-menu event
@@ -222,16 +227,56 @@ export class SettingsManager {
 
   // Save settings to local storage
   saveSettings() {
-    localStorage.setItem("userSettings", JSON.stringify(this.settings));
+    // Initialization must not overwrite a damaged backup or partial legacy settings.
+    if (this.isInitializing) return;
+    try {
+      localStorage.setItem("userSettings", JSON.stringify(this.settings));
+    } catch (error) {
+      console.warn("Unable to persist settings:", error);
+    }
   }
 
   // Load settings from local storage
   loadSettings() {
-    const savedSettings = localStorage.getItem("userSettings");
-    if (savedSettings) {
-      this.settings = JSON.parse(savedSettings);
+    try {
+      const savedSettings = localStorage.getItem("userSettings");
+      if (savedSettings) {
+        if (savedSettings.length > 65536) throw new Error("Settings exceed the supported size");
+        const saved = JSON.parse(savedSettings);
+        const isRecord = value => value !== null && typeof value === "object" && !Array.isArray(value);
+        if (!isRecord(saved)) throw new Error("Invalid saved settings");
+        const defaults = this.settings;
+        this.settings = { ...saved, ...defaults };
+        const slider = Number(saved.sliderValue);
+        if (["number", "string"].includes(typeof saved.sliderValue) && saved.sliderValue !== "" && Number.isInteger(slider) && slider >= 0 && slider <= 3) {
+          this.settings.sliderValue = slider;
+        }
+        for (const key of ["modalDisplayed", "pushContent"]) {
+          if (typeof saved[key] === "boolean") this.settings[key] = saved[key];
+        }
+        if (typeof saved.selectedDropdownValue === "string" && saved.selectedDropdownValue.length <= 1024) {
+          this.settings.selectedDropdownValue = saved.selectedDropdownValue;
+        }
+        if (isRecord(saved.checkboxes)) {
+          for (const [key, value] of Object.entries(saved.checkboxes)) {
+            if (!["__proto__", "constructor", "prototype"].includes(key) && typeof value === "boolean") {
+              this.settings.checkboxes[key] = value;
+            }
+          }
+        }
+        if (isRecord(saved.customAPI)) {
+          for (const [key, defaultValue] of Object.entries(defaults.customAPI)) {
+            const value = saved.customAPI[key];
+            if (typeof value === typeof defaultValue && (typeof value !== "string" || value.length <= 8192)) {
+              this.settings.customAPI[key] = value;
+            }
+          }
+        }
+      }
+    } catch (error) {
+      console.warn("Using default settings; saved settings were left unchanged:", error);
     }
-    
+
     window.current_difficulty = this.settings.sliderValue;
     
     const slider = this.shadowEle.querySelector("#understanding-slider");
