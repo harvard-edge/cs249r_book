@@ -183,7 +183,7 @@ Each volume answers a question the previous one leaves open.
 * **Vol II → Vol III, when a stateless response is not enough.** Volume II serves stateless requests at scale. Volume III adds stateful, multi-step loops that manage context memory, call tools, run in sandboxes, and recover from nondeterministic failures.
 * **Vol III → Vol IV, when software acts on the physical world.** Volume III governs software environments. Volume IV crosses into physical systems, where computational latency becomes distance traveled and a failure cannot be undone.
 
-> ⚠️ *Volumes III and IV are open drafts. Chapters are added, reorganized, and rewritten as I revise them, so please do not cite or teach from them yet. Feedback is welcome through the [book feedback](https://github.com/harvard-edge/cs249r_book/issues/new/choose) issue forms.*
+> ⚠️ *Volumes III and IV are open drafts. I am writing them because I plan to teach agentic and physical AI systems, and writing a book is how I learn a subject well enough to teach it. Chapters are added, reorganized, and rewritten as my understanding grows, so please do not cite or teach from them yet. Feedback is welcome through the [book feedback](https://github.com/harvard-edge/cs249r_book/issues/new/choose) issue forms.*
 
 ---
 
@@ -315,7 +315,7 @@ I have always learned best by building from scratch and teaching others.
 
 When I want to understand an emerging or complex systems area, writing about it and writing code for it forces me to slow down. It forces me to find the core invariants, work through the math, and separate what is fundamentally true about physics and hardware from what is merely current.
 
-This repository is my open workshop and teaching lab. It is how I clarify my own thinking for my students at Harvard, my research lab, and open benchmarking efforts like MLPerf.
+This repository is my open workshop and teaching lab. It is how I clarify my own thinking for my students at Harvard, my research lab, and open benchmarking efforts like MLPerf. Volumes III and IV are that process happening in public.
 
 There is also a deeper reason. In the late 1990s, as an undergraduate, I wrote to a professor at Stanford because I was fascinated by genetic algorithms. I did not expect an answer. Then a brown package arrived at my house with a VHS tape on genetic algorithms inside. I never learned who sent it, so I never got to say thank you. But I have not forgotten what it felt like to have someone I had never met take the time to share what they knew with a curious student. It sparked my curiosity, and it stayed with me.
 
@@ -394,17 +394,17 @@ Barroso, Hölzle, and Clidaras give a firsthand account of how one organization 
 </details>
 
 <details>
-<summary><b>Do you use AI tools to write the books?</b></summary>
+<summary><b>Do you use AI tools?</b></summary>
 
 <br>
 
-Yes. I use AI tools throughout the work: to write code and checks, to survey literature that I then read in the original, to draft passages that I then rewrite substantially, and to audit the manuscript for consistency. I researched, wrote, and rewrote every chapter, and the responsibility for what the books say is mine.
+Yes, and for much of the work. I use them to write code and the checks that test it, to survey the literature before I read the papers myself, to draft passages that I then rewrite, and to audit four volumes for consistency. I use them on the companions as well, from TinyTorch and the labs to the slides and the StaffML question bank. Without these tools, I could not build a curriculum of this size alongside full-time teaching and research.
 
-AI-generated text can be fluent and still be wrong, so the standard is traceability rather than trust. Every derived number in the books is computed by Python code that ships with the text, and automated checks test units, cross-references, notation, and citations on every change. Practitioners review the chapters, and the classroom tests them.
+A tool can write text that sounds right and is wrong, so I do not take its output on trust. Every number in the books is computed by code that ships with the text. Automated checks test units, cross-references, notation, and citations whenever something changes. Engineers who build these systems review the chapters, and students test them in class. In StaffML, each question records whether it began as a machine draft and whether a person has reviewed it.
 
-Volumes III and IV are released earlier, as drafts, before they receive the classroom teaching and expert review that Volumes I and II have had.
+I researched, wrote, and rewrote every chapter. The decisions about what goes in, what stays out, and how an idea is taught are mine, and so is every mistake. If you find one, the [book feedback](https://github.com/harvard-edge/cs249r_book/issues/new/choose) forms send it straight to me.
 
-Each volume includes a full [Note on AI Assistance](https://mlsysbook.ai/vol1/frontmatter/ai_use.html) that describes how the tools were used and how their output was checked.
+Volumes III and IV have not yet been through the classroom or practitioner review, which is why they are marked as drafts. Each volume includes a full [Note on AI Assistance](https://mlsysbook.ai/vol1/frontmatter/ai_use.html).
 
 </details>
 
@@ -417,7 +417,7 @@ Language models are good at retrieval, code generation, and summarizing facts. A
 
 What a textbook provides is perspective and a coherent mental model: the order in which to learn ideas, how trade-offs constrain one another, and what not to worry about. Deciding what to leave out is one of the most important choices an author makes.
 
-Bruce Davie made this point in his essay [“Textbooks in Tokenland”](https://systemsapproach.org/2026/06/01/textbooks-in-tokenland/) (Systems Approach): a language model generates text without communicative intent, while a textbook is a deliberate path from a teacher to a student toward a shared understanding of how the world works.
+Bruce Davie made this point in his essay [“Textbooks in Tokenland”](https://systemsapproach.org/2026/06/01/textbooks-in-tokenland/) (Systems Approach). A language model generates text without communicative intent, he writes, while a textbook is a deliberate path from a teacher to a student toward a shared understanding of how the world works.
 
 The two are not in opposition. The book provides the structure and the quantitative argument, and interactive tools such as the Marimo labs let a reader ask questions and test understanding.
 
