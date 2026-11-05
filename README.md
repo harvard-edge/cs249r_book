@@ -56,7 +56,7 @@ Those numbers come from constraints. A model that scores well on a benchmark sti
 
 Teaching AI engineering this way takes more than a book, which is why everything lives in one repository. Each part teaches something the others cannot. Students who only read do not internalize, and students who only code do not generalize. The textbook builds the mental model, TinyTorch makes it concrete by having students build the machinery themselves, and the hardware kits and the MLSys·im simulator show where the model breaks, on devices students can hold and at scales beyond any one lab.
 
-The work began in a classroom. The HarvardX TinyML course came first and reached more than 100,000 learners. In 2023, the students in CS249r at Harvard wrote the first class notes for this curriculum together, one topic per group, and we published them on GitHub. The goal now is to reach one million learners by 2030.
+The work began in a classroom. The HarvardX TinyML course came first and reached more than 100,000 learners. In 2023, the students in CS249r at Harvard wrote the first class notes for this curriculum together, one topic per group, and we published them on GitHub. Since then, I have kept revising the material with help from a growing community of contributors, and instructors at universities around the world now teach from it. The goal is to reach one million learners by 2030.
 
 ---
 
@@ -319,7 +319,7 @@ Responsible AI entered the book the same way, at the urging of engineers in indu
 
 When I began teaching machine learning systems, there was no textbook for the course. Books covered the models, and papers covered individual systems, but nothing taught the infrastructure underneath them as one subject. The field was changing too quickly for anyone to have written one. So I started writing it myself, because I have always learned best by building from scratch and teaching others.
 
-When I want to understand an emerging or complex systems area, writing about it and writing code for it force me to slow down. They force me to find the core invariants, work through the math, and separate what is fundamentally true about physics and hardware from what is merely current.
+When I want to understand an emerging or complex systems area, writing about it and writing code for it force me to slow down. They force me to find the principles that last, work through the math, and separate what is fundamentally true about physics and hardware from what is merely current.
 
 This repository is my open workshop and teaching lab. It is where I work out ideas for my students at Harvard, my research lab, and open benchmarking efforts like MLPerf. Volumes III and IV are that process happening in public.
 
