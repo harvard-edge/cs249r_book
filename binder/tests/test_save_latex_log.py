@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 from pathlib import Path
 
 import pytest
@@ -65,20 +66,26 @@ def test_current_index_is_preferred_over_stale_retained_stem(tmp_path):
     old.write_text("Stale previous build")
     current = tmp_path / "index.tex"
     current.write_text("Current Quarto render")
+    os.utime(old, (1_700_000_000, 1_700_000_000))
+    os.utime(current, (1_700_000_002, 1_700_000_002))
     assert save_latex_log._find_intermediate(tmp_path, "Book-Vol2", ".tex") == current
 
 
-def test_intermediate_must_be_at_least_as_new_as_retained_tex(tmp_path: Path) -> None:
+@pytest.mark.parametrize("age_seconds,expected", [(-2, False), (0, True), (2, True)])
+def test_intermediate_must_be_at_least_as_new_as_retained_tex(
+    tmp_path: Path, age_seconds: int, expected: bool
+) -> None:
     tex = tmp_path / "Book-Vol2.tex"
     aux = tmp_path / "Book-Vol2.aux"
     tex.write_text("new source", encoding="utf-8")
     aux.write_text("stale metadata", encoding="utf-8")
-    tex.touch()
+    # Container overlay filesystems can give rapid writes identical mtimes.
+    # Construct the required ordering rather than depending on clock resolution.
+    timestamp = 1_700_000_000
+    os.utime(tex, (timestamp, timestamp))
+    os.utime(aux, (timestamp + age_seconds, timestamp + age_seconds))
 
-    assert not save_latex_log._is_current_for_tex(aux, tex)
-
-    aux.touch()
-    assert save_latex_log._is_current_for_tex(aux, tex)
+    assert save_latex_log._is_current_for_tex(aux, tex) is expected
 
 
 def test_regenerate_auxiliary_files_uses_draft_mode(tmp_path: Path, monkeypatch) -> None:
