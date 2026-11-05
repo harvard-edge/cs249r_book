@@ -300,9 +300,11 @@ No chapter is written once. Each one goes through a cycle that repeats as the fi
 4. **Teach it.** Volume I has been taught at Harvard through CS249r since 2023 and adopted by instructors at UC Berkeley, Columbia, Georgia Tech, IIT Bombay, and universities across Europe, Latin America, Africa, and Asia. The classroom shows where students get stuck.
 5. **Revise.** Reader issues, reviewer notes, and classroom experience go back into the next draft.
 
-Reviewers do more than check facts, and sometimes they change what the book covers. Industry experts on sustainable AI kept asking me where the data comes from and what a system costs over its full lifecycle. Their questions led to a chapter I had not planned, and I wrote it in 2023, before sustainable AI was a common topic.
+Reviewers do more than check facts, and sometimes they change what the book covers. For instance, industry experts on sustainable AI kept asking me where the data comes from and what a system costs over its full lifecycle. Their questions led to a chapter I had not planned, which I wrote in 2023, before sustainable AI was a common topic.
 
-**Numbers are computed, not typed.** Every derived quantity in the books comes from Python code that ships with the text, built on [MLSys·im](https://mlsysbook.ai/mlsysim/), whose hardware and model specifications trace to cited sources. A test suite runs on every commit and checks unit consistency, cross-references, notation, and citations.
+Responsible AI entered the book the same way, at the urging of engineers in industry. It can look like a subject outside traditional engineering, but the systems in this book make decisions that affect people, and more and more of them act on their own. The engineers who build such systems are responsible for how they behave, so the book teaches that responsibility as part of the engineering.
+
+**Numbers are computed, not typed.** Every derived quantity in the books comes from Python code that ships with the text. That code draws on [MLSys·im](https://mlsysbook.ai/mlsysim/), which I wrote for this series so that every chapter and every volume takes its numbers from a single source of truth. Each hardware and model specification in MLSys·im traces to a cited source, and when a value changes there, every chapter that uses it changes with it. A test suite runs on every commit and checks unit consistency, cross-references, notation, and citations.
 
 **Readers are part of the review.** Every chapter is open, and when something is wrong, unclear, or missing, the [book feedback](https://github.com/harvard-edge/cs249r_book/issues/new/choose) forms send it straight into the next revision.
 
@@ -315,13 +317,13 @@ Reviewers do more than check facts, and sometimes they change what the book cove
 
 <br>
 
-I have always learned best by building from scratch and teaching others.
+When I began teaching machine learning systems, there was no textbook for the course. Books covered the models, and papers covered individual systems, but nothing taught the infrastructure underneath them as one subject. The field was changing too quickly for anyone to have written one. So I started writing it myself, because I have always learned best by building from scratch and teaching others.
 
 When I want to understand an emerging or complex systems area, writing about it and writing code for it forces me to slow down. It forces me to find the core invariants, work through the math, and separate what is fundamentally true about physics and hardware from what is merely current.
 
 This repository is my open workshop and teaching lab. It is where I work out ideas for my students at Harvard, my research lab, and open benchmarking efforts like MLPerf. Volumes III and IV are that process happening in public.
 
-There is also a deeper reason. In the late 1990s, as an undergraduate, I wrote to a professor at Stanford because I was fascinated by genetic algorithms. I did not expect an answer. Then a brown package arrived at my house with a VHS tape on genetic algorithms inside. I never learned who sent it, so I never got to say thank you, but I have not forgotten what it felt like to have someone I had never met take the time to share what they knew with a curious student. That package sparked my curiosity, and the feeling has stayed with me.
+There is also a deeper reason. In the late 1990s, as an undergraduate, I wrote to a professor at Stanford because I was fascinated by genetic algorithms. I did not expect an answer. Then a brown package arrived at my house with a VHS tape on genetic algorithms inside, sent from the professor's office. I no longer remember the professor's name, so I never got to say thank you, but I have not forgotten what it felt like to have someone I had never met take the time to share what they knew with a curious student. That package sparked my curiosity, and the feeling has stayed with me.
 
 Students write to me now the way I once wrote to that professor, far more than I can answer one by one. This curriculum is my way of sending the package back out, to a much bigger classroom than any lecture hall can hold.
 
