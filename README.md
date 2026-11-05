@@ -73,7 +73,7 @@ Those numbers come from constraints. A model that scores well on a benchmark sti
 
 Teaching AI engineering this way takes more than a book, which is why everything lives in one repository. Each part teaches something the others cannot. Students who only read do not internalize, and students who only code do not generalize. The textbook builds the mental model, TinyTorch makes it concrete by having students build the machinery themselves, and the hardware kits and the MLSys·im simulator show where the model breaks, on devices students can hold and at scales beyond any one lab.
 
-The work began in a classroom. The HarvardX TinyML course came first and reached more than 100,000 learners. In 2023, the students in CS249r at Harvard wrote the first class notes for this curriculum together, one topic per group, and we published them on GitHub. Since then, I have kept revising the material with help from a growing community of contributors, and instructors at universities around the world now teach from it. The goal is to reach one million learners by 2030, because the world is building AI factories faster than it is training the engineers who can design and run them.
+The work began in a classroom. The HarvardX TinyML course came first and reached more than 100,000 learners. In 2023, the students in CS249r at Harvard wrote the first class notes for this curriculum together, one topic per group, and we published them on GitHub. Since then, I have kept revising the material with help from a growing community of contributors, and instructors at universities around the world now teach from it. The goal is to reach one million learners by 2030, because the world is building AI factories faster than it is training AI engineers.
 
 ---
 
@@ -259,7 +259,7 @@ Around the textbook sit the companion tools that let students build, measure, an
       <td align="center">🔬</td>
       <td><b>Labs</b></td>
       <td>Interactive Marimo notebooks, run in the browser, that pair with textbook chapters. A student predicts an outcome, changes a parameter, and sees what breaks.</td>
-      <td>Early release; built in the open</td>
+      <td>Early release, built in the open</td>
       <td><a href="https://mlsysbook.ai/labs/">Try labs</a> · <a href="labs/README.md">Repo guide</a></td>
     </tr>
     <tr>
@@ -425,9 +425,9 @@ Barroso, Hölzle, and Clidaras give a firsthand account of how one organization 
 
 Yes, and I would rather say so plainly than leave readers to guess. I use generative AI tools to write code and the checks that test it, to survey the literature before I read the papers myself, to draft passages that I then rewrite, to help produce figures that I once drew by hand, and to audit four volumes for consistency. I use them on the companions as well, from TinyTorch and the labs to the slides and the StaffML question bank. They are also how I learn a new area quickly. The tools take on mechanical work, which leaves my time for the parts that need a teacher: what to include, how to explain it, and whether it is right.
 
-A tool can write text that sounds right and is wrong, so I do not take its output on trust. I check the work in ways that do not depend on the tool. Every number in the books is computed by code that ships with the text. Automated checks test units, cross-references, notation, and citations whenever something changes. Engineers who build these systems review the chapters, and students test them in class. In StaffML, each question records whether it began as a machine draft and whether a person has reviewed it.
+A tool can write text that sounds right and is wrong, so I do not take its output on trust. I check the work in ways that do not depend on the tool. Every number in the books is computed by code, and automated checks run whenever something changes. Practitioners review the chapters, and students test them in class. In StaffML, each question records whether it began as a machine draft and whether a person has reviewed it.
 
-I researched, wrote, and rewrote every chapter. The decisions about what goes in, what stays out, and how an idea is taught are mine, and so is every mistake. Because all of the work is open, anyone can check it, and the [book feedback](https://github.com/harvard-edge/cs249r_book/issues/new/choose) forms send what you find straight to me.
+I researched, wrote, and rewrote every chapter. The decisions about what goes in, what stays out, and how an idea is taught are mine, and so is every mistake. Because all of the work is open, anyone can check it and [tell me](https://github.com/harvard-edge/cs249r_book/issues/new/choose) what they find.
 
 Volumes III and IV have not yet been through the classroom or practitioner review, which is why they are marked as drafts. Each volume includes a full [Note on AI Assistance](https://mlsysbook.ai/vol1/frontmatter/ai_use.html).
 
@@ -487,7 +487,7 @@ If this curriculum has helped you, there are two simple ways to help it grow.
       </td>
       <td width="50%" align="center" valign="top">
         <b>Fund the work</b><br>
-        Contributions go to <a href="https://opencollective.com/mlsysbook">Open Collective</a>, a transparent fund for educational outreach where every expense is public. The money goes back into the work: reaching more students and improving the material they learn from.<br><br>
+        Contributions go to <a href="https://opencollective.com/mlsysbook">Open Collective</a>, a transparent fund for educational outreach where every expense is public. The money goes back into the work, to reach more students and to improve the material they learn from.<br><br>
         <a href="https://opencollective.com/mlsysbook"><img src="https://opencollective.com/mlsysbook/tiers/badge.svg" alt="Open Collective"></a>
       </td>
     </tr>
@@ -523,7 +523,7 @@ If this curriculum has helped you, there are two simple ways to help it grow.
     <tr>
       <td align="center">🛠️</td>
       <td><b>Hardware Kits</b></td>
-      <td>Improve the deployment guides for Arduino, Seeed, Grove, and Raspberry Pi devices.</td>
+      <td>Improve the deployment guides, examples, and board support.</td>
       <td><a href="kits/README.md">Kits guide</a></td>
     </tr>
     <tr>
@@ -541,13 +541,13 @@ If this curriculum has helped you, there are two simple ways to help it grow.
     <tr>
       <td align="center">🧠</td>
       <td><b>SocratiQ</b></td>
-      <td>Improve the AI tutor that adds guided reading and quizzes to the sites.</td>
+      <td>Improve the tutor, its quizzes, and its prompts.</td>
       <td><a href="socratiq/README.md">SocratiQ guide</a></td>
     </tr>
     <tr>
       <td align="center">🐛</td>
       <td><b>Report an issue</b></td>
-      <td>Tell us about an error, a broken link, or something that is unclear.</td>
+      <td>Point out an error, a broken link, or anything unclear.</td>
       <td><a href="https://github.com/harvard-edge/cs249r_book/issues">GitHub Issues</a></td>
     </tr>
     <tr>
@@ -569,18 +569,28 @@ This is a multi-component repository, and **each component is released under its
 
 | Component | License | What it means |
 |---|---|---|
-| Textbook (`books/`) | [CC BY-NC-ND 4.0](https://creativecommons.org/licenses/by-nc-nd/4.0/) | The license of the MIT Press edition. Share for **non-commercial** use with attribution; modified versions, including translations, need permission. |
+| Textbook (`books/`) | [CC BY-NC-ND 4.0](https://creativecommons.org/licenses/by-nc-nd/4.0/) | The license of the MIT Press edition. Share for **non-commercial** use with attribution. Modified versions, including translations, need permission. |
 | Labs (`labs/`), Kits (`kits/`), Slides (`slides/`), Instructors (`instructors/`) | [CC-BY-NC-SA 4.0](LICENSE.md) | Share and adapt for **non-commercial** use, with attribution and same-license sharing. |
 | [TinyTorch](tinytorch/LICENSE) | MIT | Permissive. Use, modify, and redistribute, including commercially. |
 | [MLSys·im](mlsysim/LICENSE.md) | Apache 2.0 | Permissive with explicit patent grant. |
 | [StaffML](staffml/app/LICENSE) | AGPL v3 | Strong copyleft. Modifications to deployed services must be published. Commercial licenses are available from the authors. |
-| [StaffML question corpus](staffml/vault/questions/LICENSE) | CC BY-NC 4.0 | Research and educational use; commercial use requires permission. |
+| [StaffML question corpus](staffml/vault/questions/LICENSE) | CC BY-NC 4.0 | Research and educational use. Commercial use requires permission. |
 | [TinyDigits dataset](tinytorch/LICENSE) | BSD 3-Clause | Permissive (matches sklearn ancestry). |
-| [TinyTalks dataset](tinytorch/LICENSE) | CC BY 4.0 | Permissive with attribution; commercial use allowed. |
+| [TinyTalks dataset](tinytorch/LICENSE) | CC BY 4.0 | Permissive with attribution. Commercial use is allowed. |
 
 A shorter summary for readers is at [mlsysbook.ai/about/license](https://mlsysbook.ai/about/license.html).
 
 If you are an institution considering adoption, or a company interested in commercial terms for a copyleft component, please write to [edu@tinyML.org](mailto:edu@tinyML.org).
+
+---
+
+## Acknowledgments
+
+I assembled this curriculum, but I did not invent most of what it teaches. The ideas come from the engineers and practitioners in industry who build these systems every day, and from researchers worldwide who study them and publish what they learn. The books cite their work throughout, and the curriculum would not exist without it. My own research lab has contributed as well.
+
+Many people also gave their time to the curriculum itself. My students in CS249r at Harvard have tested every revision. Reviewers in industry and academia read chapters and told me where I was wrong. Instructors who adopted the material reported what worked in their classrooms and what did not. Readers found errors, and contributors fixed them. The financial contributors on Open Collective helped carry the work to more students.
+
+Whatever is good here owes a great deal to all of them. The mistakes are mine.
 
 ---
 
@@ -984,5 +994,5 @@ These people have improved the textbooks, the software, and the teaching materia
 <b><a href="https://buttondown.email/mlsysbook">✉️ Subscribe</a> • <a href="https://github.com/harvard-edge/cs249r_book/discussions">💬 Join discussions</a> • <a href="https://mlsysbook.ai/">🌐 Visit mlsysbook.ai</a></b>
 
 <b>Made with ❤️ for AI engineers in the making, around the world 🌎</b><br>
-<i>If this material helped you, pass it on to the next curious student.</i>
+<i>If this material helped you, <a href="https://github.com/harvard-edge/cs249r_book/stargazers">star the repository</a> and pass it on to the next curious student.</i>
 </div>
