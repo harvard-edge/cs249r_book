@@ -796,7 +796,7 @@ def verify_pdf(
                 code="pdftotext-missing",
                 message="pdftotext not installed; install poppler (e.g. brew install poppler)",
             )
-        ]
+        ] + scan_build_log(log_path)
 
     issues = scan_pdf_text(pdf_path)
     issues.extend(scan_table_prose_spacing(pdf_path))

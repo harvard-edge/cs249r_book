@@ -1149,7 +1149,7 @@ def test_default_log_path_discovers_preserved_volume_log_and_rejects_stale(tmp_p
     assert default_log_path(tmp_path, "vol2") is None
 
 
-def test_volume_verification_uses_preserved_log_without_explicit_argument(tmp_path):
+def test_volume_verification_uses_preserved_log_without_explicit_argument(tmp_path, monkeypatch):
     import fitz
 
     from binder.cli.commands._pdf_checks import default_pdf_path, verify_volume_pdf
@@ -1166,6 +1166,14 @@ def test_volume_verification_uses_preserved_log_without_explicit_argument(tmp_pa
     assert not result.ok
     glyph_check = next(check for check in result.checks if check.check_id == "missing-glyph")
     assert not glyph_check.skipped and not glyph_check.passed
+    assert any(issue.code == "missing-glyph" for issue in result.issues)
+
+    # Missing text-extraction tooling must fail independently without hiding
+    # the diagnostic already present in the authoritative LaTeX log.
+    monkeypatch.setattr("binder.cli.commands._pdf_checks.shutil.which", lambda name: None)
+    result = verify_volume_pdf(tmp_path, "vol2")
+    assert not result.ok
+    assert any(issue.code == "pdftotext-missing" for issue in result.issues)
     assert any(issue.code == "missing-glyph" for issue in result.issues)
 
 
