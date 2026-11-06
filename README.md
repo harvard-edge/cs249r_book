@@ -282,7 +282,7 @@ Around the textbook sit the companion tools that let students build, measure, an
     <tr>
       <td align="center">🎬</td>
       <td><b>Lecture Slides</b></td>
-      <td>Beamer decks for each chapter of all four volumes, in one shared theme that is easy to restyle.</td>
+      <td>Beamer decks for every chapter of the textbook, in one shared theme that is easy to restyle.</td>
       <td>Released</td>
       <td><a href="https://mlsysbook.ai/slides/">Browse decks</a> · <a href="slides/README.md">Repo guide</a></td>
     </tr>
@@ -353,7 +353,7 @@ Engineers in industry also urged me to teach responsible AI. It can look like a 
 
 **Readers are part of the review, too.** Every chapter is open, and when something is wrong, unclear, or missing, the [book feedback](https://github.com/harvard-edge/cs249r_book/issues/new/choose) forms send it straight into the next revision.
 
-**Numbers are computed, not typed.** Every derived quantity in the books comes from Python code that ships with the text. I learned the need for this the hard way. In early drafts I typed numbers by hand, made mistakes, and watched the same quantity drift apart from one chapter and one volume to the next. No author can hold every number in four volumes in mind at once, so I wrote [MLSys·im](https://mlsysbook.ai/mlsysim/) to hold them instead. It is the single source of truth for every chapter and every volume. Each hardware and model specification in it traces to a cited source, and when a value changes there, every chapter that uses it changes with it. A test suite runs on every commit and checks unit consistency, cross-references, notation, and citations.
+**Numbers are computed, not typed.** Every derived quantity in the books comes from Python code that ships with the text. I learned the need for this the hard way. In early drafts I typed numbers by hand, made mistakes, and watched the same quantity drift apart from one chapter and one volume to the next. No author can hold every number across the series in mind at once, so I wrote [MLSys·im](https://mlsysbook.ai/mlsysim/) to hold them instead. It is the single source of truth for every chapter and every volume. Each hardware and model specification in it traces to a cited source, and when a value changes there, every chapter that uses it changes with it. A test suite runs on every commit and checks unit consistency, cross-references, notation, and citations.
 
 ---
 
@@ -451,7 +451,7 @@ Barroso, Hölzle, and Clidaras give a firsthand account of how one organization 
 
 <br>
 
-Yes, and I would rather say so plainly than leave readers to guess. I use generative AI tools to write code and the checks that test it, to survey the literature before I read the papers myself, to draft passages that I then rewrite, to help produce figures that I once drew by hand, and to audit four volumes for consistency. I use them on the companions as well, from TinyTorch and the labs to the slides and the StaffML question bank. They are also how I learn a new area quickly. The tools take on mechanical work, which leaves my time for the parts that need a teacher: what to include, how to explain it, and whether it is right.
+Yes, and I would rather say so plainly than leave readers to guess. I use generative AI tools to write code and the checks that test it, to survey the literature before I read the papers myself, to draft passages that I then rewrite, to help produce figures that I once drew by hand, and to audit the books for consistency. I use them on the companions as well, from TinyTorch and the labs to the slides and the StaffML question bank. They are also how I learn a new area quickly. The tools take on mechanical work, which leaves my time for the parts that need a teacher: what to include, how to explain it, and whether it is right.
 
 A tool can write text that sounds right and is wrong, so I do not take its output on trust. I check the work in ways that do not depend on the tool. Every number in the books is computed by code, and automated checks run whenever something changes. Practitioners review the chapters, and students test them in class. In StaffML, each question records whether it began as a machine draft and whether a person has reviewed it.
 
@@ -505,7 +505,7 @@ If this curriculum has helped you, there are two simple ways to help it grow.
       <td width="50%" align="center" valign="top">
         <b>Star the repository</b><br>
         A star takes one click, and it carries further than it seems. Each one tells universities, foundations, and other learners that people want to study how machine learning systems are built, and that helps AI engineering earn its place in the curriculum. Their support also pays for workshops and hardware kits in classrooms that could not otherwise afford them.<br><br>
-        Stars matter to me as well. Writing four volumes is a long project, and the new stars I see each morning are what keep me going, because each one tells me that a student somewhere is learning from this work.<br><br>
+        Stars matter to me as well. This is a long project, and the new stars I see each morning are what keep me going, because each one tells me that a student somewhere is learning from this work.<br><br>
         <a href="https://star-history.com/#harvard-edge/cs249r_book&Date">
           <picture>
             <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=harvard-edge/cs249r_book&type=date&theme=dark&legend=top-left">
