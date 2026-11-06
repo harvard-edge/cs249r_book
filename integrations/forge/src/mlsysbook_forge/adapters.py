@@ -1,5 +1,7 @@
 """Adapters consume public results; they do not change solver calculations."""
 
+import warnings
+
 from .evidence import digest, sanitize
 
 
@@ -13,10 +15,14 @@ class PipelineCallback:
 
     def on_stage_end(self, stage_name: str, result):
         self.stage += 1
-        self.session.capture(
-            {"stage": stage_name, "result": result},
-            action_id=f"{self.experiment_id}:{self.stage}:{stage_name}",
-        )
+        try:
+            self.session.capture(
+                {"stage": stage_name, "result": result},
+                action_id=f"{self.experiment_id}:{self.stage}:{stage_name}",
+            )
+        except Exception as error:  # optional observers must not change solver behavior
+            warnings.warn(f"Forge evidence capture failed ({type(error).__name__}); the lesson continues.",
+                          RuntimeWarning, stacklevel=2)
 
 
 def publish_capture(session, capture):
