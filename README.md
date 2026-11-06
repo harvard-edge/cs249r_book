@@ -173,28 +173,28 @@ The textbook spans four volumes. Each one widens the boundary of the system and 
       <td><a href="https://mlsysbook.ai/vol1/"><b>I. Introduction to Machine Learning Systems</b></a></td>
       <td>The model</td>
       <td>How does intelligence execute efficiently on a single machine?</td>
-      <td><b>Released</b>; forthcoming in print from MIT Press</td>
+      <td><b>Released</b><br>Forthcoming in print from MIT Press</td>
     </tr>
     <tr>
       <td align="center">📘</td>
       <td><a href="https://mlsysbook.ai/vol2/"><b>II. Scaling Machine Learning Systems</b></a></td>
       <td>The fleet</td>
       <td>How does intelligence scale across distributed clusters and datacenters?</td>
-      <td><b>Preview</b>; in active revision</td>
+      <td><b>Preview</b><br>In active revision</td>
     </tr>
     <tr>
       <td align="center">🟣</td>
       <td><a href="books/vol3/"><b>III. Agentic Machine Learning Systems</b></a></td>
       <td>The trajectory</td>
       <td>How is intelligence governed when it acts autonomously over long horizons?</td>
-      <td><b>In development</b>; changes often</td>
+      <td><b>In development</b><br>Changes often</td>
     </tr>
     <tr>
       <td align="center">🌲</td>
       <td><a href="books/vol4/"><b>IV. Physical AI: Machine Learning Systems That Sense and Act</b></a></td>
       <td>The physical action</td>
       <td>How can intelligence act safely on matter and physical systems?</td>
-      <td><b>In development</b>; changes often</td>
+      <td><b>In development</b><br>Changes often</td>
     </tr>
   </tbody>
 </table>
@@ -394,7 +394,7 @@ The only assumptions are that the reader can program in Python and has met basic
 
 No. The two volumes differ in scope, not in depth or rigor.
 
-Volume I is the single-machine world: how an ML system works on one machine with a handful of accelerators, from the memory hierarchy and kernel efficiency to quantization and on-device deployment. Volume II is the fleet: thousands of accelerators connected by high-speed networks, parallelism across them, fault tolerance, and serving at datacenter scale.
+Volume I covers one machine with a handful of accelerators, from the memory hierarchy and kernel efficiency to quantization and on-device deployment. Volume II covers the fleet, with thousands of accelerators connected by high-speed networks, the parallelism that spans them, fault tolerance, and serving at datacenter scale.
 
 Volume II does not assume that a reader has finished Volume I, so a reader with strong single-machine foundations can start there. Reading Volume I first gives the cleanest mental model from the silicon up, in the same way that Hennessy and Patterson's *Computer Organization and Design* precedes *Computer Architecture: A Quantitative Approach*.
 
@@ -504,7 +504,7 @@ If this curriculum has helped you, there are two simple ways to help it grow.
     <tr>
       <td width="50%" align="center" valign="top">
         <b>Star the repository</b><br>
-        A star takes one click, and it carries further than it seems. Each one tells universities, foundations, and other learners that people want to study how machine learning systems are built, and that helps AI engineering earn its place in the curriculum. Their support also pays for workshops and hardware kits in classrooms that could not otherwise afford them.<br><br>
+        A star takes one click, and each one tells universities, foundations, and other learners that people want to study how machine learning systems are built. That helps AI engineering earn its place in the curriculum, and the support of those institutions pays for workshops and hardware kits in classrooms that could not otherwise afford them.<br><br>
         Stars matter to me as well. This is a long project, and the new stars I see each morning are what keep me going, because each one tells me that a student somewhere is learning from this work.<br><br>
         <a href="https://star-history.com/#harvard-edge/cs249r_book&Date">
           <picture>
