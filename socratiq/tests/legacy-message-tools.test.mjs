@@ -33,7 +33,7 @@ async function fixture(run) {
   await page.route('**/*', async route => {
     const url = new URL(route.request().url());
     if (url.origin === origin) return route.continue();
-    if (!url.hostname.endsWith('workers.dev')) return route.abort();
+    if (url.origin + url.pathname !== 'https://mlsysbook.ai/api/socratiq/ai/stream') return route.abort();
     const body = route.request().postData() || '';
     requests.push(body);
     const paragraphId = body.match(/\(id=([^:]+):url=/)?.[1];
@@ -41,8 +41,18 @@ async function fixture(run) {
     return route.fulfill({status: 200, contentType: 'text/event-stream', body: `data: ${JSON.stringify({choices: [{delta: {content}, finish_reason: null}]})}\n\ndata: ${JSON.stringify({choices: [{delta: {}, finish_reason: 'stop'}]})}\n\ndata: [DONE]\n\n`});
   });
   const study = page.locator('#widget-chat-container');
+  let firstOpen = true;
   async function open() {
     await page.getByRole('button', {name: 'Ask SocratiQ', exact: true}).click();
+    if (firstOpen) {
+      // Message-tool assertions start after the learner dismisses onboarding;
+      // independent tour tests cover the full first-use walkthrough.
+      const tour = page.getByRole('dialog', {name: 'SocratiQ guided tour'});
+      await expect(tour).toBeVisible();
+      await tour.getByRole('button', {name: 'Skip tour', exact: true}).click();
+      await expect(tour).toBeHidden();
+      firstOpen = false;
+    }
     await page.getByRole('button', {name: 'Study tools', exact: true}).click();
     await expect(study.getByRole('button', {name: 'Close study tools', exact: true})).toBeVisible({timeout: 60000});
   }

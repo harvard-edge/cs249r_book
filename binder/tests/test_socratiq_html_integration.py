@@ -15,7 +15,7 @@ VOLUMES = ("vol1", "vol2", "vol3", "vol4")
 READER_SRC = "/shared/assets/scripts/socratiq/reader.js"
 STUDY_SRC = "/shared/assets/scripts/socratiq/study.js"
 READER_RESOURCE = "/shared/assets/scripts/socratiq/**"
-READER_ENDPOINT = "https://proxy-worker-streaming.mlsysbook.workers.dev/ai/stream"
+READER_ENDPOINT = "https://mlsysbook.ai/api/socratiq/ai/stream"
 
 
 class ScriptTagCollector(HTMLParser):
@@ -70,7 +70,8 @@ def test_html_config_loads_and_stages_socratiq_reader(volume):
 
 
 @pytest.mark.skipif(shutil.which("quarto") is None, reason="Quarto required for resource staging")
-def test_quarto_stages_reader_under_site_root(tmp_path):
+@pytest.mark.parametrize("volume", VOLUMES)
+def test_quarto_stages_reader_under_site_root(tmp_path, volume):
     books = ROOT / "books"
     source = books / READER_SRC.lstrip("/")
     assert source.is_file(), f"missing Quarto resource source: {source}"
@@ -85,7 +86,7 @@ def test_quarto_stages_reader_under_site_root(tmp_path):
     assert study_source.is_file(), f"missing lazy study resource: {study_source}"
     shutil.copy2(study_source, project / STUDY_SRC.lstrip("/"))
     (project / "index.qmd").write_text("# Resource staging check\n", encoding="utf-8")
-    chapter = project / "vol1" / "01_chapter" / "01_chapter.qmd"
+    chapter = project / volume / "01_chapter" / "01_chapter.qmd"
     chapter.parent.mkdir(parents=True)
     chapter.write_text("# Nested chapter\n", encoding="utf-8")
     fixture_config = {
@@ -93,17 +94,17 @@ def test_quarto_stages_reader_under_site_root(tmp_path):
             "type": "website",
             "output-dir": "_build/html",
             "resources": [READER_RESOURCE],
-            "render": ["index.qmd", "vol1/01_chapter/01_chapter.qmd"],
+            "render": ["index.qmd", f"{volume}/01_chapter/01_chapter.qmd"],
         },
         "website": {
-            "site-url": "https://mlsysbook.ai/vol1/",
+            "site-url": f"https://mlsysbook.ai/{volume}/",
         },
         "format": {
             "html": {
                 "include-in-header": [
                     {
                         "text": (
-                            f'<script src="{READER_SRC}" data-volume="vol1" '
+                            f'<script src="{READER_SRC}" data-volume="{volume}" '
                             f'data-endpoint="{READER_ENDPOINT}" defer></script>'
                         )
                     }
@@ -126,12 +127,12 @@ def test_quarto_stages_reader_under_site_root(tmp_path):
     output = project / "_build/html"
     flatten = ROOT / ".github" / "scripts" / "flatten-vol-urls.sh"
     flattened = subprocess.run(
-        ["bash", str(flatten), str(output), "vol1"],
+        ["bash", str(flatten), str(output), volume],
         check=True,
         capture_output=True,
         text=True,
     )
-    assert "vol1 flattened" in flattened.stdout
+    assert f"{volume} flattened" in flattened.stdout
     staged_reader = output / READER_SRC.lstrip("/")
     assert staged_reader.is_file()
     assert staged_reader.read_bytes() == source.read_bytes()
@@ -144,25 +145,25 @@ def test_quarto_stages_reader_under_site_root(tmp_path):
     root_parser.feed(root_html)
     chapter_parser = ScriptTagCollector()
     chapter_parser.feed(chapter_html)
-    root_tags = [tag for tag in root_parser.scripts if tag.get("data-volume") == "vol1"]
-    chapter_tags = [tag for tag in chapter_parser.scripts if tag.get("data-volume") == "vol1"]
+    root_tags = [tag for tag in root_parser.scripts if tag.get("data-volume") == volume]
+    chapter_tags = [tag for tag in chapter_parser.scripts if tag.get("data-volume") == volume]
     assert len(root_tags) == len(chapter_tags) == 1
     assert root_tags[0].get("data-endpoint") == chapter_tags[0].get("data-endpoint") == READER_ENDPOINT
 
-    # The production site is mounted at /vol1/. Quarto makes the root include
+    # Each production volume is mounted at its own /volN/ prefix. Quarto makes the root include
     # relative, and the flatten script adjusts the nested page after moving it
     # up one directory. Both references must resolve to the deployed asset.
-    root_asset_url = urljoin("https://mlsysbook.ai/vol1/", root_tags[0]["src"])
-    chapter_url = urljoin("https://mlsysbook.ai/vol1/", "01_chapter/01_chapter.html")
+    root_asset_url = urljoin(f"https://mlsysbook.ai/{volume}/", root_tags[0]["src"])
+    chapter_url = urljoin(f"https://mlsysbook.ai/{volume}/", "01_chapter/01_chapter.html")
     chapter_asset_url = urljoin(chapter_url, chapter_tags[0]["src"])
-    expected_asset_url = "https://mlsysbook.ai/vol1/shared/assets/scripts/socratiq/reader.js"
+    expected_asset_url = f"https://mlsysbook.ai/{volume}/shared/assets/scripts/socratiq/reader.js"
     assert root_asset_url == expected_asset_url
     assert chapter_asset_url == expected_asset_url
     # The study loader resolves a sibling of the actual reader script URL,
     # retaining the deployed volume prefix after Quarto URL flattening.
     for reader_url in (root_asset_url, chapter_asset_url):
         assert urljoin(reader_url, "study.js") == (
-            "https://mlsysbook.ai/vol1/shared/assets/scripts/socratiq/study.js"
+            f"https://mlsysbook.ai/{volume}/shared/assets/scripts/socratiq/study.js"
         )
-    deployed_asset_path = f"vol1/{READER_SRC.lstrip('/')}"
+    deployed_asset_path = f"{volume}/{READER_SRC.lstrip('/')}"
     assert urlparse(root_asset_url).path.lstrip("/") == deployed_asset_path

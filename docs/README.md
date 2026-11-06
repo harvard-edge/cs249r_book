@@ -41,3 +41,7 @@ stores, never in source or resource names.
 These conventions apply to new resources. Existing deployed names and URLs
 remain supported until an explicit migration; do not rename them solely for
 cosmetic consistency. Examples above do not imply resources are provisioned.
+
+Service inventories and operating instructions live with their code:
+[StaffML services](../staffml/CLOUDFLARE.md) and
+[SocratiQ API](../socratiq/cloudflare/README.md).

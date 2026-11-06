@@ -82,7 +82,7 @@ function _buildHTML() {
       </div>
 
       <!-- Circular dial -->
-      <div style="position:relative;width:210px;height:210px;margin:0 auto 20px;">
+      <div id="med-dial" style="position:relative;width:210px;height:210px;margin:0 auto 20px;">
         <svg id="med-svg" viewBox="0 0 220 220" width="210" height="210" style="position:absolute;inset:0;cursor:pointer;touch-action:none;">
           <circle cx="110" cy="110" r="90" fill="none" stroke="var(--socratiq-border,#e5e7eb)" stroke-width="18"/>
           <circle id="med-arc" cx="110" cy="110" r="90" fill="none"
@@ -171,7 +171,7 @@ function _buildCSS() {
     0%,100% { transform: scale(1);     opacity: 1;    }
     50%      { transform: scale(1.035); opacity: 0.88; }
   }
-  #med-card.breathing {
+  #med-card.breathing #med-dial {
     animation: med-breathe 16s ease-in-out infinite;
   }
   #med-arc.breathing {
@@ -200,6 +200,10 @@ function _buildCSS() {
     to   { opacity:1; transform:translateY(0)     scale(1); }
   }
   #socratiq-meditation-nudge { animation: med-nudge-in 0.22s ease-out; }
+  @media (prefers-reduced-motion: reduce) {
+    #med-card.breathing #med-dial, #socratiq-meditation-nudge { animation: none; transform: none; }
+    #med-arc { transition: none !important; }
+  }
   `;
 }
 
@@ -494,6 +498,7 @@ function _showNudge(shadowRoot, sound = 'bell') {
         to   { opacity:1; transform:translateX(-50%) translateY(0)      scale(1);   }
       }
       #${NUDGE_ID} { animation: med-nudge-in 0.22s ease-out; }
+      @media (prefers-reduced-motion: reduce) { #${NUDGE_ID} { animation: none; } }
       #med-nudge-start:hover { background: #4f46e5 !important; }
       #med-nudge-dismiss:hover { background: #334155 !important; color:#e2e8f0 !important; }
     `;

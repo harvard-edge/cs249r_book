@@ -5,6 +5,12 @@ export const LIMITS = Object.freeze({ bodyBytes: 131072, messageCharacters: 6400
 export const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
 const MODELS = new Set(['openai/gpt-oss-120b', 'openai/gpt-oss-20b']);
 const UNSUPPORTED = new Set(['gemini', 'cerebras', 'sambanova', 'mistral', 'openai', 'huggingface', 'awan']);
+// Exact paths only: never strip an arbitrary prefix or decode/rewrite lookalikes.
+const CHAT_ROUTES = new Map([
+  ['/ai', false], ['/ai/stream', true],
+  ['/api/socratiq/ai', false], ['/api/socratiq/ai/stream', true],
+]);
+const HEALTH_ROUTES = new Set(['/health', '/api/socratiq/health']);
 class GatewayError extends Error {
   constructor(status, code) { super(code); this.status = status; }
 }
@@ -128,9 +134,18 @@ export function createWorker({ fetchImpl = globalThis.fetch, limits = LIMITS } =
     let cors = {};
     let gate;
     try {
-      cors = corsFor(request, env);
       const url = new URL(request.url);
-      if (!['/ai', '/ai/stream'].includes(url.pathname)) fail(404, 'route_not_found');
+      // Dispatch/liveness only, including when disabled. No config, secret,
+      // limiter, or provider lookup; no configuration details in the response.
+      if (HEALTH_ROUTES.has(url.pathname)) {
+        const headers = { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' };
+        if (!['GET', 'HEAD'].includes(request.method)) {
+          return jsonError(405, 'method_not_allowed', headers, { Allow: 'GET, HEAD' });
+        }
+        return new Response(null, { status: 204, headers });
+      }
+      cors = corsFor(request, env);
+      if (!CHAT_ROUTES.has(url.pathname)) fail(404, 'route_not_found');
       if (request.method === 'OPTIONS') {
         const method = request.headers.get('Access-Control-Request-Method');
         const requested = (request.headers.get('Access-Control-Request-Headers') ?? '').toLowerCase().split(',').map(s => s.trim()).filter(Boolean);
@@ -164,7 +179,7 @@ export function createWorker({ fetchImpl = globalThis.fetch, limits = LIMITS } =
         try { body = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)); }
         catch { fail(400, 'invalid_json'); }
       } finally { bodyGate.close(); }
-      const payload = payloadFor(body, url.pathname === '/ai/stream');
+      const payload = payloadFor(body, CHAT_ROUTES.get(url.pathname));
       const upstream = await gate.race(fetchImpl(GROQ_URL, {
         method: 'POST', redirect: 'manual', signal: gate.signal,
         headers: { Authorization: `Bearer ${env.GROQ_API_KEY}`, 'Content-Type': 'application/json',

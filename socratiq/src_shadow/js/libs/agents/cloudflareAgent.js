@@ -1,6 +1,9 @@
 import { TokenCounter } from "../utils/tokenCounter.js";
 import { CustomAPIAdapter } from "./custom-api-adapter.js";
 import { WORKER_URL_AI, WORKER_URL_AI_STREAM, PROVIDER_MODELS, DEFAULT_PROVIDER, MAX_OUTPUT_TOKENS } from "../../../configs/env_configs.js";
+import { SHARED_PROVIDER } from '../../../../src_shared/provider-config.js';
+import { readLearnerPreferences } from '../../../../src_reader/preferences.js';
+import { withLearnerCalibration } from '../../../../src_reader/calibration.mjs';
 
 // Provider configs are now centrally managed in src_shadow/configs/env_configs.js
 const providerConfigs = PROVIDER_MODELS;
@@ -39,7 +42,7 @@ function validateCompletion(result) {
 }
 
 // Call provider with single response
-async function callProviderSingle(prompt, provider = DEFAULT_PROVIDER, signal, suppliedMessages) {
+async function callProviderSingle(prompt, provider = DEFAULT_PROVIDER, signal, suppliedMessages, learnerPreferences) {
   provider = provider.toUpperCase();
   const config = providerConfigs[provider];
   
@@ -49,7 +52,7 @@ async function callProviderSingle(prompt, provider = DEFAULT_PROVIDER, signal, s
 
   // Preserve caller policy and conversation order. The gateway validates size;
   // truncating arbitrary messages here could remove part of a system policy.
-  const messages = suppliedMessages?.length ? suppliedMessages : [{ role: "user", content: prompt }];
+  const messages = withLearnerCalibration(suppliedMessages?.length ? suppliedMessages : [{ role: "user", content: prompt }], learnerPreferences ?? readLearnerPreferences());
 
   // Check token count and optimize if needed
   TokenCounter.logTokenUsage(messages, `${provider} Single Request`);
@@ -59,7 +62,7 @@ async function callProviderSingle(prompt, provider = DEFAULT_PROVIDER, signal, s
     
     // For large prompts, try to split or truncate
     if (!suppliedMessages?.length && prompt.length > 15000) { // Only truncate the legacy plain prompt.
-      messages[0].content = prompt.substring(0, 15000) + "\n\n[Content truncated due to size limits]";
+      messages[messages.length - 1].content = prompt.substring(0, 15000) + "\n\n[Content truncated due to size limits]";
     }
   }
 
@@ -110,7 +113,7 @@ async function callProviderSingle(prompt, provider = DEFAULT_PROVIDER, signal, s
 }
 
 // Call provider with streaming response
-async function* callProviderStream(prompt, provider = DEFAULT_PROVIDER, signal, suppliedMessages) {
+async function* callProviderStream(prompt, provider = DEFAULT_PROVIDER, signal, suppliedMessages, learnerPreferences) {
   provider = provider.toUpperCase();
   const config = providerConfigs[provider];
   
@@ -120,7 +123,7 @@ async function* callProviderStream(prompt, provider = DEFAULT_PROVIDER, signal, 
 
   // Preserve caller policy and conversation order. The gateway validates size;
   // truncating arbitrary messages here could remove part of a system policy.
-  const messages = suppliedMessages?.length ? suppliedMessages : [{ role: "user", content: prompt }];
+  const messages = withLearnerCalibration(suppliedMessages?.length ? suppliedMessages : [{ role: "user", content: prompt }], learnerPreferences ?? readLearnerPreferences());
 
   // Check token count and optimize if needed
   TokenCounter.logTokenUsage(messages, `${provider} Streaming Request`);
@@ -130,7 +133,7 @@ async function* callProviderStream(prompt, provider = DEFAULT_PROVIDER, signal, 
     
     // For large prompts, try to split or truncate
     if (!suppliedMessages?.length && prompt.length > 15000) { // Only truncate the legacy plain prompt.
-      messages[0].content = prompt.substring(0, 15000) + "\n\n[Content truncated due to size limits]";
+      messages[messages.length - 1].content = prompt.substring(0, 15000) + "\n\n[Content truncated due to size limits]";
     }
   }
 
@@ -228,7 +231,7 @@ async function* callProviderStream(prompt, provider = DEFAULT_PROVIDER, signal, 
 function getTargetUrl(provider) {
   provider = provider.toUpperCase();
   const urls = {
-    GROQ: "https://api.groq.com/openai/v1/chat/completions",
+    GROQ: SHARED_PROVIDER.target,
     GEMINI: "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
     CEREBRAS: "https://api.cerebras.ai/v1/chat/completions",
     SAMBANOVA: "https://api.sambanova.ai/v1/chat/completions",
@@ -248,13 +251,14 @@ async function tryMultipleProvidersSingle(
   token,
   json = false,
 ) {
-  // Try custom API first if configured
-  let customHasContent = false;
+  // An explicitly selected custom service is a privacy boundary. Never send its
+  // failed request to the hosted service without the learner changing settings.
   const settings = getCurrentSettings();
-  if (CustomAPIAdapter.hasCustomAPIConfig(settings)) {
+  if (settings?.customAPI?.enabled) {
+    if (!CustomAPIAdapter.hasCustomAPIConfig(settings)) throw new Error('Complete your custom API settings, or disable the custom API to use the shared service.');
     try {
       console.log(`[CUSTOM_API] Attempting custom API for single response: ${settings.customAPI.provider}`);
-      const customResult = CustomAPIAdapter.callCustomAPI(params.prompt, settings, false);
+      const customResult = CustomAPIAdapter.callCustomAPI(params.prompt, settings, false, withLearnerCalibration(requestMessages(params), params.learnerPreferences ?? readLearnerPreferences()));
       if (customResult) {
         // Collect all chunks from the generator
         let fullResponse = '';
@@ -266,8 +270,9 @@ async function tryMultipleProvidersSingle(
         return fullResponse;
       }
     } catch (error) {
-      console.warn('[CUSTOM_API] Custom API failed for single response, falling back to default providers:', error);
+      throw new Error('Your custom API request failed. Check its endpoint, model, and credentials, or disable the custom API to use the shared service.');
     }
+    throw new Error('Your custom API returned no answer. Check its settings, or disable the custom API to use the shared service.');
   }
 
   const preferredOrder = [params.provider || DEFAULT_PROVIDER];
@@ -279,7 +284,7 @@ async function tryMultipleProvidersSingle(
   for (const provider of preferredOrder) {
     try {
 
-      const result = await callProviderSingle(params.prompt, provider, signal, requestMessages(params));
+      const result = await callProviderSingle(params.prompt, provider, signal, requestMessages(params), params.learnerPreferences);
       return result;
     } catch (error) {
       lastError = error;
@@ -300,13 +305,14 @@ async function* tryMultipleProvidersStream(
   token,
   json = false,
 ) {
-  // Try custom API first if configured
+  // A custom API failure must not forward the learner's prompt to another service.
   let customHasContent = false;
   const settings = getCurrentSettings();
-  if (CustomAPIAdapter.hasCustomAPIConfig(settings)) {
+  if (settings?.customAPI?.enabled) {
+    if (!CustomAPIAdapter.hasCustomAPIConfig(settings)) throw new Error('Complete your custom API settings, or disable the custom API to use the shared service.');
     try {
       console.log(`[CUSTOM_API] Attempting custom API for streaming: ${settings.customAPI.provider}`);
-      const customResult = CustomAPIAdapter.callCustomAPI(params.prompt, settings, true);
+      const customResult = CustomAPIAdapter.callCustomAPI(params.prompt, settings, true, withLearnerCalibration(requestMessages(params), params.learnerPreferences ?? readLearnerPreferences()));
       if (customResult) {
         let received = false;
         for await (const chunk of customResult) {
@@ -317,9 +323,9 @@ async function* tryMultipleProvidersStream(
         return; // Success with custom API
       }
     } catch (error) {
-      if (customHasContent) throw error;
-      console.warn('[CUSTOM_API] Custom API failed for streaming, falling back to default providers:', error);
+      throw new Error('Your custom API request failed. Check its endpoint, model, and credentials, or disable the custom API to use the shared service.');
     }
+    throw new Error('Your custom API returned no answer. Check its settings, or disable the custom API to use the shared service.');
   }
 
   const preferredOrder = [params.provider || DEFAULT_PROVIDER];
@@ -340,7 +346,7 @@ async function* tryMultipleProvidersStream(
     try {
 
       // Get the generator from callProviderStream
-      const generator = callProviderStream(params.prompt, provider, signal, requestMessages(params));
+      const generator = callProviderStream(params.prompt, provider, signal, requestMessages(params), params.learnerPreferences);
 
       // Yield each chunk from the generator
       for await (const chunk of generator) {
@@ -601,65 +607,18 @@ async function callCloudflareWithLegacyFormat(legacyParams, provider = DEFAULT_P
     }
   }
   
-  // Set the appropriate model for the provider
-  const config = providerConfigs[provider.toUpperCase()];
-  if (!config) throw new Error(`Unknown provider: ${provider}`);
-  openaiFormat.model = config.model;
-
-  // For non-streaming, make direct API call and parse the response
-  if (!isStreaming) {
-    const config = providerConfigs[provider.toUpperCase()];
-    if (!config) {
-      throw new Error(`Unknown provider: ${provider}`);
-    }
-
-    const apiUrl = getApiUrl(false);
-    const targetUrl = getTargetUrl(provider);
-    
-    const response = await fetch(`${apiUrl}?url=${encodeURIComponent(targetUrl)}&provider=${provider.toLowerCase()}`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        messages: openaiFormat.messages,
-        model: openaiFormat.model,
-        max_tokens: MAX_OUTPUT_TOKENS,
-        temperature: openaiFormat.temperature,
-      }),
-    });
-
-    if (!response.ok) {
-      // Handle rate limit errors specifically
-      if (response.status === 429) {
-        const errorText = await response.text();
-        console.error(`[RATE_LIMIT] ${provider} rate limit exceeded in legacy format:`, errorText);
-        throw new Error(`Rate limit exceeded for ${provider}. Please try again in a moment or reduce your request size.`);
-      }
-      throw new Error(`${provider} failed with status ${response.status}: ${response.statusText}`);
-    }
-
-    const result = await response.json();
-    validateCompletion(result);
-    if (result.error) throw new Error(result.error.message || result.error.code || 'Provider returned an error');
-    // Parse the response to extract the quiz data
-    return parseQuizResponse(result, openaiFormat.metadata?.context);
-  } else {
-    // For streaming, use the existing function
-    return callProviderStream(openaiFormat.messages[0].content, provider, null, openaiFormat.messages);
-  }
+  // Every learner-facing quiz respects the selected custom service just as chat
+  // does. Keep explicit low-level provider calls separate for transport tests.
+  const params = {...legacyParams, provider, messages:openaiFormat.messages};
+  if (isStreaming) return tryMultipleProvidersStream(params);
+  const content = await tryMultipleProvidersSingle(params);
+  return parseQuizResponse({choices:[{message:{content}}]}, openaiFormat.metadata?.context);
 }
 
 // Export functions
 // Get current user settings from localStorage
 function getCurrentSettings() {
-  try {
-    const savedSettings = localStorage.getItem("userSettings");
-    return savedSettings ? JSON.parse(savedSettings) : {};
-  } catch (error) {
-    console.error('[CUSTOM_API] Error loading settings:', error);
-    return {};
-  }
+  return CustomAPIAdapter.getRuntimeSettings();
 }
 
 export {

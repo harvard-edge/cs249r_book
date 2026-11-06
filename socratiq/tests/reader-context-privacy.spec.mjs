@@ -2,7 +2,7 @@ import {test, expect} from '@playwright/test';
 
 // Constructed hidden sentinels exercise source capture; no model requests.
 test.beforeEach(async ({page}) => {
-  await page.route('https://proxy-worker-streaming.mlsysbook.workers.dev/**', route => route.abort());
+  await page.route('https://mlsysbook.ai/api/socratiq/ai/stream**', route => route.abort());
   await page.goto('/vol1/chapter/');
 });
 

@@ -130,7 +130,7 @@ import {
 import { MessageObserver } from "./libs/utils/observers/message_observer.js";
 import { initKnowledgeGraph } from "./components/visualizations/KnowledgeGraph.js";
 import { fillPromptTemplate } from "./libs/utils/prompt_templater.js";
-import { tryMultipleProvidersStream, callProviderSingle, callCloudflareAgent } from "./libs/agents/cloudflareAgent.js";
+import { tryMultipleProvidersStream, tryMultipleProvidersSingle, callCloudflareAgent } from "./libs/agents/cloudflareAgent.js";
 import { renderMermaidDiagram } from "./libs/diagram/mermaid.js";
 import { renderMermaidFlow } from "./libs/diagram/mermaid_flow.js";
 import {
@@ -1822,7 +1822,7 @@ async function handleMermaidDiagramAction(text, id) {
     for (const provider of preferredOrder) {
       try {
         // Get complete response from provider
-        response = await callProviderSingle(prompt, provider, null);
+        response = await tryMultipleProvidersSingle({prompt, provider});
 
         // Try to render the diagram with the complete response
         const result = await renderMermaidFlow(response);

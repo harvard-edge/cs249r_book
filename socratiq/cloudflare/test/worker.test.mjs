@@ -61,6 +61,71 @@ test('/ai/stream supports explicit nonstream legacy response', async () => {
   const worker = createWorker({ fetchImpl: async () => Response.json({ choices: [{ message: { content: 'text' } }] }) });
   assert.equal((await worker.fetch(request({ body }), env())).headers.get('Content-Type'), 'application/json; charset=utf-8');
 });
+test('public prefix preserves JSON, streaming, and explicit nonstream contracts', async () => {
+  for (const [path, stream, expectedStream] of [
+    ['/api/socratiq/ai', undefined, false],
+    ['/api/socratiq/ai/stream', undefined, true],
+    ['/api/socratiq/ai/stream', false, false],
+  ]) {
+    const body = prompt(); delete body.stream;
+    if (stream !== undefined) body.stream = stream;
+    const worker = createWorker({ fetchImpl: async (url, options) => {
+      assert.equal(url, GROQ_URL);
+      const payload = JSON.parse(options.body);
+      assert.equal(payload.stream, expectedStream);
+      assert.deepEqual(payload.messages, body.messages);
+      return expectedStream ? result() : Response.json({ choices: [{ message: { content: 'fixture JSON' } }] });
+    } });
+    const response = await worker.fetch(request({ path, body }), env());
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('Access-Control-Allow-Origin'), origin);
+    if (expectedStream) assert.equal(await response.text(), sse);
+    else assert.equal((await response.json()).choices[0].message.content, 'fixture JSON');
+  }
+});
+test('public routes preserve preflight, switch, origin, and target checks', async () => {
+  const worker = createWorker({ fetchImpl: async () => assert.fail('must not contact provider') });
+  for (const path of ['/api/socratiq/ai', '/api/socratiq/ai/stream']) {
+    const preflight = await worker.fetch(request({ path, method: 'OPTIONS', headers: {
+      'Access-Control-Request-Method': 'POST', 'Access-Control-Request-Headers': 'content-type,accept',
+    } }), env());
+    assert.equal(preflight.status, 204);
+    assert.equal(preflight.headers.get('Access-Control-Allow-Methods'), 'POST, OPTIONS');
+    await errorCode(await worker.fetch(request({ path }), { ...env(), ENABLED: 'false' }), 503, 'gateway_disabled');
+    await errorCode(await worker.fetch(request({ path, headers: { Origin: 'https://attacker.example' } }), env()), 403, 'origin_not_allowed');
+    await errorCode(await worker.fetch(request({ path, query: 'provider=groq&url=https://attacker.example' }), env()), 400, 'target_not_allowed');
+  }
+  await errorCode(await worker.fetch(request({ path: '/api/socratiq/ai' }), env()), 400, 'stream_requires_stream_route');
+});
+test('path lookalikes, extra prefixes, encoded segments, and trailing slashes are not chat routes', async () => {
+  const worker = createWorker({ fetchImpl: async () => assert.fail('unknown route cannot call provider') });
+  for (const path of ['/api/socratiqx/ai', '/api/socratiqai', '/api/socratiq/ai/', '/api/socratiq/ai/stream/',
+    '/api/socratiq/ai/streaming', '/api/socratiq/ai/extra', '/prefix/api/socratiq/ai', '/api/socratiq/api/socratiq/ai',
+    '/api//socratiq/ai', '/api/socratiq//ai', '/api/socratiq/%61i', '/api/socratiq/ai%2fstream',
+    '/api/socratiq%2fai', '/AI', '/ai/', '/ai/streaming', '/health/', '/api/socratiq/health/',
+    '/api/socratiqx/health', '/api/socratiq/%68ealth']) {
+    await errorCode(await worker.fetch(request({ path }), env()), 404, 'route_not_found');
+  }
+});
+test('content-free health checks dispatch without origin, configuration, limiter, or provider calls', async () => {
+  const worker = createWorker({ fetchImpl: async () => assert.fail('health never calls provider') });
+  const inaccessible = new Proxy({}, { get() { assert.fail('health never reads configuration or bindings'); } });
+  for (const path of ['/health', '/api/socratiq/health']) {
+    for (const method of ['GET', 'HEAD']) {
+      const response = await worker.fetch(new Request(`https://worker.example${path}`, { method }), inaccessible);
+      assert.equal(response.status, 204);
+      assert.equal(await response.text(), '');
+      assert.equal(response.headers.get('Cache-Control'), 'no-store');
+      assert.equal(response.headers.get('X-Content-Type-Options'), 'nosniff');
+      assert.equal(response.headers.get('Access-Control-Allow-Origin'), null);
+    }
+    for (const method of ['POST', 'OPTIONS']) {
+      const response = await worker.fetch(new Request(`https://worker.example${path}`, { method }), inaccessible);
+      assert.equal(response.headers.get('Allow'), 'GET, HEAD');
+      await errorCode(response, 405, 'method_not_allowed');
+    }
+  }
+});
 const rejected = [
   ['target_not_allowed', 400, { query: 'provider=groq&url=http://169.254.169.254/latest/meta-data/' }],
   ['target_not_allowed', 400, { query: `provider=groq&url=${encodeURIComponent(`${GROQ_URL}?key=override`)}` }],

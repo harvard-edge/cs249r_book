@@ -23,7 +23,7 @@ test('constructed legacy settings and import corruption preserve stored data', {
     browser = await testBrowser.launch({ headless: true });
     const page = await browser.newPage();
     page.on('pageerror', error => errors.push(error.message));
-    await page.route('**/*', route => new URL(route.request().url()).hostname.endsWith('workers.dev') ? route.abort() : route.continue());
+    await page.route('**/*', route => (new URL(route.request().url()).origin === 'https://mlsysbook.ai' && new URL(route.request().url()).pathname.startsWith('/api/socratiq/')) ? route.abort() : route.continue());
     await page.addInitScript(() => localStorage.setItem('userSettings', '{constructed broken JSON'));
     await page.goto('http://127.0.0.1:4193/test_website/encryption_textbook/index.html?socratiq=true');
     await page.locator('#flashcards-button').waitFor({ state: 'attached' });

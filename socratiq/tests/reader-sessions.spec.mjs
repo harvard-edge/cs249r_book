@@ -1,6 +1,6 @@
 import {test, expect} from '@playwright/test';
 
-const endpoint = 'https://proxy-worker-streaming.mlsysbook.workers.dev/**';
+const endpoint = 'https://mlsysbook.ai/api/socratiq/ai/stream**';
 const sse = text => `data: ${JSON.stringify({choices: [{delta: {content: text}, finish_reason: null}]})}\n\ndata: ${JSON.stringify({choices: [{delta: {}, finish_reason: 'stop'}]})}\n\ndata: [DONE]\n\n`;
 function payload(request) {
   const content = request.postDataJSON().messages.at(-1).content;

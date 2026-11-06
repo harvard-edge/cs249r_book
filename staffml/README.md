@@ -361,6 +361,8 @@ python3 scripts/generate-manifest.py
 
 **CI/CD:** Pushes to `dev` auto-build and deploy via [GitHub Actions](https://github.com/harvard-edge/cs249r_book/actions/workflows/staffml-preview-dev.yml).
 
+**Cloudflare services:** See the [service inventory and naming guide](CLOUDFLARE.md) for the vault, interviewer, analytics, storage bindings, and environment migration notes.
+
 ---
 
 ## Contributors

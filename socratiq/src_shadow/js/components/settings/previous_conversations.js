@@ -344,7 +344,7 @@ export function setupModal_loadchats(shadowEle) {
   const resetButton = shadowEle.querySelector("#reset-btn");
   if (resetButton) {
     resetButton.addEventListener("click", async () => {
-      const confirmed = confirm("Are you sure you want to reset SocratiQ? This will clear all data and refresh the application.");
+      const confirmed = confirm("Clear saved conversations, flashcards, and quizzes? Learning preferences and custom API settings will remain. This page will reload.");
       if (confirmed) {
         try {
           await resetSocratiqDB();

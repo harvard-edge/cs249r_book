@@ -14,7 +14,7 @@ test('legacy study reviews, deck ownership, backups, and saved-message export', 
     }
     browser=await chromium.launch({headless:true});
     const page=await browser.newPage();
-    await page.route('**/*',route=>new URL(route.request().url()).hostname.endsWith('workers.dev')?route.abort():route.continue());
+    await page.route('**/*',route=>(new URL(route.request().url()).origin === 'https://mlsysbook.ai' && new URL(route.request().url()).pathname.startsWith('/api/socratiq/'))?route.abort():route.continue());
     const failures=[];
     page.on('pageerror',error=>failures.push(error.message));
     page.on('console',message=>{if(/Error (parsing imported|importing data)/.test(message.text())) failures.push(message.text());});

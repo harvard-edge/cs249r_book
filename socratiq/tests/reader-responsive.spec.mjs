@@ -12,7 +12,7 @@ async function select(page,id='passage') {
   await page.locator(`#${id}`).evaluate(node => {const range=document.createRange();range.selectNodeContents(node);const s=getSelection();s.removeAllRanges();s.addRange(range);document.dispatchEvent(new Event('selectionchange'));});
 }
 async function open(page) {
-  await page.route('https://proxy-worker-streaming.mlsysbook.workers.dev/**', route => route.fulfill({contentType:'text/event-stream',body:sse(answer)}));
+  await page.route('https://mlsysbook.ai/api/socratiq/ai/stream**', route => route.fulfill({contentType:'text/event-stream',body:sse(answer)}));
   await page.goto('/vol1/chapter/'); await select(page);
   await page.getByRole('button',{name:'Explain this',exact:true}).tap();
   await expect(page.getByText('Explanation ready.',{exact:true})).toBeVisible();

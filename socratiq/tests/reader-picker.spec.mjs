@@ -1,7 +1,7 @@
 import {test, expect} from '@playwright/test';
 
 test.use({hasTouch: true, viewport: {width: 390, height: 844}});
-const endpoint = 'https://proxy-worker-streaming.mlsysbook.workers.dev/**';
+const endpoint = 'https://mlsysbook.ai/api/socratiq/ai/stream**';
 const sse = text => `data: ${JSON.stringify({choices: [{delta: {content: text}, finish_reason: null}]})}\n\ndata: [DONE]\n\n`;
 
 test('tap a paragraph previews it without changing selection or sending until asked', async ({page}, info) => {

@@ -1,0 +1,149 @@
+name: SocratiQ publish (live)
+
+# Manual production deployment only. Configure the socratiq-production
+# environment's required reviewers, no self-review/bypass, and main-only
+# deployment branch rule BEFORE adding its Cloudflare secrets. See
+# socratiq/cloudflare/README.md. No provider credentials belong in Actions.
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type PUBLISH to request production deployment of this main commit'
+        required: true
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: socratiq-production
+  cancel-in-progress: false
+
+env:
+  WRANGLER_SEND_METRICS: 'false'
+  CLOUDFLARE_LOAD_DEV_VARS_FROM_DOT_ENV: 'false'
+
+jobs:
+  validate:
+    name: Validate production Worker without credentials
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Require explicit main-branch dispatch
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_EVENT_NAME" = workflow_dispatch
+          test "$GITHUB_REF" = refs/heads/main
+          test "$CONFIRM" = PUBLISH
+
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Reject incomplete or expanded production configuration
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          import tomllib
+
+          config = tomllib.loads(Path("socratiq/cloudflare/wrangler.toml").read_text())
+          def require(condition, message):
+              if not condition:
+                  raise SystemExit(message)
+
+          # This allowlist deliberately rejects build hooks, extra services,
+          # paid bindings, alternate accounts, routes, and remote dev settings.
+          require(set(config) == {
+              "name", "main", "compatibility_date", "workers_dev", "preview_urls",
+              "routes", "vars", "ratelimits", "observability",
+          }, "Unapproved Worker configuration keys; review the deployment policy first.")
+          require(config["name"] == "socratiq-api", "Production Worker must be socratiq-api.")
+          require(config["main"] == "worker.mjs", "Unexpected Worker entry point.")
+          require(config["compatibility_date"] == "2026-04-08", "Runtime date needs validation before production changes.")
+          require(config["workers_dev"] is False and config["preview_urls"] is False,
+                  "workers.dev and preview URLs must stay disabled.")
+          require(config["routes"] == [{
+              "pattern": "mlsysbook.ai/api/socratiq/*", "zone_name": "mlsysbook.ai",
+          }], "Configure only the approved mlsysbook.ai/api/socratiq/* zone route.")
+          require(set(config["vars"]) == {"ENABLED", "ALLOWED_ORIGINS"},
+                  "Only the enable switch and exact origins may be plaintext vars.")
+          require(config["vars"]["ENABLED"] in ("false", "true"), "Set an explicit ENABLED value.")
+          require(config["vars"]["ALLOWED_ORIGINS"] == "https://mlsysbook.ai",
+                  "Production requires the exact https://mlsysbook.ai origin.")
+          limits = config["ratelimits"]
+          require(isinstance(limits, list) and len(limits) == 1, "Exactly one rate limiter is required.")
+          limiter = limits[0]
+          require(set(limiter) == {"name", "namespace_id", "simple"}, "Unapproved rate limiter configuration.")
+          require(limiter["name"] == "AI_RATE_LIMITER", "AI_RATE_LIMITER binding is required.")
+          namespace = limiter["namespace_id"]
+          require(isinstance(namespace, str) and re.fullmatch(r"[1-9][0-9]*", namespace)
+                  and namespace not in {"1001", "1002"},
+                  "Replace the placeholder/local limiter namespace with an account-unique production namespace.")
+          require(limiter["simple"] == {"limit": 10, "period": 60}, "Rate policy change requires explicit review.")
+          require(config["observability"] == {"enabled": False}, "Observability must remain disabled.")
+          print("Production configuration checked; account plan, namespace uniqueness, provider free tier, and environment protections require operator verification.")
+          PY
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Install tested deployment CLI
+        run: npm install --global wrangler@4.80.0
+
+      # The Worker and transport tests have no application dependencies.
+      - name: Check gateway policy and local runtime integration
+        run: |
+          node --test socratiq/cloudflare/test/worker.test.mjs
+          node --test socratiq/cloudflare/test/local-integration.test.mjs
+
+      - name: Bundle production Worker without deploying
+        run: wrangler deploy --dry-run --config socratiq/cloudflare/wrangler.toml --outdir "$RUNNER_TEMP/socratiq-worker"
+
+  deploy:
+    name: Approve and deploy the validated main commit
+    needs: validate
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.confirm == 'PUBLISH'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: socratiq-production
+      url: https://mlsysbook.ai/api/socratiq/health
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Install tested deployment CLI
+        run: npm install --global wrangler@4.80.0
+
+      - name: Deploy reviewed configuration without changing the enable switch
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          : "${CLOUDFLARE_API_TOKEN:?Configure the socratiq-production environment token}"
+          : "${CLOUDFLARE_ACCOUNT_ID:?Configure the socratiq-production environment account}"
+          wrangler deploy --config socratiq/cloudflare/wrangler.toml
+
+      - name: Check content-free public liveness
+        run: |
+          set -euo pipefail
+          status=$(curl --fail --silent --show-error --max-time 20 --output /dev/null --write-out '%{http_code}' https://mlsysbook.ai/api/socratiq/health)
+          test "$status" = 204
+          echo 'Worker dispatch is live. This does not certify chat readiness, provider quota, or inference quality.'
