@@ -57,6 +57,14 @@ A7_REPORTED_PP = 16
 A1_GPUS = 8
 A1_CONFIG = dict(batch_size=256, precision="fp16", efficiency=0.19, is_training=True)
 A2_TP_DEGREE = 4  # Match the Argonne request-latency configuration, not minimum capacity.
+# A2 decode reference: NVIDIA NIM benchmarks report ITL with TTFT excluded at concurrency 1
+# (paper/data/nim-llama-70b-concurrency1.csv). The primary row matches A2's FP16, TP=4, four-H100
+# configuration and is the shortest published prompt; the later release and the TP sweep use the
+# one sequence length every 16-bit configuration shares.
+A2_ITL_PRIMARY = dict(version="1.5.0", gpu="H100", tp=4, precision="fp16", isl=200, osl=200)
+A2_ITL_LATER_VERSION = "1.8.0"
+A2_ITL_SWEEP_TOKENS = (1000, 1000)
+A2_ITL_HARDWARE = {"H100": Hardware.Cloud.H100, "H200": Hardware.Cloud.H200, "A100": Hardware.Cloud.A100}
 A3_ETA = 0.50
 A3_V_STAGES = 8
 # Llama 3 herd paper, Sec. 3.3.2 and Table 4: TP=8, CP=1, PP=16, DP=128 on 16K H100 at 8,192
@@ -141,6 +149,54 @@ def anchor_two() -> dict:
         "weights": weights, "floor_ms": floor.m_as("ms"), "tp": A2_TP_DEGREE,
         "request_average_ms": averages,
         "source": "Models.Language.Llama2_70B.size_in_bytes(FP16) / (4 x Hardware.Cloud.H100.memory.bandwidth)",
+    }
+
+
+def anchor_two_itl() -> dict:
+    """Weight-read floors against NIM's TTFT-excluded ITL for Llama-3.3-70B at 16 bits."""
+    model = Models.Language.Llama3_70B
+    _, bpp = resolve_precision("fp16")  # BF16 rows have the same two-byte weights
+    weights = model.size_in_bytes(bpp)
+    path = Path(__file__).resolve().parents[1] / "data" / "nim-llama-70b-concurrency1.csv"
+    with path.open() as stream:
+        rows = [r for r in csv.DictReader(stream)
+                if r["Model"] == "Llama-3.3-70b-instruct" and r["Precision"] in ("fp16", "bf16")]
+
+    def point(r: dict) -> dict:
+        gpu, tp = r["GPU"].split()[0], int(r["TP"])
+        floor = (weights / (tp * A2_ITL_HARDWARE[gpu].memory.bandwidth)).m_as("ms")
+        itl = float(r["ITL (ms)"])
+        return {"version": r["NIM Version"], "gpu": gpu, "tp": tp, "precision": r["Precision"],
+                "isl": int(r["Input Tokens"]), "osl": int(r["Output Tokens"]), "itl_ms": itl,
+                "floor_ms": floor, "gap_frac": 1 - floor / itl, "residual_ms": itl - floor}
+
+    points = [point(r) for r in rows]
+    if not points or any(p["floor_ms"] >= p["itl_ms"] for p in points):
+        raise ValueError("A2 ITL: a weight-read floor is not below its measured ITL")
+
+    def pick(**match) -> dict:
+        found = [p for p in points if all(p[k] == v for k, v in match.items())]
+        if len(found) != 1:
+            raise ValueError(f"A2 ITL: expected one row for {match}, found {len(found)}")
+        return found[0]
+
+    p = A2_ITL_PRIMARY
+    primary = pick(**p)
+    same_release = [q for q in points if q["version"] == p["version"] and q["gpu"] == p["gpu"] and q["tp"] == p["tp"]]
+    isl, osl = A2_ITL_SWEEP_TOKENS
+    earlier = pick(version=p["version"], gpu=p["gpu"], tp=p["tp"], isl=isl, osl=osl)
+    later = pick(version=A2_ITL_LATER_VERSION, gpu=p["gpu"], tp=p["tp"], isl=isl, osl=osl)
+    sweep = {key: pick(version=A2_ITL_LATER_VERSION, gpu=gpu, tp=tp, isl=isl, osl=osl)
+             for key, gpu, tp in [("h200_tp2", "H200", 2), ("h100_tp4", "H100", 4),
+                                  ("h100_tp8", "H100", 8), ("a100_tp8", "A100", 8)]}
+    return {
+        "weights": weights, "points": points, "primary": primary,
+        "release_min_ms": min(q["itl_ms"] for q in same_release),
+        "release_max_ms": max(q["itl_ms"] for q in same_release),
+        "earlier": earlier, "later": later,
+        "runtime_shift_frac": 1 - later["itl_ms"] / earlier["itl_ms"],
+        "sweep": sweep,
+        "source": "Models.Language.Llama3_70B.size_in_bytes(FP16) / (TP x Hardware.Cloud.<GPU>.memory.bandwidth)",
     }
 
 
