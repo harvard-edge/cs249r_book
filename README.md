@@ -16,8 +16,11 @@
 <p align="center">
   <a href="#license"><img src="https://img.shields.io/badge/License-per%20component-blue.svg" alt="License: per component"></a>
   <a href="CITATION.bib"><img src="https://img.shields.io/badge/Cite-IEEE%202024-blue?logo=ieee" alt="Cite"></a>
-  <a href="https://github.com/harvard-edge/cs249r_book/stargazers"><img src="https://img.shields.io/github/stars/harvard-edge/cs249r_book?logo=github&cacheSeconds=3600" alt="Stars"></a>
   <a href="https://opencollective.com/mlsysbook"><img src="https://img.shields.io/badge/Fund%20Us-Open%20Collective-blue.svg?logo=open-collective" alt="Fund Us"></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/harvard-edge/cs249r_book/stargazers"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fharvard-edge%2Fcs249r_book&query=%24.stargazers_count&label=Stars&logo=github&color=gold&style=for-the-badge&cacheSeconds=3600" alt="GitHub stars"></a>
 </p>
 
 <p align="center"><sub><b>Build status on <code>dev</code></b></sub></p>
@@ -170,28 +173,28 @@ The textbook spans four volumes. Each one widens the boundary of the system and 
       <td><a href="https://mlsysbook.ai/vol1/"><b>I. Introduction to Machine Learning Systems</b></a></td>
       <td>The model</td>
       <td>How does intelligence execute efficiently on a single machine?</td>
-      <td><b>Released</b>; forthcoming in print from MIT Press</td>
+      <td><b>Released</b><br>Forthcoming in print from MIT Press</td>
     </tr>
     <tr>
       <td align="center">📘</td>
       <td><a href="https://mlsysbook.ai/vol2/"><b>II. Scaling Machine Learning Systems</b></a></td>
       <td>The fleet</td>
       <td>How does intelligence scale across distributed clusters and datacenters?</td>
-      <td><b>Preview</b>; in active revision</td>
+      <td><b>Preview</b><br>In active revision</td>
     </tr>
     <tr>
       <td align="center">🟣</td>
       <td><a href="books/vol3/"><b>III. Agentic Machine Learning Systems</b></a></td>
       <td>The trajectory</td>
       <td>How is intelligence governed when it acts autonomously over long horizons?</td>
-      <td><b>In development</b>; changes often</td>
+      <td><b>In development</b><br>Changes often</td>
     </tr>
     <tr>
       <td align="center">🌲</td>
       <td><a href="books/vol4/"><b>IV. Physical AI: Machine Learning Systems That Sense and Act</b></a></td>
       <td>The physical action</td>
       <td>How can intelligence act safely on matter and physical systems?</td>
-      <td><b>In development</b>; changes often</td>
+      <td><b>In development</b><br>Changes often</td>
     </tr>
   </tbody>
 </table>
@@ -279,7 +282,7 @@ Around the textbook sit the companion tools that let students build, measure, an
     <tr>
       <td align="center">🎬</td>
       <td><b>Lecture Slides</b></td>
-      <td>Beamer decks for each chapter of all four volumes, in one shared theme that is easy to restyle.</td>
+      <td>Beamer decks for every chapter of the textbook, in one shared theme that is easy to restyle.</td>
       <td>Released</td>
       <td><a href="https://mlsysbook.ai/slides/">Browse decks</a> · <a href="slides/README.md">Repo guide</a></td>
     </tr>
@@ -350,7 +353,7 @@ Engineers in industry also urged me to teach responsible AI. It can look like a 
 
 **Readers are part of the review, too.** Every chapter is open, and when something is wrong, unclear, or missing, the [book feedback](https://github.com/harvard-edge/cs249r_book/issues/new/choose) forms send it straight into the next revision.
 
-**Numbers are computed, not typed.** Every derived quantity in the books comes from Python code that ships with the text. I learned the need for this the hard way. In early drafts I typed numbers by hand, made mistakes, and watched the same quantity drift apart from one chapter and one volume to the next. No author can hold every number in four volumes in mind at once, so I wrote [MLSys·im](https://mlsysbook.ai/mlsysim/) to hold them instead. It is the single source of truth for every chapter and every volume. Each hardware and model specification in it traces to a cited source, and when a value changes there, every chapter that uses it changes with it. A test suite runs on every commit and checks unit consistency, cross-references, notation, and citations.
+**Numbers are computed, not typed.** Every derived quantity in the books comes from Python code that ships with the text. I learned the need for this the hard way. In early drafts I typed numbers by hand, made mistakes, and watched the same quantity drift apart from one chapter and one volume to the next. No author can hold every number across the series in mind at once, so I wrote [MLSys·im](https://mlsysbook.ai/mlsysim/) to hold them instead. It is the single source of truth for every chapter and every volume. Each hardware and model specification in it traces to a cited source, and when a value changes there, every chapter that uses it changes with it. A test suite runs on every commit and checks unit consistency, cross-references, notation, and citations.
 
 ---
 
@@ -391,7 +394,7 @@ The only assumptions are that the reader can program in Python and has met basic
 
 No. The two volumes differ in scope, not in depth or rigor.
 
-Volume I is the single-machine world: how an ML system works on one machine with a handful of accelerators, from the memory hierarchy and kernel efficiency to quantization and on-device deployment. Volume II is the fleet: thousands of accelerators connected by high-speed networks, parallelism across them, fault tolerance, and serving at datacenter scale.
+Volume I covers one machine with a handful of accelerators, from the memory hierarchy and kernel efficiency to quantization and on-device deployment. Volume II covers the fleet, with thousands of accelerators connected by high-speed networks, the parallelism that spans them, fault tolerance, and serving at datacenter scale.
 
 Volume II does not assume that a reader has finished Volume I, so a reader with strong single-machine foundations can start there. Reading Volume I first gives the cleanest mental model from the silicon up, in the same way that Hennessy and Patterson's *Computer Organization and Design* precedes *Computer Architecture: A Quantitative Approach*.
 
@@ -448,7 +451,7 @@ Barroso, Hölzle, and Clidaras give a firsthand account of how one organization 
 
 <br>
 
-Yes, and I would rather say so plainly than leave readers to guess. I use generative AI tools to write code and the checks that test it, to survey the literature before I read the papers myself, to draft passages that I then rewrite, to help produce figures that I once drew by hand, and to audit four volumes for consistency. I use them on the companions as well, from TinyTorch and the labs to the slides and the StaffML question bank. They are also how I learn a new area quickly. The tools take on mechanical work, which leaves my time for the parts that need a teacher: what to include, how to explain it, and whether it is right.
+Yes, and I would rather say so plainly than leave readers to guess. I use generative AI tools to write code and the checks that test it, to survey the literature before I read the papers myself, to draft passages that I then rewrite, to help produce figures that I once drew by hand, and to audit the books for consistency. I use them on the companions as well, from TinyTorch and the labs to the slides and the StaffML question bank. They are also how I learn a new area quickly. The tools take on mechanical work, which leaves my time for the parts that need a teacher: what to include, how to explain it, and whether it is right.
 
 A tool can write text that sounds right and is wrong, so I do not take its output on trust. I check the work in ways that do not depend on the tool. Every number in the books is computed by code, and automated checks run whenever something changes. Practitioners review the chapters, and students test them in class. In StaffML, each question records whether it began as a machine draft and whether a person has reviewed it.
 
@@ -491,7 +494,7 @@ The textbook is released under a Creative Commons license ([CC BY-NC-ND 4.0](htt
 If this curriculum has helped you, there are two simple ways to help it grow.
 
 <p align="center">
-  <a href="https://github.com/harvard-edge/cs249r_book/stargazers"><img src="https://img.shields.io/github/stars/harvard-edge/cs249r_book?style=for-the-badge&logo=github&color=gold" alt="Stars"></a>
+  <a href="https://github.com/harvard-edge/cs249r_book/stargazers"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fharvard-edge%2Fcs249r_book&query=%24.stargazers_count&label=Stars&logo=github&color=gold&style=for-the-badge&cacheSeconds=3600" alt="GitHub stars"></a>
   &nbsp;&nbsp;
   <a href="https://opencollective.com/mlsysbook"><img src="https://img.shields.io/badge/Fund-Open%20Collective-blue.svg?style=for-the-badge&logo=open-collective" alt="Open Collective"></a>
 </p>
@@ -501,7 +504,8 @@ If this curriculum has helped you, there are two simple ways to help it grow.
     <tr>
       <td width="50%" align="center" valign="top">
         <b>Star the repository</b><br>
-        A star takes one click and sends a signal. It shows universities and foundations that this work matters, and their support pays for workshops and hardware kits in classrooms that could not otherwise afford them.<br><br>
+        A star takes one click, and each one tells universities, foundations, and other learners that people want to study how machine learning systems are built. That helps AI engineering earn its place in the curriculum, and the support of those institutions pays for workshops and hardware kits in classrooms that could not otherwise afford them.<br><br>
+        Stars matter to me as well. This is a long project, and the new stars I see each morning are what keep me going, because each one tells me that a student somewhere is learning from this work.<br><br>
         <a href="https://star-history.com/#harvard-edge/cs249r_book&Date">
           <picture>
             <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=harvard-edge/cs249r_book&type=date&theme=dark&legend=top-left">
@@ -935,6 +939,7 @@ These people have improved the textbooks, the software, and the teaching materia
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/lynnyulinlin-debug"><img src="https://avatars.githubusercontent.com/u/252566641?v=4?v=4?s=50" width="50px;" alt="lynnyulinlin-debug"/><br /><sub><b>lynnyulinlin-debug</b></sub></a><br />🪲 🧑‍💻 🧠</td>
     </tr>
     <tr>
+      <td align="center" valign="top" width="14.29%"><a href="https://github.com/Nishitha-Rajesh"><img src="https://avatars.githubusercontent.com/u/222974421?v=4?v=4?s=50" width="50px;" alt="Nishitha-Rajesh"/><br /><sub><b>Nishitha-Rajesh</b></sub></a><br />🪲 🧑‍💻 ✍️</td>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/asgalon"><img src="https://avatars.githubusercontent.com/u/45242704?v=4?v=4?s=50" width="50px;" alt="Peter Koellner"/><br /><sub><b>Peter Koellner</b></sub></a><br />🪲 ✍️</td>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/hzeljko"><img src="https://avatars.githubusercontent.com/hzeljko?v=4?s=50" width="50px;" alt="Zeljko Hrcek"/><br /><sub><b>Zeljko Hrcek</b></sub></a><br />🧑‍💻</td>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/nyxst4ck"><img src="https://avatars.githubusercontent.com/u/289980115?v=4?v=4?s=50" width="50px;" alt="nyxst4ck"/><br /><sub><b>nyxst4ck</b></sub></a><br />✍️</td>
@@ -959,6 +964,7 @@ These people have improved the textbooks, the software, and the teaching materia
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/profvjreddi"><img src="https://avatars.githubusercontent.com/profvjreddi?v=4?s=50" width="50px;" alt="Vijay Janapa Reddi"/><br /><sub><b>Vijay Janapa Reddi</b></sub></a><br />🎨 ✍️ 🧠</td>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/Shashank-Tripathi-07"><img src="https://avatars.githubusercontent.com/u/178375647?v=4?v=4?s=50" width="50px;" alt="Rocky"/><br /><sub><b>Rocky</b></sub></a><br />🪲 🧑‍💻 🎨 🧪 🛠️</td>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/farhan523"><img src="https://avatars.githubusercontent.com/u/62025759?v=4?v=4?s=50" width="50px;" alt="Farhan Asghar"/><br /><sub><b>Farhan Asghar</b></sub></a><br />🪲 🧑‍💻 🎨 ✍️ 🧪</td>
+      <td align="center" valign="top" width="14.29%"><a href="https://github.com/Nishitha-Rajesh"><img src="https://avatars.githubusercontent.com/u/222974421?v=4?v=4?s=50" width="50px;" alt="Nishitha-Rajesh"/><br /><sub><b>Nishitha-Rajesh</b></sub></a><br />🪲 🧑‍💻 ✍️ 🧪</td>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/pelinbalci"><img src="https://avatars.githubusercontent.com/u/26349040?v=4?v=4?s=50" width="50px;" alt="Pelin Balcı"/><br /><sub><b>Pelin Balcı</b></sub></a><br />🎨 🧠 🧪</td>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/torrresagus"><img src="https://avatars.githubusercontent.com/u/69726650?v=4?v=4?s=50" width="50px;" alt="Agustin Torres"/><br /><sub><b>Agustin Torres</b></sub></a><br />🪲 🧑‍💻 ✍️</td>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/DIYA73"><img src="https://avatars.githubusercontent.com/u/174887077?v=4?v=4?s=50" width="50px;" alt="didi"/><br /><sub><b>didi</b></sub></a><br />🧑‍💻 🎨</td>
@@ -984,8 +990,11 @@ These people have improved the textbooks, the software, and the teaching materia
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/Mjrovai"><img src="https://avatars.githubusercontent.com/Mjrovai?v=4?s=50" width="50px;" alt="Marcelo Rovai"/><br /><sub><b>Marcelo Rovai</b></sub></a><br />✍️ 🧑‍💻 🎨 </td>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/Shashank-Tripathi-07"><img src="https://avatars.githubusercontent.com/u/178375647?v=4?v=4?s=50" width="50px;" alt="Rocky"/><br /><sub><b>Rocky</b></sub></a><br />🪲 🧑‍💻 🎨 ✍️</td>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/farhan523"><img src="https://avatars.githubusercontent.com/u/62025759?v=4?v=4?s=50" width="50px;" alt="Farhan Asghar"/><br /><sub><b>Farhan Asghar</b></sub></a><br />🪲 🧑‍💻 🎨</td>
+      <td align="center" valign="top" width="14.29%"><a href="https://github.com/Nishitha-Rajesh"><img src="https://avatars.githubusercontent.com/u/222974421?v=4?v=4?s=50" width="50px;" alt="Nishitha-Rajesh"/><br /><sub><b>Nishitha-Rajesh</b></sub></a><br />🪲 🧑‍💻 ✍️</td>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/imrehg"><img src="https://avatars.githubusercontent.com/u/38863?v=4?v=4?s=50" width="50px;" alt="Gergely Imreh"/><br /><sub><b>Gergely Imreh</b></sub></a><br />🪲 ✍️</td>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/salmanmkc"><img src="https://avatars.githubusercontent.com/u/32169182?v=4?v=4?s=50" width="50px;" alt="Salman Chishti"/><br /><sub><b>Salman Chishti</b></sub></a><br />🧑‍💻</td>
+    </tr>
+    <tr>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/Pratham-ja"><img src="https://avatars.githubusercontent.com/u/114498234?v=4?v=4?s=50" width="50px;" alt="Pratham Chaudhary"/><br /><sub><b>Pratham Chaudhary</b></sub></a><br />🧑‍💻</td>
     </tr>
   </tbody>
