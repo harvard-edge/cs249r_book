@@ -504,7 +504,8 @@ If this curriculum has helped you, there are two simple ways to help it grow.
     <tr>
       <td width="50%" align="center" valign="top">
         <b>Star the repository</b><br>
-        A star takes one click and sends a signal. It shows universities and foundations that this work matters, and their support pays for workshops and hardware kits in classrooms that could not otherwise afford them.<br><br>
+        A star takes one click, and it carries further than it seems. Each one tells universities, foundations, and other learners that people want to study how machine learning systems are built, and that helps AI engineering earn its place in the curriculum. Their support also pays for workshops and hardware kits in classrooms that could not otherwise afford them.<br><br>
+        Stars matter to me as well. Writing four volumes is a long project, and the new stars I see each morning are what keep me going, because each one tells me that a student somewhere is learning from this work.<br><br>
         <a href="https://star-history.com/#harvard-edge/cs249r_book&Date">
           <picture>
             <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=harvard-edge/cs249r_book&type=date&theme=dark&legend=top-left">
