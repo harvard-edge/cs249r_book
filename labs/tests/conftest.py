@@ -55,7 +55,10 @@ def isolated_native_ledger_directory(monkeypatch, tmp_path):
 
 VOL1_LABS = sorted(glob.glob(str(LABS_ROOT / "vol1" / "lab_*.py")))
 VOL2_LABS = sorted(glob.glob(str(LABS_ROOT / "vol2" / "lab_*.py")))
-ALL_LABS = VOL1_LABS + VOL2_LABS
+# Labs awaiting a chapter slot: they get every per-lab check, but stay out of
+# the catalog, track arcs, and site navigation until they are placed.
+PROPOSED_LABS = sorted(glob.glob(str(LABS_ROOT / "proposed" / "lab_*.py")))
+ALL_LABS = VOL1_LABS + VOL2_LABS + PROPOSED_LABS
 
 
 def lab_id(path: str) -> str:
