@@ -79,7 +79,7 @@ artifact at `binder/tools/scripts/socratiQ/bundle.js`. Commit generated artifact
 with their source changes. Both builds embed WOFF2 math fonts without duplicate
 TTF/WOFF copies. Quarto stages the shared directory in every volume;
 the study loader resolves its URL beside the deployed reader script, preserving
-the volume prefix. The `socratiq-reader.yml` workflow checks rebuild drift and
+the volume prefix. The `socratiq-validate.yml` workflow checks rebuild drift and
 runs local, browser, and Quarto integration tests.
 
 Tests using constructed responses exercise behavior, not model quality. Storage

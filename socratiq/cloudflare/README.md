@@ -2,6 +2,18 @@
 
 Source-controlled replacement for the missing proxy source. **It is not deployed.** The reader and legacy production endpoint settings remain unchanged. This Worker provides bounded chat transport; it does not create accounts, sync study data, or implement `/results` or `/score`.
 
+## Service identity
+
+Follow the repository's [Cloudflare naming conventions](../../docs/README.md#cloudflare-service-naming).
+The production Worker is named `socratiq-api`; a future staging Worker is
+`socratiq-api-staging`, and the isolated local integration fixture is
+`socratiq-api-local`. The planned public base is
+`https://mlsysbook.ai/api/socratiq`. That route is not yet configured: deployment
+must add prefix handling and route tests before activating it. Runtime bindings
+retain purpose-based names such as `AI_RATE_LIMITER` and `GROQ_API_KEY`.
+Provider credentials and limiter namespaces belong to SocratiQ, independently
+of StaffML. No staging service or storage resource is provisioned by these names.
+
 ## Contract
 
 | Route | Request | Response |
