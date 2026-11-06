@@ -176,6 +176,16 @@ test('independent production-bundle browser and viewport matrix', {timeout: 2400
                 await expect(study.locator('#question-0 [contenteditable=true]')).toHaveText('Constructed QA flashcard question');
                 await screenshot(page, directory, 'flashcards', receipt);
                 await study.locator('#closeModal_sr').click();
+                // Authored earlier-conversation space exercises native answer
+                // clicks after a new quiz changes a long scroller's layout.
+                await study.locator('#message-container').evaluate(scroller => {
+                  const earlier = document.createElement('div');
+                  earlier.dataset.constructedEarlierConversation = 'true';
+                  earlier.textContent = 'Constructed earlier conversation content';
+                  earlier.style.height = '1600px';
+                  scroller.prepend(earlier);
+                  scroller.scrollTop = scroller.scrollHeight;
+                });
                 await study.locator('#quiz-button').click();
                 responseKind = 'quiz';
                 await study.locator('#section-quiz-btn').click();

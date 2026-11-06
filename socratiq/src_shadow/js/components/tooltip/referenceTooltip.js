@@ -1,3 +1,5 @@
+import {safeSourceUrl, safeSourcePosition} from './source-url.js';
+
 /**
  * Reference Tooltip Component
  * 
@@ -10,6 +12,9 @@ export class ReferenceTooltip {
     this.tooltip = null;
     this.isVisible = false;
     this.currentSourceData = null;
+    this.trigger = null;
+    this.restoreTriggerFocus = false;
+    this.cleanupListeners = null;
   }
 
   /**
@@ -17,49 +22,60 @@ export class ReferenceTooltip {
    * @param {HTMLElement} element - The element that triggered the tooltip
    * @param {Object} sourceData - Source data containing reference text, URL, and position
    */
-  show(element, sourceData) {
+  show(element, sourceData, {focus = false} = {}) {
     // Ensure element is valid
     if (!element || !element.getBoundingClientRect) {
       console.error('Invalid element provided to tooltip.show');
       return;
     }
     
-    this.hide(); // Remove any existing tooltip
+    this.hide({restoreFocus: false}); // Remove only the previous tooltip instance
     
+    this.trigger = element;
+    this.restoreTriggerFocus = focus;
     this.currentSourceData = sourceData;
     this.tooltip = this.createTooltip(sourceData);
     
-    // Position tooltip before adding to DOM
+    // Measure the mounted popover so its actions remain inside the viewport.
+    document.body.appendChild(this.tooltip);
     this.positionTooltip(element);
     this.addEventListeners();
-    
-    document.body.appendChild(this.tooltip);
     this.isVisible = true;
     
     // Immediate visibility - no animation delays
     this.tooltip.classList.add('tooltip-visible');
     this.tooltip.style.opacity = '1';
     this.tooltip.style.transform = 'translateY(0)';
+    element.setAttribute('aria-expanded', 'true');
+    if (focus) this.tooltip.querySelector('.tooltip-close').focus({preventScroll: true});
   }
 
   /**
    * Hide the tooltip
    */
-  hide() {
-    if (this.tooltip) {
-      this.tooltip.classList.remove('tooltip-visible');
-      this.tooltip.style.opacity = '0';
-      this.tooltip.style.transform = 'translateY(-10px)';
-      
-      setTimeout(() => {
-        if (this.tooltip && this.tooltip.parentNode) {
-          this.tooltip.parentNode.removeChild(this.tooltip);
-        }
-        this.tooltip = null;
-        this.isVisible = false;
-        this.currentSourceData = null;
-      }, 100); // Faster cleanup
-    }
+  hide({restoreFocus = true} = {}) {
+    const tooltip = this.tooltip;
+    if (!tooltip) return;
+    const trigger = this.trigger;
+    const shouldRestore = restoreFocus && (this.restoreTriggerFocus || tooltip.contains(document.activeElement));
+    this.cleanupListeners?.();
+    this.cleanupListeners = null;
+    this.tooltip = null;
+    this.isVisible = false;
+    this.currentSourceData = null;
+    this.trigger = null;
+    this.restoreTriggerFocus = false;
+    trigger?.setAttribute('aria-expanded', 'false');
+    tooltip.classList.remove('tooltip-visible');
+    tooltip.removeAttribute('id');
+    tooltip.setAttribute('aria-hidden', 'true');
+    tooltip.inert = true;
+    tooltip.style.pointerEvents = 'none';
+    tooltip.style.opacity = '0';
+    tooltip.style.transform = 'translateY(-10px)';
+    // A delayed cleanup must never remove a newer tooltip.
+    setTimeout(() => tooltip.remove(), 100);
+    if (shouldRestore && trigger?.isConnected) trigger.focus({preventScroll: true});
   }
 
   /**
@@ -71,6 +87,8 @@ export class ReferenceTooltip {
     const tooltip = document.createElement('div');
     tooltip.id = 'reference-tooltip';
     tooltip.className = 'reference-tooltip';
+    tooltip.setAttribute('role', 'dialog');
+    tooltip.setAttribute('aria-label', 'Source reference');
 
     const { sourceReference, sourceLabel, sourceUrl, sourcePosition } = sourceData;
 
@@ -111,12 +129,10 @@ export class ReferenceTooltip {
     const goBtn = document.createElement('button');
     goBtn.className = 'tooltip-action-btn go-to-source';
     goBtn.type = 'button';
-    if (sourceUrl != null && sourceUrl !== '') {
-      goBtn.dataset.url = String(sourceUrl);
-    }
-    if (sourcePosition != null && sourcePosition !== '') {
-      goBtn.dataset.position = String(sourcePosition);
-    }
+    const destination = safeSourceUrl(sourceUrl);
+    goBtn.disabled = !destination;
+    if (destination) goBtn.dataset.url = destination;
+    goBtn.dataset.position = String(safeSourcePosition(sourcePosition));
     goBtn.innerHTML = `
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
@@ -139,41 +155,19 @@ export class ReferenceTooltip {
    */
   positionTooltip(element) {
     const rect = element.getBoundingClientRect();
-    const tooltipRect = this.tooltip.getBoundingClientRect();
     const viewportWidth = window.innerWidth;
     const viewportHeight = window.innerHeight;
-    
-    // Calculate available space on both sides
-    const spaceLeft = rect.left;
-    const spaceRight = viewportWidth - rect.right;
-    
-    let left, top = rect.top - tooltipRect.height - 5; // Closer positioning
-    
-    // SIMPLE: Always position tooltip to the left of the reference pill
-    left = rect.left - tooltipRect.width - 5; // 5px gap from the pill
-    
-    // If tooltip would go off the left edge, just keep it at the edge
-    if (left < 0) {
-      left = 0; // Keep at left edge
-    }
-    
-    // Adjust vertical position if tooltip would go off-screen
-    if (top < 10) {
-      // If tooltip would go above viewport, position it below the element
-      top = rect.bottom + 5;
-      
-      // If it would go off bottom, position it above
-      if (top + tooltipRect.height > viewportHeight - 10) {
-        top = rect.top - tooltipRect.height - 5;
-      }
-    }
-    
-    // Final check to ensure tooltip doesn't go off-screen
-    if (top + tooltipRect.height > viewportHeight - 10) {
-      top = viewportHeight - tooltipRect.height - 10;
-    }
-    
-    this.tooltip.style.position = 'fixed';
+    Object.assign(this.tooltip.style, {
+      position: 'fixed', boxSizing: 'border-box',
+      maxWidth: `${Math.max(0, Math.min(300, viewportWidth - 20))}px`,
+      minWidth: `${Math.max(0, Math.min(250, viewportWidth - 20))}px`,
+      maxHeight: `${Math.max(0, viewportHeight - 20)}px`, overflowY: 'auto',
+    });
+    const tooltipRect = this.tooltip.getBoundingClientRect();
+    const left = Math.min(Math.max(10, rect.left - tooltipRect.width - 5), Math.max(10, viewportWidth - tooltipRect.width - 10));
+    let top = rect.top - tooltipRect.height - 5;
+    if (top < 10) top = rect.bottom + 5;
+    top = Math.max(10, Math.min(top, viewportHeight - tooltipRect.height - 10));
     this.tooltip.style.left = `${left}px`;
     this.tooltip.style.top = `${top}px`;
     this.tooltip.style.zIndex = '9999';
@@ -183,41 +177,33 @@ export class ReferenceTooltip {
    * Add event listeners to the tooltip
    */
   addEventListeners() {
-    // Close button
-    const closeBtn = this.tooltip.querySelector('.tooltip-close');
-    closeBtn.addEventListener('click', () => this.hide());
-    
-    // Go to source button
-    const goToSourceBtn = this.tooltip.querySelector('.go-to-source');
-    goToSourceBtn.addEventListener('click', (e) => {
-      const url = e.target.closest('.go-to-source').dataset.url;
-      const position = e.target.closest('.go-to-source').dataset.position;
-      this.goToSource(url, position);
+    const tooltip = this.tooltip;
+    const trigger = this.trigger;
+    tooltip.querySelector('.tooltip-close').addEventListener('click', () => this.hide());
+    tooltip.querySelector('.go-to-source').addEventListener('click', event => {
+      const action = event.target.closest('.go-to-source');
+      this.goToSource(action.dataset.url, action.dataset.position);
     });
-    
-    // Close on escape key
-    const handleKeydown = (e) => {
-      if (e.key === 'Escape') {
+    const handleKeydown = event => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopImmediatePropagation();
         this.hide();
-        document.removeEventListener('keydown', handleKeydown);
       }
     };
-    document.addEventListener('keydown', handleKeydown);
-    
-    // Close on click outside
-    const handleClickOutside = (e) => {
-      if (this.tooltip && !this.tooltip.contains(e.target) && !e.target.closest('.reference-number')) {
-        this.hide();
-        document.removeEventListener('click', handleClickOutside);
-      }
+    const handleClickOutside = event => {
+      const path = event.composedPath();
+      if (!path.includes(tooltip) && !path.includes(trigger)) this.hide({restoreFocus: false});
     };
-    setTimeout(() => {
-      document.addEventListener('click', handleClickOutside);
-    }, 100);
-
-    // Close when mouse leaves the tooltip
-    this.tooltip.addEventListener('mouseleave', () => {
-      this.hide();
+    document.addEventListener('keydown', handleKeydown, true);
+    const outsideTimer = setTimeout(() => document.addEventListener('click', handleClickOutside), 100);
+    this.cleanupListeners = () => {
+      clearTimeout(outsideTimer);
+      document.removeEventListener('keydown', handleKeydown, true);
+      document.removeEventListener('click', handleClickOutside);
+    };
+    tooltip.addEventListener('mouseleave', () => {
+      if (!this.restoreTriggerFocus && !tooltip.contains(document.activeElement)) this.hide();
     });
   }
 
@@ -227,14 +213,18 @@ export class ReferenceTooltip {
    * @param {number} position - Scroll position
    */
   goToSource(url, position) {
+    url = safeSourceUrl(url);
+    if (!url) return;
+    position = safeSourcePosition(position);
+    const sourceData = this.currentSourceData;
     this.hide();
     
     // Dispatch custom event for navigation
     const event = new CustomEvent('navigateToSource', {
       detail: {
         url: url,
-        position: parseFloat(position) || 0,
-        sourceData: this.currentSourceData
+        position: position,
+        sourceData: sourceData
       },
       bubbles: true,
       composed: true
@@ -373,9 +363,15 @@ export class ReferenceTooltip {
         transition: background-color 0.2s;
       }
       
-      .tooltip-action-btn:hover {
+      .tooltip-action-btn:not(:disabled):hover {
         background: #2563eb;
       }
+      .tooltip-action-btn:disabled {
+        background: #e5e7eb;
+        color: #4b5563;
+        cursor: not-allowed;
+      }
+
       
       .tooltip-action-btn svg {
         width: 14px;

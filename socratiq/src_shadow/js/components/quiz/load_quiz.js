@@ -87,32 +87,6 @@ export async function ini_quiz(shadowRoot, quizData, title, chapterTitle, attrib
             border-radius: 8px;
         }
 
-        .reference-number {
-            background: #f3f4f6;
-            border: none;
-            border-radius: 12px;
-            color: #374151;
-            cursor: help;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 0.75rem;
-            font-weight: 600;
-            height: 20px;
-            min-width: 20px;
-            padding: 0 6px;
-            margin-left: 6px;
-            opacity: 0.8;
-            transition: all 0.2s ease;
-            vertical-align: middle;
-        }
-        
-        .reference-number:hover {
-            background: #6b7280;
-            color: white;
-            opacity: 1;
-            transform: scale(1.05);
-        }
     `;
     shadowRoot.appendChild(style);
 
@@ -246,13 +220,13 @@ export async function ini_quiz(shadowRoot, quizData, title, chapterTitle, attrib
                 if(a.correct){
                     explains_wrapper.classList.add("relative","mt-2", "rounded-lg", "border-2", "border-green-500", "p-3");
                     const explains_label = document.createElement('div');
-                    explains_label.classList.add("absolute", "-top-3", "left-2", "rounded-lg", "border-2", "border-green-500", "bg-white", "px-2", "text-xs", "text-green-500");
+                    explains_label.classList.add("absolute", "-top-3", "left-2", "rounded-lg", "border-2", "border-green-500", "quiz-correct-label", "px-2", "text-xs");
                     explains_label.textContent = "Correct";
                     explains_wrapper.appendChild(explains_label);
                 }
                 const explain = document.createElement('p');
                 explain.textContent = a.explanation;
-                explain.classList.add('explanation', 'text-sm', 'text-purple-500');
+                explain.classList.add('explanation', 'text-sm');
                 explains_wrapper.appendChild(explain);
                 answerDiv.appendChild(input);
                 answerDiv.appendChild(label);
@@ -341,7 +315,13 @@ export async function ini_quiz(shadowRoot, quizData, title, chapterTitle, attrib
     attachQuizSubmitListener(submitButton, enhancedHandler);
 
 
+    // Complete the loading layout before making the quiz interactive. Leaving
+    // progress removal on its delayed timer shifts native controls during clicks.
+    shadowRoot.querySelector('#progress')?.remove();
     loadQuiz(quizData);
+    // Cancel the generation scroll and show the question in its final layout.
+    // This also avoids motion for readers who request reduced animation.
+    quizForm.querySelector('h4')?.scrollIntoView({behavior: 'instant', block: 'start'});
     await saveIndexChatHistory();
 }
 
