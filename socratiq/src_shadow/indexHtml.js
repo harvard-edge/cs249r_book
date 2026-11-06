@@ -6,8 +6,6 @@ export const htmlContent = `
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SocratiQ</title>
-  <!-- Ensure the Tailwind CSS CDN is linked in the <head> -->
-  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@latest/dist/tailwind.min.css" rel="stylesheet">
 </head>
 
 <body id="mybody" class="min-h-screen z-9999">
@@ -103,7 +101,7 @@ export const htmlContent = `
           </div>
 
           <div id="ai-message_2"
-            class="p-3 relative max-w-xs bg-white dark:bg-zinc-600 space-y-2 rounded-lg mb-2 chat-message" style="background-color: var(--socratiq-bg, #ffffff); color: var(--socratiq-text, #1f2328);">
+            class="p-3 relative max-w-xs bg-white dark:bg-zinc-600 space-y-2 rounded-lg mb-2 chat-message ai-message-chat" style="background-color: var(--socratiq-bg, #ffffff); color: var(--socratiq-text, #1f2328);">
 <!--   
                         <div class="w-full flex justify-end">
                         <div class="difficulty-dropdown inline-flex items-center text-xs bg-gray-100 dark:bg-zinc-700 rounded-md px-2 py-1 mb-2">
@@ -144,7 +142,7 @@ export const htmlContent = `
                 </svg>
               </button>
 
-                   <button id='sr-send-btn' class="w-4 h-4  mr-2  flex items-center justify-center hover:text-blue-700"
+                   <button id='sr-send-btn' class="w-4 h-4 st-send-btn mr-2 flex items-center justify-center hover:text-blue-700"
                >
                 
 

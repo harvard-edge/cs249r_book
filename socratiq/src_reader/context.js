@@ -42,19 +42,6 @@ function mathItemsWithin(win, element) {
   }
 }
 
-function nodePath(root, target) {
-  const path = [];
-  for (let node = target; node !== root; node = node.parentNode) {
-    if (!node?.parentNode) return null;
-    path.unshift(Array.prototype.indexOf.call(node.parentNode.childNodes, node));
-  }
-  return path;
-}
-
-function atPath(root, path) {
-  return path?.reduce((node, index) => node?.childNodes[index], root) || null;
-}
-
 function itemRoot(item) {
   return item?.typesetRoot?.nodeType === 1 ? item.typesetRoot : null;
 }
@@ -63,44 +50,64 @@ function itemTex(item) {
   return typeof item?.math === 'string' && item.math ? item.math : null;
 }
 
-function replaceMathInClone(copy, source, mathItems, range = null) {
-  const intersecting = mathItems.filter(item => {
-    const root = itemRoot(item);
-    if (!root || !(source === root || source.contains(root))) return false;
-    if (!range) return true;
-    try { return range.intersectsNode(root); } catch { return false; }
-  });
-
-  if (range) {
-    // cloneContents() preserves partial MathJax containers. Replace each one
-    // intersected by the source range with the complete original expression.
-    const clonedRoots = [...copy.querySelectorAll('mjx-container')];
-    intersecting.forEach((item, index) => {
-      const clone = clonedRoots[index];
-      if (clone) clone.replaceWith(copy.ownerDocument.createTextNode(` $${itemTex(item) || clone.textContent}$ `));
-    });
-    return;
-  }
-
-  for (const item of intersecting) {
-    const root = itemRoot(item);
-    const clone = atPath(copy, nodePath(source, root));
-    if (clone?.parentNode) clone.replaceWith(copy.ownerDocument.createTextNode(` $${itemTex(item) || clone.textContent}$ `));
-  }
+function excludedElement(element, {mathLayer = false} = {}) {
+  if (element.matches(`${EXCLUDED}, [hidden], [inert]`) || (!mathLayer && element.getAttribute('aria-hidden') === 'true')) return true;
+  // Read computed styles on the live page: detached clones lose stylesheet and
+  // ancestor visibility, including classes used for private/collapsed content.
+  const style = element.ownerDocument.defaultView?.getComputedStyle(element);
+  return style?.display === 'none' || style?.visibility === 'hidden' || style?.visibility === 'collapse'
+    || style?.contentVisibility === 'hidden' || style?.opacity === '0';
 }
 
-export function readableText(element, {mathItems = []} = {}) {
-  const copy = element.cloneNode(true);
-  // Resolve source-to-clone paths before removing siblings that shift indexes.
-  replaceMathInClone(copy, element, mathItems);
-  copy.querySelectorAll(EXCLUDED).forEach(node => node.remove());
-  // Preserve TeX annotations for KaTeX and pages without the MathJax registry.
-  copy.querySelectorAll('mjx-container, .katex').forEach(math => {
-    const tex = math.querySelector('annotation[encoding="application/x-tex"]')?.textContent;
-    const accessible = math.querySelector('mjx-assistive-mml')?.textContent;
-    math.replaceWith(element.ownerDocument.createTextNode(tex ? ` $${tex}$ ` : accessible || math.textContent));
-  });
-  return (copy.textContent || '').replace(/\s+/g, ' ').trim();
+function excludedAncestor(element) {
+  if (element?.closest(EXCLUDED)) return true;
+  // Visible math is one expression. Its accessibility/visual layers may be
+  // hidden independently, but the expression's root and ancestors must qualify.
+  const math = element?.closest('mjx-container, .katex');
+  for (let node = math || element; node; node = node.parentElement) {
+    if (excludedElement(node)) return true;
+    const parent = node.parentElement;
+    if (parent?.matches('details:not([open])') && node !== parent.querySelector('summary')) return true;
+  }
+  return false;
+}
+
+function visibleMathText(node) {
+  if (node.nodeType === 3) return node.data;
+  if (node.nodeType !== 1 || excludedElement(node, {mathLayer: true})) return '';
+  return [...node.childNodes].map(visibleMathText).join('');
+}
+
+export function readableText(element, {mathItems = [], range = null} = {}) {
+  if (excludedAncestor(element)) return '';
+  const registered = new Map(mathItems.map(item => [itemRoot(item), itemTex(item)]));
+  const parts = [];
+  const visit = node => {
+    if (range && !range.intersectsNode(node)) return;
+    if (node.nodeType === 3) {
+      const begin = range?.startContainer === node ? range.startOffset : 0;
+      const end = range?.endContainer === node ? range.endOffset : node.length;
+      parts.push(node.data.slice(begin, end));
+      return;
+    }
+    if (node.nodeType !== 1 || excludedElement(node)) return;
+    if (registered.has(node) || node.matches('mjx-container, .katex')) {
+      // Resolve TeX before inspecting hidden implementation layers. Never read
+      // a hidden expression, and never pair registry entries by clone indexes.
+      const tex = registered.get(node) || node.querySelector('annotation[encoding="application/x-tex"]')?.textContent;
+      const accessible = node.querySelector('mjx-assistive-mml')?.textContent;
+      parts.push(tex ? ` $${tex}$ ` : accessible || visibleMathText(node));
+      return;
+    }
+    if (node.matches('details:not([open])')) {
+      const summary = node.querySelector('summary');
+      if (summary?.parentElement === node) visit(summary);
+    } else {
+      for (const child of node.childNodes) visit(child);
+    }
+  };
+  visit(element);
+  return parts.join('').replace(/\s+/g, ' ').trim();
 }
 
 export function captureSelection({document: doc = document, window: win = window, volume, version = ''} = {}) {
@@ -113,7 +120,7 @@ export function captureSelection({document: doc = document, window: win = window
 // Capture a paragraph with a detached Range; the reader's native selection is untouched.
 export function captureParagraph(node, {document: doc = document, window: win = doc.defaultView, volume, version = ''} = {}) {
   const target = elementOf(node);
-  if (!target?.isConnected || target.ownerDocument !== doc || target.closest(EXCLUDED) || target.closest(PARAGRAPH_INTERACTIVE)) return null;
+  if (!target?.isConnected || target.ownerDocument !== doc || excludedAncestor(target) || target.closest(PARAGRAPH_INTERACTIVE)) return null;
   const paragraph = target.closest('p');
   if (!paragraph?.closest('main, article') || paragraph.closest(EXCLUDED) || paragraph.querySelector(`${EXCLUDED}, ${PARAGRAPH_CONTROLS}`)) return null;
   const range = doc.createRange();
@@ -125,33 +132,19 @@ function captureRange(range, {document: doc, window: win, volume, version}) {
   const start = elementOf(range.startContainer);
   const end = elementOf(range.endContainer);
   const main = start?.closest('main, article');
-  if (!main || !main.contains(end) || start.closest(EXCLUDED) || end.closest(EXCLUDED)) return null;
+  if (!main || !main.contains(end) || excludedAncestor(start) || excludedAncestor(end)) return null;
   const section = elementOf(range.commonAncestorContainer).closest('section') || main;
   const mathItems = mathItemsWithin(win, section);
-  const quoteRange = range.cloneRange();
-  for (const item of mathItems) {
-    const root = itemRoot(item);
-    if (!root || !(section === root || section.contains(root))) continue;
-    try {
-      if (!range.intersectsNode(root)) continue;
-      // A range wholly inside MathJax's SVG/HTML output has no container in
-      // cloneContents(). Expand only the local copy so the quote gets the full
-      // expression while the user's live selection remains exactly as made.
-      if (root.contains(range.startContainer)) quoteRange.setStartBefore(root);
-      if (root.contains(range.endContainer)) quoteRange.setEndAfter(root);
-    } catch { /* Ignore MathItems whose output root is no longer in the DOM. */ }
-  }
-  const fragment = doc.createElement('div');
-  fragment.append(quoteRange.cloneContents());
-  replaceMathInClone(fragment, section, mathItems, quoteRange);
-  const quote = readableText(fragment);
+  const quote = readableText(section, {mathItems, range});
   if (!quote) return null;
   if (quote.length > 4000) throw new Error('Select a shorter passage (a few paragraphs) so SocratiQ can focus its explanation.');
-  const heading = section.querySelector('h1,h2,h3,h4,h5,h6');
+  const heading = [...section.querySelectorAll('h1,h2,h3,h4,h5,h6')].find(node => !excludedAncestor(node));
   const anchor = section.id || heading?.id || start.closest('[id]')?.id;
   const url = new URL(win.location.href);
   // Do not send query strings, which can contain private or tracking parameters.
   url.search = '';
+  url.username = '';
+  url.password = '';
   url.hash = anchor || '';
   let context = readableText(section, {mathItems});
   if (context.length > 12000) {
@@ -167,17 +160,15 @@ function captureRange(range, {document: doc, window: win, volume, version}) {
         break;
       }
     }
-    const wrapper = doc.createElement('div');
-    wrapper.append(prefix.cloneContents());
-    replaceMathInClone(wrapper, section, mathItems, prefix);
-    const offset = readableText(wrapper).length;
+    const offset = readableText(section, {mathItems, range: prefix}).length;
     const begin = Math.max(0, offset - 4000);
     context = context.slice(begin, begin + 12000);
   }
   const rect = range.getBoundingClientRect();
+  const title = [...doc.querySelectorAll('h1')].find(node => !excludedAncestor(node));
   const source = {
-    quote, context, title: doc.querySelector('h1')?.textContent.trim() || doc.title,
-    section: heading?.textContent.trim() || '', url: url.href,
+    quote, context, title: title ? readableText(title) || doc.title : doc.title,
+    section: heading ? readableText(heading) : '', url: url.href,
     volume: volume || win.location.pathname.match(/(?:^|\/)(vol[1-4])(?:\/|$)/)?.[1] || '',
     version, rect: {top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right, width: rect.width, height: rect.height},
   };

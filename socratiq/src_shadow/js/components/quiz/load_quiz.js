@@ -18,7 +18,31 @@ let cachedSaveChatHistory = null;
   }
   
 
+function attachQuizSubmitListener(button, handler) {
+    let pending = false;
+    const listener = async event => {
+        event.preventDefault();
+        if (pending) return;
+        pending = true;
+        try {
+            if (await handler(event) !== false) button.removeEventListener('click', listener);
+        } catch (error) {
+            console.error('Error submitting quiz:', error);
+        } finally {
+            pending = false;
+        }
+    };
+    button.addEventListener('click', listener);
+}
+
 export async function ini_quiz(shadowRoot, quizData, title, chapterTitle, attributes='', contentWithSources=null, context=null) {
+    // Earlier section callers passed captured context in the source-list slot.
+    if (!context && contentWithSources && !Array.isArray(contentWithSources)) {
+        context = contentWithSources;
+        contentWithSources = context.content?.sources || null;
+    }
+    const quizPageUrl = context?.url || window.location.href;
+    const sourcePageUrls = [...new Set((contentWithSources || []).map(source => source.pageUrl).filter(Boolean))];
     const quizForm = shadowRoot.querySelector('#quiz-form');
     const submitButton = shadowRoot.querySelector('#submit-quiz-btn');
 
@@ -102,14 +126,16 @@ export async function ini_quiz(shadowRoot, quizData, title, chapterTitle, attrib
         quizForm.setAttribute('data-quiz', JSON.stringify(quizData));
         quizForm.setAttribute('chapter-title', chapterTitle);
         quizForm.setAttribute('data-quiz-title', title);
+        quizForm.setAttribute('data-context-url', quizPageUrl);
+        quizForm.setAttribute('data-source-page-urls', JSON.stringify(sourcePageUrls));
         
         // Store context metadata if available
         if (context) {
-            quizForm.setAttribute('data-context-url', context.url);
+            quizForm.setAttribute('data-context-url', quizPageUrl);
             quizForm.setAttribute('data-context-title', context.title);
-            quizForm.setAttribute('data-context-content-length', context.content.totalLength);
-            quizForm.setAttribute('data-context-source-count', context.content.sourceCount);
-            quizForm.setAttribute('data-context-scroll-position', context.position.scrollPercentage.y);
+            quizForm.setAttribute('data-context-content-length', context.content?.totalLength ?? 0);
+            quizForm.setAttribute('data-context-source-count', context.content?.sourceCount ?? 0);
+            quizForm.setAttribute('data-context-scroll-position', context.position?.scrollPercentage?.y ?? 0);
             quizForm.setAttribute('data-context-timestamp', context.timestamp);
         }
 
@@ -312,7 +338,7 @@ export async function ini_quiz(shadowRoot, quizData, title, chapterTitle, attrib
 
     // submitButton.addEventListener('click', handleQuizSubmit);
     const enhancedHandler = enhanceQuizSubmit(handleQuizSubmit.bind(null), quizForm, title);
-    submitButton.addEventListener('click', enhancedHandler);
+    attachQuizSubmitListener(submitButton, enhancedHandler);
 
 
     loadQuiz(quizData);
@@ -475,7 +501,7 @@ export function reinitializeQuizButtons(shadowRoot) {
                         throw error;
                     }
                 };
-                oldButton.addEventListener('click', submitHandler, { once: true });
+                attachQuizSubmitListener(oldButton, submitHandler);
             }
         } catch (error) {
             console.error('Error reinitializing quiz button:', error, {

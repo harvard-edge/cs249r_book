@@ -31,6 +31,9 @@ export const MAIN_TOPIC = 'MLSysBook.AI: Principles and Practices of Machine Lea
 
 // ─── AI Provider Models ───────────────────────────────────────────────────────
 // Controls which model each provider uses — edit here to swap models globally
+// The supported shared gateway uses Groq; other providers remain explicit calls.
+export const DEFAULT_PROVIDER = 'GROQ';
+export const MAX_OUTPUT_TOKENS = 2048;
 export const PROVIDER_MODELS = {
   GROQ:        { model: 'openai/gpt-oss-20b',                                stream: true  },
   GEMINI:      { model: 'gemini-2.5-flash',                                  stream: true  },

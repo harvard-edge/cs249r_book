@@ -1,3 +1,5 @@
+import { cardTagKey, putCardTag, replaceCardTags } from '../utils/card-tag-storage.js';
+import { validateFlashcardImport } from '../utils/import-validation.js';
 // src_shadow/js/libs/utils/spacedRepetitionIndexDBHandler.js
 
 import { SpacedRepetitionStorageHandler } from "./storage-handler";
@@ -99,334 +101,155 @@ export class SpacedRepetitionIndexDBHandler extends SpacedRepetitionStorageHandl
 
   performTransaction(storeNames, mode, operation) {
     return new Promise((resolve, reject) => {
-      if (!this.dbManager.db) {
+      if (!this.dbManager?.db) {
         reject(new Error("Database not initialized"));
-
         return;
       }
-
       const transaction = this.dbManager.db.transaction(storeNames, mode);
-
-      transaction.onerror = (event) => {
-        console.error("Transaction error:", event.target.error);
-
-        reject(event.target.error);
+      let result;
+      // Some existing operations report a request result before commit. Hold it
+      // until all queued writes, including legacy tag-key migration, complete.
+      transaction.addEventListener("complete", () => setTimeout(() => resolve(result), 0));
+      transaction.addEventListener("abort", () => reject(transaction.error || new Error("Flashcard transaction aborted")));
+      transaction.addEventListener("error", () => reject(transaction.error || new Error("Flashcard transaction failed")));
+      const fail = error => {
+        try { transaction.abort(); } catch {}
+        reject(error);
       };
-
-      operation(transaction, resolve, reject);
+      try { operation(transaction, value => { result = value; }, fail); }
+      catch (error) { fail(error); }
     });
   }
 
   // ───────────── SAVE TO LOCAL STORAGE ─────────────
 
   async saveToLocalStorage(fullChapterSets = null) {
+    // Older editor callbacks pass a notification boolean as the first argument.
+    // It selects a normal current-deck save, never a replacement snapshot.
+    if (typeof fullChapterSets === "boolean") fullChapterSets = null;
     try {
-      console.log("📝 Starting save to IndexedDB...", {
-        fullChapterSets: fullChapterSets
-          ? Array.from(fullChapterSets.entries())
-          : null,
-        currentChapter: this.inMemoryData.currentChapter,
-        currentDeck: this.inMemoryData.currentDeck,
-        allTags: Array.from(this.inMemoryData.allTags),
-        reviewHistory: this.inMemoryData.reviewHistory,
-        flashcards: this.modal.flashcards,
-      });
-
-      if (fullChapterSets) {
-        // Clear all stores first
-        console.log("🗑️ Clearing stores...");
-        await this.dbManager.performTransaction(
-          "chapters",
-          "readwrite",
-          (store) => store.clear()
-        );
-        await this.dbManager.performTransaction("cards", "readwrite", (store) =>
-          store.clear()
-        );
-        await this.dbManager.performTransaction(
-          "card_tags",
-          "readwrite",
-          (store) => store.clear()
-        );
-
-        // Save each chapter and its cards
-        for (const [chapter, cards] of fullChapterSets) {
-          console.log(
-            `📚 Processing chapter ${chapter} with ${cards.length} cards`
-          );
-
-          // Get existing chapter title from database, or use default
-          const existingChapter = await this.dbManager.performTransaction(
-            "chapters",
-            "readonly",
-            (store) => {
-              return new Promise((resolve) => {
-                const req = store.get(chapter);
-                req.onsuccess = () => resolve(req.result);
-                req.onerror = () => resolve(null);
-              });
-            }
-          );
-          
-          // Use existing title if available, otherwise generate default
-          const chapterTitle = existingChapter?.title || this.getChapterTitle(chapter);
-          
-          const chapterRecord = {
-            chapter,
-            title: chapterTitle,
-            is_current:
-              chapter === this.inMemoryData.currentChapter?.chapter ? 1 : 0,
-          };
-          console.log(`📖 Saving chapter record:`, chapterRecord);
-          await this.dbManager.performTransaction(
-            "chapters",
-            "readwrite",
-            (store) => store.put(chapterRecord) // Use put() instead of add() to allow updates
-          );
-
-          // Update current_chapter store if this is the current chapter
-          if (chapterRecord.is_current === 1) {
-             await this.dbManager.performTransaction(
-                "current_chapter",
-                "readwrite",
-                (store) => {
-                    store.clear(); // Clear old current chapter
-                    return store.add({
-                        chapter: chapter,
-                        title: chapterTitle
-                    });
-                }
-             );
-          }
-
-          // Save cards
-          for (const card of cards) {
-            const processedCard = {
-              ...card,
-              chapter: chapter,
-              created: card.created || new Date().toISOString(),
-            };
-            console.log(`💳 Adding card:`, {
-              id: processedCard.id,
-              chapter: processedCard.chapter,
-              created: processedCard.created,
-            });
-            await this.dbManager.performTransaction(
-              "cards",
-              "readwrite",
-              (store) => store.add(processedCard)
-            );
-
-            // Save tags
-            if (card.tags && Array.isArray(card.tags)) {
-              for (const tag of card.tags) {
-                const tagRecord = {
-                  id: `${card.id}_${tag}`,
-                  card_id: card.id,
-                  tag,
-                };
-                console.log(`🏷️ Adding tag:`, tagRecord);
-                await this.dbManager.performTransaction(
-                  "card_tags",
-                  "readwrite",
-                  (store) => store.add(tagRecord)
-                );
-              }
-            }
-          }
-
-          // Update modal's chapter sets
-          if (this.modal?.chapterSets) {
-            console.log(
-              `🔄 Updating modal chapter sets for chapter ${chapter}`
-            );
-            this.modal.chapterSets.set(chapter, cards);
-          }
-        }
-        // } else if (this.inMemoryData.currentChapter) {
-        //     const chapter = this.inMemoryData.currentChapter.chapter;
-        //     console.log(`📝 Saving current chapter ${chapter}`);
-
-        //     // Delete existing cards for this chapter
-        //     await this.dbManager.performTransaction("cards", "readwrite", store => {
-        //         const index = store.index("chapter");
-        //         const range = IDBKeyRange.only(chapter);
-        //         return index.openCursor(range);
-        //     });
-      } else if (this.inMemoryData.currentChapter) {
-        const chapter = this.inMemoryData.currentChapter.chapter;
-        
-        // Ensure chapter exists in chapters table before saving cards
-        // FIXED: performTransaction expects a request, not a Promise
-        const chapterResult = await this.dbManager.performTransaction(
-          "chapters",
-          "readonly",
-          (store) => {
-            const req = store.get(chapter);
-            // Wrap onsuccess to add logging, but let performTransaction handle resolution
-            const originalOnSuccess = req.onsuccess;
-            req.onsuccess = function() {
-              if (originalOnSuccess) originalOnSuccess.call(this);
-            };
-            req.onerror = function() {
-              console.error(`Chapter exists check error`);
-            };
-            return req;
-          }
-        );
-        const chapterExists = !!chapterResult;
-
-        if (!chapterExists) {
-          // Create chapter record if it doesn't exist
-          const chapterRecord = {
-            chapter: chapter,
-            title: this.inMemoryData.currentChapter.title || this.getChapterTitle(chapter),
-            is_current: 1,
-          };
-          await this.dbManager.performTransaction(
-            "chapters",
-            "readwrite",
-            (store) => store.put(chapterRecord)
-          );
-          
-          // Also update current_chapter store
-          await this.dbManager.performTransaction(
-            "current_chapter",
-            "readwrite",
-            (store) => {
-                store.clear();
-                return store.add({
-                    chapter: chapter,
-                    title: chapterRecord.title
-                });
-            }
-          );
-          
-          // Update other chapters to not current
-          // FIXED: Return request directly, not a Promise
-          const allChapters = await this.dbManager.performTransaction(
-            "chapters",
-            "readonly",
-            (store) => {
-              const req = store.getAll();
-              const originalOnSuccess = req.onsuccess;
-              req.onsuccess = function() {
-                if (originalOnSuccess) originalOnSuccess.call(this);
-              };
-              req.onerror = function() {
-                console.error(`Error getting chapters`);
-              };
-              return req;
-            }
-          ) || [];
-          
-          for (const ch of allChapters) {
-            if (ch.chapter !== chapter) {
-              ch.is_current = 0;
-              await this.dbManager.performTransaction(
-                "chapters",
-                "readwrite",
-                (store) => store.put(ch)
-              );
-            }
-          }
-        }
-
-        // First, get all existing cards for this chapter
-        const existingCards = await this.dbManager.performTransaction(
-          "cards",
-          "readonly",
-          (store) => {
-            const index = store.index("chapter");
-            const req = index.getAll(chapter);
-            req.onerror = () => console.error(`Error getting existing cards:`, req.error);
-            return req;
-          }
-        );
-
-        // Delete cards that are no longer in currentDeck
-        const currentCardIds = new Set(
-          this.inMemoryData.currentDeck.map((card) => card.id)
-        );
-        
-        let deletedCount = 0;
-        for (const existingCard of existingCards) {
-          if (!currentCardIds.has(existingCard.id)) {
-            await this.dbManager.performTransaction(
-              "cards",
-              "readwrite",
-              (store) => {
-                const req = store.delete(existingCard.id);
-                req.onerror = () => console.error(`Error deleting card ${existingCard.id}:`, req.error);
-                return req;
-              }
-            );
-            deletedCount++;
-            // TEMPORARILY DISABLED: Tag deletion is causing hangs
-            // TODO: Fix tag deletion properly - tags will be orphaned but won't cause issues
-          }
-        }
-
-        // Save current deck
-        let savedCardCount = 0;
-        for (const card of this.inMemoryData.currentDeck) {
-          const processedCard = {
-            ...card,
-            chapter: chapter,
-            created: card.created || new Date().toISOString(),
-          };
-          
-          await this.dbManager.performTransaction(
-            "cards",
-            "readwrite",
-            (store) => {
-              const req = store.put(processedCard);
-              req.onerror = () => console.error(`Error saving card ${card.id}:`, req.error);
-              return req;
-            }
-          );
-
-          // Save tags
-          if (card.tags && Array.isArray(card.tags) && card.tags.length > 0) {
-            for (let tagIndex = 0; tagIndex < card.tags.length; tagIndex++) {
-              const tag = card.tags[tagIndex];
-              await this.dbManager.performTransaction(
-                "card_tags",
-                "readwrite",
-                (store) => {
-                  const req = store.put({
-                    id: `${card.id}_${tag}`,
-                    card_id: card.id,
-                    tag,
-                  });
-                  req.onerror = () => console.error(`Error saving tag "${tag}":`, req.error);
-                  return req;
-                }
-              );
-            }
-          }
-          savedCardCount++;
-        }
+      if (fullChapterSets !== null && !(fullChapterSets instanceof Map)) {
+        throw new TypeError("Chapter sets must be a Map");
       }
-
-      console.log(`📝 Save to IndexedDB completed successfully!`);
-      window.dispatchEvent(
-        new CustomEvent("sr-save-card-completed", {
-          detail: { success: true },
-        })
-      );
+      const currentChapter = this.inMemoryData.currentChapter;
+      const chapterSets = fullChapterSets || new Map(currentChapter
+        ? [[currentChapter.chapter, this.inMemoryData.currentDeck]] : []);
+      const cardIds = new Set();
+      // Validate and snapshot before any writes, including before clearing a
+      // single deck. Keep the source arrays unchanged if persistence fails.
+      const snapshots = Array.from(chapterSets, ([chapter, cards]) => {
+        indexedDB.cmp(chapter, chapter);
+        if (!Array.isArray(cards)) throw new TypeError("Deck cards must be an array");
+        return { chapter, cards: cards.map(card => {
+          if (!card || typeof card !== "object") throw new TypeError("Invalid card");
+          indexedDB.cmp(card.id, card.id);
+          if (cardIds.has(card.id)) throw new Error("Duplicate card ID in chapter sets");
+          cardIds.add(card.id);
+          if (card.tags !== undefined && (!Array.isArray(card.tags) ||
+              card.tags.some(tag => typeof tag !== "string"))) {
+            throw new TypeError("Card tags must be strings");
+          }
+          return { ...card, ...(card.tags ? { tags: [...card.tags] } : {}) };
+        }) };
+      });
+      await this.ensureInitialized();
+      if (!this.dbManager?.db) {
+        if (this.useFallback) return super.saveToLocalStorage(fullChapterSets);
+        throw new Error("Database not initialized");
+      }
+      const changedChapters = new Set(snapshots.map(set => set.chapter));
+      const now = new Date().toISOString();
+      await new Promise((resolve, reject) => {
+        const tx = this.dbManager.db.transaction(
+          ["chapters", "cards", "card_tags", "current_chapter"], "readwrite");
+        tx.oncomplete = () => resolve();
+        tx.onabort = () => reject(tx.error || new Error("Flashcard save was aborted"));
+        tx.onerror = () => reject(tx.error || new Error("Flashcard save failed"));
+        const records = {};
+        let pending = 4;
+        const apply = () => {
+          try {
+            const chapterStore = tx.objectStore("chapters");
+            const cardStore = tx.objectStore("cards");
+            const tagStore = tx.objectStore("card_tags");
+            const chapters = new Map(records.chapters.map(chapter => [chapter.chapter, chapter]));
+            const cards = new Map(records.cards.map(card => [card.id, card]));
+            const existingTags = new Map();
+            for (const snapshot of snapshots) {
+              for (const card of snapshot.cards) {
+                const existing = cards.get(card.id);
+                if (existing && !changedChapters.has(existing.chapter)) {
+                  throw new Error("Card ID belongs to a deck outside this save");
+                }
+              }
+            }
+            const affectedCardIds = new Set(cardIds);
+            // Replace only the supplied decks. A deck unknown to this snapshot
+            // remains intact, as do stores outside this transaction.
+            for (const card of records.cards) {
+              if (!changedChapters.has(card.chapter)) continue;
+              affectedCardIds.add(card.id);
+              if (!cardIds.has(card.id)) cardStore.delete(card.id);
+            }
+            for (const tag of records.card_tags) {
+              if (affectedCardIds.has(tag.card_id)) {
+                if (typeof tag.tag === "string") {
+                  const key = JSON.stringify(cardTagKey(tag.card_id, tag.tag));
+                  existingTags.set(key, { ...existingTags.get(key), ...tag });
+                }
+                tagStore.delete(tag.id);
+              }
+            }
+            for (const snapshot of snapshots) {
+              const existing = chapters.get(snapshot.chapter);
+              const title = (currentChapter?.chapter === snapshot.chapter && currentChapter.title) ||
+                existing?.title || this.getChapterTitle(snapshot.chapter);
+              const chapterRecord = { ...existing, chapter: snapshot.chapter, title,
+                is_current: currentChapter ? Number(snapshot.chapter === currentChapter.chapter) : existing?.is_current || 0 };
+              chapters.set(snapshot.chapter, chapterRecord);
+              chapterStore.put(chapterRecord);
+              for (const card of snapshot.cards) {
+                const existingCard = cards.get(card.id);
+                const tags = [...new Set(card.tags ?? existingCard?.tags ?? [])];
+                cardStore.put({ ...existingCard, ...card, tags, chapter: snapshot.chapter,
+                  created: card.created || existingCard?.created || now });
+                for (const tag of tags) {
+                  const key = JSON.stringify(cardTagKey(card.id, tag));
+                  putCardTag(tagStore, card.id, tag, existingTags.get(key));
+                }
+              }
+            }
+            if (currentChapter && chapters.has(currentChapter.chapter)) {
+              for (const chapter of chapters.values()) {
+                const isCurrent = Number(chapter.chapter === currentChapter.chapter);
+                if (chapter.is_current !== isCurrent) chapterStore.put({ ...chapter, is_current: isCurrent });
+              }
+              const currentStore = tx.objectStore("current_chapter");
+              const existing = records.current_chapter.find(chapter => chapter.chapter === currentChapter.chapter);
+              currentStore.clear();
+              currentStore.put({ ...existing, ...currentChapter,
+                title: chapters.get(currentChapter.chapter).title });
+            }
+          } catch (error) {
+            tx.abort();
+            reject(error);
+          }
+        };
+        for (const name of ["chapters", "cards", "card_tags", "current_chapter"]) {
+          const request = tx.objectStore(name).getAll();
+          request.onsuccess = () => {
+            records[name] = request.result;
+            if (--pending === 0) apply();
+          };
+        }
+      });
+      if (fullChapterSets && this.modal?.chapterSets) {
+        for (const { chapter, cards } of snapshots) this.modal.chapterSets.set(chapter, cards);
+      }
+      window.dispatchEvent(new CustomEvent("sr-save-card-completed", { detail: { success: true } }));
       return true;
     } catch (error) {
-      console.error(`📝 [SAVE STEP ERROR] Failed to save to IndexedDB:`, error);
-      console.error(`📝 [SAVE STEP ERROR] Error stack:`, error.stack);
-      console.error(`📝 [SAVE STEP ERROR] Error name:`, error.name);
-      console.error(`📝 [SAVE STEP ERROR] Error message:`, error.message);
-      // Only fallback to localStorage if IndexedDB is completely unavailable
-      // Don't fallback for data errors - throw them instead
-      if (this.useFallback && !this.dbManager?.db) {
-        console.warn("⚠️ IndexedDB unavailable, falling back to localStorage");
-        return super.saveToLocalStorage(fullChapterSets);
-      }
+      console.error("Failed to save flashcards to IndexedDB:", error);
       throw error;
     }
   }
@@ -486,11 +309,7 @@ export class SpacedRepetitionIndexDBHandler extends SpacedRepetitionStorageHandl
           req.onsuccess = () => {
             if (card.tags && Array.isArray(card.tags)) {
               card.tags.forEach((tag) => {
-                tagStore.add({
-                  id: `${card.id}_${tag}`,
-                  card_id: card.id,
-                  tag,
-                });
+                putCardTag(tagStore, card.id, tag);
               });
             }
 
@@ -941,14 +760,10 @@ export class SpacedRepetitionIndexDBHandler extends SpacedRepetitionStorageHandl
   // ───────────── MERGE IMPORTED DATA ─────────────
 
   async mergeImportedData(importedData) {
-    // if (this.useFallback) {
-    //   return super.mergeImportedData(importedData);
-    // }
-
     try {
-      if (!importedData.chapter_card_sets) {
-        throw new Error("Invalid import data structure");
-      }
+      importedData = validateFlashcardImport(importedData);
+      if (this.useFallback) return super.mergeImportedData(importedData);
+      await this.ensureInitialized();
 
       await this.performTransaction(
         ["chapters", "cards", "card_tags", "current_chapter"],
@@ -958,12 +773,14 @@ export class SpacedRepetitionIndexDBHandler extends SpacedRepetitionStorageHandl
             importedData.chapter_card_sets.forEach((chapterSet) => {
               const chapterStore = tx.objectStore("chapters");
 
-              const chapterRecord = {
-                chapter: chapterSet.chapter,
-                title: this.getChapterTitle(chapterSet.chapter),
+              // Preserve metadata for chapters that already exist.
+              const existing = chapterStore.get(chapterSet.chapter);
+              existing.onsuccess = () => {
+                const title = chapterSet.title ||
+                  (importedData.current_chapter?.chapter === chapterSet.chapter ? importedData.current_chapter.title : null) ||
+                  existing.result?.title || this.getChapterTitle(chapterSet.chapter);
+                chapterStore.put({ ...existing.result, chapter: chapterSet.chapter, title });
               };
-
-              chapterStore.put(chapterRecord);
 
               const cardStore = tx.objectStore("cards");
 
@@ -972,15 +789,7 @@ export class SpacedRepetitionIndexDBHandler extends SpacedRepetitionStorageHandl
               chapterSet.cards.forEach((card) => {
                 cardStore.put(card);
 
-                if (card.tags && Array.isArray(card.tags)) {
-                  card.tags.forEach((tag) => {
-                    tagStore.put({
-                      id: `${card.id}_${tag}`,
-                      card_id: card.id,
-                      tag,
-                    });
-                  });
-                }
+                replaceCardTags(tagStore, card.id, card.tags);
               });
             });
 
@@ -993,7 +802,9 @@ export class SpacedRepetitionIndexDBHandler extends SpacedRepetitionStorageHandl
             }
 
             tx.oncomplete = () => resolve();
+            tx.onabort = () => reject(tx.error || new Error("Flashcard import was aborted"));
           } catch (err) {
+            tx.abort();
             reject(err);
           }
         }
@@ -1037,33 +848,8 @@ export class SpacedRepetitionIndexDBHandler extends SpacedRepetitionStorageHandl
 
           const tagStore = tx.objectStore("card_tags");
 
-          // Delete existing tags for this card.
-
-          const index = tagStore.index("card_id");
-
-          const req = index.openCursor(IDBKeyRange.only(newCard.id));
-
-          req.onsuccess = (event) => {
-            const cursor = event.target.result;
-
-            if (cursor) {
-              tagStore.delete(cursor.primaryKey);
-
-              cursor.continue();
-            }
-          };
-
-          if (newCard.tags && Array.isArray(newCard.tags)) {
-            newCard.tags.forEach((tag) => {
-              tagStore.add({
-                id: `${newCard.id}_${tag}`,
-                card_id: newCard.id,
-                tag,
-              });
-
-              this.inMemoryData.allTags.add(tag);
-            });
-          }
+          replaceCardTags(tagStore, newCard.id, newCard.tags || []);
+          for (const tag of newCard.tags || []) this.inMemoryData.allTags.add(tag);
 
           tx.oncomplete = () => resolve();
         }
@@ -1145,11 +931,7 @@ export class SpacedRepetitionIndexDBHandler extends SpacedRepetitionStorageHandl
             const tagStore = tx.objectStore("card_tags");
 
             tags.forEach((tag) => {
-              tagStore.add({
-                id: `${newCard.id}_${tag}`,
-                card_id: newCard.id,
-                tag,
-              });
+              putCardTag(tagStore, newCard.id, tag);
             });
           }
 
@@ -1322,11 +1104,7 @@ export class SpacedRepetitionIndexDBHandler extends SpacedRepetitionStorageHandl
 
                 if (card.tags && card.tags.length > 0) {
                   card.tags.forEach((tag) => {
-                    tx.objectStore("card_tags").add({
-                      id: `${card.id}_${tag}`,
-                      card_id: card.id,
-                      tag,
-                    });
+                    putCardTag(tx.objectStore("card_tags"), card.id, tag);
                   });
                 }
               });
@@ -1882,7 +1660,7 @@ export class SpacedRepetitionIndexDBHandler extends SpacedRepetitionStorageHandl
 
             if (cardRecord.tags && cardRecord.tags.length > 0) {
               cardRecord.tags.forEach((tag) => {
-                tagStore.put({ id: `${cardId}_${tag}`, card_id: cardId, tag });
+                putCardTag(tagStore, cardId, tag);
               });
             }
           });
@@ -1907,13 +1685,20 @@ export class SpacedRepetitionIndexDBHandler extends SpacedRepetitionStorageHandl
     );
 
     try {
-      const currentChapterData = localStorage.getItem("current_chapter");
-
-      if (!currentChapterData) {
-        throw new Error("No chapter selected");
+      await this.ensureInitialized();
+      let chapterInfo = this.inMemoryData.currentChapter;
+      if (chapterInfo?.chapter == null) {
+        const selected = await this.dbManager.getAll("current_chapter");
+        chapterInfo = selected[0] || (await this.dbManager.getAll("chapters"))
+          .find(chapter => chapter.is_current === 1);
+        if (chapterInfo) this.inMemoryData.currentChapter = chapterInfo;
       }
-
-      const chapterInfo = JSON.parse(currentChapterData);
+      if (chapterInfo?.chapter == null) {
+        throw new Error("Choose or create a flashcard deck before adding cards.");
+      }
+      // Keep the destination captured before the model request. Switching decks
+      // while generation runs must not move the generated cards elsewhere.
+      chapterInfo = { ...chapterInfo };
 
       let flashcards;
 
@@ -1921,14 +1706,12 @@ export class SpacedRepetitionIndexDBHandler extends SpacedRepetitionStorageHandl
 
       const flashcardsGenerator = duckAI.generateFlashcards(text);
 
-      console.log("Starting flashcards generation...");
 
       // Consume the async generator properly
       let finalResult = null;
       let accumulatedResponse = '';
       
       for await (const chunk of flashcardsGenerator) {
-        console.log("Received chunk:", chunk);
         
         // If we get a direct array result, use it
         if (Array.isArray(chunk)) {
@@ -1951,56 +1734,20 @@ export class SpacedRepetitionIndexDBHandler extends SpacedRepetitionStorageHandl
       // If we got a final result directly, use it
       if (finalResult) {
         flashcards = finalResult;
-        console.log("Using direct result:", flashcards);
       } else {
         // Process the accumulated response
-        console.log("Accumulated response:", accumulatedResponse);
 
-        const jsonPattern = /\[([\s\S]*?)\](?=\s*$)/;
-
-        const match = accumulatedResponse.match(jsonPattern);
-
-        if (match) {
-          try {
-            const jsonStr = `[${match[1]}]`;
-
-            const cleanedJson = jsonStr
-
-              .replace(/\n/g, " ")
-
-              .replace(/\s+/g, " ")
-
-              // Normalize typographic double quotes to ASCII for JSON.parse (was a no-op .replace(/"/g, '"'))
-              .replace(/[\u201C\u201D\u201E\uFF02]/g, '"')
-
-              .replace(/"{/g, "{")
-
-              .replace(/}"/g, "}")
-
-              .replace(/\\n/g, "")
-
-              .trim();
-
-            const repairedJson = jsonrepair(cleanedJson);
-
-            flashcards = JSON.parse(repairedJson);
-          } catch (e) {
-            console.error("Failed to parse JSON:", e);
-
-            throw new Error(`Failed to parse JSON: ${e.message}`);
-          }
-        } else {
-          console.error(
-            "No JSON array found in response:",
-            accumulatedResponse
-          );
-
-          throw new Error("No JSON array found in response");
+        let response = accumulatedResponse.trim();
+        const fenced = response.match(/^```(?:json)?\s*\n([\s\S]*)\n```$/i);
+        if (fenced) response = fenced[1];
+        try {
+          flashcards = JSON.parse(jsonrepair(response));
+        } catch {
+          throw new Error("Generated flashcards could not be read. Try again.");
         }
       }
 
       if (!Array.isArray(flashcards)) {
-        console.error("Parsed content is not an array:", flashcards);
 
         throw new Error("Parsed content is not an array");
       }
@@ -2013,7 +1760,7 @@ export class SpacedRepetitionIndexDBHandler extends SpacedRepetitionStorageHandl
 
       return { success: true, flashcards: result };
     } catch (error) {
-      console.error("Failed to add flashcards from text:", error);
+      console.error("Failed to add flashcards from text:", error.name);
 
       this.notificationHandler.updateNotification(
         loadingId,
@@ -2028,6 +1775,11 @@ export class SpacedRepetitionIndexDBHandler extends SpacedRepetitionStorageHandl
   // ───────────── PROCESS FLASHCARDS ─────────────
 
   async processFlashcards(flashcards, chapterInfo, loadingId) {
+    const validated = validateFlashcardImport({ chapter_card_sets: [{
+      chapter: chapterInfo.chapter,
+      cards: flashcards.map(card => ({ ...card, chapter: chapterInfo.chapter })),
+    }] });
+    flashcards = validated.chapter_card_sets[0].cards;
     return await this.performTransaction(
       ["cards", "card_tags"],
       "readwrite",
@@ -2043,6 +1795,8 @@ export class SpacedRepetitionIndexDBHandler extends SpacedRepetitionStorageHandl
             ...card,
 
             id: crypto.randomUUID(),
+
+            chapter: chapterInfo.chapter,
 
             tags: ["AI-Generated"],
 
@@ -2061,17 +1815,14 @@ export class SpacedRepetitionIndexDBHandler extends SpacedRepetitionStorageHandl
 
           cardStore.add(processedCard);
 
-          tagStore.add({
-            id: `${processedCard.id}_AI-Generated`,
-            card_id: processedCard.id,
-            tag: "AI-Generated",
-          });
+          putCardTag(tagStore, processedCard.id, "AI-Generated");
 
           processedCards.push(processedCard);
         });
 
         tx.oncomplete = () => {
-          this.inMemoryData.currentDeck = [
+          const stillSelected = this.inMemoryData.currentChapter?.chapter === chapterInfo.chapter;
+          if (stillSelected) this.inMemoryData.currentDeck = [
             ...this.inMemoryData.currentDeck,
             ...processedCards,
           ];
@@ -2081,7 +1832,7 @@ export class SpacedRepetitionIndexDBHandler extends SpacedRepetitionStorageHandl
               this.modal.flashcards = [];
             }
 
-            this.modal.flashcards = [
+            if (stillSelected) this.modal.flashcards = [
               ...this.modal.flashcards,
               ...processedCards,
             ];
@@ -2340,11 +2091,7 @@ This app helps you learn material by creating flashcards and tracking your progr
           store.put(card)
         ),
         this.dbManager.performTransaction("card_tags", "readwrite", (store) =>
-          store.put({
-            id: `${card.id}_introduction`,
-            card_id: card.id,
-            tag: "introduction",
-          })
+          putCardTag(store, card.id, "introduction")
         ),
       ]);
       console.log("✅ IDB Background database update completed");

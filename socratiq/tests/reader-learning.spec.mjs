@@ -126,6 +126,10 @@ test('keyboard users can focus and scroll the answer region without trapping boo
   await page.getByRole('button', {name: 'Close SocratiQ reader'}).focus();
   await page.keyboard.press('Tab');
   await expect(body).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(page.getByRole('button', {name: 'Study tools', exact: true})).toBeFocused();
+  await page.keyboard.press('Shift+Tab');
+  await expect(body).toBeFocused();
   await body.evaluate(node => {node.scrollTop = 0;});
   await page.keyboard.press('PageDown');
   await expect.poll(() => body.evaluate(node => node.scrollTop)).toBeGreaterThan(0);
