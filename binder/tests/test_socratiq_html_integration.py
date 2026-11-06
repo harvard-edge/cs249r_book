@@ -16,6 +16,7 @@ READER_SRC = "/shared/assets/scripts/socratiq/reader.js"
 STUDY_SRC = "/shared/assets/scripts/socratiq/study.js"
 READER_RESOURCE = "/shared/assets/scripts/socratiq/**"
 READER_ENDPOINT = "https://mlsysbook.ai/api/socratiq/ai/stream"
+GUIDE_SRC = "shared/frontmatter/socratiq/socratiq.qmd"
 
 
 class ScriptTagCollector(HTMLParser):
@@ -28,6 +29,18 @@ class ScriptTagCollector(HTMLParser):
             self.scripts.append(dict(attrs))
 
 
+def sidebar_hrefs(items):
+    """Collect guide links regardless of the volume's sidebar grouping."""
+    if isinstance(items, dict):
+        if "href" in items:
+            yield items["href"]
+        for value in items.values():
+            yield from sidebar_hrefs(value)
+    elif isinstance(items, list):
+        for item in items:
+            yield from sidebar_hrefs(item)
+
+
 @pytest.mark.parametrize("volume", VOLUMES)
 def test_html_config_loads_and_stages_socratiq_reader(volume):
     books = ROOT / "books"
@@ -36,6 +49,9 @@ def test_html_config_loads_and_stages_socratiq_reader(volume):
 
     resources = config["project"].get("resources", [])
     assert READER_RESOURCE in resources
+    assert (books / GUIDE_SRC).is_file()
+    assert config["project"]["render"].count(GUIDE_SRC) == 1
+    assert list(sidebar_hrefs(config["website"]["sidebar"])).count(GUIDE_SRC) == 1
 
     # Quarto resolves leading-slash resource entries from the project root and
     # preserves their relative path under output-dir. Ensure the reader source
@@ -150,20 +166,21 @@ def test_quarto_stages_reader_under_site_root(tmp_path, volume):
     assert len(root_tags) == len(chapter_tags) == 1
     assert root_tags[0].get("data-endpoint") == chapter_tags[0].get("data-endpoint") == READER_ENDPOINT
 
-    # Each production volume is mounted at its own /volN/ prefix. Quarto makes the root include
-    # relative, and the flatten script adjusts the nested page after moving it
-    # up one directory. Both references must resolve to the deployed asset.
-    root_asset_url = urljoin(f"https://mlsysbook.ai/{volume}/", root_tags[0]["src"])
-    chapter_url = urljoin(f"https://mlsysbook.ai/{volume}/", "01_chapter/01_chapter.html")
-    chapter_asset_url = urljoin(chapter_url, chapter_tags[0]["src"])
-    expected_asset_url = f"https://mlsysbook.ai/{volume}/shared/assets/scripts/socratiq/reader.js"
-    assert root_asset_url == expected_asset_url
-    assert chapter_asset_url == expected_asset_url
-    # The study loader resolves a sibling of the actual reader script URL,
-    # retaining the deployed volume prefix after Quarto URL flattening.
-    for reader_url in (root_asset_url, chapter_asset_url):
-        assert urljoin(reader_url, "study.js") == (
-            f"https://mlsysbook.ai/{volume}/shared/assets/scripts/socratiq/study.js"
-        )
-    deployed_asset_path = f"{volume}/{READER_SRC.lstrip('/')}"
-    assert urlparse(root_asset_url).path.lstrip("/") == deployed_asset_path
+    # Reuse the rendered and flattened HTML for both deployment mounts. Quarto
+    # makes the include relative, so neither the volume nor the dev repository
+    # prefix may be lost when loading the reader or its lazy study sibling.
+    for deployment_root in (
+        "https://mlsysbook.ai/",
+        "https://harvard-edge.github.io/cs249r_book_dev/",
+    ):
+        volume_url = urljoin(deployment_root, f"{volume}/")
+        root_asset_url = urljoin(volume_url, root_tags[0]["src"])
+        chapter_url = urljoin(volume_url, "01_chapter/01_chapter.html")
+        chapter_asset_url = urljoin(chapter_url, chapter_tags[0]["src"])
+        expected_asset_url = urljoin(volume_url, READER_SRC.lstrip("/"))
+        assert root_asset_url == expected_asset_url
+        assert chapter_asset_url == expected_asset_url
+        for reader_url in (root_asset_url, chapter_asset_url):
+            assert urljoin(reader_url, "study.js") == urljoin(volume_url, STUDY_SRC.lstrip("/"))
+        deployed_asset_path = urlparse(volume_url).path.lstrip("/") + READER_SRC.lstrip("/")
+        assert urlparse(root_asset_url).path.lstrip("/") == deployed_asset_path
