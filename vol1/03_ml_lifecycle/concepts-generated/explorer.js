@@ -3,7 +3,7 @@
   const $ = (id) => document.getElementById(id);
   const fieldEntry = document.querySelector(".field-entry");
   if (fieldEntry) fieldEntry.href = window.parent !== window
-    ? "https://mlsysbook.ai/explore/field.html"
+    ? "https://mlsysbook.ai/taxonomy/field.html"
     : location.pathname.endsWith("/atlas.html") ? "field-preview.html" : "field.html";
   if (window.parent !== window) {
     document.body.classList.add("embedded-map");
