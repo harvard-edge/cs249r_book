@@ -4,7 +4,10 @@ import { inspect } from 'node:util';
 import vm from 'node:vm';
 import { webcrypto } from 'node:crypto';
 import { test } from 'node:test';
-import ts from 'typescript';
+import { createRequire } from 'node:module';
+
+// CommonJS resolution also honors the isolated pre-commit Node environment.
+const ts = createRequire(import.meta.url)('typescript');
 
 // Exercise the public handler with isolated fetch, bindings, and console. No
 // network or Cloudflare runtime is needed; TypeScript is already a dev dependency.
