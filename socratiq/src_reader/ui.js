@@ -3,6 +3,8 @@ import { renderSafeMarkdown } from './render.js';
 import { createParagraphPicker } from './picker.js';
 import { createPassageSessions, passageKey } from './passage-sessions.js';
 import { createReaderEnvironment } from './environment.js';
+import {readLearnerPreferences, saveLearnerPreferences, clearLearnerPreferences} from './preferences.js';
+import {createReaderTour} from './onboarding.js';
 
 const MAX_HISTORY_MESSAGES = 12;
 const MAX_VISIBLE_TURNS = 12;
@@ -62,10 +64,22 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
       <label class="reader-sessions" hidden>Recent passages
         <select class="reader-session-select" aria-label="Recent passages"></select>
       </label>
-      <p class="reader-privacy">The selected passage and surrounding section are sent for AI explanation when you ask.</p>
+      <p class="reader-privacy">The selected passage and surrounding section are sent with your learning preferences for AI explanation when you ask.</p>
       <div class="reader-body" role="region" aria-label="Selected passage and answers" tabindex="0">
+      <details class="reader-preferences">
+        <summary>Learning preferences</summary>
+        <div class="reader-preferences-fields">
+          <label>Explanation level<select class="reader-level"><option value="beginner">Beginner — define the essentials</option><option value="intermediate">Intermediate — connect concepts</option><option value="advanced">Advanced — examine trade-offs</option></select></label>
+          <label>What do you already know? <span>(optional)</span><textarea class="reader-background" rows="2" maxlength="1200" placeholder="For example: I know Python; hardware is new to me."></textarea></label>
+          <label>How should explanations help you? <span>(optional)</span><textarea class="reader-teaching" rows="2" maxlength="800" placeholder="For example: Define symbols and use everyday analogies."></textarea></label>
+          <p>Saved in this browser. Included when you ask AI; avoid sensitive details. Changes apply to your next question.</p>
+          <div class="reader-preference-actions"><button type="button" class="reader-preferences-save">Save preferences</button><button type="button" class="reader-preferences-clear">Clear preferences</button></div>
+          <p class="reader-preferences-status" role="status" aria-live="polite"></p>
+        </div>
+      </details>
       <div class="reader-tools" hidden>
         <button class="reader-study" type="button">Study tools</button>
+        <button class="reader-tour-replay" type="button">Replay tour</button>
         <span class="reader-study-status" role="status" aria-live="polite"></span>
       </div>
         <section class="reader-source" aria-label="Selected source" hidden>
@@ -108,7 +122,8 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
   const sessionPicker = shell.querySelector('.reader-session-select');
   const studyButton = shell.querySelector('.reader-study');
   const studyStatus = shell.querySelector('.reader-study-status');
-  shell.querySelector('.reader-tools').hidden = typeof onOpenStudy !== 'function';
+  shell.querySelector('.reader-tools').hidden = false;
+  studyButton.hidden = typeof onOpenStudy !== 'function';
   const sessionControl = shell.querySelector('.reader-sessions');
   const launcher = shell.querySelector('.reader-launcher');
   const panel = shell.querySelector('.reader-panel');
@@ -129,7 +144,7 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
   const errorText = shell.querySelector('.reader-error-text');
   const retryButton = shell.querySelector('.reader-retry');
   const composer = shell.querySelector('.reader-composer');
-  const input = shell.querySelector('textarea');
+  const input = shell.querySelector('.reader-composer textarea');
   input.maxLength = 2000;
   const sendButton = shell.querySelector('.reader-send');
   const stopButton = shell.querySelector('.reader-stop');
@@ -139,6 +154,37 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
     select: sessionPicker, control: sessionControl,
   });
   const environment = createReaderEnvironment({ host, shell });
+  const preferencesControl = shell.querySelector('.reader-preferences');
+  const levelInput = shell.querySelector('.reader-level');
+  const backgroundInput = shell.querySelector('.reader-background');
+  const teachingInput = shell.querySelector('.reader-teaching');
+  const preferenceStatus = shell.querySelector('.reader-preferences-status');
+  function refreshPreferences() {
+    const preferences = readLearnerPreferences();
+    levelInput.value = preferences.level;
+    backgroundInput.value = preferences.background;
+    teachingInput.value = preferences.instructions;
+  }
+  refreshPreferences();
+  preferencesControl.querySelector('summary').addEventListener('click', () => {
+    if (!preferencesControl.open) {refreshPreferences(); preferenceStatus.textContent = '';}
+  });
+  shell.querySelector('.reader-preferences-save').addEventListener('click', () => {
+    const {persisted} = saveLearnerPreferences({level: levelInput.value, background: backgroundInput.value, instructions: teachingInput.value});
+    refreshPreferences();
+    preferenceStatus.textContent = persisted ? 'Preferences saved in this browser.' : 'Preferences apply on this page. Browser storage is unavailable.';
+  });
+  shell.querySelector('.reader-preferences-clear').addEventListener('click', () => {
+    const {persisted} = clearLearnerPreferences();
+    refreshPreferences();
+    preferenceStatus.textContent = persisted ? 'Preferences cleared. Explanation level reset to Intermediate.' : 'Preferences cleared for this page. Browser storage is unavailable.';
+  });
+  const tour = createReaderTour({shell, targets: {
+    preferences: () => preferencesControl.querySelector('summary'),
+    choose: () => [...shell.querySelectorAll('.reader-choose')].find(button => button.getClientRects().length) || sourceCard,
+    study: () => studyButton.hidden ? shell.querySelector('.reader-tour-replay') : studyButton,
+  }});
+  shell.querySelector('.reader-tour-replay').addEventListener('click', () => tour.start({replay: true}));
 
   let pendingSource = null;
   let activeSource = null;
@@ -191,6 +237,7 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
   function resumeFromStudy() {
     if (!studyActive || destroyed) return;
     studyActive = false;
+    refreshPreferences();
     shell.hidden = false;
     studyStatus.textContent = '';
     studyButton.textContent = 'Study tools';
@@ -322,11 +369,13 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
         target.focus({ preventScroll: true });
       }
       else if (!panel.hidden) closeButton.focus({ preventScroll: true });
+      if (!panel.hidden) tour.start();
     });
   }
 
   function closePanel({restoreFocus = true} = {}) {
     if (panel.hidden) return;
+    tour.stop({restoreFocus: false});
     stopRequest('Response stopped because the reader was closed.');
     panel.hidden = true;
     launcher.hidden = false;
@@ -542,6 +591,7 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
     sendButton.disabled = true;
     const requestSource = activeSource;
     const controller = new AbortController();
+    let contextReduced = false;
     activeController = controller;
     activeAnswerNode = answerNode;
     updateComposerState();
@@ -552,6 +602,11 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
         source: requestSource,
         question,
         history: boundHistory(history),
+        learnerPreferences: readLearnerPreferences(),
+        onContextBudget: () => {
+          contextReduced = true;
+          if (activeController === controller) status.textContent = 'Generating an explanation… Some surrounding text or older turns were omitted to fit this request.';
+        },
         signal: controller.signal,
         onChunk: (accumulatedAnswer) => {
           if (controller.signal.aborted || activeController !== controller) return;
@@ -568,7 +623,7 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
       trimVisibleTurns();
       lastFailedQuestion = null;
       failedUserTurn = null;
-      status.textContent = 'Explanation ready.';
+      status.textContent = contextReduced ? 'Explanation ready. Some surrounding text or older turns were omitted to fit this request.' : 'Explanation ready.';
     } catch (error) {
       if (controller.signal.aborted || activeController !== controller) return;
       answerNode.closest('.reader-turn')?.remove();
@@ -692,6 +747,7 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
       document.removeEventListener('scroll', hideSelectionAction, true);
       document.removeEventListener('keydown', handleEscape, true);
       document.removeEventListener('keydown', handleSelectionShortcut, true);
+      tour.destroy();
       environment.destroy();
       host.remove();
     },

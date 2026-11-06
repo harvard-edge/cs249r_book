@@ -4,6 +4,8 @@ Cloudflare Worker that powers StaffML's **Ask Interviewer** panel (Practice and 
 
 See [`../WORKER_DEPLOY.md`](../WORKER_DEPLOY.md) for the full deploy guide.
 
+The deployed service is `staffml-interviewer`; the private npm package is `staffml-interviewer-worker`. See the [Cloudflare service inventory](../../CLOUDFLARE.md) for the vault and analytics services and their separate storage bindings.
+
 ## At a glance
 
 - **Single file**: [`src/index.ts`](src/index.ts) (~1,300 lines)

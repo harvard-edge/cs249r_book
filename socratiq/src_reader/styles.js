@@ -317,4 +317,42 @@ export const readerStyles = `
   }
 `;
 
-export const completeReaderStyles = `${katexCss}\n${readerStyles}`;
+
+const learnerStyles = `
+  .reader-tools { flex-wrap: wrap; }
+  .reader-preferences { margin: 10px 16px; padding: 10px 12px; border: 1px solid #d9cbd0; border-radius: 10px; background: #faf5f7; }
+  .reader-preferences summary { cursor: pointer; font-weight: 650; min-height: 24px; }
+  .reader-preferences summary:focus-visible, .reader-preferences select:focus-visible { outline: 3px solid #d88ea4; outline-offset: 3px; }
+  .reader-preferences-fields { display: grid; gap: 12px; padding-top: 12px; }
+  .reader-preferences label { display: block; font-weight: 600; }
+  .reader-preferences label span { font-weight: 400; }
+  .reader-preferences select, .reader-preferences textarea { display: block; margin-top: 5px; width: 100%; padding: 9px; border: 1px solid #b8a7af; border-radius: 7px; background: #fffdfd; color: inherit; font: inherit; }
+  .reader-preferences textarea { resize: vertical; min-height: 64px; max-height: 140px; }
+  .reader-preferences-fields p { margin: 0; font-size: 12px; line-height: 1.5; }
+  .reader-preference-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  .reader-preference-actions button, .reader-tour button, .reader-tour-replay { min-height: 36px; padding: 7px 10px; border: 1px solid #b8a7af; border-radius: 7px; background: #fffdfd; color: inherit; cursor: pointer; font: inherit; }
+  .reader-tour-spotlight { position: fixed; z-index: 5; border: 2px solid #e2a1b4; border-radius: 8px; box-shadow: 0 0 0 9999px rgb(20 12 16 / 45%); pointer-events: none; }
+  .reader-tour { position: fixed; z-index: 6; pointer-events: auto; padding: 16px; border: 1px solid #a37a88; border-radius: 12px; background: #fffdfd; color: #272329; box-shadow: 0 8px 30px rgb(0 0 0 / 24%); overflow: auto; }
+  .reader-tour p { margin: 0 0 12px; line-height: 1.5; }
+  .reader-tour h3 { margin: 0 0 8px; font-size: 16px; line-height: 1.3; }
+  .reader-tour h3:focus { outline: none; }
+  .reader-tour-count { font-size: 12px; font-weight: 600; }
+  .reader-tour-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+  .reader-tour button:focus-visible { outline: 3px solid #d88ea4; outline-offset: 2px; }
+  .reader-tour button:disabled { opacity: .5; cursor: default; }
+  .reader-tour button[data-tour="next"] { background: #8e1537; border-color: #8e1537; color: #fff; }
+  .reader-shell[data-theme="dark"] .reader-preferences { background: #2b242a; border-color: #6a5660; }
+  .reader-shell[data-theme="dark"] .reader-preferences select,
+  .reader-shell[data-theme="dark"] .reader-preferences textarea,
+  .reader-shell[data-theme="dark"] .reader-preference-actions button,
+  .reader-shell[data-theme="dark"] .reader-tour-replay,
+  .reader-shell[data-theme="dark"] .reader-tour { background: #211e22; color: #f5f0f2; border-color: #806875; }
+  .reader-shell[data-theme="dark"] .reader-tour button { background: #3b3038; color: #f5f0f2; }
+  .reader-shell[data-theme="dark"] .reader-tour button[data-tour="next"] { background: #8e1537; color: #fff; }
+  @media (pointer: coarse) {
+    .reader-preferences summary, .reader-tour button, .reader-preference-actions button { min-height: 44px; }
+    .reader-preferences select, .reader-preferences textarea { font-size: 16px; }
+  }
+`;
+
+export const completeReaderStyles = `${katexCss}\n${readerStyles}\n${learnerStyles}`;

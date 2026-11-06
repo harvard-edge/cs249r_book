@@ -523,6 +523,19 @@ export const htmlContent = `
         </button>
       </div>
 
+      <details id="study-learner-preferences" class="mb-6 p-3 border rounded-lg">
+        <summary class="cursor-pointer font-semibold">Learning preferences</summary>
+        <p class="text-xs mt-2" style="color:var(--socratiq-muted,#4c566a)">Shared with the reader. Saved in this browser and included when you ask AI. Avoid sensitive details.</p>
+        <label class="block text-sm mt-3">What do you already know? (optional)
+          <textarea id="study-learner-background" rows="2" maxlength="1200" class="w-full p-2 border rounded mt-1 bg-transparent" placeholder="I know Python; hardware is new to me."></textarea>
+        </label>
+        <label class="block text-sm mt-3">How should explanations help you? (optional)
+          <textarea id="study-learner-instructions" rows="2" maxlength="800" class="w-full p-2 border rounded mt-1 bg-transparent" placeholder="Define symbols and use everyday analogies."></textarea>
+        </label>
+        <p class="text-xs mt-2" style="color:var(--socratiq-muted,#4c566a)">Use Understanding Level below to change your level.</p>
+        <div class="flex flex-wrap gap-2 mt-3"><button id="study-learner-save" type="button" class="p-2 border rounded">Save preferences</button><button id="study-learner-clear" type="button" class="p-2 border rounded">Clear preferences</button></div>
+        <p id="study-learner-status" class="text-xs mt-2" style="color:var(--socratiq-muted,#4c566a)" role="status" aria-live="polite"></p>
+      </details>
       <!-- Use your own AI Section -->
       <div class="mb-6 p-4 border border-zinc-200 dark:border-zinc-700 rounded-lg" style="background-color: var(--socratiq-bg, #ffffff); color: var(--socratiq-text, #1f2328);">
         <div class="flex items-center justify-between mb-4">
@@ -606,7 +619,7 @@ export const htmlContent = `
         <!-- Default API Info (shown when custom API is disabled) -->
         <div id="default-api-info" class="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-md p-3">
           <p class="text-sm text-blue-800 dark:text-blue-200">
-            <strong>Using SocratiQ AI:</strong> You're currently using our default AI providers (GROQ, Gemini, etc.) with automatic fallback and optimization.
+            <strong>Using SocratiQ AI:</strong> The shared AI service uses Groq. Custom AI requests use only the provider you select.
           </p>
         </div>
       </div>

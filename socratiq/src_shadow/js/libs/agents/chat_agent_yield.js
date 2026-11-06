@@ -17,6 +17,7 @@ export async function* query_agent(query, token, isMorePowerful=false, conversat
     const formattedPrompt = {
       prompt: promptText,
       systemPrompt: query.systemPrompt,
+      learnerPreferences: query.learnerPreferences,
       messages: query.messages?.length ? query.messages : [{
         role: "user",
         content: promptText

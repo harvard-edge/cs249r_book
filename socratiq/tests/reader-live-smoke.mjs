@@ -17,7 +17,7 @@ const page = await browser.newPage({viewport: {width: 1440, height: 1000}});
 const receipts = [];
 let responseReceipt;
 page.on('response', response => {
-  if (!response.url().startsWith('https://proxy-worker-streaming.mlsysbook.workers.dev/')) return;
+  if (new URL(response.url()).origin + new URL(response.url()).pathname !== 'https://mlsysbook.ai/api/socratiq/ai/stream') return;
   if (response.request().method() !== 'POST') return;
   responseReceipt = (async () => {
     const receipt = {url: response.url(), status: response.status(), request: response.request().postDataJSON()};

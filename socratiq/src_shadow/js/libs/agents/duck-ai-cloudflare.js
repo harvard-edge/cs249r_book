@@ -1,6 +1,8 @@
 import { callProviderSingle, callProviderStream } from './cloudflareAgent.js';
 import { DEFAULT_PROVIDER, PROVIDER_MODELS } from '../../../configs/env_configs.js';
 import { CustomAPIAdapter } from './custom-api-adapter.js';
+import { readLearnerPreferences } from '../../../../src_reader/preferences.js';
+import { withLearnerCalibration } from '../../../../src_reader/calibration.mjs';
 
 // Shared gateway defaults are configured in one place.
 const PROVIDER_CONFIGS = [{
@@ -28,10 +30,11 @@ export class DuckAI {
         // Try custom API first if configured
         const settings = this.getCurrentSettings();
         let customHasContent = false;
-        if (CustomAPIAdapter.hasCustomAPIConfig(settings)) {
+        if (settings?.customAPI?.enabled) {
+            if (!CustomAPIAdapter.hasCustomAPIConfig(settings)) throw new Error('Complete your custom API settings, or disable the custom API to use the shared service.');
             try {
                 console.log(`[CUSTOM_API] Attempting custom API: ${settings.customAPI.provider}`);
-                const customResult = CustomAPIAdapter.callCustomAPI(prompt, settings, true);
+                const customResult = CustomAPIAdapter.callCustomAPI(prompt, settings, true, withLearnerCalibration([{role:'user',content:prompt}], readLearnerPreferences()));
                 if (customResult) {
                     for await (const chunk of customResult) {
                         if (chunk) { customHasContent = true; yield chunk; }
@@ -41,9 +44,9 @@ export class DuckAI {
                     return; // Success with custom API
                 }
             } catch (error) {
-                if (customHasContent) throw error;
-                console.warn('[CUSTOM_API] Custom API failed, falling back to default providers:', error);
+                throw new Error('Your custom API request failed. Check its endpoint, model, and credentials, or disable the custom API to use the shared service.');
             }
+            throw new Error('Your custom API returned no answer. Check its settings, or disable the custom API to use the shared service.');
         }
         
         // Fallback to default providers
@@ -89,10 +92,11 @@ Example format:
         // Try custom API first if configured
         const settings = this.getCurrentSettings();
         let customHasContent = false;
-        if (CustomAPIAdapter.hasCustomAPIConfig(settings)) {
+        if (settings?.customAPI?.enabled) {
+            if (!CustomAPIAdapter.hasCustomAPIConfig(settings)) throw new Error('Complete your custom API settings, or disable the custom API to use the shared service.');
             try {
                 console.log(`[CUSTOM_API] Attempting custom API for flashcards: ${settings.customAPI.provider}`);
-                const customResult = CustomAPIAdapter.callCustomAPI(prompt, settings, true);
+                const customResult = CustomAPIAdapter.callCustomAPI(prompt, settings, true, withLearnerCalibration([{role:'user',content:prompt}], readLearnerPreferences()));
                 if (customResult) {
                     for await (const chunk of customResult) {
                         if (chunk) { customHasContent = true; yield chunk; }
@@ -102,9 +106,9 @@ Example format:
                     return; // Success with custom API
                 }
             } catch (error) {
-                if (customHasContent) throw error;
-                console.warn('[CUSTOM_API] Custom API failed for flashcards, falling back to default providers:', error);
+                throw new Error('Your custom API request failed. Check its endpoint, model, and credentials, or disable the custom API to use the shared service.');
             }
+            throw new Error('Your custom API returned no answer. Check its settings, or disable the custom API to use the shared service.');
         }
 
         // Fallback to default providers
@@ -232,12 +236,6 @@ Example format:
      * @returns {Object} - User settings object
      */
     getCurrentSettings() {
-        try {
-            const savedSettings = localStorage.getItem("userSettings");
-            return savedSettings ? JSON.parse(savedSettings) : {};
-        } catch (error) {
-            console.error('[CUSTOM_API] Error loading settings:', error);
-            return {};
-        }
+        return CustomAPIAdapter.getRuntimeSettings();
     }
 }

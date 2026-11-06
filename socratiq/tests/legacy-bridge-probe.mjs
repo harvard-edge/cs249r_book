@@ -10,7 +10,7 @@ await mkdir(receipt,{recursive:true});
 try {
  const page=await browser.newPage({viewport:{width:1280,height:900}});
  const errors=[];page.on('pageerror',e=>errors.push(e.message));
- await page.route('**/*.workers.dev/**',r=>r.abort());
+ await page.route('https://mlsysbook.ai/api/socratiq/**',r=>r.abort());
  await page.route('**/runtime-fixture',r=>r.fulfill({contentType:'text/html',body:'<!DOCTYPE html><html><head><title>Constructed study fixture</title></head><body><main id="quarto-document-content"><h1>Constructed chapter</h1><section><h2>Memory bandwidth</h2><p>Memory bandwidth limits the accelerator during inference.</p></section></main><script type="module" src="/js/index.js"></script></body></html>'}));
  await page.goto('http://127.0.0.1:4187/runtime-fixture');
  await page.waitForTimeout(1500);

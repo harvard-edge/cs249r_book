@@ -1,3 +1,4 @@
+import {readLearnerPreferences, saveLearnerPreferences, clearLearnerPreferences, hasSavedLearnerPreferences} from '../../../../src_reader/preferences.js';
 import {  showPopover } from "../../libs/utils/utils";
 import { DIFFICULTY_LEVELS } from "../../../configs/client.config.js";
 import { DropdownHandler } from './dropdown-handler.js';
@@ -70,6 +71,7 @@ export class SettingsManager {
 
       // Initialize custom API settings
       this.initializeCustomAPISettings();
+      this.initializeLearnerPreferences();
 
       this.dispatchAndUpdate("init", true);
       this.dispatchAndUpdate_settings("init", true);
@@ -81,6 +83,48 @@ export class SettingsManager {
       });
     }
     this.isInitializing = false;
+  }
+
+  initializeLearnerPreferences() {
+    const background = this.shadowEle.querySelector('#study-learner-background');
+    const instructions = this.shadowEle.querySelector('#study-learner-instructions');
+    if (!background || !instructions) return;
+    const status = this.shadowEle.querySelector('#study-learner-status');
+    const refresh = () => {
+      const preferences = readLearnerPreferences();
+      background.value = preferences.background;
+      instructions.value = preferences.instructions;
+    };
+    refresh();
+    window.addEventListener('socratiq:preferences-changed', () => {
+      if (this.isSyncingLearnerPreferences) return;
+      const preference = readLearnerPreferences();
+      const level = ['beginner', 'intermediate', 'advanced'].indexOf(preference.level);
+      if (this.settings.sliderValue !== level) {
+        const initializing = this.isInitializing;
+        this.isInitializing = true;
+        const slider = this.shadowEle.querySelector('#understanding-slider');
+        if (slider) slider.value = String(level);
+        this.updateSlider(level);
+        this.isInitializing = initializing;
+        if (!initializing) this.dispatchAndUpdate('learnerPreferences', level);
+      }
+      refresh();
+    });
+    this.shadowEle.querySelector('#study-learner-preferences summary').addEventListener('click', () => {
+      if (!this.shadowEle.querySelector('#study-learner-preferences').open) refresh();
+    });
+    this.shadowEle.querySelector('#study-learner-save').addEventListener('click', () => {
+      const result = saveLearnerPreferences({...readLearnerPreferences(), background: background.value, instructions: instructions.value});
+      refresh();
+      status.textContent = result.persisted ? 'Preferences saved in this browser.' : 'Preferences apply on this page. Browser storage is unavailable.';
+    });
+    this.shadowEle.querySelector('#study-learner-clear').addEventListener('click', () => {
+      const result = clearLearnerPreferences();
+      this.updateSlider(1);
+      refresh();
+      status.textContent = result.persisted ? 'Preferences cleared. Level reset to Intermediate.' : 'Preferences cleared for this page. Browser storage is unavailable.';
+    });
   }
 
   // Dispatch highlight-menu event
@@ -112,11 +156,11 @@ export class SettingsManager {
     });
     window.dispatchEvent(event);
 
-    if (key !== "init") {
+    if (key !== "init" && !this.isInitializing) {
       let displayValue = value;
       if (typeof value === 'object' && value !== null) {
-        if (key === "customAPI" && value.provider) {
-          displayValue = `${value.provider} API`;
+        if (key === "customAPI") {
+          displayValue = value.provider ? `${value.provider} API` : "Custom API preferences";
         } else {
           displayValue = JSON.stringify(value);
         }
@@ -129,6 +173,14 @@ export class SettingsManager {
   updateSlider(value) {
     this.settings.sliderValue = parseInt(value, 10);
     this.saveSettings();
+    if (!this.isInitializing) {
+      this.isSyncingLearnerPreferences = true;
+      try {
+        saveLearnerPreferences({...readLearnerPreferences(), level: ['beginner', 'intermediate', 'advanced', 'advanced'][this.settings.sliderValue]});
+      } finally {this.isSyncingLearnerPreferences = false;}
+      // Preserve the legacy Bloom mode while sharing its advanced calibration.
+      if (this.settings.sliderValue === 3) this.saveSettings();
+    }
     
     window.current_difficulty = this.settings.sliderValue;
     
@@ -206,7 +258,7 @@ export class SettingsManager {
     const useBlooms = this.settings.checkboxes["Apply-blooms-taxonomy"];
 
     const answersDescription = '';
-    showPopover(this.shadowEle, "Question difficulty level: " + understandingLevels[this.settings.sliderValue].split(':')[0], "success");
+    // Prompt generation also runs during startup and sync; it has no UI side effects.
     
     return `Tailor your response for a: ${understanding}. ${answersDescription} ${useBlooms ? 'Apply Bloom\'s Taxonomy in your response structure.' : ''}`;
   }
@@ -230,7 +282,9 @@ export class SettingsManager {
     // Initialization must not overwrite a damaged backup or partial legacy settings.
     if (this.isInitializing) return;
     try {
-      localStorage.setItem("userSettings", JSON.stringify(this.settings));
+      const snapshot = {...this.settings, customAPI: {...this.settings.customAPI}};
+      if (snapshot.customAPI.saveLocally !== true) snapshot.customAPI.apiKey = '';
+      localStorage.setItem("userSettings", JSON.stringify(snapshot));
     } catch (error) {
       console.warn("Unable to persist settings:", error);
     }
@@ -277,6 +331,10 @@ export class SettingsManager {
       console.warn("Using default settings; saved settings were left unchanged:", error);
     }
 
+    if (this.settings.customAPI.saveLocally !== true) this.settings.customAPI.apiKey = '';
+    const preferenceLevel = readLearnerPreferences().level;
+    // A valid shared preference takes precedence after reader edits.
+    if (hasSavedLearnerPreferences() && !(this.settings.sliderValue === 3 && preferenceLevel === 'advanced')) this.settings.sliderValue = ['beginner', 'intermediate', 'advanced'].indexOf(preferenceLevel);
     window.current_difficulty = this.settings.sliderValue;
     
     const slider = this.shadowEle.querySelector("#understanding-slider");

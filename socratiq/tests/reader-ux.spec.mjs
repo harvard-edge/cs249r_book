@@ -19,7 +19,7 @@ const longAnswer = Array.from({length: 36}, (_, index) => `Paragraph ${index + 1
 
 test('keyboard shortcut explains a selected passage and keeps the answer start and source available', async ({page}, testInfo) => {
   const requests = [];
-  await page.route('https://proxy-worker-streaming.mlsysbook.workers.dev/**', async route => {
+  await page.route('https://mlsysbook.ai/api/socratiq/ai/stream**', async route => {
     requests.push(route.request().postDataJSON());
     await route.fulfill({contentType: 'text/event-stream', body: sse(longAnswer)});
   });
@@ -68,26 +68,39 @@ test('keyboard shortcut explains a selected passage and keeps the answer start a
 
 test('follow-up streams follow only when the reader is already at the bottom', async ({page}) => {
   let calls = 0;
-  await page.route('https://proxy-worker-streaming.mlsysbook.workers.dev/**', route => {
+  const budgets = [];
+  await page.route('https://mlsysbook.ai/api/socratiq/ai/stream**', route => {
     calls += 1;
+    const content = route.request().postDataJSON().messages.at(-1).content;
+    budgets.push(JSON.parse(content.slice(content.indexOf('{'))).contextBudget);
     return route.fulfill({contentType: 'text/event-stream', body: sse(longAnswer)});
   });
+  const expectReady = async () => {
+    const status = page.locator('#socratiq-reader .reader-status');
+    await expect(status).toHaveText(/^Explanation ready\./);
+    const budget = budgets.at(-1);
+    expect(budget).toEqual({contextReduced: expect.any(Boolean), omittedHistoryMessages: expect.any(Number)});
+    await expect(status).toHaveText(budget.contextReduced || budget.omittedHistoryMessages
+      ? 'Explanation ready. Some surrounding text or older turns were omitted to fit this request.'
+      : 'Explanation ready.');
+  };
   await page.goto('/vol1/chapter/');
   await selectPassage(page);
   await page.getByRole('button', {name: 'Explain this', exact: true}).click();
-  await expect(page.getByText('Explanation ready.', {exact: true})).toBeVisible();
+  await expectReady();
   const body = page.locator('#socratiq-reader .reader-body');
 
   await body.evaluate(node => {node.scrollTop = 0;});
   await page.getByRole('textbox', {name: 'Ask a follow-up question'}).fill('Explain that another way.');
   await page.getByRole('button', {name: 'Send question'}).click();
-  await expect(page.getByText('Explanation ready.', {exact: true})).toBeVisible();
+  await expectReady();
+  expect(budgets.at(-1).omittedHistoryMessages).toBeGreaterThan(0);
   expect(await body.evaluate(node => node.scrollTop)).toBe(0);
 
   await body.evaluate(node => {node.scrollTop = node.scrollHeight;});
   await page.getByRole('textbox', {name: 'Ask a follow-up question'}).fill('One more detail.');
   await page.getByRole('button', {name: 'Send question'}).click();
-  await expect(page.getByText('Explanation ready.', {exact: true})).toBeVisible();
+  await expectReady();
   const scroll = await body.evaluate(node => ({top: node.scrollTop, max: node.scrollHeight - node.clientHeight}));
   expect(scroll.top).toBe(scroll.max);
   expect(calls).toBe(3);

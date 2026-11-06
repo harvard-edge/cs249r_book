@@ -69,7 +69,7 @@ The system is decoupled into four modular pillars:
 1. **The Question Vault**: A human-first, git-tracked corpus of 10,711 validated YAML files conforming to LinkML/Pydantic schemas.
 2. **The Build & Tooling Layer (`vault-cli`)**: A high-performance compiler that validates invariants, tracks content hashes, and compiles SQLite (`vault.db`) and static bundles.
 3. **The Web Application (`app/`)**: A Next.js 16 App Router application supporting dual runtime modes (local static fallback vs edge-connected D1).
-4. **The Edge & LLM Conductor (`vault-worker` & `app/worker`)**: A Cloudflare Edge Worker providing low-latency Socratic mock interviewing via a resilient multi-provider fallback cascade.
+4. **The Edge Services (`vault-worker/`, `app/worker/`, and `app/analytics-worker/`)**: Separate Cloudflare Workers serve the question vault (`staffml-vault`), Socratic interviewing (`staffml-interviewer`), and anonymous usage events (`staffml-analytics`). See the [Cloudflare service inventory](CLOUDFLARE.md) for deployment names, package names, and bindings.
 
 ---
 
@@ -237,7 +237,7 @@ StaffML implements an adapted SuperMemo SM-2 spaced repetition algorithm stored 
 
 ## 5. Pillar 4: Socratic AI Conductor & Multi-Provider Relay
 
-The live interview experience (`/interview`) pairs candidates with an AI Socratic interviewer powered by `staffml-vault-worker` and `lib/interview-conductor.ts`.
+The live interview experience (`/interview`) pairs candidates with an AI Socratic interviewer powered by the `staffml-interviewer` Worker (`app/worker/`) and `lib/interview-conductor.ts`. The separate `staffml-vault` Worker (`vault-worker/`) serves question data.
 
 ```mermaid
 sequenceDiagram
@@ -250,10 +250,10 @@ sequenceDiagram
 
     Candidate->>UI: Selects Track, Level & Duration (e.g. Cloud L4, 30 min)
     UI->>Cond: Initializes session & selects entry Socratic Chain
-    Cond->>Worker: POST /interview/turn (System Prompt + Question Context + Transcript)
+    Cond->>Worker: POST /interview (Conductor Context + Transcript + Candidate Message)
     Worker->>LLM: Fallback cascade (Groq ➔ OpenAI ➔ Anthropic ➔ Gemini ➔ Workers AI)
-    LLM-->>Worker: Streaming Response + Structured ---CONDUCTOR_META---
-    Worker-->>UI: Relays SSE stream
+    LLM-->>Worker: Complete response with CONDUCTOR_META block
+    Worker-->>UI: JSON response with message, meta, and provider details
     UI->>Candidate: Renders Socratic response
     Candidate->>UI: Submits napkin math & architectural answer
     UI->>Cond: Evaluates answer, adjusts depth, or traverses chain
@@ -272,18 +272,19 @@ To ensure 99.99% uptime and low latency for live mock interviews, the Cloudflare
 
 ### 5.2 Conductor Metadata Protocol
 
-At each Socratic turn, the AI interviewer appends structured metadata:
+The client sends each turn to `/api/staffml-interviewer/interview`. The Worker builds the system prompt from `conductorContext`, calls the provider, and returns a complete JSON response rather than a stream. The model appends a metadata block to its response, for example:
 ```
 ---CONDUCTOR_META---
 {
   "intent": "probe",
-  "score": 75,
-  "napkin_math_correct": true,
-  "concept_tested": "PagedAttention KV cache allocation",
-  "advance_chain": false
+  "questionRef": "current-question-id",
+  "chainRef": "current-chain-id",
+  "performanceNote": "The candidate identified the memory constraint.",
+  "nextAction": null,
+  "areaRatings": {}
 }
 ```
-`interview-conductor.ts` parses this block to dynamically decide whether to probe deeper, provide hints, retreat to foundational concepts, or advance to the next question in the chain.
+The Worker separates this block into the response's `message` and `meta` fields. `lib/interview-api.ts` reads the JSON response and retains fallback parsing for a metadata block embedded in the message. The conductor uses the resulting metadata to decide whether to probe deeper, provide hints, retreat to foundational concepts, or advance to the next question in the chain.
 
 ---
 
@@ -296,7 +297,7 @@ At each Socratic turn, the AI interviewer appends structured metadata:
 | **`staffml/vault/visuals/`** | 144 source SVG architectural and memory diagrams. |
 | **`staffml/vault-cli/`** | Python CLI toolchain (`vault` command) for authoring, invariant checking, building, and publishing. |
 | **`staffml/app/`** | Next.js 16 App Router web application (`src/app/`, `src/components/`, `src/lib/`). |
-| **`staffml/app/worker/`** | Next.js serverless worker relay for LLM conductor streaming. |
+| **`staffml/app/worker/`** | Cloudflare Worker for Socratic interviewing, provider fallback, and JSON responses. |
 | **`staffml/vault-worker/`** | Cloudflare Edge Worker serving D1 database endpoints and search. |
 | **`staffml/paper/`** | Academic publication macros and LaTeX build scripts synchronized with `vault.db`. |
 

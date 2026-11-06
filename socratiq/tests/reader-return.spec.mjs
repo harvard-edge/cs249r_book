@@ -3,7 +3,7 @@ import {test, expect} from '@playwright/test';
 test('returning to the selected passage keeps the page and conversation intact', async ({page, context}) => {
   let calls = 0;
   await page.emulateMedia({reducedMotion: 'reduce'});
-  await page.route('https://proxy-worker-streaming.mlsysbook.workers.dev/**', route => {
+  await page.route('https://mlsysbook.ai/api/socratiq/ai/stream**', route => {
     calls += 1;
     return route.fulfill({contentType: 'text/event-stream', body: `data: ${JSON.stringify({choices: [{delta: {content: 'The saved explanation connects bandwidth and latency.'}, finish_reason: null}]})}\n\ndata: [DONE]\n\n`});
   });

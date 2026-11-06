@@ -39,6 +39,15 @@ async function fixture(run) {
   const origin = `http://127.0.0.1:${server.address().port}`;
   const browser = await chromium.launch({headless: true});
   const page = await browser.newPage();
+  // These integration flows exercise a returning learner's study workspace;
+  // first-use tour behavior has its own focused browser coverage.
+  await page.addInitScript(expectedOrigin => {
+    // Init scripts also run in guide embeds. Only initialize this fixture's
+    // book origin; sandboxed and external frames must keep their own state.
+    if (location.origin !== expectedOrigin) return;
+    try {localStorage.setItem('socratiq_reader_tour_v1', 'true');}
+    catch { /* Let the returning-flow assertions fail if its store is blocked. */ }
+  }, origin);
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.route('**/*', route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort());
@@ -171,7 +180,7 @@ test('built legacy chat renders KaTeX and Mermaid from a constructed provider re
     const markdown = 'Constructed renderer regression fixture.\n\nTransfer time is $t = D / B$.\n\n```mermaid\ngraph TD\n  Memory --> Accelerator\n```\n';
     const sse = `data: ${JSON.stringify({choices: [{delta: {content: markdown}, finish_reason: null}]})}\n\ndata: ${JSON.stringify({choices: [{delta: {}, finish_reason: 'stop'}]})}\n\ndata: [DONE]\n\n`;
     let calls = 0;
-    await page.route('https://proxy-worker-streaming.mlsysbook.workers.dev/**', route => {
+    await page.route('https://mlsysbook.ai/api/socratiq/ai/stream**', route => {
       calls += 1;
       return route.fulfill({contentType: 'text/event-stream', body: sse});
     });

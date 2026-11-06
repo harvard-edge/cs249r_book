@@ -18,6 +18,13 @@ conversations, progress, the knowledge graph, settings, and exports. Returning t
 the reader preserves its current discussion. The workspace mounts once per page;
 opening it does not enable a persistent activation cookie.
 
+The first deliberate reader opening offers a skippable tour; **Replay tour**
+reopens it. **Learning preferences** saves the explanation level and optional
+background/goal in this browser, shared with study settings. Saving preferences
+sends nothing; subsequent AI requests include them. **Clear preferences** resets
+the intermediate level and clears both text fields. No account or device sync is
+provided.
+
 AI-generated explanations and questions can be wrong. A source link identifies
 the supplied passage; it does not establish that every generated claim is
 supported. Check-understanding feedback is not a graded assessment or evidence
@@ -44,19 +51,22 @@ relationships.
 - Cloud quiz submission and collaborative synchronization are unavailable. Local
   storage does not imply that those services have been restored.
 
-The current deployed proxy is
-`proxy-worker-streaming.mlsysbook.workers.dev` (with a separate non-streaming
-endpoint used by the study workspace). Its source and account configuration were
-not recovered. A successful HTTP response does not establish that it preserves
-client instructions: live control probes found unreliable teaching-format
-compliance. Backend ownership, message forwarding, provider retention, rate
-limits, and operating budgets remain release requirements. Frontend input bounds
-are not server-side abuse controls. No API key belongs in a book script or build.
+The production chat gateway is `https://mlsysbook.ai/api/socratiq`.
+Its source and operating contract are documented in
+[cloudflare/](cloudflare/README.md). Reader and study Groq defaults use the shared
+configuration in `src_shared/provider-config.js`; provider credentials stay on
+the Worker. The gateway supports the explicitly allowed Groq models and rejects
+unsupported providers without choosing a fallback. The study workspace's custom
+API option is an explicit user override, separate from the public gateway.
 
-A source-controlled replacement is available in [cloudflare/](cloudflare/README.md).
-Its local tests check policy enforcement and exact message forwarding. It is
-disabled by default and has not been deployed. Those tests use a constructed
-upstream response; they do not establish live model behavior or available credit.
+The Worker is activated with a dedicated encrypted Groq credential, after
+verification of Groq and Cloudflare Free plans. Activation and local transport
+tests do not establish live model quality or available quota. Local tests use
+constructed upstream responses. The deployment health check establishes dispatch
+only; live inference controls and browser checks establish different parts of the
+request path. See the gateway README for limits, disable/rollback procedures,
+provider privacy, and the manual deployment workflow. No API key belongs in a
+book script or build.
 
 ## Build and test
 
@@ -79,7 +89,7 @@ artifact at `binder/tools/scripts/socratiQ/bundle.js`. Commit generated artifact
 with their source changes. Both builds embed WOFF2 math fonts without duplicate
 TTF/WOFF copies. Quarto stages the shared directory in every volume;
 the study loader resolves its URL beside the deployed reader script, preserving
-the volume prefix. The `socratiq-reader.yml` workflow checks rebuild drift and
+the volume prefix. The `socratiq-validate.yml` workflow checks rebuild drift and
 runs local, browser, and Quarto integration tests.
 
 Tests using constructed responses exercise behavior, not model quality. Storage
@@ -87,7 +97,7 @@ tests use isolated browser data. Chromium and WebKit viewport tests cover phone
 and tablet layouts; they do not replace physical-device checks of native
 selection handles, software keyboards, or assistive technology.
 
-Optional live checks send public or author-constructed passages to the existing
+Optional live checks send public or author-constructed passages to the configured
 service and save raw evidence. They are excluded from CI:
 
 ```bash

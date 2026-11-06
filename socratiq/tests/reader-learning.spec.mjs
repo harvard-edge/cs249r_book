@@ -1,6 +1,6 @@
 import {test, expect} from '@playwright/test';
 
-const endpoint = 'https://proxy-worker-streaming.mlsysbook.workers.dev/**';
+const endpoint = 'https://mlsysbook.ai/api/socratiq/ai/stream**';
 const answer = '**Bandwidth** moves data.';
 const sse = text => `data: ${JSON.stringify({choices: [{delta: {content: text}, finish_reason: null}]})}\n\ndata: ${JSON.stringify({choices: [{delta: {}, finish_reason: 'stop'}]})}\n\ndata: [DONE]\n\n`;
 const payload = request => {
@@ -127,7 +127,11 @@ test('keyboard users can focus and scroll the answer region without trapping boo
   await page.keyboard.press('Tab');
   await expect(body).toBeFocused();
   await page.keyboard.press('Tab');
+  await expect(page.getByText('Learning preferences', {exact: true})).toBeFocused();
+  await page.keyboard.press('Tab');
   await expect(page.getByRole('button', {name: 'Study tools', exact: true})).toBeFocused();
+  await page.keyboard.press('Shift+Tab');
+  await expect(page.getByText('Learning preferences', {exact: true})).toBeFocused();
   await page.keyboard.press('Shift+Tab');
   await expect(body).toBeFocused();
   await body.evaluate(node => {node.scrollTop = 0;});

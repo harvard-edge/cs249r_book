@@ -39,7 +39,7 @@ test('embedded context button and keyboard mentions select context before sendin
     const requests = [];
     await page.route('**/*', route => {
       const url = new URL(route.request().url());
-      if (url.hostname.endsWith('workers.dev')) {
+      if (url.origin + url.pathname === 'https://mlsysbook.ai/api/socratiq/ai/stream') {
         requests.push(JSON.parse(route.request().postData()));
         return route.fulfill({contentType: 'text/event-stream', body: `data: ${JSON.stringify({choices: [{delta: {content: 'Constructed context response.'}}]})}\n\ndata: ${JSON.stringify({choices: [{delta: {}, finish_reason: 'stop'}]})}\n\ndata: [DONE]\n\n`});
       }
