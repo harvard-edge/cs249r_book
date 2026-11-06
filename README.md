@@ -16,8 +16,11 @@
 <p align="center">
   <a href="#license"><img src="https://img.shields.io/badge/License-per%20component-blue.svg" alt="License: per component"></a>
   <a href="CITATION.bib"><img src="https://img.shields.io/badge/Cite-IEEE%202024-blue?logo=ieee" alt="Cite"></a>
-  <a href="https://github.com/harvard-edge/cs249r_book/stargazers"><img src="https://img.shields.io/github/stars/harvard-edge/cs249r_book?logo=github&cacheSeconds=3600" alt="Stars"></a>
   <a href="https://opencollective.com/mlsysbook"><img src="https://img.shields.io/badge/Fund%20Us-Open%20Collective-blue.svg?logo=open-collective" alt="Fund Us"></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/harvard-edge/cs249r_book/stargazers"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fharvard-edge%2Fcs249r_book&query=%24.stargazers_count&label=Stars&logo=github&color=gold&style=for-the-badge&cacheSeconds=3600" alt="GitHub stars"></a>
 </p>
 
 <p align="center"><sub><b>Build status on <code>dev</code></b></sub></p>
@@ -491,7 +494,7 @@ The textbook is released under a Creative Commons license ([CC BY-NC-ND 4.0](htt
 If this curriculum has helped you, there are two simple ways to help it grow.
 
 <p align="center">
-  <a href="https://github.com/harvard-edge/cs249r_book/stargazers"><img src="https://img.shields.io/github/stars/harvard-edge/cs249r_book?style=for-the-badge&logo=github&color=gold" alt="Stars"></a>
+  <a href="https://github.com/harvard-edge/cs249r_book/stargazers"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fharvard-edge%2Fcs249r_book&query=%24.stargazers_count&label=Stars&logo=github&color=gold&style=for-the-badge&cacheSeconds=3600" alt="GitHub stars"></a>
   &nbsp;&nbsp;
   <a href="https://opencollective.com/mlsysbook"><img src="https://img.shields.io/badge/Fund-Open%20Collective-blue.svg?style=for-the-badge&logo=open-collective" alt="Open Collective"></a>
 </p>
