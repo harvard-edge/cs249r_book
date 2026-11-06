@@ -1,4 +1,4 @@
-import {SERVELESSURLJSON, SERVELESSURLGROQ, SERVERLESSGEMINI} from '../../../configs/env_configs'
+import {SERVELESSURLJSON, DEFAULT_PROVIDER} from '../../../configs/env_configs'
 import { callCloudflareWithLegacyFormat } from './cloudflareAgent.js'
 
 
@@ -30,7 +30,7 @@ export async function query_agent_json_serverless(query, tok) {
 export async function query_agent_groq_serverless(params) {
   try {
     // Use the translation function from cloudflareAgent.js
-    const response = await callCloudflareWithLegacyFormat(params, 'groq', false);
+    const response = await callCloudflareWithLegacyFormat(params, DEFAULT_PROVIDER, false);
     return response;
   } catch (error) {
     console.error("Failed to fetch from GROQ:", error);

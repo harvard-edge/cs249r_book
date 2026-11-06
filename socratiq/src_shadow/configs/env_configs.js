@@ -1,3 +1,6 @@
+import { SOCRATIQ_API_BASE, SHARED_PROVIDER, MAX_OUTPUT_TOKENS } from '../../src_shared/provider-config.js';
+export { MAX_OUTPUT_TOKENS };
+
 // ─── Backend Toggle ──────────────────────────────────────────────────────────
 // Set to true to use local Cloudflare Workers (wrangler dev), false for prod
 export const USE_LOCAL_WORKERS = false;
@@ -5,8 +8,8 @@ export const USE_LOCAL_WORKERS = false;
 // ─── Worker URLs ─────────────────────────────────────────────────────────────
 const URL_SERVER_QUIZ_DEV = "http://localhost:8787"
 const URL_SERVER_QUIZ_DEV_STREAMING = "http://localhost:8788"
-const URL_SERVER_QUIZ_PROD = "https://proxy-worker.mlsysbook.workers.dev"
-const URL_SERVER_QUIZ_STREAMING = "https://proxy-worker-streaming.mlsysbook.workers.dev"
+const URL_SERVER_QUIZ_PROD = SOCRATIQ_API_BASE
+const URL_SERVER_QUIZ_STREAMING = SOCRATIQ_API_BASE
 
 export const WORKER_URL_AI = USE_LOCAL_WORKERS ? URL_SERVER_QUIZ_DEV + "/ai" : URL_SERVER_QUIZ_PROD + "/ai"
 export const WORKER_URL_AI_STREAM = USE_LOCAL_WORKERS ? URL_SERVER_QUIZ_DEV_STREAMING + "/ai/stream" : URL_SERVER_QUIZ_STREAMING + "/ai/stream"
@@ -16,8 +19,8 @@ export const SERVELESSURLJSON = "https://tinymljson.azurewebsites.net/api/GroqJs
 // Updated to use our new Cloudflare proxy
 export const SERVELESSURLGROQ = URL_SERVER_QUIZ_PROD + "/ai?url=https://api.groq.com/openai/v1/chat/completions&provider=groq"
 export const SERVERLESSGEMINI = URL_SERVER_QUIZ_PROD + "/ai?url=https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent&provider=gemini"
-export const SERVERLESSRRESULTS = URL_SERVER_QUIZ_PROD + "/results" // Keep existing results endpoint
-export const SERVERLESSSCORE = URL_SERVER_QUIZ_PROD + "/score" // Keep existing score endpoint
+export const SERVERLESSRRESULTS = "https://proxy-worker.mlsysbook.workers.dev/results" // Existing results service, outside the AI gateway
+export const SERVERLESSSCORE = "https://proxy-worker.mlsysbook.workers.dev/score"
 
 // Updated DuckAI to use our new streaming proxy
 export const SERVELESSURLDuckAI = URL_SERVER_QUIZ_STREAMING + "/ai/stream?url=https://api.groq.com/openai/v1/chat/completions&provider=groq";
@@ -31,8 +34,10 @@ export const MAIN_TOPIC = 'MLSysBook.AI: Principles and Practices of Machine Lea
 
 // ─── AI Provider Models ───────────────────────────────────────────────────────
 // Controls which model each provider uses — edit here to swap models globally
+// The supported shared gateway uses Groq; other providers remain explicit calls.
+export const DEFAULT_PROVIDER = SHARED_PROVIDER.name.toUpperCase();
 export const PROVIDER_MODELS = {
-  GROQ:        { model: 'openai/gpt-oss-20b',                                stream: true  },
+  GROQ:        { model: SHARED_PROVIDER.studyModel,                        stream: SHARED_PROVIDER.stream },
   GEMINI:      { model: 'gemini-2.5-flash',                                  stream: true  },
   CEREBRAS:    { model: 'gpt-oss-120b',                                      stream: true  },
   SAMBANOVA:   { model: 'gpt-oss-120b',                                      stream: true  },

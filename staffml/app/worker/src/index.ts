@@ -364,6 +364,25 @@ async function safeJson<T>(res: Response): Promise<T | null> {
   }
 }
 
+// Only worker-defined codes and HTTP statuses may enter observability logs.
+// Provider bodies and thrown SDK/fetch errors can contain prompts or secrets.
+type ProviderFailureCode = "http_error" | "invalid_json" | "empty_response" | "timeout";
+class ProviderError extends Error {
+  constructor(readonly code: ProviderFailureCode, readonly status?: number) {
+    super(code);
+    this.name = "ProviderError";
+  }
+}
+
+function providerDiagnostic(error: unknown): { code: ProviderFailureCode | "upstream_error"; status?: number } {
+  if (error instanceof ProviderError) {
+    return { code: error.code, ...(error.status === undefined ? {} : { status: error.status }) };
+  }
+  // Do not inspect or serialize arbitrary exceptions, including their messages,
+  // stack traces, causes, URLs, or SDK-specific metadata.
+  return { code: "upstream_error" };
+}
+
 /**
  * Typed error from request parsing — carries the HTTP status the handler
  * should return. Mapped to a JSON response by bodyErrorResponse().
@@ -449,14 +468,14 @@ async function callOpenAICompat(
     }),
   });
   if (!res.ok) {
-    throw new Error(`${adapter.name} returned ${res.status}: ${(await res.text()).slice(0, 200)}`);
+    throw new ProviderError("http_error", res.status);
   }
   const data = await safeJson<{
     choices?: { message?: { content?: string } }[];
   }>(res);
-  if (!data) throw new Error(`${adapter.name} returned non-JSON response`);
+  if (!data) throw new ProviderError("invalid_json");
   const text = data.choices?.[0]?.message?.content?.trim();
-  if (!text) throw new Error(`${adapter.name} returned no content`);
+  if (!text) throw new ProviderError("empty_response");
   return text;
 }
 
@@ -508,14 +527,14 @@ async function callAnthropic(
     }),
   });
   if (!res.ok) {
-    throw new Error(`${adapter.name} returned ${res.status}: ${(await res.text()).slice(0, 200)}`);
+    throw new ProviderError("http_error", res.status);
   }
   const data = await safeJson<{
     content?: { type: string; text?: string }[];
   }>(res);
-  if (!data) throw new Error(`${adapter.name} returned non-JSON response`);
+  if (!data) throw new ProviderError("invalid_json");
   const text = data.content?.find((c) => c.type === "text")?.text?.trim();
-  if (!text) throw new Error(`${adapter.name} returned no content`);
+  if (!text) throw new ProviderError("empty_response");
   return text;
 }
 
@@ -556,14 +575,14 @@ async function callGemini(
     }),
   });
   if (!res.ok) {
-    throw new Error(`${adapter.name} returned ${res.status}: ${(await res.text()).slice(0, 200)}`);
+    throw new ProviderError("http_error", res.status);
   }
   const data = await safeJson<{
     candidates?: { content?: { parts?: { text?: string }[] } }[];
   }>(res);
-  if (!data) throw new Error(`${adapter.name} returned non-JSON response`);
+  if (!data) throw new ProviderError("invalid_json");
   const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-  if (!text) throw new Error(`${adapter.name} returned no content`);
+  if (!text) throw new ProviderError("empty_response");
   return text;
 }
 
@@ -586,11 +605,11 @@ async function callCloudflareWorkersAi(
     temperature: 0.4,
   }) as Promise<{ response?: string }>;
   const timeout = new Promise<never>((_, reject) =>
-    setTimeout(() => reject(new Error(`${adapter.name} timed out after ${WORKERS_AI_TIMEOUT_MS}ms`)), WORKERS_AI_TIMEOUT_MS),
+    setTimeout(() => reject(new ProviderError("timeout")), WORKERS_AI_TIMEOUT_MS),
   );
   const result = await Promise.race([aiCall, timeout]);
   const text = result.response?.trim();
-  if (!text) throw new Error(`${adapter.name} returned no content`);
+  if (!text) throw new ProviderError("empty_response");
   return text;
 }
 
@@ -1034,7 +1053,7 @@ async function handleInterview(request: Request, env: Env, origin: string | null
     return jsonResponse(env, origin, { error: "no_provider_configured" }, 503);
   }
 
-  let lastError: unknown = null;
+  let lastDiagnostic: ReturnType<typeof providerDiagnostic> | null = null;
   for (const adapter of candidates) {
     try {
       const rawAnswer = await callAdapter(adapter, env, systemPrompt, messages, MAX_TOKENS_CONDUCTOR);
@@ -1048,12 +1067,12 @@ async function handleInterview(request: Request, env: Env, origin: string | null
         privacyNote: adapter.privacyNote,
       });
     } catch (e) {
-      lastError = e;
-      console.warn(`[staffml-worker] interview: ${adapter.name} failed, trying next`, e);
+      lastDiagnostic = providerDiagnostic(e);
+      console.warn(`[staffml-interviewer] interview: ${adapter.name} failed, trying next`, lastDiagnostic);
     }
   }
 
-  console.error("[staffml-worker] interview: all_providers_failed", lastError);
+  console.error("[staffml-interviewer] interview: all_providers_failed", lastDiagnostic);
   return jsonResponse(env, origin, {
     error: "all_providers_failed",
     message: "All configured providers errored. Please try again later.",
@@ -1273,7 +1292,7 @@ export default {
       return jsonResponse(env, origin, { error: "no_provider_configured" }, 503);
     }
 
-    let lastError: unknown = null;
+    let lastDiagnostic: ReturnType<typeof providerDiagnostic> | null = null;
     for (const adapter of candidates) {
       try {
         const answer = await callAdapter(adapter, env, systemPrompt, messages, maxTokens);
@@ -1286,12 +1305,12 @@ export default {
         };
         return jsonResponse(env, origin, payload);
       } catch (e) {
-        lastError = e;
-        console.warn(`[staffml-worker] ${adapter.name} failed, trying next`, e);
+        lastDiagnostic = providerDiagnostic(e);
+        console.warn(`[staffml-interviewer] ${adapter.name} failed, trying next`, lastDiagnostic);
       }
     }
 
-    console.error("[staffml-worker] all_providers_failed", lastError);
+    console.error("[staffml-interviewer] all_providers_failed", lastDiagnostic);
     return jsonResponse(
       env,
       origin,

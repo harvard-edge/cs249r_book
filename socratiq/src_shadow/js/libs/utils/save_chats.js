@@ -1,3 +1,4 @@
+import DOMPurify from 'dompurify';
 import { getTopics } from "../agents/key_terms_summary.js"; 
 import { getDBInstance } from './indexDb.js';  
 import { reinitializeButtonListeners } from '../../components/quiz/create_quiz_button_grp.js'; // for previous quizzes
@@ -5,66 +6,47 @@ import { initializeAllMessageButtons } from '../../components/settings/copy_down
 // import { reinitializeEditableInputs } from '../../components/markdown/markdown.js';
 import { reinitializeEditableInputs } from '../../components/markdown/streamdown_markdown.js';
 
-function openDB(dbName = "socratiqDB", storeName = "tinyMLDB_chats") {
+async function openDB(dbName = "socratiqDB", storeName = "tinyMLDB_chats") {
+  if (dbName === 'socratiqDB') return (await getDBInstance()).db;
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(dbName, 1);
-
-    request.onerror = function (event) {
-      reject("Database error: " + event.target.errorCode);
-    };
-
-    request.onsuccess = function (event) {
-      resolve(event.target.result);
-    };
-
-    request.onupgradeneeded = function (event) {
-      const db = event.target.result;
-      db.createObjectStore(storeName, { keyPath: "id" });
+    const request = indexedDB.open(dbName);
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => resolve(request.result);
+    request.onupgradeneeded = () => {
+      if (!request.result.objectStoreNames.contains(storeName)) {
+        request.result.createObjectStore(storeName, { keyPath: 'id' });
+      }
     };
   });
 }
-// Adjusting firstTimeSaveHtmlContent to return an object including the ID
-async function firstTimeSaveHtmlContent(
-  title,
-  htmlContent,
-  storeName = "tinyMLDB_chats"
-) {
-  try {
-    const dbManager = await getDBInstance();
-    if (!dbManager || !dbManager.db) {
-      throw new Error('Database not initialized');
-    }
 
-    // Get the store
-    const store = dbManager.db
-      .transaction(['tinyMLDB_chats'], 'readwrite')
-      .objectStore('tinyMLDB_chats');
-
-    // Get the next ID
-    const countRequest = store.count();
-    const id = await new Promise((resolve, reject) => {
-      countRequest.onsuccess = () => resolve(countRequest.result + 1);
-      countRequest.onerror = (event) => reject(new Error('Error counting rows: ' + event.target.error));
-    });
-
-    // Save the chat
-    return new Promise((resolve, reject) => {
-      const request = store.put({
-        id: id,
-        title: title,
-        html_content: htmlContent,
-        date: new Date().toISOString()  // Add date for tracking
-      });
-
-      request.onsuccess = () => resolve({ success: true, id: id });
-      request.onerror = (event) => reject(new Error('Error saving content: ' + event.target.error));
-    });
-  } catch (error) {
-    console.error('Database operation failed:', error);
-    throw error;
-  }
+async function firstTimeSaveHtmlContent(title, htmlContent, storeName = "tinyMLDB_chats") {
+  const manager = await getDBInstance();
+  return new Promise((resolve, reject) => {
+    const transaction = manager.db.transaction(storeName, 'readwrite');
+    const store = transaction.objectStore(storeName);
+    let id;
+    transaction.oncomplete = () => resolve({ success: true, id });
+    transaction.onabort = () => reject(transaction.error || new Error('Chat save aborted'));
+    transaction.onerror = () => reject(transaction.error);
+    // Choose the next numeric key inside the same write transaction. Counting
+    // rows reuses IDs after deletion and put() would overwrite a surviving chat.
+    const cursorRequest = store.openKeyCursor(null, 'prev');
+    cursorRequest.onsuccess = () => {
+      const cursor = cursorRequest.result;
+      if (cursor && typeof cursor.key !== 'number') {
+        cursor.continue();
+        return;
+      }
+      id = cursor ? cursor.key + 1 : 1;
+      if (!Number.isSafeInteger(id) || id <= 0) {
+        transaction.abort();
+        return;
+      }
+      store.add({ id, title, html_content: htmlContent, date: new Date().toISOString() });
+    };
+  });
 }
-
 
 function extractVisibleText(element) {
   let text = '';
@@ -118,7 +100,7 @@ export async function newSaveChats(shadowEle) {
   : topics.join("-");
 
   if (topics.length === 0) {
-    return topics = new Date().toString();
+    topics = new Date().toString();
   }
 
   try {
@@ -193,9 +175,9 @@ function validateAndConvertId(id) {
     id = id.id;
   }
   
-  const numId = typeof id === 'string' ? parseInt(id, 10) : id;
+  const numId = typeof id === 'string' && id.trim() !== '' ? Number(id) : id;
   
-  if (isNaN(numId) || numId <= 0) {
+  if (!Number.isSafeInteger(numId) || numId <= 0) {
     return null;
   }
   
@@ -225,24 +207,15 @@ export async function loadChat(shadowEle, id) {
       return false;
     }
 
-    // Add debugging
-    const store = dbManager.db.transaction(['tinyMLDB_chats'], 'readonly')
-      .objectStore('tinyMLDB_chats');
-    
-    // Log all available chats
-    const allChats = await new Promise((resolve) => {
-      const request = store.getAll();
-      request.onsuccess = () => resolve(request.result);
-    });
-    console.log('Available chats:', allChats);
-
     const data = await dbManager.getByKey('tinyMLDB_chats', validId);
     if (!data || !data.html_content) {
       console.warn(`No data found for chat ID: ${validId}`);
       return false;
     }
 
-    element.innerHTML = data.html_content;
+    element.innerHTML = DOMPurify.sanitize(data.html_content, {
+      FORBID_TAGS: ['script', 'iframe', 'object', 'embed', 'style'],
+    });
     
     // Reinitialize quiz buttons after loading chat
     const { reinitializeQuizButtons } = await import('../../components/quiz/load_quiz.js');
@@ -309,33 +282,21 @@ export async function loadLastSavedRowIntoElement(shadowEle) {
     // First check local storage for recent ID
     const recentId = retrieveRecentIDFromLocal();
     if (recentId !== null) {
-      await loadChat(shadowEle, recentId);
-      return { id: recentId };
+      if (await loadChat(shadowEle, recentId)) return { id: recentId };
     }
 
     // If no recent ID, load the last saved chat
     const db = await openDB();
-    const transaction = db.transaction([""], "readonly");
+    const transaction = db.transaction(["tinyMLDB_chats"], "readonly");
     const objectStore = transaction.objectStore("tinyMLDB_chats");
     const request = objectStore.openCursor(null, "prev");
 
-    return new Promise((resolve, reject) => {
-      request.onsuccess = (event) => {
-        const cursor = event.target.result;
-        if (cursor) {
-          const { id, html_content } = cursor.value;
-          const element = shadowEle.getElementById("message-container");
-          if (element) {
-            element.innerHTML = html_content;
-            saveRecentIDToLocal(id); // Save this as the current chat
-            resolve({ id });
-          }
-        } else {
-          resolve({ id: null }); // No chats found
-        }
-      };
-      request.onerror = () => reject("Error fetching last record");
+    const latest = await new Promise((resolve, reject) => {
+      request.onsuccess = () => resolve(request.result?.value || null);
+      request.onerror = () => reject(request.error);
     });
+    if (latest && await loadChat(shadowEle, latest.id)) return { id: latest.id };
+    return { id: null };
   } catch (error) {
     console.error("Error loading last saved row:", error);
     return { id: null };
@@ -372,7 +333,7 @@ export async function determineAndSaveChat(shadowEle, id, topic = null) {
       return result.id;
     }
     
-    const actualId = id?.id || id;
+    const actualId = validateAndConvertId(id);
     const result = await saveChatWithId(actualId, htmlContent);
     
     if (!result.success) {
@@ -391,46 +352,23 @@ export async function determineAndSaveChat(shadowEle, id, topic = null) {
 
 // Update saveChatWithId to use the new database instance
 async function saveChatWithId(id, htmlContent) {
-  try {
-    const dbManager = await getDBInstance();
-    if (!dbManager || !dbManager.db) {
-      throw new Error('Database not initialized');
-    }
-
-    const store = dbManager.db
-      .transaction(['tinyMLDB_chats'], 'readwrite')
-      .objectStore('tinyMLDB_chats');
-
-    // First check if the entry exists
-    const getRequest = store.get(id);
-    const existingData = await new Promise((resolve, reject) => {
-      getRequest.onsuccess = () => resolve(getRequest.result);
-      getRequest.onerror = () => reject(new Error('Error retrieving entry'));
-    });
-
-    if (!existingData) {
-      console.warn(`No existing entry found for ID: ${id}`);
-      return { success: false, id: id };
-    }
-
-    // Update the existing entry
-    const updatedData = {
-      ...existingData,
-      html_content: htmlContent,
-      last_updated: new Date().toISOString()
+  if (id === null) return { success: false, id };
+  const manager = await getDBInstance();
+  return new Promise((resolve, reject) => {
+    const transaction = manager.db.transaction('tinyMLDB_chats', 'readwrite');
+    const store = transaction.objectStore('tinyMLDB_chats');
+    let found = false;
+    transaction.oncomplete = () => resolve({ success: found, id });
+    transaction.onabort = () => reject(transaction.error || new Error('Chat update aborted'));
+    transaction.onerror = () => reject(transaction.error);
+    const request = store.get(id);
+    request.onsuccess = () => {
+      if (!request.result) return;
+      found = true;
+      store.put({ ...request.result, html_content: htmlContent, last_updated: new Date().toISOString() });
     };
-
-    return new Promise((resolve, reject) => {
-      const request = store.put(updatedData);
-      request.onsuccess = () => resolve({ success: true, id: id });
-      request.onerror = (event) => reject(new Error('Error updating content: ' + event.target.error));
-    });
-  } catch (error) {
-    console.error('Database operation failed:', error);
-    throw error;
-  }
+  });
 }
-
 
 
 /**
@@ -439,7 +377,8 @@ async function saveChatWithId(id, htmlContent) {
  */
 export function saveRecentIDToLocal(id) {
   if (id !== null && id !== undefined) {
-    localStorage.setItem("mostRecentID", id.toString());
+    try { localStorage.setItem("mostRecentID", id.toString()); }
+    catch (error) { console.warn('Could not save recent chat preference:', error); }
   }
 }
 
@@ -448,8 +387,8 @@ export function saveRecentIDToLocal(id) {
  * @return {number | null} The most recent ID, or null if not found.
  */
 export function retrieveRecentIDFromLocal() {
-  const id = localStorage.getItem("mostRecentID");
-  return id ? parseInt(id, 10) : null;
+  try { return validateAndConvertId(localStorage.getItem("mostRecentID")); }
+  catch { return null; }
 }
 
 

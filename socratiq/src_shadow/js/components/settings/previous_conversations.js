@@ -91,13 +91,13 @@ function addItem(shadowEle, entry) {
     item.className = "mb-3 transition-all duration-200 ease-in-out";
     item.innerHTML = `
     <div
-      id="chat-${entry.id}"
+      data-chat-item
       class="flex items-center justify-between w-full px-4 py-3 text-left rounded-lg cursor-pointer transition-all duration-200 hover:bg-blue-50 group"
       style="background-color: #fafafa;"
     >
-      <span class="text-gray-700 group-hover:text-blue-600 font-medium truncate">${entry.title}</span>
+      <span class="text-gray-700 group-hover:text-blue-600 font-medium truncate"></span>
       <div class="flex items-center space-x-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-        <div id="load-chat-${entry.id}" class="p-1.5 rounded-lg hover:bg-blue-100 transition-colors duration-200">
+        <div data-load-chat class="p-1.5 rounded-lg hover:bg-blue-100 transition-colors duration-200">
           <svg
             xmlns="http://www.w3.org/2000/svg"
             fill="none"
@@ -109,7 +109,7 @@ function addItem(shadowEle, entry) {
             <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v12m6-6H6" />
           </svg>
         </div>
-        <div id="delete-chat-${entry.id}" class="p-1.5 rounded-lg hover:bg-red-100 transition-colors duration-200">
+        <div data-delete-chat class="p-1.5 rounded-lg hover:bg-red-100 transition-colors duration-200">
           <svg 
             xmlns="http://www.w3.org/2000/svg" 
             fill="none" 
@@ -124,14 +124,18 @@ function addItem(shadowEle, entry) {
       </div>
     </div>`;
 
-  const chatItem = item.querySelector(`#chat-${entry.id}`);
-  const deleteButton = item.querySelector(`#delete-chat-${entry.id}`);
+  const chatItem = item.querySelector("[data-chat-item]");
+  const deleteButton = item.querySelector("[data-delete-chat]");
+  chatItem.id = `chat-${entry.id}`;
+  item.querySelector("[data-load-chat]").id = `load-chat-${entry.id}`;
+  deleteButton.id = `delete-chat-${entry.id}`;
+  chatItem.querySelector("span").textContent = typeof entry.title === "string" ? entry.title : "Untitled conversation";
   // const loadButton = item.querySelector(`#load-chat-${entry.id}`);
 
   // Allow clicking anywhere on the item to load the chat
   chatItem.addEventListener("click", (e) => {
     // Prevent triggering when clicking the delete button
-    if (!e.target.closest(`#delete-chat-${entry.id}`)) {
+    if (!deleteButton.contains(e.target)) {
       rowClicked(shadowEle, entry.id);
     }
   });
@@ -340,7 +344,7 @@ export function setupModal_loadchats(shadowEle) {
   const resetButton = shadowEle.querySelector("#reset-btn");
   if (resetButton) {
     resetButton.addEventListener("click", async () => {
-      const confirmed = confirm("Are you sure you want to reset SocratiQ? This will clear all data and refresh the application.");
+      const confirmed = confirm("Clear saved conversations, flashcards, and quizzes? Learning preferences and custom API settings will remain. This page will reload.");
       if (confirmed) {
         try {
           await resetSocratiqDB();

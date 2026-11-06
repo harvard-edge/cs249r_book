@@ -1,7 +1,9 @@
-import { alert } from "../utils/utils.js";
 import { TokenCounter } from "../utils/tokenCounter.js";
 import { CustomAPIAdapter } from "./custom-api-adapter.js";
-import { USE_LOCAL_WORKERS, WORKER_URL_AI, WORKER_URL_AI_STREAM, PROVIDER_MODELS } from "../../../configs/env_configs.js";
+import { WORKER_URL_AI, WORKER_URL_AI_STREAM, PROVIDER_MODELS, DEFAULT_PROVIDER, MAX_OUTPUT_TOKENS } from "../../../configs/env_configs.js";
+import { SHARED_PROVIDER } from '../../../../src_shared/provider-config.js';
+import { readLearnerPreferences } from '../../../../src_reader/preferences.js';
+import { withLearnerCalibration } from '../../../../src_reader/calibration.mjs';
 
 // Provider configs are now centrally managed in src_shadow/configs/env_configs.js
 const providerConfigs = PROVIDER_MODELS;
@@ -15,30 +17,42 @@ function getApiUrl(isStreaming = false) {
 function serializeResponse(response, isStreaming = false) {
   if (isStreaming) {
     // For streaming, we expect delta content
-    return response.choices?.[0]?.delta?.content || '';
+    return response.choices?.[0]?.delta?.content ||
+      response.candidates?.[0]?.content?.parts?.map(part => part.text || '').join('') || '';
   } else {
     // For single response, we expect full message content
     return response.choices?.[0]?.message?.content || 
+           response.candidates?.[0]?.content?.parts?.map(part => part.text || '').join('') ||
            response.text || 
-           response.message || 
-           JSON.stringify(response);
+           (typeof response.message === 'string' ? response.message : '');
+  }
+}
+
+function requestMessages(params) {
+  const messages = params.messages?.length ? params.messages : [{ role: 'user', content: params.prompt || '' }];
+  return params.systemPrompt ? [{ role: 'system', content: params.systemPrompt }, ...messages] : messages;
+}
+
+// A length/filter/tool finish is not a completed text answer or quiz.
+function validateCompletion(result) {
+  const reason = result.choices?.[0]?.finish_reason;
+  if (reason && reason !== 'stop') {
+    throw new Error(`Provider response did not complete (finish_reason: ${reason})`);
   }
 }
 
 // Call provider with single response
-async function callProviderSingle(prompt, provider, signal) {
+async function callProviderSingle(prompt, provider = DEFAULT_PROVIDER, signal, suppliedMessages, learnerPreferences) {
+  provider = provider.toUpperCase();
   const config = providerConfigs[provider];
   
   if (!config) {
     throw new Error(`Unknown provider: ${provider}`);
   }
 
-  const messages = [
-    {
-      role: "user",
-      content: prompt,
-    },
-  ];
+  // Preserve caller policy and conversation order. The gateway validates size;
+  // truncating arbitrary messages here could remove part of a system policy.
+  const messages = withLearnerCalibration(suppliedMessages?.length ? suppliedMessages : [{ role: "user", content: prompt }], learnerPreferences ?? readLearnerPreferences());
 
   // Check token count and optimize if needed
   TokenCounter.logTokenUsage(messages, `${provider} Single Request`);
@@ -47,8 +61,8 @@ async function callProviderSingle(prompt, provider, signal) {
     console.warn(`[TOKEN_WARNING] Request too large for ${provider}, attempting to optimize...`);
     
     // For large prompts, try to split or truncate
-    if (prompt.length > 15000) { // More conservative character limit
-      messages[0].content = prompt.substring(0, 15000) + "\n\n[Content truncated due to size limits]";
+    if (!suppliedMessages?.length && prompt.length > 15000) { // Only truncate the legacy plain prompt.
+      messages[messages.length - 1].content = prompt.substring(0, 15000) + "\n\n[Content truncated due to size limits]";
     }
   }
 
@@ -64,8 +78,10 @@ async function callProviderSingle(prompt, provider, signal) {
       body: JSON.stringify({
         messages,
         model: config.model,
+        max_tokens: MAX_OUTPUT_TOKENS,
         temperature: config.temperature || 0.7,
         top_p: config.top_p || 0.9,
+        stream: false,
       }),
       signal,
     });
@@ -81,7 +97,11 @@ async function callProviderSingle(prompt, provider, signal) {
     }
 
     const result = await response.json();
-    return serializeResponse(result, false);
+    validateCompletion(result);
+    if (result.error) throw new Error(result.error.message || result.error.code || 'Provider returned an error');
+    const content = serializeResponse(result, false);
+    if (!content) throw new Error('No content received from provider');
+    return content;
     
   } catch (error) {
     console.error("Error in callProviderSingle:", error);
@@ -93,19 +113,17 @@ async function callProviderSingle(prompt, provider, signal) {
 }
 
 // Call provider with streaming response
-async function* callProviderStream(prompt, provider, signal) {
+async function* callProviderStream(prompt, provider = DEFAULT_PROVIDER, signal, suppliedMessages, learnerPreferences) {
+  provider = provider.toUpperCase();
   const config = providerConfigs[provider];
   
   if (!config) {
     throw new Error(`Unknown provider: ${provider}`);
   }
 
-  const messages = [
-    {
-      role: "user",
-      content: prompt,
-    },
-  ];
+  // Preserve caller policy and conversation order. The gateway validates size;
+  // truncating arbitrary messages here could remove part of a system policy.
+  const messages = withLearnerCalibration(suppliedMessages?.length ? suppliedMessages : [{ role: "user", content: prompt }], learnerPreferences ?? readLearnerPreferences());
 
   // Check token count and optimize if needed
   TokenCounter.logTokenUsage(messages, `${provider} Streaming Request`);
@@ -114,8 +132,8 @@ async function* callProviderStream(prompt, provider, signal) {
     console.warn(`[TOKEN_WARNING] Request too large for ${provider}, attempting to optimize...`);
     
     // For large prompts, try to split or truncate
-    if (prompt.length > 15000) { // More conservative character limit
-      messages[0].content = prompt.substring(0, 15000) + "\n\n[Content truncated due to size limits]";
+    if (!suppliedMessages?.length && prompt.length > 15000) { // Only truncate the legacy plain prompt.
+      messages[messages.length - 1].content = prompt.substring(0, 15000) + "\n\n[Content truncated due to size limits]";
     }
   }
 
@@ -131,8 +149,10 @@ async function* callProviderStream(prompt, provider, signal) {
       body: JSON.stringify({
         messages,
         model: config.model,
+        max_tokens: MAX_OUTPUT_TOKENS,
         temperature: config.temperature || 0.7,
         top_p: config.top_p || 0.9,
+        stream: config.stream !== false,
       }),
       signal,
     });
@@ -147,98 +167,57 @@ async function* callProviderStream(prompt, provider, signal) {
       throw new Error(`${provider} failed with status ${response.status}: ${response.statusText}`);
     }
 
-    // Handle streaming responses
+    // Providers configured without streaming return a normal JSON response.
+    if (response.headers.get('content-type')?.includes('application/json')) {
+      const result = await response.json();
+      validateCompletion(result);
+      if (result.error) throw new Error(result.error.message || result.error.code || 'Provider returned an error');
+      const content = serializeResponse(result);
+      if (!content) throw new Error('No content received from provider');
+      yield content;
+      return;
+    }
+    if (!response.body) throw new Error('Provider returned no response body');
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
-    let hasYieldedContent = false;
-    let streamCompleted = false;
-
+    let hasContent = false;
+    const parseLine = line => {
+      if (!line.startsWith('data:')) return null;
+      const data = line.slice(5).trim();
+      if (!data) return null;
+      if (data === '[DONE]') return { done: true };
+      const result = JSON.parse(data);
+      if (result.error) throw new Error(result.error.message || result.error.code || 'Provider stream returned an error');
+      validateCompletion(result);
+      return { content: serializeResponse(result, true), done: result.choices?.[0]?.finish_reason === 'stop' };
+    };
     try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) {
-          streamCompleted = true;
-          break;
-        }
-
-        // Decode the chunk and add to buffer
-        const newText = decoder.decode(value, { stream: true });
-        buffer += newText;
-        
-        // Handle Server-Sent Events format (data: prefix)
+      let done = false;
+      while (!done) {
+        const chunk = await reader.read();
+        done = chunk.done;
+        buffer += decoder.decode(chunk.value, { stream: !done });
         const lines = buffer.split('\n');
-        buffer = lines.pop() || ''; // Keep incomplete line in buffer
-        
+        buffer = done ? '' : lines.pop() || '';
         for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const jsonStr = line.slice(6).trim();
-            if (jsonStr === '[DONE]') {
-              streamCompleted = true;
-              return; // End of stream
-            }
-            
-            try {
-              const parsed = JSON.parse(jsonStr);
-              const content = serializeResponse(parsed, true);
-              if (content) {
-                hasYieldedContent = true;
-                yield content;
-              }
-              
-              // Check for finish_reason to detect completion
-              if (parsed.choices?.[0]?.finish_reason) {
-                streamCompleted = true;
-                return;
-              }
-            } catch (e) {
-              console.warn('Failed to parse streaming chunk:', e, 'Raw:', jsonStr);
-            }
+          const event = parseLine(line.replace(/\r$/, ''));
+          if (event?.content) {
+            hasContent = true;
+            yield event.content;
           }
-        }
-      }
-    } catch (error) {
-      console.error('Stream reading error:', error);
-      throw error;
-    } finally {
-      // Ensure we always close the reader
-      try {
-        reader.releaseLock();
-      } catch (e) {
-        // Reader might already be released
-      }
-    }
-
-    // Check if we got any content but stream didn't complete properly
-    if (hasYieldedContent && !streamCompleted) {
-      console.warn('Stream ended without proper completion signal');
-    } else if (!hasYieldedContent) {
-      throw new Error('No content received from streaming response');
-    }
-
-    // Process any remaining data in buffer
-    if (buffer.trim()) {
-      const lines = buffer.split('\n');
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const jsonStr = line.slice(6).trim();
-          if (jsonStr === '[DONE]') {
+          if (event?.done) {
+            if (!hasContent) throw new Error('No content received from streaming response');
             return;
           }
-          
-          try {
-            const parsed = JSON.parse(jsonStr);
-            const content = serializeResponse(parsed, true);
-            if (content) {
-              yield content;
-            }
-          } catch (e) {
-            console.warn('Failed to parse final streaming chunk:', e);
-          }
         }
       }
+      throw new Error('Provider stream ended before completion');
+    } finally {
+      await reader.cancel().catch(() => {});
+      reader.releaseLock();
     }
-    
+
   } catch (error) {
     console.error("Error in callProviderStream:", error);
     if (error.name === "AbortError") {
@@ -250,8 +229,9 @@ async function* callProviderStream(prompt, provider, signal) {
 
 // Get target URL for each provider
 function getTargetUrl(provider) {
+  provider = provider.toUpperCase();
   const urls = {
-    GROQ: "https://api.groq.com/openai/v1/chat/completions",
+    GROQ: SHARED_PROVIDER.target,
     GEMINI: "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
     CEREBRAS: "https://api.cerebras.ai/v1/chat/completions",
     SAMBANOVA: "https://api.sambanova.ai/v1/chat/completions",
@@ -261,7 +241,8 @@ function getTargetUrl(provider) {
     AWAN: "https://api.awanllm.com/v1/chat/completions",
   };
   
-  return urls[provider] || urls.GROQ; // Default to Groq
+  if (!urls[provider]) throw new Error(`Unknown provider: ${provider}`);
+  return urls[provider];
 }
 
 // Try multiple providers with single response
@@ -270,12 +251,14 @@ async function tryMultipleProvidersSingle(
   token,
   json = false,
 ) {
-  // Try custom API first if configured
+  // An explicitly selected custom service is a privacy boundary. Never send its
+  // failed request to the hosted service without the learner changing settings.
   const settings = getCurrentSettings();
-  if (settings?.customAPI?.endpoint) {
+  if (settings?.customAPI?.enabled) {
+    if (!CustomAPIAdapter.hasCustomAPIConfig(settings)) throw new Error('Complete your custom API settings, or disable the custom API to use the shared service.');
     try {
       console.log(`[CUSTOM_API] Attempting custom API for single response: ${settings.customAPI.provider}`);
-      const customResult = CustomAPIAdapter.callCustomAPI(params.prompt, settings, false);
+      const customResult = CustomAPIAdapter.callCustomAPI(params.prompt, settings, false, withLearnerCalibration(requestMessages(params), params.learnerPreferences ?? readLearnerPreferences()));
       if (customResult) {
         // Collect all chunks from the generator
         let fullResponse = '';
@@ -283,14 +266,16 @@ async function tryMultipleProvidersSingle(
           fullResponse += chunk;
         }
         console.log(`[CUSTOM_API] Successfully completed single response with custom API: ${settings.customAPI.provider}`);
-        return { text: fullResponse };
+        if (!fullResponse) throw new Error('Custom API returned no content');
+        return fullResponse;
       }
     } catch (error) {
-      console.warn('[CUSTOM_API] Custom API failed for single response, falling back to default providers:', error);
+      throw new Error('Your custom API request failed. Check its endpoint, model, and credentials, or disable the custom API to use the shared service.');
     }
+    throw new Error('Your custom API returned no answer. Check its settings, or disable the custom API to use the shared service.');
   }
 
-  const preferredOrder = ["GROQ", "GEMINI", "CEREBRAS", "SAMBANOVA", "MISTRAL", "OPENAI", "HUGGINGFACE", "AWAN"];
+  const preferredOrder = [params.provider || DEFAULT_PROVIDER];
   const controller = new AbortController();
   const { signal } = controller;
 
@@ -298,13 +283,8 @@ async function tryMultipleProvidersSingle(
 
   for (const provider of preferredOrder) {
     try {
-      // TRACE: Track which backup provider is being called
-      console.trace(`[AI_TRACE] cloudflareAgent.js - Trying backup provider (single): ${provider}`, {
-        model: providerConfigs[provider]?.model || 'Unknown model',
-        promptPreview: params.prompt?.substring(0, 100) + '...' || 'No prompt'
-      });
 
-      const result = await callProviderSingle(params.prompt, provider, signal);
+      const result = await callProviderSingle(params.prompt, provider, signal, requestMessages(params), params.learnerPreferences);
       return result;
     } catch (error) {
       lastError = error;
@@ -325,23 +305,30 @@ async function* tryMultipleProvidersStream(
   token,
   json = false,
 ) {
-  // Try custom API first if configured
+  // A custom API failure must not forward the learner's prompt to another service.
+  let customHasContent = false;
   const settings = getCurrentSettings();
-  if (settings?.customAPI?.endpoint) {
+  if (settings?.customAPI?.enabled) {
+    if (!CustomAPIAdapter.hasCustomAPIConfig(settings)) throw new Error('Complete your custom API settings, or disable the custom API to use the shared service.');
     try {
       console.log(`[CUSTOM_API] Attempting custom API for streaming: ${settings.customAPI.provider}`);
-      const customResult = CustomAPIAdapter.callCustomAPI(params.prompt, settings, true);
+      const customResult = CustomAPIAdapter.callCustomAPI(params.prompt, settings, true, withLearnerCalibration(requestMessages(params), params.learnerPreferences ?? readLearnerPreferences()));
       if (customResult) {
-        yield* customResult;
+        let received = false;
+        for await (const chunk of customResult) {
+          if (chunk) { customHasContent = true; received = true; yield chunk; }
+        }
+        if (!received) throw new Error('Custom API returned no content');
         console.log(`[CUSTOM_API] Successfully completed streaming with custom API: ${settings.customAPI.provider}`);
         return; // Success with custom API
       }
     } catch (error) {
-      console.warn('[CUSTOM_API] Custom API failed for streaming, falling back to default providers:', error);
+      throw new Error('Your custom API request failed. Check its endpoint, model, and credentials, or disable the custom API to use the shared service.');
     }
+    throw new Error('Your custom API returned no answer. Check its settings, or disable the custom API to use the shared service.');
   }
 
-  const preferredOrder = ["GROQ", "GEMINI", "CEREBRAS", "SAMBANOVA", "MISTRAL", "OPENAI", "HUGGINGFACE", "AWAN"];
+  const preferredOrder = [params.provider || DEFAULT_PROVIDER];
   const controller = new AbortController();
   const { signal } = controller;
 
@@ -353,18 +340,14 @@ async function* tryMultipleProvidersStream(
 
   let lastError = null;
 
+  try {
   for (const provider of preferredOrder) {
+    let hasYieldedContent = false;
     try {
-      // TRACE: Track which backup provider is being called
-      console.trace(`[AI_TRACE] cloudflareAgent.js - Trying backup provider: ${provider}`, {
-        model: providerConfigs[provider]?.model || 'Unknown model',
-        promptPreview: params.prompt?.substring(0, 100) + '...' || 'No prompt'
-      });
 
       // Get the generator from callProviderStream
-      const generator = callProviderStream(params.prompt, provider, signal);
+      const generator = callProviderStream(params.prompt, provider, signal, requestMessages(params), params.learnerPreferences);
 
-      let hasYieldedContent = false;
       // Yield each chunk from the generator
       for await (const chunk of generator) {
         hasYieldedContent = true;
@@ -382,15 +365,17 @@ async function* tryMultipleProvidersStream(
       lastError = error;
       console.error(`${provider} failed:`, error);
       // Continue to next provider unless cancelled
-      if (error.message === "Request was cancelled") {
+      if (hasYieldedContent || error.message === "Request was cancelled") {
         clearTimeout(timeoutId);
         throw error;
       }
     }
   }
 
-  clearTimeout(timeoutId);
-  throw new Error(`All providers failed. Last error: ${lastError.message}`);
+  throw new Error(`All providers failed. Last error: ${lastError?.message || 'No response'}`);
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 // Main function that handles both single and streaming
@@ -451,7 +436,7 @@ function translateLegacyQuizFormat(legacyParams) {
   const fullPrompt = `${legacyParams.prompt}\n\nCHAPTER SECTION: ${optimizedQuote}`;
   
   return {
-    messages: [{ role: 'user', content: fullPrompt }],
+    messages: requestMessages({ ...legacyParams, prompt: fullPrompt }),
     model: 'openai/gpt-oss-120b', // Default to Groq model
     temperature: 0.7,
     // Preserve original metadata for potential use
@@ -474,7 +459,7 @@ function parseQuizResponse(response, context = null) {
   try {
     
     // Extract content from the response
-    const content = response.choices?.[0]?.message?.content;
+    const content = response.choices?.[0]?.message?.content || response.candidates?.[0]?.content?.parts?.map(part => part.text || '').join('');
     if (!content) {
       console.error('No content found in response:', response);
       throw new Error('No content found in response');
@@ -498,7 +483,7 @@ function parseQuizResponse(response, context = null) {
               q.sourceReference = `Based on content from "${context.title}" (Question ${index + 1})`;
               q.sourceLabel = context.title;
               q.sourceUrl = context.url;
-              q.sourcePosition = context.position.scrollY;
+              q.sourcePosition = context.position?.scrollY || 0;
             } else {
               q.sourceReference = `Based on content from the current page section (Question ${index + 1})`;
               q.sourceLabel = "Current Page Section";
@@ -510,7 +495,7 @@ function parseQuizResponse(response, context = null) {
             if (context) {
               q.sourceLabel = context.title;
               q.sourceUrl = context.url;
-              q.sourcePosition = context.position.scrollY;
+              q.sourcePosition = context.position?.scrollY || 0;
             } else {
               q.sourceLabel = "Current Page Section";
               q.sourceUrl = window.location.href;
@@ -549,7 +534,7 @@ function parseQuizResponse(response, context = null) {
               q.sourceReference = `Based on content from "${context.title}" (Question ${index + 1})`;
               q.sourceLabel = context.title;
               q.sourceUrl = context.url;
-              q.sourcePosition = context.position.scrollY;
+              q.sourcePosition = context.position?.scrollY || 0;
             } else {
               q.sourceReference = `Based on content from the current page section (Question ${index + 1})`;
               q.sourceLabel = "Current Page Section";
@@ -561,7 +546,7 @@ function parseQuizResponse(response, context = null) {
             if (context) {
               q.sourceLabel = context.title;
               q.sourceUrl = context.url;
-              q.sourcePosition = context.position.scrollY;
+              q.sourcePosition = context.position?.scrollY || 0;
             } else {
               q.sourceLabel = "Current Page Section";
               q.sourceUrl = window.location.href;
@@ -605,7 +590,7 @@ function parseQuizResponse(response, context = null) {
  * @param {boolean} isStreaming - Whether to use streaming endpoint
  * @returns {Promise|AsyncGenerator} Response from the proxy
  */
-async function callCloudflareWithLegacyFormat(legacyParams, provider = 'groq', isStreaming = false) {
+async function callCloudflareWithLegacyFormat(legacyParams, provider = DEFAULT_PROVIDER, isStreaming = false) {
   // Translate legacy format to OpenAI format
   const openaiFormat = translateLegacyQuizFormat(legacyParams);
   
@@ -617,77 +602,23 @@ async function callCloudflareWithLegacyFormat(legacyParams, provider = 'groq', i
     
     // Optimize the prompt content
     const originalContent = openaiFormat.messages[0].content;
-    if (originalContent.length > 15000) {
+    if (!legacyParams.messages?.length && !legacyParams.systemPrompt && originalContent.length > 15000) {
       openaiFormat.messages[0].content = originalContent.substring(0, 15000) + "\n\n[Content truncated due to size limits]";
     }
   }
   
-  // Set the appropriate model for the provider
-  const providerModels = {
-    groq: 'openai/gpt-oss-20b',
-    gemini: 'gemini-2.5-flash', 
-    cerebras: 'gpt-oss-120b',
-    sambanova: 'gpt-oss-120b',
-    mistral: 'mistral-tiny',
-    openai: 'deepseek/deepseek-chat-v3.1:free',
-    huggingface: 'meta-llama/Llama-3.1-8B-Instruct:featherless-ai',
-    awan: 'Meta-Llama-3.1-70B-Instruct'
-  };
-  
-  openaiFormat.model = providerModels[provider.toLowerCase()] || providerModels.groq;
-  
-  // For non-streaming, make direct API call and parse the response
-  if (!isStreaming) {
-    const config = providerConfigs[provider.toUpperCase()];
-    if (!config) {
-      throw new Error(`Unknown provider: ${provider}`);
-    }
-
-    const apiUrl = getApiUrl(false);
-    const targetUrl = getTargetUrl(provider);
-    
-    const response = await fetch(`${apiUrl}?url=${encodeURIComponent(targetUrl)}&provider=${provider.toLowerCase()}`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        messages: openaiFormat.messages,
-        model: openaiFormat.model,
-        temperature: openaiFormat.temperature,
-      }),
-    });
-
-    if (!response.ok) {
-      // Handle rate limit errors specifically
-      if (response.status === 429) {
-        const errorText = await response.text();
-        console.error(`[RATE_LIMIT] ${provider} rate limit exceeded in legacy format:`, errorText);
-        throw new Error(`Rate limit exceeded for ${provider}. Please try again in a moment or reduce your request size.`);
-      }
-      throw new Error(`${provider} failed with status ${response.status}: ${response.statusText}`);
-    }
-
-    const result = await response.json();
-    
-    // Parse the response to extract the quiz data
-    return parseQuizResponse(result, openaiFormat.metadata?.context);
-  } else {
-    // For streaming, use the existing function
-    return callProviderStream(openaiFormat.messages[0].content, provider, null);
-  }
+  // Every learner-facing quiz respects the selected custom service just as chat
+  // does. Keep explicit low-level provider calls separate for transport tests.
+  const params = {...legacyParams, provider, messages:openaiFormat.messages};
+  if (isStreaming) return tryMultipleProvidersStream(params);
+  const content = await tryMultipleProvidersSingle(params);
+  return parseQuizResponse({choices:[{message:{content}}]}, openaiFormat.metadata?.context);
 }
 
 // Export functions
 // Get current user settings from localStorage
 function getCurrentSettings() {
-  try {
-    const savedSettings = localStorage.getItem("userSettings");
-    return savedSettings ? JSON.parse(savedSettings) : {};
-  } catch (error) {
-    console.error('[CUSTOM_API] Error loading settings:', error);
-    return {};
-  }
+  return CustomAPIAdapter.getRuntimeSettings();
 }
 
 export {

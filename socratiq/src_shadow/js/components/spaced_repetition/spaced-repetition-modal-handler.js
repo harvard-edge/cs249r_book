@@ -1,3 +1,4 @@
+import { escapeSidebarText } from './utils/sidebar-text.js';
 import { SpacedRepetitionEventHandler } from "./handlers/event-handler";
 import { SpacedRepetitionUIHandler } from "./handlers/ui-handler";
 import { FlashcardVisualization } from "./spaced-repetition-visualization";
@@ -231,7 +232,7 @@ this.createModal().then(async () => {
             <div 
                 id="sr-modal-content_inner"
                 class="relative top-10 mx-auto mb-6 p-5 w-[90%] max-w-4xl shadow-lg rounded-md ${themeClasses.modalBg}"
-               style="max-height: calc(100vh - 80px); background-color: ${isDark ? '#0d1117' : '#ffffff'} !important; color: ${isDark ? '#e6edf3' : '#1f2328'} !important; display: flex; flex-direction: column;"
+               style="max-height: calc(100vh - 80px); background-color: var(--socratiq-bg) !important; color: var(--socratiq-text) !important; display: flex; flex-direction: column;"
                 >
                     <!-- Close button -->
       <button id="closeModal_sr" class="absolute top-4 right-4 flex items-center z-10" style="color: #9ca3af !important;">             
@@ -300,7 +301,7 @@ this.createModal().then(async () => {
                         <div class="mb-4">
                             <div class="flex justify-between items-center mb-2">
                                 <span id=progress-label class="text-sm font-medium">Progress</span>
-                                <span id="progressText" class="text-sm ${themeClasses.textSecondary}" style="color: ${isDark ? '#e6edf3' : '#1f2328'} !important;">0/0 Cards Learned</span>
+                                <span id="progressText" class="text-sm ${themeClasses.textSecondary}" style="color: var(--socratiq-text) !important;">0/0 Cards Learned</span>
                             </div>
                             <div class="w-full bg-gray-200 rounded-full h-2.5 dark:bg-gray-700">
                                 <div id="progressBar" class="bg-blue-600 h-2.5 rounded-full" style="width: 0%"></div>
@@ -312,10 +313,10 @@ this.createModal().then(async () => {
                         id="sr-modal-content-container-controls"
                         >
                             <div id="sr-controls-container" class="space-x-2">
-                                <button id="showStats" class="px-3 py-2 text-sm ${themeClasses.bgButton} ${themeClasses.bgButtonHover} rounded-md" style="color: ${isDark ? '#e6edf3' : '#1f2328'} !important;">
+                                <button id="showStats" class="px-3 py-2 text-sm ${themeClasses.bgButton} ${themeClasses.bgButtonHover} rounded-md" style="color: var(--socratiq-text) !important;">
                                     Show Stats
                                 </button>
-                                <button id="showViz" class="px-3 py-2 text-sm ${themeClasses.bgButton} ${themeClasses.bgButtonHover} rounded-md" style="color: ${isDark ? '#e6edf3' : '#1f2328'} !important;">
+                                <button id="showViz" class="px-3 py-2 text-sm ${themeClasses.bgButton} ${themeClasses.bgButtonHover} rounded-md" style="color: var(--socratiq-text) !important;">
                                     Show Interactive UI
                                 </button>
                                 <button id="startReview" class="px-3 py-2 text-sm ${themeClasses.bgAccent} ${themeClasses.bgAccentHover} ${themeClasses.textAccent} rounded-md" style="color: ${isDark ? '#58a6ff' : '#0969da'} !important;">
@@ -543,13 +544,12 @@ this.createModal().then(async () => {
     });
     
     // Set up theme change listener
-    this.themeManager.onThemeChange((theme) => {
-      this.updateThemeElements();
-      // Update UI handler theme
-      if (this.uiHandler) {
-        this.uiHandler.updateTheme();
-      }
-    });
+    if (!this.unsubscribeThemeChange) {
+      this.unsubscribeThemeChange = this.themeManager.onThemeChange(() => {
+        this.updateThemeElements();
+        if (this.uiHandler) this.uiHandler.updateTheme();
+      });
+    }
   }
 
   updateDeckButtonTheme(button) {
@@ -567,9 +567,9 @@ this.createModal().then(async () => {
     
     // Add appropriate theme classes
     if (isActive) {
-      button.classList.add(themeClasses.buttonActive);
+      button.classList.add(...themeClasses.buttonActive.split(/\s+/));
     } else {
-      button.classList.add(themeClasses.buttonHover);
+      button.classList.add(...themeClasses.buttonHover.split(/\s+/));
     }
   }
 
@@ -1694,12 +1694,12 @@ this.createModal().then(async () => {
       .map(
         ([tag, count]) => `
             <button class="w-full text-left px-3 py-2 text-sm text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-zinc-800/50 rounded-md flex items-center justify-between"
-                    data-tag="${tag}">
+                    data-tag="${escapeSidebarText(tag)}">
                 <span class="flex items-center">
                     <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A2 2 0 013 12V7a4 4 0 014-4z"></path>
                     </svg>
-                    ${tag}
+                    ${escapeSidebarText(tag)}
                 </span>
                 <span class="text-xs ${tagCountBg} px-2 py-1 rounded-full">
                     ${count}
@@ -1864,10 +1864,10 @@ this.createModal().then(async () => {
           
           chaptersContent += `
             <div class="chapter-container group">
-                <button class="w-full flex justify-between px-3 py-2 text-sm text-gray-600 dark:text-gray-300 ${hoverClasses} rounded-md ${activeClasses} min-h-[2.5rem]" data-chapter="${chapter.chapter}">
+                <button class="w-full flex justify-between px-3 py-2 text-sm text-gray-600 dark:text-gray-300 ${hoverClasses} rounded-md ${activeClasses} min-h-[2.5rem]" data-chapter="${escapeSidebarText(chapter.chapter)}">
                     <div class="flex gap-2">
                         <svg class="w-4 h-4 transform transition-transform duration-200" 
-                             data-dropdown="chapter-${chapter.chapter}" 
+                             data-dropdown="chapter-${escapeSidebarText(chapter.chapter)}"
                              fill="none" 
                              stroke="currentColor" 
                              viewBox="0 0 24 24">
@@ -1878,13 +1878,13 @@ this.createModal().then(async () => {
                             </path>
                         </svg>
                         <span class="flex items-start text-left">
-                            <span class="text-left">${chapter.title || `Deck ${chapter.chapter}`}</span>
+                            <span class="text-left">${escapeSidebarText(chapter.title || `Deck ${chapter.chapter}`)}</span>
                         </span>
                     </div>
                     <div class="flex flex-col items-center justify-center h-full">
                         <span class="text-xs text-gray-400">${cards.length}</span>
                         <span class="opacity-0 group-hover:opacity-100 transition-opacity duration-200 cursor-pointer text-red-500 dark:text-red-400" 
-                              data-delete-chapter="${chapter.chapter}" 
+                              data-delete-chapter="${escapeSidebarText(chapter.chapter)}"
                               title="Delete deck">
                             <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
@@ -1899,14 +1899,14 @@ this.createModal().then(async () => {
                       .map(
                         (card, index) => `
                         <button class="w-full text-left px-3 py-2 text-sm text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-zinc-800/50 rounded-md flex items-start"
-                                data-chapter="${chapter.chapter}" 
+                                data-chapter="${escapeSidebarText(chapter.chapter)}"
                                 data-card-index="${index}">
                             <span class="mr-2">
                                 <svg data-slot="icon" fill="none" stroke-width="1.5" stroke="currentColor" viewBox="0 0 24 24" class="w-4 h-4">
                                     <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z"></path>
                                 </svg>
                             </span>
-                            <span>${card.question}</span>
+                            <span>${escapeSidebarText(card.question)}</span>
                         </button>
                     `
                       )
@@ -2465,10 +2465,10 @@ this.createModal().then(async () => {
         }
       }
 
-      this.immediateUpdate();
-
-      // Save silently
-      this.storageHandler.saveToLocalStorage();
+      // Finish the write before replacing live cards with a storage reload.
+      // Reloading first can restore the prior repetition count for the next grade.
+      await this.storageHandler.saveToLocalStorage();
+      await this.immediateUpdate();
 
       // Update UI immediately
       this.uiHandler.updateProgress();
@@ -2905,8 +2905,7 @@ this.createModal().then(async () => {
           clickedButton.style.border = borderStyle + ' !important';
         }
 
-        // Process the review
-        this.reviewCard(index, quality);
+        // Scheduling is handled by the single listener installed below.
       });
 
       // Rest of your existing event listeners...
@@ -3014,54 +3013,57 @@ this.createModal().then(async () => {
     Object.entries(reviewButtons).forEach(([btnId, { quality, text }]) => {
       this.shadowRoot
         .querySelector(`#${btnId}`)
-        ?.addEventListener("click", () => {
-          this.reviewCard(this.currentReview.currentIndex, quality);
+        ?.addEventListener("click", async () => {
+          await this.reviewCard(this.currentReview.currentIndex, quality);
           showPopover(
             this.shadowRoot,
             `Card marked as ${text}`,
             quality === 0 ? "error" : "success"
           );
-          this.immediateUpdate();
         });
     });
 
-    // Inside showCard method, after creating the modal
-    modal.addEventListener("reviewCard", (event) => {
-      const { index, quality } = event.detail;
-      this.reviewCard(index, quality);
+    // Reopening or navigating the existing modal must not add another review.
+    if (!modal.dataset.reviewHandlerAttached) {
+      modal.dataset.reviewHandlerAttached = "true";
+      modal.addEventListener("reviewCard", (event) => {
+        const { index, quality } = event.detail;
+        this.reviewCard(index, quality);
 
-      // Show feedback based on quality
-      let message = "";
-      switch (quality) {
-        case 0:
-          message = "Card reset";
-          break;
-        case 2:
-          message = "Marked as hard";
-          break;
-        case 3:
-          message = "Marked as good";
-          break;
-        case 5:
-          message = "Marked as memorized";
-          break;
-      }
+        // Show feedback based on quality
+        let message = "";
+        switch (quality) {
+          case 0:
+            message = "Card reset";
+            break;
+          case 2:
+            message = "Marked as hard";
+            break;
+          case 3:
+            message = "Marked as good";
+            break;
+          case 5:
+            message = "Marked as memorized";
+            break;
+        }
 
-      showPopover(
-        this.shadowRoot,
-        message,
-        quality === 0 ? "warning" : "success"
-      );
+        showPopover(
+          this.shadowRoot,
+          message,
+          quality === 0 ? "warning" : "success"
+        );
 
-      // Move to next card if not the last one
-      const cards = this.chapterSets.get(
-        parseInt(this.currentReview.chapterNum)
-      );
-      if (this.currentReview.currentIndex < cards.length - 1) {
-      } else {
-        showPopover(this.shadowRoot, "Review completed!", "success");
-      }
-    });
+        // Move to next card if not the last one
+        const cards = this.chapterSets.get(
+          parseInt(this.currentReview.chapterNum)
+        );
+        if (this.currentReview.currentIndex < cards.length - 1) {
+        } else {
+          showPopover(this.shadowRoot, "Review completed!", "success");
+        }
+      });
+
+    }
 
     // Update navigation handlers
     this.shadowRoot

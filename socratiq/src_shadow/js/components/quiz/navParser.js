@@ -126,7 +126,7 @@ export async function parseNavigation(navElement = document.querySelector('#quar
                   chapter: index + 1,
                   title: page.title,
                   quizzesTaken: page.quizzesTaken || 0,
-                  totalQuizzes: page.totalQuizzes || 10,
+                  totalQuizzes: page.totalQuizzes ?? null,
                   passedQuizzes: page.passedQuizzes || 0
               }));
               
@@ -172,7 +172,7 @@ export async function parseNavigation(navElement = document.querySelector('#quar
                   chapter: chapterNum,
                   title: title,
                   quizzesTaken: progress.totalAttempted,
-                  totalQuizzes: 10,  // Set to 10 as specified
+                  totalQuizzes: null, // No complete quiz inventory is available
                   passedQuizzes: progress.passedQuizzes
               };
           }

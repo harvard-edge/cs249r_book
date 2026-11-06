@@ -35,7 +35,7 @@ export function insertContextButton(shadowRoot) {
 
   // Create folder filters section
   const folderFilters = document.createElement('div');
-  folderFilters.className = 'folder-filters flex space-x-2 p-2 border-b border-gray-200';
+  folderFilters.className = 'folder-filters flex flex-wrap gap-1 p-2 border-b border-gray-200';
   folderFilters.innerHTML = `
     <div class="folder-filter p-1.5 rounded-md cursor-pointer flex items-center hover:bg-gray-100 bg-blue-100" data-filter="all">
       <span class="mr-1">📁</span><span>All</span>

@@ -70,63 +70,25 @@ const commonFixes = {
 // Helper function to extract mermaid code and caption from response
 function extractMermaidAndCaption(text) {
   try {
-    // If the text is a JSON string, try to parse it
-    if (typeof text === 'string' && (text.startsWith('{') || text.startsWith('['))) {
-      const parsed = JSON.parse(text);
-      
-      const content = parsed.choices?.[0]?.message?.content || 
-                     parsed[0]?.generated_text || 
-                     parsed.generated_text ||
-                     parsed.text ||
-                     text;
-
-      // Extract mermaid code and caption with improved regex
-      const mermaidMatch = content.match(/```(?:mermaid)?\s*([\s\S]*?)```/);
-      const captionMatch = content.match(/\$\$([\s\S]*?)\$\$/);
-
-      let mermaidCode = mermaidMatch ? mermaidMatch[1].trim() : '';
-      const caption = captionMatch ? captionMatch[1].trim() : '';
-
-      // Clean up the mermaid code
-      if (mermaidCode) {
-        // Remove excessive indentation
-        mermaidCode = mermaidCode.split('\n')
-          .map(line => line.trimStart())  // Remove leading whitespace
-          .join('\n')
-          .trim();
-      }
-
-      // Validate and fix diagram type
-      let fixedCode = mermaidCode;
-      if (mermaidCode && !mermaidCode.match(/^(graph|sequenceDiagram|classDiagram|stateDiagram|erDiagram|gantt|pie|flowchart)/)) {
-        if (mermaidCode.includes('[') && mermaidCode.includes(']') &&
-            (mermaidCode.includes('-->') || mermaidCode.includes('--'))) {
-            fixedCode = 'graph TD\n' + mermaidCode;
-        }
-      }
-
-      console.log("I am fixed code", fixedCode);
-
-      return {
-        code: fixedCode,
-        caption: caption,
-        success: !!fixedCode
-      };
+    let content = text;
+    // ProviderSingle returns plain message text. Retain compatibility with old
+    // response envelopes without requiring a JSON wrapper around fenced code.
+    if (typeof text === 'string' && /^[{[]/.test(text.trim())) {
+      try { content = JSON.parse(text); } catch { content = text; }
     }
-
-    return {
-      code: '',
-      caption: '',
-      success: false
-    };
-  } catch (e) {
-    console.warn('Error parsing response:', e);
-    return {
-      code: '',
-      caption: '',
-      success: false,
-      error: e.message
-    };
+    if (typeof content !== 'string') {
+      content = content?.choices?.[0]?.message?.content ||
+        content?.[0]?.generated_text || content?.generated_text || content?.text || '';
+    }
+    const mermaidMatch = content.match(/```(?:mermaid)?\s*([\s\S]*?)```/);
+    const captionMatch = content.match(/\$\$([\s\S]*?)\$\$/);
+    const code = (mermaidMatch ? mermaidMatch[1] : content).trim();
+    if (!/^(graph|sequenceDiagram|classDiagram|stateDiagram|erDiagram|gantt|pie|flowchart|mindmap|timeline|xychart|quadrantChart)\b/.test(code)) {
+      throw new Error('No valid Mermaid diagram found in provider response');
+    }
+    return { code, caption: captionMatch?.[1]?.trim() || '', success: true };
+  } catch (error) {
+    return { code: '', caption: '', success: false, error: error.message };
   }
 }
 

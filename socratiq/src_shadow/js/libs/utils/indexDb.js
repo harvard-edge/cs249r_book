@@ -25,52 +25,62 @@ export class IndexDBManager {
 
     async initDB(stores) {
         this._lastKnownStores = stores;
-        
-        return new Promise((resolve, reject) => {
-            const request = indexedDB.open(this.dbName, this.version);
+        if (!this._initPromise) {
+            this._initPromise = this._openWithSchema(stores).finally(() => {
+                this._initPromise = null;
+            });
+        }
+        return this._initPromise;
+    }
 
-            request.onerror = (event) => {
-                console.error(`❌ Database error for ${this.dbName}:`, event.target.error);
-                reject(event.target.error);
-            };
-
-            request.onsuccess = (event) => {
-                this.db = event.target.result;
-                console.log(`✅ Database ${this.dbName} opened successfully`);
-                console.log(`✅ Available stores:`, Array.from(this.db.objectStoreNames));
-                resolve(this.db);
-            };
-
-            request.onupgradeneeded = (event) => {
-                console.log(`🔄 Database upgrade needed for ${this.dbName}`);
-                console.log(`🔄 Old version: ${event.oldVersion}, New version: ${event.newVersion}`);
-                
-                const db = event.target.result;
-                
-                // Create/update stores
-                stores.forEach(({ name, keyPath, indexes }) => {
-                    console.log(`🔄 Processing store: ${name}`);
-                    
-                    if (!db.objectStoreNames.contains(name)) {
-                        console.log(`➕ Creating new store: ${name}`);
-                        const store = db.createObjectStore(name, { keyPath });
-                        
-                        if (indexes) {
-                            indexes.forEach(({ name: indexName, keyPath: indexKeyPath, unique, multiEntry }) => {
-                                if (!store.indexNames.contains(indexName)) {
-                                    console.log(`➕ Creating index: ${indexName} on ${indexKeyPath}`);
-                                    store.createIndex(indexName, indexKeyPath, { unique, multiEntry });
-                                }
-                            });
+    async _openWithSchema(stores) {
+        // Inspect the installed schema before choosing an upgrade version. A newer
+        // database may belong to another SocratiQ release and must never be reset.
+        if (this.db) {
+            this.db.close();
+            this.db = null;
+        }
+        const open = (version) => new Promise((resolve, reject) => {
+            const request = version === undefined
+                ? indexedDB.open(this.dbName)
+                : indexedDB.open(this.dbName, version);
+            request.onerror = () => reject(request.error);
+            request.onupgradeneeded = () => {
+                const db = request.result;
+                for (const { name, keyPath, indexes = [] } of stores) {
+                    const store = db.objectStoreNames.contains(name)
+                        ? request.transaction.objectStore(name)
+                        : db.createObjectStore(name, { keyPath });
+                    for (const { name: indexName, keyPath: indexKeyPath, unique, multiEntry } of indexes) {
+                        if (!store.indexNames.contains(indexName)) {
+                            store.createIndex(indexName, indexKeyPath, { unique, multiEntry });
                         }
-                    } else {
-                        console.log(`✅ Store ${name} already exists`);
                     }
-                });
-                
-                console.log(`✅ Database upgrade completed for ${this.dbName}`);
+                }
             };
+            request.onsuccess = () => resolve(request.result);
         });
+        let db = await open();
+        const missingSchema = stores.some(({ name, indexes = [] }) => {
+            if (!db.objectStoreNames.contains(name)) return true;
+            const store = db.transaction(name, 'readonly').objectStore(name);
+            return indexes.some(index => !store.indexNames.contains(index.name));
+        });
+        const targetVersion = Math.max(this.version, db.version + (missingSchema ? 1 : 0));
+        if (targetVersion > db.version) {
+            db.close();
+            db = await open(targetVersion);
+        }
+        this.version = db.version;
+        this.db = db;
+        db.onversionchange = () => {
+            db.close();
+            if (this.db === db) this.db = null;
+        };
+        db.onclose = () => {
+            if (this.db === db) this.db = null;
+        };
+        return db;
     }
 
     async add(storeName, data) {
@@ -171,148 +181,62 @@ export class IndexDBManager {
     }
 
     async performTransaction(storeName, mode, operation) {
-        const MAX_RETRIES = 3;
-        let attempts = 0;
-        
-        while (attempts < MAX_RETRIES) {
+        for (let attempt = 0; attempt < 2; attempt++) {
             try {
-                
-                if (!this.db || this.db.closed) {
-                    await this.reconnectDB();
-                }
-
-                return new Promise((resolve, reject) => {
+                if (!this.db) await this.reconnectDB();
+                return await new Promise((resolve, reject) => {
                     const transaction = this.db.transaction(storeName, mode);
-                    const store = transaction.objectStore(storeName);
-
-                    transaction.onerror = (event) => {
-                        console.error("❌ IDB Transaction error:", event.target.error);
-                        reject(event.target.error);
-                    };
-
-                    // Add timeout protection
+                    let result;
                     const timeoutId = setTimeout(() => {
-                        console.warn("⏰ IDB Transaction timeout");
-                        try {
-                            transaction.abort();
-                        } catch (e) {
-                            console.warn('Could not abort transaction:', e);
-                        }
+                        try { transaction.abort(); } catch {}
                         reject(new Error('Transaction timeout'));
                     }, 5000);
-
+                    const fail = error => {
+                        clearTimeout(timeoutId);
+                        reject(error || new Error('Database transaction aborted'));
+                    };
                     transaction.oncomplete = () => {
                         clearTimeout(timeoutId);
+                        resolve(result);
                     };
-
+                    transaction.onabort = () => fail(transaction.error);
+                    transaction.onerror = () => fail(transaction.error);
                     try {
-                        const request = operation(store);
-                        
-                        request.onsuccess = () => {
-                            clearTimeout(timeoutId);
-                            resolve(request.result);
-                        };
-                        
-                        request.onerror = () => {
-                            console.error("💥 IDB Operation error:", request.error);
-                            clearTimeout(timeoutId);
-                            reject(request.error);
-                        };
+                        const request = operation(transaction.objectStore(storeName));
+                        request.onsuccess = () => { result = request.result; };
+                        request.onerror = () => fail(request.error);
                     } catch (error) {
-                        console.error("🚨 IDB Operation failed:", error);
-                        clearTimeout(timeoutId);
-                        reject(error);
+                        try { transaction.abort(); } catch {}
+                        fail(error);
                     }
                 });
             } catch (error) {
-                attempts++;
-                console.error(`❌ IDB Attempt ${attempts} failed:`, error);
-                
-                if (error.name === 'InvalidStateError' && attempts < MAX_RETRIES) {
-                    const delay = 1000 * attempts;
-                    await new Promise(resolve => setTimeout(resolve, delay));
-                    continue;
-                }
-                throw error;
+                if (error.name !== 'InvalidStateError' || attempt > 0) throw error;
+                this.db = null;
             }
         }
-        throw new Error(`Failed to perform transaction after ${MAX_RETRIES} attempts`);
     }
 
     async reconnectDB() {
-        try {
-            await this.initDB(this._lastKnownStores || []);
-            return true;
-        } catch (error) {
-            console.error(`Reconnection failed for ${this.dbName}:`, error);
-            return false;
-        }
+        await this.initDB(this._lastKnownStores || []);
+        return true;
     }
 }
 
-// Add after the existing DB initialization code (around line 820)
-let dbInstances = {
-    socratiqDB: null
-};
+let dbInstances = { socratiqDB: null };
+let initializationPromise = null;
 
 export async function initializeSocratiqDB() {
-    try {
-        const { DB_CONFIGS } = await import('../../../configs/db_configs_one.js');
-        
-        console.log('🔄 Initializing SocratiqDB with version:', DB_CONFIGS.version);
-        console.log('🔄 Required stores:', DB_CONFIGS.stores.map(s => s.name));
-        
-        // First check if database already exists and get its configuration
-        const existingDb = await new Promise((resolve) => {
-            const request = indexedDB.open(DB_CONFIGS.name);
-            request.onsuccess = (event) => {
-                const db = event.target.result;
-                const info = {
-                    exists: true,
-                    version: db.version,
-                    stores: Array.from(db.objectStoreNames)
-                };
-                console.log('📊 Existing database info:', info);
-                db.close();
-                resolve(info);
-            };
-            request.onerror = () => {
-                console.log('📊 No existing database found');
-                resolve({ exists: false });
-            };
-        });
-
-        // Check if we need to upgrade by comparing store configurations
-        const needsUpgrade = existingDb.exists ? 
-            !DB_CONFIGS.stores.every(store => 
-                existingDb.stores.includes(store.name)
-            ) : true;
-
-        const currentVersion = existingDb.exists ? existingDb.version : 0;
-        const newVersion = needsUpgrade ? DB_CONFIGS.version : currentVersion;
-        
-        console.log('🔄 Database upgrade needed:', needsUpgrade);
-        console.log('🔄 Current version:', currentVersion, 'New version:', newVersion);
-        
-        // Create database manager with appropriate version
-        const dbManager = new IndexDBManager(DB_CONFIGS.name, newVersion);
-        
-        // Initialize database with stores
-        await dbManager.initDB(DB_CONFIGS.stores);
-        
-        // Store the instance
-        dbInstances.socratiqDB = dbManager;
-        
-        console.log('✅ SocratiqDB initialized successfully');
-        console.log('✅ Available stores:', Array.from(dbManager.db.objectStoreNames));
-        
-        return dbManager;
-        
-    } catch (error) {
-        console.error('❌ Failed to initialize Socratiq database:', error);
-        console.error('❌ Error details:', error.message, error.stack);
-        throw error;
+    if (!initializationPromise) {
+        initializationPromise = (async () => {
+            const { DB_CONFIGS } = await import('../../../configs/db_configs_one.js');
+            const manager = dbInstances.socratiqDB || new IndexDBManager(DB_CONFIGS.name, DB_CONFIGS.version);
+            await manager.initDB(DB_CONFIGS.stores);
+            dbInstances.socratiqDB = manager;
+            return manager;
+        })().finally(() => { initializationPromise = null; });
     }
+    return initializationPromise;
 }
 
 // Update the getter to always return the socratiqDB instance
@@ -321,6 +245,7 @@ export async function getDBInstance(dbName = 'socratiqDB') {
         console.warn('Database instance not found, initializing...');
         return await initializeSocratiqDB();
     }
+    if (!dbInstances.socratiqDB.db) await dbInstances.socratiqDB.reconnectDB();
     return dbInstances.socratiqDB;
 }
 
@@ -369,48 +294,10 @@ async function deleteDatabase(dbName) {
     });
 }
 
-// Add this to your initialization function if you want to force a fresh start
+// Legacy startup callers use this name for schema repair. Repair in place so
+// stores belonging to older or newer releases remain intact, including unknown stores.
 export async function forceInitializeSocratiqDB() {
-    try {
-        const { DB_CONFIGS } = await import('../../../configs/db_configs_one.js');
-        
-        // Get existing data before deletion
-        const existingDb = await getDBInstance().catch(() => null);
-        const existingData = {};
-        
-        if (existingDb) {
-            // Store existing data from each store
-            for (const store of DB_CONFIGS.stores) {
-                try {
-                    existingData[store.name] = await existingDb.getAll(store.name);
-                } catch (e) {
-                    console.warn(`Could not backup store ${store.name}:`, e);
-                }
-            }
-        }
-        
-        // Delete and recreate database
-        await deleteDatabase(DB_CONFIGS.name);
-        const newDb = await initializeSocratiqDB();
-        
-        // Restore existing data
-        for (const [storeName, data] of Object.entries(existingData)) {
-            if (data && data.length > 0) {
-                const store = newDb.db
-                    .transaction([storeName], 'readwrite')
-                    .objectStore(storeName);
-                    
-                for (const item of data) {
-                    await store.put(item);
-                }
-            }
-        }
-        
-        return newDb;
-    } catch (error) {
-        console.error('Failed to force initialize database:', error);
-        throw error;
-    }
+    return initializeSocratiqDB();
 }
 
 // Add this new function to handle complete reset
