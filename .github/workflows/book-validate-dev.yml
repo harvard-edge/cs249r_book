@@ -144,7 +144,7 @@ jobs:
       - name: 📥 Checkout repository
         uses: actions/checkout@v6
         with:
-          ref: ${{ inputs.test_branch || github.ref }}
+          ref: ${{ inputs.test_branch || github.sha }}
           fetch-depth: 0
 
       - name: 🐍 Set up Python
@@ -163,6 +163,10 @@ jobs:
           # and nbdev whenever TinyTorch sources change; without these the hook
           # fails on import instead of testing anything.
           pip install -r tinytorch/requirements.txt || echo "⚠️ Could not install TinyTorch requirements, continuing..."
+          pip install -r taxonomy/requirements.txt || echo "⚠️ Could not install taxonomy requirements, continuing..."
+          # MLSysIM hooks execute documentation examples, lint, and accounting tests.
+          # Install their declared extras so dependency failures cannot mask validation.
+          pip install "./mlsysim[dev,viz,labs]"
           echo "📦 Installing fallback hook dependencies..."
           pip install rich requests pillow pint pandas pytest || echo "⚠️ Could not install one or more fallback deps, continuing..."
           
@@ -173,9 +177,11 @@ jobs:
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             echo "🔄 Running pre-commit on PR changes (origin/${{ github.base_ref }}..HEAD)..."
             CMD="pre-commit run --from-ref origin/${{ github.base_ref }} --to-ref HEAD --verbose"
-          elif [ "${{ github.event_name }}" = "push" ] && git rev-parse --verify HEAD~1 >/dev/null 2>&1; then
-            echo "🔄 Running pre-commit on push changes (HEAD~1..HEAD)..."
-            CMD="pre-commit run --from-ref HEAD~1 --to-ref HEAD --verbose"
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            # A push may contain many merged branches; HEAD~1 omits older commits.
+            # Validate the complete integration tree, matching the local push gate.
+            echo "🔄 Running pre-commit on all files at the pushed dev tip..."
+            CMD="pre-commit run --all-files --verbose"
           else
             echo "🔄 Running pre-commit on all files..."
             CMD="pre-commit run --all-files --verbose"
@@ -216,7 +222,7 @@ jobs:
   build-config:
     name: '🎯 Build Configuration'
     needs: [pre-commit]
-    if: always() && needs.pre-commit.result == 'success'
+    if: ${{ !cancelled() && needs.pre-commit.result == 'success' }}
     runs-on: ubuntu-latest
     outputs:
       build_html: ${{ steps.config.outputs.build_html }}
@@ -347,7 +353,7 @@ jobs:
     name: '🐳 Container Build Matrix'
     needs: [build-config]
     if: |
-      always() &&
+      !cancelled() &&
       (needs.build-config.result == 'success')
     uses: ./.github/workflows/book-build-container.yml
     with:
@@ -358,6 +364,7 @@ jobs:
       build_epub: ${{ needs.build-config.outputs.build_epub == 'true' }}
       build_target: ${{ needs.build-config.outputs.build_target }}
       target: ${{ needs.build-config.outputs.target }}
+      source_ref: ${{ inputs.test_branch || github.sha }}
       container_registry: ${{ needs.build-config.outputs.container_registry }}
       container_tag: ${{ needs.build-config.outputs.container_tag }}
 
@@ -471,10 +478,12 @@ jobs:
     name: '📘 EPUB validate (epubcheck via binder)'
     needs: [collect-results]
     if: |
-      always() &&
+      !cancelled() &&
       needs.collect-results.outputs.linux_success == 'true' &&
-      needs.collect-results.outputs.linux_epub_vol1_artifact != '' &&
-      needs.collect-results.outputs.linux_epub_vol2_artifact != ''
+      (needs.collect-results.outputs.linux_epub_vol1_artifact != '' ||
+       needs.collect-results.outputs.linux_epub_vol2_artifact != '' ||
+       needs.collect-results.outputs.linux_epub_vol3_artifact != '' ||
+       needs.collect-results.outputs.linux_epub_vol4_artifact != '')
     runs-on: ubuntu-latest
     env:
       # Ratchet baseline — fails if epubcheck counts exceed recorded
@@ -500,6 +509,7 @@ jobs:
           python-version: '3.11'
 
       - name: 📥 Download vol1 EPUB artifact
+        if: needs.collect-results.outputs.linux_epub_vol1_artifact != ''
         uses: actions/download-artifact@v8
         with:
           name: ${{ needs.collect-results.outputs.linux_epub_vol1_artifact }}
@@ -509,10 +519,25 @@ jobs:
           path: books/_build/epub-vol1
 
       - name: 📥 Download vol2 EPUB artifact
+        if: needs.collect-results.outputs.linux_epub_vol2_artifact != ''
         uses: actions/download-artifact@v8
         with:
           name: ${{ needs.collect-results.outputs.linux_epub_vol2_artifact }}
           path: books/_build/epub-vol2
+
+      - name: 📥 Download vol3 EPUB artifact
+        if: needs.collect-results.outputs.linux_epub_vol3_artifact != ''
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.collect-results.outputs.linux_epub_vol3_artifact }}
+          path: books/_build/epub-vol3
+
+      - name: 📥 Download vol4 EPUB artifact
+        if: needs.collect-results.outputs.linux_epub_vol4_artifact != ''
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.collect-results.outputs.linux_epub_vol4_artifact }}
+          path: books/_build/epub-vol4
 
       - name: ☕ Set up Java (for the epubcheck jar)
         uses: actions/setup-java@v5
@@ -568,7 +593,7 @@ jobs:
   check-links:
     name: '🔗 Check Links'
     needs: [pre-commit]
-    if: always() && needs.pre-commit.result == 'success'
+    if: ${{ !cancelled() && needs.pre-commit.result == 'success' }}
     uses: ./.github/workflows/infra-link-check.yml
     with:
       path_pattern: './books/**/*.qmd'

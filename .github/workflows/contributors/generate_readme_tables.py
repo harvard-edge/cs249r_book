@@ -15,6 +15,10 @@ import re
 import sys
 from pathlib import Path
 
+
+# Listed first in every contributor table.
+MAINTAINER_LOGIN = "profvjreddi"
+
 # Project key → on-disk directory. Project key is the canonical name used in
 # commit messages and bot replies; directory is where the .all-contributorsrc
 # file lives. Loaded from projects.json (the single source of truth — edit
@@ -128,11 +132,11 @@ def process_project(project_name: str, project_path: str, update: bool = False) 
         print(f"{project_name}: No contributors to display")
         return
 
-    # Sort contributors by number of contributions (descending)
+    # The maintainer leads each table; everyone else follows by number of
+    # contribution types (most first), ties keeping the config order.
     sorted_contributors = sorted(
         contributors,
-        key=lambda c: len(c.get('contributions', [])),
-        reverse=True
+        key=lambda c: (c.get("login") != MAINTAINER_LOGIN, -len(c.get("contributions", []))),
     )
 
     table_html = generate_table(sorted_contributors, per_line, image_size)
