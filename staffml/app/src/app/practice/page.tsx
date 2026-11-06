@@ -157,6 +157,7 @@ function PracticePage() {
   // when the drawer is hidden by the lg:translate-x-0 utility.
   useEffect(() => {
     if (!filtersOpen) return;
+    const returnFocus = document.activeElement;
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     const onKey = (e: KeyboardEvent) => {
@@ -171,6 +172,9 @@ function PracticePage() {
       document.body.style.overflow = prevOverflow;
       document.removeEventListener("keydown", onKey);
       window.clearTimeout(focusTimer);
+      if (returnFocus instanceof HTMLElement && returnFocus.isConnected) {
+        returnFocus.focus({ preventScroll: true });
+      }
     };
   }, [filtersOpen]);
 
@@ -709,7 +713,7 @@ function PracticePage() {
       */}
       {filtersOpen && (
         <div
-          className="lg:hidden fixed inset-0 z-40 bg-black/60 backdrop-blur-[1px]"
+          className="lg:hidden fixed inset-0 z-[1150] bg-black/60 backdrop-blur-[1px]"
           onClick={() => setFiltersOpen(false)}
           aria-hidden="true"
         />
@@ -728,11 +732,11 @@ function PracticePage() {
         role="dialog"
         aria-modal={filtersOpen}
         className={clsx(
-          "border-border bg-surface/50 p-4 lg:p-5 flex flex-col gap-4 lg:gap-6",
+          "border-border bg-surface lg:bg-surface/50 p-4 lg:p-5 flex flex-col gap-4 lg:gap-6",
           // Desktop layout (lg+): inline left column, in-flow, with right border.
-          "lg:relative lg:w-64 lg:border-r lg:border-b-0 lg:translate-x-0 lg:overflow-y-auto",
-          // Mobile layout (<lg): fixed full-height left drawer, slides in/out.
-          "fixed inset-y-0 left-0 z-50 w-[85%] max-w-[320px] overflow-y-auto",
+          "lg:relative lg:z-auto lg:w-64 lg:border-r lg:border-b-0 lg:translate-x-0 lg:overflow-y-auto",
+          // Mobile drawer and backdrop sit above the sticky ecosystem header (1100).
+          "fixed inset-y-0 left-0 z-[1200] w-[85%] max-w-[320px] overflow-y-auto",
           "transition-transform duration-200 ease-out shadow-2xl lg:shadow-none",
           filtersOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
         )}
@@ -1504,7 +1508,9 @@ function PracticePage() {
             </div>
 
             {/* ── RIGHT: tools panel ── */}
-            <div className="w-full lg:w-[400px] border-t lg:border-t-0 lg:border-l border-border bg-surface flex flex-col overflow-y-auto">
+            {/* Below lg, reserve space after the tools for the fixed Filters
+                button, including the device's bottom safe area. */}
+            <div className="w-full lg:w-[400px] border-t lg:border-t-0 lg:border-l border-border bg-surface flex flex-col overflow-y-auto pb-[calc(5rem+env(safe-area-inset-bottom,0px))] lg:pb-0">
               <div className="h-10 border-b border-border flex items-center px-4 bg-background/50 justify-between shrink-0">
                 <span className="text-[10px] font-mono text-textTertiary uppercase tracking-widest flex items-center gap-2">
                   <Sparkles className="w-3 h-3" /> Tools

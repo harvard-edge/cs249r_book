@@ -12,25 +12,16 @@ module.exports = {
       //
       // Aligned with Bootstrap (which the rest of the Quarto ecosystem
       // uses): `nav-lg` = 992 matches Bootstrap's `lg` breakpoint and
-      // Quarto's `collapse-below: lg` setting, so StaffML collapses to
-      // hamburger at the same viewport as every other ecosystem subsite.
+      // Quarto's `collapse-below: lg` setting for the app's own Nav.
       //
-      // The corollary at iPad landscape (1024–1194 px): the full desktop
-      // nav renders but the right-side icons get visually clipped past
-      // the viewport edge. That's the same trade-off Quarto makes — see
-      // EcosystemBar.tsx's `overflowX: 'clip'` comment for how we keep
-      // the page from horizontally scrolling despite the overflow.
-      //
-      // Note on `nav-xl`: Quarto's _navbar.scss hides right-side text
-      // labels in the range `1200px <= width < 1400px` (the "icon-only"
-      // band where dropdowns crowd text labels). Setting `nav-xl` to
-      // 1400 px keeps that label-reveal behavior: labels appear only
-      // once the viewport is wide enough to fit them alongside the full
-      // dropdown row.
+      // The ecosystem row has more menus than the app's own Nav. Keep its
+      // hamburger until the compact row fits; reveal the full brand and
+      // right-side labels only when the expanded row also fits.
       screens: {
         'nav-sm': '576px',   // brand title visible
         'nav-lg': '992px',   // desktop nav appears, hamburger hides (Bootstrap `lg`)
-        'nav-xl': '1400px',  // right-side label-reveal threshold (post-icon band)
+        'nav-ecosystem': '1152px', // compact ecosystem row fits with icons
+        'nav-xl': '1536px',  // full brand and right-side labels fit
       },
       colors: {
         background: "var(--background)",
