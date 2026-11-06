@@ -1667,7 +1667,7 @@ async function handleSummativeAction(
   showProgressItem(progress, progressCount);
 
   removeElementById(clone, "progress");
-  if (!ele) scrollToTopSmooth(shadowRoot);
+  // ini_quiz owns the completed question anchor.
 
   replaceElementsWithErrorNotice("skeleton-loader", shadowRoot);
   await removeElementById(clone, "progress");
@@ -2199,19 +2199,7 @@ export function setListeners() {
     handleQueryActionStream(newText);
   });
 
-  // Handle navigation to source with position
-  window.addEventListener("navigateToSource", (event) => {
-    const { url, position, sourceData } = event.detail;
-    
-    // Check if we're already on the target page
-    if (window.location.href === url) {
-      // Same page - scroll to position
-      scrollToPosition(position);
-    } else {
-      // Different page - navigate and scroll
-      navigateToSourceWithPosition(url, position);
-    }
-  });
+  // Source navigation is owned by the guarded persistent tooltip manager.
 
   // Helper function to scroll to a specific position
   function scrollToPosition(position) {
@@ -2222,30 +2210,8 @@ export function setListeners() {
         behavior: 'smooth'
       });
       
-      // Verify scroll after a delay
-      setTimeout(() => {
-      }, 1000);
-      
     } else {
     }
-  }
-
-  // Helper function to navigate to a different page with position
-  function navigateToSourceWithPosition(url, position) {
-    // Add position as query parameter
-    if (position && position > 0) {
-      const urlObj = new URL(url);
-      urlObj.searchParams.set('scrollTo', position.toString());
-      url = urlObj.toString();
-    }
-    
-    // Store the position in sessionStorage for after page load (backup)
-    if (position && position > 0) {
-      sessionStorage.setItem('scrollToPosition', position.toString());
-    }
-    
-    // Navigate to the URL
-    window.location.href = url;
   }
 
   // Check for stored scroll position on page load

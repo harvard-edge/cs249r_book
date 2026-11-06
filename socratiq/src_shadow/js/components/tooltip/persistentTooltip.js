@@ -6,6 +6,7 @@
  */
 
 import { ReferenceTooltip } from './referenceTooltip.js';
+import {safeSourceUrl, safeSourcePosition} from './source-url.js';
 
 class PersistentTooltipManager {
   constructor() {
@@ -95,7 +96,7 @@ class PersistentTooltipManager {
     }
     
     // Extract data from attributes
-    const sourceUrl = element.getAttribute('data-source-url') || '';
+    const sourceUrl = safeSourceUrl(element.getAttribute('data-source-url'));
     const sourceLabel = element.getAttribute('data-source-label') || 
       (sourceUrl ? new URL(sourceUrl).origin : window.location.origin);
     
@@ -103,12 +104,30 @@ class PersistentTooltipManager {
       sourceReference: element.getAttribute('data-source-reference') || 'No source reference available',
       sourceLabel: sourceLabel,
       sourceUrl: sourceUrl,
-      sourcePosition: parseFloat(element.getAttribute('data-source-position')) || 0
+      sourcePosition: safeSourcePosition(element.getAttribute('data-source-position'))
     };
     
-    // Create unique event handler functions for this element
-    const mouseEnterHandler = (e) => {
-      this.tooltip.show(e.target, sourceData);
+    element.setAttribute('role', 'button');
+    element.tabIndex = 0;
+    element.setAttribute('aria-label', `Show source reference ${element.textContent.trim()}`);
+    element.setAttribute('aria-haspopup', 'dialog');
+    element.setAttribute('aria-expanded', 'false');
+    const mouseEnterHandler = () => {
+      if (this.tooltip.isVisible && this.tooltip.trigger === element) return;
+      this.tooltip.show(element, sourceData);
+    };
+    const activate = () => {
+      if (this.tooltip.isVisible && this.tooltip.trigger === element && this.tooltip.restoreTriggerFocus) {
+        this.tooltip.hide();
+      } else {
+        this.tooltip.show(element, sourceData, {focus: true});
+      }
+    };
+    const keydownHandler = event => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        activate();
+      }
     };
     
     const mouseLeaveHandler = () => {
@@ -135,6 +154,8 @@ class PersistentTooltipManager {
     // Add new event listeners
     element.addEventListener('mouseenter', mouseEnterHandler);
     element.addEventListener('mouseleave', mouseLeaveHandler);
+    element.addEventListener('click', activate);
+    element.addEventListener('keydown', keydownHandler);
   }
 
   /**
@@ -202,7 +223,11 @@ class PersistentTooltipManager {
   setupNavigationListeners() {
     // Listen for navigation to source events
     window.addEventListener('navigateToSource', (event) => {
-      const { url, position, sourceData } = event.detail;
+      const detail = event.detail;
+      if (!detail || typeof detail !== 'object' || Array.isArray(detail)) return;
+      const url = safeSourceUrl(detail.url);
+      if (!url) return;
+      const position = safeSourcePosition(detail.position);
       
       // Check if we're already on the target page
       if (window.location.href === url) {
@@ -220,6 +245,7 @@ class PersistentTooltipManager {
    * @param {number} position - Scroll position
    */
   scrollToPosition(position) {
+    position = safeSourcePosition(position);
     if (position && position > 0) {
       // Ensure position doesn't exceed document height
       const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
@@ -238,6 +264,9 @@ class PersistentTooltipManager {
    * @param {number} position - Scroll position
    */
   navigateToSourceWithPosition(url, position) {
+    url = safeSourceUrl(url);
+    if (!url) return;
+    position = safeSourcePosition(position);
     // Add position as query parameter
     if (position && position > 0) {
       const urlObj = new URL(url);
@@ -247,7 +276,7 @@ class PersistentTooltipManager {
     
     // Store the position in sessionStorage for after page load (backup)
     if (position && position > 0) {
-      sessionStorage.setItem('scrollToPosition', position.toString());
+      try {sessionStorage.setItem('scrollToPosition', position.toString());} catch { /* Navigation also carries the position in its URL. */ }
     }
     
     // Navigate to the URL

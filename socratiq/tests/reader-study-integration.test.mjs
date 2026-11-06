@@ -39,6 +39,10 @@ async function fixture(run) {
   const origin = `http://127.0.0.1:${server.address().port}`;
   const browser = await chromium.launch({headless: true});
   const page = await browser.newPage();
+  if (Number(process.env.SOCRATIQ_TEST_CPU_RATE) > 1) {
+    const session = await page.context().newCDPSession(page);
+    await session.send('Emulation.setCPUThrottlingRate', {rate: Number(process.env.SOCRATIQ_TEST_CPU_RATE)});
+  }
   // These integration flows exercise a returning learner's study workspace;
   // first-use tour behavior has its own focused browser coverage.
   await page.addInitScript(expectedOrigin => {
@@ -144,6 +148,16 @@ test('built study workspace loads lazily once beside the reader, preserves a dec
   });
 });
 
+// CodeMirror owns its document and selection. Native selection + keystrokes keep
+// its editor state in sync; DOM-based contenteditable fill can leave its model
+// selection collapsed and insert beside the old text on Linux.
+async function replaceEditorText(editor, text) {
+  await editor.click();
+  await editor.press('ControlOrMeta+A');
+  await editor.pressSequentially(text);
+  await expect(editor).toHaveText(text);
+}
+
 test('built ink editor adds and edits a phone flashcard across study close and reopen', {timeout: 90000}, async () => {
   await fixture(async ({page, origin, errors}) => {
     await page.setViewportSize({width: 390, height: 844});
@@ -156,13 +170,13 @@ test('built ink editor adds and edits a phone flashcard across study close and r
     await legacy.locator('#deckNameInput').fill('Constructed editor deck');
     await legacy.locator('#createDeck').click();
     await legacy.locator('#showAddCard').click();
-    await legacy.locator('#questionEditor [contenteditable=true]').fill('Constructed bandwidth question');
-    await legacy.locator('#answerEditor [contenteditable=true]').fill('Constructed bandwidth answer');
+    await replaceEditorText(legacy.locator('#questionEditor [contenteditable=true]'), 'Constructed bandwidth question');
+    await replaceEditorText(legacy.locator('#answerEditor [contenteditable=true]'), 'Constructed bandwidth answer');
     await legacy.locator('#saveCard').click();
     const question = legacy.locator('#question-0 [contenteditable=true]');
     await expect(question).toHaveText('Constructed bandwidth question');
-    await question.fill('Constructed edited bandwidth question');
-    await legacy.locator('#answer-0 [contenteditable=true]').fill('Constructed edited bandwidth answer');
+    await replaceEditorText(question, 'Constructed edited bandwidth question');
+    await replaceEditorText(legacy.locator('#answer-0 [contenteditable=true]'), 'Constructed edited bandwidth answer');
     await legacy.locator('#closeModal_sr').click();
     await legacy.getByRole('button', {name: 'Close study tools', exact: true}).click();
     await page.getByRole('button', {name: 'Study tools', exact: true}).click();
@@ -201,6 +215,141 @@ test('built legacy chat renders KaTeX and Mermaid from a constructed provider re
   });
 });
 
+test('built quiz reference pills and readable feedback survive saved conversation restoration', {timeout: 120000}, async () => {
+  const quiz = [{question: 'Constructed presentation quiz: what does bandwidth measure?', sourceReference: 'Constructed bandwidth passage', answers: [
+    {text: 'Data transferred per unit time', correct: true, explanation: 'Bandwidth is a rate.'},
+    {text: 'Delay of one request', correct: false, explanation: 'That describes latency.'},
+  ]}];
+  const grade = `You got ${quiz.length} out of ${quiz.length} questions correct.`;
+  const records = [];
+  const contrast = ({color, background}) => {
+    const foreground = color.slice(0, 3).map((value, index) => value * color[3] + background[index] * (1 - color[3]));
+    const luminance = rgb => rgb.map(value => value / 255).map(value => value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4)
+      .reduce((sum, value, index) => sum + value * [0.2126, 0.7152, 0.0722][index], 0);
+    const values = [luminance(foreground), luminance(background)];
+    return (Math.max(...values) + 0.05) / (Math.min(...values) + 0.05);
+  };
+  for (const theme of ['light', 'dark']) await fixture(async ({page, origin, errors}) => {
+    const study = page.locator('#widget-chat-container');
+    await page.route('https://mlsysbook.ai/api/socratiq/ai**', route => route.fulfill({contentType: 'application/json', body: JSON.stringify({choices: [{message: {role: 'assistant', content: JSON.stringify(quiz)}, finish_reason: 'stop'}]})}));
+    const open = async () => {
+      await page.evaluate(theme => {
+        document.body.style.backgroundColor = theme === 'dark' ? '#161b22' : '#fff';
+        document.body.style.color = theme === 'dark' ? '#eee' : '#222';
+        document.body.classList.toggle('quarto-dark', theme === 'dark');
+      }, theme);
+      await page.getByRole('button', {name: 'Ask SocratiQ', exact: true}).click();
+      await page.getByRole('button', {name: 'Study tools', exact: true}).click();
+      await expect(study.getByRole('button', {name: 'Close study tools', exact: true})).toBeVisible();
+      await expect(study).toHaveAttribute('data-socratiq-theme', theme);
+    };
+    const snapshot = async stage => {
+      const captured = {};
+      for (const [name, width, height] of [['desktop', 1280, 900], ['phone', 390, 844]]) {
+        await page.setViewportSize({width, height});
+        const badge = study.locator('form[data-quiz] .reference-number').last();
+        const correct = study.locator('.explains_wrapper').getByText('Correct', {exact: true}).last();
+        const explanation = study.locator('.explains_wrapper .explanation').first();
+        await badge.scrollIntoViewIfNeeded();
+        await page.mouse.move(0, 0);
+        for (const element of [badge, correct, explanation]) await expect(element).toBeVisible();
+        await expect(badge).toHaveText(String(quiz.length));
+        const styles = await study.locator('form[data-quiz]').last().evaluate(form => {
+          const rgba = text => {
+            const values = text.match(/[\d.]+/g).map(Number);
+            return [values[0], values[1], values[2], values[3] ?? 1];
+          };
+          const background = element => {
+            const layers = [];
+            for (let node = element; node; node = node.parentElement || node.getRootNode().host) layers.push(rgba(getComputedStyle(node).backgroundColor));
+            return layers.reverse().reduce((under, over) => over.slice(0, 3).map((value, index) => value * over[3] + under[index] * (1 - over[3])), [255, 255, 255]);
+          };
+          const inspect = element => {
+            const style = getComputedStyle(element);
+            return {color: rgba(style.color), background: background(element), clipped: element.scrollWidth > element.clientWidth, css: Object.fromEntries(['display', 'height', 'width', 'borderRadius', 'fontSize', 'fontWeight', 'lineHeight', 'padding', 'borderColor'].map(key => [key, style[key]])), beforeContent: getComputedStyle(element, '::before').content};
+          };
+          return {badge: inspect(form.querySelector('.reference-number')), correct: inspect([...form.querySelectorAll('.explains_wrapper div')].find(node => node.textContent === 'Correct')), explanation: inspect(form.querySelector('.explanation'))};
+        });
+        assert.ok(parseFloat(styles.badge.css.borderRadius) > 0, 'The source reference keeps its pill shape');
+        assert.equal(styles.explanation.clipped, false, 'Feedback text fits its available width');
+        for (const [element, style] of Object.entries(styles)) {
+          style.contrast = contrast(style);
+          assert.ok(style.contrast >= 4.5, `${theme} ${name} ${stage} ${element} contrast: ${style.contrast}`);
+        }
+        captured[name] = styles;
+        records.push({theme, viewport: {width, height}, stage, styles});
+        await mkdir(receipts, {recursive: true});
+        await page.screenshot({path: new URL(`quiz-${theme}-${name}-${stage}.png`, receipts).pathname, animations: 'disabled'});
+      }
+      return captured;
+    };
+    await page.emulateMedia({colorScheme: theme});
+    await page.goto(`${origin}/preview/vol2/chapter/`); await open();
+    await study.locator('#quiz-button').click(); await study.locator('#section-quiz-btn').click();
+    await expect(study.locator('form[data-quiz]').last()).toContainText(quiz[0].question);
+    await study.locator('form[data-quiz] input[data-correct=true]').last().check();
+    await study.locator('button.socratiq-quiz-submit').last().click();
+    await expect(study.locator('#result').last()).toHaveText(grade);
+    let savedId;
+    await expect.poll(async () => {
+      savedId = await page.evaluate(({question, grade}) => new Promise((resolve, reject) => {
+        const opening = indexedDB.open('socratiqDB'); opening.onerror = () => reject(opening.error);
+        opening.onsuccess = () => {
+          const db = opening.result;
+          const reading = db.transaction('tinyMLDB_chats', 'readonly').objectStore('tinyMLDB_chats').getAll();
+          reading.onerror = () => {db.close(); reject(reading.error);};
+          reading.onsuccess = () => {db.close(); resolve(reading.result.find(row => row.html_content.includes(question) && row.html_content.includes(grade))?.id ?? null);};
+        };
+      }), {question: quiz[0].question, grade});
+      return savedId;
+    }, {timeout: 15000}).not.toBeNull();
+    const before = await snapshot('before-reload');
+    const restore = async stage => {
+      await page.reload(); await open();
+      await study.locator('#new-chat-btn').click();
+      await study.locator(`#chat-${savedId}`).click();
+      await expect(study.locator('#popover-container')).toBeHidden();
+      await expect(study.locator('#result').last()).toHaveText(grade);
+      const after = await snapshot(stage);
+      // The surrounding restored message can offer a different paragraph width;
+      // compare the pill itself and feedback paint/font properties exactly.
+      const expected = structuredClone(before), actual = structuredClone(after);
+      for (const viewport of Object.keys(before)) for (const property of ['width', 'height']) {
+        delete expected[viewport].explanation.css[property];
+        delete actual[viewport].explanation.css[property];
+      }
+      assert.deepEqual(actual, expected, `${stage} preserves the pill and readable feedback`);
+    };
+    await restore('after-reload');
+    // Construct the original saved-label template in this fixture's own row.
+    // Older conversations must remain readable without rewriting stored HTML.
+    const legacyLabels = await page.evaluate(id => new Promise((resolve, reject) => {
+      const opening = indexedDB.open('socratiqDB'); opening.onerror = () => reject(opening.error);
+      opening.onsuccess = () => {
+        const db = opening.result, transaction = db.transaction('tinyMLDB_chats', 'readwrite');
+        const store = transaction.objectStore('tinyMLDB_chats'), reading = store.get(id);
+        let changed = 0;
+        reading.onsuccess = () => {
+          const row = reading.result, template = document.createElement('template');
+          template.innerHTML = row.html_content;
+          const labels = template.content.querySelectorAll('.quiz-correct-label');
+          changed = labels.length;
+          for (const label of labels) {label.classList.remove('quiz-correct-label'); label.classList.add('text-green-500', 'bg-white');}
+          row.html_content = template.innerHTML; store.put(row);
+        };
+        transaction.oncomplete = () => {db.close(); resolve(changed);};
+        transaction.onerror = () => {db.close(); reject(transaction.error);};
+        transaction.onabort = () => {db.close(); reject(transaction.error);};
+      };
+    }), savedId);
+    assert.equal(legacyLabels, quiz.length);
+    await restore('after-legacy-label-reload');
+    await expect(study.locator('.explains_wrapper').getByText('Correct', {exact: true}).last()).not.toHaveClass(/quiz-correct-label/);
+    assert.deepEqual(errors, []);
+  });
+  await writeFile(new URL('quiz-presentation-contrast.json', receipts), JSON.stringify({classification: 'Measured computed colors and styles on constructed quiz responses before and after actual saved-chat restoration', records}, null, 2));
+});
+
 test('built settings, progress, graph, and help overlays receive actual desktop and phone clicks', {timeout: 90000}, async () => {
   await fixture(async ({page, origin, errors}) => {
     await page.goto(`${origin}/preview/vol2/chapter/`);
@@ -216,9 +365,22 @@ test('built settings, progress, graph, and help overlays receive actual desktop 
       await legacy.locator('#chat-quiz-btn').click();
       await expect(legacy.locator('.stats-modal')).toBeVisible();
       if (name === 'phone') {
-        const title = await legacy.locator('.stats-header h2').boundingBox();
-        const prompt = await legacy.locator('#badges-prompt').boundingBox();
-        const close = await legacy.locator('.stats-modal .close-modal').boundingBox();
+        for (const selector of ['.stats-header h2', '#badges-prompt', '.close-modal']) {
+          await expect(legacy.locator('.stats-modal').locator(selector)).toBeVisible();
+        }
+        // Read one settled frame. Separate protocol calls can sample different
+        // positions while the modal's opening transform is still moving.
+        const {title, prompt, close} = await legacy.locator('.stats-modal').evaluate(async modal => {
+          await new Promise(requestAnimationFrame);
+          const transitions = modal.getAnimations({subtree: true}).filter(animation =>
+            animation.effect?.getComputedTiming().iterations !== Infinity);
+          await Promise.all(transitions.map(animation => animation.finished.catch(() => {})));
+          const rect = selector => {
+            const {x, y, width, height} = modal.querySelector(selector).getBoundingClientRect();
+            return {x, y, width, height};
+          };
+          return {title: rect('.stats-header h2'), prompt: rect('#badges-prompt'), close: rect('.close-modal')};
+        });
         const overlaps = (a, b) => a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
         assert.equal(overlaps(title, prompt), false);
         assert.equal(overlaps(title, close), false);
