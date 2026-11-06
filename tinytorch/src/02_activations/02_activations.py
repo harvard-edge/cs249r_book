@@ -931,38 +931,41 @@ def analyze_activation_performance():
     _ = relu(test_data)
     _ = sigmoid(test_data)
 
+    # Use a high-resolution interval clock; wall-clock ticks can miss short runs.
     # Time each activation (multiple runs for accuracy)
     n_runs = 10
 
     # ReLU timing
-    start = time.time()
+    start = time.perf_counter()
     for _ in range(n_runs):
         _ = relu(test_data)
-    relu_time = (time.time() - start) / n_runs * 1000
+    relu_time = (time.perf_counter() - start) / n_runs * 1000
 
     # Sigmoid timing
-    start = time.time()
+    start = time.perf_counter()
     for _ in range(n_runs):
         _ = sigmoid(test_data)
-    sigmoid_time = (time.time() - start) / n_runs * 1000
+    sigmoid_time = (time.perf_counter() - start) / n_runs * 1000
 
     # Tanh timing
-    start = time.time()
+    start = time.perf_counter()
     for _ in range(n_runs):
         _ = tanh(test_data)
-    tanh_time = (time.time() - start) / n_runs * 1000
+    tanh_time = (time.perf_counter() - start) / n_runs * 1000
 
     # GELU timing
-    start = time.time()
+    start = time.perf_counter()
     for _ in range(n_runs):
         _ = gelu(test_data)
-    gelu_time = (time.time() - start) / n_runs * 1000
+    gelu_time = (time.perf_counter() - start) / n_runs * 1000
 
     print("\n📊 Activation Performance Results:")
-    print(f"   ReLU:    {relu_time:.2f}ms (baseline)")
-    print(f"   Sigmoid: {sigmoid_time:.2f}ms ({sigmoid_time/relu_time:.1f}x slower)")
-    print(f"   Tanh:    {tanh_time:.2f}ms ({tanh_time/relu_time:.1f}x slower)")
-    print(f"   GELU:    {gelu_time:.2f}ms ({gelu_time/relu_time:.1f}x slower)")
+    baseline = f"{relu_time:.2f}ms (baseline)" if relu_time > 0 else "unmeasurable (nonpositive clock interval)"
+    print(f"   ReLU:    {baseline}")
+    for name, elapsed in [("Sigmoid", sigmoid_time), ("Tanh", tanh_time), ("GELU", gelu_time)]:
+        duration = f"{elapsed:.2f}ms" if elapsed > 0 else "unmeasurable (nonpositive clock interval)"
+        ratio = f"{elapsed/relu_time:.1f}x slower" if elapsed > 0 and relu_time > 0 else "ratio unmeasurable"
+        print(f"   {name}: {duration} ({ratio})")
 
     print("\n" + "=" * 60)
     print("KEY INSIGHTS:")

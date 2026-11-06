@@ -1856,16 +1856,16 @@ def analyze_dataloader_performance():
             # Time data loading
             loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
 
-            start_time = time.time()
+            start_time = time.perf_counter()
             batch_count = 0
             for batch in loader:
                 batch_count += 1
-            end_time = time.time()
+            end_time = time.perf_counter()
 
             elapsed = end_time - start_time
-            throughput = size / elapsed if elapsed > 0 else float('inf')
+            throughput = f"{size / elapsed:,.0f} samples/sec" if elapsed > 0 else "throughput unmeasurable"
 
-            print(f"  Batch size {batch_size:3d}: {elapsed:.3f}s ({throughput:,.0f} samples/sec)")
+            print(f"  Batch size {batch_size:3d}: {elapsed:.3f}s ({throughput})")
 
     # Analyze shuffle overhead
     print("\n🔄 Shuffle Overhead Analysis:")
@@ -1879,21 +1879,23 @@ def analyze_dataloader_performance():
 
     # No shuffle
     loader_no_shuffle = DataLoader(dataset, batch_size=batch_size, shuffle=False)
-    start_time = time.time()
+    start_time = time.perf_counter()
     batches_no_shuffle = list(loader_no_shuffle)
-    time_no_shuffle = time.time() - start_time
+    time_no_shuffle = time.perf_counter() - start_time
 
     # With shuffle
     loader_shuffle = DataLoader(dataset, batch_size=batch_size, shuffle=True)
-    start_time = time.time()
+    start_time = time.perf_counter()
     batches_shuffle = list(loader_shuffle)
-    time_shuffle = time.time() - start_time
-
-    shuffle_overhead = ((time_shuffle - time_no_shuffle) / time_no_shuffle) * 100
+    time_shuffle = time.perf_counter() - start_time
 
     print(f"  No shuffle: {time_no_shuffle:.3f}s")
     print(f"  With shuffle: {time_shuffle:.3f}s")
-    print(f"  Shuffle overhead: {shuffle_overhead:.1f}%")
+    if time_no_shuffle > 0 and time_shuffle > 0:
+        shuffle_overhead = ((time_shuffle - time_no_shuffle) / time_no_shuffle) * 100
+        print(f"  Shuffle overhead: {shuffle_overhead:.1f}%")
+    else:
+        print("  Shuffle overhead: unmeasurable (nonpositive clock interval)")
 
     print("\n💡 Key Insights:")
     print("• Larger batch sizes reduce per-sample overhead")
@@ -1979,10 +1981,10 @@ def analyze_collation_overhead():
     for batch_size in [8, 32, 128, 512]:
         loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
 
-        start_time = time.time()
+        start_time = time.perf_counter()
         for batch in loader:
             pass  # Just iterate, measuring collation overhead
-        total_time = time.time() - start_time
+        total_time = time.perf_counter() - start_time
 
         batches = len(loader)
         time_per_batch = (total_time / batches) * 1000  # Convert to ms
