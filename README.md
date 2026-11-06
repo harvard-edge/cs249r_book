@@ -886,6 +886,7 @@ These people have improved the textbooks, the software, and the teaching materia
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/farhan523"><img src="https://avatars.githubusercontent.com/u/62025759?v=4?v=4?s=50" width="50px;" alt="Farhan Asghar"/><br /><sub><b>Farhan Asghar</b></sub></a><br />🪲 🧑‍💻 🎨 ✍️ 🧪</td>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/pelinbalci"><img src="https://avatars.githubusercontent.com/u/26349040?v=4?v=4?s=50" width="50px;" alt="Pelin Balcı"/><br /><sub><b>Pelin Balcı</b></sub></a><br />🎨 🧠 🧪</td>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/torrresagus"><img src="https://avatars.githubusercontent.com/u/69726650?v=4?v=4?s=50" width="50px;" alt="Agustin Torres"/><br /><sub><b>Agustin Torres</b></sub></a><br />🪲 🧑‍💻 ✍️</td>
+      <td align="center" valign="top" width="14.29%"><a href="https://github.com/Nishitha-Rajesh"><img src="https://avatars.githubusercontent.com/u/222974421?v=4?v=4?s=50" width="50px;" alt="Nishitha-Rajesh"/><br /><sub><b>Nishitha-Rajesh</b></sub></a><br />🧑‍💻 ✍️ 🧪</td>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/DIYA73"><img src="https://avatars.githubusercontent.com/u/174887077?v=4?v=4?s=50" width="50px;" alt="didi"/><br /><sub><b>didi</b></sub></a><br />🧑‍💻 🎨</td>
     </tr>
   </tbody>
