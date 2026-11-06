@@ -15,17 +15,17 @@ title: Phi-3-Mini INT8 vs INT4 Decode SLO on Jetson Orin
 scenario: You are sizing the memory footprint and decode latency for Phi-3-Mini (3.8B params) on an edge device with 102.4GB/s bandwidth. Assume 32 transformer layers, 2048 hidden dim, 32 attention heads, seq=512, batch=1.
 question: Is the 2-second P99 SLO met for 100 output tokens using either INT8 or INT4 quantization?
 details:
-  realistic_solution: With the weights already resident in accelerator memory during decode, per-token latency is governed by incremental KV-cache reads and writes rather than by rereading the full weight file. Using an INT8 KV cache, each decode step reads the existing K/V history and writes one new K/V entry, for about 7.37 GB of KV traffic across 100 generated tokens from a 512-token context. At 102.4 GB/s this is about 72 ms, far below the 2-second P99 SLO. INT8 and INT4 weight quantization therefore both meet the stated latency SLO under this decode model; INT4 is a memory-capacity choice, not a requirement for the 2-second token-generation latency.
+  realistic_solution: At batch 1, every decode step streams all of the weights from DRAM once ("resident" means resident in DRAM, not on-chip), plus the KV-cache reads and writes. For 100 tokens from a 512-token context, an INT8 KV cache adds about 7.37 GB of traffic, while the weights add 380 GB at INT8 or 190 GB at INT4. At 102.4 GB/s, INT8 takes about 3.78 s and misses the 2-second P99 SLO, while INT4 takes about 1.93 s and meets it only at peak bandwidth (about 2.4 s at 80% of peak), so INT4 is necessary but still needs headroom.
   common_mistake: |
-    **The Pitfall:** Calculating decode latency based only on model weight loading.
-    **The Rationale:** Candidates fail to include the KV cache memory bandwidth, which scales with sequence length and must be read every token.
-    **The Consequence:** Severe underestimation of token generation latency, leading to missed P99 SLOs in production.
+    **The Pitfall:** Counting only the KV-cache traffic because the weights are "resident".
+    **The Rationale:** Resident means resident in DRAM, not on-chip, so at batch 1 every decode step still streams all 3.8 GB (INT8) or 1.9 GB (INT4) of weights, about 25-50x the 74 MB of KV traffic per token at this context.
+    **The Consequence:** Concluding that INT8 meets a 2-second SLO that it misses by almost 2x.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Model: Phi-3-Mini (3.8B params).
+    - Model: Phi-3-Mini (3.8B params): INT8 weights = 3.8 GB, INT4 weights = 1.9 GB.
     - Hardware bandwidth: 102.4 GB/s.
     - Architecture: 32 layers, 2048 hidden dim, 32 heads, seq=512, batch=1.
-    - Decode assumption: model weights are resident; per-token bandwidth is KV read/write traffic.
+    - Decode assumption: weights are resident in DRAM, not on-chip, so at batch 1 every decode step streams all weights once, plus the KV read/write traffic.
     - KV precision: INT8 KV cache = 1 byte per K or V element.
 
     **Calculations:**
@@ -34,10 +34,12 @@ details:
     - For 100 generated tokens, average context read is about (512 + 611) / 2 = 561.5 tokens.
     - KV traffic per generated token = 131,072 * (561.5 reads + 1 write) = 73.7 MB.
     - Total KV traffic for 100 tokens = 73.7 MB * 100 = 7.37 GB.
-    - Bandwidth time = 7.37 GB / 102.4 GB/s = 0.072 s.
+    - Weight traffic for 100 tokens: INT8 = 100 * 3.8 GB = 380 GB; INT4 = 100 * 1.9 GB = 190 GB.
+    - INT8 decode time = (380 GB + 7.37 GB) / 102.4 GB/s = 3.78 s.
+    - INT4 decode time = (190 GB + 7.37 GB) / 102.4 GB/s = 1.93 s.
 
     **Conclusion & Interpretation:**
-    - **Result: Both INT8 and INT4 weights meet the 2-second P99 SLO when paired with INT8 KV.** The latency estimate is about 72 ms for KV traffic across 100 tokens; INT4 mainly reduces static weight memory.
+    - **Result: INT8 misses the 2-second P99 SLO (3.78 s); INT4 meets it only at peak bandwidth (1.93 s).** Weight streaming is 96-98% of decode traffic at this context length, so weight precision, not the KV cache, decides the SLO. At a more typical 80% of peak bandwidth INT4 takes about 2.4 s, so it needs extra headroom (shorter outputs, speculative decoding) to hold the P99.
 status: published
 provenance: imported
 requires_explanation: false

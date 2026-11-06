@@ -91,7 +91,7 @@ from matplotlib.lines import Line2D  # noqa: E402
 import mlsysim  # noqa: E402
 import mlsysim.physics as physics_pkg  # noqa: E402
 import paper_scenarios as ps  # noqa: E402
-from mlsysim import Hardware, Infrastructure, Models, Systems  # noqa: E402
+from mlsysim import Datasets, Hardware, Infrastructure, Models, Systems  # noqa: E402
 from mlsysim.core import provenance_catalog  # noqa: E402
 from mlsysim.core.provenance import Provenance  # noqa: E402
 from mlsysim.core.registry import Registry  # noqa: E402
@@ -133,16 +133,25 @@ from mlsysim.systems.types import Fleet, Node  # noqa: E402
 # published values live in paper_scenarios.py).
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Case S2: per-worker ImageNet JPEG rates (decode only; decode + augmentation)
-# and the host provisioning of four data-loader workers per GPU.
-S2_DECODE_IMG_PER_WORKER_S = 1_200
-S2_AUGMENT_IMG_PER_WORKER_S = 850
+# Case S2: per-worker ImageNet rates and the host provisioning of four data-loader workers per GPU.
+# The full-pipeline rate (decode, random crop and resize, flip, normalize) is measured, not assumed:
+# tf.data (Murray et al., PVLDB 2021, arXiv:2101.12127), Table 6, processes one ImageNet epoch CPU-only
+# in 110 s on a GCP n2-standard-64 (64 vCPUs = 32 physical cores); the PyTorch DataLoader takes 213 s.
+# One worker per physical core at the tf.data rate is the upper end of the measured range (~364 img/s;
+# 182 per vCPU, 188 per core with the DataLoader).
+S2_PREP_REF_EPOCH_S = 110.0
+S2_PREP_REF_PHYSICAL_CORES = 32
+S2_AUGMENT_IMG_PER_WORKER_S = (Datasets.ImageNet.training_examples.m_as("count")
+                               / S2_PREP_REF_EPOCH_S / S2_PREP_REF_PHYSICAL_CORES)
+S2_DECODE_IMG_PER_WORKER_S = 1_200  # decode-only rate, illustrative scenario input
 S2_WORKERS_PER_GPU = 4
-S2_SAMPLE_SIZE = Q_("150 KB")  # compressed ImageNet JPEG, scenario assumption
-# Appendix Scenario C: under-provisioned 16-worker pipeline at 40k images/s.
+S2_SAMPLE_SIZE = Datasets.ImageNet.mean_compressed_image_size  # archive size / training examples
+# Appendix Scenario C: under-provisioned 16-worker pipeline at 40k images/s; the accelerator step is
+# derived from that demand so the I/O and CPU checks describe the same stream.
 SC_DEMAND_IMG_PER_S = 40_000
 SC_WORKERS = 16
-SC_ACCEL_STEP = Q_("48 ms")
+SC_BATCH = 2048
+SC_ACCEL_STEP = (SC_BATCH / Q_(SC_DEMAND_IMG_PER_S, "1/s")).to("ms")
 # Bound printed in the conceptual-diagram footnotes ("full analysis completes
 # in <0.3 s on a laptop"); generation fails if a chain exceeds it.
 CLAIMED_CHAIN_BOUND_S = 0.3
@@ -853,13 +862,18 @@ def section_students(V: Values) -> None:
     V.pct("CaseSTwoScalingEffPct", d.scaling_efficiency, src + ".scaling_efficiency")
     V.num("CaseSTwoWorkersPerGpu", S2_WORKERS_PER_GPU, "scenario input")
     V.num("CaseSTwoWorkers", workers, "workers per GPU x fleet.total_accelerators")
-    V.num("CaseSTwoAugmentRate", S2_AUGMENT_IMG_PER_WORKER_S, "scenario input: decode + augmentation images/s per worker")
+    V.num("CaseSTwoAugmentRate", S2_AUGMENT_IMG_PER_WORKER_S,
+          "Datasets.ImageNet.training_examples / S2_PREP_REF_EPOCH_S / S2_PREP_REF_PHYSICAL_CORES (tf.data, Murray et al. 2021, Table 6)")
+    V.num("CaseSTwoPrepRefEpochS", S2_PREP_REF_EPOCH_S, "S2_PREP_REF_EPOCH_S (tf.data, Murray et al. 2021, Table 6)")
+    V.num("CaseSTwoPrepRefCores", S2_PREP_REF_PHYSICAL_CORES, "S2_PREP_REF_PHYSICAL_CORES (GCP n2-standard-64, 64 vCPUs)")
+    V.num("CaseSTwoCoresPerGpuNeeded", (batch / step.m_as("s")) / S2_AUGMENT_IMG_PER_WORKER_S / fleet.total_accelerators,
+          "CaseSTwoDemandImgPerS / CaseSTwoAugmentRate / GPUs")
     V.num("CaseSTwoDecodeRate", S2_DECODE_IMG_PER_WORKER_S, "scenario input: decode-only images/s per worker")
     V.num("CaseSTwoRawSupplyImgPerS", workers * S2_DECODE_IMG_PER_WORKER_S, "workers x decode-only rate")
     V.num("CaseSTwoEffectiveSupplyImgPerS", supply_aug, "workers x decode+augment rate")
     V.pct("CaseSTwoAugmentFactorPct", S2_AUGMENT_IMG_PER_WORKER_S / S2_DECODE_IMG_PER_WORKER_S, "augment rate / decode rate", nd=0)
     V.pct("CaseSTwoAccelUtilizationPct", tr.accelerator_utilization,
-          "TransformationModel().solve(batch_size=2048, 150 KB samples, effective CPU supply, step).accelerator_utilization", nd=0)
+          "TransformationModel().solve(batch_size=2048, Datasets.ImageNet.mean_compressed_image_size, effective CPU supply, step).accelerator_utilization", nd=0)
     V.num("CaseSTwoEndToEndEta", eta * tr.accelerator_utilization, "eta x accelerator_utilization", nd=2)
     V.text("CaseSTwoCpuBottleneck", "yes" if tr.is_bottleneck else "no", "TransformationModel(...).is_bottleneck")
 
@@ -1122,11 +1136,11 @@ def section_listings(V: Values) -> None:
 
     demand = Q_(SC_DEMAND_IMG_PER_S, "1/s") * S2_SAMPLE_SIZE  # Scenario C
     dm = DataModel().solve(workload_data_rate=demand, hardware=A100)
-    tr = TransformationModel().solve(batch_size=2048, sample_size_bytes=S2_SAMPLE_SIZE,
+    tr = TransformationModel().solve(batch_size=SC_BATCH, sample_size_bytes=S2_SAMPLE_SIZE,
                                      cpu_throughput=SC_WORKERS * S2_AUGMENT_IMG_PER_WORKER_S * S2_SAMPLE_SIZE / Q_("1 s"),
                                      accelerator_step_time=SC_ACCEL_STEP)
-    V.text("ScenarioCIoStalled", str(dm.is_stalled), "DataModel().solve(40,000/s x 150 KB, Hardware.Cloud.A100).is_stalled")
-    V.text("ScenarioCCpuStalled", str(tr.is_bottleneck), "TransformationModel().solve(2048, 150 KB, 16 x 850 img/s, 48 ms).is_bottleneck")
+    V.text("ScenarioCIoStalled", str(dm.is_stalled), "DataModel().solve(40,000/s x Datasets.ImageNet.mean_compressed_image_size, Hardware.Cloud.A100).is_stalled")
+    V.text("ScenarioCCpuStalled", str(tr.is_bottleneck), "TransformationModel().solve(2048, ImageNet mean image, 16 x CaseSTwoAugmentRate, 2048 / 40,000 per s).is_bottleneck")
     V.pct("ScenarioCAccelUtilizationPct", tr.accelerator_utilization, "TransformationModel(...).accelerator_utilization", nd=0)
 
     syn = SynthesisSolver().solve(llama8, Q_("30 ms"), precision="fp16")  # Scenario D

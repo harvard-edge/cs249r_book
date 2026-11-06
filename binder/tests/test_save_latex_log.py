@@ -126,3 +126,66 @@ def test_regenerate_auxiliary_files_stops_after_failed_pass(
 
     assert not save_latex_log._regenerate_auxiliary_files(tmp_path, "Book-Vol2")
     assert len(calls) == 2
+
+
+def test_chapter_postrender_regenerates_and_preserves_selected_target(tmp_path, monkeypatch):
+    books = tmp_path / "books"
+    script = books / "shared/scripts/save_latex_log.py"
+    script.parent.mkdir(parents=True)
+    monkeypatch.setattr(save_latex_log, "__file__", str(script))
+    monkeypatch.delenv("QUARTO_PROJECT_OUTPUT_DIR", raising=False)
+    (books / "_quarto.yml").write_text(
+        "# binder: config/_quarto-pdf-vol4.yml\n"
+        "project:\n  output-dir: _build/pdf-vol4/chapters/appendix_control\n"
+        "book:\n  output-file: appendix_control\n"
+    )
+    tex = books / "appendix_control.tex"
+    tex.write_text("Current chapter TeX")
+    stale = books / "Machine-Learning-Systems-Vol4.aux"
+    stale.write_text("Previous full-volume labels")
+    os.utime(stale, (1_700_000_000, 1_700_000_000))
+    calls = []
+
+    def regenerate(directory, stem):
+        calls.append((directory, stem))
+        (directory / f"{stem}.aux").write_text(r"\newlabel{fig-test}{{1.1}{7}{Caption}{figure.1}{}}")
+        (directory / f"{stem}.log").write_text("Current chapter log")
+        return True
+
+    monkeypatch.setattr(save_latex_log, "_regenerate_auxiliary_files", regenerate)
+    save_latex_log.main()
+    output = books / "_build/pdf-vol4/chapters/appendix_control"
+    assert calls == [(books, "appendix_control")]
+    assert "fig-test" in (output / "appendix_control.aux").read_text()
+    assert (output / "latex-build.log").read_text() == "Current chapter log"
+    assert not (books / "_build/pdf-vol4/Machine-Learning-Systems-Vol4.aux").exists()
+
+
+def test_failed_regeneration_does_not_preserve_stale_aux(tmp_path, monkeypatch):
+    books = tmp_path / "books"
+    script = books / "shared/scripts/save_latex_log.py"
+    script.parent.mkdir(parents=True)
+    monkeypatch.setattr(save_latex_log, "__file__", str(script))
+    monkeypatch.delenv("QUARTO_PROJECT_OUTPUT_DIR", raising=False)
+    (books / "_quarto.yml").write_text("project:\n  output-dir: _build/pdf-vol4\n")
+    (books / "index.tex").write_text("New source")
+    aux = books / "index.aux"
+    aux.write_text("Old labels")
+    os.utime(aux, (1_700_000_000, 1_700_000_000))
+    def failed_regeneration(*args):
+        # A failed LaTeX pass can leave a fresh but incomplete AUX behind.
+        aux.write_text("Partial labels from failed pass")
+        return False
+
+    monkeypatch.setattr(save_latex_log, "_regenerate_auxiliary_files", failed_regeneration)
+    with pytest.raises(RuntimeError, match="Could not regenerate current PDF AUX"):
+        save_latex_log.main()
+    assert not (books / "_build/pdf-vol4/Machine-Learning-Systems-Vol4.aux").exists()
+
+
+def test_newer_index_aux_does_not_belong_to_retained_chapter_tex(tmp_path):
+    tex = tmp_path / "appendix_control.tex"
+    tex.write_text("Chapter source")
+    index_aux = tmp_path / "index.aux"
+    index_aux.write_text("Unrelated metadata")
+    assert not save_latex_log._is_current_for_tex(index_aux, tex)

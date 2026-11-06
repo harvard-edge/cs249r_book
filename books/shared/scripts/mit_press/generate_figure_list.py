@@ -24,9 +24,22 @@ MANIFEST_HEADER = 'LATEX FIGURE MANIFEST'
 
 
 def find_figure_aux(quarto_dir: Path, output_dir: Path) -> Path | None:
-    """Find the current master AUX, including the post-render preserved copy."""
-    candidates = list(output_dir.glob('*.aux')) + list(quarto_dir.glob('*.aux'))
-    return max(candidates, key=lambda path: path.stat().st_mtime_ns, default=None)
+    """Find AUX for this target, no older than its retained TeX source."""
+    import yaml
+
+    config_path = quarto_dir / '_quarto.yml'
+    config = yaml.safe_load(config_path.read_text(encoding='utf-8')) if config_path.exists() else {}
+    stem = Path(str((config or {}).get('book', {}).get('output-file', 'index'))).stem
+    tex_candidates = [quarto_dir / f'{stem}.tex', quarto_dir / 'index.tex']
+    tex = max((p for p in tex_candidates if p.is_file()),
+              key=lambda p: p.stat().st_mtime_ns, default=None)
+    if tex is None:
+        return None
+    # The root intermediate must belong to the selected TeX job. The preserved
+    # copy is renamed to the configured output stem by save_latex_log.
+    candidates = [output_dir / f'{stem}.aux', tex.with_suffix('.aux')]
+    return max((p for p in candidates if p.is_file() and p.stat().st_mtime_ns >= tex.stat().st_mtime_ns),
+               key=lambda p: p.stat().st_mtime_ns, default=None)
 
 
 def parse_aux_figures(aux_file: Path) -> dict[str, dict[str, str]]:

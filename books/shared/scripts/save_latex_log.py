@@ -4,10 +4,13 @@
 Quarto deletes intermediate files after post-render scripts finish. Preserve
 the log for diagnostics and the AUX for trustworthy mapped chapter builds.
 """
+import os
 import re
 import shutil
 import subprocess
 from pathlib import Path
+
+import yaml
 
 OVERFULL_RE = re.compile(
     r"Overfull \\[hv]box \((\d+(?:\.\d+)?)pt too (?:wide|high)\).*?lines (\d+)"
@@ -37,6 +40,18 @@ def _active_volume(script_dir: Path) -> str | None:
     return direct.group(1) if direct else None
 
 
+def _active_target(script_dir: Path, volume: str) -> tuple[str, Path]:
+    """Honor Binder's selective-build stem and output directory."""
+    config = yaml.safe_load((script_dir / "_quarto.yml").read_text(encoding="utf-8")) or {}
+    stem = str(config.get("book", {}).get("output-file", VOLUME_OUTPUTS[volume]))
+    output = (
+        os.environ.get("QUARTO_PROJECT_OUTPUT_DIR")
+        or config.get("project", {}).get("output-dir")
+        or f"_build/pdf-{volume}"
+    )
+    return Path(stem).stem, script_dir / output
+
+
 def _find_intermediate(script_dir: Path, stem: str, suffix: str) -> Path | None:
     """Find a Quarto/LaTeX intermediate before post-render cleanup."""
     candidates = [script_dir / f"{stem}{suffix}", script_dir / f"index{suffix}"]
@@ -51,6 +66,7 @@ def _is_current_for_tex(intermediate: Path | None, tex_path: Path) -> bool:
     return bool(
         intermediate
         and intermediate.is_file()
+        and intermediate.with_suffix(".tex") == tex_path
         and tex_path.is_file()
         and intermediate.stat().st_mtime_ns >= tex_path.stat().st_mtime_ns
     )
@@ -96,8 +112,7 @@ def main():
         print("[latex-build] No active volume PDF config found")
         return
 
-    stem = VOLUME_OUTPUTS[volume]
-    out_dir = script_dir / "_build" / f"pdf-{volume}"
+    stem, out_dir = _active_target(script_dir, volume)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # Quarto 1.10 can remove current AUX/log files before project post-render
@@ -105,18 +120,20 @@ def main():
     # is equally unsafe. Regenerate unless the discovered AUX is at least as
     # new as the exact retained TeX.
     tex_path = _find_intermediate(script_dir, stem, ".tex") or script_dir / f"{stem}.tex"
-    aux_before = _find_intermediate(script_dir, stem, ".aux")
+    aux_before = tex_path.with_suffix(".aux")
+    regenerated = True
     if not _is_current_for_tex(aux_before, tex_path):
-        if _regenerate_auxiliary_files(script_dir, tex_path.stem):
+        if _regenerate_auxiliary_files(tex_path.parent, tex_path.stem):
             print(
                 "[latex-build] Regenerated converged AUX/log from retained TeX "
                 "(3 draft-mode passes)"
             )
         else:
+            regenerated = False
             print("[latex-build] WARNING: draft-mode AUX regeneration failed")
 
-    log_src = _find_intermediate(script_dir, stem, ".log")
-    if log_src is None:
+    log_src = tex_path.with_suffix(".log")
+    if not log_src.is_file():
         print("[latex-build] No LaTeX log found (non-PDF build or already cleaned)")
     else:
         log_dst = out_dir / "latex-build.log"
@@ -136,9 +153,12 @@ def main():
         else:
             print("[latex-build] No severe layout overflows detected")
 
-    aux_src = _find_intermediate(script_dir, stem, ".aux")
-    if aux_src is None:
-        print("[latex-build] WARNING: authoritative full-build AUX not found")
+    if not regenerated:
+        raise RuntimeError("Could not regenerate current PDF AUX from retained TeX")
+
+    aux_src = tex_path.with_suffix(".aux")
+    if not _is_current_for_tex(aux_src, tex_path):
+        print("[latex-build] WARNING: current authoritative AUX not found")
     else:
         aux_dst = out_dir / f"{stem}.aux"
         shutil.copy2(aux_src, aux_dst)

@@ -936,7 +936,8 @@ from mlsysim.fmt import fmt_multiple, check
 
 class EdgeInferenceSpan:
     # ┌── 1. LOAD ──────────────────────────────────────────────────────────────
-    rows = viz.load_series("vol2/11_edge_intelligence/data/edge_inference_benchmarks.csv").entries
+    _all_rows = viz.load_series("vol2/11_edge_intelligence/data/edge_inference_benchmarks.csv").entries
+    rows = [row for row in _all_rows if row["source_status"] == "source_matched"]
 
     # ┌── 2. EXECUTE ───────────────────────────────────────────────────────────
     min_energy_uj = min(row["energy_uj"] for row in rows)
@@ -951,48 +952,42 @@ class EdgeInferenceSpan:
     energy_span_mult_str = fmt_multiple(round(energy_ratio), precision=0)
 ```
 
-Reported benchmark observations compiled from MLPerf Tiny and vendor data illustrate the range of edge inference costs in @fig-edge-inference-landscape. The plotted observations span approximately `{python} EdgeInferenceSpan.energy_span_mult_str` in energy per inference, from Syntiant Core 2 keyword spotting to Jetson AGX Orin ResNet-50. Dedicated neural processors such as the Syntiant Core 2 and STM32N6 NPU occupy the sub-millijoule MCU and application-specific integrated circuit (ASIC) band. They use 30 to 444 $\Glyph{\mu}$J per inference across keyword spotting, visual wake words, and small-image classification, and keyword spotting finishes in under 5 ms. Google Coral appears near 4.8 mJ, and the Jetson AGX Orin appears near 15 mJ for ResNet-50. This full-range ratio mixes different workloads with different hardware, so it is not a matched-task efficiency comparison. Energy per inference does not determine battery lifetime on its own, because inference frequency, sleep power, sensing, radio use, and usable battery capacity also enter that budget.
+Published Syntiant Core 2 and STM32N6 results illustrate the cost of inference on dedicated neural processors in @fig-edge-inference-landscape [@syntiant2023mlperf; @bartoli2025benchmarking]. The plotted observations span approximately `{python} EdgeInferenceSpan.energy_span_mult_str` in reported energy, from Syntiant keyword spotting to STM32N6 visual wake word detection. The workloads and measurement boundaries differ: the STM32N6 results include pre-inference and post-inference work, while Syntiant reports MLPerf Tiny benchmark results. The span therefore does not establish a matched-task hardware-efficiency ranking. Energy per inference does not determine battery lifetime on its own, because inference frequency, sleep power, sensing, radio use, and usable battery capacity also enter that budget.
 
-For a learning device the figure sets the scale against which an update must be judged. One evaluation costs microjoules to millijoules, while each second of training inside the `{python} EdgeMobilePowerEnvelope.sustained_range_str` sustained envelope spends joules, more than a thousand keyword-spotting evaluations at the plotted 30 to 160 $\Glyph{\mu}$J. An update can therefore be a substantial energy cost, but its share of the device budget depends on how often training and inference run. Both paths need measurement over the same operating period.
+For a learning device the figure sets the scale against which an update must be judged. The plotted evaluations cost tens to hundreds of microjoules, while each second of training inside the `{python} EdgeMobilePowerEnvelope.sustained_range_str` sustained envelope spends joules, more than a thousand keyword-spotting evaluations at the plotted 30 to 160 $\Glyph{\mu}$J. An update can therefore be a substantial energy cost, but its share of the device budget depends on how often training and inference run. Both paths need measurement over the same operating period.
 
-::: {#fig-edge-inference-landscape fig-env="figure" fig-pos="htb" fig-cap="**The Edge Inference Landscape**: Reported inference latency and energy observations compiled from MLPerf Tiny and vendor benchmarks span approximately `{python} EdgeInferenceSpan.energy_span_mult_str` from minimum to maximum energy per inference; because the tiers run different workloads (keyword spotting and small-image tasks versus ResNet-50), the gap mixes hardware efficiency with workload size. Dedicated neural processors (Syntiant, STM32N6) achieve keyword spotting in under 5 ms at 30--160 microjoules, while edge GPUs (Jetson Orin) deliver sub-millisecond latency at 15 mJ." fig-alt="Log-log scatter plot of inference latency in milliseconds against energy per inference in microjoules. A light gray band labeled MCU/ASIC tier holds Syntiant Core 2 and STM32N6 NPU points from tens to a few hundred microjoules; a slightly darker gray band labeled edge accelerator tier holds Google Coral Edge TPU at a few thousand microjoules; the darkest gray band, labeled edge GPU tier, holds Jetson AGX Orin running ResNet-50 near 15000 microjoules at under one millisecond. A double-headed arrow at the left spans the minimum and maximum plotted energies, labeled approximately `{python} EdgeInferenceSpan.energy_span_mult_str` energy span."}
+::: {#fig-edge-inference-landscape fig-env="figure" fig-pos="htb" fig-cap="**Reported MCU Inference Costs**: Selected Syntiant Core 2 MLPerf Tiny results and STM32N6 measurements span approximately `{python} EdgeInferenceSpan.energy_span_mult_str` in reported energy [@syntiant2023mlperf; @bartoli2025benchmarking]. KWS denotes keyword spotting, VWW visual wake word detection, and IC image classification. The STM32N6 points include pre-inference and post-inference work. Different tasks, operating conditions, and measurement boundaries prevent a matched-task efficiency comparison." fig-alt="Log-log scatter plot of latency in milliseconds against reported energy in microjoules for Syntiant Core 2 and STM32N6 NPU configurations. Direct labels identify keyword spotting, visual wake words, and image classification. A vertical double-headed arrow marks the energy span of the plotted observations."}
 
 ```{python}
 #| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ EDGE INFERENCE LANDSCAPE (FIGURE)
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @fig-edge-inference-landscape—MLPerf Tiny/vendor benchmarks
+# │ Context: @fig-edge-inference-landscape—source-matched microcontroller-class results
 # │
-# │ Goal: Scatter latency vs energy for Syntiant, STM32N6, Coral, Jetson;
+# │ Goal: Scatter latency vs energy for Syntiant and STM32N6;
 # │       show the computed maximum/minimum energy span.
-# │ Show: Scatter by tier; log-scale axes; device labels.
+# │ Show: Log-scale axes; direct device and task labels.
 # │ How: devices (name, lat_ms, energy_uJ, tier); book_style.setup_plot().
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 # ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
-# │ Scatter latency vs energy for Syntiant, STM32N6, Coral, Jetson;
-import numpy as np
+# │ Scatter latency vs energy for Syntiant and STM32N6;
 import matplotlib.pyplot as plt
 from binder.tools.figures import style as book_style
-from matplotlib.patches import FancyBboxPatch
 
 fig, ax, COLORS, plt = book_style.setup_plot(figsize=(5.4, 4.6))
 
 # Data: (name, task, latency_ms, energy_uJ, tier)
 # Tier 0: MCU/ASIC (Syntiant, STM32N6)
-# Tier 1: Edge accelerator (Coral)
-# Tier 2: Edge GPU (Jetson)
 
 # ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
-# Sourced from vol2/11_edge_intelligence/data/edge_inference_benchmarks.csv (MLPerf Tiny + vendor data);
-# tiers: 0 = MCU/ASIC, 1 = edge accelerator, 2 = edge GPU.
+# Sourced from vol2/11_edge_intelligence/data/edge_inference_benchmarks.csv (Syntiant MLPerf Tiny + STM32N6 study);
+# Only source-matched observations enter the plot; unverified rows remain in the CSV for audit.
 devices = [(d["name"].replace("\\n", "\n"), d["latency_ms"], d["energy_uj"], int(d["tier"])) for d in EdgeInferenceSpan.rows]
 
-# Tiers are categories, not resources: one neutral hue for every point, and
-# gray bands whose tint deepens with energy per inference. Position and the
-# direct band labels distinguish the tiers.
-tier_colors = [COLORS["primary"]] * 3
+# Direct task labels distinguish observations without assigning hardware ranks.
+tier_colors = [COLORS["primary"]]
 
 # Plot each device
 
@@ -1012,8 +1007,8 @@ label_styles = {
         "va": "center",
         "xytext": (-9, 0),
     },
-    # Dropped below its dot so both lines sit inside the MCU/ASIC band.
-    "STM32N6 NPU\n(IC, high-perf)": {
+    # Place the two-line task label below its point.
+    "STM32N6 NPU\n(VWW, high-perf)": {
         "ha": "right",
         "va": "center",
         "xytext": (-9, -8),
@@ -1028,16 +1023,6 @@ label_styles = {
         "ha": "center",
         "va": "top",
         "xytext": (-4, -9),
-    },
-    "Google Coral\nEdge TPU": {
-        "ha": "right",
-        "va": "center",
-        "xytext": (-10, 0),
-    },
-    "Jetson AGX Orin\n(ResNet-50)": {
-        "ha": "left",
-        "va": "center",
-        "xytext": (9, 0),
     },
 }
 
@@ -1066,24 +1051,7 @@ for name, lat, energy, tier in devices:
         va=style["va"],
     )
 
-# Draw approximate tier boundary regions
-from matplotlib.patches import FancyBboxPatch
-
-# Very light neutral ramp (about 246/240/234 gray) deepening with energy so
-# the bands recede behind the data; hairline grid-gray edges mark their extent.
-tier_bands = [(20, 600, 0.06), (2000, 8000, 0.10), (10000, 25000, 0.14)]
-for lo, hi, a in tier_bands:
-    ax.axhspan(lo, hi, xmin=0, xmax=1, alpha=a, color=COLORS["secondary"], lw=0, zorder=0)
-    for edge in (lo, hi):
-        ax.axhline(edge, color=COLORS["grid"], lw=0.4, zorder=1)
-
-# Tier labels on right margin
-
 # ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
-ax.text(20, 400, "MCU/ASIC tier", fontsize=10, color=COLORS["primary"], fontweight="bold", ha="right", va="center")
-ax.text(20, 4800, "Edge accelerator tier", fontsize=10, color=COLORS["primary"], fontweight="bold", ha="right", va="center")
-ax.text(20, 15000, "Edge GPU tier", fontsize=10, color=COLORS["primary"], fontweight="bold", ha="right", va="center")
-
 # Annotate the full plotted energy span using the same extrema as the prose.
 ax.annotate(
     "",
@@ -1093,7 +1061,7 @@ ax.annotate(
 )
 ax.text(
     0.39,
-    1100,
+    110,
     f"≈{EdgeInferenceSpan.energy_span_mult_str}\nenergy span",
     fontsize=10,
     fontweight="bold",
@@ -1104,14 +1072,14 @@ ax.text(
     zorder=4,
 )
 
-# The tier bands carry their own labels, so no legend is needed
+# Every point is labeled directly.
 
 ax.set_xscale("log")
 ax.set_yscale("log")
 ax.set_xlabel("Inference latency (ms)")
 ax.set_ylabel("Energy per inference (μJ)")
 ax.set_xlim(0.3, 30)
-ax.set_ylim(15, 30000)
+ax.set_ylim(20, 800)
 ax.grid(axis="x", visible=False)
 for side in ("top", "right"):
     ax.spines[side].set_visible(False)
