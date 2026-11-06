@@ -76,8 +76,11 @@ except ImportError:
 # invoked standalone from elsewhere.
 WORKFLOW_DIR = Path(__file__).resolve().parents[1] / "workflows"
 
-# Match ${{ vars.NAME }} or ${{ secrets.NAME }} with optional whitespace.
-UNSAFE_PATTERN = re.compile(r"\$\{\{\s*(vars|secrets)\.(\w+)\s*\}\}")
+# Match ${{ ... (vars|secrets).NAME ... }} expressions.
+# For vars.NAME, an explicit `|| '...'` literal default is fork-safe; bare vars.NAME or any secrets.NAME (except GITHUB_TOKEN) is unsafe.
+EXPR_PATTERN = re.compile(r"\$\{\{([^}]*)\}\}")
+TOKEN_PATTERN = re.compile(r"\b(vars|secrets)\.(\w+)\b")
+SAFE_VAR_FALLBACK_PATTERN = re.compile(r"^\s*vars\.\w+\s*\|\|\s*('[^']*'|\"[^\"]*\")\s*$")
 
 # GITHUB_TOKEN is the one secret that IS available on fork PRs.
 ALWAYS_AVAILABLE_SECRETS = {"GITHUB_TOKEN"}
@@ -148,13 +151,17 @@ def find_violations(path: Path) -> list[tuple[int, str, str]]:
         if stripped_leading.startswith("#"):
             continue
         code_part = strip_comment(raw_line)
-        for match in UNSAFE_PATTERN.finditer(code_part):
-            kind = match.group(1)  # "vars" or "secrets"
-            name = match.group(2)
-            if kind == "secrets" and name in ALWAYS_AVAILABLE_SECRETS:
+        for expr_match in EXPR_PATTERN.finditer(code_part):
+            expr_body = expr_match.group(1)
+            if SAFE_VAR_FALLBACK_PATTERN.match(expr_body):
                 continue
-            token = f"{kind}.{name}"
-            violations.append((lineno, token, raw_line.strip()))
+            for match in TOKEN_PATTERN.finditer(expr_body):
+                kind = match.group(1)  # "vars" or "secrets"
+                name = match.group(2)
+                if kind == "secrets" and name in ALWAYS_AVAILABLE_SECRETS:
+                    continue
+                token = f"{kind}.{name}"
+                violations.append((lineno, token, raw_line.strip()))
     return violations
 
 

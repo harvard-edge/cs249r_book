@@ -13,7 +13,7 @@ async def _():
     if sys.platform == "emscripten":
         import micropip
         await micropip.install(["pydantic", "pint", "plotly", "pandas"], keep_going=False)
-        await micropip.install("../../wheels/mlsysim-0.3.0-py3-none-any.whl", keep_going=False)
+        await micropip.install("../../wheels/mlsysim-0.3.1-py3-none-any.whl", keep_going=False)
         await micropip.install("../../wheels/mlsysbook_labs-0.1.0-py3-none-any.whl", keep_going=False)
     else:
         labs_dir = Path(__file__).resolve().parents[1]
@@ -55,10 +55,12 @@ def _(mo):
 
 
 @app.cell
-def _(mo, set_evidence):
+def _(ledger, mo, set_evidence):
+    from mlsysbook_labs.contexts import preferred_context as _preferred_context
+    _track_options = {"TinyML": "tinyml", "Mobile": "mobile", "Edge": "edge", "Cloud": "cloud"}
     track = mo.ui.dropdown(
-        {"TinyML": "tinyml", "Mobile": "mobile", "Edge": "edge", "Cloud": "cloud"},
-        value="TinyML", label="Fleet track", on_change=lambda _value: set_evidence({}),
+        _track_options,
+        value=next(label for label, context in _track_options.items() if context == _preferred_context(ledger)), label="Deployment context", on_change=lambda _value: set_evidence({}),
     )
     return (track,)
 
@@ -107,13 +109,15 @@ def _(algorithm_cases, mo, overlap_bucket_options, routing_cases, track_id):
         {"FP8 transport": "fp8", "Top-k with error feedback": "topk_error_feedback", "Naive top-k": "topk_naive"},
         value="FP8 transport", label="Compression candidate",
     )
+    e_residual_steps = mo.ui.slider(start=5, stop=20, step=1, value=5, label="Residual trace horizon (steps)")
+    e_reset_residual = mo.ui.checkbox(value=False, label="Discard carried residual after step 3")
     e_decision = mo.ui.radio(
         {"Adopt tested candidate": "adopt", "Keep uncompressed baseline": "keep_baseline"},
         label="Compression decision",
     )
     return (
         a_payload_case, b_oversubscription, b_skew, c_plan, d_algorithm,
-        d_bucket, e_decision, e_method,
+        d_bucket, e_decision, e_method, e_residual_steps, e_reset_residual,
     )
 
 
@@ -164,14 +168,14 @@ def _(mo, track_id):
     rationale = mo.ui.text_area(
         label="Design rationale",
         placeholder="Connect saved payload, topology, overlap, and quality evidence.",
-    )
+     debounce=False)
     return final_choice, final_rejected, final_risk, final_trigger, rationale
 
 
 @app.cell
 def _(
     a_payload_case, algorithm_cases, algorithm_crossover, b_oversubscription,
-    b_skew, compression_comparison, d_algorithm, d_bucket, e_method,
+    b_skew, compression_comparison, d_algorithm, d_bucket, e_method, e_residual_steps, e_reset_residual,
     overlap_bucket_options, overlap_timeline, routing_cases, semantic_exchange,
     topology_comparison, track_id,
 ):
@@ -199,7 +203,7 @@ def _(
     d_result = overlap_timeline(
         track_id, bucket_mb=d_choice["bucket_mb"], algorithm=d_algorithm.value,
     )
-    e_result = compression_comparison(track_id, method=e_method.value)
+    e_result = compression_comparison(track_id, method=e_method.value, residual_steps=e_residual_steps.value, reset_residual=e_reset_residual.value)
     return (
         a_alternatives, a_baseline, a_choice, a_result, b_choice, b_result,
         c_result, d_baseline, d_choice, d_result, e_result,
@@ -211,7 +215,7 @@ def _(
     a_alternatives, a_baseline, a_choice, a_prediction, a_result, b_choice,
     b_oversubscription, b_prediction, b_result, b_skew, c_plan, c_prediction,
     c_result, capture_evidence, d_algorithm, d_baseline, d_bucket, d_choice,
-    d_prediction, d_result, e_decision, e_method, e_prediction, e_result, mo,
+    d_prediction, d_result, e_decision, e_method, e_prediction, e_result, e_residual_steps, e_reset_residual, mo,
     set_evidence, track_id,
 ):
     def store(part, capture):
@@ -221,7 +225,7 @@ def _(
     b_upstream = {"destination_case": b_skew.value, "hotspot_fraction": b_choice["hotspot_fraction"], "oversubscription": b_oversubscription.value}
     c_upstream = {"fixture": c_result["fixture"], "decision": c_plan.value}
     d_upstream = {"bucket_policy": d_bucket.value, "bucket_mb": d_choice["bucket_mb"], "algorithm": d_algorithm.value}
-    e_upstream = {"method": e_method.value, "decision": e_decision.value}
+    e_upstream = {"method": e_method.value, "decision": e_decision.value, "residual_steps": e_residual_steps.value, "reset_residual": e_reset_residual.value}
 
     a_capture = mo.ui.button(
         label="Capture crossover evidence", kind="success",
@@ -288,6 +292,13 @@ def _(
 
 @app.cell
 def _(ACADEMIC_LAB_CSS, LAB_CSS, mo, profile, track):
+    from mlsysbook_labs.notebook import (
+        notebook_header as _course_header, notebook_shell as _course_shell,
+        notebook_learning_map as _course_learning_map,
+        notebook_scenario as _course_scenario,
+    )
+    from mlsysbook_labs.learning_paths import get_learning_path as _course_path
+    from mlsysbook_labs import get_lab_metadata as _course_metadata
     css = mo.Html("""
     <style>
     .collective-head{background:linear-gradient(135deg,#101827,#312e81);color:white;border-radius:14px;padding:clamp(18px,4vw,32px);margin-bottom:12px}
@@ -295,29 +306,27 @@ def _(ACADEMIC_LAB_CSS, LAB_CSS, mo, profile, track):
     .collective-head h1{font-size:clamp(1.7rem,5vw,2.7rem);line-height:1.05;margin:16px 0 8px}.collective-head p{color:#e0e7ff;max-width:780px}
     .collective-meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(175px,1fr));gap:9px;margin-top:17px}.collective-meta div{background:#ffffff14;border:1px solid #ffffff26;padding:9px 11px;border-radius:8px}
     .collective-note{color:#475569;font-size:.9rem;line-height:1.5;margin:0}.saved{border-left:4px solid #2ca02c;background:#f0fdf4;padding:9px 12px;border-radius:7px}
-    .metric-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}.metric{border:1px solid #dbe4ee;border-radius:9px;padding:10px;background:#fff}.metric b{display:block;font-size:1.15rem;color:#172554}.metric small{color:#64748b}
     .lab-hud{display:flex;align-items:center;flex-wrap:wrap;gap:10px;background:#101827!important;color:#fff;padding:14px 18px;border-radius:9px}.lab-hud .hud-label{color:#a7b9cf}.lab-hud .hud-value{color:#fff}.lab-hud .hud-active{color:#86efac}
     .failure-card{border-left:4px solid #CB202D;background:#fff1f2;padding:10px 12px;border-radius:7px}
-    @media(max-width:520px){.collective-head{border-radius:9px;margin-top:30px}.collective-meta,.metric-row{grid-template-columns:1fr}}
+    @media(max-width:520px){.collective-head{border-radius:9px;margin-top:30px}.collective-meta{grid-template-columns:1fr}}
     </style>""")
-    header = mo.Html(f"""
-    <section class="collective-head">
-      <div class="collective-top"><span>VOLUME II · LAB 05</span><span>ABOUT 50 MIN</span></div>
-      <h1>Collective Communication</h1>
-      <p>When should a fleet change the operation, schedule, topology, bucket timeline, or payload it sends?</p>
-      <div class="collective-meta">
-        <div><b>Participants</b><br>{profile['participants']} {profile['participant_kind']}</div>
-        <div><b>Context</b><br>{profile['fleet_semantics']}</div>
-        <div><b>Deliverable</b><br>Communication design review</div>
-      </div>
-    </section>""")
+    header = _course_header(_course_metadata("vol2/lab_05_collective_communication.py"), 'When should a fleet change the operation, schedule, topology, bucket timeline, or payload it sends?')
     _fleet_note = (
         "Endpoint uploads remain separate from gateway or backend collectives."
         if profile["endpoint_count"] > 0
         else "Multi-node accelerator workers synchronize gradients directly without endpoint upload stages."
     )
     note = mo.Html(f'<p class="collective-note">{_fleet_note} Results are analytical or simulated from illustrative fleet workloads; matched calibration and quality fixtures are labeled where used.</p>')
-    mo.vstack([LAB_CSS, ACADEMIC_LAB_CSS, css, header, track, note], gap=0.5)
+    _course_shell([
+        LAB_CSS,
+        ACADEMIC_LAB_CSS,
+        css,
+        header,
+        track,
+        _course_scenario(_course_path('vol2', 5), track=track.value, volume=2),
+        note,
+        _course_learning_map(_course_path('vol2', 5))
+    ], gap=0.5, volume=2)
     return
 
 
@@ -333,10 +342,17 @@ def _(
     audit_evidence, b_capture, b_oversubscription, b_prediction, b_result,
     b_skew, b_upstream, c_capture, c_plan, c_prediction, c_result, c_upstream,
     d_algorithm, d_bucket, d_capture, d_prediction, d_result, d_upstream,
-    e_capture, e_decision, e_method, e_prediction, e_result, e_upstream,
+    e_capture, e_decision, e_method, e_prediction, e_result, e_upstream, e_residual_steps, e_reset_residual,
     final_choice, final_rejected, final_risk, final_trigger, get_evidence, go,
     mo, rationale, track_id,
 ):
+    _saved_prediction_widgets = {'A': a_prediction, 'B': b_prediction, 'C': c_prediction, 'D': d_prediction, 'E': e_prediction}
+    from mlsysbook_labs.notebook import notebook_prediction_label as _read_prediction
+    from mlsysbook_labs.notebook import notebook_tab_hint as _part_tabs_hint, notebook_shell as _lesson_shell
+    from mlsysbook_labs.notebook import notebook_part_reflection as _concept_reflection
+    from mlsysbook_labs.notebook import notebook_cards as _metric_cards
+    from mlsysbook_labs.learning_paths import get_learning_path as _reflection_path
+    _reflection_contract = _reflection_path('vol2', 5)
     captures = get_evidence()
     upstream = {"A": a_upstream, "B": b_upstream, "C": c_upstream, "D": d_upstream, "E": e_upstream}
     audit = audit_evidence(
@@ -350,11 +366,8 @@ def _(
         )
 
     def metrics(items):
-        cards = "".join(
-            f'<div class="metric"><small>{label}</small><b>{value}</b><small>{detail}</small></div>'
-            for label, value, detail in items
-        )
-        return mo.Html(f'<div class="metric-row">{cards}</div>')
+        return _metric_cards([(f"{label} · {detail}", str(value), "neutral")
+                              for label, value, detail in items])
 
     def saved(part):
         capture = captures.get(part)
@@ -366,7 +379,7 @@ def _(
                 kind="danger",
             )
         snapshot = capture.to_dict()
-        return mo.Html(f'<div class="saved"><b>Saved snapshot</b> · original prediction: {snapshot["prediction"]}<br><small>Track {snapshot["track"]}; later controls do not rewrite this record.</small></div>')
+        return mo.Html(f'<div class="saved"><b>Saved snapshot</b> · original prediction: {_read_prediction(_saved_prediction_widgets[part], value=snapshot["prediction"])}<br><small>Track {snapshot["track"]}; later controls do not rewrite this record.</small></div>')
 
     def build_part_a():
         intro = mo.md("### A · When does ring versus tree preference reverse? (8 min)\nChoose a payload regime, then predict the winner. The instrument separates startup rounds from bytes transferred.")
@@ -376,17 +389,17 @@ def _(
         fig.add_bar(name="Startup", x=["Ring", "Tree"], y=[a_result["ring"]["startup_ms"], a_result["tree"]["startup_ms"]], marker_color=COLORS["OrangeLine"])
         fig.add_bar(name="Transfer", x=["Ring", "Tree"], y=[a_result["ring"]["transfer_ms"], a_result["tree"]["transfer_ms"]], marker_color=COLORS["BlueLine"])
         fig.update_layout(barmode="stack", height=285, yaxis_title="Analytical time (ms)", legend_orientation="h")
-        return mo.vstack([
+        return mo.vstack([mo.vstack([
             intro, a_payload_case, a_prediction, apply_plotly_theme(fig),
             metrics([
                 ("Payload", f"{a_result['payload_mb']:.3g} MB", "per participant"),
                 ("Crossover", f"{a_result['crossover_mb']:.3g} MB", "same process group"),
                 ("Winner", a_result["winner"].title(), "analytical comparison"),
             ]),
-            mo.callout(mo.md(f"You predicted **{a_prediction.value}**. The selected payload favors **{a_result['winner']}** because startup and transfer use different counts."), kind="info"),
+            mo.callout(mo.md(f"You predicted **{_read_prediction(a_prediction)}**. The selected payload favors **{a_result['winner']}** because startup and transfer use different counts."), kind="info"),
             a_capture, saved("A"),
             mo.accordion({"Calculation Notes": mo.md("Ring uses `2(N−1)` startups and transfers `2(N−1)M/N`. The simple tree uses `2 ceil(log₂N)` startups and transfers a full message at each level. MLSysIM computes their exact intersection.")}),
-        ])
+        ]), _concept_reflection(_reflection_contract, "A")])
 
     def build_part_b():
         intro = mo.md("### B · Does this workload reduce values or route records? (8 min)\nKeep each participant’s payload fixed. Change destination skew and fabric pressure, then identify the routed exchange’s active bound.")
@@ -398,17 +411,17 @@ def _(
             marker_color=[COLORS["BlueLine"], COLORS["OrangeLine"]],
         )])
         fig.update_layout(height=270, yaxis_title="Analytical time (ms)", showlegend=False)
-        return mo.vstack([
+        return mo.vstack([mo.vstack([
             intro, mo.hstack([b_skew, b_oversubscription], widths="equal", wrap=True),
             b_prediction, apply_plotly_theme(fig),
             table([
                 {"Operation": "Reduction", "Result semantics": "Same aggregate everywhere", "Time (ms)": b_result["reduction"]["time_ms"]},
                 {"Operation": "Routed exchange", "Result semantics": "Different destination records", "Time (ms)": b_result["routed"]["time_ms"]},
             ]),
-            mo.callout(mo.md(f"You predicted **{b_prediction.value}**. The routed case is limited by **{b_result['routed']['limiting_bound']}**. AllReduce cannot produce destination-specific outputs."), kind="info"),
+            mo.callout(mo.md(f"You predicted **{_read_prediction(b_prediction)}**. The routed case is limited by **{b_result['routed']['limiting_bound']}**. AllReduce cannot produce destination-specific outputs."), kind="info"),
             b_capture, saved("B"),
             mo.accordion({"Calculation Notes": mo.md(f"Routed traffic is bounded by sender injection, the hottest receiver, and bisection capacity. Oversubscription lowers bisection capacity. {b_result['endpoint_note']}")}),
-        ])
+        ]), _concept_reflection(_reflection_contract, "B")])
 
     def build_part_c():
         intro = mo.md("### C · When does topology change the winning schedule? (9 min)\nCompare a flat inter-group ring with local reduce-scatter, an inter-group ring, and local all-gather. The fixture matches algorithm, group size, and placement.")
@@ -420,7 +433,9 @@ def _(
         fig.update_layout(barmode="group", height=285, yaxis_title="Time (ms)", legend_orientation="h")
         unsupported = c_plan.value is not None and c_plan.value != "hold" and c_plan.value != c_result["calibrated_winner"]
         consequence = mo.Html('<div class="failure-card"><b>Decision consequence</b><br>The selected topology is slower in the matched illustrative calibration. The report will preserve this unsupported choice.</div>') if unsupported else mo.callout(mo.md("The plan follows current evidence, or deliberately waits for new matched measurements."), kind="success")
-        return mo.vstack([
+        if c_plan.value is None:
+            consequence = mo.callout(mo.md("Choose a topology decision, or explicitly hold for new matched measurements."), kind="info")
+        return mo.vstack([mo.vstack([
             intro, c_prediction, apply_plotly_theme(fig),
             metrics([
                 ("Analytical winner", c_result["analytical_winner"].title(), "unit-aware model"),
@@ -429,7 +444,7 @@ def _(
             ]),
             c_plan, consequence, c_capture, saved("C"),
             mo.accordion({"Calculation Notes": mo.md("The hierarchical path prices all three phases separately. Calibration factors come from the supplied illustrative fixture, not a live product benchmark.")}),
-        ])
+        ]), _concept_reflection(_reflection_contract, "C")])
 
     def build_part_d():
         phase_label = d_result.get("compute_phase", "backward pass")
@@ -447,7 +462,7 @@ def _(
             )
         fig.add_vline(x=d_result["backward_end_ms"], line_dash="dash", line_color=COLORS["RedLine"])
         fig.update_layout(height=250, xaxis_title=f"{phase_label.capitalize()} timeline (ms)", showlegend=False, barmode="overlay")
-        return mo.vstack([
+        return mo.vstack([mo.vstack([
             intro, mo.hstack([d_bucket, d_algorithm], widths="equal", wrap=True),
             d_prediction, apply_plotly_theme(fig),
             metrics([
@@ -455,13 +470,13 @@ def _(
                 ("Exposed", f"{d_result['exposed_communication_ms']:.2f} ms", "extends the step"),
                 ("Launches", str(d_result["bucket_count"]), "serialized buckets"),
             ]),
-            mo.callout(mo.md(f"You predicted **{d_prediction.value}**. The readiness schedule hides **{d_result['overlap_fraction']:.1%}** of collective work; asynchronous launch alone did not determine this result."), kind="info"),
+            mo.callout(mo.md(f"You predicted **{_read_prediction(d_prediction)}**. The readiness schedule hides **{d_result['overlap_fraction']:.1%}** of collective work; asynchronous launch alone did not determine this result."), kind="info"),
             d_capture, saved("D"),
             mo.accordion({"Calculation Notes": mo.md(f"Each bucket starts at the later of its final readiness time and network availability. Exposed time is the final network tail beyond {phase_label} completion. Smaller buckets launch earlier but pay more startup rounds.")}),
-        ])
+        ]), _concept_reflection(_reflection_contract, "D")])
 
     def build_part_e():
-        intro = mo.md("### E · When is sending fewer bytes worthwhile? (9 min)\nTest one codec against the uncompressed baseline. The instrument includes encoding, decoding, communication, and supplied steps-to-target evidence.")
+        intro = mo.md("### E · When is sending fewer bytes worthwhile? (9 min)\nFirst test why compression needs memory: compare naive rounding with a carried residual, then discard that state. Separately compare a codec against uncompressed execution using supplied steps-to-target evidence.")
         if e_prediction.value is None:
             return mo.vstack([intro, e_method, e_prediction])
         fig = go.Figure()
@@ -473,19 +488,40 @@ def _(
         else:
             consequence = mo.Html(f'<div class="failure-card"><b>Quality target missed</b><br>The supplied outcome remains {e_result["quality_gap_pp"]:.1f} percentage points below target. A faster step has no valid time-to-target.</div>')
         prediction_feedback = mo.callout(
-            mo.md(f"You predicted **{e_prediction.value}**. The resulting outcome is **{e_result['outcome']}** to target."),
+            mo.md(f"You predicted **{_read_prediction(e_prediction)}**. The resulting outcome is **{e_result['outcome']}** to target."),
             kind="info" if e_prediction.value == e_result["outcome"] else "warn",
         )
-        return mo.vstack([
+        return mo.vstack([mo.vstack([
             intro, e_method, e_prediction, apply_plotly_theme(fig),
             prediction_feedback,
+            mo.md("#### What happens to updates too small to transmit?\nThis separate scalar rounding study follows the chapter example. It is not a top-k codec benchmark or a measured convergence result. A signed residual can remain after the last step: transmitted updates alone need not equal the true total."),
+            mo.hstack([e_residual_steps, e_reset_residual], widths="equal", wrap=True),
+            table([
+                {"Step": row["step"], "Gradient": row["gradient"],
+                 "Carried in": round(row["entering_residual"], 3),
+                 "Sent": row["transmitted"], "Carried out": round(row["retained_residual"], 3),
+                 "Discarded": round(row["discarded_this_step"], 3),
+                 "True cumulative": round(row["cumulative_true"], 3),
+                 "Sent cumulative": round(row["cumulative_transmitted"], 3)}
+                for row in e_result["mechanism_study"]["feedback"]["rows"]
+            ]),
+            table([
+                {"Policy": label, "True total": round(trace["true_total"], 3),
+                 "Sent": round(trace["transmitted_total"], 3),
+                 "Retained": round(trace["retained_residual"], 3),
+                 "Discarded": round(trace["discarded_total"], 3)}
+                for label, trace in [("Naive rounding", e_result["mechanism_study"]["naive"]),
+                                     ("Error feedback", e_result["mechanism_study"]["feedback"])]
+            ]),
+            mo.callout(mo.md("**Explain the accounting:** true total = sent + retained residual + discarded information. Resetting local state discards information even if the wire codec is unchanged. Keeping the residual preserves this identity; it does not establish training quality."), kind="warn" if e_reset_residual.value else "info"),
+            mo.md("#### Does this candidate repay its execution and convergence cost?"),
             table([
                 {"Plan": "Uncompressed", "Payload (MB)": e_result["payload_mb"], "Step (ms)": e_result["baseline_step_ms"], "Time to target (ms)": e_result["baseline"]["time_to_target_ms"]},
                 {"Plan": e_result["method"], "Payload (MB)": e_result["compressed_payload_mb"], "Step (ms)": e_result["step_ms"], "Time to target (ms)": e_result["time_to_target_ms"]},
             ]),
             consequence, e_decision, e_capture, saved("E"),
-            mo.accordion({"Calculation Notes": mo.md("Encoding scans the original payload; decoding processes the compressed payload. Steps-to-target and target attainment come from a supplied illustrative outcome fixture, not a hardware score or universal quality equation.")}),
-        ])
+            mo.accordion({"Calculation Notes": mo.md("Encoding scans the original payload; decoding processes the compressed payload. Steps-to-target and target attainment come from a supplied illustrative outcome fixture, not a hardware score or universal quality equation. The separate rounding trace evolves e_next = g + e − round(g + e), repeats the chapter gradient sequence, and uses nearest-even rounding. It cannot validate these supplied convergence outcomes.")}),
+        ]), _concept_reflection(_reflection_contract, "E")])
 
     def build_synthesis():
         rows = []
@@ -496,7 +532,7 @@ def _(
                 state = "STALE" if part in audit.stale or (part, part) in audit.identical_pairs else "CURRENT"
             rows.append({
                 "Part": part,
-                "Original prediction": capture.to_dict()["prediction"] if capture else "—",
+                "Original prediction": _read_prediction(_saved_prediction_widgets[part], value=(capture.to_dict()["prediction"] if capture else "—")),
                 "Evidence": state,
             })
         quantified = []
@@ -544,8 +580,16 @@ def _(
         "C · Topology": build_part_c(), "D · Overlap": build_part_d(),
         "E · Compression": build_part_e(), "Synthesis": build_synthesis(),
     })
-    tabs
+    _lesson_shell([_part_tabs_hint(), tabs], volume=2)
     return audit, complete
+
+
+@app.cell
+def _():
+    from mlsysbook_labs.notebook import notebook_shell as _submit_shell, notebook_submission as _submit_guide
+    from mlsysbook_labs.learning_paths import get_learning_path as _submit_path
+    _submit_shell([_submit_guide(_submit_path(2, 5))], volume=2)
+    return
 
 
 @app.cell
@@ -554,6 +598,7 @@ def _(
     final_trigger, get_evidence, get_lab_metadata, mo, profile, rationale,
     report_export_panel, track_id,
 ):
+    from mlsysbook_labs.notebook import notebook_shell as _workspace_shell
     mo.stop(
         not complete,
         mo.callout(mo.md("## Local evidence report\nThe report unlocks after all five contrasts are current and synthesis is complete."), kind="warn"),
@@ -605,32 +650,35 @@ def _(
             "calculations": "MLSysIM V2-06 experiment engine with Pint-backed collective formulas.",
         },
     )
-    mo.vstack([mo.md("## Local evidence report"), report_export_panel(report)])
+    _workspace_shell([mo.vstack([mo.md("### Download your discussion"), report_export_panel(report)])], volume=2)
     return (report,)
 
 
 @app.cell
-async def _(
-    complete, final_choice, final_rejected, final_risk, final_trigger,
-    get_evidence, ledger, mo, rationale, track_id,
+def _(
+    complete, final_choice, final_rejected, final_risk, final_trigger, get_evidence, mo, rationale, track_id
 ):
-    save_status = "EVIDENCE IN PROGRESS"
-    if complete:
-        try:
-            ledger.save(chapter=5, design={
-                "schema_version": 1, "lab_id": "v2_05", "track_id": track_id,
-                "model_id": "v2_06_experiments",
-                "evidence": {part: capture.to_dict() for part, capture in get_evidence().items()},
-                "recommendation": final_choice.value,
-                "rejected_alternative": final_rejected.value,
-                "reevaluation_trigger": final_trigger.value,
-                "residual_risk": final_risk.value, "rationale": rationale.value,
-            })
-            await ledger.flush()
-            save_status = "SAVED"
-        except Exception as exc:
-            save_status = f"SAVE FAILED · {type(exc).__name__}"
-    mo.Html(f'<div class="lab-hud"><span class="hud-label">LAB</span><span class="hud-value">05 · Collective Communication</span><span style="flex:1"></span><span class="hud-label">|</span><span class="hud-label">STATUS</span><span class="hud-active">{save_status}</span></div>')
+    from mlsysbook_labs.fleet_evidence import discussion_fingerprint as _discussion_fingerprint
+    _ready = complete
+    fleet_discussion_ready = _ready
+    fleet_discussion_design = {'schema_version': 1, 'lab_id': 'v2_05', 'track_id': track_id, 'model_id': 'v2_06_experiments', 'evidence': {part: capture.to_dict() for part, capture in get_evidence().items()}, 'recommendation': final_choice.value, 'rejected_alternative': final_rejected.value, 'reevaluation_trigger': final_trigger.value, 'residual_risk': final_risk.value, 'rationale': rationale.value} if _ready else None
+    fleet_discussion_fingerprint = _discussion_fingerprint(fleet_discussion_design)
+    # Recreated when any evidence, track, or discussion field changes.
+    save_discussion = mo.ui.run_button(label="Save discussion", disabled=not fleet_discussion_ready)
+    return (fleet_discussion_ready, fleet_discussion_design, fleet_discussion_fingerprint, save_discussion)
+
+
+@app.cell
+async def _(fleet_discussion_design, fleet_discussion_fingerprint, fleet_discussion_ready,
+            ledger, mo, save_discussion, track_id):
+    from mlsysbook_labs.fleet_evidence import save_completed_discussion as _save_completed_discussion
+    from mlsysbook_labs.notebook import notebook_shell as _discussion_shell, notebook_status as _notebook_status
+    _outcome = await _save_completed_discussion(
+        ledger, chapter=5, track=track_id, design=fleet_discussion_design,
+        fingerprint=fleet_discussion_fingerprint, ready=fleet_discussion_ready,
+        requested=bool(save_discussion.value),
+    )
+    _discussion_shell([mo.vstack([save_discussion, _notebook_status(_outcome.status, _outcome.detail)])], volume=2)
     return
 
 

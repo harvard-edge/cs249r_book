@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass
+from itertools import pairwise
 from pathlib import Path
 from typing import Any
 
@@ -76,7 +77,7 @@ class MarginGeometryElement:
         """Return the box height in points."""
         return self.y1 - self.y0
 
-    def merge(self, other: "MarginGeometryElement") -> None:
+    def merge(self, other: MarginGeometryElement) -> None:
         """Grow this box in place to cover *other*.
 
         The kind becomes ``"mixed"`` when the kinds differ, and *other*'s
@@ -200,6 +201,13 @@ def _trim_boundary_findings(page, pageno: int) -> list[MarginGeometryFinding]:
     crop marks intentionally cross the trim at the sheet corners, so short
     vector marks and the full-sheet white background are excluded.
     """
+    trim = getattr(page, "trimbox", None)
+    if trim is None:
+        trim_left, trim_top, trim_right, trim_bottom = TRIM_LEFT, TRIM_TOP, TRIM_RIGHT, TRIM_BOTTOM
+    else:
+        crop = page.cropbox
+        trim_left, trim_top = trim.x0 - crop.x0, trim.y0 - crop.y0
+        trim_right, trim_bottom = trim.x1 - crop.x0, trim.y1 - crop.y0
     candidates: dict[str, list[tuple[float, str, tuple[float, float, float, float], str]]] = {
         side: [] for side in ("top", "bottom", "left", "right")
     }
@@ -217,25 +225,25 @@ def _trim_boundary_findings(page, pageno: int) -> list[MarginGeometryFinding]:
         also catches boxes lying wholly below the trim.
         """
         x0, y0, x1, y1 = bbox
-        if not bottom_only and y0 < TRIM_TOP - EDGE_TOL and y1 > TRIM_TOP + EDGE_TOL:
-            candidates["top"].append((TRIM_TOP - y0, kind, bbox, snippet))
+        if not bottom_only and y0 < trim_top - EDGE_TOL and y1 > trim_top + EDGE_TOL:
+            candidates["top"].append((trim_top - y0, kind, bbox, snippet))
         # Bottom overflow can be either a crossing object or content placed
         # wholly below trim. The latter is especially dangerous because it is
         # absent from the visible page while TeX may continue with later prose.
-        if y1 > TRIM_BOTTOM + EDGE_TOL and x1 > TRIM_LEFT and x0 < TRIM_RIGHT:
-            candidates["bottom"].append((y1 - TRIM_BOTTOM, kind, bbox, snippet))
+        if y1 > trim_bottom + EDGE_TOL and x1 > trim_left and x0 < trim_right:
+            candidates["bottom"].append((y1 - trim_bottom, kind, bbox, snippet))
         if bottom_only:
             return
         if (
-            x0 < TRIM_LEFT - HORIZONTAL_EDGE_TOL
-            and x1 > TRIM_LEFT + HORIZONTAL_EDGE_TOL
+            x0 < trim_left - HORIZONTAL_EDGE_TOL
+            and x1 > trim_left + HORIZONTAL_EDGE_TOL
         ):
-            candidates["left"].append((TRIM_LEFT - x0, kind, bbox, snippet))
+            candidates["left"].append((trim_left - x0, kind, bbox, snippet))
         if (
-            x0 < TRIM_RIGHT - HORIZONTAL_EDGE_TOL
-            and x1 > TRIM_RIGHT + HORIZONTAL_EDGE_TOL
+            x0 < trim_right - HORIZONTAL_EDGE_TOL
+            and x1 > trim_right + HORIZONTAL_EDGE_TOL
         ):
-            candidates["right"].append((x1 - TRIM_RIGHT, kind, bbox, snippet))
+            candidates["right"].append((x1 - trim_right, kind, bbox, snippet))
 
     for block in page.get_text("dict").get("blocks", []):
         bbox = tuple(float(value) for value in block["bbox"])
@@ -257,6 +265,21 @@ def _trim_boundary_findings(page, pageno: int) -> list[MarginGeometryFinding]:
             bottom_only=kind == "image",
         )
 
+    # Text extraction clips to the visible page and can omit whole paragraphs
+    # below it. The display list retains their original ink bounds.
+    if hasattr(page, "get_bboxlog"):
+        for sequence, (kind, bbox) in enumerate(page.get_bboxlog()):
+            if kind in {"fill-text", "stroke-text"}:
+                if pageno <= 4 and bbox[0] >= TRIM_RIGHT - 18 and bbox[1] >= TRIM_BOTTOM:
+                    trace = next((row for row in page.get_texttrace()
+                                  if row.get("seqno") == sequence), None)
+                    if trace:
+                        text = "".join(chr(char[0]) for char in trace["chars"])
+                        if _is_cover_printer_strip_label(pageno, bbox, text):
+                            continue
+                add("text", tuple(float(value) for value in bbox),
+                    "unclipped rendered text", bottom_only=True)
+
     for drawing in page.get_drawings():
         rect = drawing["rect"]
         if rect.is_empty:
@@ -264,7 +287,7 @@ def _trim_boundary_findings(page, pageno: int) -> list[MarginGeometryFinding]:
         bbox = _rect_tuple(rect)
         width, height = rect.width, rect.height
         # Ignore the full-sheet white background and the 30-point crop marks.
-        if width >= TRIM_RIGHT and height >= TRIM_BOTTOM:
+        if width >= trim_right and height >= trim_bottom:
             continue
         if width <= 36 and height <= 36:
             continue
@@ -272,7 +295,7 @@ def _trim_boundary_findings(page, pageno: int) -> list[MarginGeometryFinding]:
         # path data. PyMuPDF expands the drawing rectangle to tens of thousands
         # of points even though the PDF clip path keeps all visible ink on the
         # page. A plausible un-clipped overflow remains far below this bound.
-        if height > TRIM_BOTTOM * 4:
+        if height > trim_bottom * 4:
             continue
         add("drawing", bbox, bottom_only=True)
 
@@ -287,8 +310,8 @@ def _trim_boundary_findings(page, pageno: int) -> list[MarginGeometryFinding]:
             side,
             (
                 f"{kind} crosses the {side} trim edge by {amount:.0f}pt "
-                f"(trim box {TRIM_LEFT:.0f},{TRIM_TOP:.0f}–"
-                f"{TRIM_RIGHT:.0f},{TRIM_BOTTOM:.0f})"
+                f"(trim box {trim_left:.0f},{trim_top:.0f}–"
+                f"{trim_right:.0f},{trim_bottom:.0f})"
             ),
             tuple(round(value) for value in bbox),
             snippet,
@@ -562,7 +585,7 @@ def scan_page(page, pageno: int) -> list[MarginGeometryFinding]:
 
     for side in ("left", "right"):
         col = sorted((e for e in elems if e.side == side), key=lambda e: e.y0)
-        for a, b in zip(col, col[1:]):
+        for a, b in pairwise(col):
             y_inter = _y_overlap(a, b)
             x_inter = _x_overlap(a, b)
             if y_inter > OVERLAP_TOL and x_inter > 1.0:

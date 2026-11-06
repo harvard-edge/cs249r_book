@@ -38,19 +38,35 @@ class EmpiricalAnchor:
     review_notes: str = ""
 
     def accepts(self, value: float) -> bool:
-        """Return whether a solver result remains inside the reviewed envelope.
+        """Check a result against a declared target tolerance or inclusive range.
 
-        An anchor is one of two mutually exclusive shapes:
+        Parameters
+        ----------
+        value : float
+            Result scalar already converted to this anchor's units; no unit conversion is performed.
 
-        - **target anchor**: ``target`` set; accepts when
-          ``|value - target| <= |target| * rel_tolerance`` (symmetric
-          relative band — ``rel_tolerance`` is then mandatory);
-        - **range anchor**: ``lower`` and ``upper`` set; accepts when
-          ``lower <= value <= upper`` (inclusive).
+        Returns
+        -------
+        bool
+            Whether the scalar lies in the configured envelope. An incomplete target or range specification raises ValueError; target takes precedence if supplied.
 
-        ``value`` must already be expressed in this anchor's ``units``.
-        Raises ``ValueError`` when the anchor's fields do not form a complete
-        shape.
+        Notes
+        -----
+        Equation: For a target, abs(value-target) <= ``abs(target)*rel_tolerance``. Otherwise lower <= value <= upper.
+
+        Assumptions: The result and anchor describe the same metric, workload, and units. Target anchors supply rel_tolerance; range anchors supply both bounds.
+
+        Excludes: Calibration, uncertainty estimation, source verification, and evidence that other workloads share this tolerance. The predicate only checks a configured regression envelope.
+
+        References
+        ----------
+        Derivation: The target expression is a symmetric relative-error interval centered on the target. Range anchors directly test membership between inclusive endpoints.
+
+        Examples
+        --------
+        >>> anchor = RESNET50_A100_TRAIN_BS256
+        >>> anchor.accepts(float(anchor.target))
+        True
         """
         if self.target is not None:
             if self.rel_tolerance is None:

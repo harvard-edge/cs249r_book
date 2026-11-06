@@ -3,8 +3,13 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
+from math import ceil
 
 import pytest
+
+from mlsysim.core.units import Q_
+from mlsysim.labs.experiments import v1_10_experiments as compression
 
 from mlsysim.labs.experiments.v1_10_experiments import (
     CANONICAL_TRACK_IDS,
@@ -242,6 +247,74 @@ def test_recipe_order_changes_representation_and_unknown_outcome_stays_unknown()
     assert not quant_then_distill.outcome_available
     assert quant_then_distill.deployment.task_quality is None
     assert "quality_outcome_unavailable" in quant_then_distill.deployment.violations
+
+
+@pytest.mark.parametrize("track_id", TRACK_IDS)
+@pytest.mark.parametrize(
+    "sequence",
+    (
+        ("prune_structured_25", "quant_int8_ptq"),
+        ("quant_int8_ptq", "prune_structured_25"),
+        ("distill_small", "prune_structured_25", "quant_int8_ptq"),
+    ),
+)
+def test_ordered_recipe_counts_layout_and_quantization_metadata(track_id, sequence):
+    scenario = get_scenario(track_id)
+    recipe = evaluate_recipe(track_id, sequence)
+    for stage in recipe.stages:
+        count = stage.logical_parameters
+        expected_bits = count * stage.storage_bits
+        if stage.storage_bits < 16:
+            expected_bits += ceil(count / scenario.quant_group_size) * (
+                scenario.quant_scale_bits + scenario.quant_zero_point_bits
+            )
+        if stage.representation == "structured":
+            expected_bits += ceil(count / 32) * 16
+        assert stage.artifact_size.to("byte").magnitude == expected_bits / 8
+
+    deployment = recipe.deployment
+    assert deployment.artifact_size == recipe.stages[-1].artifact_size
+    assert deployment.working_set_size == (
+        deployment.artifact_size + deployment.runtime_state_size + scenario.application_memory
+    )
+    assert deployment.weight_load_time == (
+        deployment.artifact_size / scenario.effective_load_bandwidth
+    ).to("ms")
+
+
+@pytest.mark.parametrize("budget_kind", ("package", "working_set", "latency"))
+def test_quantized_structured_recipe_feasibility_includes_metadata_at_boundary(
+    monkeypatch, budget_kind
+):
+    sequence = ("distill_small", "prune_structured_25", "quant_int8_ptq")
+    scenario = get_scenario("iphone")
+    corrected = evaluate_recipe("iphone", sequence)
+    count = corrected.stages[-1].logical_parameters
+    metadata = Q_(
+        ceil(count / scenario.quant_group_size)
+        * (scenario.quant_scale_bits + scenario.quant_zero_point_bits) / 8,
+        "byte",
+    )
+    fields = {
+        "package": ("package_budget", corrected.deployment.artifact_size, metadata),
+        "working_set": ("working_set_budget", corrected.deployment.working_set_size, metadata),
+        "latency": (
+            "latency_budget", corrected.deployment.end_to_end_latency,
+            (metadata / scenario.effective_load_bandwidth).to("ms"),
+        ),
+    }
+    field, boundary, overhead = fields[budget_kind]
+    monkeypatch.setitem(compression._SCENARIOS, "iphone", replace(scenario, **{field: boundary}))
+    assert evaluate_recipe("iphone", sequence).deployment.feasible
+
+    # The old artifact would pass this budget; the complete allocation must fail.
+    monkeypatch.setitem(
+        compression._SCENARIOS, "iphone",
+        replace(scenario, **{field: boundary - overhead / 2}),
+    )
+    result = evaluate_recipe("iphone", sequence).deployment
+    assert not result.feasible
+    assert result.violations == (budget_kind,)
 
 
 def test_named_recipe_matches_direct_ordered_evaluation():

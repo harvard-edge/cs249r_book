@@ -22,6 +22,7 @@ import re
 import shutil
 import subprocess
 from collections import Counter
+from importlib.util import find_spec
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -200,9 +201,9 @@ def default_pdf_path(quarto_dir: Path, volume: str) -> Path:
 def default_log_path(quarto_dir: Path, volume: str) -> Path | None:
     """Locate the LuaLaTeX log for ``volume``, or None when it cannot be trusted.
 
-    ``keep-tex`` leaves ``Machine-Learning-Systems-VolN.tex`` in the Quarto
-    directory, and with ``latex-clean: false`` the sibling ``.log`` survives
-    alongside it. Auto-discovering it means the log-based gates (crossref
+    The post-render hook saves the current log beside the volume PDF as
+    ``latex-build.log``. Older builds may retain a named sibling log in the
+    Quarto directory. Auto-discovering either means the log-based gates (crossref
     warnings, overfull boxes, missing glyphs) run on a normal
     ``binder check pdf`` without the caller remembering ``--log``.
 
@@ -213,10 +214,15 @@ def default_log_path(quarto_dir: Path, volume: str) -> Path | None:
     log-based checks report as skipped, which is honest rather than wrong. An
     explicit ``--log`` bypasses this and is always trusted.
     """
-    candidate = quarto_dir / Path(PDF_BY_VOLUME[volume]).with_suffix(".log").name
-    if not candidate.is_file():
-        return None
     pdf_path = default_pdf_path(quarto_dir, volume)
+    candidates = (
+        pdf_path.parent / "latex-build.log",
+        quarto_dir / Path(PDF_BY_VOLUME[volume]).with_suffix(".log").name,
+    )
+    candidate = max((path for path in candidates if path.is_file()),
+                    key=lambda path: path.stat().st_mtime_ns, default=None)
+    if candidate is None:
+        return None
     if pdf_path.is_file():
         if candidate.stat().st_mtime < pdf_path.stat().st_mtime - LOG_STALENESS_TOLERANCE_S:
             return None
@@ -790,7 +796,7 @@ def verify_pdf(
                 code="pdftotext-missing",
                 message="pdftotext not installed; install poppler (e.g. brew install poppler)",
             )
-        ]
+        ] + scan_build_log(log_path)
 
     issues = scan_pdf_text(pdf_path)
     issues.extend(scan_table_prose_spacing(pdf_path))
@@ -981,20 +987,19 @@ def scan_purpose_overflow(
 def scan_margin_geometry_summary(pdf_path: Path):
     """Return the Binder-native margin geometry summary, or ``None``.
 
-    ``None`` means PyMuPDF is unavailable or the scan failed; callers should
-    treat that as skipped rather than as a clean geometry result.
+    ``None`` means the optional PyMuPDF dependency is unavailable. A failure
+    after the dependency is present is an error, never a skipped clean result.
     """
-    try:
-        try:
-            from cli.checks.margin_geometry import scan_pdf
-        except ImportError:
-            from binder.cli.checks.margin_geometry import scan_pdf
-    except ImportError:
+    if find_spec("pymupdf") is None and find_spec("fitz") is None:
         return None
+    try:
+        from cli.checks.margin_geometry import scan_pdf
+    except ImportError:
+        from binder.cli.checks.margin_geometry import scan_pdf
     try:
         return scan_pdf(pdf_path)
-    except Exception:
-        return None
+    except Exception as exc:
+        raise RuntimeError(f"Rendered PDF geometry scan failed: {pdf_path}: {exc}") from exc
 
 
 def verify_volume_pdf(
@@ -1004,6 +1009,7 @@ def verify_volume_pdf(
     log_path: Path | None = None,
 ) -> PdfValidationResult:
     """Verify the default built PDF for ``volume`` (a key of ``PDF_BY_VOLUME``)."""
+    log_path = log_path or default_log_path(quarto_dir, volume)
     pdf_path = default_pdf_path(quarto_dir, volume)
     issues = verify_pdf(pdf_path, log_path=log_path)
     geom_summary = scan_margin_geometry_summary(pdf_path) if pdf_path.is_file() else None

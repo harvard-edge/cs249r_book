@@ -13,7 +13,7 @@ async def _():
     if sys.platform == "emscripten":
         import micropip
         await micropip.install(["pydantic", "pint", "plotly", "pandas"], keep_going=False)
-        await micropip.install("../../wheels/mlsysim-0.3.0-py3-none-any.whl", keep_going=False)
+        await micropip.install("../../wheels/mlsysim-0.3.1-py3-none-any.whl", keep_going=False)
         await micropip.install("../../wheels/mlsysbook_labs-0.1.0-py3-none-any.whl", keep_going=False)
     else:
         labs_dir = Path(__file__).resolve().parents[1]
@@ -55,10 +55,12 @@ def _(mo):
 
 
 @app.cell
-def _(mo, set_evidence):
+def _(mo, set_evidence, ledger):
+    from mlsysbook_labs.contexts import preferred_context as _preferred_context
+    _track_labels = {"tinyml": "TinyML", "mobile": "Mobile", "edge": "Edge", "cloud": "Cloud"}
     track = mo.ui.dropdown(
         {"TinyML": "tinyml", "Mobile": "mobile", "Edge": "edge", "Cloud": "cloud"},
-        value="TinyML", label="Deployment track",
+        value=_track_labels[_preferred_context(ledger)], label="Deployment track",
         on_change=lambda _value: set_evidence({}),
     )
     return (track,)
@@ -132,6 +134,30 @@ def _(mo, profile, track_id):
         outcome_delay, plan_choice, plan_rejected, release_choice,
         release_rejected, requirement_choice, signal_interval, timing_decision,
     )
+
+
+@app.cell
+def _(mo, profile):
+    gate_repairs = mo.ui.multiselect(options=list(profile["release_defects"]), value=[], label="Detected defects to repair")
+    gate_phase = mo.ui.dropdown({"Inspect only": "inspect", "Apply selected repairs": "repair", "Retest repaired artifact": "retest"}, value="Inspect only", label="Artifact lifecycle action")
+    gate_version = mo.ui.dropdown({"Current artifact evidence": "current", "Previous artifact evidence": "previous"}, value="Current artifact evidence", label="Retest evidence identity")
+    gate_retest_plan = mo.ui.dropdown({"Combined retest": "combined", "Offline retest only": "offline", "Target retest only": "target"}, value="Combined retest", label="Retest scope")
+    return gate_repairs, gate_phase, gate_version, gate_retest_plan
+
+
+@app.cell
+def _(track_id, gate_repairs, gate_phase, gate_version, gate_retest_plan):
+    from mlsysim.labs.experiments.v1_03_experiments import release_gate_trial as _gate_trial
+    gate_baseline = {**_gate_trial(track_id, "combined"), "model_key": "v1_03_experiments.release_gate_trial"}
+    gate_result = _gate_trial(
+        track_id, "combined",
+        repair_defects=() if gate_phase.value == "inspect" else tuple(gate_repairs.value),
+        phase=gate_phase.value,
+        evidence_version=None if gate_version.value == "current" else 1,
+        retest_plan=gate_retest_plan.value,
+    )
+    gate_result["model_key"] = "v1_03_experiments.release_gate_trial"
+    return gate_baseline, gate_result
 
 
 @app.cell
@@ -248,7 +274,7 @@ def _(
     e_prediction, e_result, escalation, feedback_revisit, late_stage,
     mo, outcome_delay, plan_choice, plan_rejected, release_choice,
     release_rejected, requirement_choice, set_evidence, signal_interval,
-    timing_decision, track_id,
+    timing_decision, track_id, gate_baseline, gate_result,
 ):
     def store(part, capture):
         set_evidence(lambda current: {**current, part: capture})
@@ -256,7 +282,7 @@ def _(
     a_upstream = None
     b_upstream = {"carried_requirement": requirement_choice.value}
     c_upstream = None
-    d_upstream = {"carried_iteration_plan": plan_choice.value}
+    d_upstream = {"carried_iteration_plan": plan_choice.value, "gate_trial": gate_result["inputs"]}
     e_upstream = {"release_decision": release_choice.value}
     a_capture = mo.ui.button(
         label="Capture requirement contrast", kind="success",
@@ -330,7 +356,7 @@ def _(
         on_click=lambda _value: store("D", capture_evidence(
             track=track_id, part="D", prediction=d_prediction.value,
             inputs={"choice": release_choice.value, "rejected": release_rejected.value},
-            baseline=d_base, result=d_result, alternatives=(*tuple(d_results.values()), d_hold),
+            baseline=d_base, result={**d_result, "release_gate_reference": {"baseline": gate_baseline, "result": gate_result}}, alternatives=(*tuple(d_results.values()), d_hold),
             decision=release_choice.value, upstream_inputs=d_upstream,
             model_key="v1_03_experiments.evaluate_release_checks",
             chosen_result=_d_chosen, result_role=_d_role,
@@ -357,25 +383,34 @@ def _(
 
 
 @app.cell
-def _(ACADEMIC_LAB_CSS, LAB_CSS, mo, profile, track):
-    css = mo.Html("""
-    <style>
-    .pilot-head{background:linear-gradient(135deg,#101827,#28496b);color:white;border-radius:14px;padding:clamp(18px,4vw,32px);margin:30px 0 14px}
-    .pilot-top{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font:700 .72rem ui-monospace;letter-spacing:.08em}
-    .pilot-head h1{font-size:clamp(1.65rem,5vw,2.65rem);line-height:1.05;margin:16px 0 8px}.pilot-head p{color:#dbeafe;max-width:780px}
-    .pilot-meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:9px;margin-top:17px}.pilot-meta div{background:#ffffff14;border:1px solid #ffffff26;padding:9px 11px;border-radius:8px}
-    .pilot-note{color:#475569;font-size:.9rem;line-height:1.5;margin:0;padding:0 2px}.saved{border-left:4px solid #2ca02c;background:#f0fdf4;padding:9px 12px;border-radius:7px}
-    .lab-hud{display:flex;align-items:center;flex-wrap:wrap;gap:10px;background:#101827!important;color:#fff;padding:14px 18px;border-radius:9px}.lab-hud .hud-label{color:#a7b9cf}.lab-hud .hud-value{color:#fff}.lab-hud .hud-active{color:#86efac}
-    .table-wrap{max-width:100%;overflow-x:auto}@media(max-width:520px){.pilot-head{border-radius:9px}.pilot-meta{grid-template-columns:1fr}}
-    </style>""")
-    header = mo.Html(f"""<section class="pilot-head"><div class="pilot-top"><span>VOLUME I · LAB 03</span><span>ABOUT 50–55 MIN</span></div>
-    <h1>Carry the Constraint</h1><p>When should evidence interrupt the ML workflow, and what must production send backward?</p>
-    <div class="pilot-meta"><div><b>Track</b><br>{profile['display']}</div><div><b>Context</b><br>{profile['scenario']}</div><div><b>Deliverable</b><br>Workflow recommendation with a release rule</div></div></section>""")
-    mo.vstack([
-        LAB_CSS, ACADEMIC_LAB_CSS, css, header, track,
-        mo.Html('<p class="pilot-note">All workflow costs, defect fixtures, and task outcomes are illustrative scenario assumptions. Open Calculation Notes in each part to inspect their scope.</p>'),
-    ], gap=0.5)
-    return
+def _(get_lab_metadata, mo, track, track_id, profile):
+    from mlsysbook_labs.notebook import notebook_scenario as _scenario
+    from mlsysim import Scenarios as _Scenarios
+    from mlsysbook_labs.learning_paths import get_learning_path as _get_learning_path
+    from mlsysbook_labs.notebook import (
+        notebook_bridge as _bridge, notebook_header as _header,
+        notebook_learning_map as _learning_map, notebook_shell as _opening_shell,
+    )
+
+    learning_contract = _get_learning_path("vol1", 3)
+    _journey = _Scenarios.DeploymentJourneys.get(track_id)
+    _episode = _journey.episode(3)
+    learning_contract["narrative"] = {
+        "project": _journey.mission,
+        "scene": _episode.scene,
+        "carry_forward": _episode.handoff,
+        "scope": _journey.boundary,
+    }
+    _opening_shell([
+        _header(get_lab_metadata("vol1/lab_03_ml_lifecycle.py"), _episode.question,
+                topics=[part["label"] for part in learning_contract["parts"]]),
+        track,
+        _scenario(learning_contract, track=track_id, scene=_episode.scene),
+        _learning_map(learning_contract),
+        mo.md(f"**Reference used in today’s instruments:** {profile['scenario']}. This controlled case tests the chapter’s mechanism; transfer the reasoning to your project without treating the result as project validation."),
+        mo.callout(mo.md("These are supplied, controlled reference studies. Their results do not validate the deployment project. Choose a prediction in Part A to open its live experiment; a wrong prediction still opens the evidence."), kind="info"),
+    ])
+    return (learning_contract,)
 
 
 @app.cell
@@ -396,7 +431,13 @@ def _(
     go, late_stage, mo, outcome_delay, plan_choice, plan_rejected,
     profile, rationale, release_choice, release_rejected, requirement_choice,
     signal_interval, timing_decision, track_id,
+    gate_baseline, gate_result, gate_repairs, gate_phase, gate_version, gate_retest_plan,
+    learning_contract,
 ):
+    from mlsysbook_labs.notebook import notebook_shell as _shell, notebook_learning_part as _learning_part, notebook_tab_hint as _tab_hint
+    _route = {part["id"]: part for part in learning_contract["parts"]}
+
+
     _captures = get_evidence()
     _upstream = {"A": a_upstream, "B": b_upstream, "C": c_upstream,
                  "D": d_upstream, "E": e_upstream}
@@ -407,9 +448,8 @@ def _(
     )
 
     def table(rows):
-        return mo.vstack([mo.ui.table(rows, pagination=False)]).style(
-            {"max-width": "100%", "overflow-x": "auto"}
-        )
+        from mlsysbook_labs.notebook import notebook_table as _compact_table
+        return _compact_table(rows)
 
     def saved(part):
         _capture = _captures.get(part)
@@ -427,7 +467,7 @@ def _(
 
     def part_a():
         _intro = mo.md(
-            f"### A · Which requirement changes the development plan? (8 min)\n"
+            f""
             f"Development context: **{profile['scenario']}**. Compare **{a_base['requirement_label']}** ({a_base['requirement_limit']}) with "
             f"**{a_result['requirement_label']}** ({a_result['requirement_limit']}) before choosing which one the team must carry through every stage."
         )
@@ -449,8 +489,15 @@ def _(
             "Affected artifacts": ", ".join(result["affected_artifacts"]),
         } for result in (a_base, a_result)]
         return mo.vstack([
-            _intro, a_prediction, apply_plotly_theme(_fig), table(_rows),
+            _intro, a_prediction, apply_plotly_theme(_fig),
             requirement_choice,
+            mo.md(f"**Carried requirement:** {a_base['requirement_label']} · {a_base['requirement_limit']}. "
+                  f"The selected root reaches **{a_base['affected_artifact_count']} artifacts**; only these obligations carry into the next investigation."),
+            table([{"Artifact to revisit": row["artifact"].replace("_", " "),
+                    "Lifecycle stage": row["stage"],
+                    "Depends on": ", ".join(row["depends_on"]).replace("_", " ") or "Requirement root"}
+                   for row in a_base["propagation"]]),
+            mo.accordion({"Compare both requirement summaries": table(_rows)}),
             mo.callout(mo.md(
                 f"**Your prediction:** {a_prediction.value}. Carrying **{a_base['requirement_label']}** changes only artifacts reachable from that requirement in the lifecycle graph."
             ), kind="info"),
@@ -462,7 +509,7 @@ def _(
 
     def part_b():
         _intro = mo.md(
-            f"### B · When should we pay to check it? (10 min)\n"
+            f""
             f"Development context: **{profile['scenario']}**. The carried requirement is **{a_base['requirement_label']}** ({a_base['requirement_limit']}). Predict before comparing a data-stage check with a later check."
         )
         if b_prediction.value is None:
@@ -497,7 +544,7 @@ def _(
 
     def part_c():
         _intro = mo.md(
-            f"### C · Does faster iteration produce a better result? (10 min)\n"
+            f""
             f"Development context: **{profile['scenario']}** carrying **{a_base['requirement_label']}**. Both plans receive the same {development_budget.value}-day budget and follow supplied candidate outcomes for this matched task."
         )
         if c_prediction.value is None:
@@ -534,7 +581,7 @@ def _(
 
     def part_d():
         _intro = mo.md(
-            f"### D · What evidence makes release defensible? (10 min)\n"
+            f""
             f"Development context: **{profile['scenario']}** carrying **{a_base['requirement_label']}**. The checks receive the same seeded defects: **{', '.join(d_results['combined']['seeded_defects'])}**. Predict each check's blind spot before seeing the matrix."
         )
         if d_prediction.value is None:
@@ -565,15 +612,19 @@ def _(
             mo.callout(mo.md(
                 f"**Compared live result:** {d_result['check_plan']} detects {d_result['detected_defect_count']} of {d_result['seeded_defect_count']} seeded defects and leaves {d_result['escaped_defect_count']} visible blind spots."
             ), kind="success" if d_result["release_defensible"] else "danger"),
+            mo.md("#### Finding a defect is not a repair\nThe combined inspection above identifies the supplied defects. Choose which findings to repair, apply repairs, then retest the identified artifact. Try a narrower retest or evidence from the previous version. What remains blocked or unverified?"),
+            gate_repairs, mo.hstack([gate_phase, gate_retest_plan], wrap=True), gate_version,
+            table([{"Defect": row["defect_id"], "Release evidence": row["status"]} for row in gate_result["gates"]]),
+            mo.callout(mo.md(f"**Artifact version:** {gate_result['artifact_version']}. **Evidence version:** {gate_result['evidence_version']}. **Release gate:** {'bounded fixture pass' if gate_result['release_gate_passed'] else 'HOLD'}. {gate_result['scope_notice']}"), kind="success" if gate_result["release_gate_passed"] else "warn"),
             d_capture, saved("D"),
             mo.accordion({"Calculation Notes": mo.md(
-                "Each check has an explicit inspection time and detection set. Combined evidence is the union of offline and target detections. Passing covers only the named seeded defects; it cannot prove that no other defect exists."
+                "Each check has an explicit inspection time and detection set. Combined inspection finds the union of offline and target defects; detection alone does not establish readiness. The release-gate study distinguishes detected failure, repaired but unverified, missing evidence, and compatible retest. A bounded fixture pass cannot prove that no other defect exists."
             )}),
         ])
 
     def part_e():
         _intro = mo.md(
-            f"### E · What should production send backward? (8 min)\n"
+            f""
             f"Development context: **{profile['scenario']}** ({e_result['requests_after_change']} post-shift requests carrying **{a_base['requirement_label']}**). A world change, an input alert, and delayed labeled outcomes are different events. Predict what the first signal establishes."
         )
         if e_prediction.value is None:
@@ -650,11 +701,19 @@ def _(
         ])
 
     tabs = mo.ui.tabs({
-        "Part A": part_a(), "Part B": part_b(), "Part C": part_c(),
-        "Part D": part_d(), "Part E": part_e(), "Synthesis": build_synthesis(),
+        "Part A": _learning_part(learning_contract, "A", part_a()), "Part B": _learning_part(learning_contract, "B", part_b()), "Part C": _learning_part(learning_contract, "C", part_c()),
+        "Part D": _learning_part(learning_contract, "D", part_d()), "Part E": _learning_part(learning_contract, "E", part_e()), "Synthesis": build_synthesis(),
     })
-    tabs
+    _shell([_tab_hint(), tabs])
     return (audit,)
+
+
+@app.cell(hide_code=True)
+def _():
+    from mlsysbook_labs.learning_paths import get_learning_path as _submission_path
+    from mlsysbook_labs.notebook import notebook_shell as _submission_shell, notebook_submission as _submission
+    _submission_shell([_submission(_submission_path(1, 3))])
+    return
 
 
 @app.cell
@@ -673,7 +732,8 @@ def _(
         and final_choice.value != final_rejected.value
         and final_choice.value == _saved_choice
     )
-    mo.stop(not _ready)
+    from mlsysbook_labs.notebook import notebook_download_readiness as _download_readiness
+    mo.stop(not _ready, _download_readiness(volume=1))
     _snapshots = {part: _captures[part].to_dict() for part in "ABCDE"}
     _d_chosen = _snapshots["D"].get("chosen_result")
     _d_effective = _d_chosen if _d_chosen is not None else _snapshots["D"]["result"]
@@ -736,14 +796,30 @@ def _(
             "calculations": "MLSysIM workflow experiment results.",
         },
     )
-    mo.vstack([mo.md("## Local evidence report"), report_export_panel(report)])
+    from mlsysbook_labs.notebook import notebook_shell as _report_shell
+    _report_shell([report_export_panel(report)])
     return (report,)
+
+
+
+
+@app.cell
+def _(mo, get_evidence, final_choice, final_rejected, final_risk, final_trigger, rationale, audit):
+    from mlsysbook_labs.notebook import notebook_shell as _save_shell
+    _draft_identity = (audit.to_dict(), get_evidence(), final_choice.value, final_rejected.value, final_risk.value, final_trigger.value, rationale.value)
+    save_discussion = mo.ui.run_button(label="Save discussion")
+    _save_shell([
+        save_discussion,
+        mo.md("Save your completed discussion locally. Editing a decision, rationale, or saved comparison requires saving again. Download remains available independently of local storage."),
+    ])
+    return (save_discussion,)
 
 
 @app.cell
 async def _(
     audit, final_choice, final_rejected, final_risk, final_trigger,
     get_evidence, ledger, mo, rationale, track_id,
+    save_discussion,
 ):
     _captures = get_evidence()
     _saved_choice = _captures["C"].to_dict()["decision"] if "C" in _captures else None
@@ -755,8 +831,8 @@ async def _(
         and final_choice.value != final_rejected.value
         and final_choice.value == _saved_choice
     )
-    _status = "EVIDENCE IN PROGRESS"
-    if _ready:
+    _status = "DRAFT READY · SAVE DISCUSSION TO RECORD" if _ready else "EVIDENCE IN PROGRESS"
+    if _ready and save_discussion.value:
         try:
             ledger.save(chapter=3, design={
                 "schema_version": 1,
@@ -775,9 +851,8 @@ async def _(
             _status = "LOCAL SAVE FAILED · DOWNLOAD THE REPORT TO KEEP YOUR EVIDENCE"
         else:
             _status = "SAVED"
-    mo.Html(
-        f'<div class="lab-hud"><span>LAB 03 · Carry the Constraint · STATUS: {_status}</span></div>'
-    )
+    from mlsysbook_labs.notebook import notebook_shell as _status_shell, notebook_status as _status_view
+    _status_shell([_status_view("Lab 03", _status)])
     return
 
 

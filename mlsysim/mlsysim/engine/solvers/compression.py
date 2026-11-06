@@ -47,7 +47,7 @@ class CompressionModel(ForwardModel):
               sparsity_type: str = "unstructured",
               baseline_precision: str = "fp32") -> CompressionResult:
         """
-        Solves for compression gains and estimated accuracy impact.
+        Estimate compression storage, speed, and assumed quality trade-offs.
 
         Parameters
         ----------
@@ -81,8 +81,24 @@ class CompressionModel(ForwardModel):
             and estimated accuracy delta, plus the ``baseline_precision`` they
             are relative to.
 
+        See Also
+        --------
+        mlsysim.physics.performance.calc_bottleneck : Weight-only Roofline regime.
+
         Notes
         -----
+        Equation: quantization ratio = baseline_bits/target_bitwidth;
+        pruning ratio = 1/(1-sparsity); compressed_bytes = original_bytes/ratio.
+        Fully sparse pruning uses a finite 100x convention instead of infinity.
+
+        Assumptions: quality deltas are model-independent defaults. The baseline
+        weight-only Roofline regime determines the quantization speed branch;
+        structured sparsity is assumed to translate storage savings into speed.
+
+        Excludes: measured task accuracy, retraining, sparse index storage,
+        dequantization overhead, and kernel/allocator effects. ``distillation``
+        is documented as an accepted name but currently follows the no-op branch.
+
         Conventions and branch logic:
 
         - Sizes are measured against the configurable ``baseline_precision``
@@ -91,10 +107,10 @@ class CompressionModel(ForwardModel):
           by default; 16/4 = 4x with ``baseline_precision="fp16"``). A target
           wider than the baseline is an upcast and yields a ratio < 1.
         - ``estimated_accuracy_delta`` is a signed fraction (e.g. -0.005 =
-          -0.5 percentage points top-1), taken from survey medians in
-          ``engine/calibration.py`` (Gholami 2021 for quantization; Blalock
-          2020 for pruning, where degradation goes exponential past the
-          ~50% sparsity threshold).
+          -0.5 percentage points top-1), selected from illustrative defaults in
+          ``engine/calibration.py``. These are not a measurement of this
+          workload. The pruning branch uses an exponential penalty beyond
+          its declared sparsity threshold.
         - ``inference_speedup`` depends on the Roofline regime: memory-bound
           workloads gain the full compression ratio (less data to move);
           compute-bound workloads gain only what the hardware's low-precision
@@ -103,6 +119,20 @@ class CompressionModel(ForwardModel):
           sparsity saves storage only.
         - Unknown ``method`` values fall through to a no-op result
           (ratio 1.0, delta 0.0).
+
+        References
+        ----------
+        Derivation: storage changes in proportion to bits per element or the
+        surviving weight fraction. Speed and quality branches are declared
+        implementation assumptions, not consequences of that storage identity.
+
+        Examples
+        --------
+        >>> from mlsysim import Models, Hardware
+        >>> result = CompressionModel().solve(Models.Language.Llama3_8B,
+        ...     Hardware.Cloud.H100, target_bitwidth=8, baseline_precision="fp16")
+        >>> result.compression_ratio == 2
+        True
         """
         from ...core._validation import validate_at_least, validate_range
         validate_at_least(target_bitwidth, 1, "target_bitwidth")
@@ -206,10 +236,75 @@ class CompressionModel(ForwardModel):
         require_hardware_support: bool = False,
         baseline_precision: str = "fp32",
     ) -> CompressionCandidate:
-        """Evaluate one compression configuration with feasibility metadata.
+        """Apply declared size, quality, speed, and support constraints to a candidate.
 
-        Sizes, ratios, and speedups are relative to ``baseline_precision``
-        (see ``solve``).
+        Parameters
+        ----------
+        model : Workload
+            Workload specification supplying parameter count and a lowered graph.
+        hardware : HardwareNode
+            Device specification supplying memory bandwidth and precision compute rates.
+        label : str, optional
+            Display name; defaults to a name derived from the compression configuration.
+        method : str, optional
+            Compression branch, ``quantization`` or ``pruning``; other names are no-ops.
+        target_bitwidth : int, optional
+            Positive target bits per weight for quantization; default eight.
+        sparsity : float, optional
+            Removed-weight fraction in [0, 1] for pruning; default zero.
+        sparsity_type : str, optional
+            Pruning pattern: unstructured, structured, or N:M; common 2:4 spellings
+            normalize to ``n_m``. Default unstructured.
+        size_limit : Quantity, optional
+            Maximum compressed checkpoint size, convertible to bytes.
+        max_accuracy_drop : float, optional
+            Maximum absolute assumed accuracy delta as a fraction, not percent.
+        min_speedup : float, optional
+            Minimum dimensionless modeled speed ratio relative to baseline precision.
+        require_hardware_support : bool, optional
+            Require the registry's precision/sparsity support heuristic; default False.
+        baseline_precision : str, optional
+            Uncompressed precision key; default fp32. All ratios use this baseline.
+
+        Returns
+        -------
+        CompressionCandidate
+            Sizes in GB, speed/storage ratios, assumed quality delta, support status,
+            and constraint violations. Feasible means these requested gates pass;
+            it does not certify runtime memory residency or deployment performance.
+
+        See Also
+        --------
+        CompressionModel.solve : Compression estimates and their assumptions.
+
+        Notes
+        -----
+        Equation: feasible = all(requested limits pass), where size <= size_limit,
+        abs(quality_delta) <= max_accuracy_drop, speedup >= min_speedup, and optional
+        hardware support. Missing limits impose no condition.
+
+        Assumptions: the estimates returned by ``solve`` apply unchanged. Hardware
+        support is inferred from registry keys and pattern names, not from a kernel
+        execution. Constraint checks use the same baseline for every metric.
+
+        Excludes: validation of task accuracy, sparse-kernel availability, workspace,
+        and the quality of an actually compressed checkpoint.
+
+        References
+        ----------
+        Derivation: candidate admission is the conjunction of user-supplied scalar
+        bounds on the compression model outputs; the first failed check is reported
+        as binding while all violations remain in the result.
+
+        Examples
+        --------
+        >>> from mlsysim import Models, Hardware, Q_
+        >>> result = CompressionModel().candidate(Models.Language.Llama3_8B,
+        ...     Hardware.Cloud.H100, target_bitwidth=8, size_limit=Q_("1 byte"))
+        >>> result.feasible
+        False
+        >>> result.binding_constraint
+        'model_size'
         """
         normalized_method = method.lower()
         normalized_sparsity_type = self._normalize_sparsity_type(sparsity_type)
@@ -299,10 +394,70 @@ class CompressionModel(ForwardModel):
         objective: str = "min_size_max_speed_preserve_quality",
         baseline_precision: str = "fp32",
     ) -> CompressionSweepResult:
-        """Evaluate a compression design space and mark Pareto candidates.
+        """Evaluate compression configurations and identify nondominated candidates.
 
-        Every candidate is measured against the same ``baseline_precision``
-        so sizes, ratios, and speedups are comparable across the sweep.
+        Parameters
+        ----------
+        model : Workload
+            Common workload evaluated for every candidate.
+        hardware : HardwareNode
+            Common device profile evaluated for every candidate.
+        candidate_configs : list of dict
+            Candidate keyword dictionaries accepted by ``candidate``, such as method,
+            target_bitwidth, sparsity, sparsity_type, and label. Do not repeat the
+            shared constraints or baseline passed separately here.
+        size_limit : Quantity, optional
+            Maximum checkpoint size for each candidate, convertible to bytes.
+        max_accuracy_drop : float, optional
+            Maximum absolute assumed accuracy delta as a fraction, not percent.
+        min_speedup : float, optional
+            Minimum modeled speed ratio relative to the common baseline.
+        require_hardware_support : bool, optional
+            Require the candidate support heuristic; default False.
+        objective : str, optional
+            Descriptive result label only; changing it does not change the selection
+            algorithm. Default ``min_size_max_speed_preserve_quality``.
+        baseline_precision : str, optional
+            Common uncompressed precision key; default fp32.
+
+        Returns
+        -------
+        CompressionSweepResult
+            Candidate records, frontier/dominated labels, and a selected label among
+            feasible frontier candidates, or None when none exist. Sizes are in GB;
+            quality and speed comparisons are dimensionless modeled quantities.
+
+        See Also
+        --------
+        CompressionModel.candidate : Constraint checks and support heuristics.
+
+        Notes
+        -----
+        Equation: A dominates B if A has no larger size, no lower speed, and no lower
+        quality (1 + accuracy_delta), with at least one strict improvement. Among
+        feasible frontier entries, selection minimizes the tuple
+        (abs(accuracy_delta), size/max(speedup, 1e-9)).
+
+        Assumptions: each candidate uses the same workload, hardware, and baseline.
+        Dominance is evaluated across all candidates, including infeasible ones;
+        feasibility is applied afterward when choosing the returned best label.
+
+        Excludes: global optimization outside the supplied candidate list, measured
+        accuracy/performance, uncertainty intervals, and runtime memory feasibility.
+
+        References
+        ----------
+        Derivation: Pareto dominance is the componentwise ordering of storage cost,
+        speed benefit, and assumed quality. The lexicographic tie-break is an explicit
+        implementation policy, not a learned or universally optimal preference.
+
+        Examples
+        --------
+        >>> from mlsysim import Models, Hardware
+        >>> result = CompressionModel().sweep(Models.Language.Llama3_8B,
+        ...     Hardware.Cloud.H100, [{"target_bitwidth": 8, "label": "int8"}])
+        >>> result.frontier_labels
+        ['int8']
         """
         candidates: List[CompressionCandidate] = []
         for config in candidate_configs:

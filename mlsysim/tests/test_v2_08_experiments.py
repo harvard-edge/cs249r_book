@@ -313,3 +313,66 @@ def test_track_fixture_provides_calibrated_selector_defaults_and_ranges():
         a = fixture["arrival_slider"]
         assert a["min"] < a["value"] < a["max"], track_id
         assert a["max"] <= profile["long_duration_min"], track_id
+
+
+def test_lost_observation_does_not_establish_exclusive_ownership():
+    from mlsysim.labs.experiments.v2_08_experiments import allocation_reconciliation
+    unsafe = allocation_reconciliation(3, False)
+    safe = allocation_reconciliation(3, True)
+    delayed = allocation_reconciliation(7, True)
+    assert unsafe['late_write_accepted'] and not unsafe['exclusive_effect_preserved']
+    assert not safe['late_write_accepted'] and safe['exclusive_effect_preserved']
+    assert delayed['replacement_start_min'] > safe['replacement_start_min']
+    assert delayed['exclusive_effect_preserved']
+    assert [e['phase'] for e in safe['events']][:2] == ['admission', 'placement']
+    assert safe['events'][-1]['effect'] == 'rejected by epoch fence'
+
+
+def test_elastic_transition_is_amortized_against_the_same_target():
+    from mlsysim.labs.experiments.v2_08_experiments import elastic_resize
+    long = elastic_resize(4, 30, 3)
+    short = elastic_resize(4, 1, 3)
+    assert long['decision'] == 'resize'
+    assert short['decision'] == 'keep'
+    assert long['resize_time_min'] == pytest.approx(sum(e['duration_min'] for e in long['events']))
+    boundary = long['amortization_work']
+    tied = elastic_resize(4, boundary, 3)
+    assert tied['resize_time_min'] == pytest.approx(tied['keep_time_min'])
+    assert elastic_resize(8, 30, 3)['resize_time_min'] > 30 / 4 + 3  # diminishing returns
+
+
+@pytest.mark.parametrize('slots,validated', [(3, True), (10, True), (4, False)])
+def test_invalid_resize_never_reports_a_target_time(slots, validated):
+    from mlsysim.labs.experiments.v2_08_experiments import elastic_resize
+    result = elastic_resize(slots, 20, 3, validated)
+    assert not result['eligible'] and result['resize_time_min'] is None
+    assert result['decision'] == 'unavailable' and not result['events']
+
+
+def test_replay_changes_productivity_without_changing_activity_or_allocation():
+    from mlsysim.labs.experiments.v2_08_experiments import utilization_trace
+    clean, replay = utilization_trace(0), utilization_trace(16)
+    assert clean['allocated_slot_min'] == replay['allocated_slot_min']
+    assert clean['active_slot_min'] == replay['active_slot_min']
+    assert replay['productive_slot_min'] < clean['productive_slot_min']
+    assert replay['allocated_slot_min'] == (replay['held_slots'] - replay['incomplete_held_slots']) * replay['duration_min']
+    assert replay['productive_slot_min'] == replay['retained_steps'] / replay['fault_free_steps_per_slot_min']
+    assert replay['productive_fleet_pct'] < replay['active_fleet_pct'] < replay['allocated_fleet_pct']
+
+
+@pytest.mark.parametrize('value', [-1, 25, 2.5, float('nan')])
+def test_utilization_trace_rejects_impossible_discard_counts(value):
+    from mlsysim.labs.experiments.v2_08_experiments import utilization_trace
+    with pytest.raises(ValueError):
+        utilization_trace(value)
+
+
+def test_chapter_extensions_survive_in_capture_payloads():
+    for track in TRACKS:
+        a = gang_backfill_comparison(track, 6)
+        c = preemption_comparison(track, 6, 4, 3, 20, 3, True)
+        d = fairness_comparison(track, 16)
+        assert a['backfill']['control_plane']['replacement_start_min'] == 11
+        assert c['result']['elastic']['resize_time_min'] is None
+        assert d['result']['utilization_trace']['retained_steps'] == 8
+        json.dumps([a, c, d])

@@ -214,6 +214,19 @@ def _ledger_entry(chapter, track="cloud", model_id=None):
     model = model_id or REQUIRED_MODELS[chapter]
     exact_inputs = _exact_inputs(chapter)
     target_part, target_key = REPLAY_TARGETS[REQUIRED_MODELS[chapter]]
+    from mlsysim.labs.experiments.v2_17_experiments import _dispatch_replay
+    replayed = _dispatch_replay(REQUIRED_MODELS[chapter], target_key, exact_inputs)
+    if chapter == 1:
+        from mlsysim.labs.experiments.v2_01_experiments import serialize_value
+        record = {"inputs": exact_inputs, "outputs": serialize_value(replayed)}
+    elif chapter == 7:
+        record = replayed
+    elif chapter == 10:
+        from mlsysim.labs.experiments.v2_10_experiments import replay_snapshot
+        record = replay_snapshot(replayed, inputs=exact_inputs)
+    else:
+        from mlsysim.labs.experiments.v2_15_experiments import serialize_experiment_value
+        record = {"inputs": exact_inputs, "outputs": serialize_experiment_value(replayed)}
     return {
         "schema_version": 1,
         "lab_id": f"v2_{chapter:02d}",
@@ -225,8 +238,8 @@ def _ledger_entry(chapter, track="cloud", model_id=None):
                 "part": target_part,
                 "prediction": "higher",
                 "inputs": {"selected": "intervention"},
-                "baseline": {"inputs": exact_inputs, "outputs": {}},
-                "result": {"inputs": exact_inputs, "outputs": {}},
+                "baseline": record,
+                "result": record,
                 "alternatives": [],
                 "decision": "keep margin",
                 "model_key": target_key,
@@ -319,3 +332,84 @@ def test_device_tracks_explicitly_name_fleet_roles_and_boundaries(track_id):
     assert "backend training/recovery" in label
     assert "serving pool" in label
     assert "energy boundary" in label
+
+
+def _signed_discussion(chapter, track='cloud'):
+    import hashlib
+    import json
+    model_chapter = 6 if chapter == 5 else 5 if chapter == 6 else chapter
+    record = {'schema_version': 1, 'lab_id': f'v2_{chapter:02d}', 'track_id': track,
+              'model_id': f'v2_{model_chapter:02d}_experiments',
+              'evidence': {'A': {'track': track, 'result': {'value': 1}}},
+              'recommendation': 'defer', 'reevaluation_trigger': 'new matched evidence',
+              'residual_risk': 'conditions differ from the instructor fleet'}
+    record['discussion_fingerprint'] = hashlib.sha256(json.dumps(record, sort_keys=True,
+                separators=(',', ':'), allow_nan=False).encode()).hexdigest()
+    return record
+
+
+def test_dossier_carries_all_prior_decisions_without_granting_deployment_clearance():
+    from mlsysim.labs.experiments.v2_17_experiments import audit_discussion_dossier
+    history = {str(n): _signed_discussion(n) for n in range(1, 17)}
+    audit = audit_discussion_dossier(history, track_id='cloud')
+    assert len(audit['rows']) == 16
+    assert not audit['missing_chapters'] and not audit['incompatible_chapters']
+    assert all(row['status'] == 'saved_scoped_discussion' for row in audit['rows'])
+    assert {row['chapter'] for row in audit['governance_obligations']} == {12, 13, 14, 16}
+    assert not audit['deployment_clearance']
+    assert audit['rows'][12]['recommendation'] == 'defer'
+    assert history['13']['recommendation'] == 'defer'
+
+
+def test_dossier_rejects_changed_cross_track_and_unsigned_discussions():
+    from mlsysim.labs.experiments.v2_17_experiments import audit_discussion_dossier
+    changed = _signed_discussion(13)
+    changed['recommendation'] = 'release'
+    other = _signed_discussion(14, 'tinyml')
+    unsigned = _signed_discussion(16)
+    unsigned.pop('discussion_fingerprint')
+    audit = audit_discussion_dossier({13: changed, 14: other, 16: unsigned}, track_id='cloud')
+    assert audit['incompatible_chapters'] == [13, 14, 16]
+    assert 12 in audit['missing_chapters']
+    assert not audit['deployment_clearance']
+
+
+@pytest.mark.parametrize('chapter', REQUIRED_MODELS)
+def test_output_drift_is_incompatible_even_when_inputs_still_execute(chapter):
+    import copy
+    entry = copy.deepcopy(_ledger_entry(chapter))
+    part = REPLAY_TARGETS[REQUIRED_MODELS[chapter]][0]
+    entry['evidence'][part]['result'] = {'inputs': entry['evidence'][part]['result']['inputs'], 'outputs': {}}
+    item = next(i for i in audit_ledger_evidence({chapter: entry}, track_id='cloud').items if i.chapter == chapter)
+    assert item.status == 'incompatible'
+    assert 'outputs do not match' in item.issue
+
+
+def test_nested_recovery_reference_preserves_physical_replay():
+    entry = _ledger_entry(7)
+    record = dict(entry['evidence']['E']['result'])
+    record['inputs'] = {'recovery': record['inputs'], 'gray_trace': {'detector': 'progress'}}
+    entry['evidence']['E']['result'] = record
+    item = next(i for i in audit_ledger_evidence({7: entry}, track_id='cloud').items if i.chapter == 7)
+    assert item.status == 'ledger'
+    assert replay_evidence(item, part='E')['recovery_s'] == record['recovery_s']
+
+
+def test_replayed_boolean_cannot_be_replaced_with_numeric_one():
+    entry = _ledger_entry(7)
+    entry['evidence']['E']['result']['loss_approximation_valid'] = 1
+    item = next(i for i in audit_ledger_evidence({7: entry}, track_id='cloud').items if i.chapter == 7)
+    assert item.status == 'incompatible'
+    assert 'outputs do not match' in item.issue
+
+
+def test_boolean_schema_version_is_not_integer_schema_contract():
+    from mlsysim.labs.experiments.v2_17_experiments import audit_discussion_dossier
+    entry = _signed_discussion(13)
+    entry['schema_version'] = True
+    audit = audit_discussion_dossier({13: entry}, track_id='cloud')
+    assert audit['incompatible_chapters'] == [13]
+    physical = _ledger_entry(7)
+    physical['schema_version'] = True
+    item = next(i for i in audit_ledger_evidence({7: physical}, track_id='cloud').items if i.chapter == 7)
+    assert item.status == 'incompatible'

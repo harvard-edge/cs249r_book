@@ -1,4 +1,4 @@
-"""Vol I/II calculations must stay wired to MLSysIM registries.
+"""Vol I–IV calculations must stay wired to MLSysIM registries.
 
 The book is allowed to have illustrative scenario constants in a chapter, but
 model, hardware, dataset, platform, system, infrastructure, literature, and ops
@@ -70,7 +70,7 @@ def _resolve_registry_ref(ref: str) -> object:
     return obj
 
 
-def test_vol1_vol2_registry_paths_resolve() -> None:
+def test_all_volume_registry_paths_resolve() -> None:
     missing: list[str] = []
 
     for path in _qmd_files():
@@ -90,7 +90,7 @@ def test_vol1_vol2_registry_paths_resolve() -> None:
                 missing.append(f"{rel}: {ref} ({exc})")
 
     assert not missing, (
-        "Vol I/II QMD registry references must resolve through mlsysim:\n"
+        "Vol I–IV QMD registry references must resolve through mlsysim:\n"
         + "\n".join(missing[:80])
         + (f"\n... and {len(missing) - 80} more" if len(missing) > 80 else "")
     )

@@ -8,6 +8,8 @@ quotes against the in-repo ``mlsysim`` package and writes:
   trailing ``% source:`` comment naming the solver call that produced it;
 * ``paper/generated/values.json`` the raw (unrounded) values, the printed
   strings, and the sources, for audit and for ``--check``;
+* ``paper/generated/timing_samples.json`` raw local durations, run context,
+  dependency versions, and input/output hashes;
 * ``paper/generated/hw_catalog.tex`` and ``paper/generated/infra_systems.tex``
   table-row macros for the appendix registry snapshots;
 * ``paper/figures/roofline-crossover.{pdf,svg}`` and
@@ -24,22 +26,28 @@ install)::
     cd mlsysim && PYTHONPATH=. uv run --no-project --python 3.11 \\
         --with "pint>=0.24.4" --with "pydantic>=2.10.5" --with "numpy>=2.0" \\
         --with typer --with rich --with pyyaml --with matplotlib \\
-        --with pytest --with marimo --with scipy --with ortools --with plotly \\
+        --with pytest --with numpydoc --with marimo --with scipy --with ortools --with plotly \\
         python paper/scripts/generate_paper_values.py
 
 or ``make values`` in ``paper/``. The test-count step collects ``tests/``,
 which imports the lab and optimizer extras.
 
 Drift gate: ``python paper/scripts/generate_paper_values.py --check`` recomputes
-every value without writing anything and exits non-zero if any value differs
-from the committed ``generated/values.json`` (relative tolerance 1e-6), if the
-appendix tables differ, or if a diagram label is out of sync. It skips the
-figures, the sweep timing, the machine description, and the test count, which
-describe the machine and environment rather than the model.
+deterministic values without writing anything and exits non-zero if a raw value
+differs from ``generated/values.json`` (relative tolerance 1e-6), displayed text or
+source comments differ, appendix tables differ, or diagram labels are out of sync.
+The complete ``values.tex`` must match the recorded macros. Recorded runtime and
+machine values are not replaced with the checking machine's values: their display,
+raw samples, sampling protocol, source/output hashes, and run metadata are checked.
+Schema-2 receipts record a project-relative equivalent invocation; host-specific
+executable and checkout paths are retained only in private execution logs.
+The receipt detects drift and inconsistent evidence, not coordinated fabrication;
+independent execution remains part of publication review.
 
 Any solver error, any infeasible result where the paper needs a feasible run,
 any malformed or duplicate macro name, and any diagram template naming an
-unknown value is fatal: the script exits non-zero before writing.
+unknown value is fatal. If source files change during generation, the run fails
+and must be repeated after edits finish; the freshness gate rejects stale receipts.
 """
 
 from __future__ import annotations
@@ -70,6 +78,10 @@ for p in (str(PROJECT_ROOT), str(SCRIPT.parent)):
     if p not in sys.path:
         sys.path.insert(0, p)
 
+from paper_integrity import (  # noqa: E402
+    check_timing_receipt, file_hashes, render_values_tex, source_paths, write_timing_receipt,
+)
+
 import matplotlib  # noqa: E402
 
 matplotlib.use("Agg")
@@ -79,7 +91,7 @@ from matplotlib.lines import Line2D  # noqa: E402
 import mlsysim  # noqa: E402
 import mlsysim.physics as physics_pkg  # noqa: E402
 import paper_scenarios as ps  # noqa: E402
-from mlsysim import Hardware, Infrastructure, Models, Systems  # noqa: E402
+from mlsysim import Datasets, Hardware, Infrastructure, Models, Systems  # noqa: E402
 from mlsysim.core import provenance_catalog  # noqa: E402
 from mlsysim.core.provenance import Provenance  # noqa: E402
 from mlsysim.core.registry import Registry  # noqa: E402
@@ -121,16 +133,25 @@ from mlsysim.systems.types import Fleet, Node  # noqa: E402
 # published values live in paper_scenarios.py).
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Case S2: per-worker ImageNet JPEG rates (decode only; decode + augmentation)
-# and the host provisioning of four data-loader workers per GPU.
-S2_DECODE_IMG_PER_WORKER_S = 1_200
-S2_AUGMENT_IMG_PER_WORKER_S = 850
+# Case S2: per-worker ImageNet rates and the host provisioning of four data-loader workers per GPU.
+# The full-pipeline rate (decode, random crop and resize, flip, normalize) is measured, not assumed:
+# tf.data (Murray et al., PVLDB 2021, arXiv:2101.12127), Table 6, processes one ImageNet epoch CPU-only
+# in 110 s on a GCP n2-standard-64 (64 vCPUs = 32 physical cores); the PyTorch DataLoader takes 213 s.
+# One worker per physical core at the tf.data rate is the upper end of the measured range (~364 img/s;
+# 182 per vCPU, 188 per core with the DataLoader).
+S2_PREP_REF_EPOCH_S = 110.0
+S2_PREP_REF_PHYSICAL_CORES = 32
+S2_AUGMENT_IMG_PER_WORKER_S = (Datasets.ImageNet.training_examples.m_as("count")
+                               / S2_PREP_REF_EPOCH_S / S2_PREP_REF_PHYSICAL_CORES)
+S2_DECODE_IMG_PER_WORKER_S = 1_200  # decode-only rate, illustrative scenario input
 S2_WORKERS_PER_GPU = 4
-S2_SAMPLE_SIZE = Q_("150 KB")  # compressed ImageNet JPEG, scenario assumption
-# Appendix Scenario C: under-provisioned 16-worker pipeline at 40k images/s.
+S2_SAMPLE_SIZE = Datasets.ImageNet.mean_compressed_image_size  # archive size / training examples
+# Appendix Scenario C: under-provisioned 16-worker pipeline at 40k images/s; the accelerator step is
+# derived from that demand so the I/O and CPU checks describe the same stream.
 SC_DEMAND_IMG_PER_S = 40_000
 SC_WORKERS = 16
-SC_ACCEL_STEP = Q_("48 ms")
+SC_BATCH = 2048
+SC_ACCEL_STEP = (SC_BATCH / Q_(SC_DEMAND_IMG_PER_S, "1/s")).to("ms")
 # Bound printed in the conceptual-diagram footnotes ("full analysis completes
 # in <0.3 s on a laptop"); generation fails if a chain exceeds it.
 CLAIMED_CHAIN_BOUND_S = 0.3
@@ -263,6 +284,9 @@ class Values:
 BATCH_WORDS = {1: "One", 8: "Eight", 32: "ThirtyTwo", 128: "OneTwentyEight", 256: "TwoFiftySix"}
 
 
+TIMING_SAMPLES = []
+
+
 def median_seconds(fn, runs: int = 5, warmup: int = 1) -> float:
     for _ in range(warmup):
         fn()
@@ -271,6 +295,8 @@ def median_seconds(fn, runs: int = 5, warmup: int = 1) -> float:
         t0 = time.perf_counter()
         fn()
         samples.append(time.perf_counter() - t0)
+    TIMING_SAMPLES.append({"function": fn.__qualname__, "warmup_runs": warmup,
+                           "seconds": samples, "median_seconds": statistics.median(samples)})
     return statistics.median(samples)
 
 
@@ -487,7 +513,13 @@ def section_anchors(V: Values) -> None:
     a2 = ps.anchor_two()
     V.num("AnchorTwoWeightsGB", gb(a2["weights"]), "Models.Language.Llama2_70B.size_in_bytes(FP16)")
     V.num("AnchorTwoTpDegree", a2["tp"], "paper_scenarios.A2_TP_DEGREE")
-    V.num("AnchorTwoDecodeFloorMs", a2["floor_ms"], a2["source"], nd=1)
+    V.num("AnchorTwoDecodeFloorMs", a2["floor_ms"], a2["source"], nd=2)
+    for key, engine in [("Vllm", "vLLM"), ("Trt", "TensorRT-LLM")]:
+        V.num(f"AnchorTwo{key}RequestAverageMs", a2["request_average_ms"][engine],
+              f"paper/data/argonne-llama2-70b-h100.csv: {engine}, 128 input/output tokens, Latency * 1000 / 128; NOT decode ITL", nd=2)
+    from mlsysim.engine.calibration import FRAMEWORK_LAYER_TAX_MS
+    V.num("DefaultDispatchUs", H100.dispatch_tax.m_as("us"), "Hardware.Cloud.H100.dispatch_tax")
+    V.num("DefaultLayerTaxUs", FRAMEWORK_LAYER_TAX_MS * 1000, "FRAMEWORK_LAYER_TAX_MS converted to microseconds")
 
     a3 = ps.anchor_three()
     d, fleet = a3["result"], a3["fleet"]
@@ -830,13 +862,18 @@ def section_students(V: Values) -> None:
     V.pct("CaseSTwoScalingEffPct", d.scaling_efficiency, src + ".scaling_efficiency")
     V.num("CaseSTwoWorkersPerGpu", S2_WORKERS_PER_GPU, "scenario input")
     V.num("CaseSTwoWorkers", workers, "workers per GPU x fleet.total_accelerators")
-    V.num("CaseSTwoAugmentRate", S2_AUGMENT_IMG_PER_WORKER_S, "scenario input: decode + augmentation images/s per worker")
+    V.num("CaseSTwoAugmentRate", S2_AUGMENT_IMG_PER_WORKER_S,
+          "Datasets.ImageNet.training_examples / S2_PREP_REF_EPOCH_S / S2_PREP_REF_PHYSICAL_CORES (tf.data, Murray et al. 2021, Table 6)")
+    V.num("CaseSTwoPrepRefEpochS", S2_PREP_REF_EPOCH_S, "S2_PREP_REF_EPOCH_S (tf.data, Murray et al. 2021, Table 6)")
+    V.num("CaseSTwoPrepRefCores", S2_PREP_REF_PHYSICAL_CORES, "S2_PREP_REF_PHYSICAL_CORES (GCP n2-standard-64, 64 vCPUs)")
+    V.num("CaseSTwoCoresPerGpuNeeded", (batch / step.m_as("s")) / S2_AUGMENT_IMG_PER_WORKER_S / fleet.total_accelerators,
+          "CaseSTwoDemandImgPerS / CaseSTwoAugmentRate / GPUs")
     V.num("CaseSTwoDecodeRate", S2_DECODE_IMG_PER_WORKER_S, "scenario input: decode-only images/s per worker")
     V.num("CaseSTwoRawSupplyImgPerS", workers * S2_DECODE_IMG_PER_WORKER_S, "workers x decode-only rate")
     V.num("CaseSTwoEffectiveSupplyImgPerS", supply_aug, "workers x decode+augment rate")
     V.pct("CaseSTwoAugmentFactorPct", S2_AUGMENT_IMG_PER_WORKER_S / S2_DECODE_IMG_PER_WORKER_S, "augment rate / decode rate", nd=0)
     V.pct("CaseSTwoAccelUtilizationPct", tr.accelerator_utilization,
-          "TransformationModel().solve(batch_size=2048, 150 KB samples, effective CPU supply, step).accelerator_utilization", nd=0)
+          "TransformationModel().solve(batch_size=2048, Datasets.ImageNet.mean_compressed_image_size, effective CPU supply, step).accelerator_utilization", nd=0)
     V.num("CaseSTwoEndToEndEta", eta * tr.accelerator_utilization, "eta x accelerator_utilization", nd=2)
     V.text("CaseSTwoCpuBottleneck", "yes" if tr.is_bottleneck else "no", "TransformationModel(...).is_bottleneck")
 
@@ -1029,6 +1066,8 @@ def section_overview(V: Values, check: bool) -> None:
     econ = EconomicsModel().solve(f1k, duration_days=30, datacenter=us, mfu=OVERVIEW_MFU)
     rel = ReliabilityModel().solve(f1k, job_duration_hours=720)
     elapsed = time.perf_counter() - t0
+    TIMING_SAMPLES.append({"function": "section_overview", "warmup_runs": 0,
+                           "seconds": [elapsed]})
     require(node.feasible, "overview (d): Llama-3 70B FP16 must fit on one B200")
     require(elapsed < CLAIMED_CHAIN_BOUND_S, f"overview (d) took {elapsed:.3f} s, over the claimed bound")
     wall = {"Memory": 2, "Compute": 1}.get(node.bottleneck)
@@ -1097,11 +1136,11 @@ def section_listings(V: Values) -> None:
 
     demand = Q_(SC_DEMAND_IMG_PER_S, "1/s") * S2_SAMPLE_SIZE  # Scenario C
     dm = DataModel().solve(workload_data_rate=demand, hardware=A100)
-    tr = TransformationModel().solve(batch_size=2048, sample_size_bytes=S2_SAMPLE_SIZE,
+    tr = TransformationModel().solve(batch_size=SC_BATCH, sample_size_bytes=S2_SAMPLE_SIZE,
                                      cpu_throughput=SC_WORKERS * S2_AUGMENT_IMG_PER_WORKER_S * S2_SAMPLE_SIZE / Q_("1 s"),
                                      accelerator_step_time=SC_ACCEL_STEP)
-    V.text("ScenarioCIoStalled", str(dm.is_stalled), "DataModel().solve(40,000/s x 150 KB, Hardware.Cloud.A100).is_stalled")
-    V.text("ScenarioCCpuStalled", str(tr.is_bottleneck), "TransformationModel().solve(2048, 150 KB, 16 x 850 img/s, 48 ms).is_bottleneck")
+    V.text("ScenarioCIoStalled", str(dm.is_stalled), "DataModel().solve(40,000/s x Datasets.ImageNet.mean_compressed_image_size, Hardware.Cloud.A100).is_stalled")
+    V.text("ScenarioCCpuStalled", str(tr.is_bottleneck), "TransformationModel().solve(2048, ImageNet mean image, 16 x CaseSTwoAugmentRate, 2048 / 40,000 per s).is_bottleneck")
     V.pct("ScenarioCAccelUtilizationPct", tr.accelerator_utilization, "TransformationModel(...).accelerator_utilization", nd=0)
 
     syn = SynthesisSolver().solve(llama8, Q_("30 ms"), precision="fp16")  # Scenario D
@@ -1436,20 +1475,41 @@ def sync_diagrams(V: Values, write: bool) -> list[str]:
 
 def write_outputs(V: Values, tables: dict[str, str]) -> None:
     GENERATED_DIR.mkdir(parents=True, exist_ok=True)
-    lines = ["% Generated by mlsysim/paper/scripts/generate_paper_values.py. Do not edit by hand.",
-             "% Regenerate with `make values` in mlsysim/paper/. Raw values: generated/values.json.",
-             "% Percent macros (*Pct) print the number without the percent sign."]
-    current = None
-    for name, rec in V.records.items():
-        if rec["section"] != current:
-            current = rec["section"]
-            lines += ["", f"% ===== {current} ====="]
-        lines.append(f"\\newcommand{{\\{name}}}{{{rec['tex']}}}% source: {rec['source']}")
-    (GENERATED_DIR / "values.tex").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    (GENERATED_DIR / "values.tex").write_text(render_values_tex(V.records), encoding="utf-8")
     payload = {"generator": "mlsysim/paper/scripts/generate_paper_values.py", "values": V.records, "audit": V.audit}
     (GENERATED_DIR / "values.json").write_text(json.dumps(payload, indent=2, default=str) + "\n", encoding="utf-8")
     for name, text in tables.items():
         (GENERATED_DIR / name).write_text(text, encoding="utf-8")
+
+
+def check_volatile_display(records: dict) -> list[str]:
+    """Reformat recorded runtime/machine values without remeasuring the machine."""
+    decimal_places = {"CountTests": 0, "CaseIOneSweepMs": 2, "CaseRThreeChainSeconds": 3,
+                      "OverviewDSolveSeconds": 3, "SweepTimingConfigs": 0,
+                      "SweepTimingMedianMs": 0, "SweepTimingPerConfigUs": 0, "MachineCores": 0}
+    text_names = {"MachineCpu", "MachineOs", "MachinePython"}
+    problems = []
+    volatile = {name for name, rec in records.items() if rec.get("volatile")}
+    if volatile != set(decimal_places) | text_names:
+        problems.append("volatile macro inventory differs from declared runtime/machine values")
+    for name in volatile:
+        rec = records[name]
+        raw = rec.get("raw")
+        if name in decimal_places:
+            if not isinstance(raw, (int, float)) or isinstance(raw, bool) or not math.isfinite(raw) or raw <= 0:
+                problems.append(f"{name}: recorded value must be finite and positive")
+                continue
+            printed = fmt_fixed(raw, decimal_places[name])
+        elif name in text_names:
+            if not isinstance(raw, str) or not raw:
+                problems.append(f"{name}: recorded machine text is missing")
+                continue
+            printed = raw
+        else:
+            continue
+        if rec.get("printed") != printed or rec.get("tex") != to_tex(printed):
+            problems.append(f"{name}: displayed value differs from recorded raw value")
+    return problems
 
 
 def check_drift(V: Values, tables: dict[str, str]) -> list[str]:
@@ -1457,7 +1517,19 @@ def check_drift(V: Values, tables: dict[str, str]) -> list[str]:
     committed_path = GENERATED_DIR / "values.json"
     if not committed_path.exists():
         return [f"{committed_path} is missing; run `make values`"]
-    committed = json.loads(committed_path.read_text(encoding="utf-8"))["values"]
+    try:
+        committed = json.loads(committed_path.read_text(encoding="utf-8"))["values"]
+        required_fields = {"raw", "printed", "tex", "source", "section", "volatile"}
+        if not isinstance(committed, dict) or any(not isinstance(rec, dict) or
+                not required_fields.issubset(rec) for rec in committed.values()):
+            raise ValueError("malformed value records")
+    except (ValueError, KeyError, TypeError) as exc:
+        return [f"generated/values.json is invalid: {exc}"]
+    tex_path = GENERATED_DIR / "values.tex"
+    if not tex_path.exists() or tex_path.read_text(encoding="utf-8") != render_values_tex(committed):
+        problems.append("generated/values.tex differs from displayed values/source comments in values.json")
+    problems.extend(check_timing_receipt(PROJECT_ROOT, committed, GENERATED_DIR))
+    problems.extend(check_volatile_display(committed))
     for name, rec in V.records.items():
         if rec["volatile"]:
             continue
@@ -1465,6 +1537,9 @@ def check_drift(V: Values, tables: dict[str, str]) -> list[str]:
         if old is None:
             problems.append(f"{name}: new value {rec['printed']!r} not in committed values.json")
             continue
+        for field in ("printed", "tex", "source", "section", "volatile"):
+            if rec[field] != old.get(field):
+                problems.append(f"{name}: {field} differs from recomputed value")
         a, b = rec["raw"], old["raw"]
         if isinstance(a, float) and isinstance(b, (int, float)) and not isinstance(b, bool):
             if not math.isclose(a, b, rel_tol=CHECK_REL_TOL, abs_tol=1e-12):
@@ -1488,9 +1563,11 @@ def main() -> int:
     parser.add_argument("--check", action="store_true",
                         help="recompute without writing; exit 1 if any value differs from generated/values.json")
     args = parser.parse_args()
+    TIMING_SAMPLES.clear()
     warnings.simplefilter("ignore")
     apply_style()
     V = Values()
+    initial_source_hashes = file_hashes(PROJECT_ROOT, source_paths(PROJECT_ROOT))
     try:
         section_registry(V)
         section_counts(V, args.check)
@@ -1519,7 +1596,8 @@ def main() -> int:
         figures = figure_roofline(roof) + figure_carbon(carbon)
         changed = sync_diagrams(V, write=True)
         write_outputs(V, tables)
-    except GenerationError as exc:
+        write_timing_receipt(PROJECT_ROOT, V.records, TIMING_SAMPLES, initial_source_hashes)
+    except (GenerationError, ValueError) as exc:
         print(f"generate_paper_values: FAILED: {exc}", file=sys.stderr)
         return 1
     print(f"wrote {len(V.records)} macros to {GENERATED_DIR / 'values.tex'}")

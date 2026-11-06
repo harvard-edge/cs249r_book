@@ -15,7 +15,7 @@ async def _():
         import micropip
 
         await micropip.install(["pydantic", "pint", "plotly", "pandas"], keep_going=False)
-        await micropip.install("../../wheels/mlsysim-0.3.0-py3-none-any.whl", keep_going=False)
+        await micropip.install("../../wheels/mlsysim-0.3.1-py3-none-any.whl", keep_going=False)
         await micropip.install("../../wheels/mlsysbook_labs-0.1.0-py3-none-any.whl", keep_going=False)
     else:
         labs_dir = Path(__file__).resolve().parents[1]
@@ -27,6 +27,8 @@ async def _():
 
     import plotly.graph_objects as go
     from mlsysim.labs.experiments.v2_01_experiments import (
+        DEMAND_GAIN_OPTIONS,
+        evaluate_quality_demand,
         compare_failure_semantics,
         evaluate_c3_scaling,
         evaluate_machine_boundary,
@@ -49,6 +51,8 @@ async def _():
         _loaded = await ledger.load_async()
     return (
         ACADEMIC_LAB_CSS,
+        DEMAND_GAIN_OPTIONS,
+        evaluate_quality_demand,
         COLORS,
         LAB_CSS,
         apply_plotly_theme,
@@ -76,11 +80,13 @@ def _(mo):
 
 
 @app.cell
-def _(mo, set_evidence):
+def _(ledger, mo, set_evidence):
+    from mlsysbook_labs.contexts import preferred_context as _preferred_context
+    _track_options = {"TinyML": "tinyml", "Mobile": "mobile", "Edge": "edge", "Cloud": "cloud"}
     track = mo.ui.dropdown(
-        {"TinyML": "tinyml", "Mobile": "mobile", "Edge": "edge", "Cloud": "cloud"},
-        value="TinyML",
-        label="Teaching track",
+        _track_options,
+        value=next(label for label, context in _track_options.items() if context == _preferred_context(ledger)),
+        label="Deployment context",
         on_change=lambda _value: set_evidence({}),
     )
     return (track,)
@@ -95,7 +101,7 @@ def _(get_track_scenario, track):
 
 
 @app.cell
-def _(mo, scenario, track_id):
+def _(DEMAND_GAIN_OPTIONS, mo, scenario, track_id):
     _track_key = track_id
     a_action = mo.ui.radio(
         {"Add machines": "add_machines", "Reduce state on each machine": "compact_state"},
@@ -121,6 +127,11 @@ def _(mo, scenario, track_id):
         {label.title(): label for label in scenario.coordination_options},
         value="Planned",
         label="Coordination condition",
+    )
+    b_quality_gain = mo.ui.dropdown(DEMAND_GAIN_OPTIONS, value="Moderate equal gains", label="Two equal loss reductions")
+    b_quality_prediction = mo.ui.radio(
+        {"The second gain needs more additional compute": "increasing", "Both gains cost the same additional compute": "constant"},
+        label="Before inspecting the demand curve, predict the resource cost",
     )
     c_nodes = mo.ui.dropdown(
         {f"{value:,} nodes": value for value in scenario.fleet_size_options},
@@ -155,6 +166,8 @@ def _(mo, scenario, track_id):
         b_bandwidth,
         b_coordination,
         b_workers,
+        b_quality_gain,
+        b_quality_prediction,
         c_nodes,
         c_recovery,
         d_duration,
@@ -232,7 +245,7 @@ def _(mo, track_id):
     rationale = mo.ui.text_area(
         label="Fleet memo rationale",
         placeholder="Cite a saved result, quantify the rejected alternative, and explain the trigger.",
-    )
+     debounce=False)
     return final_choice, final_rejected, final_risk, final_trigger, rationale
 
 
@@ -344,12 +357,21 @@ def _(
 
 
 @app.cell
+def _(b_quality_gain, evaluate_quality_demand):
+    b_demand_result = evaluate_quality_demand(equal_loss_gain=b_quality_gain.value)
+    return (b_demand_result,)
+
+
+@app.cell
 def _(
     a_action,
     a_baseline,
     a_machine_count,
     a_prediction,
     a_result,
+    b_demand_result,
+    b_quality_gain,
+    b_quality_prediction,
     b_bandwidth,
     b_baseline,
     b_coordination,
@@ -376,7 +398,7 @@ def _(
         set_evidence(lambda current: {**current, part: capture})
 
     a_upstream = {"action": a_action.value, "machine_count": a_machine_count.value}
-    b_upstream = {"workers": b_workers.value, "network": b_bandwidth.value, "coordination": b_coordination.value}
+    b_upstream = {"workers": b_workers.value, "network": b_bandwidth.value, "coordination": b_coordination.value, "demand_gain": b_quality_gain.value, "demand_prediction": b_quality_prediction.value, "quality_demand": b_demand_result}
     c_upstream = {"nodes": c_nodes.value, "recovery": c_recovery.value}
     d_upstream = {"duration": d_duration.value, "scope": d_fraction.value, "decision": d_policy.value}
     a_capture = mo.ui.button(
@@ -402,7 +424,7 @@ def _(
     b_capture = mo.ui.button(
         label="Capture scaling contrast",
         kind="success",
-        disabled=b_prediction.value is None or b_baseline["inputs"] == b_result["inputs"],
+        disabled=b_prediction.value is None or b_quality_prediction.value is None or b_baseline["inputs"] == b_result["inputs"],
         on_click=lambda _value: store(
             "B",
             capture_evidence(
@@ -470,37 +492,37 @@ def _(
 
 @app.cell
 def _(ACADEMIC_LAB_CSS, LAB_CSS, mo, profile, track):
+    from mlsysbook_labs.notebook import (
+        notebook_header as _course_header, notebook_shell as _course_shell,
+        notebook_learning_map as _course_learning_map,
+        notebook_scenario as _course_scenario,
+    )
+    from mlsysbook_labs.learning_paths import get_learning_path as _course_path
+    from mlsysbook_labs import get_lab_metadata as _course_metadata
     css = """
         <style>
-        .fleet-head{background:linear-gradient(135deg,#101827,#164e63);color:white;border-radius:14px;padding:clamp(18px,4vw,32px);margin-bottom:14px}
-        .fleet-top{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font:700 .72rem ui-monospace;letter-spacing:.08em}
-        .fleet-head h1{font-size:clamp(1.65rem,5vw,2.65rem);line-height:1.05;margin:16px 0 8px}.fleet-head p{color:#cffafe;max-width:780px}
-        .fleet-meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:9px;margin-top:17px}.fleet-meta div{background:#ffffff14;border:1px solid #ffffff26;padding:9px 11px;border-radius:8px}
+
+
+
+
         .fleet-note{color:#475569;font-size:.9rem;line-height:1.5;margin:0;padding:0 2px}.saved{border-left:4px solid #2ca02c;background:#f0fdf4;padding:9px 12px;border-radius:7px}
         .lab-hud{display:flex;align-items:center;flex-wrap:wrap;gap:10px;background:#101827!important;color:#fff;padding:14px 18px;border-radius:9px}.lab-hud .hud-label{color:#a7b9cf}.lab-hud .hud-value{color:#fff}.lab-hud .hud-active{color:#86efac}
-        @media(max-width:520px){.fleet-head{border-radius:9px;margin-top:30px}.fleet-meta{grid-template-columns:1fr}}
+
         </style>
         """
-    header = mo.Html(
-        f"""
-        {css}
-        <section class="fleet-head">
-          <div class="fleet-top"><span>VOLUME II · LAB 01</span><span>ABOUT 45–55 MIN</span></div>
-          <h1>The Fleet Is the System</h1>
-          <p>When does adding another machine create useful work, and when does fleet coupling erase the gain?</p>
-          <div class="fleet-meta">
-            <div><b>Track</b><br>{profile.label}</div>
-            <div><b>Deployment</b><br>{profile.deployed_system}</div>
-            <div><b>Scaling system</b><br>{profile.scaling_system}</div>
-            <div><b>Deliverable</b><br>Fleet operating memo</div>
-          </div>
-        </section>
-        """
-    )
+    header = _course_header(_course_metadata("vol2/lab_01_introduction.py"), 'When does adding another machine create useful work, and when does fleet coupling erase the gain?')
     note = mo.Html(
         '<p class="fleet-note">Select the track. All values are analytical outputs from explicit illustrative scenarios. Each Calculation Notes panel states the model boundary.</p>'
     )
-    mo.vstack([LAB_CSS, ACADEMIC_LAB_CSS, header, track, note], gap=0.5)
+    _course_shell([
+        LAB_CSS,
+        ACADEMIC_LAB_CSS,
+        header,
+        track,
+        _course_scenario(_course_path('vol2', 1), track=track.value, volume=2),
+        note,
+        _course_learning_map(_course_path('vol2', 1))
+    ], gap=0.5, volume=2)
     return
 
 
@@ -522,6 +544,9 @@ def _(
     a_upstream,
     apply_plotly_theme,
     audit_evidence,
+    b_demand_result,
+    b_quality_gain,
+    b_quality_prediction,
     b_bandwidth,
     b_baseline_result,
     b_capture,
@@ -557,6 +582,12 @@ def _(
     scenario,
     track_id,
 ):
+    _saved_prediction_widgets = {'A': a_prediction, 'B': b_prediction, 'C': c_prediction, 'D': d_prediction}
+    from mlsysbook_labs.notebook import notebook_prediction_label as _read_prediction
+    from mlsysbook_labs.notebook import notebook_tab_hint as _part_tabs_hint, notebook_shell as _lesson_shell
+    from mlsysbook_labs.notebook import notebook_part_reflection as _concept_reflection
+    from mlsysbook_labs.learning_paths import get_learning_path as _reflection_path
+    _reflection_contract = _reflection_path('vol2', 1)
     _captures = get_evidence()
     upstream = {"A": a_upstream, "B": b_upstream, "C": c_upstream, "D": d_upstream}
     audit = audit_evidence(
@@ -584,7 +615,7 @@ def _(
             return mo.callout(mo.md("**STALE OR NON-CONTRASTING EVIDENCE.** Recapture this experiment."), kind="danger")
         data = capture.to_dict()
         return mo.Html(
-            f'<div class="saved"><b>Saved snapshot</b> · original prediction: {data["prediction"]}<br><small>Track {data["track"]}; later control changes cannot rewrite this record.</small></div>'
+            f'<div class="saved"><b>Saved snapshot</b> · original prediction: {_read_prediction(_saved_prediction_widgets[part], value=data["prediction"])}<br><small>Track {data["track"]}; later control changes cannot rewrite this record.</small></div>'
         )
 
     def part_a():
@@ -624,14 +655,14 @@ def _(
             if profile.deployed_coupling == "independent_devices"
             else "Coupled workers may shard state and aggregate rate in this first-order boundary."
         )
-        return mo.vstack(
+        return mo.vstack([mo.vstack(
             [
                 setup,
                 mo.hstack([a_action, a_machine_count], widths="equal", wrap=True),
                 a_prediction,
                 table(rows),
                 mo.callout(
-                    mo.md(f"**Your prediction:** {a_prediction.value}. **Observed consequence:** {consequence}"),
+                    mo.md(f"**Your prediction:** {_read_prediction(a_prediction)}. **Observed consequence:** {consequence}"),
                     kind="info",
                 ),
                 a_capture,
@@ -640,7 +671,7 @@ def _(
                     {"Calculation Notes": mo.md("The test compares model-state bytes with memory bytes and required request rate with per-machine rate. Coupled machines may divide state and demand evenly. Independent deployment devices must each satisfy both limits; fleet size is noncausal for local fit.")}
                 ),
             ]
-        )
+        ), _concept_reflection(_reflection_contract, "A")])
 
     def part_b():
         setup = mo.md(
@@ -686,7 +717,7 @@ def _(
                 "Dominant": b_changed_result.dominant_term,
             },
         ]
-        return mo.vstack(
+        return mo.vstack([mo.vstack(
             [
                 setup,
                 mo.hstack([b_workers, b_bandwidth, b_coordination], widths="equal", wrap=True),
@@ -694,16 +725,28 @@ def _(
                 apply_plotly_theme(figure),
                 table(rows),
                 mo.callout(
-                    mo.md(f"**Your prediction:** {b_prediction.value}. **Observed consequence:** useful throughput is {q(b_changed_result.useful_throughput, 'count/second')}, while scaling efficiency is {pct(b_changed_result.scaling_efficiency)}."),
+                    mo.md(f"**Your prediction:** {_read_prediction(b_prediction)}. **Observed consequence:** useful throughput is {q(b_changed_result.useful_throughput, 'count/second')}, while scaling efficiency is {pct(b_changed_result.scaling_efficiency)}."),
                     kind="danger" if b_changed_result.scaling_efficiency < 0.5 else "info",
                 ),
+                mo.md("#### Demand first, execution price second\nThe team wants two equal reductions in loss. Predict whether the second costs the same additional compute, then inspect this normalized law. Its floor is zero excess loss; it forecasts neither track accuracy nor task utility."),
+                b_quality_prediction,
+                b_quality_gain,
+                (table([
+                    {"Target": label, "Loss above floor (normalized)": f"{loss:.3f}", "Total compute / baseline": f"{compute:,.2f}×"}
+                    for label, loss, compute in zip(("Starting point", "First gain", "Second equal gain"), b_demand_result["excess_loss"], b_demand_result["relative_compute"])
+                ]) if b_quality_prediction.value is not None else mo.md("Make the demand prediction to reveal the comparison.")),
+                (mo.callout(mo.md(
+                    f"**Observed:** the first gain adds {b_demand_result['additional_compute'][0]:,.2f} baseline compute units; the second adds {b_demand_result['additional_compute'][1]:,.2f}. "
+                    "Changing worker count above changes execution time, not the work this quality target demands. A lower modeled loss still needs task evaluation before purchase."
+                ), kind="info") if b_quality_prediction.value is not None else mo.md("")),
+                mo.md("**Locate the remedy in the fleet stack:** compare a network-tier change with a coordination-condition change at the same worker count. A fabric upgrade acts in **Infrastructure** on transfer time; improved coordination acts in **Distribution** on waiting. Neither changes the quality-demand curve. C³ names a cost; the stack locates responsibility. These controlled knobs assume the named cause; a real trace is still needed to identify it."),
                 b_capture,
                 saved("B"),
                 mo.accordion(
-                    {"Calculation Notes": mo.md("Fixed work gives compute time = one-worker compute time / workers. Step time adds compute, one disclosed communication transfer, and per-worker coordination, then subtracts bounded compute–communication overlap. Useful throughput is fixed work / step time; scaling efficiency compares it with ideal linear throughput. No collective algorithm is selected or optimized.")}
+                    {"Calculation Notes": mo.md("Fixed work gives compute time = one-worker compute time / workers. Step time adds compute, one disclosed communication transfer, and per-worker coordination, then subtracts bounded compute–communication overlap. Useful throughput is fixed work / step time; scaling efficiency compares it with ideal linear throughput. No collective algorithm is selected or optimized. The demand comparison uses normalized excess loss = relative compute raised to minus the illustrative chapter exponent. Inverting it determines the compute required for each target; the irreducible floor cannot be reached at finite compute.")}
                 ),
             ]
-        )
+        ), _concept_reflection(_reflection_contract, "B")])
 
     def part_c():
         independent_system = (
@@ -760,7 +803,7 @@ def _(
                 "Independent capacity available": pct(c_changed_result.independent_available_capacity_fraction),
             },
         ]
-        return mo.vstack(
+        return mo.vstack([mo.vstack(
             [
                 setup,
                 mo.hstack([c_nodes, c_recovery], widths="equal", wrap=True),
@@ -769,7 +812,7 @@ def _(
                 table(rows),
                 mo.callout(
                     mo.md(
-                        f"**Your prediction:** {c_prediction.value}. **Observed consequence:** a node event interrupts the coupled job. "
+                        f"**Your prediction:** {_read_prediction(c_prediction)}. **Observed consequence:** a node event interrupts the coupled job. "
                         f"In the independent deployment ({independent_system}), it removes only that node while repair-time availability determines the remaining capacity."
                     ),
                     kind="info",
@@ -780,7 +823,7 @@ def _(
                     {"Calculation Notes": mo.md("The event probability is evaluated over the displayed observation horizon, starting with all nodes operational. Independent capacity uses stationary repairable availability A = MTBF / (MTBF + repair time). These are different quantities: a horizon event probability is not instantaneous unavailable capacity. Failures are independent; correlated domains are a stated limitation.")}
                 ),
             ]
-        )
+        ), _concept_reflection(_reflection_contract, "C")])
 
     def part_d():
         setup = mo.md(
@@ -825,7 +868,7 @@ def _(
                 "Maximum model age": q(d_stale_result.maximum_model_age, "minute", 1),
             },
         ]
-        return mo.vstack(
+        return mo.vstack([mo.vstack(
             [
                 setup,
                 mo.hstack([d_duration, d_fraction], widths="equal", wrap=True),
@@ -833,14 +876,14 @@ def _(
                 apply_plotly_theme(figure),
                 table(rows),
                 d_policy,
-                mo.callout(mo.md(f"**Your prediction:** {d_prediction.value}. **Observed consequence:** both policies see {q(d_wait_result.affected_requests, 'count', 0)} affected requests. Waiting makes them unavailable; serving continues with older state."), kind="danger"),
+                mo.callout(mo.md(f"**Your prediction:** {_read_prediction(d_prediction)}. **Observed consequence:** both policies see {q(d_wait_result.affected_requests, 'count', 0)} affected requests. Waiting makes them unavailable; serving continues with older state."), kind="danger"),
                 d_capture,
                 saved("D"),
                 mo.accordion(
                     {"Calculation Notes": mo.md("Affected requests = request rate × partition duration × partitioned fraction. Waiting counts them as unavailable. Serving the last confirmed model counts them as stale and adds partition duration to model age. The model assigns no universal score to either policy.")}
                 ),
             ]
-        )
+        ), _concept_reflection(_reflection_contract, "D")])
 
     def build_synthesis():
         rows = []
@@ -855,7 +898,7 @@ def _(
             else:
                 state = "CURRENT"
                 prediction = capture.to_dict()["prediction"]
-            rows.append({"Part": part, "Original prediction": prediction, "Evidence": state})
+            rows.append({"Part": part, "Original prediction": _read_prediction(_saved_prediction_widgets[part], value=(prediction)), "Evidence": state})
         complete = (
             audit.complete
             and all(widget.value is not None for widget in (final_choice, final_rejected, final_trigger, final_risk))
@@ -865,7 +908,7 @@ def _(
         status = "**Ready for the local fleet memo.**" if complete else "Capture four current contrasts, choose different recommendation and rejected options, and complete the rationale."
         return mo.vstack(
             [
-                mo.md("### Synthesis · Where should scaling stop? (6 min)\nUse the saved capacity, C³, failure, and partition evidence. Choose one option, quantify a rejected alternative in your rationale, name a remaining limitation, and set a reevaluation trigger."),
+                mo.md("### Synthesis · Where should scaling stop? (6 min)\nUse the saved capacity, quality-demand, C³, failure, and partition evidence. Separate the work worth buying from the time the fleet takes to execute it. Locate the binding remedy in the fleet stack, quantify a rejected alternative, name a remaining limitation, and set a reevaluation trigger."),
                 table(rows),
                 mo.callout(mo.md("Saved snapshots remain fixed while live controls move. Recapture stale evidence before reporting."), kind="info"),
                 mo.hstack([final_choice, final_rejected], widths="equal", wrap=True),
@@ -884,8 +927,16 @@ def _(
             "Synthesis": build_synthesis(),
         }
     )
-    tabs
+    _lesson_shell([_part_tabs_hint(), tabs], volume=2)
     return (audit,)
+
+
+@app.cell
+def _():
+    from mlsysbook_labs.notebook import notebook_shell as _submit_shell, notebook_submission as _submit_guide
+    from mlsysbook_labs.learning_paths import get_learning_path as _submit_path
+    _submit_shell([_submit_guide(_submit_path(2, 1))], volume=2)
+    return
 
 
 @app.cell
@@ -904,6 +955,7 @@ def _(
     report_export_panel,
     track_id,
 ):
+    from mlsysbook_labs.notebook import notebook_shell as _workspace_shell
     _captures = get_evidence()
     _ready = (
         audit.complete
@@ -911,7 +963,8 @@ def _(
         and final_choice.value != final_rejected.value
         and bool(rationale.value.strip())
     )
-    mo.stop(not _ready)
+    from mlsysbook_labs.notebook import notebook_download_readiness as _download_readiness
+    mo.stop(not _ready, _download_readiness(volume=2))
     snapshots = {part: _captures[part].to_dict() for part in "ABCD"}
     report = build_lab_report(
         get_lab_metadata("vol2/lab_01_introduction.py"),
@@ -960,6 +1013,7 @@ def _(
                 else "Coupled workers may shard state and aggregate rate in this first-order boundary."
             ),
             "Useful fleet throughput depends on all three C³ time terms.",
+            "A quality target sets compute demand; more workers change execution time, not this demand curve.",
             "Failure consequences depend on workload coupling and repair time.",
             "Partition policy trades unavailable requests against older model state.",
         ],
@@ -978,54 +1032,35 @@ def _(
             "calculations": "Unit-aware fleet capacity, C³, failure, and partition models.",
         },
     )
-    mo.vstack([mo.md("## Local fleet evidence report"), report_export_panel(report)])
+    _workspace_shell([mo.vstack([mo.md("### Download your discussion"), report_export_panel(report)])], volume=2)
     return (report,)
 
 
 @app.cell
-async def _(
-    audit,
-    final_choice,
-    final_rejected,
-    final_risk,
-    final_trigger,
-    get_evidence,
-    ledger,
-    mo,
-    rationale,
-    track_id,
+def _(
+    audit, final_choice, final_rejected, final_risk, final_trigger, get_evidence, mo, rationale, track_id
 ):
-    _ready = (
-        audit.complete
-        and all(widget.value is not None for widget in (final_choice, final_rejected, final_trigger, final_risk))
-        and final_choice.value != final_rejected.value
-        and bool(rationale.value.strip())
+    from mlsysbook_labs.fleet_evidence import discussion_fingerprint as _discussion_fingerprint
+    _ready = audit.complete and all((widget.value is not None for widget in (final_choice, final_rejected, final_trigger, final_risk))) and (final_choice.value != final_rejected.value) and bool(rationale.value.strip())
+    fleet_discussion_ready = _ready
+    fleet_discussion_design = {'schema_version': 1, 'lab_id': 'v2_01', 'track_id': track_id, 'model_id': 'v2_01_experiments', 'evidence': {part: capture.to_dict() for part, capture in get_evidence().items()}, 'recommendation': final_choice.value, 'rejected_alternative': final_rejected.value, 'reevaluation_trigger': final_trigger.value, 'residual_risk': final_risk.value, 'rationale': rationale.value} if _ready else None
+    fleet_discussion_fingerprint = _discussion_fingerprint(fleet_discussion_design)
+    # Recreated when any evidence, track, or discussion field changes.
+    save_discussion = mo.ui.run_button(label="Save discussion", disabled=not fleet_discussion_ready)
+    return (fleet_discussion_ready, fleet_discussion_design, fleet_discussion_fingerprint, save_discussion)
+
+
+@app.cell
+async def _(fleet_discussion_design, fleet_discussion_fingerprint, fleet_discussion_ready,
+            ledger, mo, save_discussion, track_id):
+    from mlsysbook_labs.fleet_evidence import save_completed_discussion as _save_completed_discussion
+    from mlsysbook_labs.notebook import notebook_shell as _discussion_shell, notebook_status as _notebook_status
+    _outcome = await _save_completed_discussion(
+        ledger, chapter=1, track=track_id, design=fleet_discussion_design,
+        fingerprint=fleet_discussion_fingerprint, ready=fleet_discussion_ready,
+        requested=bool(save_discussion.value),
     )
-    status = "EVIDENCE IN PROGRESS"
-    if _ready:
-        try:
-            ledger.save(
-                chapter=1,
-                design={
-                    "schema_version": 1,
-                    "lab_id": "v2_01",
-                    "track_id": track_id,
-                    "model_id": "v2_01_experiments",
-                    "evidence": {part: capture.to_dict() for part, capture in get_evidence().items()},
-                    "recommendation": final_choice.value,
-                    "rejected_alternative": final_rejected.value,
-                    "reevaluation_trigger": final_trigger.value,
-                    "residual_risk": final_risk.value,
-                    "rationale": rationale.value,
-                },
-            )
-            await ledger.flush()
-            status = "SAVED"
-        except Exception as error:
-            status = f"SAVE FAILED · {type(error).__name__}"
-    mo.Html(
-        f'<div class="lab-hud"><span class="hud-label">LAB</span><span class="hud-value">· 01 · The Fleet Is the System</span><span style="flex:1"></span><span class="hud-label">STATUS</span><span class="hud-active">· {status}</span></div>'
-    )
+    _discussion_shell([mo.vstack([save_discussion, _notebook_status(_outcome.status, _outcome.detail)])], volume=2)
     return
 
 

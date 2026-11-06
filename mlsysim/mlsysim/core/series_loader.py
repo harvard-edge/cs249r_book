@@ -1,13 +1,69 @@
-"""Lightweight CSV table loader for chapter-local and deck-local figure series."""
+"""Lightweight CSV table loader for chapter-local and deck-local figure series.
+
+Tier-2 figure and table CSVs under ``books/volN/<chapter>/data/*.csv`` and
+``slides/volN/<deck>/images/data/*.csv`` carry structured leading ``#`` metadata
+lines before the header row so every empirical plot dataset keeps its source and
+computation lineage co-located with the rows:
+
+    # Source: Primary citation or dataset title (@bibkey when in references.bib)
+    # URL: https://...
+    # Verified: YYYY-MM-DD
+    # Epistemic: measured | modeled | assumed | constructed (plus boundary scope)
+    # Generator: python3 binder/tools/scripts/<script>.py ...
+    # Upstream-SHA256: <64-hex digest of raw upstream snapshot, when applicable>
+    # Computation: Filtering criteria, exclusions, units, and derivation formulas
+    # Notes: Caveats and accounting boundaries
+
+``LocalSeries.provenance`` parses these ``# Key: Value`` lines into a normalized
+read-only mapping (for example ``series.provenance["source"]``,
+``series.provenance["computation"]``, ``series.provenance["epistemic"]``).
+"""
 from __future__ import annotations
 
 import csv as _csv
 import functools as _functools
 import math as _math
+import re as _re
 from pathlib import Path as _Path
+from types import MappingProxyType as _MappingProxyType
+from typing import Mapping as _Mapping
 
 _REPO_ROOT = _Path(__file__).resolve().parents[3]
 _BOOKS_DIR = _REPO_ROOT / "books"
+_HEADER_KEY_RE = _re.compile(r"^#\s*([A-Za-z][A-Za-z0-9_-]*)\s*:\s*(.+)$")
+_CONTINUATION_RE = _re.compile(r"^#\s{2,}(\S.*)$")
+_INLINE_VERIFIED_RE = _re.compile(r"\|\s*Verified\s*:\s*(\d{4}-\d{2}-\d{2})\b", _re.I)
+
+
+def parse_series_provenance(comments: tuple[str, ...] | list[str]) -> _Mapping[str, str]:
+    """Parse leading ``# Key: Value`` provenance lines into an immutable mapping.
+
+    Keys are normalized to lowercase ``snake_case`` (for example,
+    ``Upstream-SHA256`` becomes ``upstream_sha256``). Indented ``#   ...`` lines
+    continue the preceding field, and inline ``| Verified: YYYY-MM-DD`` tokens
+    inside ``# License:`` lines populate ``verified`` when no standalone
+    ``# Verified:`` line is present.
+    """
+    fields: dict[str, str] = {}
+    last_key: str | None = None
+    for raw in comments:
+        m = _HEADER_KEY_RE.match(raw)
+        if m:
+            key = m.group(1).strip().lower().replace("-", "_")
+            val = m.group(2).strip()
+            if key == "license" and "verified" not in fields:
+                vm = _INLINE_VERIFIED_RE.search(val)
+                if vm:
+                    fields["verified"] = vm.group(1)
+            fields[key] = f"{fields[key]} {val}".strip() if key in fields else val
+            last_key = key
+            continue
+        cm = _CONTINUATION_RE.match(raw)
+        if cm and last_key is not None:
+            fields[last_key] = f"{fields[last_key]} {cm.group(1).strip()}"
+        else:
+            last_key = None
+    return _MappingProxyType(fields)
 
 
 def _coerce_csv_value(value: str):
@@ -42,6 +98,7 @@ class LocalSeries:
         self.path = p.resolve()
         self._numeric = tuple(numeric) if numeric is not None else None
         self._provenance_comments: tuple[str, ...] | None = None
+        self._provenance: _Mapping[str, str] | None = None
         self._columns: tuple[str, ...] | None = None
         self._entries: tuple[dict, ...] | None = None
 
@@ -58,6 +115,7 @@ class LocalSeries:
             else:
                 break
         self._provenance_comments = tuple(comments)
+        self._provenance = parse_series_provenance(self._provenance_comments)
         reader = _csv.DictReader(raw_lines[data_start:])
         self._columns = tuple(reader.fieldnames or ())
         if self._numeric is not None:
@@ -76,6 +134,12 @@ class LocalSeries:
     def provenance_comments(self) -> tuple[str, ...]:
         self._ensure_loaded()
         return self._provenance_comments  # type: ignore[return-value]
+
+    @property
+    def provenance(self) -> _Mapping[str, str]:
+        """Structured ``# Key: Value`` provenance fields parsed from the CSV header."""
+        self._ensure_loaded()
+        return self._provenance  # type: ignore[return-value]
 
     @property
     def columns(self) -> tuple[str, ...]:

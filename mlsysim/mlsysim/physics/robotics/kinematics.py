@@ -6,8 +6,25 @@ from ...core.units import ureg
 
 
 def calc_two_link_singular_values(upper_arm, forearm, elbow_angle):
-    """
-    Singular values of the planar two-link arm's Jacobian at elbow angle q2.
+    """Calculate planar two-link Jacobian singular values.
+
+    Parameters
+    ----------
+    upper_arm : Quantity
+        First link length in meters; positive physical lengths are assumed.
+    forearm : Quantity
+        Second link length in meters; positive physical lengths are assumed.
+    elbow_angle : Quantity
+        Elbow angle in angular units, converted to radians.
+
+    Returns
+    -------
+    tuple of Quantity
+        (sigma_max, sigma_min) in meters per radian of joint motion.
+
+    Notes
+    -----
+    Equation: sigma_i = sqrt(eigenvalue_i(J.T J)); det J = l1 l2 sin(q2).
 
     The Jacobian maps joint rates (q1dot, q2dot) to tool velocity (x, y):
 
@@ -19,12 +36,21 @@ def calc_two_link_singular_values(upper_arm, forearm, elbow_angle):
     to zero as the elbow straightens: the singular pose. A tool speed v in the
     weakest direction needs a joint-rate vector of norm v / sigma_min.
 
-    Source: Lynch, K. M. and Park, F. C., Modern Robotics (2017), ch. 5.
+    Assumptions: A rigid planar two-revolute-joint arm; shoulder rotation changes orientation but not singular values.
 
-    Returns
-    -------
-    tuple of Quantity
-        (sigma_max, sigma_min) in meters per radian of joint motion.
+    Excludes: Joint limits, compliance, collision geometry, and safety certification.
+
+    References
+    ----------
+    Derivation: Compute the two eigenvalues of the symmetric matrix J.T J from its trace and determinant, clipping roundoff below zero.
+
+    Lynch, K. M. and Park, F. C., Modern Robotics (2017), ch. 5.
+
+    Examples
+    --------
+    >>> largest, smallest = calc_two_link_singular_values(1 * ureg.meter, 1 * ureg.meter, 0 * ureg.radian)
+    >>> bool(largest > smallest and smallest == 0 * ureg.meter)
+    True
     """
     l1 = upper_arm.to(ureg.meter).magnitude
     l2 = forearm.to(ureg.meter).magnitude
@@ -43,8 +69,25 @@ def calc_two_link_singular_values(upper_arm, forearm, elbow_angle):
 
 
 def calc_dls_joint_rate(tool_speed, singular_value, damping):
-    """
-    Joint rate damped least squares commands for ``tool_speed`` along one singular direction.
+    """Calculate damped joint rate along one Jacobian singular direction.
+
+    Parameters
+    ----------
+    tool_speed : Quantity
+        Tool speed along the selected direction in meters per second.
+    singular_value : Quantity
+        Nonnegative Jacobian singular value, represented in meters with radians dimensionless.
+    damping : Quantity
+        Nonnegative damping length in meters; it and singular_value cannot both be zero.
+
+    Returns
+    -------
+    tuple
+        (joint rate in rad/s, realized fraction of the tool motion).
+
+    Notes
+    -----
+    Equation: qdot = v ``sigma/(sigma**2`` + ``damping**2)``; motion fraction = ``sigma**2/(sigma**2`` + ``damping**2)``.
 
     Damped least squares minimizes ||J qdot - v||^2 + lambda^2 ||qdot||^2;
     along a singular direction with value sigma its gain is
@@ -55,14 +98,23 @@ def calc_dls_joint_rate(tool_speed, singular_value, damping):
     sigma^2 / (sigma^2 + lambda^2) of the requested tool motion. With
     ``damping`` zero the gain is the exact inverse, 1 / sigma.
 
-    Source: Wampler, C. W. (1986), Manipulator inverse kinematic solutions
+    Assumptions: One singular direction and a nonzero denominator; valid nonnegative inputs are caller responsibilities.
+
+    Excludes: Joint saturation, full inverse-kinematics iteration, obstacle avoidance, and safety certification.
+
+    References
+    ----------
+    Derivation: Differentiate the scalar regularized least-squares objective to obtain the damped inverse gain.
+
+    Wampler, C. W. (1986), Manipulator inverse kinematic solutions
     based on vector formulations and damped least-squares methods, IEEE
     Trans. SMC 16(1); Nakamura, Y. and Hanafusa, H. (1986), ASME J. Dyn. Syst.
 
-    Returns
-    -------
-    tuple
-        (joint rate in rad/s, realized fraction of the tool motion).
+    Examples
+    --------
+    >>> rate, share = calc_dls_joint_rate(1 * ureg.meter / ureg.second, 1 * ureg.meter, 1 * ureg.meter)
+    >>> bool(rate.to("radian/second").magnitude == share)
+    True
     """
     s = singular_value.to(ureg.meter).magnitude
     lam = damping.to(ureg.meter).magnitude

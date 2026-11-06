@@ -22,7 +22,9 @@ def test_pilot_labs_have_all_canonical_track_variants():
     coverage = variant_coverage()
 
     assert tuple(coverage) == ALL_LAB_IDS
-    assert len(ALL_LAB_IDS) == len(LAB_CATALOG) == 34
+    deployment_ids = {m.lab_id for m in LAB_CATALOG.values() if m.volume in {"Volume I", "Volume II"}}
+    assert set(ALL_LAB_IDS) == deployment_ids
+    assert len(ALL_LAB_IDS) == 35
     for lab_id in ALL_LAB_IDS:
         assert coverage[lab_id] == expected
         assert len(list_lab_variants(lab_id)) == len(expected)
@@ -451,3 +453,24 @@ def test_remaining_v2_variants_define_system_design_defaults():
             assert variant.assumptions["system_design_variant"] is True
             assert variant.assumptions.get("fallback_variant") is not True
             assert variant.assumptions["report_artifact"]
+
+
+def test_fleet_orientation_has_explicit_rehearsal_variants_not_engineering_fallbacks():
+    orientation = list_lab_variants("v2_00")
+    assert tuple(variant.track_id for variant in orientation) == canonical_track_ids()
+    assert "v2_00" in PILOT_LAB_IDS
+    assert ALL_LAB_IDS.index("v2_00") + 1 == ALL_LAB_IDS.index("v2_01_scale_illusion")
+    for variant in orientation:
+        assert variant.defaults == {
+            "assignment_mode": "interface rehearsal",
+            "briefing_views": ("baseline", "alternative"),
+            "initial_view": "baseline",
+        }
+        assert variant.assumptions["solver_required"] is False
+        assert variant.assumptions["deployment_evidence"] is False
+        assert variant.assumptions["requires_prior_volume"] is False
+        assert variant.assumptions["report_artifact"] == "your saved work"
+        assert variant.assumptions.get("fallback_variant") is not True
+        assert "no hardware or model evaluation" in variant.assumptions["reference_role"]
+        assert "captured" in variant.primary_metric
+        assert "does not establish deployment evidence" in variant.guardrail_metric

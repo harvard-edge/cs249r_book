@@ -41,17 +41,51 @@ class RecoveryProfile(BaseModel):
     checkpoint_write_bw_gbs: Sourced | float
 
     def cold_restart_time(self, checkpoint_bytes, *, include_detection: bool = True):
-        """Cold-restart time for a job whose resumable checkpoint is ``checkpoint_bytes``.
+        """Calculate a serial cold-restart budget from a resumable checkpoint.
 
-        Sums failure detection (optional), restart, checkpoint load at the
-        aggregate checkpoint bandwidth, and warmup: the four-term recovery
-        budget. A scheduler-initiated stop (a forced preemption, a planned
-        relaunch) needs no failure detection, so callers pass
-        ``include_detection=False``. Work redone since the last checkpoint is
-        not included: a failure charges it to checkpoint waste, and a forced
-        preemption adds it explicitly (ReferenceStats.ForcedPreemptionProfile).
-        Added 2026-10-15 so the recovery budget and the preemption tax read one
-        source instead of hand-typed reload and warmup times.
+        Parameters
+        ----------
+        checkpoint_bytes : Quantity
+            Nonnegative checkpoint size, with data-size units such as bytes or GB.
+        include_detection : bool, optional
+            Include the profile's failure-detection delay when True (default).
+            Use False for a scheduler-initiated stop or planned relaunch.
+
+        Returns
+        -------
+        Quantity
+            Modeled recovery duration in seconds, excluding lost work before failure.
+
+        Notes
+        -----
+        Equation: T = T_restart + checkpoint_bytes / BW_checkpoint + T_warmup,
+        plus T_detection when include_detection is True. The instance fields
+        ``restart_time_s``, ``warmup_time_s``, and ``detection_time_s`` are nonnegative
+        seconds; ``checkpoint_write_bw_gbs`` is positive decimal GB/s. This model uses
+        the same aggregate per-job bandwidth for checkpoint writes and restore reads.
+        Assumptions: stages execute serially at the profile's fixed times and
+        bandwidth. Detection is the end-to-end budget, not just the heartbeat timeout.
+        Excludes: work redone since the last checkpoint, failures during recovery,
+        contention changes, and overlap. ``heartbeat_timeout_s`` and
+        ``reschedule_time_s`` are not additional terms in this method. A failure
+        charges lost work to checkpoint waste; a forced preemption adds it separately.
+
+        References
+        ----------
+        Derivation: add the durations of the serial detection, restart, checkpoint
+        load, and warmup stages. Load duration is bytes divided by aggregate bandwidth.
+        This shared budget keeps recovery and preemption accounting on the same inputs.
+
+        Examples
+        --------
+        >>> from mlsysim.core.units import Q_
+        >>> profile = RecoveryProfile(heartbeat_timeout_s=1, reschedule_time_s=2,
+        ...     detection_time_s=3, restart_time_s=4, warmup_time_s=5,
+        ...     checkpoint_write_bw_gbs=2)
+        >>> profile.cold_restart_time(Q_('4 GB')).m_as('s')
+        14.0
+        >>> profile.cold_restart_time(Q_('4 GB'), include_detection=False).m_as('s')
+        11.0
         """
         load = (checkpoint_bytes / (float(self.checkpoint_write_bw_gbs) * GB / second)).to(second)
         total = float(self.restart_time_s) * second + load + float(self.warmup_time_s) * second

@@ -42,7 +42,7 @@ class Provenance(BaseModel):
     def _validate_kind_rules(self) -> Provenance:
         """
         Enforces validation rules based on the ProvenanceKind.
-        
+
         Requires source URLs and verification dates for evidence-backed records,
         and notes for estimates and derived values. This keeps public numbers
         traceable and makes intentionally illustrative numbers explicit.
@@ -121,15 +121,41 @@ class Sourced(float):
         return float(self)
 
     def to(self, unit: str = "dimensionless"):
-        """Convert this dimensionless sourced scalar to a Pint Quantity."""
+        """Convert the sourced scalar into a dimensionless Pint quantity.
+
+        Parameters
+        ----------
+        unit : str, optional
+            Target unit compatible with dimensionless quantities; defaults to
+            dimensionless. Percent is supported; physical units are not.
+
+        Returns
+        -------
+        Quantity
+            Converted value in the requested unit, without attached provenance.
+
+        Notes
+        -----
+        The stored scalar is dimensionless. Conversion delegates to
+        Pint and raises its dimensionality error for incompatible target units.
+
+        Conversion does not assign physical dimensions, preserve provenance, or
+        infer units from the scalar's name or description.
+
+        Examples
+        --------
+        >>> p = Provenance(kind=ProvenanceKind.ILLUSTRATIVE, ref="Example", verified="2026-11-04")
+        >>> Sourced(0.5, p).to("percent").magnitude
+        50.0
+        """
         from .units import Q_
         return Q_(float(self), "dimensionless").to(unit)
 
     def render_markdown(self) -> str:
         """
         Renders a Markdown representation of the sourced scalar.
-        
-        This includes the value, description, provenance kind, source reference, 
+
+        This includes the value, description, provenance kind, source reference,
         and URL. It is used primarily by CLI commands to inspect values.
         """
         lines = [
@@ -181,13 +207,30 @@ def sourced_qty(quantity, provenance: Provenance, *, name: str = "", description
 
 
 def scalar_value(x: Scalar | Sourced) -> float:
-    """Coerce a scalar (plain or ``Sourced``) to a plain ``float``.
+    """Extract a plain float from a sourced or ordinary scalar.
 
-    ``Sourced`` already subclasses ``float``, so ``float(x)`` handles both
-    cases identically; this helper exists so call sites in generated
-    calculations can state the intent ("drop provenance, keep the number")
-    explicitly. Note that the returned float carries no ``.provenance`` —
-    see the ``Sourced`` docstring for how provenance is lost in arithmetic.
+    Parameters
+    ----------
+    x : int, float, or Sourced
+        Numeric scalar whose magnitude is to be retained.
+
+    Returns
+    -------
+    float
+        Numeric value without provenance attributes or units.
+
+    Notes
+    -----
+    The input must support Python float conversion. Sourced subclasses
+    float, so conversion follows the same path as for an ordinary scalar.
+
+    The conversion does not propagate provenance or perform unit conversion.
+    Use the registry leaf to inspect evidence before transforming its value.
+
+    Examples
+    --------
+    >>> scalar_value(3)
+    3.0
     """
     return float(x)
 
@@ -198,7 +241,40 @@ def fleet_mttf_hours(
     component: str,
     failure_mode: str = "",
 ) -> Sourced:
-    """MTTF anchor for reliability registry entries."""
+    """Attach the reliability catalog provenance to an MTTF anchor.
+
+    Parameters
+    ----------
+    hours : float
+        Supplied mean time to failure in hours. Callers are responsible for
+        selecting a physically meaningful positive value.
+    component : str
+        Component name used in the anchor name and description.
+    failure_mode : str, optional
+        Typical failure mode appended to the description; empty by default.
+
+    Returns
+    -------
+    Sourced
+        The supplied numeric hours with catalog provenance and descriptive
+        labels. This scalar is not a unit-bearing Pint quantity.
+
+    Notes
+    -----
+    The caller must select a steady-state MTTF appropriate to
+    continuous datacenter operation. The catalog supplies the evidence label.
+
+    The helper does not estimate MTTF, check a value against the cited literature,
+    aggregate component hazards, or validate a reliability distribution.
+
+    Examples
+    --------
+    >>> anchor = fleet_mttf_hours(1000, component="Illustrative component")
+    >>> float(anchor)
+    1000.0
+    >>> anchor.name
+    'Illustrative component MTTF (hours)'
+    """
     from .provenance_catalog import RELIABILITY_MTTF_LITERATURE
 
     desc = f"Steady-state MTTF for {component} in continuous datacenter operation."

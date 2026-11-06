@@ -19,7 +19,7 @@ async def _():
             ["pydantic", "pint", "plotly", "pandas"], keep_going=False
         )
         await micropip.install(
-            "../../wheels/mlsysim-0.3.0-py3-none-any.whl", keep_going=False
+            "../../wheels/mlsysim-0.3.1-py3-none-any.whl", keep_going=False
         )
         await micropip.install(
             "../../wheels/mlsysbook_labs-0.1.0-py3-none-any.whl", keep_going=False
@@ -84,10 +84,12 @@ def _(mo):
 
 
 @app.cell
-def _(mo, set_evidence):
+def _(mo, set_evidence, ledger):
+    from mlsysbook_labs.contexts import preferred_context as _preferred_context
+    _track_labels = {"tinyml": "TinyML", "mobile": "Mobile", "edge": "Edge", "cloud": "Cloud"}
     track = mo.ui.dropdown(
         {"TinyML": "tinyml", "Mobile": "mobile", "Edge": "edge", "Cloud": "cloud"},
-        value="TinyML",
+        value=_track_labels[_preferred_context(ledger)],
         label="Deployment track",
         on_change=lambda _value: set_evidence({}),
     )
@@ -110,10 +112,6 @@ def _(get_track_scenario, track):
 @app.cell
 def _(mo, track_id):
     _track_key = track_id
-    a_prediction = mo.ui.radio(
-        ["Newest records", "Widest cohort coverage", "Remove duplicates first"],
-        label="Which policy preserves the most useful evidence under the fixed budget?",
-    ).form(submit_button_label="Lock Part A prediction")
     b_prediction = mo.ui.radio(
         [
             "The higher accuracy is trustworthy",
@@ -147,12 +145,33 @@ def _(mo, track_id):
         ],
         label="What happens when meaning changes without a type change?",
     ).form(submit_button_label="Lock Part E prediction")
-    return a_prediction, b_prediction, c_prediction, d_prediction, e_prediction
+    return b_prediction, c_prediction, d_prediction, e_prediction
+
+
+@app.cell
+def _(mo, track_id, a_task):
+    _track_key = track_id
+    _task_key = a_task.value
+    a_prediction = mo.ui.radio(
+        ["Finer labels resolve necessary actions", "Coarse labels suffice and buy more records", "Neither rubric supplies missing raw evidence"],
+        label="What will changing label detail buy for this task?",
+    ).form(submit_button_label="Lock Part A prediction")
+    return (a_prediction,)
 
 
 @app.cell
 def _(mo, track_id):
     _track_key = track_id
+    a_task = mo.ui.dropdown(
+        {"Route a response to the observed condition": "route", "Record only whether an event occurred": "presence"},
+        value="Route a response to the observed condition",
+        label="Required task",
+    )
+    a_rubric = mo.ui.dropdown(
+        {"Coarse event label": "coarse", "Condition-specific labels": "specific"},
+        value="Coarse event label",
+        label="Label rubric",
+    )
     a_policy = mo.ui.dropdown(
         {
             "Coverage first": "coverage",
@@ -195,6 +214,14 @@ def _(mo, track_id):
         },
         value="Stream events",
         label="Freshness policy",
+    )
+    a_review = mo.ui.dropdown(
+        {"Single annotation": "single", "Review disagreements": "disagreements", "Add gold checks": "gold"},
+        value="Single annotation", label="Audit review",
+    )
+    d_trace = mo.ui.dropdown(
+        {"Feature state changes": "changing", "Feature state stays stable": "stable"},
+        value="Feature state changes", label="Replay conditions",
     )
     e_level = mo.ui.dropdown(
         {"Semantic contract": "semantic", "Schema contract": "schema"},
@@ -248,12 +275,16 @@ def _(mo, track_id):
     )
     return (
         a_policy,
+        a_rubric,
+        a_review,
+        a_task,
         b_scope,
         b_strategy,
         c_compression,
         c_lanes,
         c_storage,
         d_policy,
+        d_trace,
         e_level,
         final_choice,
         final_rejected,
@@ -266,6 +297,9 @@ def _(mo, track_id):
 @app.cell
 def _(
     a_policy,
+    a_rubric,
+    a_review,
+    a_task,
     b_scope,
     b_strategy,
     c_compression,
@@ -274,6 +308,7 @@ def _(
     capture_experiment,
     contract_inputs,
     d_policy,
+    d_trace,
     e_level,
     freshness_inputs,
     pipeline_inputs,
@@ -282,12 +317,14 @@ def _(
     split_inputs,
 ):
     a_runs = {
-        p: capture_experiment("retention", **retention_inputs(scenario, p))
+        (p, r): capture_experiment("retention", **retention_inputs(scenario, p, r, a_task.value, a_review.value))
         for p in ("newest", "coverage", "deduplicate")
+        for r in ("coarse", "specific")
     }
-    a_base = a_runs["newest"]
-    a_chosen = a_runs[a_policy.value]
-    a_result = a_runs["coverage"] if a_policy.value == "newest" else a_chosen
+    a_base = capture_experiment("retention", **retention_inputs(scenario, "newest", "coarse", a_task.value, "single"))
+    a_chosen = a_runs[(a_policy.value, a_rubric.value)]
+    a_is_baseline = a_policy.value == "newest" and a_rubric.value == "coarse" and a_review.value == "single"
+    a_result = a_runs[("newest", "specific")] if a_is_baseline else a_chosen
     b_base = capture_experiment("split", **split_inputs(scenario, "record", "all"))
     b_result = capture_experiment(
         "split", **split_inputs(scenario, b_strategy.value, b_scope.value)
@@ -308,7 +345,7 @@ def _(
         ),
     )
     d_runs = {
-        p: capture_experiment("freshness", **freshness_inputs(scenario, p))
+        p: capture_experiment("freshness", **freshness_inputs(scenario, p, d_trace.value))
         for p in ("batch", "stream", "local feature")
     }
     d_base = d_runs["batch"]
@@ -341,6 +378,9 @@ def _(
     a_base,
     a_chosen,
     a_policy,
+    a_rubric,
+    a_review,
+    a_task,
     a_prediction,
     a_result,
     a_runs,
@@ -358,6 +398,7 @@ def _(
     capture_evidence,
     d_base,
     d_policy,
+    d_trace,
     d_prediction,
     d_chosen,
     d_result,
@@ -397,12 +438,13 @@ def _(
             alternatives=tuple(payload(run) for run in alternatives),
             decision=decision,
             model_key="v1_04_experiments",
+            upstream_inputs=inputs if part in {"A", "D"} else None,
             chosen_result=payload(chosen_result),
             result_role=result_role,
         )
 
     a_capture = mo.ui.button(
-        label="Capture retention contrast",
+        label="Capture label and retention contrast",
         kind="success",
         disabled=a_prediction.value is None,
         on_click=lambda _v: store(
@@ -410,14 +452,14 @@ def _(
             capture(
                 "A",
                 a_prediction.value,
-                {"policy": a_policy.value},
+                {"policy": a_policy.value, "rubric": a_rubric.value, "task": a_task.value, "review": a_review.value},
                 a_base,
                 a_result,
                 a_runs.values(),
                 a_policy.value,
                 a_chosen,
                 "rejected alternative"
-                if a_policy.value == "newest"
+                if a_policy.value == "newest" and a_rubric.value == "coarse" and a_review.value == "single"
                 else "tested intervention",
             ),
         ),
@@ -477,7 +519,7 @@ def _(
             capture(
                 "D",
                 d_prediction.value,
-                {"policy": d_policy.value},
+                {"policy": d_policy.value, "trace": d_trace.value},
                 d_base,
                 d_result,
                 d_runs.values(),
@@ -511,34 +553,34 @@ def _(
 
 
 @app.cell
-def _(ACADEMIC_LAB_CSS, LAB_CSS, mo, profile, track):
-    css = mo.Html("""
-    <style>
-    .pilot-head{background:linear-gradient(135deg,#101827,#1d4f78);color:white;border-radius:14px;padding:clamp(18px,4vw,32px);margin-bottom:10px}
-    .pilot-top{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font:700 .72rem ui-monospace;letter-spacing:.08em}
-    .pilot-head h1{font-size:clamp(1.65rem,5vw,2.65rem);line-height:1.05;margin:16px 0 8px}.pilot-head p{color:#dbeafe;max-width:780px}
-    .pilot-meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:9px;margin-top:17px}.pilot-meta div{background:#ffffff14;border:1px solid #ffffff26;padding:9px 11px;border-radius:8px}
-    .pilot-note{color:#475569;font-size:.9rem;line-height:1.5;margin:0;padding:0 2px}.saved{border-left:4px solid #2ca02c;background:#f0fdf4;padding:9px 12px;border-radius:7px}
-    .lab-hud{display:flex;align-items:center;flex-wrap:wrap;gap:10px;background:#101827!important;color:#fff;padding:14px 18px;border-radius:9px}.lab-hud .hud-label{color:#a7b9cf}.lab-hud .hud-active{color:#86efac}
-    @media(max-width:520px){.pilot-head{border-radius:9px;margin-top:30px}.pilot-meta{grid-template-columns:1fr}}
-    </style>""")
-    header = mo.Html(
-        f"""<section class="pilot-head"><div class="pilot-top"><span>VOLUME I · LAB 04</span><span>ABOUT 50–55 MIN</span></div><h1>Evidence Through the Data Pipeline</h1><p>Which records preserve trustworthy evidence, and can the pipeline deliver them before execution or freshness budgets bind?</p><div class="pilot-meta"><div><b>Context</b><br>{profile[1]}</div><div><b>Investigation</b><br>Five controlled contrasts</div><div><b>Deliverable</b><br>Evidence-backed data design</div></div></section>"""
+def _(get_lab_metadata, mo, track, track_id, profile):
+    from mlsysbook_labs.notebook import notebook_scenario as _scenario
+    from mlsysim import Scenarios as _Scenarios
+    from mlsysbook_labs.learning_paths import get_learning_path as _get_learning_path
+    from mlsysbook_labs.notebook import (
+        notebook_bridge as _bridge, notebook_header as _header,
+        notebook_learning_map as _learning_map, notebook_shell as _opening_shell,
     )
-    mo.vstack(
-        [
-            LAB_CSS,
-            ACADEMIC_LAB_CSS,
-            css,
-            header,
-            track,
-            mo.Html(
-                '<p class="pilot-note">The track selector sits outside the briefing header. All records and outcomes are illustrative scenario fixtures.</p>'
-            ),
-        ],
-        gap=0.5,
-    )
-    return
+
+    learning_contract = _get_learning_path("vol1", 4)
+    _journey = _Scenarios.DeploymentJourneys.get(track_id)
+    _episode = _journey.episode(4)
+    learning_contract["narrative"] = {
+        "project": _journey.mission,
+        "scene": _episode.scene,
+        "carry_forward": _episode.handoff,
+        "scope": _journey.boundary,
+    }
+    _opening_shell([
+        _header(get_lab_metadata("vol1/lab_04_data_engr.py"), _episode.question,
+                topics=[part["label"] for part in learning_contract["parts"]]),
+        track,
+        _scenario(learning_contract, track=track_id, scene=_episode.scene),
+        _learning_map(learning_contract),
+        mo.md(f"**Reference used in today’s instruments:** {profile[1]}. This controlled case tests the chapter’s mechanism; transfer the reasoning to your project without treating the result as project validation."),
+        mo.callout(mo.md("These are supplied, controlled reference studies. Their results do not validate the deployment project. Choose a prediction in Part A to open its live experiment; a wrong prediction still opens the evidence."), kind="info"),
+    ])
+    return (learning_contract,)
 
 
 @app.cell
@@ -554,6 +596,9 @@ def _(
     a_capture,
     a_chosen,
     a_policy,
+    a_rubric,
+    a_review,
+    a_task,
     a_prediction,
     a_result,
     apply_plotly_theme,
@@ -575,6 +620,7 @@ def _(
     d_capture,
     d_chosen,
     d_policy,
+    d_trace,
     d_prediction,
     d_result,
     d_runs,
@@ -593,24 +639,32 @@ def _(
     rationale,
     scenario,
     track_id,
+    learning_contract,
 ):
+    from mlsysbook_labs.notebook import notebook_shell as _shell, notebook_learning_part as _learning_part, notebook_tab_hint as _tab_hint
+    _route = {part["id"]: part for part in learning_contract["parts"]}
+
+
     _captures = get_evidence()
     audit = audit_evidence(
         _captures,
         track=track_id,
         required_parts=tuple("ABCDE"),
         contrast_required_parts=tuple("ABCDE"),
+        per_part_upstream_inputs={"A": {"policy": a_policy.value, "rubric": a_rubric.value, "task": a_task.value, "review": a_review.value}, "D": {"policy": d_policy.value, "trace": d_trace.value}},
     )
 
     def table(rows):
-        return mo.vstack([mo.ui.table(rows, pagination=False)]).style(
-            {"max-width": "100%", "overflow-x": "auto"}
-        )
+        from mlsysbook_labs.notebook import notebook_table as _compact_table
+        return _compact_table(rows)
 
     def saved(part):
         cap = _captures.get(part)
         if cap is None:
             return mo.callout(mo.md("No saved evidence for this part."), kind="warn")
+        data = cap.to_dict()
+        if part == "A" and data["inputs"] != {"policy": a_policy.value, "rubric": a_rubric.value, "task": a_task.value, "review": a_review.value}:
+            return mo.callout(mo.md("**Saved comparison differs from the current label design.** Live evidence above has updated; the saved snapshot still records its original task, rubric, and retention choice. Capture again to submit the current design."), kind="warn")
         if part in audit.stale or (part, part) in audit.identical_pairs:
             return mo.callout(
                 mo.md(
@@ -618,17 +672,18 @@ def _(
                 ),
                 kind="danger",
             )
-        data = cap.to_dict()
         return mo.Html(
-            f'<div class="saved"><b>Saved snapshot</b> · original prediction: {data["prediction"]}<br><small>Track {data["track"]}; later controls do not rewrite this record.</small></div>'
+            f'<div class="saved"><b>Saved snapshot</b> · original prediction: {data["prediction"]}<br><small>Track {data["track"]}; later controls do not change this saved comparison.</small></div>'
         )
 
     def part_a():
         intro = mo.md(
-            "### A · Which examples are worth retaining? (8 min)\nSix candidates compete for one fixed annotation-time budget. Predict first, then compare coverage, duplicates, and supplied task evidence."
+            "The team has raw candidate records but has not agreed on what a label must distinguish. "
+            "Choose the required task, predict, then spend the same annotation budget on coarse or condition-specific labels. "
+            "The listed actions are supplied requirements for this controlled reference, not medical or driving recommendations."
         )
         if a_prediction.value is None:
-            return mo.vstack([intro, a_prediction])
+            return mo.vstack([intro, a_task, a_prediction])
         base, result, chosen = a_base.result, a_result.result, a_chosen.result
         fig = go.Figure(
             [
@@ -645,21 +700,25 @@ def _(
         fig.update_layout(
             height=245,
             margin=dict(l=20, r=20, t=20, b=20),
-            yaxis_title="Represented cohorts (count)",
+            yaxis_title="Represented conditions (count)",
             showlegend=False,
         )
         rows = [
             {
-                "Run": "Newest",
+                "Run": "Newest / coarse",
+                "Resolvable": base["action_resolvable_records"],
                 "Annotation": f"{base['annotation_time']['magnitude']:.0f} min",
-                "Cohorts": base["represented_cohort_count"],
+                "Conditions": base["represented_cohort_count"],
+                "Records": len(base["retained_ids"]),
                 "Duplicates": base["duplicate_records"],
                 "Task evidence": base["records_with_task_evidence"],
             },
             {
-                "Run": result["policy"],
+                "Run": f"{result['policy']} / {result['rubric_name']}",
+                "Resolvable": result["action_resolvable_records"],
                 "Annotation": f"{result['annotation_time']['magnitude']:.0f} min",
-                "Cohorts": result["represented_cohort_count"],
+                "Conditions": result["represented_cohort_count"],
+                "Records": len(result["retained_ids"]),
                 "Duplicates": result["duplicate_records"],
                 "Task evidence": result["records_with_task_evidence"],
             },
@@ -667,22 +726,64 @@ def _(
         return mo.vstack(
             [
                 intro,
+                a_task,
                 a_prediction,
                 a_policy,
+                a_rubric,
+                mo.md("To isolate label detail, select **Newest first**. To isolate retention, select **Coarse event label**. Changing the required task asks for a new prediction."),
                 apply_plotly_theme(fig),
                 table(rows),
                 mo.callout(
                     mo.md(
-                        f"**Your prediction:** {a_prediction.value}. The tested comparison is **newest versus {result['policy']}**. Your chosen **{a_policy.value}** policy retains **{chosen['represented_cohort_count']} cohorts**, **{chosen['duplicate_records']} duplicates**, and **{chosen['records_with_task_evidence']} records with supplied task evidence**."
+                        f"**Your prediction:** {a_prediction.value}. Compared with newest / coarse, the displayed intervention is **{result['policy']} / {result['rubric_name']}**. "
+                        f"Your selected design retains **{chosen['represented_cohort_count']} {'condition' if chosen['represented_cohort_count'] == 1 else 'conditions'}** and **{chosen['records_with_task_evidence']} {'record' if chosen['records_with_task_evidence'] == 1 else 'records'} with task evidence**; "
+                        f"**{chosen['action_resolvable_records']} {'record has' if chosen['action_resolvable_records'] == 1 else 'records have'}** both evidence and a label that uniquely specifies the required action. "
+                        "If you select the baseline, the displayed contrast uses newest / specific as its rejected alternative. The audit set below stays fixed and has its own labor ledger."
                     ),
                     kind="info",
                 ),
+                mo.md("**Selected design · inspect each retained record**"),
+                table([
+                    {"Record": row["record_id"], "Condition": row["condition"], "Assigned label": row["label"],
+                     "Required action": row["required_action"], "Actions sharing label": ", ".join(row["possible_actions"]),
+                     "Raw evidence": "present" if row["has_task_evidence"] else "missing",
+                     "Action specified": "yes" if row["action_resolvable"] else "unresolved"}
+                    for row in chosen["label_assignments"]
+                ]),
+                mo.callout(mo.md(
+                    f"The declared rubric has **{chosen['ambiguous_label_count']}** ambiguous labels, where one label merges conditions needing different actions. "
+                    "Missing raw evidence remains unresolved even with specific labels. Switch to the presence-only task: does finer annotation still buy a necessary distinction? "
+                    "This checks a finite specification; it does not predict learned accuracy or deployment safety."
+                ), kind="warn" if chosen["ambiguous_label_count"] else "info"),
+                mo.md("**Audit the annotators · does agreement establish correctness?**\nThe following fixed audit set is separate from the retained pool. Predict which error disagreement review will miss, then change the review policy. Its labor is additional to the acquisition budget above. Supplied independent references make this a controlled audit; they are not inferred from agreement."),
+                a_review,
+                table([{"Record": row["record_id"], "First": row["first"],
+                        "Second": row["second"] or "not collected", "Reviewed": row["reviewed"],
+                        "Final": row["final"] or "abstain", "Supplied audit reference": row["supplied_reference"] or "unavailable",
+                        "Mismatch": row["reference_mismatch"], "Unresolved": row["unresolved"]}
+                       for row in chosen["annotation_audit"]["records"]]),
+                mo.md(
+                    "Only one annotation per record: agreement and kappa are unobserved."
+                    if chosen["annotation_audit"]["observed_agreement"] is None else
+                    f"Observed pair agreement: **{chosen['annotation_audit']['observed_agreement']:.2f}**; chance agreement from rater marginals: **{chosen['annotation_audit']['chance_agreement']:.2f}**; "
+                    + (f"Cohen's kappa: **{chosen['annotation_audit']['cohens_kappa']:.2f}**. " if chosen['annotation_audit']['cohens_kappa'] is not None else "Kappa is undefined because chance agreement is one. ")
+                    + "These summarize the supplied annotation pairs before adjudication. Gold review changes final labels, not the original pair agreement."
+                ),
+                mo.callout(mo.md(
+                    f"Audit labor: **{chosen['annotation_audit']['labor_minutes']:.0f} min**, compared with **{base['annotation_audit']['labor_minutes']:.0f} min** for single annotation. "
+                    f"Remaining reference mismatches: **{chosen['annotation_audit']['reference_mismatches']}**; unresolved records: **{chosen['annotation_audit']['unresolved_records']}**. "
+                    "Double annotation exposes disagreements, but the shared wrong label survives disagreement-only review. Independent gold checks repair that supplied error. Missing raw evidence still requires abstention or new collection. These finite counts are not population error-rate estimates."
+                )),
                 a_capture,
                 saved("A"),
                 mo.accordion(
                     {
                         "Calculation Notes": mo.md(
-                            "Whole records are admitted until the annotation-time budget is exhausted. Coverage rotates across cohorts; deduplication removes records explicitly marked as duplicates. Supplied outcome flags do not influence selection."
+                            "Whole records are admitted until the annotation-time budget is exhausted. Condition-specific annotation costs twice the coarse annotation time in this hypothetical reference. "
+                            "This price is assumed, not measured. Coverage rotates across observed conditions; deduplication removes explicitly linked duplicates. "
+                            "Required actions stay fixed when the rubric changes. A label is action-sufficient only when every condition in its declared vocabulary requires the same action. "
+                            "Omitting a condition from the retained set cannot repair the rubric. Selection never uses the supplied task-evidence flags. "
+                            "The audit panel replays supplied first/second annotations and independent references on a separate fixed set. Adjudication uses the supplied reference only when available. Its annotation, adjudication, and gold-check costs are hypothetical explicit inputs; it does not estimate learned quality."
                         )
                     }
                 ),
@@ -691,7 +792,7 @@ def _(
 
     def part_b():
         intro = mo.md(
-            "### B · Can higher evaluation accuracy mean worse evidence? (10 min)\nThe baseline overlaps entity keys and fits preprocessing before the split. Change the split, preprocessing scope, or both."
+            "The baseline overlaps entity keys and fits preprocessing before the split. Change the split, preprocessing scope, or both."
         )
         if b_prediction.value is None:
             return mo.vstack([intro, b_prediction])
@@ -757,7 +858,7 @@ def _(
 
     def part_c():
         intro = mo.md(
-            "### C · Why is execution waiting for data? (10 min)\nThe baseline uses constrained reads, raw records, and one transform lane. Compression reduces bytes and adds decode work. Predict the binding stage."
+            "The baseline uses constrained reads, raw records, and one transform lane. Compression reduces bytes and adds decode work. Predict the binding stage."
         )
         if c_prediction.value is None:
             return mo.vstack([intro, c_prediction])
@@ -836,7 +937,7 @@ def _(
 
     def part_d():
         intro = mo.md(
-            "### D · How fresh must the evidence be? (8 min)\nCompare batching with streaming or local feature computation. Each policy changes age, traffic, and annotation time over the same horizon."
+            "The team must decide whether faster delivery buys a useful decision. Compare policies on the same supplied feature-state history, then hold the feature state stable. Age alone does not establish a behavior loss."
         )
         if d_prediction.value is None:
             return mo.vstack([intro, d_prediction])
@@ -871,6 +972,7 @@ def _(
                 "Traffic": f"{run.result['traffic_megabytes']:.1f} MB",
                 "Annotation": f"{run.result['annotation_time']['magnitude']:.1f} min",
                 "SLA": "PASS" if run.result["meets_freshness_sla"] else "FAIL",
+                "Replay mismatches": run.result["stale_decisions"],
             }
             for name, run in d_runs.items()
         ]
@@ -879,6 +981,7 @@ def _(
                 intro,
                 d_prediction,
                 d_policy,
+                d_trace,
                 apply_plotly_theme(fig),
                 table(rows),
                 mo.callout(
@@ -887,12 +990,20 @@ def _(
                     ),
                     kind="success" if chosen["meets_freshness_sla"] else "danger",
                 ),
+                mo.md("**Decision replay · selected policy**\nEach query uses state available through query time minus the policy's maximum age. This deliberately conservative constant-lag stress test is not an actual batch-arrival schedule. The action rule is supplied, and is held fixed across policies."),
+                table([{"Query (s)": row["query_second"], "Evidence through (s)": row["observed_through_second"],
+                        "Action from available evidence": row["available_action"], "Currently required": row["current_required_action"],
+                        "Mismatch": row["mismatch"]} for row in chosen["decision_trace"]]),
+                mo.callout(mo.md(
+                    f"The chosen policy produces **{chosen['stale_decisions']} mismatches** on this finite replay. Switch to stable conditions: older evidence can give the same decisions, even when an age SLA fails. "
+                    "Faster updates are valuable when changed information changes a required action; this fixture does not estimate learned accuracy, drift rates, or field safety. The local-feature policy assumes it preserves the required state; semantic sufficiency requires separate validation."
+                )),
                 d_capture,
                 saved("D"),
                 mo.accordion(
                     {
                         "Calculation Notes": mo.md(
-                            "Worst-case age sums collection, transport, and feature-compute time. Traffic and annotation time count explicit events over a fixed horizon. The SLA changes acceptance, not physical age."
+                            "Worst-case age sums collection, transport, and feature-compute time. Traffic and annotation time count explicit events over a fixed horizon. The SLA changes acceptance, not physical age or decisions. Decision replay independently compares the latest supplied state with the state available at a conservative constant lag. Changing versus stable state is the counterexample, not an age-to-accuracy curve."
                         )
                     }
                 ),
@@ -901,7 +1012,7 @@ def _(
 
     def part_e():
         intro = mo.md(
-            f"### E · What happens when the producer changes? (8 min)\nThe producer changes **{scenario.semantic_field_name}** from **{scenario.expected_semantic_unit}** while preserving its declared schema version. Compare no enforcement with a contract."
+            f"The producer changes **{scenario.semantic_field_name}** from **{scenario.expected_semantic_unit}** while preserving its declared schema version. Compare no enforcement with a contract."
         )
         if e_prediction.value is None:
             return mo.vstack([intro, e_prediction])
@@ -1025,16 +1136,24 @@ def _(
 
     tabs = mo.ui.tabs(
         {
-            "Part A": part_a(),
-            "Part B": part_b(),
-            "Part C": part_c(),
-            "Part D": part_d(),
-            "Part E": part_e(),
+            "Part A": _learning_part(learning_contract, "A", part_a()),
+            "Part B": _learning_part(learning_contract, "B", part_b()),
+            "Part C": _learning_part(learning_contract, "C", part_c()),
+            "Part D": _learning_part(learning_contract, "D", part_d()),
+            "Part E": _learning_part(learning_contract, "E", part_e()),
             "Synthesis": synthesis(),
         }
     )
-    tabs
+    _shell([_tab_hint(), tabs])
     return (audit,)
+
+
+@app.cell(hide_code=True)
+def _():
+    from mlsysbook_labs.learning_paths import get_learning_path as _submission_path
+    from mlsysbook_labs.notebook import notebook_shell as _submission_shell, notebook_submission as _submission
+    _submission_shell([_submission(_submission_path(1, 4))])
+    return
 
 
 @app.cell
@@ -1047,6 +1166,7 @@ def _(
     final_trigger,
     get_evidence,
     get_lab_metadata,
+    learning_contract,
     mo,
     profile,
     rationale,
@@ -1065,17 +1185,14 @@ def _(
         and final_rejected.value != final_choice.value
         and bool(rationale.value.strip())
     )
-    mo.stop(not _ready)
+    from mlsysbook_labs.notebook import notebook_download_readiness as _download_readiness
+    mo.stop(not _ready, _download_readiness(volume=1))
     snapshots = {part: _captures[part].to_dict() for part in "ABCDE"}
     report = build_lab_report(
         get_lab_metadata("vol1/lab_04_data_engr.py"),
         track=track_id,
         scenario=profile[1],
-        learning_objectives=[
-            "Allocate fixed annotation time",
-            "Detect split leakage",
-            "Diagnose supply, freshness, and producer boundaries",
-        ],
+        learning_objectives=learning_contract["learning_objectives"],
         predictions={p: snapshots[p]["prediction"] for p in "ABCDE"},
         knob_settings={p: snapshots[p]["inputs"] for p in "ABCDE"},
         evidence_summary={
@@ -1083,6 +1200,7 @@ def _(
                 "baseline": snapshots[p]["baseline"],
                 "result": snapshots[p]["result"],
                 "alternatives": snapshots[p]["alternatives"],
+                "chosen": snapshots[p]["chosen_result"],
             }
             for p in "ABCDE"
         },
@@ -1131,8 +1249,23 @@ def _(
             "calculations": "Deterministic data-pipeline experiment model.",
         },
     )
-    mo.vstack([mo.md("## Local evidence report"), report_export_panel(report)])
+    from mlsysbook_labs.notebook import notebook_shell as _report_shell
+    _report_shell([report_export_panel(report)])
     return (report,)
+
+
+
+
+@app.cell
+def _(mo, get_evidence, final_choice, final_rejected, final_risk, final_trigger, rationale, audit):
+    from mlsysbook_labs.notebook import notebook_shell as _save_shell
+    _draft_identity = (audit.to_dict(), get_evidence(), final_choice.value, final_rejected.value, final_risk.value, final_trigger.value, rationale.value)
+    save_discussion = mo.ui.run_button(label="Save discussion")
+    _save_shell([
+        save_discussion,
+        mo.md("Save your completed discussion locally. Editing a decision, rationale, or saved comparison requires saving again. Download remains available independently of local storage."),
+    ])
+    return (save_discussion,)
 
 
 @app.cell
@@ -1147,6 +1280,7 @@ async def _(
     mo,
     rationale,
     track_id,
+    save_discussion,
 ):
     _captures = get_evidence()
     _saved_d = _captures["D"].to_dict()["decision"] if "D" in _captures else None
@@ -1160,8 +1294,8 @@ async def _(
         and final_rejected.value != final_choice.value
         and bool(rationale.value.strip())
     )
-    _status = "EVIDENCE IN PROGRESS"
-    if _ready:
+    _status = "DRAFT READY · SAVE DISCUSSION TO RECORD" if _ready else "EVIDENCE IN PROGRESS"
+    if _ready and save_discussion.value:
         try:
             ledger.save(
                 chapter=4,
@@ -1185,9 +1319,8 @@ async def _(
             _status = "LOCAL SAVE FAILED · DOWNLOAD THE REPORT TO KEEP YOUR EVIDENCE"
         else:
             _status = "SAVED"
-    mo.Html(
-        f'<div class="lab-hud"><span>LAB 04 · Evidence Through the Data Pipeline · STATUS: {_status}</span></div>'
-    )
+    from mlsysbook_labs.notebook import notebook_shell as _status_shell, notebook_status as _status_view
+    _status_shell([_status_view("Lab 04", _status)])
     return
 
 

@@ -33,6 +33,112 @@ Release body. Omit any section that has no entries for a given release.
     - @profvjreddi
 -->
 
+## v0.3.1 (2026-11-04)
+
+This release corrects training units of work and serving resource accounting,
+shares accounting across public APIs, and makes calibration documentation
+reproducible. Numerical outputs can change even though call signatures remain
+compatible.
+
+### Bug Fixes
+
+- Transformer single-device training scales FLOPs and utilization accounting
+  by sequence length, consistent with distributed training.
+- Speculative serving includes draft KV memory; disaggregated serving checks
+  the prefill device as well as the decode device.
+- Serving and continuous batching share compute/memory roofline accounting and
+  layer overhead. Large batches can become compute-limited. Speculative
+  verification counts the work of the proposed tokens and the bonus-token
+  distribution, preserving the target model's compute floor.
+- Training-memory helpers agree on AdamW and reject unknown optimizer names.
+- Shared input validators reject non-finite values; activation accounting checks
+  sequence length, batch, geometry, and element width.
+- Scaling-model budgets normalize FLOP prefixes before computing parameter and
+  token allocations; equivalent work expressed in FLOP or TFLOP gives the same result.
+  Budgets and explicitly requested model sizes must be finite and positive.
+- Weight-streaming prefill counts query-head attention work independently of
+  grouped KV heads. VLA evaluation, decoder-family models, and mobile-manipulator
+  intent latency fall back to the
+  canonical FP16 peak when no precision-specific override is registered. Serving,
+  continuous-batching prefill, and weight streaming honor explicit attention-head
+  widths instead of always deriving width from the model hidden dimension.
+- Quantity serialization uses canonical unit names and full-precision ASCII
+  exponents instead of display superscripts. Public model and lab-record roundtrips
+  preserve fractional dimensions on all supported Pint versions. Serialized unit
+  strings change (for example, `ms` becomes `millisecond`); human-facing formatting
+  and physical values are unchanged.
+- Disjoint-write probability returns zero when valid write sets cannot fit
+  without overlap, and rejects invalid cardinalities. Short-circuit check
+  accounting rejects unequal or empty probability/cost sequences, out-of-range
+  probabilities, and negative or non-finite costs.
+- Deadline policies launch only complete rounds that fit the budget and account
+  for at most one conditional revision. Zero-success policies report infinite
+  per-success cost; undefined cost ratios report NaN. Admission compares decimal
+  time inputs before floating-point rounding, preserving exact deadline boundaries.
+- DSE rejects malformed constraints, unsupported comparison operators, and
+  nonnumeric or non-finite thresholds before evaluating any candidates. Unknown
+  objective and constraint metric paths raise on the first affected feasible result.
+- Gripper-transfer scenarios return a typed geometry/force result instead of
+  invoking an unrelated prefill calculation with nonexistent inputs.
+
+### Documentation
+
+- Organize scenario definitions, named configurations, and result schemas by
+  modeling domain while preserving existing imports, registry names, and
+  serialized class identities. This reorganization does not change equations
+  or defaults.
+- Add domain navigation to the scenario reference and a contributor walkthrough
+  connecting named inputs, equations, result schemas, and behavior tests. Existing
+  reference URLs and the alphabetical index remain available.
+- Generate the calibration report from executable anchor configurations and
+  distinguish calibration, family sanity ranges, and formula checks.
+- Document model scope, installation, package ownership, validation, and the
+  separate review required for downstream prose and numerical changes.
+- Define a domain-based organization and NumPy docstring convention published
+  through the existing Quarto/quartodoc API reference. Training-work and serving
+  examples execute in tests; their source keys are checked against the paper.
+- Discover calculation documentation targets from the package, including solver
+  entry points, and check equation, assumption, exclusion, source, and example
+  sections instead of relying only on a hand-maintained shortlist.
+
+### Packaging & Dependencies
+
+- Include development scripts and tests in the source distribution.
+- Install lint/build tools through the development extra; use the selected
+  Python interpreter consistently in development commands.
+
+### Internal
+
+- Share decode, optimizer-state, attention-product, KV-storage, and decoder-weight
+  accounting instead of maintaining divergent implementations. Preserve distinct
+  causal-prefill, rectangular-attention, MLA, and active-expert conventions.
+- Add physical-boundary and cross-API regression tests and calibration/lint gates.
+  Independent operation, storage, transfer-schedule, queue, and energy accounts
+  complement same-implementation consistency checks.
+- Enforce scoped NumPy docstring validation, Ruff formatting, scientific contract
+  sections, source keys, and executable examples through one documentation command.
+
+### Numerical Compatibility
+
+Review training throughput/energy, large-batch serving capacity, speculative
+latency, near-capacity feasibility, prefixed compute budgets, and grouped-query
+weight-streaming prefill and explicit-head-width models before adopting changed
+outputs in textbook prose,
+figures, labs, or published benchmark tables. Deadline-policy results change
+when fewer than two rounds fit or when more than two were previously reported;
+the registered two-round `DeadlineBoundRepairPolicies` result is unchanged.
+Existing gripper scalar properties are unchanged; `.result` now succeeds.
+Invalid short-circuit sequences and disjoint-write cardinalities now raise
+`ValueError` instead of truncating work or failing later. Invalid DSE constraints
+now raise before search instead of being ignored; supported comparisons retain
+their previous filtering and ranking behavior.
+
+Public call signatures remain compatible, but returned values and invalid-input
+behavior can change. Use the downstream impact comparison to identify affected
+consumers and review their explanations separately. The raw bandwidth floor
+remains a separate analytical bound. This release does not claim a universal
+error tolerance against hardware measurements.
+
 ## v0.3.0 (2026-10-25)
 
 MLSys·im 0.3.0 reorganizes the package around nested registries and a dedicated

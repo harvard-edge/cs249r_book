@@ -258,8 +258,7 @@ class DistributedModel(ForwardModel):
               moe_routing_imbalance_factor: float = 1.0,
               gradient_accumulation_steps: int = 1,
               seq_len: int = 2048) -> DistributedResult:
-        """
-        Calculates distributed training performance using the 3D/4D Parallelism model.
+        """Calculate distributed training performance using the 3D/4D Parallelism model.
 
         Parameters
         ----------
@@ -299,14 +298,18 @@ class DistributedModel(ForwardModel):
             Whether to overlap DP communication with backward pass compute.
         overlap_efficiency : float
             Fraction of communication hidden behind compute (0.0-1.0).
-            Default 0.85 reflects typical Megatron-LM overlap efficiency.
+            Default 0.85 is an assumed modeling input, not a measured guarantee.
         congestion_factor : float
             Multiplicative factor on communication time to account for
             network congestion (1.0 = ideal, 1.5-2.0 = shared fabric,
             2.0-3.0 = oversubscribed multi-tenant).
+        straggler_factor : float
+            Multiplier on final step latency; positive, with one meaning no stretch.
         moe_routing_imbalance_factor : float
             Multiplier on routed MoE token traffic. A value of 1.0 is perfectly
             balanced routing; values above 1.0 approximate hot experts.
+        gradient_accumulation_steps : int
+            Positive count of microsteps per DP synchronization.
         seq_len : int
             Sequence length for memory calculation.
 
@@ -315,6 +318,36 @@ class DistributedModel(ForwardModel):
         DistributedResult
             Metrics including DP/TP/EP latency, the Pipeline Bubble penalty,
             and the final Scaling Efficiency.
+
+        See Also
+        --------
+        TrainingMemoryModel.solve : Per-device state and activation accounting.
+
+        Notes
+        -----
+        Equation: step time adds replica Roofline latency, pipeline idle time
+        ``T_replica * bubble / (1 - bubble)``, and exposed DP/TP/EP communication.
+        Data parallelism is ``N / (TP * PP * EP)``; transformer work counts tokens.
+        Assumptions: homogeneous accelerators, ideal model partitioning, analytic
+        collective traffic, and declared overlap/congestion factors. LoRA traffic
+        uses a fixed fraction independently of the rank-based memory approximation.
+        Excludes: measured kernel scheduling, interleaved activation deallocation,
+        and network contention traces. ``topology_override`` is currently accepted
+        but does not alter the calculation. Inspect ``node_profile.feasible``;
+        a latency returned for spilled state is not an in-HBM deployment claim.
+
+        References
+        ----------
+        Derivation: sum the resource-specific times after sharding the workload;
+        subtract the permitted overlap window and add pipeline idle time.
+
+        Examples
+        --------
+        >>> from mlsysim import Models, Systems
+        >>> result = DistributedModel().solve(Models.Vision.ResNet50,
+        ...     Systems.Clusters.Research_256, batch_size=256)
+        >>> result.step_latency_total.m_as("second") > 0
+        True
         """
         # 0. Input validation
         from ...core._validation import validate_at_least, validate_range
@@ -619,6 +652,31 @@ class MoERoutingModel(ForwardModel):
         MoERoutingResult
             Effective active experts/parameters, the dispatch volume (MB),
             and the all-to-all latency (ms) when a fleet is provided.
+
+        Notes
+        -----
+        Equation: effective experts are ``min(experts, top_k * imbalance)``;
+        routed bytes are ``B * S * H * bytes * effective_experts * (EP-1)/EP``.
+        Assumptions: uniform expert placement and one scalar imbalance multiplier
+        applied to both active work and dispatch traffic.
+        Excludes: per-expert queues, token dropping, capacity-factor admission,
+        and measured routing distributions. No fleet means latency is unset,
+        not a zero-cost exchange.
+
+        References
+        ----------
+        Derivation: count hidden-state elements dispatched per token and multiply
+        by the fraction of destinations outside the local expert-parallel rank.
+
+        Examples
+        --------
+        >>> from mlsysim.models.types import SparseTransformerWorkload
+        >>> model = SparseTransformerWorkload(name="example", architecture="transformer", parameters=Q_(1000, "count"),
+        ...     active_parameters=Q_(250, "count"), experts=4,
+        ...     active_experts_per_token=1, layers=1, hidden_dim=16, heads=1)
+        >>> result = MoERoutingModel().solve(model, batch_size=1, seq_len=8)
+        >>> result.token_dispatch_bytes.m_as("byte") == 0
+        True
         """
         from ...core._validation import validate_at_least, validate_range
 
@@ -705,8 +763,7 @@ class TopologyModel(ForwardModel):
 
     def solve(self, fabric: NetworkFabric, topology: str = "fat_tree",
               num_nodes: int = 64) -> TopologyResult:
-        """
-        Solves for effective network bandwidth under a given topology.
+        """Solve for effective network bandwidth under a given topology.
 
         Parameters
         ----------
@@ -721,6 +778,31 @@ class TopologyModel(ForwardModel):
         -------
         TopologyResult
             Effective bandwidth, bisection fraction, and average hops.
+
+        Notes
+        -----
+        Equation: effective bandwidth is ``link_bandwidth * beta / oversubscription``;
+        the reported bisection bandwidth multiplies it by ``num_nodes / 2``.
+        Ring beta is ``2/N``; three-dimensional torus beta is ``2*N**(-1/3)``.
+        Assumptions: positive node count and oversubscription, homogeneous links,
+        and an aggregate bisection approximation. Other supported topologies use
+        class-level beta and hop conventions; unknown names fall back to beta one.
+        Excludes: routing simulation, packet contention, and physical cut-link counts.
+        The absolute bisection output is normalized to a fat-tree reference cut;
+        for a ring it counts one link-equivalent rather than two physical cut links.
+
+        References
+        ----------
+        Derivation: normalize cross-section link capacity by fleet size, then
+        apply the declared oversubscription ratio to the shared capacity.
+
+        Examples
+        --------
+        >>> from mlsysim import Systems
+        >>> result = TopologyModel().solve(Systems.Fabrics.InfiniBand_HDR,
+        ...     topology="ring", num_nodes=8)
+        >>> result.bisection_bw_fraction == 2 / 8
+        True
         """
         # Compute bisection bandwidth fraction β.
         # Ring: bisection cuts 2 links out of N, so β = 2/N.
@@ -787,8 +869,7 @@ class ParallelismOptimizer(BaseOptimizer):
               max_tp: Optional[int] = None, max_pp: Optional[int] = None,
               overlap_comm: bool = True, seq_len: int = 2048,
               activation_recomputation: bool = False) -> ParallelismOptimizerResult:
-        """
-        Search for the parallelism split (TP x PP x DP) that maximizes MFU.
+        """Search for the parallelism split (TP x PP x DP) that maximizes MFU.
 
         Exhaustive sweep over power-of-two TP and PP degrees with
         ``TP * PP * DP = total_accelerators``. TP is capped at the node size
@@ -836,6 +917,33 @@ class ParallelismOptimizer(BaseOptimizer):
         ------
         ValueError
             If no factorization is memory-feasible for this cluster.
+
+        See Also
+        --------
+        DistributedModel.solve : Performance model used to rank each candidate.
+
+        Notes
+        -----
+        Equation: maximize ``efficiency * scaling_efficiency`` over power-of-two
+        TP/PP layouts with integer ``DP = N/(TP*PP)`` and EP fixed to one.
+        Assumptions: homogeneous fleet, one-sample pipeline microbatches, and the
+        underlying distributed solver's communication and memory approximations.
+        Excludes: non-power-of-two layouts, EP search, measured scheduling, and
+        allocator workspace. A feasible winner is feasible only under this model;
+        the weight/gradient pre-screen is followed by full modeled-state checking.
+
+        References
+        ----------
+        Derivation: enumerate the bounded discrete layout set, discard candidates
+        that violate modeled memory capacity, and rank remaining objective values.
+
+        Examples
+        --------
+        >>> from mlsysim import Models, Systems
+        >>> result = ParallelismOptimizer().solve(Models.Vision.ResNet50,
+        ...     Systems.Clusters.Research_256, batch_size=256, max_tp=1, max_pp=1)
+        >>> result.best_config["tp"] == 1
+        True
         """
         n_gpus = fleet.total_accelerators
         gpus_per_node = fleet.node.accelerators_per_node

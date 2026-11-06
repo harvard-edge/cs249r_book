@@ -5,17 +5,18 @@ from __future__ import annotations
 from .schemas import LabMetadata
 
 
-UPDATED_AT = "2026-06-02"
+UPDATED_AT = "2026-10-20"
 
 
 LAB_CATALOG: dict[str, LabMetadata] = {
     "vol1/lab_00_introduction.py": LabMetadata(
         lab_id="v1_00_architects_portal",
-        title="The Architect's Portal",
+        title="Choose a Context",
         volume="Volume I",
         chapter="Orientation",
         book_anchor="Volume I orientation",
-        updated_at=UPDATED_AT,
+        lab_version="2.0.0",
+        updated_at="2026-10-20",
     ),
     "vol1/lab_01_ml_intro.py": LabMetadata(
         lab_id="v1_01_ai_triad",
@@ -23,7 +24,8 @@ LAB_CATALOG: dict[str, LabMetadata] = {
         volume="Volume I",
         chapter="Chapter 1",
         book_anchor="Volume I, Chapter 1: Introduction to Machine Learning Systems",
-        updated_at="2026-09-15",
+        lab_version="2.0.0",
+        updated_at="2026-10-20",
     ),
     "vol1/lab_02_system_paradigms.py": LabMetadata(
         lab_id="v1_02_physics_of_deployment",
@@ -31,7 +33,8 @@ LAB_CATALOG: dict[str, LabMetadata] = {
         volume="Volume I",
         chapter="Chapter 2",
         book_anchor="Volume I, Chapter 2: System Paradigms",
-        updated_at="2026-09-15",
+        lab_version="2.0.0",
+        updated_at="2026-10-20",
     ),
     "vol1/lab_03_ml_lifecycle.py": LabMetadata(
         lab_id="v1_03_constraint_tax",
@@ -285,6 +288,46 @@ LAB_CATALOG: dict[str, LabMetadata] = {
 }
 
 
+def _register_learning_paths() -> None:
+    """Use generated chapter contracts as the canonical title/path catalog.
+
+    Preserve established IDs referenced by captured reports. New volumes obtain
+    deterministic identities without a second hand-maintained list.
+    """
+    from dataclasses import replace
+    from importlib import resources
+    import json
+
+    directory = resources.files("mlsysbook_labs").joinpath("data", "learning_paths")
+    if not directory.is_dir():
+        return
+    roman = {1: "I", 2: "II", 3: "III", 4: "IV"}
+    for source in directory.iterdir():
+        if not source.name.endswith(".json"):
+            continue
+        data = json.loads(source.read_text(encoding="utf-8"))
+        number = int(data["volume"])
+        for entry in data["chapters"]:
+            path = entry["notebook"].removeprefix("labs/")
+            if path in LAB_CATALOG:
+                LAB_CATALOG[path] = replace(LAB_CATALOG[path], title=entry["title"])
+            else:
+                chapter = entry["chapter"]
+                LAB_CATALOG[path] = LabMetadata(
+                    lab_id=f"v{number}_{chapter:02d}", title=entry["title"],
+                    volume=f"Volume {roman[number]}",
+                    chapter="Orientation" if chapter == 0 else f"Chapter {chapter}",
+                    book_anchor=entry.get("chapter_source") or "Volume orientation",
+                    updated_at=UPDATED_AT,
+                )
+
+
+_register_learning_paths()
+
+
 def get_lab_metadata(path: str) -> LabMetadata:
-    """Return version metadata for a lab path such as ``vol1/lab_01_ml_intro.py``."""
-    return LAB_CATALOG[path]
+    """Resolve a canonical relative notebook path or an absolute source path."""
+    normalized = str(path).replace("\\", "/")
+    if normalized not in LAB_CATALOG:
+        normalized = "/".join(normalized.split("/")[-2:])
+    return LAB_CATALOG[normalized]

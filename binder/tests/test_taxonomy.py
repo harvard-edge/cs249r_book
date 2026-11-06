@@ -27,7 +27,7 @@ def example(tmp_path):
 
 
 def save(root, model):
-    path = root / "taxonomy/ml-systems-taxonomy.yml"
+    path = root / "taxonomy/taxonomy.yml"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(yaml.safe_dump(model, sort_keys=False))
 

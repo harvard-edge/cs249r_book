@@ -23,6 +23,20 @@ from pathlib import Path
 MANIFEST_HEADER = 'LATEX FIGURE MANIFEST'
 
 
+def find_figure_aux(quarto_dir: Path, output_dir: Path) -> Path | None:
+    """Find the current master AUX, including the post-render preserved copy."""
+    candidates = list(output_dir.glob('*.aux')) + list(quarto_dir.glob('*.aux'))
+    return max(candidates, key=lambda path: path.stat().st_mtime_ns, default=None)
+
+
+def parse_aux_figures(aux_file: Path) -> dict[str, dict[str, str]]:
+    """Read figure labels, numbers, and Arabic or Roman folios from LaTeX."""
+    pattern = re.compile(r'\\newlabel\{(fig-[^}]+)\}\{\{([^{}]+)\}\{([^{}]+)\}')
+    return {label: {'number': number, 'page': page}
+            for label, number, page in pattern.findall(aux_file.read_text(encoding='utf-8'))
+            if not label.endswith('@cref')}
+
+
 def _is_latex_manifest(path: Path) -> bool:
     """Check whether a file is a LaTeX figure manifest."""
     try:
@@ -189,8 +203,8 @@ def extract_qmd_figures(quarto_dir: Path, scan_all: bool = False) -> list[dict]:
     )
     
     for qmd_path in qmd_files:
-        # Skip index, 404, parts, and shelved files
-        if qmd_path.name in ['index.qmd', '404.qmd'] or 'parts' in str(qmd_path) or qmd_path.name.startswith('_shelved'):
+        # Front matter and part openers can contain numbered PDF figures too.
+        if qmd_path.name == '404.qmd' or qmd_path.name.startswith('_shelved'):
             continue
         
         try:
@@ -203,6 +217,10 @@ def extract_qmd_figures(quarto_dir: Path, scan_all: bool = False) -> list[dict]:
         if chapter_name == 'index':
             chapter_name = qmd_path.parent.name
         chapter_title = chapter_name.replace('_', ' ').title()
+        body = re.sub(r'\A---\s*\n.*?\n---\s*\n', '', content, count=1, flags=re.DOTALL)
+        heading = re.search(r'^#\s+(.+?)(?:\s+\{[^}]*\})?\s*$', body, re.MULTILINE)
+        if heading:
+            chapter_title = heading.group(1)
         
         chapter_figures = []
         
@@ -299,8 +317,7 @@ def main():
     args = parser.parse_args()
     
     # Get quarto directory
-    script_dir = Path(__file__).parent
-    quarto_dir = script_dir.parent.parent
+    quarto_dir = Path(__file__).resolve().parents[3]  # books/shared/scripts/mit_press -> books
 
     # Get output directory from Quarto environment or use default
     output_dir = Path(
@@ -314,31 +331,29 @@ def main():
         clear_cache(quarto_dir, output_dir)
         return
     
-    # Find LaTeX figures file (written by header-includes.tex via \jobname).
-    # LaTeX writes into the quarto root; a previous post-render may have
-    # already moved it into output_dir.
-    latex_file = find_latex_manifest(quarto_dir, output_dir)
-    if latex_file:
-        print(f"[Figure List] LaTeX manifest: {latex_file.name}", file=sys.stderr)
+    # The AUX records stable labels and folios. Positional matching can shift
+    # every caption when a front-matter figure has a Roman folio or a figure
+    # is conditionally omitted from PDF.
+    aux_file = find_figure_aux(quarto_dir, output_dir)
+    if aux_file:
+        print(f"[Figure List] LaTeX AUX: {aux_file.name}", file=sys.stderr)
     else:
-        print(f"[Figure List] WARNING: No LaTeX manifest (*_figures.txt) found", file=sys.stderr)
+        raise RuntimeError("Current PDF AUX is required to export figure numbers and pages")
     
-    latex_figures = parse_latex_figures(latex_file) if latex_file else []
+    latex_figures = parse_aux_figures(aux_file)
     print(f"[Figure List] LaTeX: {len(latex_figures)} figures with page numbers", file=sys.stderr)
     
     # Extract QMD figures (reads chapter order from config, or scans all)
     qmd_figures = extract_qmd_figures(quarto_dir, scan_all=args.scan_all)
     print(f"[Figure List] QMD: {len(qmd_figures)} figures with metadata", file=sys.stderr)
     
-    # Merge: only include figures if counts match (both from same build)
-    if len(latex_figures) != len(qmd_figures):
-        print(f"[Figure List] WARNING: LaTeX ({len(latex_figures)}) and QMD ({len(qmd_figures)}) counts don't match!", file=sys.stderr)
-        print(f"[Figure List] The LaTeX manifest may be from a previous build.", file=sys.stderr)
-        print(f"[Figure List] Run with --clear and rebuild to fix.", file=sys.stderr)
-    
-    # Merge by position - trust QMD count as source of truth
+    # Export only figures present in this PDF; preserve source metadata by ID.
     merged = []
-    for i, qmd_fig in enumerate(qmd_figures):
+    for qmd_fig in qmd_figures:
+        location = latex_figures.get(qmd_fig['label'])
+        if location is None:
+            print(f"[Figure List] Not in this PDF: {qmd_fig['label']}", file=sys.stderr)
+            continue
         fig = {
             'chapter': qmd_fig['chapter'],
             'label': qmd_fig['label'],
@@ -346,12 +361,7 @@ def main():
             'alt_text': qmd_fig['alt_text'],
         }
         
-        if i < len(latex_figures):
-            fig['number'] = latex_figures[i]['number']
-            fig['page'] = latex_figures[i]['page']
-        else:
-            fig['number'] = '?'
-            fig['page'] = '?'
+        fig.update(location)
         
         merged.append(fig)
     

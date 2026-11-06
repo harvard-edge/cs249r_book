@@ -8,7 +8,7 @@ import yaml
 from pathlib import Path
 from typing import Dict, Any, Optional
 from rich.console import Console
-from .volume_index import write_volume_index
+from .volume_index import volume_index_bytes, write_volume_index
 
 console = Console()
 
@@ -215,13 +215,13 @@ class ConfigManager:
             return None
         content = self.active_index.read_bytes()
         for index_candidate in sorted(self.book_dir.glob("index-*.qmd")):
-            if index_candidate.is_file() and index_candidate.read_bytes() == content:
+            if index_candidate.is_file() and volume_index_bytes(self.book_dir, index_candidate) == content:
                 return index_candidate.relative_to(self.book_dir).as_posix()
         for vol_dir in self.book_dir.iterdir():
             if vol_dir.is_dir() and (vol_dir.name.startswith("vol") or vol_dir.name == "tinytorch"):
                 for rel in ("index.qmd", "frontmatter/about.qmd"):
                     idx = vol_dir / rel
-                    if idx.is_file() and idx.read_bytes() == content:
+                    if idx.is_file() and volume_index_bytes(self.book_dir, idx) == content:
                         return idx.relative_to(self.book_dir).as_posix()
         return None
 

@@ -154,7 +154,32 @@ class ReticleField(BaseModel):
 
     @property
     def area(self) -> Quantity:
-        """Derived exposure-field area (width x height)."""
+        """Calculate the rectangular exposure-field area.
+
+        Returns
+        -------
+        Quantity
+            Exposure-field area in square millimeters.
+
+        Notes
+        -----
+        Equation: area = width * height. The instance's ``width`` and ``height``
+        fields are length quantities and should both be positive.
+        Assumptions: a rectangular, single-exposure field with the stated dimensions.
+        Excludes: wafer-edge loss, scribe lanes, yield, stitching, and usable die area.
+
+        References
+        ----------
+        Derivation: the area of a rectangle is the product of its orthogonal side
+        lengths; unit conversion expresses the result in square millimeters.
+
+        Examples
+        --------
+        >>> from mlsysim.core.units import Q_
+        >>> field = ReticleField(name='Example field', width=Q_('2 mm'), height=Q_('3 mm'))
+        >>> field.area.m_as('mm^2')
+        6
+        """
         return (self.width * self.height).to(ureg.millimeter ** 2)
 
 
@@ -190,6 +215,64 @@ class MovementEnergy(BaseModel):
     metadata: Metadata = Field(default_factory=Metadata)
 
 
+class BatteryCell(BaseModel):
+    """Standard primary-cell format (technology-class): nominal charge capacity and
+    nominal voltage of a cell designation such as CR2032.
+
+    Added 2026-10-30. A standard designation fixes chemistry and size, so capacity
+    and voltage are ~constant across parts of that format; the cited datasheet pins
+    one manufacturer's rating. ``energy`` is derived (capacity x voltage)."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
+    name: str
+    capacity: Quantity           # nominal charge capacity (mAh)
+    voltage: Quantity            # nominal voltage (V)
+    metadata: Metadata = Field(default_factory=Metadata)
+
+    @field_validator("capacity", mode="after")
+    @classmethod
+    def _validate_capacity(cls, v):
+        return require_dimensionality(v, ureg.ampere * ureg.hour, "capacity")
+
+    @field_validator("voltage", mode="after")
+    @classmethod
+    def _validate_voltage(cls, v):
+        return require_dimensionality(v, ureg.volt, "voltage")
+
+    @property
+    def energy(self) -> Quantity:
+        """Calculate nominal stored energy from charge capacity and voltage.
+
+        Returns
+        -------
+        Quantity
+            Nominal stored energy in milliwatt-hours.
+
+        Notes
+        -----
+        Equation: energy = capacity * voltage. The instance's ``capacity`` is a
+        charge quantity (such as mAh) and ``voltage`` is an electric potential;
+        both should be positive.
+        Assumptions: the nominal voltage represents the voltage across the full
+        rated discharge, so the charge integral is approximated by Q * V_nominal.
+        Excludes: voltage variation, load-dependent capacity, temperature, aging,
+        self-discharge, and conversion losses. This is not usable load energy.
+
+        References
+        ----------
+        Derivation: electrical work is the integral of voltage over transferred
+        charge. Holding voltage at its nominal value gives energy = charge * voltage.
+
+        Examples
+        --------
+        >>> from mlsysim.core.units import Q_
+        >>> cell = BatteryCell(name='Example cell', capacity=Q_('100 mAh'), voltage=Q_('3 V'))
+        >>> round(cell.energy.m_as('mWh'), 6)
+        300.0
+        """
+        return (self.capacity * self.voltage).to(ureg.mWh)
+
+
 _DATA = Path(__file__).parent / "data" / "tech"
 
 Memory = load_collection(
@@ -222,6 +305,11 @@ Lithography = load_collection(
     doc="Lithography technology limits (exposure-field / reticle size).",
 )
 
+Battery = load_collection(
+    _DATA / "battery.yaml", BatteryCell, name="Battery",
+    doc="Standard primary-cell formats (nominal capacity + nominal voltage).",
+)
+
 
 class Tech(Registry):
     """Technology-class reference facts: latency / energy / generic bandwidth."""
@@ -233,10 +321,39 @@ class Tech(Registry):
     Movement = Movement
     Interconnect = Interconnect
     Lithography = Lithography
+    Battery = Battery
 
 
 def resolve_latency(instance_latency, tech_default):
-    """Invariant #1 fallback: use the instance's own measured value when set, else the
-    technology-class default. e.g. ``resolve_latency(node.memory.latency, Tech.Memory.HopperGlobalMemory.latency)``.
-    Lets a specific chip override a class fact without forcing per-instance values everywhere."""
+    """Select an instance latency when present, otherwise its technology default.
+
+    Parameters
+    ----------
+    instance_latency : Quantity or None
+        Optional instance-specific time quantity, normally nonnegative. A supplied
+        zero is an explicit value, not a missing value.
+    tech_default : Quantity or None
+        Technology-class fallback time quantity, normally nonnegative. None is
+        returned if neither source supplies a value.
+
+    Returns
+    -------
+    Quantity or None
+        Selected input object with its original units; no conversion is performed.
+
+    Notes
+    -----
+    Instance-specific values take precedence over technology-class defaults.
+    None is the absence sentinel, so an explicitly supplied zero is preserved.
+    Inputs must already be validated by their owning schema; this helper does
+    not check dimensions or sign, average values, or normalize units.
+
+    Examples
+    --------
+    >>> from mlsysim.core.units import Q_
+    >>> resolve_latency(None, Q_('10 ns')).m_as('ns')
+    10
+    >>> resolve_latency(Q_('0 ns'), Q_('10 ns')).m_as('ns')
+    0
+    """
     return instance_latency if instance_latency is not None else tech_default

@@ -26,6 +26,20 @@
 
 ---
 
+## Start with a Python question
+
+Use `Engine.solve()` for a generic single-device Roofline profile. Use
+`from mlsysim.solvers import ServingModel` for KV-aware language-model serving,
+or another specialized solver for training memory, distributed performance,
+energy, or cost. A `Scenario` binds workload and system choices to a reusable
+scorecard; it does not automatically select the most specialized solver.
+
+The [Python API guide](https://mlsysbook.ai/mlsysim/choosing-an-api.html)
+([source](docs/choosing-an-api.qmd)) provides runnable examples, result meanings,
+and a map from public imports to implementation. Specifications, equations,
+solvers, and presentation remain separate; all textbook volumes use this same
+package.
+
 ## 🏗 The 5-Layer Analytical Stack
 
 `mlsysim` implements a "Progressive Lowering" architecture, separating high-level workloads from the physical infrastructure that executes them.
@@ -61,7 +75,7 @@
     </tr>
     <tr>
       <td align="center"><b>Layer E</b></td>
-      <td><b>Execution & Resolvers</b><br><code>mlsysim.engine.solver</code></td>
+      <td><b>Execution & Resolvers</b><br><code>mlsysim.solvers</code></td>
       <td>The 3-tier math engine: Models, Solvers, and Optimizers (Design space search).</td>
     </tr>
     <tr>
@@ -84,7 +98,7 @@ new and existing code should use the canonical path directly.
 
 `mlsysim` is a **first-principles analytical modeling framework** for ML systems. It provides a terminal UI for humans and strict JSON output for scripts, CI/CD pipelines, and validation tooling.
 
-> **Accuracy note:** Trust mlsysim for bottleneck classification and relative comparisons. Absolute latency is workload-dependent; well-calibrated cases are often within ±15–30%, while production serving can be 1.5–2× slower than idealized roofline bounds. For production capacity planning, validate with benchmarks.
+> **Accuracy note:** Results depend on each model's assumptions and supplied efficiencies. A physical lower bound, a calibrated estimate, and a measured runtime are different kinds of evidence. Check sensitivity and feasibility before ranking designs, and use matched measurements for deployment decisions. See the [calibration report](docs/empirical-calibration.md) for the scope of existing comparisons.
 
 ### 1. Explore the Registry (The Zoo)
 Discover built-in hardware, models, and infrastructure without reading source code:
@@ -185,7 +199,7 @@ If you use mlsysim in your research or teaching, please cite:
   title        = {{MLSys$\cdot$im}: First-Principles Infrastructure Modeling for Machine Learning Systems},
   year         = {2026},
   url          = {https://mlsysbook.ai/mlsysim},
-  version      = {0.3.0},
+  version      = {0.3.1},
   institution  = {Harvard University}
 }
 ```
@@ -278,6 +292,7 @@ Thanks to these wonderful people for helping improve MLSys·im!
     </tr>
     <tr>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/asgalon"><img src="https://avatars.githubusercontent.com/u/45242704?v=4?v=4?s=80" width="80px;" alt="Peter Koellner"/><br /><sub><b>Peter Koellner</b></sub></a><br />🪲 ✍️</td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/Nishitha-Rajesh"><img src="https://avatars.githubusercontent.com/u/222974421?v=4?v=4?s=80" width="80px;" alt="Nishitha-Rajesh"/><br /><sub><b>Nishitha-Rajesh</b></sub></a><br />🧑‍💻 ✍️</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/hzeljko"><img src="https://avatars.githubusercontent.com/hzeljko?v=4?s=80" width="80px;" alt="Zeljko Hrcek"/><br /><sub><b>Zeljko Hrcek</b></sub></a><br />🧑‍💻</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/nyxst4ck"><img src="https://avatars.githubusercontent.com/u/289980115?v=4?v=4?s=80" width="80px;" alt="nyxst4ck"/><br /><sub><b>nyxst4ck</b></sub></a><br />✍️</td>
     </tr>
@@ -305,3 +320,11 @@ Thanks to these wonderful people for helping improve MLSys·im!
 The two licenses are intentionally separate: the Python package is permissively licensed so engineers and researchers can use it anywhere (including commercially), while the textbook prose retains its non-commercial protection to prevent republication as a derivative textbook.
 
 Copyright &copy; 2026 Vijay Janapa Reddi and MLSys·im contributors.
+
+## Development and model contracts
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for an isolated installation, the package
+layout, validation commands, and numerical-change review. The executable
+[calibration report](docs/empirical-calibration.md) separates calibrated
+regressions from external validation. [RELEASE.md](RELEASE.md) describes the
+release gates and packaging checks.

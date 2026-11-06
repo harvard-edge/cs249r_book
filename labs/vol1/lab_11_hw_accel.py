@@ -13,7 +13,7 @@ async def _():
     if sys.platform == "emscripten":
         import micropip
         await micropip.install(["pydantic", "pint", "plotly", "pandas"], keep_going=False)
-        await micropip.install("../../wheels/mlsysim-0.3.0-py3-none-any.whl", keep_going=False)
+        await micropip.install("../../wheels/mlsysim-0.3.1-py3-none-any.whl", keep_going=False)
         await micropip.install("../../wheels/mlsysbook_labs-0.1.0-py3-none-any.whl", keep_going=False)
     else:
         labs_dir = Path(__file__).resolve().parents[1]
@@ -58,10 +58,15 @@ def _(mo):
 
 
 @app.cell
-def _(mo, set_evidence):
+def _(ledger, mo, set_evidence):
+    from mlsysbook_labs.contexts import preferred_context as _preferred_context
+
+    _track_options = {"TinyML": "tinyml", "Mobile": "mobile", "Edge": "edge", "Cloud": "cloud"}
+    _preferred_track = _preferred_context(ledger)
+    _initial_label = next(label for label, identifier in _track_options.items() if identifier == _preferred_track)
     track = mo.ui.dropdown(
-        {"TinyML": "tinyml", "Mobile": "mobile", "Edge": "edge", "Cloud": "cloud"},
-        value="TinyML", label="Deployment track", on_change=lambda _value: set_evidence({}),
+        _track_options,
+        value=_initial_label, label="Deployment track", on_change=lambda _value: set_evidence({}),
     )
     return (track,)
 
@@ -112,6 +117,25 @@ def _(mo, track_id):
         {"Primary": "primary", "Alternative": "alternative"}, label="Rejected tested candidate",
     )
     return a_change, a_factor, b_fused, b_tile, c_operation, c_shape, d_speedup, e_budget, e_choice, e_objective, e_rejected
+
+
+@app.cell
+def _(mo, track_id):
+    _context = track_id
+    b_stationary = mo.ui.dropdown({"Keep output partial sums": "output", "Keep weight tile": "weight", "Keep activation tile": "activation"}, value="Keep output partial sums", label="Resident operand")
+    return (b_stationary,)
+
+
+@app.cell
+def _(b_tile, b_stationary, make_replay_packet, scenario, scenario_tile_choices, track_id):
+    from mlsysim.labs.experiments.v1_11_experiments import analyze_stationary_dataflow
+    _tile = scenario_tile_choices(track_id)[b_tile.value]
+    _common = dict(m=scenario.dimensions[0], n=scenario.dimensions[1], k=scenario.dimensions[2], tile_m=_tile[0], tile_n=_tile[1], tile_k=_tile[2], precision=scenario.precision, accumulator_precision="fp32")
+    b_flow_base = analyze_stationary_dataflow(**_common, stationary="output")
+    b_flow_result = analyze_stationary_dataflow(**_common, stationary=b_stationary.value)
+    b_flow_base_packet = make_replay_packet(track=track_id, experiment="stationary_dataflow", inputs={**_common, "stationary": "output"})
+    b_flow_packet = make_replay_packet(track=track_id, experiment="stationary_dataflow", inputs={**_common, "stationary": b_stationary.value})
+    return b_flow_base, b_flow_result, b_flow_base_packet, b_flow_packet
 
 
 @app.cell
@@ -263,6 +287,7 @@ def _(
     e_alternative, e_alternative_packet, e_choice, e_full, e_full_packet,
     e_prediction, e_primary, e_primary_packet, e_rejected, mo, set_evidence,
     to_jsonable, track_id,
+    b_flow_base, b_flow_base_packet, b_flow_packet, b_flow_result,
 ):
     def _store(part, capture):
         set_evidence(lambda current: {**current, part: capture})
@@ -271,7 +296,7 @@ def _(
         return {"inputs": packet["inputs"], "outputs": to_jsonable(result)}
 
     a_upstream = {"baseline": a_base_packet["inputs"], "result": a_result_packet["inputs"]}
-    b_upstream = {"baseline": b_base_packet["inputs"], "result": b_result_packet["inputs"]}
+    b_upstream = {"baseline": b_base_packet["inputs"], "result": b_result_packet["inputs"], "dataflow": b_flow_packet["inputs"]}
     c_upstream = {"baseline": c_base_packet["inputs"], "result": c_result_packet["inputs"]}
     d_upstream = {"baseline": d_base_packet["inputs"], "result": d_result_packet["inputs"]}
     e_upstream = {"ranking": e_full_packet["inputs"], "choice": e_choice.value, "rejected": e_rejected.value}
@@ -291,6 +316,7 @@ def _(
             track=track_id, part="B", prediction=b_prediction.value, inputs=b_upstream,
             baseline=_run(b_base_packet, b_base), result=_run(b_result_packet, b_result),
             upstream_inputs=b_upstream, model_key=b_result_packet["model_key"],
+            alternatives=({**b_flow_base_packet, "result": to_jsonable(b_flow_base)}, {**b_flow_packet, "result": to_jsonable(b_flow_result)}),
         )),
     )
     c_capture = mo.ui.button(
@@ -340,20 +366,25 @@ def _(
 
 
 @app.cell
-def _(ACADEMIC_LAB_CSS, LAB_CSS, mo, scenario, track):
-    css = mo.Html("""
-    <style>
-    .pilot-head{background:linear-gradient(135deg,#101827,#1d4f78);color:white;border-radius:14px;padding:clamp(18px,4vw,32px);margin-bottom:14px}
-    .pilot-top{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font:700 .72rem ui-monospace;letter-spacing:.08em}
-    .pilot-head h1{font-size:clamp(1.65rem,5vw,2.65rem);line-height:1.05;margin:16px 0 8px}.pilot-head p{color:#dbeafe;max-width:760px}
-    .pilot-note{color:#475569;font-size:.9rem;line-height:1.5;margin:0;padding:0 2px}.pilot-meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:9px;margin-top:17px}
-    .pilot-meta div{background:#ffffff14;border:1px solid #ffffff26;padding:9px 11px;border-radius:8px}.saved{border-left:4px solid #2ca02c;background:#f0fdf4;padding:9px 12px;border-radius:7px}
-    .lab-hud{display:flex;align-items:center;flex-wrap:wrap;gap:10px;background:#101827!important;color:#fff;padding:14px 18px;border-radius:9px}.lab-hud .hud-label{color:#a7b9cf}.lab-hud .hud-value{color:#fff}.lab-hud .hud-active{color:#86efac}
-    @media(max-width:520px){.pilot-head{border-radius:9px;margin-top:30px}.pilot-meta{grid-template-columns:1fr}}
-    </style>""")
-    header = mo.Html(f"""<section class="pilot-head"><div class="pilot-top"><span>VOLUME I · LAB 11</span><span>ABOUT 50–55 MIN</span></div><h1>Acceleration That Survives the Whole Path</h1><p>When does specialized hardware improve the application rather than one attractive kernel?</p><div class="pilot-meta"><div><b>Machine</b><br>{scenario.hardware.name}</div><div><b>Track</b><br>{scenario.track.title()}</div><div><b>Deliverable</b><br>Constrained accelerator decision</div></div></section>""")
-    mo.vstack([LAB_CSS, ACADEMIC_LAB_CSS, css, track, header, mo.Html(f'<p class="pilot-note">{scenario.assumption_label.capitalize()}. Hardware supply comes from MLSysIM registry entries; results are analytical, not measured benchmarks.</p>')], gap=0.5).style({"padding-top": "32px"})
-    return
+def _(get_lab_metadata, mo, track, track_id):
+    from mlsysbook_labs.notebook import notebook_scenario as _scenario
+    from mlsysbook_labs.notebook import notebook_header, notebook_learning_map, notebook_learning_part, notebook_shell, notebook_table, notebook_tab_hint
+    from mlsysbook_labs.learning_paths import get_learning_path
+    from mlsysim import Scenarios
+
+    _mission = Scenarios.DeploymentJourneys.get(track_id)
+    _episode = _mission.episode(11)
+    _metadata = get_lab_metadata("vol1/lab_11_hw_accel.py")
+    learning_contract = get_learning_path("vol1", 11)
+    notebook_shell([
+        notebook_header(_metadata, _episode.question, topics=_episode.core_concepts),
+        track,
+        _scenario(learning_contract, track=track_id, scene=_episode.scene),
+        notebook_learning_map(learning_contract),
+        mo.md('Results are analytical teaching studies, not measurements of the continuing project. Native support, capacity failures, and fallback remain visible.'),
+    ])
+    return learning_contract, notebook_learning_part, notebook_shell, notebook_table, notebook_tab_hint
+
 
 
 @app.cell
@@ -372,6 +403,12 @@ def _(
     e_choice, e_decision_valid, e_full, e_objective, e_prediction, e_rejected,
     e_upstream, get_evidence, go, mo, rationale, reevaluation_trigger,
     residual_risk, track_id,
+    notebook_shell,
+    learning_contract,
+    b_flow_base, b_flow_result, b_stationary,
+    notebook_learning_part,
+    notebook_table,
+    notebook_tab_hint,
 ):
     _captures = get_evidence()
     _upstream = {"A": a_upstream, "B": b_upstream, "C": c_upstream, "D": d_upstream, "E": e_upstream}
@@ -381,7 +418,7 @@ def _(
     )
 
     def _table(rows):
-        return mo.vstack([mo.ui.table(rows, pagination=False)]).style({"max-width": "100%", "overflow-x": "auto"})
+        return notebook_table(rows)
 
     def _saved(part):
         capture = _captures.get(part)
@@ -390,7 +427,7 @@ def _(
         if part in audit.stale or (part, part) in audit.identical_pairs:
             return mo.callout(mo.md("**STALE OR NON-CONTRASTING EVIDENCE.** Recapture after changing dependencies."), kind="danger")
         data = capture.to_dict()
-        return mo.Html(f'<div class="saved"><b>Saved snapshot</b> · prediction: {data["prediction"]}<br><small>Track {data["track"]}; later controls do not rewrite this record.</small></div>')
+        return mo.Html(f'<div class="saved"><b>Saved snapshot</b> · prediction: {data["prediction"]}<br><small>Track {data["track"]}; later controls do not change this saved comparison.</small></div>')
 
     def _part_a():
         intro = mo.md("### A · When does faster arithmetic help? (9 min)\nChange one resource while workload operations and base traffic stay fixed.")
@@ -405,10 +442,12 @@ def _(
         intro = mo.md("### B · How much reuse fits locally? (10 min)\nCompare one blocked matrix mapping with the baseline tile and unfused intermediate.")
         if b_prediction.value is None:
             return mo.vstack([intro, mo.hstack([b_tile, b_fused], widths="equal", wrap=True), b_prediction])
+        flow_rows = [{"Kept": result["stationary"], **{key.replace("_", " ")+" (KiB)": f"{value.to('KiB').magnitude:.2f}" for key, value in result["traffic"].items()}, "DRAM energy (mJ)": f"{result['movement_energy'].to('mJ').magnitude:.3g}"} for result in (b_flow_base, b_flow_result)]
+        flow_view = mo.vstack([mo.md("**Choose what stays.** Hold the tile and padded arithmetic fixed, change its resident operand, and inspect which transfers are avoided or added. This schedule study compares traffic; it does not supply a runtime for an illegal tile."), b_stationary, _table(flow_rows), mo.md(f"**Trace:** {b_flow_result['trace_note']} **Energy boundary:** {b_flow_result['energy_boundary']}. FP32 accumulators are counted separately from operand storage above."), mo.accordion({"Follow the operand trace": _table([{**{key: row[key] for key in ('step','tile_index','resident_operand','resident_tile','resident_changed')}, **{key: f"{value.to('KiB').magnitude:.2f} KiB" for key,value in row['traffic'].items()}} for row in b_flow_result['trace'][:8]])})])
         fig = go.Figure([go.Bar(x=["Baseline", "Selected"], y=[b_base.dram_bytes.to("KiB").magnitude, b_result.dram_bytes.to("KiB").magnitude], marker_color=[COLORS["BlueLine"], COLORS["GreenLine"]])])
         fig.update_layout(height=250, margin=dict(l=20, r=20, t=20, b=20), yaxis_title="DRAM traffic (KiB)", showlegend=False)
-        rows = [{"Run": "Baseline", "Tile": str(b_base.tile), "Local need": f"{b_base.scratchpad_required.to('KiB').magnitude:.1f} KiB", "Capacity": f"{b_base.scratchpad_capacity.to('KiB').magnitude:.1f} KiB", "Mapping": "FITS" if b_base.fits else "SPILL"}, {"Run": "Selected", "Tile": str(b_result.tile), "Local need": f"{b_result.scratchpad_required.to('KiB').magnitude:.1f} KiB", "Capacity": f"{b_result.scratchpad_capacity.to('KiB').magnitude:.1f} KiB", "Mapping": "FITS" if b_result.fits else "SPILL"}]
-        return mo.vstack([intro, mo.hstack([b_tile, b_fused], widths="equal", wrap=True), b_prediction, apply_plotly_theme(fig), _table(rows), mo.callout(mo.md(f"**Your prediction:** {b_prediction.value}. The selected tile **{'fits' if b_result.fits else 'does not fit'}**. A failed mapping has no fabricated runtime penalty; it must be remapped."), kind="danger" if not b_result.fits else "success"), b_capture, _saved("B"), mo.accordion({"Calculation Notes": mo.md("Scratchpad occupancy counts A, B, and C tiles. DRAM traffic counts tiled inputs, output, and an explicit write/read intermediate when fusion is off. Movement energy uses registry energy per byte.")})])
+        rows = [{"Run": "Baseline", "Tile": str(b_base.tile), "Operand / accumulator (KiB)": f"{b_base.operand_storage.to('KiB').magnitude:.1f} / {b_base.accumulator_storage.to('KiB').magnitude:.1f}", "Local need": f"{b_base.scratchpad_required.to('KiB').magnitude:.1f} KiB", "Capacity": f"{b_base.scratchpad_capacity.to('KiB').magnitude:.1f} KiB", "Mapping": "FITS" if b_base.fits else "SPILL"}, {"Run": "Selected", "Tile": str(b_result.tile), "Operand / accumulator (KiB)": f"{b_result.operand_storage.to('KiB').magnitude:.1f} / {b_result.accumulator_storage.to('KiB').magnitude:.1f}", "Local need": f"{b_result.scratchpad_required.to('KiB').magnitude:.1f} KiB", "Capacity": f"{b_result.scratchpad_capacity.to('KiB').magnitude:.1f} KiB", "Mapping": "FITS" if b_result.fits else "SPILL"}]
+        return mo.vstack([intro, mo.hstack([b_tile, b_fused], widths="equal", wrap=True), b_prediction, apply_plotly_theme(fig), _table(rows), flow_view, mo.callout(mo.md(f"**Your prediction:** {b_prediction.value}. The selected tile **{'fits' if b_result.fits else 'does not fit'}**. A failed mapping has no fabricated runtime penalty; it must be remapped."), kind="danger" if not b_result.fits else "success"), b_capture, _saved("B"), mo.accordion({"Calculation Notes": mo.md("Scratchpad occupancy counts A, B, and C tiles. DRAM traffic counts tiled inputs, output, and an explicit write/read intermediate when fusion is off. Movement energy uses registry energy per byte.")})])
 
     def _part_c():
         intro = mo.md("### C · Can the specialized unit execute this workload? (9 min)\nThe execution contract is an illustrative scenario assumption. Matched-task quality evidence stays fixed and cannot accelerate hardware.")
@@ -446,25 +485,36 @@ def _(
         complete = audit.complete and "E" in _captures and all(widget.value is not None for widget in (reevaluation_trigger, residual_risk)) and bool(rationale.value.strip())
         return mo.vstack([mo.md("### Synthesis · Defend the accelerator decision (4 min)\nUse saved experiments to name the chosen option, quantify the rejected candidate, state one limitation, and define a reevaluation trigger."), _table(rows), mo.hstack([reevaluation_trigger, residual_risk], widths="equal", wrap=True), rationale, mo.callout(mo.md("**Ready for the local report.**" if complete else "Capture five current contrasts, then complete the limitation, trigger, and rationale."), kind="success" if complete else "warn")])
 
-    tabs = mo.ui.tabs({"Part A": _part_a(), "Part B": _part_b(), "Part C": _part_c(), "Part D": _part_d(), "Part E": _part_e(), "Synthesis": build_synthesis()})
-    tabs
+    tabs = mo.ui.tabs({"Part A": notebook_learning_part(learning_contract, "A", _part_a()), "Part B": notebook_learning_part(learning_contract, "B", _part_b()), "Part C": notebook_learning_part(learning_contract, "C", _part_c()), "Part D": notebook_learning_part(learning_contract, "D", _part_d()), "Part E": notebook_learning_part(learning_contract, "E", _part_e()), "Synthesis": build_synthesis()})
+    notebook_shell([notebook_tab_hint(), tabs])
     return (audit,)
+
+
+@app.cell(hide_code=True)
+def _():
+    from mlsysbook_labs.learning_paths import get_learning_path as _submission_path
+    from mlsysbook_labs.notebook import notebook_shell as _submission_shell, notebook_submission as _submission
+    _submission_shell([_submission(_submission_path(1, 11))])
+    return
 
 
 @app.cell
 def _(
     audit, build_lab_report, get_evidence, get_lab_metadata, mo, rationale,
     reevaluation_trigger, report_export_panel, residual_risk, scenario, track_id,
+    notebook_shell,
+    learning_contract,
 ):
     _captures = get_evidence()
     _decision = _captures["E"].to_dict()["decision"] if "E" in _captures else None
     _ready = audit.complete and _decision is not None and all(widget.value is not None for widget in (reevaluation_trigger, residual_risk)) and bool(rationale.value.strip())
-    mo.stop(not _ready)
+    from mlsysbook_labs.notebook import notebook_download_readiness as _download_readiness
+    mo.stop(not _ready, _download_readiness(volume=1))
     snapshots = {part: _captures[part].to_dict() for part in "ABCDE"}
     report = build_lab_report(
         get_lab_metadata("vol1/lab_11_hw_accel.py"), track=track_id,
         scenario=f"{scenario.hardware.name} analytical accelerator-fit investigation",
-        learning_objectives=["Identify the binding roofline resource", "Test local-memory and execution-support boundaries", "Compare kernel and application speedup", "Rank feasible accelerators under explicit budgets"],
+        learning_objectives=learning_contract["learning_objectives"],
         predictions={part: snapshot["prediction"] for part, snapshot in snapshots.items()},
         knob_settings={part: snapshot["inputs"] for part, snapshot in snapshots.items()},
         evidence_summary={part: {"baseline": snapshot["baseline"], "result": snapshot["result"], "alternatives": snapshot["alternatives"]} for part, snapshot in snapshots.items()},
@@ -476,17 +526,30 @@ def _(
         result_snapshot={"track": track_id, "captures": snapshots, "recommendation": _decision["recommendation"], "rejected": _decision["rejected"], "trigger": reevaluation_trigger.value, "residual_risk": residual_risk.value},
         source_trace={"hardware": "MLSysIM registry", "scenario": scenario.assumption_label, "results": "Analytical MLSysIM Chapter 11 experiment models; not measured benchmarks."},
     )
-    mo.vstack([mo.md("## Local evidence report"), report_export_panel(report)])
+    notebook_shell([report_export_panel(report)])
     return (report,)
 
 
+
+
 @app.cell
-async def _(MODEL_ID, audit, get_evidence, ledger, mo, rationale, reevaluation_trigger, residual_risk, track_id):
+def _(MODEL_ID, audit, get_evidence, ledger, mo, rationale, reevaluation_trigger, residual_risk, track_id, notebook_shell):
     _captures = get_evidence()
     _decision = _captures["E"].to_dict()["decision"] if "E" in _captures else None
     _ready = audit.complete and _decision is not None and all(widget.value is not None for widget in (reevaluation_trigger, residual_risk)) and bool(rationale.value.strip())
-    _status = "EVIDENCE IN PROGRESS"
-    if _ready:
+    _status = "READY TO SAVE" if _ready else "EVIDENCE IN PROGRESS"
+    save_discussion = mo.ui.run_button(label="Save discussion", disabled=not _ready)
+    notebook_shell([save_discussion, mo.md("When ready, downloading is separate from saving locally. Editing evidence or your discussion requires saving again.")])
+    return (save_discussion,)
+
+
+@app.cell
+async def _(MODEL_ID, audit, get_evidence, ledger, mo, rationale, reevaluation_trigger, residual_risk, track_id, notebook_shell, save_discussion):
+    _captures = get_evidence()
+    _decision = _captures["E"].to_dict()["decision"] if "E" in _captures else None
+    _ready = audit.complete and _decision is not None and all(widget.value is not None for widget in (reevaluation_trigger, residual_risk)) and bool(rationale.value.strip())
+    _status = "READY TO SAVE" if _ready else "EVIDENCE IN PROGRESS"
+    if _ready and save_discussion.value:
         try:
             ledger.save(chapter=11, design={
                 "schema_version": 1, "lab_id": "v1_11", "track_id": track_id,
@@ -499,7 +562,7 @@ async def _(MODEL_ID, audit, get_evidence, ledger, mo, rationale, reevaluation_t
             _status = "SAVED"
         except Exception:
             _status = "SAVE FAILED · REPORT STILL AVAILABLE"
-    mo.Html(f'<div class="lab-hud"><span class="hud-label">LAB</span><span class="hud-value">11 · Acceleration That Survives the Whole Path · STATUS: </span><span class="hud-active">{_status}</span></div>')
+    notebook_shell([mo.Html(f'<div class="lab-hud"><span class="hud-label">LAB</span><span class="hud-value">11 · Acceleration That Survives the Whole Path · STATUS: </span><span class="hud-active">{_status}</span></div>')])
     return
 
 

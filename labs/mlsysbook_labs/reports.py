@@ -140,7 +140,46 @@ def build_lab_report(
 {_bullet_list(missing)}
 """
 
-    markdown = f"""# {metadata.title} Lab Report
+    markdown = f"""# {metadata.title} · Lab discussion
+
+## Track And Scenario
+
+- Track: {track}
+- Scenario: {scenario}
+
+## Final Decision
+
+{_section_value(decision)}
+
+## Reflections
+
+{_bullet_dict(reflections)}
+
+## Evidence Summary
+
+{_section_value(evidence)}
+
+## Predictions
+
+{_bullet_dict(predictions)}
+
+## Big Takeaways
+
+{_bullet_list(big_takeaways)}
+
+## Residual Risk
+
+{residual_risk or "Not provided."}
+
+## Learning Objectives
+
+{_bullet_list(learning_objectives)}
+{incomplete_section}
+
+## Source details
+
+The following details identify the lab, its assumptions, and the calculation results
+behind this discussion. Keep them with your work so the comparison can be checked.
 
 ## Lab
 
@@ -154,39 +193,6 @@ def build_lab_report(
 - MLSysBook Labs version: {metadata.mlsysbook_labs_version}
 - Report schema version: {metadata.report_schema_version}
 
-## Track And Scenario
-
-- Track: {track}
-- Scenario: {scenario}
-
-## Learning Objectives
-
-{_bullet_list(learning_objectives)}
-
-## Predictions
-
-{_bullet_dict(predictions)}
-
-## Evidence Summary
-
-{_section_value(evidence)}
-
-## Final Decision
-
-{_section_value(decision)}
-
-## Big Takeaways
-
-{_bullet_list(big_takeaways)}
-
-## Reflections
-
-{_bullet_dict(reflections)}
-
-## Residual Risk
-
-{residual_risk or "Not recorded."}
-
 ## Source Trace
 
 {_section_value(trace)}
@@ -198,7 +204,6 @@ def build_lab_report(
 ```json
 {json.dumps(snapshot, indent=2, sort_keys=True)}
 ```
-{incomplete_section}
 """
 
     report_snapshot = {
@@ -237,9 +242,9 @@ def report_export(report: LabReport, *, include_json: bool = True):
     safe_id = report.metadata.lab_id.replace("/", "_")
     md_download = mo.download(
         report.markdown.encode("utf-8"),
-        filename=f"{safe_id}_report.md",
+        filename=f"{safe_id}_discussion.md",
         mimetype="text/markdown",
-        label="Download report",
+        label="Download discussion",
     )
 
     if not include_json:
@@ -249,9 +254,13 @@ def report_export(report: LabReport, *, include_json: bool = True):
         json.dumps(report.snapshot, indent=2, sort_keys=True).encode("utf-8"),
         filename=f"{safe_id}_snapshot.json",
         mimetype="application/json",
-        label="Download JSON snapshot",
+        label="Download evidence JSON",
     )
-    return mo.hstack([md_download, json_download], justify="start", gap=1.0)
+    # Keep labels on one line; move whole controls to the next row on phones.
+    controls = [control.style({"flex": "0 0 auto", "width": "max-content",
+                               "max-width": "100%", "white-space": "nowrap"})
+                for control in (md_download, json_download)]
+    return mo.hstack(controls, justify="start", gap=1.0, wrap=True)
 
 
 def report_text_fallback(report: LabReport) -> str:
@@ -269,9 +278,9 @@ def report_export_panel(report: LabReport, *, include_json: bool = True, include
         return mo.Html(
             f"""
 <div class="mlsysbook-panel mlsysbook-report-panel" style="border-left:4px solid #B42318;">
-  <h2>Report Locked</h2>
+  <h2>Your discussion is not ready yet</h2>
   <p class="mlsysbook-action-note">
-    Complete the required lab work before downloading the local report.
+    Complete the required comparisons and explanation before downloading your discussion.
   </p>
   <ul style="margin:10px 0 0 18px; color:#475467; line-height:1.6;">
     {missing_items}
@@ -287,12 +296,12 @@ def report_export_panel(report: LabReport, *, include_json: bool = True, include
     fallback = mo.Html(
         f"""
 <div class="mlsysbook-panel mlsysbook-report-panel">
-  <h2>Report Text Fallback</h2>
+  <h2>Read or copy your discussion</h2>
   <p class="mlsysbook-action-note">
-    This contains the same Markdown artifact as the download button.
+    If downloading does not work, select and copy the discussion below. It is the same text as the download.
   </p>
   <textarea readonly style="width:100%; min-height:260px; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size:0.85rem; line-height:1.45; border:1px solid #D9DEE8; border-radius:8px; padding:12px;">{html.escape(report.markdown)}</textarea>
 </div>
 """
     )
-    return mo.vstack([controls, mo.accordion({"Report text fallback": fallback}, multiple=False)], align="center")
+    return mo.vstack([controls, mo.accordion({"Read or copy your discussion": fallback}, multiple=False)], align="center")

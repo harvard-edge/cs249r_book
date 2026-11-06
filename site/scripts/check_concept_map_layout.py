@@ -15,7 +15,10 @@ from pathlib import Path
 import yaml
 ROOT = Path(__file__).resolve().parents[2]
 URL = sys.argv[1] if len(sys.argv) > 1 else "http://localhost:8000/taxonomy/index.html"
-ids = [c["id"] for c in yaml.safe_load((ROOT / "taxonomy/ml-systems-field.yml").read_text())["concepts"]]
+source = yaml.safe_load((ROOT / "taxonomy/taxonomy.yml").read_text())
+ids = [c["id"] for c in source["concepts"]]
+statements = {cid: sorted((r["predicate"], r.get("conditions", ""))
+    for r in source["relationships"] if cid in (r["source"], r["target"])) for cid in ids}
 HOOK = """
 (() => { let f; Object.defineProperty(window, 'cytoscape', { configurable: true,
   set(v) { f = v; }, get() { if (!f) return undefined; const w = function(...a) { const c = f(...a); window.__cy = c; return c; };
@@ -39,15 +42,27 @@ with sync_playwright() as p:
     pg = b.new_page(viewport={"width": 1440, "height": 1000})
     pg.add_init_script(HOOK)
     pg.goto(URL, wait_until="networkidle")
-    problems = {}; measured = 0
+    problems = {}; measured = 0; missing = []; changed_statements = []
     for cid in ids:
         pg.evaluate(f"location.hash = 'concept={cid}'"); pg.wait_for_timeout(120)
+        actual = pg.locator(".bok-rels tbody tr").evaluate_all("""rows => rows.map(row => [
+            row.querySelector('.bok-verb').textContent,
+            row.querySelector('td:last-child').textContent])""")
+        if sorted(map(tuple, actual)) != statements[cid]:
+            changed_statements.append(cid)
         r = pg.evaluate(MEASURE)
-        if r is None: continue
+        if r is None:
+            missing.append(cid)
+            continue
         measured += 1
         if r["bad"]: problems[cid] = r["bad"][:4]
     b.close()
 print(f"measured {measured} of {len(ids)} concept maps; {len(problems)} with overlapping labels")
 for k, v in list(problems.items())[:15]:
     print(" ", k, v)
-sys.exit(1 if problems else 0)
+if missing:
+    print("Maps not measured:", ", ".join(missing[:15]))
+print(f"{len(changed_statements)} concepts with altered or missing relationship statements")
+if changed_statements:
+    print("Statement mismatches:", ", ".join(changed_statements[:15]))
+sys.exit(1 if problems or missing or changed_statements or not ids else 0)

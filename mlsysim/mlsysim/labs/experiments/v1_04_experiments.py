@@ -8,7 +8,7 @@ turning those observations into a synthetic quality or readiness score.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, fields, is_dataclass
+from dataclasses import dataclass, fields, is_dataclass, replace
 import math
 from typing import Any, Literal, Mapping, Sequence
 
@@ -36,6 +36,22 @@ class CandidateRecord:
 
 
 @dataclass(frozen=True)
+class LabelRubric:
+    """An explicit finite specification and hypothetical annotation price.
+
+    Cohorts here stand for supplied record conditions, not protected classes.
+    A label is action-sufficient only if all its conditions require the same
+    action. This is a specification check, never a learned-model prediction.
+    """
+
+    name: str
+    labels_by_cohort: Mapping[str, str]
+    actions_by_cohort: Mapping[str, str]
+    annotation_multiplier: float
+    task: str
+
+
+@dataclass(frozen=True)
 class RetentionResult:
     policy: RetentionPolicy
     retained_ids: tuple[str, ...]
@@ -46,12 +62,20 @@ class RetentionResult:
     unique_entities: int
     duplicate_records: int
     records_with_task_evidence: int
+    rubric_name: str | None = None
+    task: str | None = None
+    ambiguous_label_count: int = 0
+    action_resolvable_records: int = 0
+    label_assignments: tuple[dict[str, Any], ...] = ()
+    annotation_audit: dict[str, Any] | None = None
 
 
 def retain_for_annotation(
     records: Sequence[CandidateRecord],
     annotation_budget: Quantity,
     policy: RetentionPolicy,
+    rubric: LabelRubric | None = None,
+    annotation_audit_inputs: Mapping[str, Any] | None = None,
 ) -> RetentionResult:
     """Select whole records without exceeding a fixed annotation-time budget."""
 
@@ -61,7 +85,19 @@ def retain_for_annotation(
     if policy not in {"newest", "coverage", "deduplicate"}:
         raise ValueError(f"unsupported retention policy: {policy}")
 
-    candidates = list(records)
+    if rubric is not None:
+        if not math.isfinite(rubric.annotation_multiplier) or rubric.annotation_multiplier <= 0:
+            raise ValueError("annotation_multiplier must be positive and finite")
+        cohorts = {record.cohort for record in records}
+        if not cohorts <= rubric.labels_by_cohort.keys() or not cohorts <= rubric.actions_by_cohort.keys():
+            raise ValueError("rubric must specify labels and actions for every record cohort")
+        if rubric.labels_by_cohort.keys() != rubric.actions_by_cohort.keys():
+            raise ValueError("rubric label and action vocabularies must cover the same cohorts")
+    candidates = [
+        replace(record, annotation_time=record.annotation_time * rubric.annotation_multiplier)
+        if rubric is not None else record
+        for record in records
+    ]
     if policy == "newest":
         candidates.sort(key=lambda record: record.captured_at.to("hour").magnitude, reverse=True)
     elif policy == "deduplicate":
@@ -94,6 +130,23 @@ def retain_for_annotation(
             retained.append(record)
             spent_minutes += cost
 
+    actions_by_label: dict[str, set[str]] = {}
+    if rubric is not None:
+        for cohort, label in rubric.labels_by_cohort.items():
+            actions_by_label.setdefault(label, set()).add(rubric.actions_by_cohort[cohort])
+    assignments = tuple(
+        {
+            "record_id": record.record_id,
+            "condition": record.cohort,
+            "label": rubric.labels_by_cohort[record.cohort],
+            "required_action": rubric.actions_by_cohort[record.cohort],
+            "possible_actions": tuple(sorted(actions_by_label[rubric.labels_by_cohort[record.cohort]])),
+            "has_task_evidence": record.has_task_evidence,
+            "action_resolvable": record.has_task_evidence and len(actions_by_label[rubric.labels_by_cohort[record.cohort]]) == 1,
+        }
+        for record in retained
+        if rubric is not None
+    )
     return RetentionResult(
         policy=policy,
         retained_ids=tuple(record.record_id for record in retained),
@@ -104,7 +157,73 @@ def retain_for_annotation(
         unique_entities=len({record.entity_id for record in retained}),
         duplicate_records=sum(record.duplicate_of is not None for record in retained),
         records_with_task_evidence=sum(record.has_task_evidence for record in retained),
+        rubric_name=rubric.name if rubric else None,
+        task=rubric.task if rubric else None,
+        ambiguous_label_count=sum(len(actions) > 1 for actions in actions_by_label.values()),
+        action_resolvable_records=sum(item["action_resolvable"] for item in assignments),
+        label_assignments=assignments,
+        annotation_audit=evaluate_annotation_audit(**annotation_audit_inputs) if annotation_audit_inputs else None,
     )
+
+
+def evaluate_annotation_audit(
+    records: Sequence[Mapping[str, Any]],
+    policy: Literal["single", "disagreements", "gold"],
+    minutes_per_annotation: float,
+    minutes_per_adjudication: float,
+    minutes_per_gold_check: float,
+) -> dict[str, Any]:
+    """Replay supplied annotations on a fixed audit set, never infer accuracy.
+
+    A gold label is an independently supplied reference in this fixture. It is
+    not inferred by majority vote. Missing references remain unresolved even
+    after review. Labor assumptions are explicit and separate from acquisition.
+    """
+    if policy not in {"single", "disagreements", "gold"}:
+        raise ValueError("unsupported annotation audit policy")
+    for cost in (minutes_per_annotation, minutes_per_adjudication, minutes_per_gold_check):
+        if not math.isfinite(cost) or cost < 0:
+            raise ValueError("annotation audit costs must be finite and non-negative")
+    if len({r["record_id"] for r in records}) != len(records):
+        raise ValueError("annotation audit record IDs must be unique")
+    rows = []
+    labor = 0.0
+    for record in records:
+        first, second, reference = record["first"], record["second"], record["reference"]
+        disagreement = first != second
+        double = policy != "single"
+        reviewed = (double and disagreement) or policy == "gold"
+        labor += minutes_per_annotation * (2 if double else 1)
+        labor += minutes_per_adjudication if double and disagreement else 0
+        labor += minutes_per_gold_check if policy == "gold" else 0
+        final = reference if reviewed else first
+        rows.append({
+            "record_id": record["record_id"], "first": first,
+            "second": second if double else None,
+            "agreement": (not disagreement) if double else None,
+            "reviewed": reviewed, "reference": reference if reviewed else None,
+            "final": final, "supplied_reference": reference,
+            "reference_mismatch": reference is not None and final != reference,
+            "unresolved": final is None or reference is None,
+        })
+    # Correct agreement for the supplied raters' empirical class marginals.
+    # It summarizes this set, not correctness of any individual annotation.
+    observed = chance = kappa = None
+    if rows and policy != "single":
+        observed = sum(r["first"] == r["second"] for r in rows) / len(rows)
+        labels = {r[key] for r in rows for key in ("first", "second")}
+        chance = sum(sum(r["first"] == label for r in rows) / len(rows)
+                     * sum(r["second"] == label for r in rows) / len(rows) for label in labels)
+        kappa = (observed - chance) / (1 - chance) if chance < 1 else None
+    return {
+        "observed_agreement": observed, "chance_agreement": chance, "cohens_kappa": kappa,
+        "policy": policy, "records": tuple(rows), "labor_minutes": labor,
+        "agreements": sum(r["agreement"] is True for r in rows),
+        "disagreements": sum(r["agreement"] is False for r in rows),
+        "reviewed_records": sum(r["reviewed"] for r in rows),
+        "reference_mismatches": sum(r["reference_mismatch"] for r in rows),
+        "unresolved_records": sum(r["unresolved"] for r in rows),
+    }
 
 
 @dataclass(frozen=True)
@@ -263,6 +382,8 @@ class FreshnessResult:
     annotation_time: Quantity
     events: int
     meets_freshness_sla: bool
+    decision_trace: tuple[dict[str, Any], ...] = ()
+    stale_decisions: int = 0
 
 
 def evaluate_freshness(
@@ -271,6 +392,8 @@ def evaluate_freshness(
     event_rate: Quantity,
     horizon: Quantity,
     freshness_sla: Quantity,
+    state_trace: Sequence[Mapping[str, Any]] = (),
+    query_seconds: Sequence[float] = (),
 ) -> FreshnessResult:
     """Calculate worst-case feature age and explicit traffic/labor costs."""
 
@@ -280,6 +403,26 @@ def evaluate_freshness(
     age = (policy.collection_window + policy.transport_time + policy.feature_compute_time).to("second")
     traffic = (events * policy.bytes_per_event).to("byte")
     annotation = (events * policy.annotation_time_per_event).to("minute")
+    # A conservative lag stress test uses each policy's maximum age at every
+    # query. It is not a realized batch-arrival schedule or measured drift.
+    states = list(state_trace)
+    times = [float(row["at_second"]) for row in states]
+    queries = [float(t) for t in query_seconds]
+    if any(not math.isfinite(t) for t in times + queries):
+        raise ValueError("trace times must be finite")
+    if times != sorted(set(times)):
+        raise ValueError("state trace times must be strictly increasing")
+    decisions = []
+    for query in queries:
+        observed_at = query - age.magnitude
+        current = [row for row in states if row["at_second"] <= query]
+        available = [row for row in states if row["at_second"] <= observed_at]
+        if not current or not available:
+            raise ValueError("state trace must cover current and lagged query times")
+        truth, seen = current[-1]["action"], available[-1]["action"]
+        decisions.append({"query_second": query, "observed_through_second": observed_at,
+                          "available_action": seen, "current_required_action": truth,
+                          "mismatch": seen != truth})
     return FreshnessResult(
         policy_name=policy.name,
         worst_case_age=age,
@@ -288,6 +431,8 @@ def evaluate_freshness(
         annotation_time=annotation,
         events=events,
         meets_freshness_sla=age <= freshness_sla.to("second"),
+        decision_trace=tuple(decisions),
+        stale_decisions=sum(row["mismatch"] for row in decisions),
     )
 
 
@@ -495,13 +640,53 @@ def get_track_scenario(track: Track) -> TrackScenario:
     )
 
 
-def retention_inputs(scenario: TrackScenario, policy: RetentionPolicy) -> dict[str, Any]:
-    """Return the complete argument set for a retention experiment."""
+def retention_inputs(
+    scenario: TrackScenario,
+    policy: RetentionPolicy,
+    rubric_name: Literal["coarse", "specific"] = "coarse",
+    task: Literal["presence", "route"] = "route",
+    review_policy: Literal["single", "disagreements", "gold"] = "single",
+) -> dict[str, Any]:
+    """Resolve a finite label specification before selecting annotation work.
 
+    Costs are illustrative scenario assumptions, not measurements. A finer
+    rubric costs twice as much per raw record in this controlled reference.
+    The presence task deliberately needs no condition-specific response.
+    """
+    if rubric_name not in {"coarse", "specific"} or task not in {"presence", "route"}:
+        raise ValueError("unsupported label rubric or task")
+    # Task requirements belong to the declared scenario vocabulary, never the
+    # encounter order (or survival) of raw candidate records.
+    cohorts = _TRACK_CONTEXT[scenario.track][0]
+    actions = {
+        "tinyml": ("retain sleep summary", "request sensor recheck", "mark motion interval"),
+        "mobile": ("index ordinary photo", "keep private item local", "defer remote enrichment"),
+        "edge": ("retain routine route", "request event review", "request low-visibility review"),
+        "cloud": ("accept ordinary event", "reconcile late arrival", "check regional semantics"),
+    }[scenario.track]
+    rubric = LabelRubric(
+        name=rubric_name,
+        labels_by_cohort={cohort: ("event" if rubric_name == "coarse" else cohort) for cohort in cohorts},
+        actions_by_cohort={cohort: ("record presence" if task == "presence" else action) for cohort, action in zip(cohorts, actions)},
+        annotation_multiplier=1.0 if rubric_name == "coarse" else 2.0,
+        task=task,
+    )
     return {
         "records": scenario.candidates,
         "annotation_budget": scenario.annotation_budget,
         "policy": policy,
+        "rubric": rubric,
+        "annotation_audit_inputs": {
+            "records": (
+                {"record_id": "audit-shared-error", "first": "event", "second": "event", "reference": "background"},
+                {"record_id": "audit-disagreement", "first": "background", "second": "event", "reference": "event"},
+                {"record_id": "audit-missing-evidence", "first": "event", "second": "background", "reference": None},
+            ),
+            "policy": review_policy,
+            "minutes_per_annotation": 1.0,
+            "minutes_per_adjudication": 2.0,
+            "minutes_per_gold_check": 1.0,
+        },
     }
 
 
@@ -550,9 +735,17 @@ def pipeline_inputs(
     }
 
 
-def freshness_inputs(scenario: TrackScenario, policy_name: str) -> dict[str, Any]:
+def freshness_inputs(scenario: TrackScenario, policy_name: str, trace: Literal["changing", "stable"] = "changing") -> dict[str, Any]:
     """Return a named freshness policy and its complete evaluation context."""
 
+    if trace not in {"changing", "stable"}:
+        raise ValueError("unsupported freshness trace")
+    first, second = {
+        "tinyml": ("use normal sampling", "request sensor recheck"),
+        "mobile": ("permit remote enrichment", "keep private item local"),
+        "edge": ("retain routine route", "request low-visibility review"),
+        "cloud": ("recommend available item", "suppress unavailable item"),
+    }[scenario.track]
     matches = [policy for policy in scenario.freshness_policies if policy.name == policy_name]
     if not matches:
         raise ValueError(f"unsupported freshness policy: {policy_name}")
@@ -561,6 +754,12 @@ def freshness_inputs(scenario: TrackScenario, policy_name: str) -> dict[str, Any
         "event_rate": scenario.event_rate,
         "horizon": scenario.freshness_horizon,
         "freshness_sla": scenario.freshness_sla,
+        "state_trace": (
+            {"at_second": 0.0, "action": first},
+            {"at_second": 40.0, "action": second if trace == "changing" else first},
+            {"at_second": 80.0, "action": first},
+        ),
+        "query_seconds": (50.0, 70.0, 90.0, 120.0),
     }
 
 
@@ -691,7 +890,13 @@ def replay_experiment(
             "records": tuple(_candidate_from_dict(item) for item in raw_inputs["records"]),
             "annotation_budget": _quantity_from_dict(raw_inputs["annotation_budget"]),
             "policy": raw_inputs["policy"],
+            "rubric": LabelRubric(**raw_inputs["rubric"]) if raw_inputs.get("rubric") else None,
+            "annotation_audit_inputs": raw_inputs.get("annotation_audit_inputs"),
         }
+        if "annotation_audit_inputs" not in raw_inputs:
+            inputs.pop("annotation_audit_inputs")
+        if "rubric" not in raw_inputs:
+            inputs.pop("rubric")
     elif method == "split":
         inputs = {
             "records": tuple(_labeled_from_dict(item) for item in raw_inputs["records"]),
@@ -710,6 +915,7 @@ def replay_experiment(
             "event_rate": _quantity_from_dict(raw_inputs["event_rate"]),
             "horizon": _quantity_from_dict(raw_inputs["horizon"]),
             "freshness_sla": _quantity_from_dict(raw_inputs["freshness_sla"]),
+            **{key: raw_inputs[key] for key in ("state_trace", "query_seconds") if key in raw_inputs},
         }
     elif method == "contract":
         inputs = dict(raw_inputs)
@@ -732,6 +938,7 @@ __all__ = [
     "FreshnessPolicy",
     "FreshnessResult",
     "LabeledRecord",
+    "LabelRubric",
     "PipelineResult",
     "ProducerRecord",
     "RetentionResult",
@@ -740,6 +947,7 @@ __all__ = [
     "TrackScenario",
     "capture_experiment",
     "contract_inputs",
+    "evaluate_annotation_audit",
     "evaluate_contract",
     "evaluate_freshness",
     "evaluate_pipeline",

@@ -12,6 +12,7 @@ devices.
 
 from __future__ import annotations
 
+
 from dataclasses import dataclass
 import math
 from typing import Any
@@ -19,6 +20,7 @@ from typing import Any
 import pint
 
 from mlsysim import Hardware, Infrastructure, Systems
+from mlsysim.core.types import serialize_unit
 from mlsysim.core.units import Q_, ureg
 from mlsysim.physics import transfer_time
 
@@ -161,7 +163,7 @@ def serialize_quantity(value: Quantity) -> dict[str, float | str]:
     magnitude = float(value.magnitude)
     if not math.isfinite(magnitude):
         raise ValueError("quantity magnitude must be finite")
-    return {"magnitude": magnitude, "unit": str(value.units)}
+    return {"magnitude": magnitude, "unit": serialize_unit(value.units)}
 
 
 def deserialize_quantity(payload: dict[str, Any]) -> Quantity:

@@ -471,6 +471,120 @@ def compare_quality_slices(
     }
 
 
+def compare_calibration(
+    track_id: str, *, examples_per_slice: int = 40,
+    confidence_mode: str = "reference", seed_offset: int = 0,
+) -> dict[str, Any]:
+    """Separate ranking, classification, and calibration on matched heldout cases.
+
+    Synthetic supplied Bernoulli observations have disclosed reference risks.
+    Overconfidence scales logits by three. The supported repair fits a scalar
+    temperature on a separate calibration split, never on heldout labels.
+    A finite temperature grid need not improve every heldout sample. These are
+    sample diagnostics, not population guarantees or task-specific accuracy.
+    """
+    scenario = _scenario(track_id)
+    count = _positive_int(examples_per_slice, "examples_per_slice")
+    if count > 2000:
+        raise ValueError("examples_per_slice must be at most 2000")
+    if confidence_mode not in {"reference", "overconfident", "repaired"}:
+        raise ValueError("confidence_mode must be reference, overconfident, or repaired")
+    if isinstance(seed_offset, bool) or not isinstance(seed_offset, int):
+        raise ValueError("seed_offset must be an integer")
+
+    def observations(split: str, offset: int) -> list[dict[str, Any]]:
+        rng = random.Random(scenario.seed + seed_offset + offset)
+        rows = []
+        for slice_name, risks in (("ordinary", (0.1, 0.3, 0.7, 0.9)),
+                                  ("difficult", (0.3, 0.45, 0.55, 0.7))):
+            for index in range(count):
+                risk = risks[index % len(risks)]
+                rows.append({"case_id": f"{split}:{slice_name}:{index}", "split": split,
+                             "slice": slice_name, "label": int(rng.random() < risk),
+                             "reference_score": risk,
+                             "overconfident_logit": 3.0 * math.log(risk / (1.0 - risk))})
+        return rows
+
+    calibration = observations("calibration", 110_000)
+    heldout = observations("heldout", 120_000)
+
+    def probability(logit: float, temperature: float) -> float:
+        return 1.0 / (1.0 + math.exp(-logit / temperature))
+
+    def loss(rows: list[dict], temperature: float) -> float:
+        values = [probability(row["overconfident_logit"], temperature) for row in rows]
+        return -sum(row["label"] * math.log(score) + (1-row["label"]) * math.log(1-score)
+                    for row, score in zip(rows, values)) / len(rows)
+
+    # Disclosed teaching search, fitted exclusively on calibration labels.
+    temperatures = (0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0, 8.0)
+    fitted_temperature = min(temperatures, key=lambda value: loss(calibration, value))
+    temperature = {"reference": 3.0, "overconfident": 1.0,
+                   "repaired": fitted_temperature}[confidence_mode]
+    records = tuple({**row, "candidate_score": probability(row["overconfident_logit"], temperature)}
+                    for row in heldout)
+
+    def metrics(rows: list[dict], score_key: str) -> dict[str, Any]:
+        positives = [row[score_key] for row in rows if row["label"]]
+        negatives = [row[score_key] for row in rows if not row["label"]]
+        if positives and negatives:
+            ordered = sorted((row[score_key], row["label"]) for row in rows)
+            concordance, negative_before, index = 0.0, 0, 0
+            while index < len(ordered):
+                end = index + 1
+                while end < len(ordered) and ordered[end][0] == ordered[index][0]:
+                    end += 1
+                positive_ties = sum(label for _, label in ordered[index:end])
+                negative_ties = end - index - positive_ties
+                concordance += positive_ties * (negative_before + 0.5 * negative_ties)
+                negative_before += negative_ties
+                index = end
+            auc = concordance / (len(positives) * len(negatives))
+        else:
+            auc = None
+        bins = []
+        for index in range(10):
+            selected = [row for row in rows if min(int(row[score_key] * 10), 9) == index]
+            bins.append({"lower": index / 10, "upper": (index + 1) / 10,
+                         "count": len(selected),
+                         "mean_probability": None if not selected else sum(row[score_key] for row in selected)/len(selected),
+                         "positive_fraction": None if not selected else sum(row["label"] for row in selected)/len(selected)})
+        return {
+            "count": len(rows), "positive_count": len(positives), "negative_count": len(negatives),
+            "accuracy_pct": 100.0 * sum((row[score_key] >= 0.5) == bool(row["label"]) for row in rows)/len(rows),
+            "roc_auc": auc,
+            "brier_score": sum((row[score_key] - row["label"])**2 for row in rows)/len(rows),
+            "log_loss": -sum(row["label"]*math.log(row[score_key]) + (1-row["label"])*math.log(1-row[score_key]) for row in rows)/len(rows),
+            "ece": sum(item["count"] * abs(item["mean_probability"]-item["positive_fraction"])
+                       for item in bins if item["count"])/len(rows),
+            "reliability_bins": tuple(bins),
+        }
+
+    slices = {}
+    for slice_name in ("ordinary", "difficult"):
+        rows = [row for row in records if row["slice"] == slice_name]
+        slices[slice_name] = {"count": len(rows), "reference": metrics(rows, "reference_score"),
+                              "candidate": metrics(rows, "candidate_score")}
+    return {
+        "track_id": track_id, "confidence_mode": confidence_mode,
+        "reference": metrics(list(records), "reference_score"),
+        "candidate": metrics(list(records), "candidate_score"), "slices": slices,
+        "temperature": temperature, "fitted_temperature": fitted_temperature,
+        "calibration_count": len(calibration), "heldout_count": len(records),
+        "fit_split": "calibration", "evaluation_split": "heldout",
+        "calibration_records": tuple(calibration), "records": records,
+        "search_temperatures": temperatures,
+        "calibration_log_loss_before": loss(calibration, 1.0),
+        "calibration_log_loss_after": loss(calibration, fitted_temperature),
+        "classifications_unchanged": all((row["reference_score"] >= 0.5) == (row["candidate_score"] >= 0.5) for row in records),
+        "missing_coverage": ("Unobserved populations and deployment shifts are not evaluated.",),
+        "evidence_note": "Finite synthetic sample diagnostics; more cases do not establish coverage of absent populations. Heldout labels are never used to fit the repair.",
+        "assumption": SCENARIO_ASSUMPTION,
+        "inputs": {"track_id": track_id, "examples_per_slice": count,
+                   "confidence_mode": confidence_mode, "seed_offset": seed_offset},
+    }
+
+
 @dataclass(frozen=True)
 class ProtocolSpec:
     """Fields that define whether two benchmark results answer the same claim."""
@@ -547,6 +661,8 @@ def replay(model_key: str, inputs: dict[str, Any]) -> dict[str, Any]:
         return analyze_repeats(**inputs)
     if short_key == "compare_sustained":
         return compare_sustained(**inputs)
+    if short_key == "compare_calibration":
+        return compare_calibration(**inputs)
     if short_key == "compare_quality_slices":
         return compare_quality_slices(**inputs)
     if short_key == "audit_protocols":
@@ -558,13 +674,13 @@ def replay(model_key: str, inputs: dict[str, Any]) -> dict[str, Any]:
         return audit_protocols(reference, candidate)
     raise ValueError(
         "model_key must name compare_scopes, analyze_repeats, compare_sustained, "
-        "compare_quality_slices, or audit_protocols"
+        "compare_quality_slices, compare_calibration, or audit_protocols"
     )
 
 
 __all__ = [
     "BenchmarkScenario", "ProtocolSpec", "SCENARIO_ASSUMPTION", "TRACKS",
-    "analyze_repeats", "audit_protocols", "compare_quality_slices",
+    "analyze_repeats", "audit_protocols", "compare_quality_slices", "compare_calibration",
     "compare_scopes", "compare_sustained", "default_protocol",
     "replay", "to_jsonable",
 ]

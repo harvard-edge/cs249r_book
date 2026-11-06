@@ -163,18 +163,94 @@ class RemediationWorkload(AgentWorkload):
 
     @property
     def approval_cost_per_attempt(self) -> Quantity:
-        """Reviewer cost of one approval: review effort times the hourly rate."""
+        """Price reviewer effort for one approval decision.
+
+        Returns
+        -------
+        Quantity
+            Reviewer labor cost in USD per attempt.
+
+        Notes
+        -----
+        Equation: C_approval = approver_review_time * approver_hourly_rate.
+
+        Assumptions: every attempt incurs the stated review effort once. Review effort can differ from the elapsed approval-decision delay.
+
+        Excludes: queue waiting, reviewer overhead not in the rate, repeated reviews, and consequences of approving a wrong change.
+
+        References
+        ----------
+        Derivation: multiply billable labor time by currency per unit time and convert to USD.
+
+        Examples
+        --------
+        >>> from mlsysim import Agents
+        >>> workload = Agents.Remediation.OnCall
+        >>> workload.approval_cost_per_attempt == (workload.approver_review_time * workload.approver_hourly_rate).to('USD')
+        True
+        """
         return (self.approver_review_time * self.approver_hourly_rate).to(ureg.USD)
 
     @property
     def attempt_cost(self) -> Quantity:
-        """One attempt: model calls, environment, assessment, and approval (added 2026-10-20)."""
+        """Sum the modeled charges for one remediation attempt.
+
+        Returns
+        -------
+        Quantity
+            Model, environment, assessment, and approval cost in USD.
+
+        Notes
+        -----
+        Equation: C_attempt = model_cost_per_attempt + environment_cost_per_attempt + assessment_cost_per_attempt + approval_cost_per_attempt.
+
+        Assumptions: all four categories describe one attempt and do not overlap. model_cost_per_attempt must be populated for this sum.
+
+        Excludes: retries, acceptance-probability normalization, irreversible loss, and costs outside the declared categories.
+
+        References
+        ----------
+        Derivation: add disjoint per-attempt charges; approval labor is derived from review time and rate before addition.
+
+        Examples
+        --------
+        >>> from mlsysim import Agents
+        >>> workload = Agents.Remediation.OnCall
+        >>> other = workload.model_cost_per_attempt + workload.environment_cost_per_attempt + workload.assessment_cost_per_attempt
+        >>> workload.attempt_cost == other + workload.approval_cost_per_attempt
+        True
+        """
         return (self.model_cost_per_attempt + self.environment_cost_per_attempt
                 + self.assessment_cost_per_attempt + self.approval_cost_per_attempt).to(ureg.USD)
 
     @property
     def approval_share(self) -> float:
-        """Approval's share of the attempt cost (added 2026-10-20)."""
+        """Calculate the reviewer-labor fraction of one attempt cost.
+
+        Returns
+        -------
+        float
+            Dimensionless approval cost divided by total attempt cost.
+
+        Notes
+        -----
+        Equation: share = approval_cost_per_attempt / attempt_cost.
+
+        Assumptions: total attempt cost is positive and all cost categories use consistent currency.
+
+        Excludes: approval latency share, cost per accepted task, retry behavior, and wrong-change losses.
+
+        References
+        ----------
+        Derivation: divide one additive cost component by the corresponding total; monetary units cancel.
+
+        Examples
+        --------
+        >>> from mlsysim import Agents
+        >>> workload = Agents.Remediation.OnCall
+        >>> 0 <= workload.approval_share <= 1
+        True
+        """
         return (self.approval_cost_per_attempt / self.attempt_cost).to("").magnitude
 
 

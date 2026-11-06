@@ -354,6 +354,47 @@ def audit_systems_reliability() -> list[str]:
     return issues
 
 
+def audit_tier2_book_series() -> list[str]:
+    """Audit all Tier-2 empirical CSV series under ``books/vol*/**/data/*.csv``."""
+    from pathlib import Path
+    from mlsysim.core.series_loader import LocalSeries
+
+    repo_root = Path(__file__).resolve().parents[3]
+    books_dir = repo_root / "books"
+    if not books_dir.is_dir():
+        return []
+
+    valid_epistemic = {"measured", "modeled", "assumed", "constructed"}
+    issues: list[str] = []
+    for csv_path in sorted(books_dir.rglob("data/*.csv")):
+        rel_parts = csv_path.relative_to(books_dir).parts
+        if not rel_parts or not rel_parts[0].startswith("vol"):
+            continue
+        if any(p.startswith(".") or p in {"_build", "_book"} or p.endswith("_files") for p in rel_parts):
+            continue
+        label = f"Tier2Series.{csv_path.relative_to(repo_root)}"
+        series = LocalSeries(csv_path)
+        prov = series.provenance
+        if not prov.get("source", "").strip():
+            issues.append(f"{label}: missing '# Source:' header")
+        verified = prov.get("verified", "").strip()
+        if not verified:
+            issues.append(f"{label}: missing '# Verified: YYYY-MM-DD' header")
+        else:
+            try:
+                date.fromisoformat(verified)
+            except ValueError:
+                issues.append(f"{label}: '# Verified: {verified}' must be YYYY-MM-DD")
+        if not prov.get("computation", "").strip() and not prov.get("notes", "").strip():
+            issues.append(f"{label}: missing both '# Computation:' and '# Notes:' headers")
+        epistemic = prov.get("epistemic", "").strip()
+        if epistemic:
+            head = epistemic.replace("(", " ").replace(";", " ").replace(",", " ").split()[0].lower()
+            if head not in valid_epistemic:
+                issues.append(f"{label}: '# Epistemic:' must start with {sorted(valid_epistemic)}")
+    return issues
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -392,6 +433,7 @@ def main(argv: list[str] | None = None) -> int:
         issues.extend(audit_ops_sourced())
         issues.extend(audit_systems_reliability())
         issues.extend(audit_calibration_sourced())
+        issues.extend(audit_tier2_book_series())
 
     if issues:
         print(f"Provenance audit ({args.scope}): {len(issues)} issue(s)")

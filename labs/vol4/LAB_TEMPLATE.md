@@ -94,3 +94,20 @@ TBD (staff)
 1. A question that asks what the measurement means.
 2. A question that connects it back to the chapter.
 ```
+
+
+## Relationship to the interactive chapter companion
+
+This template continues to govern the supervised physical studio. Its weekly
+parts and staff checkpoints are not the chapter companion's four investigations.
+The companion follows [the shared lab template](../TEMPLATE.md), with visible
+chapter goals, A–D concept parts, evidence limits, one integrated discussion,
+and an explicit handoff. Its canonical map in `concepts/` records the connection
+to this studio instead of copying bench setup or thresholds.
+
+An instructor may assign the chapter reading and browser investigation before a
+studio session. A reference calculation or constructed trace supports only the
+stated reference claim. The studio adds separately identified physical
+observations, preserves the approved procedures, and retains the existing
+`skeleton` / `draft` / `bench-verified` status discipline. A downloaded companion
+discussion never signs a bench competency or grants operating permission.

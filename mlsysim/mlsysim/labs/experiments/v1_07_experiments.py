@@ -428,12 +428,78 @@ def evaluate_fusion(
     }
 
 
+def runtime_decision_supported(result: Mapping[str, Any], decision: str | None) -> bool:
+    """Unsupported work is evidence for holding/rejecting, never an executable choice."""
+    return (decision == "hold" or
+            (decision == "selected" and result.get("executable") is True) or
+            (decision == "none" and result.get("executable") is False))
+
+
+def execution_plan_supported(snapshot: Mapping[str, Any] | None, choice: str | None,
+                             training_result: Mapping[str, Any] | None = None) -> bool:
+    """Bind synthesis to the actual captured operator, shape, and chosen path."""
+    if not snapshot:
+        return False
+    result = snapshot.get("result", {})
+    inputs = snapshot.get("inputs", {})
+    decision = snapshot.get("decision")
+    if any(inputs.get(key) != result.get(key) for key in ("operator", "shape_mode")):
+        return False
+    if not runtime_decision_supported(result, decision):
+        return False
+    if choice == "none":
+        return decision == "none"
+    if choice == "hold":
+        return decision == "hold" and snapshot.get("chosen_result", {}).get("executable") is True
+    if training_result is not None and not training_result.get("dependency_trace", {}).get("backward_valid"):
+        return False
+    return (choice in {"eager", "compiled", "compiled_fused"}
+            and decision == "selected" and snapshot.get("chosen_result") == result)
+
+
+def trace_saved_state(policy: str, *, regenerate: bool = True) -> dict[str, Any]:
+    """Exact Lab 05 graph, independent of the six-operation cost surrogate."""
+    from .v1_05_experiments import run_dependency_trace
+
+    if policy not in RECOMPUTE_POLICIES:
+        raise ValueError("unknown saved-state policy")
+    if not isinstance(regenerate, bool):
+        raise ValueError("regenerate must be boolean")
+    reference = run_dependency_trace()
+    discarded = {"retain_all": set(), "alternate": {"z1"},
+                 "input_only": {"z1", "h", "prediction"}}[policy]
+    available = {k: v for k, v in reference["forward_values"].items() if k not in discarded}
+    available.update(reference["fixed_parameters"])
+    regenerated = []
+    rules = (("z1", ("x", "w1", "b1"), "w1*x+b1", lambda: available["w1"] * available["x"] + available["b1"]),
+             ("h", ("z1",), "max(0,z1)", lambda: max(0.0, available["z1"])),
+             ("prediction", ("w2", "h", "b2"), "w2*h+b2", lambda: available["w2"] * available["h"] + available["b2"]))
+    if regenerate:
+        for name, required, formula, operation in rules:
+            if name not in available and all(key in available for key in required):
+                available[name] = operation()
+                regenerated.append({"operand": name, "required_operands": list(required),
+                                    "formula": formula, "value": available[name]})
+    missing = discarded - {row["operand"] for row in regenerated}
+    backward = run_dependency_trace(discarded=sorted(missing))
+    valid = all(value is not None for value in backward["gradients"].values())
+    return {"graph": "z1=w1*x+b1; h=relu(z1); prediction=w2*h+b2; loss=(prediction-target)^2/2",
+            "discarded_operands": sorted(discarded), "regenerated_values": regenerated,
+            "retained_forward_values": {k: v for k, v in reference["forward_values"].items() if k not in discarded},
+            "missing_operands": sorted(missing), "backward_trace": backward["backward_trace"],
+            "gradients": backward["gradients"], "reference_gradients": reference["gradients"],
+            "backward_valid": valid,
+            "derivatives_equal": valid and backward["gradients"] == reference["gradients"],
+            "scope_note": "Exact scalar Lab 05 dependency trace; separate from the six-operation activation capacity/time surrogate. Missing derivatives are unavailable, not zero."}
+
+
 def evaluate_recomputation(
     track_id: str,
     policy: str,
     *,
     tensor_elements: int | None = None,
     batch_size: int = 1,
+    regenerate: bool = True,
 ) -> dict[str, Any]:
     """Trade retained activation bytes for repeated forward operations."""
 
@@ -475,6 +541,7 @@ def evaluate_recomputation(
         "model_key": MODEL_KEY,
         "track_id": track_id,
         "policy": policy,
+        "dependency_trace": trace_saved_state(policy, regenerate=regenerate),
         "training_host": host.name,
         "batch_size": batch_size,
         "retained_activation_count": len(retained_indices),
@@ -491,6 +558,7 @@ def evaluate_recomputation(
             "policy": policy,
             "tensor_elements": elements // batch_size,
             "batch_size": batch_size,
+            "regenerate": regenerate,
         },
         "scenario_note": SCENARIO_NOTE,
     }
@@ -553,7 +621,7 @@ def replay(model_key: str, inputs: Mapping[str, Any]) -> dict[str, Any]:
             {"track_id", "operator", "shape_mode", "tensor_elements"}
         ): evaluate_operator_support,
         frozenset(
-            {"track_id", "policy", "tensor_elements", "batch_size"}
+            {"track_id", "policy", "tensor_elements", "batch_size", "regenerate"}
         ): evaluate_recomputation,
         frozenset(
             {
@@ -564,6 +632,7 @@ def replay(model_key: str, inputs: Mapping[str, Any]) -> dict[str, Any]:
             }
         ): compare_dispatch,
     }
+    evaluators[frozenset({"track_id", "policy", "tensor_elements", "batch_size"})] = evaluate_recomputation
     input_keys = frozenset(inputs)
     evaluator = evaluators.get(input_keys)
     if evaluator is None:
