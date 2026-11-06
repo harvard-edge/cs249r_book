@@ -1,6 +1,6 @@
 # Machine learning systems: a candidate body of knowledge
 
-Version: `0.3-draft`. **Editorial draft.**
+Version: `0.4-draft`. **Editorial draft.**
 
 A candidate classification of the engineering knowledge needed to construct, evaluate, deploy, and operate machine learning systems, including generative, agentic, and physical settings. The focus is systems for ML; using ML to optimize unrelated systems is adjacent. This is a scoped editorial proposal, not an exhaustive or community-validated definition of the field.
 
@@ -49,6 +49,7 @@ Candidate home concepts:
 - **Error budget** (`mlsys.error-budget`): The amount of service-level-objective violation permitted over a window, used to pace changes and risk against a reliability target.
 - **Latency budget** (`mlsys.latency-budget`): An allocation of an end-to-end latency target across the stages of a request path, such as network, preprocessing, inference, and postprocessing.
 - **Recovery time and point objectives** (`mlsys.recovery-objectives`): Stated limits on how long restoring service may take (RTO) and how far recovered state may lag the state before the failure (RPO), which constrain checkpointing, replication, and failover design.
+- **Service-level agreement** (`mlsys.service-level-agreement`): A contract binding a provider to stated service targets, with declared consequences such as credits or penalties when they are missed, whose targets are usually set looser than the internal objectives that trigger engineering response.
 
 Secondary concept connections (not additional homes):
 
@@ -162,7 +163,7 @@ Candidate home concepts:
 
 - **Linear models** (`mlsys.linear-model`): Models whose score is linear in their supplied features, with a possible output link function.
 - **Tree ensembles** (`mlsys.tree-ensemble`): Collections of decision trees whose branch traversal and aggregation determine predictions.
-- **Kernel methods** (`mlsys.kernel-method`): Models using similarity functions whose storage and evaluation costs depend on their representation.
+- **Kernel methods** (`mlsys.kernel-method`): Models that score an input by a kernel similarity to retained training examples or to an explicit feature approximation, so storage and evaluation cost grow with the number of retained examples unless the kernel is approximated.
 - **Nearest-neighbor models** (`mlsys.nearest-neighbor`): Predictions or retrieval based on similarity to stored examples or vectors.
 - **Neural networks** (`mlsys.neural-network`): Parameterized compositions of differentiable operations used to learn representations and predictions.
 - **Inductive bias** (`mlsys.inductive-bias`): Structural assumptions that favor some learned functions over others.
@@ -172,7 +173,7 @@ Candidate home concepts:
 - **Multimodal model** (`mlsys.multimodal-model`): A model that consumes or produces several modalities, such as text, images, audio, or video, through modality encoders feeding a shared backbone.
 - **Generative adversarial network** (`mlsys.gan`): A generator and a discriminator trained against each other, so the generator learns to produce samples the discriminator cannot tell apart from data.
 - **Graph neural network** (`mlsys.graph-neural-network`): Neural network that computes node, edge, or graph representations by repeatedly aggregating features from each node's neighbors along graph edges.
-- **Large language model** (`mlsys.large-language-model`): A language model large enough that parameter memory, attention state that grows with context, and token-by-token decoding usually dominate its training and serving cost. Tag it only when an item is about that workload class itself, not merely because an LLM is involved.
+- **Large language model** (`mlsys.large-language-model`): A language model large enough that parameter memory, attention state that grows with context, and, when serving, token-by-token decoding dominate its resource demands.
 - **Encoder-only, decoder-only, and encoder-decoder Transformers** (`mlsys.transformer-variants`): The three arrangements of Transformer stacks, which differ in whether inputs are processed bidirectionally, outputs are generated autoregressively, or both, and therefore in how they are trained, cached, and served.
 
 Related MLSysBook passages (teaching depth not assessed):
@@ -198,7 +199,7 @@ Design warrants: `dlsys`, `cs336`.
 
 Candidate home concepts:
 
-- **Embeddings** (`mlsys.embeddings`): Vector representations whose dimension and lookup or construction method affect storage and computation.
+- **Embeddings** (`mlsys.embeddings`): Vector representations of tokens, items, or inputs, learned or constructed, whose dimension and lookup or encoder implementation determine storage and computation costs.
 - **Attention** (`mlsys.attention`): Input-dependent aggregation of value vectors using query-key compatibility scores.
 - **Position encoding** (`mlsys.position-encoding`): Representations that make sequence position available to a model.
 - **Tokenization** (`mlsys.tokenization`): Mapping text into vocabulary-dependent token identifiers, which sets sequence lengths and so influences context usage, embedding size, and processing cost.
@@ -208,6 +209,8 @@ Candidate home concepts:
 - **Depthwise separable convolution** (`mlsys.depthwise-separable-convolution`): Factoring a standard convolution into a per-channel spatial convolution followed by a pointwise convolution, reducing operations and parameters.
 - **Modality encoder** (`mlsys.modality-encoder`): A network that turns images, audio, or video into token sequences for a shared backbone; visual tokens often dominate prefill cost and KV size.
 - **Residual connection** (`mlsys.residual-connection`): A connection that adds a block's input, or a projection of it, to the block's output, so information and gradients can bypass the block and deep stacks stay trainable.
+- **Feed-forward block** (`mlsys.feed-forward-block`): The per-position subnetwork of learned projections and a nonlinearity paired with attention in each Transformer block, which in most architectures holds the largest share of a dense model's parameters, executes as large matrix multiplications, and is the sublayer that mixture-of-experts routing replaces.
+- **Activation function** (`mlsys.activation-function`): The elementwise or gated nonlinearity applied between a network's linear layers, whose choice sets whether activations contain exact zeros, whether a block needs an extra gating projection, and how cheaply the operation fuses into the preceding matrix multiply.
 
 Secondary concept connections (not additional homes):
 
@@ -274,7 +277,7 @@ Design warrants: `ut378`, `mit-65940`.
 
 Candidate home concepts:
 
-- **Sparse and sliding-window attention** (`mlsys.sliding-window-attention`): Attention restricted to local windows or fixed sparse patterns so cost grows linearly rather than quadratically with sequence length.
+- **Sparse and sliding-window attention** (`mlsys.sliding-window-attention`): Attention restricted to local windows or predetermined sparse patterns, reducing attended query-key pairs; cost is linear in sequence length when the attended positions per query remain bounded.
 - **Linear attention** (`mlsys.linear-attention`): Attention reformulated with kernel feature maps so it is computed in linear time with a fixed-size recurrent state.
 - **State-space sequence model** (`mlsys.state-space-model`): Sequence models built on discretized linear state-space recurrences, trainable in parallel and run with constant-size state per step at inference.
 - **Grouped-query attention** (`mlsys.grouped-query-attention`): Attention in which groups of query heads share key and value heads, shrinking the key-value cache and decode memory traffic.
@@ -319,8 +322,9 @@ Candidate home concepts:
 - **Model artifact** (`mlsys.model-artifact`): The learned parameters, structures, example stores, and metadata required to execute a model.
 - **Weight serialization format** (`mlsys.weight-serialization`): The on-disk encoding of a model's parameter tensors and metadata, governing load time, memory mapping, and safety of deserialization.
 - **Model exchange format** (`mlsys.model-exchange-format`): A framework-neutral representation of a model's operator graph and weights used to move models between training frameworks and inference runtimes.
-- **Model export** (`mlsys.model-export`): Converting a framework program into a self-contained deployable artifact by tracing or capturing its graph and fixing operators, shapes, and weights.
+- **Model export** (`mlsys.model-export`): Converting a framework model into an artifact with an explicit computation and input contract that a compatible runtime can execute.
 - **Model signature** (`mlsys.model-signature`): The declared names, types, and shapes of a model artifact's inputs and outputs, forming its interface contract with callers.
+- **Chat template** (`mlsys.chat-template`): The fixed scheme of role markers and special tokens that serializes system instructions, user and assistant turns, and tool calls into one token sequence, which must match between fine-tuning and serving or the model misreads turn boundaries.
 
 Secondary concept connections (not additional homes):
 
@@ -363,12 +367,13 @@ Candidate home concepts:
 - **Roofline bound** (`mlsys.roofline`): A performance bound combining a compute ceiling with an intensity-dependent bandwidth ceiling.
 - **Data locality** (`mlsys.locality`): Reuse of data near its consumers across time or execution locations.
 - **Ridge point** (`mlsys.ridge-point`): The arithmetic intensity at which a roofline's bandwidth and compute ceilings meet, equal to peak compute throughput divided by peak memory bandwidth.
-- **Compute-bound vs. memory-bound** (`mlsys.bound-regime`): Classifying a kernel or phase by which roofline ceiling limits it, indicating whether more arithmetic throughput or more bandwidth would help.
+- **Compute-bound vs. memory-bound** (`mlsys.bound-regime`): Classifying a kernel or phase by what limits it: the roofline's arithmetic ceiling, its bandwidth ceiling, or, for operations too small to approach either, fixed per-operation overhead, indicating whether more throughput, more bandwidth, or fewer and larger operations would help.
 - **Data-movement energy** (`mlsys.data-movement-energy`): The energy cost of moving operands between storage levels, which grows with distance and typically exceeds the energy of the arithmetic performed on them.
 - **Analytical performance model** (`mlsys.analytical-performance-model`): A closed-form model composing compute, memory, communication, and queueing terms to predict a workload's time, memory, and cost on a configuration without running it.
 - **Performance simulation** (`mlsys.performance-simulation`): Predicting system behavior by executing a model of compute, memory, network, or scheduling events at a chosen granularity, trading simulation speed against detail.
 - **Simulator fidelity** (`mlsys.model-fidelity`): Agreement between a performance model's or simulator's predictions and measured behavior on reference workloads, reported as validation error over stated configurations.
 - **Operator execution trace** (`mlsys.execution-trace`): A recorded graph of a training or inference step's compute and communication operators with their dependencies and timings, replayable for simulation and benchmarking.
+- **Communication-to-computation ratio** (`mlsys.communication-intensity`): The bytes a parallel plan must exchange per unit of local arithmetic, which, set against link bandwidth and the accelerator's FLOP rate, says whether a stage is communication-bound in the same way arithmetic intensity says whether a kernel is memory-bound.
 
 Secondary concept connections (not additional homes):
 
@@ -449,6 +454,8 @@ Candidate home concepts:
 - **Arrival burstiness** (`mlsys.arrival-burstiness`): Variability of request inter-arrival times or sizes beyond a Poisson baseline, which raises queueing delay at a given mean utilization.
 - **Finite buffers and overflow** (`mlsys.finite-buffer`): A queue with bounded capacity drops or blocks arrivals once full, so its size trades memory and added delay against the loss rate under bursty input.
 - **Bandwidth-delay product** (`mlsys.bandwidth-delay-product`): A path's bottleneck bandwidth times its round-trip time, the amount of outstanding data a window-controlled flow must sustain to keep the path full.
+- **Head-of-line blocking** (`mlsys.head-of-line-blocking`): Delay imposed on short or ready work because a queue serves in arrival order and a long or stalled item ahead holds the service point, so an item's wait depends on what is in front of it rather than on its own cost.
+- **Open-loop vs. closed-loop load** (`mlsys.open-closed-loop-load`): A distinction between arrivals scheduled independently of responses and arrivals triggered by prior completions, which changes offered-load feedback and the queueing behavior a load test exposes.
 
 Secondary concept connections (not additional homes):
 
@@ -577,8 +584,8 @@ Candidate home concepts:
 - **High-bandwidth memory** (`mlsys.hbm`): Stacked DRAM placed beside the processor on an interposer, providing very high bandwidth with limited capacity per stack.
 - **On-chip SRAM and scratchpads** (`mlsys.on-chip-sram`): Small, fast on-die storage, such as caches, shared memory, and register files, used to stage reused operands near compute units.
 - **Memory wall** (`mlsys.memory-wall`): The widening gap between processor arithmetic throughput and memory bandwidth or latency, which makes data movement the limiting factor.
-- **Embedding cache and tiering** (`mlsys.embedding-cache`): Keeping frequently accessed embedding rows in accelerator memory and cold rows in host memory or SSD, exploiting the skew of lookups.
 - **Emerging non-volatile memory** (`mlsys.emerging-nvm`): Resistive, phase-change, and magnetic memory devices that retain state without power and can store weights densely or act as analog compute elements.
+- **Host memory tier** (`mlsys.host-memory`): Memory directly managed by the host processor and used for input staging or offloaded model state, whose capacity and accelerator access costs depend on the platform's memory and interconnect design.
 
 Secondary concept connections (not additional homes):
 
@@ -655,6 +662,7 @@ Candidate home concepts:
 - **Dark silicon** (`mlsys.dark-silicon`): The fraction of a chip that cannot be powered at full frequency simultaneously within its power and thermal budget.
 - **Power capping** (`mlsys.power-capping`): Enforcing a maximum power draw on a device or group by limiting clocks or activity, trading peak throughput for bounded power.
 - **Duty cycling and sleep states** (`mlsys.duty-cycling`): Keeping a device in a low-power sleep state most of the time and waking it briefly to sense and infer, so average power is set by the active fraction and the cost of each wake-up.
+- **Technology scaling** (`mlsys.technology-scaling`): The historical trends by which transistor density doubled on a steady cadence while, for a long period, power density stayed constant as transistors shrank; the end of constant power density is why added transistors can no longer all be clocked at once, pushing designs toward parallelism and specialization.
 
 Secondary concept connections (not additional homes):
 
@@ -735,14 +743,14 @@ Candidate home concepts:
 - **Tensor** (`mlsys.tensor`): A multidimensional array carrying shape, element type, device, and layout metadata, the core data abstraction of ML frameworks.
 - **Computation graph** (`mlsys.computation-graph`): A directed graph of tensor operations and their data dependencies representing a model program, used for differentiation, optimization, and scheduling.
 - **Eager vs. graph execution** (`mlsys.eager-execution`): The choice between running each operation as the host program issues it and building a whole graph first for later optimization and execution.
-- **Tracing and JIT capture** (`mlsys.tracing-jit`): Recording operations executed on example inputs to build a graph compiled just in time, with guards or retracing when shapes or control flow change.
-- **Composable function transformations** (`mlsys.function-transformations`): Higher-order operations that map pure array functions to new functions, such as differentiation, vectorization, compilation, and sharding, and compose in any order.
-- **Distributed task and actor runtime** (`mlsys.task-actor-runtime`): A runtime exposing stateless remote tasks and stateful actors as future-returning calls, scheduled across a cluster with a shared object store and lineage-based fault tolerance.
+- **Graph tracing** (`mlsys.tracing-jit`): Recording supported operations during a program execution with concrete or abstract inputs to construct an intermediate graph for transformation, compilation, or export.
+- **Composable function transformations** (`mlsys.function-transformations`): Higher-order operations that map pure array functions to new functions, such as differentiation, vectorization, compilation, and sharding, and compose subject to each transformation's input, output, and tracing contract.
+- **Distributed task and actor runtime** (`mlsys.task-actor-runtime`): A runtime exposing stateless remote tasks and stateful actors as future-returning calls scheduled across a cluster; implementations add a shared object store and lineage-based recovery.
 - **Single- vs. multi-controller execution** (`mlsys.single-vs-multi-controller`): Whether one coordinating process issues work to all devices or every host runs the same program independently, trading orchestration flexibility against dispatch scalability.
 - **Embedded ML DSL** (`mlsys.embedded-dsl`): A domain-specific language hosted inside a general language such as Python, whose operations build a program representation that a separate compiler or runtime executes.
 - **Differentiable programming** (`mlsys.differentiable-programming`): Writing general programs, including control flow, recursion, and data structures, that the language or framework differentiates end to end by automatic differentiation.
 - **Large-model training framework** (`mlsys.llm-training-framework`): A library that composes data, tensor, pipeline, and sharded-state parallelism with memory optimizations behind one training configuration for models exceeding one device.
-- **Python GIL and host-language concurrency** (`mlsys.python-gil`): The CPython global interpreter lock serializes Python bytecode across threads, so ML host code achieves concurrency through native kernels that release the lock, multiple processes, or asynchronous I/O.
+- **Python GIL and host-language concurrency** (`mlsys.python-gil`): In GIL-enabled CPython, the global interpreter lock serializes Python bytecode across threads, so ML host code achieves concurrency through native kernels that release the lock, multiple processes, or asynchronous I/O.
 
 Secondary concept connections (not additional homes):
 
@@ -772,7 +780,7 @@ Design warrants: `dlsys`, `flash`.
 Candidate home concepts:
 
 - **Tensor layout** (`mlsys.tensor-layout`): The mapping from tensor indices to storage locations, including strides and materialization.
-- **Matrix multiplication** (`mlsys.matrix-multiply`): A dense linear-algebra operation whose tiling, shape, and precision affect execution cost.
+- **Matrix multiplication** (`mlsys.matrix-multiply`): The dense product of two matrices, a central arithmetic workload in many neural networks, whose operand shapes, tiling, and precision determine execution cost on a specified processor.
 - **IO-aware attention kernel** (`mlsys.io-aware-attention`): An exact attention implementation that tiles queries, keys, and values through on-chip memory to avoid materializing the full score matrix in off-chip memory.
 - **Convolution lowering** (`mlsys.convolution-lowering`): Implementing convolution by rearranging input patches into matrices for GEMM, or by direct, FFT, or Winograd algorithms with different memory costs.
 - **Vendor kernel library** (`mlsys.kernel-library`): Tuned implementations of common operators supplied for a hardware platform, which frameworks call rather than generating their own kernels.
@@ -810,11 +818,13 @@ Design warrants: `dlsys`, `cuda-model`.
 Candidate home concepts:
 
 - **Thread hierarchy** (`mlsys.thread-hierarchy`): The decomposition of a kernel into grids of thread blocks and warps that share on-chip memory and synchronize at defined scopes.
-- **Memory coalescing and bank conflicts** (`mlsys.memory-coalescing`): Access patterns that merge a warp's loads into few memory transactions, or that serialize on shared-memory banks.
+- **Memory coalescing** (`mlsys.memory-coalescing`): Combining memory requests from threads in a warp into fewer global-memory transactions, reducing wasted memory traffic.
 - **Occupancy and latency hiding** (`mlsys.occupancy`): The ratio of resident to maximum warps, and how oversubscribing threads hides memory latency at the cost of registers and shared memory per thread.
-- **Asynchronous data movement** (`mlsys.async-data-movement`): Hardware-assisted bulk copies into on-chip memory and producer-consumer warp roles that overlap loads with matrix-engine compute.
+- **Asynchronous data movement** (`mlsys.async-data-movement`): Transferring data into on-chip memory while independent computation proceeds, with explicit synchronization on the transfer's completion; hardware copy engines and producer-consumer warp roles are its implementations.
 - **Matrix-engine programming** (`mlsys.matrix-engine-programming`): Issuing tile-level matrix-multiply-accumulate instructions with the layouts, fragment shapes, and precisions a tensor-core-class unit requires.
 - **Register pressure** (`mlsys.register-pressure`): Demand for registers from simultaneously live kernel values, which can reduce resident threads or force values to spill into slower memory.
+- **Kernel synchronization and atomics** (`mlsys.kernel-synchronization`): The barriers, memory fences, and atomic read-modify-write operations through which threads of a kernel coordinate access to shared data, where barrier stalls and contended atomics serialize work that the thread hierarchy otherwise runs in parallel.
+- **Shared-memory bank conflict** (`mlsys.shared-memory-bank-conflict`): Serialization of a shared-memory request when threads access different addresses in the same bank, reducing effective shared-memory bandwidth.
 
 Secondary concept connections (not additional homes):
 
@@ -857,6 +867,7 @@ Candidate home concepts:
 - **Dynamic shapes and shape specialization** (`mlsys.dynamic-shapes`): Handling inputs whose tensor dimensions vary across calls by specializing compiled code per shape, padding into buckets, or compiling with symbolic dimensions.
 - **Rule-based graph rewriting** (`mlsys.rule-based-graph-rewriting`): Applying hand-written semantics-preserving transformations to a computation graph, such as constant folding, dead-code elimination, operator substitution, and algebraic simplification.
 - **Software pipelining** (`mlsys.software-pipelining`): Scheduling independent operations from different loop iterations to overlap, such as loading the next tile while computing the current one, hiding latency at the cost of extra live state and buffering.
+- **Algorithm-schedule separation** (`mlsys.schedule-separation`): A compiler design in which what an operator computes is written once and how it runs, meaning loop order, tiling, vectorization, unrolling, memory placement, and parallel mapping, is a separate composable schedule, so the same algorithm can be retargeted and tuned without changing its semantics.
 
 Secondary concept connections (not additional homes):
 
@@ -932,6 +943,11 @@ Candidate home concepts:
 - **Host-side data loading** (`mlsys.host-data-loader`): Reading, decoding, augmenting, and collating examples on host CPU worker processes and staging batches in pinned memory so that a single machine's accelerators are not left waiting for input.
 - **Zero-copy sensor input via DMA** (`mlsys.zero-copy-dma`): Having sensors or peripherals write input directly into model input buffers by direct memory access, avoiding CPU copies between capture and inference.
 - **Sequence packing** (`mlsys.sequence-packing`): Combining variable-length training examples into packed token buffers with explicit example boundaries and attention semantics to reduce padding work without unintended cross-example attention.
+- **Dataset shuffling** (`mlsys.dataset-shuffling`): Randomizing the order in which training examples are visited, by a full permutation or an approximate buffered shuffle over sharded files, trading the randomness that stochastic optimization assumes against the sequential reads that storage delivers cheaply.
+
+Secondary concept connections (not additional homes):
+
+- **Dataset storage layout** (`mlsys.dataset-storage-layout`)
 
 Related MLSysBook passages (teaching depth not assessed):
 
@@ -965,7 +981,7 @@ Candidate home concepts:
 - **Block-scaled number formats** (`mlsys.block-scaled-format`): Low-precision formats in which small blocks of values share a scale factor, extending dynamic range for FP8, FP6, FP4, or INT8 elements.
 - **Accumulation precision** (`mlsys.accumulation-precision`): The numerical format used to sum products in dot products and reductions, which may differ from input precision and governs rounding-error growth.
 - **Numerical nondeterminism** (`mlsys.numerical-nondeterminism`): Run-to-run variation in floating-point results because non-associative reductions change order with atomics, kernel selection, parallel layout, batch composition, or hardware.
-- **Batch invariance** (`mlsys.batch-invariance`): A kernel property that each request's output is bitwise independent of batch size and co-batched requests, required for deterministic serving and matching training to inference numerics.
+- **Batch invariance** (`mlsys.batch-invariance`): A kernel property that each request's output is bitwise independent of batch size and co-batched requests, one way to remove a source of run-to-run numerical variation in serving.
 
 Secondary concept connections (not additional homes):
 
@@ -1011,6 +1027,7 @@ Candidate home concepts:
 - **Pipeline bubble** (`mlsys.pipeline-bubble`): Idle device time during pipeline fill and drain, whose fraction shrinks as the number of microbatches grows relative to pipeline stages.
 - **Embedding-table sharding** (`mlsys.embedding-table-sharding`): Partitioning very large sparse embedding tables row-, column-, or table-wise across devices, usually model-parallel beside data-parallel dense layers.
 - **Parameter server** (`mlsys.parameter-server`): An architecture in which workers pull and push model parameters from sharded server processes, common for sparse recommendation models and asynchronous training.
+- **Local SGD** (`mlsys.local-sgd`): Data-parallel training in which workers take several local optimizer steps between parameter synchronizations, cutting communication frequency for low-bandwidth or geo-distributed settings.
 - **Synchronous vs. asynchronous training** (`mlsys.sync-async-training`): Choosing whether workers apply an update only after every gradient for a step is combined, or apply updates independently on possibly stale parameters.
 - **Graph partitioning for GNN training** (`mlsys.gnn-graph-partitioning`): Splitting a large graph across workers to balance computation while minimizing cut edges, whose cross-partition neighbor features must be fetched remotely.
 - **Pipeline schedule** (`mlsys.pipeline-schedule`): The order in which pipeline stages run the forward and backward passes of microbatches (fill-drain, one-forward-one-backward, interleaved), which sets the bubble fraction and how many microbatches' activations each stage holds.
@@ -1059,6 +1076,7 @@ Candidate home concepts:
 - **Dynamic re-parallelization** (`mlsys.dynamic-resharding`): Redistributing model weights among devices at runtime so successive phases, such as generation and training or prefill and decode, each run under a better parallel layout.
 - **Expert replication and placement** (`mlsys.expert-placement`): Assigning mixture-of-experts experts to devices, and replicating frequently routed ones, to balance per-device token load under skewed routing.
 - **Variable-length parallelism planning** (`mlsys.variable-length-parallelism`): Choosing, for each training step, sequence or context parallel degrees and how packed documents are sharded across ranks from that step's sequence lengths and attention patterns, so ranks receive balanced attention work.
+- **Geo-distributed training** (`mlsys.geo-distributed-training`): Planning one training job across accelerators in several datacenters by placing the low-communication parallelism dimension (pipeline stages, local-SGD replicas, or asynchronous hierarchies) on the long, narrow inter-site links and the bandwidth-hungry dimensions inside each site, and scheduling the WAN transfers against its latency and bandwidth.
 
 Secondary concept connections (not additional homes):
 
@@ -1095,10 +1113,11 @@ Candidate home concepts:
 - **All-to-all exchange** (`mlsys.all-to-all`): A collective in which every participant sends distinct data to every other, as in expert routing; its throughput is sensitive to bisection bandwidth.
 - **Alpha-beta communication model** (`mlsys.alpha-beta-model`): A cost model estimating message time as a fixed latency term plus message size times a per-byte cost, used to compare collective algorithms.
 - **Gradient compression** (`mlsys.gradient-compression`): Reducing gradient communication through quantization, sparsification, or low-rank approximation, often with error feedback to preserve convergence.
-- **Local SGD** (`mlsys.local-sgd`): Data-parallel training in which workers take several local optimizer steps between parameter synchronizations, cutting communication frequency for low-bandwidth or geo-distributed settings.
 - **Distributed job launch and process groups** (`mlsys.process-group-rendezvous`): Starting the processes of a distributed job, having them discover each other through a rendezvous, assigning ranks, and forming the process groups and communicators that collectives run over.
 - **Device-initiated communication** (`mlsys.device-initiated-communication`): Communication in which kernels on the accelerator issue and synchronize inter-device transfers themselves, without a host call per exchange, allowing fine-grained fusion of compute and communication at the cost of explicit ordering and completion handling.
 - **Collective algorithm selection** (`mlsys.collective-algorithm-selection`): Choosing, per call, among collective algorithms (ring, tree, switch-offloaded) and wire protocols by message size, participant count, and link hierarchy, to minimize latency for small messages and maximize bandwidth for large ones.
+- **All-reduce** (`mlsys.all-reduce`): A collective in which every participant ends with the same reduction, usually the sum, of all participants' equal-shaped tensors, the operation that synchronizes gradients across replicas in data-parallel training.
+- **Reduce-scatter and all-gather** (`mlsys.reduce-scatter-all-gather`): The complementary collectives in which each participant receives one reduced shard of the group's tensors (reduce-scatter) or the concatenation of every participant's shard (all-gather), the pair that moves sharded parameters and gradients in fully sharded training and composes into a bandwidth-optimal all-reduce.
 
 Secondary concept connections (not additional homes):
 
@@ -1228,6 +1247,7 @@ Candidate home concepts:
 - **UPS and battery energy storage** (`mlsys.facility-energy-storage`): Facility batteries that carry load through outages until generators start and can also buffer fast load swings or shave demand peaks.
 - **Grid interconnection** (`mlsys.grid-interconnection`): The utility connection that fixes how much power a site can draw; its capacity and multi-year lead times increasingly decide where AI datacenters are built.
 - **On-site power generation** (`mlsys.on-site-generation`): Generators, turbines, fuel cells, or renewables at the datacenter that provide backup power or supply load alongside or instead of the grid.
+- **Datacenter demand response** (`mlsys.demand-response`): Shifting, shedding, or capping datacenter power in response to grid signals, made practical by deferrable training and batch work.
 
 Secondary concept connections (not additional homes):
 
@@ -1276,11 +1296,15 @@ Candidate home concepts:
 - **In-network reduction** (`mlsys.in-network-reduction`): Performing collective reductions inside network switches so data crosses each link fewer times, lowering all-reduce traffic and latency.
 - **Adaptive routing** (`mlsys.adaptive-routing`): Choosing network paths per packet or flowlet from current congestion, avoiding the hash collisions static ECMP suffers with few large, synchronized training flows.
 - **Incast congestion** (`mlsys.incast`): Congestion that occurs when many senders transmit to one receiver at once, overflowing its switch port buffer and causing queueing, drops, or pause propagation.
-- **Network propagation delay** (`mlsys.network-propagation-delay`): The minimum latency set by the distance a signal travels at the speed of light in fiber, which bounds round trips between regions regardless of bandwidth.
+- **Network propagation delay** (`mlsys.network-propagation-delay`): The minimum latency set by the distance a signal travels through the medium, which sets a floor under round-trip time between regions regardless of bandwidth.
 - **Optical circuit switching** (`mlsys.optical-circuit-switching`): Reconfiguring optical connections between endpoints to match communication demand, trading switching delay and topology coordination against delivered bandwidth and network power.
 - **Co-packaged optics** (`mlsys.co-packaged-optics`): Placing optical transceivers inside the switch or accelerator package beside the silicon, so electrical paths shrink and energy per bit falls, at the cost of field serviceability and added package heat.
 - **Forward error correction** (`mlsys.forward-error-correction`): Adding redundant bits to transmitted data so the receiver corrects supported error patterns without retransmission, at the cost of coding overhead and decoding delay.
 - **Network traffic classes and QoS** (`mlsys.traffic-classes`): Classifying traffic on a shared network into separately scheduled queues with configured priorities or bandwidth shares, limiting interference between collective, storage, and control traffic.
+- **Torus topology** (`mlsys.torus-topology`): A fabric in which accelerator nodes form a multidimensional grid with wraparound links to fixed neighbors rather than tiers of switches, so neighbor and ring traffic can run at link rate while global exchanges are routed hop by hop with lower bisection bandwidth that depends on dimensions, routing, and contention.
+- **Network oversubscription** (`mlsys.network-oversubscription`): Provisioning less uplink capacity at a switch tier than the downlink capacity it serves, written as a downlink-to-uplink ratio, which cuts fabric cost but makes cross-tier bandwidth contend when many endpoints communicate at once, as synchronized collectives do.
+- **Link reach limit (copper versus optics)** (`mlsys.link-reach`): The maximum distance over which a link meets its signal-quality requirements for a specified medium and signaling scheme, constraining cabling, retiming, and the geometry of connected accelerator domains.
+- **Link signal degradation and flaps** (`mlsys.link-signal-integrity`): Physical-link degradation that produces excessive bit errors, retraining, or intermittent disconnections, causing retransmission and communication stalls when protection mechanisms cannot absorb it.
 
 Secondary concept connections (not additional homes):
 
@@ -1318,7 +1342,9 @@ Candidate home concepts:
 - **Object storage** (`mlsys.object-storage`): Storage of immutable named objects behind an HTTP-style interface, offering scalable capacity and throughput with higher per-request latency than file systems.
 - **Checkpoint I/O** (`mlsys.checkpoint-io`): Writing and reading large training-state snapshots, where storage bandwidth, asynchronous persistence, and sharded layout determine checkpoint cost.
 - **Storage tiering and caching** (`mlsys.storage-tiering`): Placing data across tiers, from memory and local NVMe caches to shared and archival storage, according to access frequency and cost.
+- **Embedding cache and tiering** (`mlsys.embedding-cache`): Keeping frequently accessed embedding rows in accelerator memory and cold rows in host memory or SSD, exploiting the skew of lookups.
 - **Erasure coding** (`mlsys.erasure-coding`): Encoding stored data into data and parity fragments so it can be reconstructed after a bounded number of fragment losses, trading storage overhead against encoding and recovery work.
+- **Sequential versus random storage access** (`mlsys.storage-access-pattern`): Whether a workload reads storage in large contiguous ranges or in many small scattered requests, which decides whether sequential throughput or per-request latency and IOPS bound it, and so which media, layout, and shard sizes suit it.
 
 Secondary concept connections (not additional homes):
 
@@ -1487,7 +1513,7 @@ Design warrants: `cs336`, `dmls`.
 Candidate home concepts:
 
 - **Data selection** (`mlsys.data-selection`): Allocating learning effort to examples according to value, coverage, and acquisition cost.
-- **Dataset deduplication** (`mlsys.deduplication`): Identifying and managing repeated or near-duplicate examples.
+- **Dataset deduplication** (`mlsys.deduplication`): Finding and managing exact or near-duplicate examples within a corpus and overlaps with evaluation data to control sample weighting, redundant compute, memorization, and contamination.
 - **Quality filtering** (`mlsys.quality-filtering`): Removing or down-weighting training examples judged low quality by heuristics, classifiers, or model scores.
 - **Data mixture** (`mlsys.data-mixture`): The proportions in which source domains or datasets are sampled during training.
 - **Synthetic data** (`mlsys.synthetic-data`): Training or evaluation examples generated by simulators, programs, or models rather than collected from the target environment.
@@ -1649,7 +1675,7 @@ Candidate home concepts:
 - **Data leakage** (`mlsys.leakage`): Information unavailable at the intended prediction boundary entering development or evaluation.
 - **Point-in-time correctness** (`mlsys.point-in-time`): Constructing examples using only information available at their stated prediction time.
 - **Training-serving skew** (`mlsys.train-serve-skew`): A mismatch between the data transformations or feature semantics used in training and serving.
-- **Feature freshness** (`mlsys.feature-freshness`): The age of a feature value at the time it is used for a prediction, relative to the freshness assumed during training.
+- **Feature freshness** (`mlsys.feature-freshness`): How recent a feature's value is at the moment it is used for a prediction, relative to the recency assumed when training examples were built; stale values shift inputs away from the training distribution.
 - **Online and offline feature consistency** (`mlsys.online-feature-consistency`): Keeping the feature values materialized in the low-latency online store consistent with the offline values used for training, as features are recomputed, backfilled, and updated.
 
 Secondary concept connections (not additional homes):
@@ -1698,6 +1724,8 @@ Candidate home concepts:
 - **Interactive imitation learning** (`mlsys.interactive-imitation`): Imitation learning that queries an expert for corrective labels on states the learner's own policy visits and aggregates them into training data over rounds.
 - **Offline reinforcement learning** (`mlsys.offline-rl`): Learning a policy from a fixed dataset of previously logged interactions without further environment access, limited by how well the data covers states the policy would visit.
 - **Multi-task learning** (`mlsys.multi-task-learning`): Jointly learning several tasks through shared parameters, often a shared backbone with task-specific heads, so their training signals can help or interfere with one another.
+- **Semi-supervised learning** (`mlsys.semi-supervised-learning`): Learning from a small labeled set together with a large unlabeled one, typically by training on confident model predictions for unlabeled examples or by enforcing consistent predictions under perturbation, which lowers labeling cost but can reinforce the model's own early mistakes.
+- **Contrastive learning** (`mlsys.contrastive-learning`): A self-supervised or paired-data objective that pulls representations of matched views or pairs together and pushes mismatched ones apart, whose quality depends on how many negatives each step sees, which makes large batches and their memory a systems cost.
 
 Secondary concept connections (not additional homes):
 
@@ -1740,6 +1768,9 @@ Candidate home concepts:
 - **Mode collapse** (`mlsys.mode-collapse`): A generative-training failure in which the model covers only a few modes of the data distribution and produces low-diversity samples.
 - **Gradient clipping** (`mlsys.gradient-clipping`): Rescaling or truncating gradients whose norm exceeds a threshold so that a single large update cannot destabilize training.
 - **Weight initialization** (`mlsys.weight-initialization`): Choosing the scale and distribution of initial parameters so that activations and gradients keep stable variance through depth at the start of training.
+- **Overfitting** (`mlsys.overfitting`): Fitting training-specific variation that does not persist in new data, causing training performance to overstate generalization.
+- **Early stopping** (`mlsys.early-stopping`): Ending training according to a held-out validation criterion and selecting a checkpoint under that criterion, limiting additional compute and potentially reducing overfitting.
+- **Group distributionally robust optimization** (`mlsys.group-dro`): Training to minimize the highest expected loss among predefined groups so that poor subgroup performance is not hidden by average loss.
 
 Secondary concept connections (not additional homes):
 
@@ -1779,6 +1810,7 @@ Candidate home concepts:
 - **Gradient accumulation** (`mlsys.gradient-accumulation`): Summing gradients over several micro-batches before one optimizer update to emulate a larger batch within limited memory.
 - **Training-state offloading** (`mlsys.memory-offloading`): Moving optimizer state, parameters, or activations from accelerator memory to host memory or storage between uses.
 - **Memory-efficient optimizer** (`mlsys.memory-efficient-optimizer`): Optimizers that shrink per-parameter state through factorization, low-rank projection, or low-precision storage, cutting the memory adaptive methods such as Adam otherwise require.
+- **Training memory estimate** (`mlsys.training-memory-estimate`): Approximating a training step's accelerator memory as a per-parameter cost for weights, gradients, and optimizer state in their chosen precisions, plus activation memory that grows with batch size, sequence length, and depth, to decide what fits before a run is launched.
 
 Secondary concept connections (not additional homes):
 
@@ -1843,7 +1875,7 @@ Adapting a pretrained model to a new task or behavior, by continued training of 
 - **Concerns:** Task and predictive quality; Monetary cost.
 - **Contexts:** Deep learning; Generative systems; Agentic systems; Edge and device.
 
-Includes: Instruction and supervised fine-tuning, adapters and LoRA..
+Includes: Instruction and supervised fine-tuning, adapters, LoRA, and model merging.; Prompt engineering and in-context learning without parameter updates..
 
 Excludes: Preference or reward-driven training (Preference &amp; RL post-training); Assembling context for agents (Context engineering &amp; agent memory).
 
@@ -1901,6 +1933,8 @@ Candidate home concepts:
 - **Reward hacking** (`mlsys.reward-hacking`): Improving a measured reward through behavior that fails the intended task objective.
 - **Group relative policy optimization** (`mlsys.group-relative-policy-optimization`): A policy-gradient method that scores each sampled response against the mean reward of a group of responses to the same prompt, removing the learned critic at the cost of generating several rollouts per prompt.
 - **Agent training environment** (`mlsys.agent-training-environment`): A task system that supplies observations, accepts actions, and manages episode state for training tool-using policies, whose throughput and reset fidelity limit rollout collection.
+- **Rejection-sampling fine-tuning** (`mlsys.rejection-sampling-fine-tuning`): Generating candidate responses, filtering them with an acceptance criterion, and fine-tuning on accepted responses to turn a selection signal into supervised training data, with repeated filtering potentially reducing diversity.
+- **Colocated versus disaggregated RL post-training** (`mlsys.rl-training-colocation`): Whether rollout generation and policy updates share the same accelerators, alternating phases and re-sharding weights in place, or run on separate pools that exchange weights and samples, trading idle time within each phase against transfer cost and policy staleness.
 
 Secondary concept connections (not additional homes):
 
@@ -1985,9 +2019,11 @@ Candidate home concepts:
 - **Sequential testing** (`mlsys.sequential-testing`): Experimental analysis that permits repeated looks at accumulating data while controlling error rates, unlike fixed-horizon tests.
 - **Experiment interference** (`mlsys.experiment-interference`): Treatment of one experimental unit affecting outcomes of another, violating the no-interference assumption (SUTVA) of standard A/B analysis.
 - **Evaluation harness** (`mlsys.evaluation-harness`): A system running versioned benchmark suites against model checkpoints with fixed prompts, decoding settings, and scorers, sharding and caching work so results stay reproducible and comparable.
+- **Closed-loop policy evaluation** (`mlsys.closed-loop-evaluation`): Evaluating a policy by letting its own actions determine subsequent observations, in simulation or deployment, rather than scoring its predictions against logged data.
 - **Paired comparison and noninferiority testing** (`mlsys.paired-comparison`): Comparing two systems on the same items or units and testing per-item differences, including whether a candidate is no worse than a baseline by a preset margin.
 - **Off-policy evaluation** (`mlsys.off-policy-evaluation`): Estimating a proposed policy's expected outcomes from interactions collected under another policy, by propensity reweighting, outcome modeling, or doubly robust estimators, subject to assumptions about action coverage and confounding.
 - **Multiple comparisons correction** (`mlsys.multiple-comparisons`): Adjusting significance thresholds when many hypotheses, metrics, or slices are tested together, so the chance of a false declared effect, by family-wise error or false discovery rate, stays controlled.
+- **Statistical power** (`mlsys.statistical-power`): The probability that an experiment detects an effect of a stated size, fixed by sample size, outcome variance, and the significance level, which decides how much traffic or how many evaluation items a comparison needs before its answer can be trusted.
 
 Secondary concept connections (not additional homes):
 
@@ -1998,6 +2034,8 @@ Related MLSysBook passages (teaching depth not assessed):
 
 - vol1: Data Engineering — Data leakage (`vol1.data.leakage`)
 - vol3: Trajectory Curation — Task-group split (`vol3.split`)
+- vol3: Trajectory Fine-Tuning — Closed-loop evaluation (`vol3.closed-loop`)
+- vol4: Closed-Loop Evaluation — Closed-loop trial (`vol4.evaluation.trial`)
 
 #### Metrics, calibration &amp; uncertainty
 
@@ -2022,9 +2060,12 @@ Candidate home concepts:
 - **Evaluation metrics** (`mlsys.metrics`): Specified measurements of predictive or task behavior, with explicit populations and aggregation.
 - **Probability calibration** (`mlsys.calibration`): Agreement between predicted probabilities and observed event frequencies under an evaluation distribution.
 - **Statistical uncertainty** (`mlsys.statistical-uncertainty`): Uncertainty in an estimated quantity due to finite and dependent observations.
-- **Selective prediction** (`mlsys.selective-prediction`): Predicting on admitted cases and abstaining or deferring the rest.
-- **Conformal prediction** (`mlsys.conformal-prediction`): Constructing prediction sets with finite-sample coverage guarantees under exchangeability, using held-out calibration scores.
+- **Selective prediction** (`mlsys.selective-prediction`): Decision-gating mechanism that emits model outputs only for admitted cases and abstains on or defers the remaining cases.
+- **Conformal prediction** (`mlsys.conformal-prediction`): Constructing prediction sets from conformity scores with finite-sample coverage guarantees under stated assumptions, such as exchangeability.
 - **Out-of-distribution detection** (`mlsys.ood-detection`): Flagging individual inputs that differ from the training distribution so the system can abstain, defer, or fall back instead of trusting the prediction.
+- **Predictive uncertainty estimation** (`mlsys.predictive-uncertainty`): An estimate of uncertainty in an individual prediction, sometimes decomposed into data noise and model uncertainty, used to support abstention, deferral, or data acquisition.
+- **Retrieval quality metrics** (`mlsys.retrieval-metrics`): Measures of a retriever's ranked results against relevance judgments, such as recall at k, mean reciprocal rank, and normalized discounted cumulative gain, which show the retrieval depth and ranking quality a downstream reranker or generator can rely on.
+- **Precision, recall, and ROC analysis** (`mlsys.precision-recall`): Classifier metrics that separate the two error types, false positives and false negatives, and the curves (ROC, precision-recall) that show how a decision threshold trades them, which matter whenever classes are imbalanced or the two errors cost differently.
 
 Secondary concept connections (not additional homes):
 
@@ -2104,6 +2145,7 @@ Candidate home concepts:
 - **Perplexity** (`mlsys.perplexity`): The exponentiated average negative log-likelihood per token of held-out text, measuring how well a language model predicts that text.
 - **Reference-match scoring** (`mlsys.reference-match-scoring`): Scoring a generated output by exact or token-overlap agreement with reference answers; cheap and reproducible but blind to valid answers phrased differently.
 - **Model-grader bias** (`mlsys.judge-bias`): Systematic scoring errors in model-based graders, such as preferences for response position, length, or style, that distort comparisons independently of task quality.
+- **Sycophancy evaluation** (`mlsys.sycophancy-evaluation`): Measuring how often a model abandons a correct answer or endorses a user's mistaken claim under pushback, authority cues, or social pressure, usually across several turns, so that agreement-seeking is measured separately from task accuracy.
 
 Secondary concept connections (not additional homes):
 
@@ -2128,7 +2170,7 @@ Testing data, models, pipelines, and their integration against stated expectatio
 - **Concerns:** Task and predictive quality; Reliability and recovery.
 - **Contexts:** .
 
-Includes: Oracles, metamorphic and behavioral tests, readiness rubrics..
+Includes: Oracles, metamorphic and behavioral tests, readiness rubrics.; Integration testing, training diagnostics, and error analysis..
 
 Excludes: Fault injection into infrastructure (Fault injection &amp; resilience testing).
 
@@ -2172,7 +2214,7 @@ The structure through which predictions are produced and delivered, from offline
 - **Concerns:** Latency, throughput, and resources; Monetary cost; Reliability and recovery.
 - **Contexts:** Batch and offline; Interactive services; Streaming systems; Generative systems; Recommendation and ranking.
 
-Includes: Batch vs online prediction, inference servers and APIs..
+Includes: Batch vs online prediction, inference servers, serverless endpoints, and APIs.; Multi-model and multi-adapter hosting, ranking funnels, and streaming/voice pipelines..
 
 Excludes: Replica load balancing (Batching, admission &amp; autoscaling); Routing and composing calls across models (Compound AI systems &amp; model routing); Second-stage reranking inside retrieval (Retrieval &amp; vector search).
 
@@ -2193,6 +2235,7 @@ Candidate home concepts:
 - **Voice interaction pipeline** (`mlsys.voice-pipeline`): Serving a spoken interaction as one latency-budgeted pipeline of streaming speech recognition, a language model, and speech synthesis, with turn detection and interruption handling between stages.
 - **Streaming inference** (`mlsys.streaming-inference`): Serving a model over an open stream of input, producing outputs incrementally from partial input while carrying state between chunks, rather than answering one complete request at a time.
 - **Inference API and payload serialization** (`mlsys.inference-api`): The request and response protocol of a model server, including the transport (HTTP, gRPC, streaming connections), the tensor and payload encoding, and the cost of serializing inputs and outputs.
+- **Model swapping and residency** (`mlsys.model-swapping`): Keeping some models' weights resident in accelerator memory and loading others from host memory or storage on demand, so a shared accelerator serves more models than fit at once, at the cost of transfer latency.
 
 Secondary concept connections (not additional homes):
 
@@ -2231,11 +2274,13 @@ Candidate home concepts:
 - **Model gateway** (`mlsys.model-gateway`): A proxy in front of one or more model providers that centralizes authentication, routing, rate limits, fallbacks, and usage logging for model calls.
 - **Semantic cache** (`mlsys.semantic-cache`): Returning a stored model response when a new request is close in embedding space to an earlier one, trading answer fidelity for latency and cost.
 - **Model cascade** (`mlsys.model-cascade`): Sending a request to cheaper models first and escalating to more capable models only when a confidence or quality criterion is not met.
+- **Compound workflow pipelining** (`mlsys.compound-workflow-pipelining`): Overlapping stages of a compound ML application by streaming intermediate results to downstream stages as their dependencies become available, reducing critical-path latency while preserving dependency order.
 
 Secondary concept connections (not additional homes):
 
 - **Retrieval** (`mlsys.retrieval`)
 - **Cost per useful outcome** (`mlsys.unit-cost`)
+- **Prompt engineering** (`mlsys.prompt-engineering`)
 
 Related MLSysBook passages (teaching depth not assessed):
 
@@ -2317,6 +2362,7 @@ Candidate home concepts:
 - **Model cold start** (`mlsys.cold-start`): Delay before a newly started replica can serve, from provisioning, loading weights, and warming runtime state.
 - **LLM request scheduling and preemption** (`mlsys.llm-request-scheduling`): Ordering, prioritizing, and preempting in-flight generation requests at iteration granularity, swapping or recomputing their KV state, to meet latency targets and fairness goals.
 - **Cache-aware request routing** (`mlsys.cache-aware-routing`): Sending each request to the replica that already holds a reusable prefix or KV cache for it, trading load balance against cache reuse.
+- **Fidelity-adaptive serving** (`mlsys.fidelity-adaptive-serving`): Meeting a latency target under rising load by switching requests to a cheaper variant of the same model, such as a lower-precision copy, a pruned subnetwork, or fewer layers, so capacity is bought with controlled quality loss instead of queueing or rejection.
 
 Secondary concept connections (not additional homes):
 
@@ -2370,6 +2416,8 @@ Candidate home concepts:
 - **Masked diffusion decoding** (`mlsys.masked-diffusion-decoding`): Generating text by repeatedly predicting and committing masked positions in parallel, trading refinement passes for token parallelism while weakening the attention-state reuse that autoregressive decoding relies on.
 - **Expert offloading** (`mlsys.expert-offloading`): Keeping some mixture-of-experts weights in host memory or storage and fetching the experts a batch needs into accelerator memory, often prefetching predicted ones, which lets a model larger than accelerator memory run at the cost of transfers.
 - **Intra-device overlap of bottlenecks** (`mlsys.intra-device-overlap`): Scheduling generative-inference operations with complementary compute, memory, or communication demands concurrently on one accelerator, using small batches or fused kernels so several hardware resources stay busy together.
+- **KV-cache memory allocation** (`mlsys.kv-memory-allocation`): Laying out and allocating accelerator memory for cached attention state, which trades fragmentation and sharing against kernel compatibility and allocation cost.
+- **Attention-FFN disaggregation** (`mlsys.attention-ffn-disaggregation`): Running attention layers and the feed-forward or expert layers on separate accelerator pools during decode, so memory-bound attention over the KV cache and compute-bound expert matmuls are each batched and provisioned on hardware suited to them, at the cost of streaming activations between pools at every layer.
 
 Secondary concept connections (not additional homes):
 
@@ -2413,10 +2461,11 @@ Design warrants: `guided-generation`.
 
 Candidate home concepts:
 
-- **Structured output constraint** (`mlsys.grammar`): Restricting the syntax or schema of model outputs without establishing factual correctness or authority.
+- **Structured output constraint** (`mlsys.grammar`): A contract on the admissible syntax or schema of model outputs, enforced during generation by constrained decoding or checked afterward by output validation, which establishes form but not factual correctness or authority.
 - **Decoding and sampling controls** (`mlsys.sampling-controls`): Parameters and rules, such as greedy, temperature, top-k, and nucleus sampling, that determine how tokens are chosen from a model's distribution.
-- **Constrained decoding** (`mlsys.constrained-decoding`): Masking disallowed tokens at each step, typically from a grammar or schema automaton, so output satisfies a structural constraint.
-- **Output validation** (`mlsys.output-validation`): Checking generated output against a schema or rules after generation and repairing, retrying, or rejecting it on failure.
+- **Constrained decoding** (`mlsys.constrained-decoding`): A generation mechanism that restricts token choices to continuations permitted by an output constraint, so a successfully completed output satisfies the supported syntax or schema constraints.
+- **Output validation** (`mlsys.output-validation`): Checking generated output against declared schemas or rules and reporting whether it satisfies them.
+- **Stop conditions and output-length limits** (`mlsys.generation-stopping`): Rules that terminate autoregressive generation when a stopping criterion is met, including an end token, a stop sequence, or an output-token limit.
 
 Secondary concept connections (not additional homes):
 
@@ -2453,6 +2502,7 @@ Candidate home concepts:
 - **Process reward model** (`mlsys.process-reward-model`): A verifier that scores intermediate reasoning steps rather than only final answers.
 - **Inference-time search** (`mlsys.inference-time-search`): Exploring a tree of partial solutions, as in beam or tree search, guided by a scorer, to find a higher-quality output.
 - **Test-time scaling** (`mlsys.test-time-scaling`): The empirical relation between inference compute spent per query and output quality, used to allocate compute between model size and inference.
+- **Sequential revision** (`mlsys.sequential-revision`): Refining an answer through successive model calls conditioned on earlier drafts and internal or external feedback, spending additional inference compute on dependent revisions.
 
 Secondary concept connections (not additional homes):
 
@@ -2535,7 +2585,7 @@ Candidate home concepts:
 
 - **Model conversion** (`mlsys.model-conversion`): Translating a trained model into the format and operator set of a target runtime, possibly changing numerics and supported operations.
 - **On-device inference runtime** (`mlsys.on-device-runtime`): An interpreter or compiled engine that executes models locally on personal or embedded devices, including inside browsers, under the target environment's memory, operator, and execution limits.
-- **Over-the-air model update** (`mlsys.ota-model-update`): Delivering new model versions to deployed devices remotely, with staging, verification, and rollback across the device fleet.
+- **Over-the-air model update** (`mlsys.ota-model-update`): Delivering model weights to deployed devices remotely, whether the first download after installation or a later version, with staging, verification, and rollback across the device fleet.
 - **Device-cloud partitioning** (`mlsys.device-cloud-partitioning`): Splitting inference between device and server, by layer or by model, to balance latency, energy, bandwidth, and privacy.
 - **Device heterogeneity** (`mlsys.device-heterogeneity`): Variation in hardware, operating system, and runtime capability across a deployed device fleet that a single model release must accommodate.
 - **Asynchronous on-device inference** (`mlsys.ui-thread-inference`): Running inference off the application's main thread, so a model call does not block rendering and input handling, with results delivered back by callback or message.
@@ -2546,6 +2596,7 @@ Secondary concept connections (not additional homes):
 - **Execution placement** (`mlsys.placement`)
 - **On-device training** (`mlsys.on-device-training`)
 - **Memory capacity** (`mlsys.memory-capacity`)
+- **Static memory planning** (`mlsys.memory-planning`)
 
 Related MLSysBook passages (teaching depth not assessed):
 
@@ -2600,7 +2651,7 @@ Related MLSysBook passages (teaching depth not assessed):
 - vol2: ML Operations at Scale — Staged rollout (`vol2.operations.rollout`)
 - vol3: Operating Agents — Staged release (`vol3.release`)
 - vol1: ML Operations — Rollback (`vol1.operations.rollback`)
-- vol1: ML Lifecycle — Release gate (`vol1.lifecycle.gate`)
+- vol1: ML Lifecycle — Release decision (`vol1.lifecycle.gate`)
 - vol2: ML Operations at Scale — Evaluation contract (`vol2.operations.evaluation-contract`)
 - vol2: ML Operations at Scale — Dependency registry (`vol2.operations.registry`)
 
@@ -2675,6 +2726,7 @@ Candidate home concepts:
 - **Continuous training** (`mlsys.continuous-training`): An automated pipeline that retrains, validates, and proposes models on a schedule or when triggered by data or performance signals.
 - **User feedback collection** (`mlsys.user-feedback`): Capturing explicit signals such as ratings and corrections and implicit signals such as clicks, edits, and abandonment, for use as labels or quality signals.
 - **Fleet data engine** (`mlsys.fleet-data-engine`): Collecting training data from deployed devices through on-device triggers that flag rare or uncertain events, uploading selected samples under bandwidth budgets for labeling and retraining.
+- **Label-shift estimation and prior correction** (`mlsys.label-shift-estimation`): Estimating deployment class priors from unlabeled predictions under stable class-conditional input distributions and adjusting weights or probabilities to reduce errors from the changed priors.
 
 Secondary concept connections (not additional homes):
 
@@ -2712,6 +2764,7 @@ Candidate home concepts:
 - **Incident response** (`mlsys.incident-response`): Detecting, containing, diagnosing, and recovering from unexpected system behavior.
 - **Blameless postmortem** (`mlsys.postmortem`): A written analysis after an incident of its timeline, causes, and corrective actions, focused on system fixes rather than blame.
 - **ML failure attribution** (`mlsys.failure-attribution`): Determining whether a production failure stems from data, model, code, configuration, or infrastructure, or from an adversary.
+- **Runbook** (`mlsys.runbook`): A written or automated procedure attached to an alert that says how to confirm, mitigate, and escalate a known failure, so that response speed does not depend on who is on call.
 
 Secondary concept connections (not additional homes):
 
@@ -2748,7 +2801,7 @@ Candidate home concepts:
 - **Experiment reproducibility** (`mlsys.experiment-reproducibility`): The ability to repeat an experimental procedure and obtain results consistent with declared criteria when its inputs, environment, randomness, and execution conditions are specified.
 - **ML configuration management** (`mlsys.configuration-management`): Treating model, feature, and pipeline configuration as versioned, reviewed, and tested code.
 - **Infrastructure as code** (`mlsys.infrastructure-as-code`): Declaring compute, storage, and service infrastructure in versioned machine-readable files from which environments are provisioned.
-- **Containerization** (`mlsys.containerization`): Packaging a model, its code, and its dependencies as an immutable image that runs unchanged across machines. Scheduling those containers across a cluster belongs to the cluster manager.
+- **Containerization** (`mlsys.containerization`): Packaging a model, its code, and its dependencies as an immutable image that runs unchanged across machines, leaving the scheduling of those containers across a cluster to the cluster manager.
 
 Secondary concept connections (not additional homes):
 
@@ -2868,6 +2921,8 @@ Candidate home concepts:
 - **Bottleneck analysis** (`mlsys.bottleneck-analysis`): Identifying the resource or stage, such as compute, memory bandwidth, I/O, or communication, whose capacity limits end-to-end throughput or latency for a workload.
 - **Training goodput** (`mlsys.training-goodput`): The fraction of allocated accelerator time that produces retained training progress, after losses to scheduling, failures, restarts, and lost work.
 - **Cross-stack profiling** (`mlsys.cross-stack-profiling`): Profiling that correlates timestamped events and calling contexts from model code, frameworks, native libraries, and accelerator kernels, so that device time and stalls can be attributed to the operations that launched them.
+- **Hardware performance counters** (`mlsys.hardware-performance-counters`): On-chip event counters, such as cycles, issued instructions, cache misses, bytes moved, and active compute units, that profilers sample to compute achieved bandwidth and arithmetic rate and to attribute stalls to their cause rather than to elapsed time alone.
+- **Model bandwidth utilization** (`mlsys.model-bandwidth-utilization`): Model-required bytes of weights and KV cache per decoding step divided by step time and by the aggregate peak memory bandwidth of the participating devices, the memory-bound counterpart of model FLOPs utilization, stated for a given batch and cache configuration.
 
 Secondary concept connections (not additional homes):
 
@@ -2905,7 +2960,7 @@ Design warrants: `mlperf-inference`, `roofline`.
 
 Candidate home concepts:
 
-- **Benchmark protocol** (`mlsys.benchmark`): A reproducible workload, measurement boundary, and comparison procedure.
+- **Benchmark protocol** (`mlsys.benchmark`): A reproducible specification of workload, measurement boundary, run rules, and comparison procedure that lets results from different systems be compared and lets a system be judged against a baseline.
 - **Time to train** (`mlsys.time-to-train`): Wall-clock time for a system to train a specified model to a specified quality target under fixed run rules.
 - **Inference load scenario** (`mlsys.inference-load-scenario`): A specified query-arrival pattern and latency constraint, such as single-stream, server, or offline, under which inference performance is measured.
 - **Benchmark representativeness** (`mlsys.benchmark-representativeness`): The degree to which a benchmark's workload, scale, and measurement boundary predict production behavior, from isolated microbenchmarks to end-to-end application runs.
@@ -2947,12 +3002,12 @@ Candidate home concepts:
 
 - **Quantization** (`mlsys.quantization`): Representing values using a reduced discrete set with a specified encoding and approximation rule.
 - **Sparsity** (`mlsys.sparsity`): A pattern of absent or zero values whose execution benefit depends on representation and support.
-- **Knowledge distillation** (`mlsys.distillation`): Training a student model using signals from a teacher model or ensemble.
+- **Knowledge distillation** (`mlsys.distillation`): Training a student to match output distributions or internal signals from a teacher model or ensemble, potentially reducing serving cost when the student is cheaper while requiring validation of retained quality.
 - **Pruning** (`mlsys.pruning`): Removing weights, neurons, channels, or other structures judged unimportant from a network, usually followed by fine-tuning to recover quality.
 - **Structured pruning** (`mlsys.structured-pruning`): Pruning whole channels, filters, heads, or layers so that the remaining model stays dense and runs faster without sparse-execution support.
 - **Low-rank factorization** (`mlsys.low-rank-factorization`): Approximating a weight matrix or tensor by a product of smaller factors of reduced rank to cut parameters and operations.
 - **Quantization-aware training** (`mlsys.quantization-aware-training`): Training or fine-tuning with simulated quantization in the forward pass so the model adapts to reduced precision, in contrast to post-training quantization.
-- **Post-training quantization** (`mlsys.post-training-quantization`): Quantizing a trained model without retraining, choosing scales and rounding from a small calibration set of representative inputs.
+- **Post-training quantization** (`mlsys.post-training-quantization`): Quantizing a trained model without retraining, choosing scales and rounding from statistics of the weights and, for many methods, a small calibration set of representative inputs.
 - **Weight-only quantization** (`mlsys.weight-only-quantization`): Storing weights at low bit width while computing in higher-precision activations, cutting memory traffic for bandwidth-bound decoding, with error-compensating or activation-aware rounding.
 - **Activation outliers** (`mlsys.activation-outliers`): Rare, large-magnitude activation channels in large transformers that inflate quantization ranges, handled by mixed-precision decomposition or by migrating scale into weights.
 - **KV-cache quantization** (`mlsys.kv-cache-quantization`): Storing attention keys and values at reduced precision, often with per-channel keys and per-token values, to raise batch size or context length under fixed memory.
@@ -2960,6 +3015,7 @@ Candidate home concepts:
 - **Contextual activation sparsity** (`mlsys.activation-sparsity`): Skipping neurons, heads, or channels whose activations are predicted negligible for the current input, reducing per-token compute and weight reads at inference.
 - **Integer-only inference** (`mlsys.integer-only-inference`): Executing a quantized model with integer arithmetic throughout its operator graph, including accumulation and rescaling, so no floating-point operations are needed at inference time.
 - **Quantization granularity** (`mlsys.quantization-granularity`): The grouping of values that share quantization parameters, such as a scale and an optional zero point, from per tensor to per channel to small groups, trading approximation error against metadata and kernel cost.
+- **Compression technique composition** (`mlsys.compression-composition`): Applying several compression methods in a chosen sequence, whose interactions can reinforce or diminish their individual savings and must be evaluated jointly for quality and execution cost.
 
 Secondary concept connections (not additional homes):
 
@@ -3037,12 +3093,15 @@ Candidate home concepts:
 - **Failure model** (`mlsys.failure-model`): The declared classes of faults and timing assumptions under which a mechanism is analyzed.
 - **Idempotency** (`mlsys.idempotency`): A specified operation's repeated execution having the same intended effect as one execution.
 - **Compensating action** (`mlsys.compensation`): An explicit action intended to remedy an earlier effect whose direct reversal is unavailable.
+- **Irreversible effects** (`mlsys.irreversible-effects`): External consequences that cannot be fully undone by restoring software state, retrying, or performing a compensating action.
 - **Retry with backoff** (`mlsys.retry-backoff`): Reissuing a failed request after increasing, typically jittered, delays and within a retry budget, so that transient faults recover without overloading dependencies.
 - **Circuit breaker** (`mlsys.circuit-breaker`): A client-side guard that stops sending requests to a failing dependency after an error threshold and probes it before resuming traffic.
 - **Replication and failover** (`mlsys.replication-failover`): Maintaining redundant replicas of a service or state and redirecting work to a healthy replica when one fails.
 - **Graceful degradation** (`mlsys.graceful-degradation`): Continuing to serve with reduced quality, features, or freshness under failure or overload instead of failing outright.
 - **Health checks and readiness probes** (`mlsys.health-checks`): Periodic liveness and readiness checks that let an orchestrator or load balancer stop routing traffic to, or restart, a replica that is unhealthy or still loading its model.
 - **Metastable failure** (`mlsys.metastable-failure`): A state in which a transient trigger, such as a load spike or slowdown, starts a self-sustaining loop of retries, cache misses, or timeouts that keeps a system overloaded after the trigger is gone.
+- **Timeouts and deadline propagation** (`mlsys.request-timeout`): A caller's time limit propagated to dependencies so they can stop work after the remaining budget expires, bounding caller wait and reducing abandoned work when cancellation is enforced.
+- **In-doubt action** (`mlsys.in-doubt-action`): An external action whose outcome is unknown after dispatch, requiring reconciliation or retry-safe endpoint semantics before recovery chooses whether to repeat or skip it.
 
 Secondary concept connections (not additional homes):
 
@@ -3055,6 +3114,7 @@ Related MLSysBook passages (teaching depth not assessed):
 - vol3: Tool Calling — Operation identity (`vol3.operation`)
 - vol3: Failure Recovery — Semantic compensation (`vol3.compensation`)
 - vol4: Safety Enforcement — Runtime safety filter (`vol4.enforcement.filter`)
+- vol4: The Causal Boundary — Irreversibility (`vol4.boundary.irreversibility`)
 
 #### Checkpointing &amp; elastic recovery
 
@@ -3076,11 +3136,13 @@ Design warrants: `sre`, `daly-checkpoint`.
 Candidate home concepts:
 
 - **Recovery checkpoint** (`mlsys.checkpoint`): A persisted state from which a specified computation can resume.
-- **Consistent checkpoint cut** (`mlsys.consistent-cut`): A recoverable collection of distributed states with compatible dependencies.
+- **Consistent checkpoint cut** (`mlsys.consistent-cut`): A set of per-worker checkpoint states taken so that no saved state depends on an update or message that another worker's saved state has not yet recorded, so restoring all of them together yields one coherent global state.
 - **Optimal checkpoint interval** (`mlsys.checkpoint-interval`): The checkpoint period that minimizes expected lost time, balancing checkpoint write cost against expected rework, approximately the square root of twice the write cost times MTBF.
 - **Asynchronous checkpointing** (`mlsys.async-checkpointing`): Snapshotting training state quickly to host memory and persisting it in the background so computation resumes before the durable write completes.
 - **Checkpoint resharding** (`mlsys.checkpoint-resharding`): Loading a checkpoint saved under one parallel layout or world size into another by remapping sharded tensors, needed for elastic restarts and training-to-serving handoff.
 - **Incremental checkpointing** (`mlsys.incremental-checkpointing`): Persisting only the state that changed since the preceding checkpoint, with periodic full checkpoints as bases, which cuts write volume when updates are sparse at the cost of reconstructing state from a chain on restore.
+- **Hot-spare capacity** (`mlsys.hot-spare-capacity`): Idle, pre-provisioned accelerators or nodes reserved to replace failed workers, reducing the delay of acquiring replacement resources at the cost of reserved capacity.
+- **Restart-free failure recovery** (`mlsys.restart-free-recovery`): Reconfiguring distributed training around surviving replicas of model and optimizer state so that the job resumes after supported worker failures without a full-job restart or durable-checkpoint reload, reducing recovery delay at the cost of redundancy and reconfiguration.
 
 Secondary concept connections (not additional homes):
 
@@ -3124,6 +3186,7 @@ Candidate home concepts:
 - **Distributed job hang diagnosis** (`mlsys.distributed-hang-diagnosis`): Detecting and localizing stalled distributed jobs through collective timeouts, heartbeats, per-rank progress traces, and node health checks, so faulty ranks can be isolated.
 - **Flash write endurance** (`mlsys.flash-endurance`): Flash memory cells wear out after a limited number of program and erase cycles, which bounds how often embedded and edge devices can write logs, checkpoints, or model updates; wear leveling spreads writes to extend life.
 - **Error-correcting code memory** (`mlsys.ecc-memory`): Memory protected by redundant check bits that correct supported error patterns and report detectable uncorrectable errors, reducing the risk of silent corruption.
+- **Fleet hardware screening tests** (`mlsys.fleet-hardware-screening`): Periodically running test workloads with known outputs on fleet accelerators and processors, at intake and during production, to find defective or silently miscomputing units before they corrupt jobs, at the cost of fleet time spent on tests.
 
 Secondary concept connections (not additional homes):
 
@@ -3196,7 +3259,7 @@ Candidate home concepts:
 
 - **Threat modeling** (`mlsys.threat-model`): Specifying adversaries, assets, interfaces, capabilities, and failure consequences.
 - **Data poisoning** (`mlsys.poisoning`): Adversarial manipulation of learning data or signals to alter learned behavior.
-- **Adversarial evasion** (`mlsys.evasion`): Adversarially chosen inference inputs intended to cause harmful model behavior.
+- **Adversarial evasion** (`mlsys.evasion`): Inputs chosen or perturbed at inference time so that a model misclassifies or misbehaves, within an adversary's stated knowledge of the model and perturbation budget, without any change to the model or its training data.
 - **Prompt injection** (`mlsys.prompt-injection`): Untrusted content attempting to redirect model-driven behavior across an instruction or authority boundary.
 - **Backdoor attack** (`mlsys.backdoor`): Implanting a hidden behavior in a model, via poisoned data or modified weights, that activates only on inputs containing an attacker-chosen trigger.
 - **Jailbreak** (`mlsys.jailbreak`): A user-crafted input that induces a model to bypass its safety training or usage policy and produce disallowed output.
@@ -3206,6 +3269,7 @@ Candidate home concepts:
 - **Sensor spoofing** (`mlsys.sensor-spoofing`): Attacks that inject false signals into a sensor's physical channel, such as fabricated LiDAR returns or GPS and acoustic spoofing, so perception receives counterfeit measurements.
 - **Certified robustness by randomized smoothing** (`mlsys.randomized-smoothing`): Classifying many noise-perturbed copies of an input and taking the majority vote, which yields a provable radius within which no adversarial perturbation can change the prediction, at the cost of many inferences per input.
 - **Resource-exhaustion attack** (`mlsys.resource-exhaustion-attack`): Crafting inputs that maximize a model service's compute, energy, output length, or tool calls, degrading service for other users or running up the operator's cost.
+- **Instruction privilege levels** (`mlsys.instruction-hierarchy`): Giving instructions from the system, the user, and retrieved or tool-returned content distinct privilege levels, through prompt formatting, delimiting, or training, so that lower-privilege content is less able to override higher-privilege instructions.
 
 Secondary concept connections (not additional homes):
 
@@ -3236,10 +3300,12 @@ Design warrants: `aml`, `mitre-atlas`.
 Candidate home concepts:
 
 - **Model extraction** (`mlsys.model-extraction`): Reconstructing a functionally equivalent copy or the parameters of a model by querying its prediction interface.
-- **Model watermarking** (`mlsys.model-watermarking`): Embedding a verifiable signature in a model's parameters or behavior so that ownership of copies or derivatives can later be demonstrated.
+- **Model watermarking** (`mlsys.model-watermarking`): Embedding a verifiable signature in a model's parameters or its behavior on trigger inputs so that ownership of copies or derivatives can later be demonstrated, with survival under fine-tuning, pruning, and distillation deciding its value.
 - **Model artifact signing** (`mlsys.artifact-signing`): Cryptographically signing model files and their provenance metadata so that consumers can verify integrity and origin before loading.
 - **Unsafe model deserialization** (`mlsys.unsafe-deserialization`): Code execution triggered by loading a model stored in an executable serialization format, such as pickle, from an untrusted source.
 - **ML supply-chain compromise** (`mlsys.supply-chain-compromise`): Introducing malicious or vulnerable components into an ML system through third-party datasets, pretrained weights, libraries, build tools, or hardware.
+- **Model weight theft** (`mlsys.weight-exfiltration`): Theft of a model's parameter files from training, storage, or serving infrastructure by insiders or intruders, as distinct from reconstructing the model through its query interface, which the owner counters with access control, encryption at rest, attested execution, and egress limits.
+- **AI bill of materials** (`mlsys.ai-bill-of-materials`): An inventory of the datasets, base weights, libraries, and build steps that produced a model, with versions and hashes, so consumers can check every component against vulnerability and trust lists before depending on the model.
 
 Secondary concept connections (not additional homes):
 
@@ -3282,6 +3348,7 @@ Candidate home concepts:
 - **Secure multi-party computation inference** (`mlsys.secure-computation-inference`): Jointly evaluating a model over secret-shared inputs or weights so no party learns another's data, with cost dominated by communication rounds for nonlinear layers.
 - **Training data extraction** (`mlsys.training-data-extraction`): Recovering particular training examples or their sensitive contents through a trained model's outputs, exposing information that was not intended for release.
 - **PII detection and de-identification** (`mlsys.pii-deidentification`): Finding personal identifiers in training corpora, logs, and prompts and removing, masking, or pseudonymizing them before the data is stored, trained on, or shared.
+- **Privacy budget and accounting** (`mlsys.privacy-budget`): A declared bound on cumulative privacy loss across releases involving overlapping individuals, tracked through composition accounting to constrain further releases.
 
 Secondary concept connections (not additional homes):
 
@@ -3323,8 +3390,10 @@ Candidate home concepts:
 - **Ephemeral sandbox** (`mlsys.ephemeral-sandbox`): An isolated execution environment created per task from a snapshot, often copy-on-write, and destroyed or reset afterward so no state carries across tasks or tenants.
 - **Network egress control** (`mlsys.egress-control`): Restricting which external network destinations a workload or sandbox may contact, typically through default-deny allowlists, to block exfiltration and unintended remote actions.
 - **Information-flow control** (`mlsys.information-flow-control`): Labeling data with confidentiality and integrity tags and propagating them through computation so policy can block untrusted inputs from steering privileged actions or secrets from leaking.
+- **Agent credentials and delegated authority** (`mlsys.agent-credentials`): Issuing tool-using agents scoped, short-lived credentials that act on a user's behalf, brokering secrets outside model context so authority stays bounded and revocable.
 - **Workload identity and secrets management** (`mlsys.secrets-management`): Giving training jobs, model servers, and pipelines verifiable identities and provisioning, rotating, and revoking the keys and credentials they use, without embedding secrets in code or images.
 - **Confused deputy** (`mlsys.confused-deputy`): A security failure in which a component uses its legitimate authority for an untrusted party's purpose because it does not distinguish the requester's authority from its own.
+- **Quarantined-model pattern** (`mlsys.quarantined-model-pattern`): Separating privileged planning from an unprivileged model that parses untrusted content, so that parsed values reach the planner only as references and a trusted runtime, often with provenance tracking, checks derived values before tool execution.
 
 Secondary concept connections (not additional homes):
 
@@ -3364,12 +3433,13 @@ Design warrants: `stpa-leveson`, `iso21448`, `concrete-safety`.
 
 Candidate home concepts:
 
-- **Operational design domain** (`mlsys.operating-domain`): The conditions under which a physical system's behavior and evidence are intended to apply.
+- **Operational design domain** (`mlsys.operating-domain`): The declared set of conditions, covering environment, inputs, actors, and system state, within which a system is designed to perform and outside which its safety claims and evidence do not apply.
 - **Hazard analysis** (`mlsys.hazard-analysis`): Systematically identifying conditions under which a system could contribute to harm, with their causes, severity, and required controls.
 - **System-theoretic process analysis** (`mlsys.stpa`): Hazard analysis that models a system as a control structure and identifies unsafe control actions and the flawed feedback or process models that cause them.
 - **Failure modes and effects analysis** (`mlsys.fmea`): Enumerating each component's possible failure modes and tracing their effects on system behavior to rank and mitigate them.
-- **Functional insufficiency (SOTIF)** (`mlsys.functional-insufficiency`): Hazardous behavior arising without any fault, from limits of a specification or of a component's performance, such as perception errors under particular triggering conditions.
+- **Functional insufficiency** (`mlsys.functional-insufficiency`): An insufficiency in the specification or performance of an intended function that can contribute to hazardous behavior without a fault covered by functional-safety analysis.
 - **Fault tree analysis** (`mlsys.fault-tree-analysis`): Top-down hazard analysis that decomposes an undesired top event into Boolean combinations of contributing faults, so minimal cut sets and their probabilities can be computed.
+- **Risk acceptance criteria** (`mlsys.tolerable-risk`): Criteria used to judge whether residual risk is acceptable or tolerable in a stated application and whether additional risk reduction is required.
 
 Secondary concept connections (not additional homes):
 
@@ -3411,6 +3481,7 @@ Candidate home concepts:
 - **Minimal-risk condition** (`mlsys.minimal-risk-condition`): A predefined reduced-capability state the system reaches when it can no longer operate safely, often via an ordered ladder of fallback behaviors.
 - **Guardrails** (`mlsys.guardrails`): Runtime checks on model inputs and outputs that detect and block, rewrite, or escalate content or actions violating a stated safety policy.
 - **Over-refusal** (`mlsys.over-refusal`): Refusing benign requests that resemble harmful ones, the false-positive side of a safety filter or refusal policy, which is traded against missed harmful requests when setting the operating point.
+- **Reachability analysis** (`mlsys.reachability-analysis`): Computing the set of states a system, or another agent in its workspace, can reach within a time horizon under its dynamics and bounded inputs or disturbances, used to prove a safe set invariant, to size clearance margins, and to screen proposed motions against where other agents could be.
 
 Secondary concept connections (not additional homes):
 
@@ -3453,7 +3524,6 @@ Candidate home concepts:
 - **Neural network verification** (`mlsys.neural-network-verification`): Proving or refuting input-output properties of a trained network over a bounded input region, such as local robustness, using exact or bound-propagation methods.
 - **Rare-event safety validation** (`mlsys.rare-event-validation`): Estimating or bounding failure probabilities too small to observe in feasible exposure, using importance sampling, extreme-value models, or zero-failure statistical bounds.
 - **X-in-the-loop testing** (`mlsys.xil-testing`): A qualification ladder that runs the real software, then real hardware, against simulated or recorded environments before physical trials.
-- **Closed-loop policy evaluation** (`mlsys.closed-loop-evaluation`): Evaluating a policy by letting its own actions determine subsequent observations, in simulation or deployment, rather than scoring its predictions against logged data.
 
 Secondary concept connections (not additional homes):
 
@@ -3465,8 +3535,6 @@ Secondary concept connections (not additional homes):
 Related MLSysBook passages (teaching depth not assessed):
 
 - vol4: Policy Training — Reality gap (`vol4.learning.reality-gap`)
-- vol3: Trajectory Fine-Tuning — Closed-loop evaluation (`vol3.closed-loop`)
-- vol4: Closed-Loop Evaluation — Closed-loop trial (`vol4.evaluation.trial`)
 - vol4: Closed-Loop Evaluation — Failure-rate bound (`vol4.evaluation.confidence`)
 - vol4: Adversarial Verification — Fault injection (`vol4.verification.fault`)
 - vol4: Adversarial Verification — Test oracle (`vol4.verification.oracle`)
@@ -3490,13 +3558,14 @@ Design warrants: `gsn`, `iso26262`, `ul4600`.
 
 Candidate home concepts:
 
-- **Safety case** (`mlsys.safety-case`): A structured argument connecting claims, evidence, assumptions, and defeaters for a defined system.
+- **Safety case** (`mlsys.safety-case`): A structured, reviewable argument, with its evidence, assumptions, and defeaters, that a defined system is acceptably safe for a stated use within a stated operating domain.
 - **Goal Structuring Notation** (`mlsys.goal-structuring-notation`): A graphical notation for safety cases that links goals, strategies, solutions (evidence), context, and assumptions into an explicit argument structure.
 - **Functional safety** (`mlsys.functional-safety`): Absence of unreasonable risk from malfunctioning electrical or electronic systems, achieved through a standardized safety lifecycle such as IEC 61508 or ISO 26262.
 - **Safety integrity level** (`mlsys.safety-integrity-level`): A graded risk class assigned to a safety function that sets the rigor of development, verification, and tolerable failure rate required.
 - **Safety performance indicator** (`mlsys.safety-performance-indicator`): A field-measured metric tied to a safety-case claim whose threshold violation signals that the argument may no longer hold.
 - **Event data recorder** (`mlsys.event-data-recorder`): Tamper-evident onboard logging of inputs, decisions, control authority, and safety interventions around events, retained for incident reconstruction and assurance evidence.
 - **Safety change-impact analysis** (`mlsys.change-impact-analysis`): Determining which hazards, safety-case claims, and evidence a change to a model, software, data, or operating domain invalidates, and what must be re-verified.
+- **Safety certification** (`mlsys.safety-certification`): An independent assessment that a system meets specified safety requirements for a stated use, providing evidence for deployment approval and review of relevant changes.
 
 Secondary concept connections (not additional homes):
 
@@ -3533,7 +3602,7 @@ Specifying, measuring, and mitigating how a system's outcomes and errors differ 
 - **Concerns:** Fairness; Task and predictive quality; Human control and accountability.
 - **Contexts:** Classical ML; Deep learning; Generative systems.
 
-Includes: Group and individual fairness criteria and the metrics that operationalize them.; Pre-, in-, and post-processing mitigation and its accuracy cost..
+Includes: Group and individual fairness criteria and the metrics that measure them.; Pre-, in-, and post-processing mitigation and its accuracy cost..
 
 Excludes: Per-slice measurement machinery in general (Sliced &amp; robustness evaluation); Scheduler fair sharing (Cluster scheduling &amp; orchestration).
 
@@ -3548,6 +3617,8 @@ Candidate home concepts:
 - **Bias mitigation** (`mlsys.bias-mitigation`): Interventions on data (pre-processing), training objective (in-processing), or decisions (post-processing) that reduce measured disparities, usually at some cost in other metrics.
 - **Representational bias evaluation** (`mlsys.representational-bias-evaluation`): Measuring stereotyped, demeaning, or unequal portrayals of groups in generated outputs, revealing representational harms that aggregate quality or decision-rate metrics can miss.
 - **Proxy discrimination** (`mlsys.proxy-discrimination`): Decisions driven by features that encode protected-group membership, so group disparities persist even when the protected attribute itself is omitted.
+- **Sources of bias in the pipeline** (`mlsys.bias-sources`): The distinct points at which disparity enters an ML system, from the world the data records, who is sampled, how labels and features are measured, pooling heterogeneous groups into one model, an unrepresentative evaluation set, and use outside the intended context, each of which calls for a different remedy.
+- **Fairness monitoring** (`mlsys.fairness-monitoring`): Tracking group fairness metrics on production traffic over time, with the sampling, delayed-label, and protected-attribute availability problems that make subgroup estimates noisier than aggregate ones, so that disparities introduced by drift or retraining are caught before they accumulate.
 
 Secondary concept connections (not additional homes):
 
@@ -3590,6 +3661,7 @@ Candidate home concepts:
 - **Inherently interpretable model** (`mlsys.interpretable-model`): A model whose structure, such as a sparse linear model, short rule list, or shallow tree, can be directly inspected to understand its predictions.
 - **Model card** (`mlsys.model-card`): A standardized document reporting a model's intended use, evaluation results across conditions and groups, limitations, and ethical considerations.
 - **Datasheet for datasets** (`mlsys.datasheet`): A standardized document recording a dataset's motivation, composition, collection process, preprocessing, intended uses, and maintenance.
+- **Mechanistic interpretability** (`mlsys.mechanistic-interpretability`): Investigating how a network's internal representations and computations produce behavior through analysis and interventions, to test explanations at the level of internal components.
 
 Secondary concept connections (not additional homes):
 
@@ -3668,6 +3740,8 @@ Candidate home concepts:
 - **Decision accountability record** (`mlsys.decision-accountability`): A record of who authorized each consequential decision, policy, or automated action and on what evidence, so responsibility can be assigned and reviewed later.
 - **Content provenance** (`mlsys.content-provenance`): Cryptographically signed metadata attached to media that records its origin and edit history, including model generation, so recipients can verify source claims.
 - **Generated-content watermarking** (`mlsys.generated-content-watermarking`): Embedding a statistically detectable signal into generated text, images, or audio at generation time, such as by biasing token sampling, so that content can later be identified as model-generated.
+- **Data protection regulation** (`mlsys.data-protection-regulation`): Law governing the collection, use, retention, and automated use of personal data, which imposes obligations such as consent, purpose limitation, deletion, impact assessment, and rights over automated decisions that an ML system must implement in its data pipeline, models, and decision flow.
+- **AI incident reporting** (`mlsys.ai-incident-reporting`): Recording and disclosing harms and near-misses caused by a deployed AI system to an internal register or an external authority or database, as regulation or policy requires, so that patterns across deployments feed back into risk management.
 
 Secondary concept connections (not additional homes):
 
@@ -3716,8 +3790,8 @@ Candidate home concepts:
 - **Energy per inference** (`mlsys.energy-per-inference`): Energy consumed to process one input end to end on a device, the binding metric for battery-powered and energy-harvesting deployments.
 - **Energy measurement methodology** (`mlsys.energy-measurement`): The declared sensor sources, sampling rate, measurement boundary, and attribution rules by which a workload's energy is measured, from on-chip counters to facility meters.
 - **Idle vs. dynamic power** (`mlsys.idle-dynamic-power`): Separating power drawn by provisioned but idle hardware from the incremental power of active work, which decides how shared energy is attributed to workloads.
-- **Datacenter demand response** (`mlsys.demand-response`): Shifting, shedding, or capping datacenter power in response to grid signals, made practical by deferrable training and batch work.
 - **Rebound effect** (`mlsys.rebound-effect`): Efficiency gains lower the cost of a service enough that total demand, and with it total energy or resource use, grows, partly or fully offsetting the savings.
+- **Location-based vs. market-based carbon accounting** (`mlsys.carbon-accounting-method`): Accounting for purchased-electricity emissions using grid-average emission factors or qualifying contractual instruments, which changes the emissions attributed to the same electricity consumption.
 
 Secondary concept connections (not additional homes):
 
@@ -3762,8 +3836,20 @@ Candidate home concepts:
 - **Hardware service lifetime** (`mlsys.hardware-lifetime`): The period a hardware asset stays in service before replacement, over which its embodied impacts and capital cost are amortized.
 - **Electronic waste** (`mlsys.e-waste`): Discarded electronic equipment and components, including retired accelerators and servers, and the hazards and lost materials of their disposal.
 
+Secondary concept connections (not additional homes):
+
+- **Operating energy** (`mlsys.energy`)
+- **Lifecycle carbon** (`mlsys.carbon`)
+- **Operational carbon** (`mlsys.operational-carbon`)
+
 Related MLSysBook passages (teaching depth not assessed):
 
+- vol2: Sustainable AI — Operating energy (`vol2.sustainability.energy`)
+- vol1: Responsible Engineering — Operational carbon (`vol1.responsibility.carbon`)
+- vol2: Sustainable AI — Embodied carbon (`vol2.sustainability.embodied-carbon`)
+- vol2: Sustainable AI — Operational carbon (`vol2.sustainability.operational-carbon`)
+- vol1: Responsible Engineering — Operational carbon (`vol1.responsibility.carbon`)
+- vol2: Sustainable AI — Operational carbon (`vol2.sustainability.operational-carbon`)
 - vol2: Sustainable AI — Embodied carbon (`vol2.sustainability.embodied-carbon`)
 
 #### Cost, TCO &amp; unit economics
@@ -3790,6 +3876,7 @@ Candidate home concepts:
 - **Cost per token** (`mlsys.cost-per-token`): Serving or API expenditure divided by tokens processed or generated, often priced separately for input and output tokens.
 - **Cost attribution** (`mlsys.cost-attribution`): Allocating shared infrastructure spend to teams, models, or workloads so that owners see and act on their costs.
 - **Data transfer cost** (`mlsys.data-transfer-cost`): The money charged for moving data across network, zone, region, or provider boundaries, such as cloud egress fees, which can dominate the cost of distributing data, checkpoints, or responses.
+- **Compute cost estimate** (`mlsys.compute-cost-estimate`): Estimating accelerator time from workload demand and effective hardware performance, then applying resource prices to estimate monetary compute cost under a stated deployment plan.
 
 Secondary concept connections (not additional homes):
 
@@ -3882,11 +3969,9 @@ Design warrants: `mcp`, `agents`, `building-agents`.
 Candidate home concepts:
 
 - **Tool contract** (`mlsys.tool-contract`): A specification of tool inputs, outputs, authority, effects, and failure behavior.
-- **Irreversible effects** (`mlsys.irreversible-effects`): External consequences that cannot be fully undone by restoring software state, retrying, or performing a compensating action.
 - **Function calling** (`mlsys.function-calling`): A model emitting a structured invocation of a declared tool, which the harness validates, executes, and returns as an observation.
 - **Tool discovery protocol** (`mlsys.model-context-protocol`): A shared client-server interface through which agent hosts discover the tools, resources, and prompts external services expose, with their schemas, reducing custom integration.
 - **Computer use** (`mlsys.computer-use`): An agent operating graphical software through screenshots or accessibility trees and synthesized keyboard and pointer input.
-- **Agent credentials and delegated authority** (`mlsys.agent-credentials`): Issuing tool-using agents scoped, short-lived credentials that act on a user's behalf, brokering secrets outside model context so authority stays bounded and revocable.
 
 Secondary concept connections (not additional homes):
 
@@ -3903,7 +3988,6 @@ Related MLSysBook passages (teaching depth not assessed):
 - vol4: Workload Placement — Resource isolation (`vol4.placement.isolation`)
 - vol3: Tool Calling — Operation identity (`vol3.operation`)
 - vol3: Agent Security — Prompt injection (`vol3.injection`)
-- vol4: The Causal Boundary — Irreversibility (`vol4.boundary.irreversibility`)
 
 #### Agent harness &amp; control loop
 
@@ -3974,6 +4058,7 @@ Candidate home concepts:
 - **Durable execution** (`mlsys.durable-execution`): Execution that persists workflow progress and reuses recorded results on recovery, with external-effect guarantees determined by endpoint idempotency, transactional boundaries, and reconciliation.
 - **Record and replay** (`mlsys.deterministic-replay`): Re-executing a trajectory from its log by substituting recorded model outputs and tool results, to reproduce, debug, or test a divergence.
 - **Suspend and resume** (`mlsys.suspend-resume`): Persisting a trajectory while it waits on a human, timer, or external event, then resuming with a validated state and authority.
+- **Trajectory log** (`mlsys.trajectory-log`): An append-only harness-owned record of intents before dispatch and outcomes after execution, together with approvals and budget state, that supports recovery, replay, evaluation, and audit.
 
 Secondary concept connections (not additional homes):
 
@@ -4061,6 +4146,7 @@ Candidate home concepts:
 - **Active sensor interference** (`mlsys.sensor-interference`): Crosstalk between active sensors, such as lidars, radars, or structured-light cameras, that emit into the same environment and corrupt each other's measurements.
 - **Coordinate frames and transforms** (`mlsys.coordinate-frames`): Reference frames and the spatial transforms between them that express sensor observations, robot geometry, and actions in consistent coordinates.
 - **Sensor degradation** (`mlsys.sensor-degradation`): Loss of sensor measurement fidelity under environmental or operating conditions, such as glare, rain, fog, dust, or a dirty lens, that degrades perception even when the sensing hardware has not failed.
+- **Capture timing and rolling shutter** (`mlsys.capture-epoch`): The time or interval over which a measurement is acquired, whose spread across rows or beams can require motion compensation before observations are fused.
 
 Secondary concept connections (not additional homes):
 
@@ -4102,6 +4188,8 @@ Candidate home concepts:
 - **Learned world model** (`mlsys.world-model`): A learned model that predicts future observations or latent states conditioned on actions, used for planning, policy training, or simulation.
 - **Multi-object tracking** (`mlsys.multi-object-tracking`): Maintaining identities and states of multiple moving objects over time by associating new detections with existing tracks and starting or ending tracks.
 - **Motion forecasting** (`mlsys.motion-forecasting`): Predicting the future trajectories of other moving agents, usually as several weighted hypotheses, from their tracked history and the map, so a planner can avoid where they will be rather than where they are.
+- **Odometry and dead reckoning** (`mlsys.odometry`): Estimating a platform's pose change by integrating its own motion measurements, from wheel encoders, inertial units, or feature motion in camera and lidar frames, whose error grows without bound with distance traveled unless corrected by loop closure or an external reference.
+- **Map representation** (`mlsys.map-representation`): The data structure a robot keeps of its environment, such as an occupancy grid, signed-distance field, point cloud, mesh, or semantic layer, chosen by the queries that planning and collision checking must answer at their rates and by the memory and update cost the onboard computer can afford.
 
 Secondary concept connections (not additional homes):
 
@@ -4143,6 +4231,8 @@ Candidate home concepts:
 - **Task and motion planning** (`mlsys.task-and-motion-planning`): Planning that jointly searches discrete symbolic action sequences and continuous motions, accepting a task plan only when each step admits a feasible motion.
 - **System identification** (`mlsys.system-identification`): Estimating the parameters of a dynamics model, such as masses, friction, delays, and actuator gains, from measured input-output data of the physical system.
 - **Robot kinematics** (`mlsys.robot-kinematics`): The geometric mapping between joint positions and velocities and the pose and velocity of a robot's links and end effector, including inverse solutions and singular configurations where motion authority is lost.
+- **Loop stability margin** (`mlsys.loop-stability-margin`): The allowed gain or phase variation before a specified feedback loop becomes unstable, used to budget delay and model uncertainty around an operating point.
+- **Impedance and force control** (`mlsys.impedance-force-control`): Feedback control that regulates the relationship between motion and contact force, by commanding a virtual stiffness and damping or by tracking a force setpoint, so a robot can touch, push, and insert without the force spikes that pure position control produces at contact.
 
 Secondary concept connections (not additional homes):
 
@@ -4180,15 +4270,17 @@ Design warrants: `wcet-survey`, `liu-layland`, `mixed-crit-vestal`.
 Candidate home concepts:
 
 - **Observation age** (`mlsys.observation-age`): Elapsed time between a physical observation and its use in a decision.
-- **Feedback delay** (`mlsys.feedback-delay`): Delay around a sensing, computation, communication, and actuation loop.
+- **Feedback delay** (`mlsys.feedback-delay`): The total delay around the sense-compute-communicate-actuate loop, which erodes a controller's stability margin and adds motion before any response can begin, so it must be budgeted end to end rather than stage by stage.
 - **Worst-case execution time** (`mlsys.wcet`): A justified execution-time upper bound under specified hardware and execution assumptions.
 - **Real-time scheduling** (`mlsys.real-time-scheduling`): Assigning processor time to periodic and sporadic tasks so that each meets its deadline, with schedulability established by analysis.
 - **Mixed-criticality partitioning** (`mlsys.mixed-criticality`): Running functions of different assurance levels on shared hardware while preventing lower-criticality work from delaying or corrupting higher-criticality functions.
 - **Watchdog timer** (`mlsys.watchdog-timer`): A timer that a monitored component must refresh within a deadline or window; expiry triggers a defined safe response such as reset or revoking control authority.
 - **Robotics middleware and dataflow** (`mlsys.robotics-middleware`): Software connecting sensing, perception, planning, and control processes as nodes that exchange typed messages over publish-subscribe topics with configurable delivery and timing policies.
 - **Onboard compute partitioning** (`mlsys.onboard-compute-partitioning`): Assigning perception, planning, and control workloads to the CPUs, accelerators, and microcontrollers of a robot, or offloading them, so each meets its deadline and criticality level.
-- **Interrupt latency** (`mlsys.interrupt-latency`): The delay between a hardware event and its interrupt handler running, plus the handler's own run time, which must fit inside a real-time sensing or control budget alongside inference.
-- **Priority inversion** (`mlsys.priority-inversion`): A high-priority task waiting on a resource held by a lower-priority task, which a medium-priority task then preempts, so the high-priority task misses its deadline unless priority inheritance or ceilings are used.
+- **Interrupt latency** (`mlsys.interrupt-latency`): The delay from an interrupt request to the start of its handler, which contributes to event-response time alongside handler execution and subsequent processing.
+- **Priority inversion** (`mlsys.priority-inversion`): A high-priority task blocked on a resource held by a lower-priority task while a medium-priority task preempts the holder, so the high-priority task's blocking time is unbounded and can exceed its deadline unless the scheduler bounds it.
+- **Timing jitter** (`mlsys.timing-jitter`): Variation in the period or completion time of a periodic sensing, inference, or control task, which degrades a controller designed for a fixed sample interval even when every deadline is met, so real-time budgets bound the spread of completion times and not only their worst case.
+- **Real-time fieldbus** (`mlsys.deterministic-field-network`): A device network engineered to provide bounded delivery under stated traffic and scheduling assumptions, whose cycle time and occupancy constrain sensing and control deadlines.
 
 Secondary concept connections (not additional homes):
 
@@ -4226,7 +4318,7 @@ Design warrants: `pi0`, `rt2`, `domain-rand`.
 
 Candidate home concepts:
 
-- **Simulation-to-real transfer** (`mlsys.sim-to-real`): Deployment of a learned policy under differences between simulated and physical conditions.
+- **Simulation-to-real transfer** (`mlsys.sim-to-real`): Transferring a policy trained in simulation to physical hardware, where differences in dynamics, sensing, contact, and timing can degrade behavior and motivate randomization, system identification, or adaptation on real experience.
 - **Vision-language-action model** (`mlsys.vla-model`): A policy built on a pretrained vision-language backbone that maps images and language instructions to robot actions.
 - **Teleoperation data** (`mlsys.teleoperation-data`): Robot demonstrations collected by humans driving the robot remotely, whose cost, coverage, and action-label fidelity bound imitation-learned policies.
 - **Action chunking** (`mlsys.action-chunking`): Predicting a short sequence of future actions per policy inference, decoupling model invocation rate from control rate and reducing compounding error.
@@ -4256,11 +4348,13 @@ Related MLSysBook passages (teaching depth not assessed):
 
 Candidates for editorial investigation, not verified omissions.
 
-- **Photonic compute, in Accelerator architecture** (`gap-emerging-compute-substrates`): Kept open in 0.3 (2026-10 review): photonic arithmetic is not yet in production ML; compute-in-memory, wafer-scale execution, FPGAs, and advanced packaging are now covered.
+- **Photonic compute, in Accelerator architecture** (`gap-emerging-compute-substrates`): Reviewed 2026-11: photonic arithmetic still has no production ML lineage and no 2025 or 2026 systems-venue paper reports one; compute-in-memory, wafer-scale execution, FPGAs, and advanced packaging cover the admitted substrates.
 
-- **Attention-FFN disaggregation, in LLM &amp; generative inference** (`gap-attention-ffn-disaggregation`): Proposed in the 2026-10 review from MegaScale-Infer (SIGCOMM 2025); admit with independent supporting evidence or a qualifying recorded coverage miss.
+- **Verifiable ML computation (zero-knowledge proofs of training, inference, or unlearning), in Model &amp; supply-chain security** (`gap-verifiable-ml-computation`): Zero-knowledge proofs of ML training, inference, or unlearning have two venue lineages (ZK-APEX, MLSys 2026; zkLLM, CCS 2024) but are expected by no course, standard, or role yet; a proof that a computation ran is also not a proof of an unlearning guarantee.
 
-- **Decoded-video view reuse, in Data loading &amp; input pipelines** (`gap-decoded-video-reuse`): Surfaced by the 2025 held-out test (SAND, SOSP 2025); one venue lineage so far, and basic decoding is covered by the input-pipeline concepts. Admit with a second independent source.
+- **Decoded-video view reuse, in Data loading &amp; input pipelines** (`gap-decoded-video-reuse`): Reviewed 2026-11: one venue lineage (SAND, SOSP 2025) and two 2026 preprint production reports describe caching decoded frames across epochs and jobs; the admission test asks for two independent venue, course, or standard sources, so it stays a candidate until a second one appears.
+
+- **Reasoning-trace monitoring, in Runtime assurance &amp; safety filters** (`gap-reasoning-trace-monitoring`): Reviewed 2026-11: monitoring a model's intermediate reasoning for intent to subvert a task is described by frontier-lab reports and a 2025 multi-lab position paper, but no course, standard, or role yet expects it; it stays a candidate until that evidence exists.
 
 ## Design references
 
