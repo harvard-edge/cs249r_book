@@ -19,7 +19,7 @@ async def _():
             ["pydantic", "pint", "plotly", "pandas"], keep_going=False
         )
         await micropip.install(
-            "../../wheels/mlsysim-0.3.0-py3-none-any.whl", keep_going=False
+            "../../wheels/mlsysim-0.3.1-py3-none-any.whl", keep_going=False
         )
         await micropip.install(
             "../../wheels/mlsysbook_labs-0.1.0-py3-none-any.whl", keep_going=False
@@ -87,11 +87,13 @@ def _(mo):
 
 
 @app.cell
-def _(mo, set_evidence):
+def _(ledger, mo, set_evidence):
+    from mlsysbook_labs.contexts import preferred_context as _preferred_context
+    _track_options = {"TinyML": "tinyml", "Mobile": "mobile", "Edge": "edge", "Cloud": "cloud"}
     track = mo.ui.dropdown(
-        {"TinyML": "tinyml", "Mobile": "mobile", "Edge": "edge", "Cloud": "cloud"},
-        value="TinyML",
-        label="Fleet track",
+        _track_options,
+        value=next(label for label, context in _track_options.items() if context == _preferred_context(ledger)),
+        label="Deployment context",
         on_change=lambda _value: set_evidence({}),
     )
     return (track,)
@@ -143,6 +145,17 @@ def _(fixture, mo, track_id):
     e_reserve = mo.ui.slider(1, 4, value=2, step=1, label="Warm replicas held ready")
     e_demand = mo.ui.slider(0.75, 1.5, value=1.0, step=0.25, label="Demand-ramp scale")
     return b_iterations, b_payload, b_wait, c_arrival, c_checkpoint, e_demand, e_reserve
+
+
+@app.cell
+def _(mo):
+    a_reconcile = mo.ui.slider(0, 8, value=3, step=1, label="Reconciliation delay after lease expiry (min)")
+    c_resize = mo.ui.dropdown({"Keep 2 slots": 2, "3 slots (invalid increment)": 3, "4 slots": 4, "6 slots": 6, "8 slots": 8}, value="4 slots", label="Requested elastic size")
+    c_remaining = mo.ui.slider(1, 60, value=20, step=1, label="Remaining retained target-work units")
+    c_transition = mo.ui.slider(0, 15, value=3, step=1, label="Resize transition (min)")
+    c_target = mo.ui.checkbox(value=True, label="Same target criterion validated across supported sizes")
+    d_replay = mo.ui.slider(0, 24, value=8, step=1, label="Completed steps discarded by replay")
+    return a_reconcile, c_resize, c_remaining, c_transition, c_target, d_replay
 
 
 @app.cell
@@ -250,7 +263,7 @@ def _(mo, profile, track_id):
     rationale = mo.ui.text_area(
         label="Evidence chain",
         placeholder="Name your chosen policy, a saved quantity, the quantified rejected alternative, and what would trigger reevaluation.",
-    )
+     debounce=False)
     return (
         a_decision,
         b_decision,
@@ -266,6 +279,12 @@ def _(mo, profile, track_id):
 
 @app.cell
 def _(
+    a_reconcile,
+    c_resize,
+    c_remaining,
+    c_transition,
+    c_target,
+    d_replay,
     b_iterations,
     b_payload,
     b_wait,
@@ -281,21 +300,27 @@ def _(
     track_id,
     warm_capacity_comparison,
 ):
-    a_runs = gang_backfill_comparison(track_id)
+    a_runs = gang_backfill_comparison(track_id, a_reconcile.value)
     b_runs = topology_wait_comparison(
         track_id, b_wait.value, b_payload.value, b_iterations.value
     )
     b_curve = topology_wait_curve(
         track_id, b_payload.value, b_iterations.value
     )
-    c_runs = preemption_comparison(track_id, c_arrival.value, c_checkpoint.value)
-    d_runs = fairness_comparison(track_id)
+    c_runs = preemption_comparison(track_id, c_arrival.value, c_checkpoint.value, c_resize.value, c_remaining.value, c_transition.value, c_target.value)
+    d_runs = fairness_comparison(track_id, d_replay.value)
     e_runs = warm_capacity_comparison(track_id, e_reserve.value, e_demand.value)
     return a_runs, b_curve, b_runs, c_runs, d_runs, e_runs
 
 
 @app.cell
 def _(
+    a_reconcile,
+    c_resize,
+    c_remaining,
+    c_transition,
+    c_target,
+    d_replay,
     a_decision,
     a_prediction,
     a_runs,
@@ -325,7 +350,7 @@ def _(
     def store(part, capture):
         set_evidence(lambda current: {**current, part: capture})
 
-    a_upstream = {"track_id": track_id}
+    a_upstream = {"track_id": track_id, "reconcile_delay_min": a_reconcile.value}
     b_upstream = {
         "track_id": track_id,
         "wait_min": b_wait.value,
@@ -336,8 +361,10 @@ def _(
         "track_id": track_id,
         "urgent_arrival_min": c_arrival.value,
         "checkpoint_interval_min": c_checkpoint.value,
+        "resize_slots": c_resize.value, "remaining_work": c_remaining.value,
+        "transition_min": c_transition.value, "target_validated": c_target.value,
     }
-    d_upstream = {"track_id": track_id}
+    d_upstream = {"track_id": track_id, "replayed_steps": d_replay.value}
     e_upstream = {
         "track_id": track_id,
         "warm_reserve": e_reserve.value,
@@ -354,7 +381,7 @@ def _(
                 track=track_id,
                 part="A",
                 prediction=a_prediction.value,
-                inputs={"selected_policy": a_decision.value},
+                inputs={"selected_policy": a_decision.value, **a_upstream},
                 baseline=a_runs["partial"],
                 result=a_runs["backfill"],
                 chosen_result=a_runs["fifo"]
@@ -431,7 +458,7 @@ def _(
                 track=track_id,
                 part="D",
                 prediction=d_prediction.value,
-                inputs={"decision": d_decision.value, "track_id": track_id},
+                inputs={"decision": d_decision.value, **d_upstream},
                 baseline=d_runs["baseline"],
                 result=d_runs["result"],
                 chosen_result=d_runs["baseline"]
@@ -484,31 +511,38 @@ def _(
 
 @app.cell
 def _(ACADEMIC_LAB_CSS, LAB_CSS, mo, profile, track):
+    from mlsysbook_labs.notebook import (
+        notebook_header as _course_header, notebook_shell as _course_shell,
+        notebook_learning_map as _course_learning_map,
+        notebook_scenario as _course_scenario,
+    )
+    from mlsysbook_labs.learning_paths import get_learning_path as _course_path
+    from mlsysbook_labs import get_lab_metadata as _course_metadata
     css = """
     <style>
-    .fleet-head{background:linear-gradient(135deg,#101827,#164e63);color:white;border-radius:14px;padding:clamp(18px,4vw,32px);margin-bottom:10px}
-    .fleet-top{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font:700 .72rem ui-monospace;letter-spacing:.08em}
-    .fleet-head h1{font-size:clamp(1.65rem,5vw,2.65rem);line-height:1.05;margin:16px 0 8px}.fleet-head p{color:#cffafe;max-width:780px}
-    .fleet-meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:9px;margin-top:17px}.fleet-meta div{background:#ffffff14;border:1px solid #ffffff26;padding:9px 11px;border-radius:8px}
+
+
+
+
     .fleet-note{color:#475569;font-size:.9rem;line-height:1.5;margin:0;padding:0 2px}.saved{border-left:4px solid #2ca02c;background:#f0fdf4;padding:9px 12px;border-radius:7px}
     .lab-hud{display:flex;align-items:center;flex-wrap:wrap;gap:10px;background:#101827!important;color:#fff;padding:14px 18px;border-radius:9px}.lab-hud .hud-label{color:#a7b9cf}.lab-hud .hud-value{color:#fff}.lab-hud .hud-active{color:#86efac}.lab-hud .hud-error{color:#fecaca}
-    @media(max-width:520px){.fleet-head{border-radius:9px;margin-top:30px}.fleet-meta{grid-template-columns:1fr}}
+
     </style>"""
-    header = mo.Html(
-        f"""{css}<section class="fleet-head"><div class="fleet-top"><span>VOLUME II · LAB 08</span><span>ABOUT 50–55 MIN</span></div><h1>Useful Work from a Shared Fleet</h1><p>When should a scheduler leave capacity idle, delay a job, or interrupt useful work?</p><div class="fleet-meta"><div><b>Fleet</b><br>{profile["fleet"]}</div><div><b>Urgent work</b><br>{profile["urgent_work"]}</div><div><b>Deliverable</b><br>Fleet scheduling policy memo</div></div></section>"""
-    )
-    mo.vstack(
+    header = _course_header(_course_metadata("vol2/lab_08_fleet_orch.py"), 'When should a scheduler leave capacity idle, delay a job, or interrupt useful work?')
+    _course_shell(
         [
-            LAB_CSS,
-            ACADEMIC_LAB_CSS,
-            header,
-            track,
-            mo.Html(
+        LAB_CSS,
+        ACADEMIC_LAB_CSS,
+        header,
+        track,
+        _course_scenario(_course_path('vol2', 8), track=track.value, volume=2),
+        mo.Html(
                 '<p class="fleet-note">Illustrative deterministic fleet trace, not a production measurement. Each saved contrast preserves its original settings and result.</p>'
             ),
-        ],
+        _course_learning_map(_course_path('vol2', 8))
+    ],
         gap=0.5,
-    )
+     volume=2)
     return
 
 
@@ -520,6 +554,12 @@ def _(mo):
 
 @app.cell
 def _(
+    a_reconcile,
+    c_resize,
+    c_remaining,
+    c_transition,
+    c_target,
+    d_replay,
     COLORS,
     a_capture,
     a_decision,
@@ -566,6 +606,12 @@ def _(
     rationale,
     track_id,
 ):
+    _saved_prediction_widgets = {'A': a_prediction, 'B': b_prediction, 'C': c_prediction, 'D': d_prediction, 'E': e_prediction}
+    from mlsysbook_labs.notebook import notebook_prediction_label as _read_prediction
+    from mlsysbook_labs.notebook import notebook_tab_hint as _part_tabs_hint, notebook_shell as _lesson_shell
+    from mlsysbook_labs.notebook import notebook_part_reflection as _concept_reflection
+    from mlsysbook_labs.learning_paths import get_learning_path as _reflection_path
+    _reflection_contract = _reflection_path('vol2', 8)
     _captures = get_evidence()
     upstream = {
         "A": a_upstream,
@@ -600,12 +646,12 @@ def _(
             )
         data = cap.to_dict()
         return mo.Html(
-            f'<div class="saved"><b>Saved snapshot</b> · original prediction: {data["prediction"]}<br><small>Track {data["track"]}; later control changes cannot rewrite this result.</small></div>'
+            f'<div class="saved"><b>Saved snapshot</b> · original prediction: {_read_prediction(_saved_prediction_widgets[part], value=data["prediction"])}<br><small>Track {data["track"]}; later control changes cannot rewrite this result.</small></div>'
         )
 
     def part_a():
         preface = mo.md(
-            f"### A · Why can jobs wait while {profile['resource_label']} are occupied? (9 min)\nTwo rigid jobs each request more than half of the same bounded fleet. Compare partial hold with atomic gangs, then inspect whether a short job can pass a blocked queue head."
+            f"### A · Why can jobs wait while {profile['resource_label']} are occupied? (11 min)\nTwo rigid jobs each request more than half of the same bounded fleet. Compare partial hold with atomic gangs, then inspect whether a short job can pass a blocked queue head."
         )
         if a_prediction.value is None:
             return mo.vstack([preface, a_prediction])
@@ -631,7 +677,7 @@ def _(
                 "Observed state": "backfill event recorded",
             },
         ]
-        return mo.vstack(
+        return mo.vstack([mo.vstack(
             [
                 preface,
                 a_prediction,
@@ -639,10 +685,15 @@ def _(
                 a_decision,
                 mo.callout(
                     mo.md(
-                        f"**Your prediction:** {a_prediction.value}. **Observed:** partial allocation holds **{a_runs['partial']['idle_held_accelerators']} idle slots** with zero useful work. Backfill starts the short job at **{a_runs['backfill']['jobs']['short']['start_min']:.1f} min**, versus **{a_runs['fifo']['jobs']['short']['start_min']:.1f} min** under FIFO gang scheduling."
+                        f"**Your prediction:** {_read_prediction(a_prediction)}. **Observed:** partial allocation holds **{a_runs['partial']['idle_held_accelerators']} idle slots** with zero useful work. Backfill starts the short job at **{a_runs['backfill']['jobs']['short']['start_min']:.1f} min**, versus **{a_runs['fifo']['jobs']['short']['start_min']:.1f} min** under FIFO gang scheduling."
                     ),
                     kind="danger" if a_runs["partial"]["deadlocked"] else "info",
                 ),
+                mo.md("#### A2 · Admission is not proof of exclusive ownership\nA replacement bundle fits, but the previous owner is unobserved. The same separate protocol trace compares immediate reuse against lease expiry followed by an epoch fence. A lease timeout cannot stop a partitioned process."),
+                a_reconcile,
+                table([{"Policy": label, "Replacement starts (min)": run["replacement_start_min"], "Late old write accepted": run["late_write_accepted"], "Exclusive effect preserved": run["exclusive_effect_preserved"]} for label, run in [("Reuse on lost observation", a_runs["partial"]["control_plane"]), ("Lease and fence", a_runs["backfill"]["control_plane"])]]),
+                table(a_runs["backfill"]["control_plane"]["events"]),
+                mo.md("**Explain:** Which phase admits the job, which selects its bundle, and which repairs observed state? Increase reconciliation delay: which safety property stays fixed, and what availability cost grows? The fence is enforced by the target of writes, not by trust that the old process stopped."),
                 a_capture,
                 saved("A"),
                 mo.accordion(
@@ -653,7 +704,7 @@ def _(
                     }
                 ),
             ]
-        )
+        ), _concept_reflection(_reflection_contract, "A")])
 
     def part_b():
         preface = mo.md(
@@ -699,7 +750,7 @@ def _(
                 "Communication": f"{result['remote_communication_min']:.2f} min",
             },
         ]
-        return mo.vstack(
+        return mo.vstack([mo.vstack(
             [
                 preface,
                 controls,
@@ -709,7 +760,7 @@ def _(
                 b_decision,
                 mo.callout(
                     mo.md(
-                        f"**Your prediction:** {b_prediction.value}. **Observed boundary:** waiting wins only below **{result['crossover_wait_min']:.2f} min** for these bytes, iterations, and links. The selected case favors **{result['decision'].replace('_', ' ')}**."
+                        f"**Your prediction:** {_read_prediction(b_prediction)}. **Observed boundary:** waiting wins only below **{result['crossover_wait_min']:.2f} min** for these bytes, iterations, and links. The selected case favors **{result['decision'].replace('_', ' ')}**."
                     ),
                     kind="info",
                 ),
@@ -723,11 +774,11 @@ def _(
                     }
                 ),
             ]
-        )
+        ), _concept_reflection(_reflection_contract, "B")])
 
     def part_c():
         preface = mo.md(
-            f"### C · Who pays for preemption? (10 min)\nAn urgent {profile['urgent_work']} arrives while {profile['background_work']} occupies the fleet. Compare FIFO and priority preemption from the identical arrival trace."
+            f"### C · Who pays for preemption? (12 min)\nAn urgent {profile['urgent_work']} arrives while {profile['background_work']} occupies the fleet. Compare FIFO and priority preemption from the identical arrival trace."
         )
         controls = mo.hstack([c_arrival, c_checkpoint], widths="equal", wrap=True)
         if c_prediction.value is None:
@@ -748,7 +799,7 @@ def _(
                 "Lost work": f"{preempt['jobs']['background']['lost_work_min']:.1f} min",
             },
         ]
-        return mo.vstack(
+        return mo.vstack([mo.vstack(
             [
                 preface,
                 controls,
@@ -757,10 +808,20 @@ def _(
                 c_decision,
                 mo.callout(
                     mo.md(
-                        f"**Your prediction:** {c_prediction.value}. **Observed transfer:** urgent wait changes from **{fifo['jobs']['urgent']['wait_min']:.1f} to {preempt['jobs']['urgent']['wait_min']:.1f} min**. The interrupted job loses **{preempt['jobs']['background']['lost_work_min']:.1f} min** since its last checkpoint and finishes later."
+                        f"**Your prediction:** {_read_prediction(c_prediction)}. **Observed transfer:** urgent wait changes from **{fifo['jobs']['urgent']['wait_min']:.1f} to {preempt['jobs']['urgent']['wait_min']:.1f} min**. The interrupted job loses **{preempt['jobs']['background']['lost_work_min']:.1f} min** since its last checkpoint and finishes later."
                     ),
                     kind="info",
                 ),
+                mo.md("#### C2 · Resize instead of interrupt?\nUse a separate coupled backend-job fixture with a declared size range, two-slot increments, and a supplied diminishing-return retained-work curve. This is a backend training/reference workload for every track; it does not resize an individual device. The fixed target is meaningful only when the same quality criterion remains validated."),
+                mo.hstack([c_resize, c_remaining, c_transition], wrap=True),
+                c_target,
+                table([{"Supported slots": size, "Retained units/min": rate} for size, rate in preempt["elastic"]["contract"]["rate_curve"].items()]),
+                mo.callout(mo.md(
+                    (f"Keep: **{preempt['elastic']['keep_time_min']:.2f} min**. Resize: **{preempt['elastic']['resize_time_min']:.2f} min**. Decision: **{preempt['elastic']['decision']}**."
+                     + (f" Transition is repaid above **{preempt['elastic']['amortization_work']:.2f} retained-work units**." if preempt['elastic']['amortization_work'] is not None else " No speedup at the current size."))
+                    if preempt["elastic"]["eligible"] else f"**Resize unavailable:** {preempt['elastic']['reason']}. A faster nominal step rate cannot establish time to the same target."), kind="info" if preempt["elastic"]["eligible"] else "danger"),
+                table(preempt["elastic"]["events"]) if preempt["elastic"]["events"] else mo.md("No valid transition is executed."),
+                mo.md("**Test a reversal:** shorten remaining work or increase transition time until keeping the allocation wins. Then request an invalid increment or remove target validation. Explain why those are contract failures rather than slow valid executions. The curve is supplied synthetic evidence, not a convergence model."),
                 c_capture,
                 saved("C"),
                 mo.accordion(
@@ -771,12 +832,12 @@ def _(
                     }
                 ),
             ]
-        )
+        ), _concept_reflection(_reflection_contract, "C")])
 
     def part_d():
         _resource_label = profile["resource_label"]
         preface = mo.md(
-            f"### D · Is equal {_resource_label} allocation fair? (9 min)\nTwo tenants receive equal {_resource_label} counts but consume different CPU, memory, and network shares. Predict whether the dominant shares remain equal."
+            f"### D · Is equal {_resource_label} allocation fair? (11 min)\nTwo tenants receive equal {_resource_label} counts but consume different CPU, memory, and network shares. Predict whether the dominant shares remain equal."
         )
         if d_prediction.value is None:
             return mo.vstack([preface, d_prediction])
@@ -821,7 +882,7 @@ def _(
                 "Gap": f"{d_runs['result']['dominant_share_gap_pct']:.1f} points",
             },
         ]
-        return mo.vstack(
+        return mo.vstack([mo.vstack(
             [
                 preface,
                 d_prediction,
@@ -830,10 +891,15 @@ def _(
                 d_decision,
                 mo.callout(
                     mo.md(
-                        f"**Your prediction:** {d_prediction.value}. **Observed:** equal {_resource_label} counts leave a **{d_runs['baseline']['dominant_share_gap_pct']:.1f}-point dominant-share gap**. Progressive filling grants {d_runs['result']['bundle_counts']['compute-heavy']} and {d_runs['result']['bundle_counts']['network-heavy']} feasible bundles and reduces the gap to **{d_runs['result']['dominant_share_gap_pct']:.1f} points**."
+                        f"**Your prediction:** {_read_prediction(d_prediction)}. **Observed:** equal {_resource_label} counts leave a **{d_runs['baseline']['dominant_share_gap_pct']:.1f}-point dominant-share gap**. Progressive filling grants {d_runs['result']['bundle_counts']['compute-heavy']} and {d_runs['result']['bundle_counts']['network-heavy']} feasible bundles and reduces the gap to **{d_runs['result']['dominant_share_gap_pct']:.1f} points**."
                     ),
                     kind="info",
                 ),
+                mo.md(f"#### D2 · Which utilization is this?\nA separate {d_runs['result']['utilization_trace']['duration_min']:g}-minute runtime record holds {d_runs['result']['utilization_trace']['allocated_slot_min'] / d_runs['result']['utilization_trace']['duration_min']:g} slots in a complete allocation and {d_runs['result']['utilization_trace']['incomplete_held_slots']} in an incomplete gang. Its activity counter records {d_runs['result']['utilization_trace']['active_slot_min']:g} slot-minutes, including communication and replay. It completes {d_runs['result']['utilization_trace']['completed_steps']} steps; discarded steps do not survive as target progress. The fault-free baseline is {d_runs['result']['utilization_trace']['fault_free_steps_per_slot_min']:g} retained steps per slot-minute. This trace is independent of the fairness intervention above."),
+                d_replay,
+                table([{"Tier": label, "Slot-minutes": d_runs["result"]["utilization_trace"][key], "Fleet capacity (%)": d_runs["result"]["utilization_trace"][pct]} for label, key, pct in [("Allocated: complete groups only", "allocated_slot_min", "allocated_fleet_pct"), ("Active: declared activity counter", "active_slot_min", "active_fleet_pct"), ("Productive: retained / fault-free rate", "productive_slot_min", "productive_fleet_pct")]]),
+                mo.md(f"**Retained steps:** {d_runs['result']['utilization_trace']['retained_steps']}. Active and productive capacity share the same fleet-time denominator above. As fractions of the complete allocation they are **{d_runs['result']['utilization_trace']['active_of_allocated_pct']:.1f}%** and **{d_runs['result']['utilization_trace']['productive_of_allocated_pct']:.1f}%**. {d_runs['result']['utilization_trace']['incomplete_held_slots']} incomplete held slots count in none of these allocated groups."),
+                mo.md("**Explain:** increase discarded steps while keeping the activity counter fixed. Which dashboard moves? Does the unchanged active counter prove useful progress? Compare the retained-work evidence before recommending more hardware; this counterexample does not identify a production root cause."),
                 d_capture,
                 saved("D"),
                 mo.accordion(
@@ -844,7 +910,7 @@ def _(
                     }
                 ),
             ]
-        )
+        ), _concept_reflection(_reflection_contract, "D")])
 
     def part_e():
         preface = mo.md(
@@ -898,7 +964,7 @@ def _(
                 "Charged cost": f"${warm['cost_usd']:.2f}",
             },
         ]
-        return mo.vstack(
+        return mo.vstack([mo.vstack(
             [
                 preface,
                 controls,
@@ -907,7 +973,7 @@ def _(
                 table(rows),
                 mo.callout(
                     mo.md(
-                        f"**Your prediction:** {e_prediction.value}. **Observed tradeoff:** the reserve changes missed requests from **{cold['missed_requests']:.1f} to {warm['missed_requests']:.1f}**, while charged cost changes from **${cold['cost_usd']:.2f} to ${warm['cost_usd']:.2f}**. Loading plus warmup remains **{warm['readiness_delay_min']} min** for newly requested replicas."
+                        f"**Your prediction:** {_read_prediction(e_prediction)}. **Observed tradeoff:** the reserve changes missed requests from **{cold['missed_requests']:.1f} to {warm['missed_requests']:.1f}**, while charged cost changes from **${cold['cost_usd']:.2f} to ${warm['cost_usd']:.2f}**. Loading plus warmup remains **{warm['readiness_delay_min']} min** for newly requested replicas."
                     ),
                     kind="info",
                 ),
@@ -921,7 +987,7 @@ def _(
                     }
                 ),
             ]
-        )
+        ), _concept_reflection(_reflection_contract, "E")])
 
     def build_synthesis():
         rows = []
@@ -937,9 +1003,9 @@ def _(
             rows.append(
                 {
                     "Part": part,
-                    "Original prediction": capture.to_dict()["prediction"]
+                    "Original prediction": _read_prediction(_saved_prediction_widgets[part], value=(capture.to_dict()["prediction"]
                     if capture
-                    else "—",
+                    else "—")),
                     "Evidence": state,
                 }
             )
@@ -988,8 +1054,16 @@ def _(
             "Synthesis": build_synthesis(),
         }
     )
-    tabs
+    _lesson_shell([_part_tabs_hint(), tabs], volume=2)
     return (audit,)
+
+
+@app.cell
+def _():
+    from mlsysbook_labs.notebook import notebook_shell as _submit_shell, notebook_submission as _submit_guide
+    from mlsysbook_labs.learning_paths import get_learning_path as _submit_path
+    _submit_shell([_submit_guide(_submit_path(2, 8))], volume=2)
+    return
 
 
 @app.cell
@@ -1008,6 +1082,7 @@ def _(
     report_export_panel,
     track_id,
 ):
+    from mlsysbook_labs.notebook import notebook_shell as _workspace_shell
     _captures = get_evidence()
     _ready = (
         audit.complete
@@ -1018,7 +1093,8 @@ def _(
         and final_choice.value != final_rejected.value
         and bool(rationale.value.strip())
     )
-    mo.stop(not _ready)
+    from mlsysbook_labs.notebook import notebook_download_readiness as _download_readiness
+    mo.stop(not _ready, _download_readiness(volume=2))
     snapshots = {part: _captures[part].to_dict() for part in "ABCDE"}
     report = build_lab_report(
         get_lab_metadata("vol2/lab_08_fleet_orch.py"),
@@ -1081,64 +1157,36 @@ def _(
             "calculations": "Deterministic MLSysIM event schedules and physical-unit calculations.",
         },
     )
-    mo.vstack([mo.md("## Local evidence report"), report_export_panel(report)])
+    _workspace_shell([mo.vstack([mo.md("### Download your discussion"), report_export_panel(report)])], volume=2)
     return (report,)
 
 
 @app.cell
-async def _(
-    audit,
-    final_choice,
-    final_rejected,
-    final_risk,
-    final_trigger,
-    get_evidence,
-    ledger,
-    mo,
-    rationale,
-    track_id,
+def _(
+    audit, final_choice, final_rejected, final_risk, final_trigger, get_evidence, mo, rationale, track_id
 ):
+    from mlsysbook_labs.fleet_evidence import discussion_fingerprint as _discussion_fingerprint
     _captures = get_evidence()
-    _ready = (
-        audit.complete
-        and all(
-            widget.value is not None
-            for widget in (final_choice, final_rejected, final_trigger, final_risk)
-        )
-        and final_choice.value != final_rejected.value
-        and bool(rationale.value.strip())
+    _ready = audit.complete and all((widget.value is not None for widget in (final_choice, final_rejected, final_trigger, final_risk))) and (final_choice.value != final_rejected.value) and bool(rationale.value.strip())
+    fleet_discussion_ready = _ready
+    fleet_discussion_design = {'schema_version': 1, 'lab_id': 'v2_08', 'track_id': track_id, 'model_id': 'v2_08_experiments', 'evidence': {part: capture.to_dict() for part, capture in _captures.items()}, 'recommendation': final_choice.value, 'rejected_alternative': final_rejected.value, 'reevaluation_trigger': final_trigger.value, 'residual_risk': final_risk.value, 'rationale': rationale.value} if _ready else None
+    fleet_discussion_fingerprint = _discussion_fingerprint(fleet_discussion_design)
+    # Recreated when any evidence, track, or discussion field changes.
+    save_discussion = mo.ui.run_button(label="Save discussion", disabled=not fleet_discussion_ready)
+    return (fleet_discussion_ready, fleet_discussion_design, fleet_discussion_fingerprint, save_discussion)
+
+
+@app.cell
+async def _(fleet_discussion_design, fleet_discussion_fingerprint, fleet_discussion_ready,
+            ledger, mo, save_discussion, track_id):
+    from mlsysbook_labs.fleet_evidence import save_completed_discussion as _save_completed_discussion
+    from mlsysbook_labs.notebook import notebook_shell as _discussion_shell, notebook_status as _notebook_status
+    _outcome = await _save_completed_discussion(
+        ledger, chapter=8, track=track_id, design=fleet_discussion_design,
+        fingerprint=fleet_discussion_fingerprint, ready=fleet_discussion_ready,
+        requested=bool(save_discussion.value),
     )
-    _save_status = "EVIDENCE IN PROGRESS"
-    _save_detail = ""
-    _status_class = "hud-active"
-    if _ready:
-        try:
-            ledger.save(
-                chapter=8,
-                design={
-                    "schema_version": 1,
-                    "lab_id": "v2_08",
-                    "track_id": track_id,
-                    "model_id": "v2_08_experiments",
-                    "evidence": {
-                        part: capture.to_dict() for part, capture in _captures.items()
-                    },
-                    "recommendation": final_choice.value,
-                    "rejected_alternative": final_rejected.value,
-                    "reevaluation_trigger": final_trigger.value,
-                    "residual_risk": final_risk.value,
-                    "rationale": rationale.value,
-                },
-            )
-            await ledger.flush()
-            _save_status = "SAVED"
-        except Exception:
-            _save_status = "SAVE FAILED"
-            _save_detail = " · report export remains available"
-            _status_class = "hud-error"
-    mo.Html(
-        f'<div class="lab-hud"><span class="hud-label">LAB</span><span class="hud-value">08 · Useful Work from a Shared Fleet</span><span class="hud-label">|</span><span style="flex:1"></span><span class="hud-label">STATUS</span><span class="{_status_class}">{_save_status}</span><span class="hud-value">{_save_detail}</span></div>'
-    )
+    _discussion_shell([mo.vstack([save_discussion, _notebook_status(_outcome.status, _outcome.detail)])], volume=2)
     return
 
 

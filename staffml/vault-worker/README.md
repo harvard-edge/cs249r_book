@@ -1,10 +1,14 @@
-# staffml-vault-worker
+# StaffML Vault Worker
 
 Cloudflare Worker serving the StaffML vault API over D1.
+
+The deployed service is `staffml-vault` (`staffml-vault-staging` for staging). The private npm package is `staffml-vault-worker`. See the [Cloudflare service inventory](../CLOUDFLARE.md) for resource identities and environment isolation notes.
 
 Implements ARCHITECTURE.md §10 with v2.1 refinements.
 
 ## Deploy (user action — requires Cloudflare account + authenticated wrangler)
+
+The checked-in configuration already contains production and staging D1 IDs. Reuse them for an existing deployment; the creation commands below are only for initial provisioning in a new account or a planned migration. Keep the Worker and D1 names in `wrangler.toml` aligned with the intended environment. Staging currently shares production's rate-limit KV namespace; see the [migration note](../CLOUDFLARE.md#changes-that-require-a-migration) before using staging for independent traffic tests.
 
 ```bash
 # One-time setup: provision D1 databases

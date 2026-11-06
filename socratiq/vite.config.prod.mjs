@@ -2,6 +2,8 @@
 import { defineConfig } from 'vite';
 import { resolve } from 'path';
 import { viteSingleFile } from 'vite-plugin-singlefile';
+import tailwindcss from 'tailwindcss';
+import {woff2MathFonts} from './vite.fonts.mjs';
 import { copyFileSync, mkdirSync, existsSync, readdirSync, statSync } from 'fs';
 
 export default defineConfig({
@@ -60,7 +62,7 @@ export default defineConfig({
       generateScopedName: '[name]__[local]___[hash:base64:5]',
     },
     postcss: {
-      plugins: [],
+      plugins: [tailwindcss(resolve(__dirname, 'tailwind.config.cjs'))],
     },
   },
   
@@ -72,6 +74,7 @@ export default defineConfig({
   
   // Production plugins
   plugins: [
+    woff2MathFonts(),
     {
       name: 'multi-dist-copy-and-cleanup',
       writeBundle() {
@@ -128,6 +131,10 @@ export default defineConfig({
             copyRecursive(mainDistPath, destInfo.path);
             console.log(`✅ Build output copied to ${destInfo.name}: ${destInfo.path}`);
           });
+          // The focused reader opens the same existing workspace on demand.
+          const studyPath = resolve(__dirname, '../books/shared/assets/scripts/socratiq');
+          mkdirSync(studyPath, { recursive: true });
+          copyFileSync(resolve(mainDistPath, 'bundle.js'), resolve(studyPath, 'study.js'));
           console.log('✨ All copy operations completed successfully.');
         } catch (error) {
           console.error('❌ Error during file copy operations:', error);

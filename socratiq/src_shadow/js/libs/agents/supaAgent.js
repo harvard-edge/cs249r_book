@@ -4,7 +4,7 @@ import { alert } from "../utils/utils.js";
 // Configuration for different providers
 const providerConfigs = {
   GROQ: {
-    model: "llama-3.3-70b-versatile",
+    model: "openai/gpt-oss-120b",
     stream: true,
   },
   MISTRAL: {

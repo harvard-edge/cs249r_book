@@ -371,3 +371,94 @@ def test_privacy_check_adapts_scope_to_fleet_role():
 def test_invalid_inputs_fail_loudly(call, match):
     with pytest.raises(ValueError, match=match):
         call()
+
+
+def test_intersection_audit_exposes_gap_hidden_by_aggregate_parity():
+    from mlsysim.labs.experiments.v2_16_experiments import disparity_uncertainty
+
+    coarse = disparity_uncertainty(dossier="expanded", intersections=False)
+    slices = disparity_uncertainty(dossier="expanded", intersections=True)
+    assert coarse["gaps"][0]["observed_gap"] == 0
+    constrained = next(row for row in slices["gaps"] if row["context"] == "constrained")
+    assert constrained["observed_gap"] == pytest.approx(0.3)
+    assert constrained["lower"] > 0
+    assert all(0 <= row["lower"] <= row["rate"] <= row["upper"] <= 1 for row in slices["rates"])
+    assert sum(row["trials"] for row in coarse["rates"]) == sum(row["trials"] for row in slices["rates"])
+
+
+def test_more_independent_evidence_narrows_bounds_without_changing_point_gap():
+    from mlsysim.labs.experiments.v2_16_experiments import disparity_uncertainty
+
+    small = disparity_uncertainty(dossier="pilot")
+    large = disparity_uncertainty(dossier="expanded")
+    assert [g["observed_gap"] for g in small["gaps"]] == [g["observed_gap"] for g in large["gaps"]]
+    assert all(b["upper"]-b["lower"] < a["upper"]-a["lower"]
+               for a, b in zip(small["rates"], large["rates"]))
+    assert small["gaps"][1]["lower"] == 0
+    assert large["gaps"][1]["lower"] > 0
+
+
+def test_confidence_changes_bounds_not_counts_or_underlying_fairness():
+    first = audit_evidence("mobile", threshold=0.5, criterion="equal_opportunity", allowed_gap=0.1,
+                           sampling_fraction=0.5, confidence=0.8)
+    second = audit_evidence("mobile", threshold=0.5, criterion="equal_opportunity", allowed_gap=0.1,
+                            sampling_fraction=0.5, confidence=0.99)
+    assert first.observed_assessment == second.observed_assessment
+    assert first.population_assessment == second.population_assessment
+    assert first.uncertainty["rates"][0]["trials"] == second.uncertainty["rates"][0]["trials"]
+    assert first.uncertainty["rates"][0]["upper"] < second.uncertainty["rates"][0]["upper"]
+
+
+def test_simultaneous_bounds_use_all_displayed_rates():
+    import math
+    from mlsysim.labs.experiments.v2_16_experiments import disparity_uncertainty
+
+    audit = disparity_uncertainty(dossier="expanded", confidence=0.95)
+    row = audit["rates"][0]
+    expected = math.sqrt(math.log(2*len(audit["rates"])/(1-audit["confidence"]))/(2*row["trials"]))
+    assert row["upper"]-row["rate"] == pytest.approx(expected)
+
+
+def test_feedback_selection_starves_labels_without_changing_potential_outcomes():
+    from mlsysim.labs.experiments.v2_16_experiments import feedback_and_oversight
+
+    exploit = feedback_and_oversight()
+    explore = feedback_and_oversight(exploration_per_group=5)
+    assert all(row["exposures_B"] == 0 for row in exploit["exposure_trace"])
+    assert all(row["exposures_B"] >= 5 for row in explore["exposure_trace"])
+    assert exploit["exposure_trace"][-1]["new_labels_B"] == 0
+    assert explore["exposure_trace"][-1]["new_labels_B"] > 0
+    assert all(row["exposures_A"]+row["exposures_B"] == 20 for row in explore["exposure_trace"])
+
+
+def test_review_order_changes_observed_issues_with_same_budget_and_true_cases():
+    from mlsysim.labs.experiments.v2_16_experiments import feedback_and_oversight
+
+    fifo = feedback_and_oversight()
+    triaged = feedback_and_oversight(review_order="independent_signal")
+    assert fifo["review_budget"] == triaged["review_budget"]
+    assert [(r["id"], r["issue"], r["independent_signal"]) for r in fifo["alerts"]] == [
+        (r["id"], r["issue"], r["independent_signal"]) for r in triaged["alerts"]]
+    assert triaged["detected_issues"] > fifo["detected_issues"]
+    assert triaged["unreviewed_issues"] < fifo["unreviewed_issues"]
+
+
+def test_log_deletion_is_not_trained_state_removal_and_shard_work_is_bounded():
+    from mlsysim.labs.experiments.v2_16_experiments import unlearning_trace
+
+    logs = unlearning_trace()
+    full = unlearning_trace(method="full_retrain")
+    shard = unlearning_trace(method="shard_retrain")
+    assert logs["log_record_removed"] and not logs["matches_retrain_reference"]
+    assert logs["residual_contribution"] == logs["deleted_record"]
+    assert full["matches_retrain_reference"] and shard["matches_retrain_reference"]
+    assert full["resulting_state"] == shard["resulting_state"]
+    assert shard["processed_contributions"] < full["processed_contributions"]
+    assert check_privacy_profile("pseudonymous_events", require_case_review=True).unlearning == logs
+
+
+@pytest.mark.parametrize("confidence", [0, 1, -0.1, float("nan"), True])
+def test_uncertainty_rejects_invalid_confidence(confidence):
+    from mlsysim.labs.experiments.v2_16_experiments import disparity_uncertainty
+    with pytest.raises(ValueError):
+        disparity_uncertainty(confidence=confidence)

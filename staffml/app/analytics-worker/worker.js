@@ -2,23 +2,23 @@
  * StaffML Analytics Worker — Cloudflare Workers
  *
  * Receives anonymous analytics events from StaffML clients and stores them
- * in Cloudflare KV for aggregate analysis. No PII is collected.
+ * in Cloudflare KV for aggregate analysis. Email-pattern filtering is a
+ * heuristic and does not guarantee that submitted fields contain no PII.
  *
  * Setup:
- *   1. Create a KV namespace: wrangler kv:namespace create STAFFML_ANALYTICS
- *   2. Update wrangler.toml with the namespace ID
+ *   1. For a new deployment, create KV: wrangler kv namespace create staffml-analytics-events
+ *   2. Assign its ID to STAFFML_ANALYTICS; reuse existing IDs for an existing deployment
  *   3. Deploy: wrangler deploy
  *   4. Set NEXT_PUBLIC_ANALYTICS_URL in the StaffML build env
  *
  * Data model:
- *   KV key: "events:{YYYY-MM-DD}" → JSON array of events for that day
- *   KV key: "summary:latest"      → aggregated summary (updated on read)
- *   KV key: "meta:total_events"   → running event counter
+ *   KV key: "events:{YYYY-MM-DD}:{UUID}" → JSON array for one submitted batch
+ *   Summaries are computed on read over the recent event keys.
  *
  * Security:
  *   - CORS restricted to allowed origins
- *   - Rate limited: max 100 events per request
- *   - No PII validation: rejects events containing email-like patterns
+ *   - Batch cap: max 100 events per request; no request-frequency limiter
+ *   - Email-pattern heuristic rejects matching events
  *   - Session IDs are ephemeral UUIDs (per-tab, not per-user)
  */
 
@@ -58,11 +58,20 @@ export default {
       'Access-Control-Max-Age': '86400',
     };
 
-    // Only allow known origins
-    if (ALLOWED_ORIGINS.some(o => origin.startsWith(o))) {
-      corsHeaders['Access-Control-Allow-Origin'] = origin;
-    } else if (origin) {
-      return new Response('Forbidden', { status: 403 });
+    // Origin contains a serialized origin, never a URL path or credentials.
+    // Compare parsed origins so lookalike hosts cannot pass a prefix check.
+    if (origin) {
+      let parsed;
+      try {
+        parsed = new URL(origin);
+      } catch {
+        return new Response('Forbidden', { status: 403 });
+      }
+      if (parsed.username || parsed.password || parsed.pathname !== '/' ||
+          parsed.search || parsed.hash || !ALLOWED_ORIGINS.includes(parsed.origin)) {
+        return new Response('Forbidden', { status: 403 });
+      }
+      corsHeaders['Access-Control-Allow-Origin'] = parsed.origin;
     }
 
     // Handle CORS preflight
@@ -78,7 +87,8 @@ export default {
     // GET /summary — return aggregate stats
     if (request.method === 'GET') {
       const auth = request.headers.get('Authorization');
-      if (auth !== `Bearer ${env.ADMIN_SECRET}`) {
+      const secret = env.ADMIN_SECRET;
+      if (typeof secret !== 'string' || !secret.trim() || auth !== `Bearer ${secret}`) {
         return new Response('Unauthorized', { status: 401, headers: corsHeaders });
       }
       return handleSummary(env, corsHeaders);
@@ -96,7 +106,7 @@ async function handleEvents(request, env, corsHeaders) {
     return jsonResponse({ error: 'Invalid JSON' }, 400, corsHeaders);
   }
 
-  const events = body.events;
+  const events = body?.events;
   if (!Array.isArray(events)) {
     return jsonResponse({ error: 'events must be an array' }, 400, corsHeaders);
   }
@@ -108,6 +118,10 @@ async function handleEvents(request, env, corsHeaders) {
   // Validate and sanitize each event
   const validated = [];
   for (const event of events) {
+    if (!event || typeof event !== 'object' || Array.isArray(event)) continue;
+    // The client event contract contains scalar fields. Reject nested values
+    // before string coercion or aggregation can invoke attacker-controlled keys.
+    if (Object.values(event).some(value => value !== null && typeof value === 'object')) continue;
     // Check event type
     if (!event.type || !VALID_EVENT_TYPES.has(event.type)) continue;
 
@@ -198,7 +212,8 @@ async function handleSummary(env, corsHeaders) {
     let gauntletsCompleted = 0;
     let questionsReported = 0;
     let improvementsSuggested = 0;
-    const scoresByLevel = {};
+    // Levels are submitted by anonymous clients, including prototype key names.
+    const scoresByLevel = Object.create(null);
     // Dedup feedback: last-write-wins per (questionId, sessionId)
     const latestThumbs = new Map();
     const latestDifficulty = new Map();
@@ -209,7 +224,7 @@ async function handleSummary(env, corsHeaders) {
       switch (event.type) {
         case 'question_scored':
           questionsScored++;
-          if (event.level && event.score !== undefined) {
+          if (typeof event.level === 'string' && event.level && Number.isFinite(event.score)) {
             if (!scoresByLevel[event.level]) scoresByLevel[event.level] = { total: 0, count: 0 };
             scoresByLevel[event.level].total += event.score;
             scoresByLevel[event.level].count++;
@@ -244,7 +259,7 @@ async function handleSummary(env, corsHeaders) {
     }
     const difficultyDistribution = { too_easy: 0, about_right: 0, too_hard: 0 };
     for (const v of latestDifficulty.values()) {
-      if (difficultyDistribution[v] !== undefined) difficultyDistribution[v]++;
+      if (Object.hasOwn(difficultyDistribution, v)) difficultyDistribution[v]++;
     }
 
     // Compute averages

@@ -1,11 +1,11 @@
 import { MAIN_TOPIC } from './env_configs.js';
 
-export const QUERYAGENTPROCESS = ["Vectorizing query", "Cosine searching vector database", "Retrieving relevant sentences", "Calling LLM model", "Returning results"]
+export const QUERYAGENTPROCESS = ["Reading your question", "Searching the current page", "Retrieving relevant passages", "Calling LLM model", "Returning results"]
 export const EXPLAINAGENTPROCESS = ["Retrieving relevant context from website", "Calling LLM model", "Returning results"]
 export const GENERALAGENTPROCESS = ["Retrieving relevant sentences", "Checking conversation history", "Calling LLM model", "Returning results"]
 export const QUIZAGENTPROCESS = [ "Retrieving relevant sentences from website", "Generating possible questions", "Calling LLM model", "Returning results"]
 export const RESEARCHAGENTPROCESS = [ "Retrieving relevant papers from Arxiv", "Generating possible questions", "Calling LLM model", "Returning results"]
-export const PROGRESSREPORTAGENTPROCESS = [ "Retrieving relevant papers from Arxiv", "Generating possible questions", "Calling LLM model", "Returning results"]
+export const PROGRESSREPORTAGENTPROCESS = [ "Reading quiz history", "Checking previous progress reports", "Analyzing learning progress", "Returning results"]
 export const OFFLINE_PROCESS = [
   "Checking network status",
   "Analyzing your query",

@@ -299,7 +299,11 @@ class WorkloadPlacement:
 
 @dataclass(frozen=True)
 class PlacementSite:
-    """Capacity, execution time, and accounting inputs for one location."""
+    """Capacity, execution time, and accounting inputs for one location.
+
+    Optional WUE is direct water use per IT kilowatt-hour, excluding the
+    facility overhead that PUE adds to electricity consumption.
+    """
 
     name: str
     available_accelerators: int
@@ -309,6 +313,8 @@ class PlacementSite:
     electrical_capacity: Any
     cooling_capacity: Any
     wue: Any | None = None
+    water_allowance: Any | None = None
+    water_context: str = "Watershed and season unassessed"
 
 
 @dataclass(frozen=True)
@@ -320,6 +326,9 @@ class PlacementEvaluation:
     facility_energy: Any
     operational_emissions: Any
     water_use: Any | None
+    water_allowance: Any | None = None
+    water_requirement_met: bool | None = None
+    water_context: str = "Watershed and season unassessed"
 
 
 def evaluate_placements(workload: WorkloadPlacement, sites: Iterable[PlacementSite]) -> tuple[PlacementEvaluation, ...]:
@@ -363,7 +372,17 @@ def evaluate_placements(workload: WorkloadPlacement, sites: Iterable[PlacementSi
         water_use = None
         if site.wue is not None:
             wue = _quantity(site.wue, "liter/kilowatt_hour", f"{site.name}.wue")
-            water_use = (facility_energy * wue).to("liter")
+            water_use = (it_energy.to("kilowatt_hour") * wue).to("liter")
+        allowance = None
+        water_met = None
+        if site.water_allowance is not None:
+            allowance = _quantity(site.water_allowance, "liter", f"{site.name}.water_allowance")
+            if water_use is None:
+                reasons.append("direct-water evidence missing for required local allowance")
+            else:
+                water_met = water_use <= allowance
+                if not water_met:
+                    reasons.append("direct-water consumption exceeds local run allowance")
         rows.append(
             PlacementEvaluation(
                 site=site.name,
@@ -373,6 +392,9 @@ def evaluate_placements(workload: WorkloadPlacement, sites: Iterable[PlacementSi
                 facility_energy=facility_energy,
                 operational_emissions=emissions,
                 water_use=water_use,
+                water_allowance=allowance,
+                water_requirement_met=water_met,
+                water_context=site.water_context,
             )
         )
     return tuple(rows)
@@ -931,9 +953,15 @@ def lower_lifecycle_option(keep: LifecycleImpact, replace: LifecycleImpact) -> s
 
 
 def placement_experiment_args(
-    track_id: str, *, deadline_scale: float, clean_capacity_scale: float = 1.0
+    track_id: str, *, deadline_scale: float, clean_capacity_scale: float = 1.0,
+    clean_cooling: str = "supplied", water_season: str = "unassessed",
 ) -> dict[str, Any]:
-    """Return exact placement evaluator arguments after two causal controls."""
+    """Return placement arguments with optional hypothetical cooling/water cases.
+
+    Cooling values and seasonal allowances below are teaching assumptions for
+    the unnamed clean site, not observations about an actual region. A water
+    allocation is for this fixed run; it is not a regional scarcity index.
+    """
     deadline_scale = _scalar(deadline_scale, "deadline_scale", minimum=0.01)
     clean_capacity_scale = _scalar(clean_capacity_scale, "clean_capacity_scale", minimum=0.0)
     scenario = track_scenario(track_id)
@@ -941,10 +969,28 @@ def placement_experiment_args(
     workload = WorkloadPlacement(**{**asdict(workload), "deadline": workload.deadline * deadline_scale})
     sites = list(scenario["placement_sites"])
     clean = sites[1]
+    cooling_cases = {
+        "supplied": (clean.pue, clean.wue),
+        "dry": (1.25, Q_(0.05, "liter/kilowatt_hour")),
+        "evaporative": (1.08, Q_(1.5, "liter/kilowatt_hour")),
+        "unknown": (clean.pue, None),
+    }
+    seasons = {
+        "unassessed": (None, "Watershed and season unassessed"),
+        "wet": (Q_(2.0, "liter/kilowatt_hour"), "Hypothetical basin, wet season: larger run allocation"),
+        "drought": (Q_(0.5, "liter/kilowatt_hour"), "Same hypothetical basin, drought: restricted run allocation"),
+    }
+    if clean_cooling not in cooling_cases or water_season not in seasons:
+        raise ValueError("unknown cooling case or water season")
+    pue, wue = cooling_cases[clean_cooling]
+    allowance_per_fixed_work, context = seasons[water_season]
+    allowance = (workload.it_energy * allowance_per_fixed_work).to("liter") if allowance_per_fixed_work is not None else None
     sites[1] = PlacementSite(
         **{
             **asdict(clean),
             "available_accelerators": int(math.floor(clean.available_accelerators * clean_capacity_scale)),
+            "pue": pue, "wue": wue, "water_allowance": allowance,
+            "water_context": context,
         }
     )
     return {"workload": workload, "sites": tuple(sites)}

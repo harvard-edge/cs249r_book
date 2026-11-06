@@ -68,6 +68,35 @@ class SystemEvaluation(BaseModel):
 
     @property
     def passed_all(self) -> bool:
+        """Check whether every scorecard level is passed or skipped.
+
+        Parameters
+        ----------
+
+        Returns
+        -------
+        bool
+            True when every level has status PASS or SKIPPED; false for WARNING, FAIL, or any other status. True does not certify that feasibility was evaluated.
+
+        Notes
+        -----
+        Equation: passed_all = all(level.status in {PASS, SKIPPED} for feasibility, performance, macro).
+
+        Assumptions: Status strings use the scorecard conventions; each producer is responsible for the checks behind its status.
+
+        Excludes: Recomputing model results, checking omitted constraints, or converting skipped feasibility into evidence of capacity.
+
+        References
+        ----------
+        Derivation: This is the conjunction of the accepted status predicate across the three scorecard levels.
+
+        Examples
+        --------
+        >>> level = EvaluationLevel(level_name="example", summary="not evaluated", status="SKIPPED")
+        >>> report = SystemEvaluation(scenario_name="example", feasibility=level, performance=level, macro=level)
+        >>> report.passed_all
+        True
+        """
         return all(l.status in {"PASS", "SKIPPED"} for l in [self.feasibility, self.performance, self.macro])
 
 class SystemEvaluator:
@@ -87,46 +116,63 @@ class SystemEvaluator:
         nodes: int = 1,
         duration_days: Optional[float] = None
     ) -> SystemEvaluation:
-        """
-        Evaluate an ML system scenario across three analytical lenses.
-
-        Composes a pipeline from the inputs and maps its results onto the
-        three-level scorecard:
-
-        - **Feasibility** ("will it run?"): memory footprint vs HBM capacity
-          from ``SingleNodeModel`` (single node only; the distributed path
-          currently reports a pass-through check);
-        - **Performance** ("is it fast enough?"): latency/throughput/MFU from
-          ``SingleNodeModel``, or step latency / scaling efficiency from
-          ``DistributedModel`` when ``nodes > 1`` and a fleet is given;
-        - **Macro** ("is it worth it?"): TCO/carbon/energy from
-          ``EconomicsModel``, included only when both ``fleet_obj`` and
-          ``duration_days`` are provided (otherwise SKIPPED).
+        """Compose performance and optional economics into a system scorecard.
 
         Parameters
         ----------
         scenario_name : str
-            Label echoed into the scorecard.
-        model_obj, hardware_obj : Any
-            Workload and accelerator registry objects.
+            Display label carried into the result.
+        model_obj : Any
+            Workload registry object accepted by the selected solver.
+        hardware_obj : Any
+            Accelerator registry object used by the single-node path.
         batch_size : int
-            Samples per step.
+            Positive global samples or sequences per modeled step, as defined by the selected
+            solver.
         precision : str
-            Numerical precision ('fp16', 'fp32', ...).
+            Registered numerical precision such as fp16.
         efficiency : float
-            Software efficiency factor in (0, 1].
+            Declared compute efficiency in (0, 1].
         fleet_obj : Any, optional
-            Fleet object; enables the distributed and economics paths.
-        nodes : int
-            Node count; > 1 with a fleet selects ``DistributedModel``.
+            Fleet definition. A supplied fleet with nodes greater than one selects
+            DistributedModel; its own node count determines the modeled hardware.
+        nodes : int, optional
+            Path selector, default one. This argument does not resize fleet_obj.
         duration_days : float, optional
-            Operation duration for the economics lens.
+            Nonnegative modeled operating duration in days. Economics runs only when both
+            fleet_obj and duration_days are truthy.
 
         Returns
         -------
         SystemEvaluation
-            The three-level scorecard (metric units: memory in GB, latency in
-            ms, throughput in 1/s, TCO in USD, carbon in metric tons).
+            Feasibility and performance levels plus optional macro costs. Memory uses GB,
+            latency ms, throughput 1/s, TCO USD, and carbon metric tons. Distributed memory
+            feasibility is SKIPPED; performance PASS is not an SLA comparison.
+
+        See Also
+        --------
+        mlsysim.engine.solvers.performance.SingleNodeModel.solve : Evaluate a single accelerator.
+        mlsysim.engine.solvers.distributed.DistributedModel.solve : Evaluate distributed training.
+
+        Notes
+        -----
+        Single-node memory utilization = footprint/capacity. Distributed effective MFU =
+        node_mfu * scaling_efficiency. Macro carbon tons = EconomicsModel carbon_kg / 1000;
+        other outputs are selected solver fields.
+
+        Solver defaults apply, including TP=1 and PP=1 for the distributed path. The pipeline
+        connects outputs by argument names; model and hardware must be compatible.
+
+        The method does not provide sLA thresholds, distributed memory feasibility, custom ZeRO/accumulation settings, and
+        measured deployment validation. Solver exceptions propagate.
+
+        Examples
+        --------
+        >>> from mlsysim import Models, Hardware
+        >>> r = SystemEvaluator.evaluate("small", Models.Vision.ResNet50,
+        ...     Hardware.Cloud.H100, 1, "fp16", 0.5)
+        >>> r.feasibility.status == "PASS" and r.macro.status == "SKIPPED"
+        True
         """
         
         from .solvers import SingleNodeModel, DistributedModel, EconomicsModel

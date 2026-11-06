@@ -14,14 +14,34 @@ default and the complete print/no-JavaScript fallback.
 
 `mechanisms/implementations.json` selects the original-art factories for
 computation, memory, communication, coordination, and physical action across
-the four volumes. The current manifest contains 100 original-art implementations:
-86 newly authored modules and 14 retained implementations. The other 637
-cataloged figures remain static. There is no animation quota. The convolution
+the four volumes. This manifest and `figure-registry.json` identify the current
+roster; unselected catalog figures remain static. There is no animation quota. The convolution
 prototype retains its separate accepted-prototype label; the remaining reviewed
 implementations use hash-bound records in the original-art catalog.
 Enrollment alone is not acceptance. Source, artwork, module, shared-runtime,
 and timing changes invalidate the relevant current review evidence.
-Historical tests below apply only to their recorded snapshots.
+Historical counts and tests below apply only to their recorded snapshots.
+
+### Shareable step-by-step previews
+
+`binder/tools/scripts/export_figure_animation.py` exports a finite GIF from a
+rendered shared-player lesson. It captures committed states, preserves the
+diagram, and includes the current explanation, assumptions, book credit, and
+canonical chapter link. It does not capture interpolated movement or retain
+interactive controls. The chapter player remains the primary learning surface.
+
+```sh
+python3 binder/tools/scripts/export_figure_animation.py \
+  --url 'http://127.0.0.1:8891/PATH/TO/CHAPTER.html?view=explore#fig-allocator-live-cached-blocks' \
+  --key vol1:fig-allocator-live-cached-blocks \
+  --output /tmp/allocator-preview.gif
+```
+
+Use a new output filename for each export. The exporter retains raw PNG frames
+and a JSON manifest with input, fetched-resource, and output hashes. Reading
+pauses are constructed display allowances, not measured execution times.
+Inspect the decoded GIF before sharing. An export from a QA fixture remains a
+preview; the command does not publish a download or add a book download button.
 
 The selected set includes two native original-art factories: asynchronous
 host–accelerator timing and the two-link arm’s singularity comparison. These
@@ -63,6 +83,96 @@ case identity visible in the diagram or its live readout; for example, a
 single-query worked case must not appear to execute a complete matrix.
 Module-specific case selectors belong before the shared toolbar. Diagram-view
 selectors may remain with the artwork.
+
+**Consistent shared-player layout.** The shared player now defaults to the compact, diagram-first layout across volumes.
+Existing lessons retain their titles and narration; no introductory prose is generated.
+`layout: 'classic'` explicitly retains the previous layout for compatibility.
+An authored `intro` remains required when a module explicitly requests `layout: 'compact'`.
+The initial authored-intro pilots are `vol1:fig-mixed-precision`, `vol1:fig-fetching-optimized`,
+`vol1:fig-hw-acceleration-h100-roofline-lighthouses`, `vol1:fig-tiling-diagram`
+(a tall figure), and `vol1:fig-activation-checkpointing` (a wide chain).
+Omitting `layout` uses the same compact controls, without an empty introduction. Its order is:
+title; the required `intro` (creation throws without one); one collapsed
+**Assumptions** disclosure; optional view controls; the diagram; a dock
+holding the control bar; the current narration; then details and readouts.
+Nothing else sits between the diagram and the bar, so phone node cards and
+value readouts belong in `details`. `render` also receives `assumptions`, the
+disclosure element, for interpretation notes (a second disclosure is not
+allowed). Module view switches go in the `viewControls` option (an element or
+array), which the player places right above the diagram (left-aligned), never
+inside Assumptions; in Expand they ride in the Close bar. Label the options
+`Follow` and `Whole`.
+
+The bar reads Play, a status word, the step menu, Back, Next, Restart, Expand,
+and **Speed**, whose face shows the current rate. Wide players (container
+> 640 px) use one style, words only (`Speed 1×`); narrow players use 44 px icon
+targets (chevrons, `1×`). The status word is truthful and sparse: *Ready* only
+at step 1 (before play, after Restart); *Moving*, *Reading* (the automatic
+pause between actions), or *Paused* (an interrupted play) while a play is
+under way; *Complete* only at the last step; and no word at all when idle
+mid-sequence (the menu counter already says where the reader is). Screen
+readers get one concise `role="status"` that follows the same rule (Ready /
+Playing / Paused / Complete, spoken only on change, cleared silently when
+idle mid-sequence) and one announcement per committed step,
+on arrival; the narration itself is not a live region. The menu carries the
+only step number (`9 / 16 · label`); while an action is in motion or paused
+mid-move it keeps the committed step and shows the pending one as
+`8 → 9 / 16 · label`. Author labels without a leading stage number: write
+`Backprop at S = 2¹⁵ (stage 4)`, not `4. Backprop …` (the player rewrites a
+leading number the same way, and `check_original_player.py` flags it). While
+a move is in progress or paused mid-move the narration shows only
+`Next · <target title>`, without the target's explanation, so it never asserts
+a state the diagram has not reached; the explanation appears on arrival (the
+box keeps its height meanwhile, so the page does not jump). The automatic reading pause scales with the
+narration's word count (30 words = the build-time pause, bounded to 0.6–2×);
+it paces reading and never encodes measured time.
+
+**Speed** opens a popover with the 0.5×/1×/1.5×/2× choices, Restart (on narrow
+players), and a legend of the N/P/K/R/−/+/Esc shortcuts; touch-only devices
+(`pointer: coarse` without a fine pointer) hide the legend. The popover opens
+toward the larger free space, bounds its height to it, scrolls internally,
+and repositions on scroll and resize; the clicked speed radio keeps focus (a
+Safari fix) so arrow keys keep working. Buttons carry tooltips on hover and
+keyboard focus; tips are hoverable and Escape dismisses them (WCAG 1.4.13).
+One Escape does one thing: it closes the popover, else dismisses a tooltip
+that was already showing (hovered, or on a control focused from the keyboard),
+else closes Expand. The popover's height is bounded by the free space on its
+side, with no fixed floor.
+On narrow players (container ≤ 640 px) the bar is one row of 44 px targets;
+below ~300 px it wraps to two rows instead of overflowing (320 px reflow).
+
+**Protection contract.** Modules mark two kinds of stage elements:
+`data-mlsys-focus` on the step's highlighted region (every committed state
+must have one), and `data-mlsys-keep` on step-critical readouts, legends, and
+labels that are not highlighted (a loss-scale panel, an inline readout plate,
+axis tick labels, a color key). The dock and the pill never cover either, and
+the check re-runs on scroll, resize, state changes, and every animation frame
+of a move. In every view a module offers, each focus region plus 8 px must
+sit inside the drawing's frame (Follow crops include what the narration names;
+rings never touch an edge). `check_original_player.py --chapter-links` fails a
+compact module whose states lack a visible focus region or clip one.
+
+The dock pins to the viewport bottom only together with its one-line step
+title (attached above the bar), and only while bar plus title cover at most 15%
+of the visible diagram and no protected region; when pinned, the status word
+hides and Speed shrinks to its rate so the menu keeps room. A bar that cannot
+show its title does not pin: it flows, and a pill (`9/16 · title ↓`; a
+diagram-wide strip when the compact pill would truncate the title on narrow
+players; `9/16 ↓` as the last resort) rides the bottom edge under the same cap,
+lifted above any protected region it would cover. The pill is a named button
+("Go to step explanation"), reachable by keyboard while shown, with a 44 px
+hit area; it scrolls to the narration and moves focus there. Scrolled past
+the diagram, the dock sticks under the header, and its title line appears
+below it only once the whole narration has scrolled under the dock. **Expand**
+opens a dialog whose Close button (and the view switch) sit in their own bar
+above a scrolling body, so they never cover the diagram or scroll under it.
+
+Intros: one imperative sentence of at most 30 words, no contractions, no
+"you"; name the moving object as the diagram labels it, state one visible
+change, and use only numbers that appear in the step menu or narration.
+Build intro numbers from the module's own computed data where possible.
+`binder/tools/scripts/check_original_player.py` lints intros and step labels
+(and, with `--chapter-links`, the emitted compact mounts).
 
 While an action is moving or paused, stored values and completed results must
 still describe the last committed state. Instructions may describe the next

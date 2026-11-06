@@ -1,0 +1,192 @@
+---
+title: "Modeling and documentation conventions"
+subtitle: "One engine, shared equations, traceable assumptions"
+---
+
+MLSysIM is the modeling engine for the four-volume ML Systems textbook series.
+The books are its primary integration consumers; the same public API also serves
+students, instructors, and engineers working independently of the books.
+Organize the engine by the system being modeled, not by volume or chapter.
+A memory equation can serve a single accelerator, a fleet, an agent, or a robot.
+
+## Follow a calculation through the code
+
+| Layer | Question it answers | Location |
+|---|---|---|
+| Definitions | What hardware, workload, and environment are we modeling? | Registry packages and their `data/` directories |
+| Physics | What equation applies, and where does it come from? | `mlsysim/physics/` |
+| Solvers | How do the equations combine under these constraints? | `mlsysim/engine/solvers/` |
+| Scenarios | What named configuration are we evaluating? | `mlsysim/engine/scenario_catalog/` and `scenario_definitions/` |
+| Results | What does the answer mean, in which units? | `mlsysim/engine/result_types/` |
+| Teaching | How does a reader reason about the result? | Quarto guides, textbook cells, and labs |
+
+Keep equations in one implementation. A solver composes equations and checks
+constraints; a scenario supplies inputs. Chapter-specific empirical series and
+one-off anecdotes remain with the chapter rather than becoming engine constants.
+
+Use descriptive names such as `context_tokens` and `bytes_per_element`. Short
+symbols are appropriate when the adjacent docstring maps them directly to a
+published equation. Keep units attached until formatting the output.
+
+Split a large module when its domains can be understood independently. Preserve
+public import paths through explicit re-exports, and compare outputs before and
+after a move. Keep structural changes separate from changes to equations or defaults.
+
+## Document the calculation where it lives
+
+Use NumPy-style docstrings for public equations and solver methods. The first
+sentence explains the purpose in plain English. Include these standard sections:
+
+| Section | Required explanation |
+|---|---|
+| `Parameters` | Meaning, units, valid range, and meaning of defaults |
+| `Returns` | Quantity or result type, units, and feasibility semantics |
+| `Notes` | Equation, symbol definitions, unit of work, assumptions, and exclusions |
+| `References` | A supporting source URL and bibliography key when available, or a concrete algebraic derivation for original accounting |
+| `Examples` | A small executable example using the public API |
+
+Put the reusable equation's full derivation in its physics function. A solver
+should explain how it composes those equations and link to the relevant functions
+using `See Also`. Avoid copying a derivation into several implementations.
+
+Elementary identities do not need an unrelated citation. Use `Derivation:` in
+`References` to explain how a result follows from its definitions, conservation
+relationship, or stated construction. A heuristic must identify its assumed
+relationship and limitations; labeling it a derivation does not make it a physical
+law. Literature-derived methods should link the supporting source.
+
+An equation or section number belongs in the reference only after checking the
+source. A citation to a paper is not evidence that every constant in our
+implementation came from it. Identify each addition as a modeling convention,
+assumed efficiency, calibrated parameter, or algebraic consequence.
+
+For example, the Roofline principle motivates taking the larger of compute and
+memory time. An additive per-layer runtime tax is a separate assumption. Report
+both, rather than attributing the entire implementation to the Roofline paper.
+
+The existing provenance catalog records sources for values. Formula docstrings
+record the derivation and modeling choices. These complement each other; a
+verification-date field alone does not establish that an equation is correct.
+
+## Keep scenario properties concise
+
+Calculation scenarios share their inputs and assumptions across related properties.
+Put the scenario's equation or composition map, assumptions, exclusions, sources,
+and runnable example in its class docstring. A delegated scenario may name a
+qualified `Implementation reference:` in `References`; the checker resolves every
+linked target so a renamed solver cannot silently leave a broken explanation. Each public calculated property then
+states what it means, its units, and its equation or the qualified function or
+solver that owns the calculation. A simple alias can point to that contract instead
+of repeating a derivation. A property that introduces additional arithmetic must
+explain that arithmetic locally.
+
+These property explanations are part of the code, not generated substitutes for
+reading it. An extracted Python expression alone does not explain a unit of work,
+a valid regime, or why a relation applies.
+
+## Publish from the same source
+
+The site already uses `quartodoc`, configured in `_quarto.yml`. Its NumPy docstring
+parser turns code documentation into the [API reference](api/index.qmd).
+The pre-render hook, `scripts/build_api.py`, regenerates the reference for a full
+site build and checks public API coverage. Do not edit generated `docs/api/` pages.
+The [scenario reference index](api/scenario-index.qmd) links class pages with
+input fields, defaults, calculated properties, and their explanations. Single-page
+previews do not regenerate the API; rebuild it explicitly when reviewing changed
+docstrings.
+
+From the package directory, with the development and documentation extras installed:
+
+```bash
+python docs/scripts/build_api.py
+make modeling-docs-check
+make docs
+```
+
+Keep conceptual explanations in Quarto guides and implementation contracts in
+code. Link between them. Generate numerical tables from executable calculations;
+[calibration and validation scope](empirical-calibration.md) is an example.
+API coverage checks establish that pages exist, not that every explanation is complete.
+
+## Enforce the convention
+
+Run `make modeling-docs-check` from the package directory. This command is also
+part of `make check`, the development and release CI workflows, and the local
+pre-commit hooks. Install the development extra before running it.
+
+| Check | What fails |
+|---|---|
+| Ruff with the NumPy pydocstyle convention | Missing or incorrectly formatted docstrings in the selected modules |
+| Ruff formatter check | Python formatting that differs from the standard layout |
+| numpydoc validation | Missing or misordered parameters, undocumented returns, malformed sections, or missing examples |
+| MLSysIM contract check | Missing `Equation:`, `Assumptions:`, or `Excludes:` labels in `Notes`; missing supporting source URL, concrete `Derivation:`, or qualified `Implementation reference:` in `References` |
+| Executable examples | A doctest fails or the examples contain no executable code |
+| Citation-key check | A supplied key does not exist in the repository's paper bibliography |
+| Equation display | Unquoted multiplication tokens could become Markdown emphasis instead of the written equation |
+| Discovery | A newly added public calculation or scenario lacks its required contract |
+| Scenario trace | A scenario property loses its local equation or link to an underlying contract |
+
+The checker discovers public functions in the physics tree, public concrete
+solver methods and helpers, generic Engine calculations, workload calculations,
+calculated registry and result properties, serving profiles, constraint-explorer
+calculations, and scenario classes and their public properties from source
+definitions. New calculations in these modules enter the gate without someone
+remembering to add an allowlist entry. Scenario definitions and result types are
+scanned recursively through their domain packages, including base classes and
+package initializers. The legacy `scenario_types.py` and `results.py` import
+facades remain compatible entry points; imported aliases add no duplicate checks.
+Discovery follows physical source definitions rather than historical `__module__`
+values retained for serialization compatibility.
+Private implementation modules, abstract interfaces, and presentation-only summary
+methods are outside this numerical-contract inventory; their public callers own
+the documented contract. Imported aliases are checked at the defining function.
+
+`[tool.mlsysim.documentation]` in `pyproject.toml` controls optional module-wide
+Ruff style and formatting checks and the numpydoc exceptions. It does not narrow
+the discovered scientific-contract scope. Full NumPy contracts apply to equations
+and solvers; scenario properties use the concise shared-context convention above.
+Composition and conversion entry points have a separate ordinary NumPy API check:
+parameters, return semantics, and executable examples, without artificial equations
+or citations for dispatch and unit conversion. Presentation, serialization,
+metadata lookup, schema/introspection, abstract interfaces, and optional backend
+plumbing are not scientific-model contracts. Optional optimizer examples state
+the required installation extra and are validated separately when it is present.
+
+The only disabled numpydoc rules are the optional extended-summary and `See Also`
+requirements. The scientific explanation belongs in `Notes`; cross-links remain
+encouraged. The source distribution does not contain the paper bibliography, so
+checks there explicitly report that key resolution is unavailable. Repository CI
+checks the bibliography. A citation key existing does not prove that a source
+supports an equation; that remains a review responsibility.
+
+To apply formatting locally, run `python -m ruff format` on the affected modules.
+Checks never rewrite files. The tests exercise both documented APIs and deliberate
+failures such as an undocumented parameter, an unknown citation key, or an
+incorrect example result. Tests also add new temporary calculations to prove
+that discovery includes them, remove a scenario trace, and reject an empty or
+unexplained source declaration.
+
+The implementation uses standard [Ruff NumPy conventions](https://docs.astral.sh/ruff/settings/#lint_pydocstyle_convention)
+and [numpydoc validation](https://numpydoc.readthedocs.io/en/latest/validation.html).
+It does not require changing the existing Quarto publishing system.
+
+## Protect the textbook series
+
+Treat a change to an equation, default, unit, or feasibility decision as a numerical
+compatibility change even when the Python signature stays the same.
+
+1. Record the old and new outputs with identical inputs and package versions.
+2. Search consumers in **all four volumes**, including named scenarios and indirect
+   solver calls. Include labs, slides, the paper, figures, and generated tables.
+3. Execute affected textbook cells and compare the values interpolated into prose.
+   Passing registry lookup tests alone does not check the claims around those values.
+4. Review the surrounding claim: its inequality, bottleneck, comparison, and conclusion
+   may change even when rounding hides a small numerical difference.
+5. Flag prose discrepancies for a separate editorial decision. Do not silently rewrite
+   a teaching claim or tune an equation merely to retain its previous answer.
+6. Before a coordinated release, refresh approved generated artifacts and inspect
+   the affected rendered pages and figures. Report any cells or environments not tested.
+
+A structural cleanup should preserve outputs. A correctness fix may change them;
+its release notes must explain the change. Neither passing tests nor agreement with
+calibration cases establishes an accuracy guarantee for unseen workloads.

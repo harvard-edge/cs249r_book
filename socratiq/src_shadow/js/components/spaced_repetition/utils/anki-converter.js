@@ -1,30 +1,24 @@
+import { MAX_IMPORT_BYTES, validateFlashcardImport } from './import-validation.js';
+
 export class AnkiConverter {
     static parseAnkiCSV(csvContent) {
         try {
-            // Split content into lines and filter out empty lines
-            const lines = csvContent.split('\n').filter(line => line.trim());
-            
-            // Parse headers
+            if (typeof csvContent !== 'string' || csvContent.length > MAX_IMPORT_BYTES) throw new Error('Import file is too large');
+            const lines = csvContent.replace(/^\uFEFF/, '').split(/\r?\n/);
             const headers = this.parseHeaders(lines);
-            const startIndex = headers.headerEndIndex;
-            const separator = headers.separator || ';';
-            
-            // Parse the column definitions line
-            const columnLine = lines[startIndex];
-            const columns = this.parseColumns(columnLine, separator);
-            
-            // Parse the actual data
-            const cards = [];
-            for (let i = startIndex + 1; i < lines.length; i++) {
-                const line = lines[i];
-                if (line.startsWith('#')) continue; // Skip comments
-                
-                const card = this.parseCardLine(line, separator, columns);
-                if (card) cards.push(card);
+            if (!headers.separator) {
+                const firstRow = lines[headers.headerEndIndex] || '';
+                headers.separator = firstRow.includes('\t') ? '\t' : firstRow.includes(';') ? ';' : ',';
             }
-            
-            // Convert to our app's format
-            return this.convertToAppFormat(cards, headers);
+            if (headers.separator.length !== 1 || /["\r\n]/.test(headers.separator)) throw new Error('Invalid separator');
+            const rows = this.parseRows(lines.slice(headers.headerEndIndex).join('\n'), headers.separator);
+            if (rows.length && /^(question|front)$/i.test(rows[0][0].trim()) && /^(answer|back)$/i.test(rows[0][1]?.trim())) rows.shift();
+            if (!rows.length || rows.length > 10000) throw new Error('No cards or too many cards');
+            const cards = rows.map(fields => {
+                if (fields.length < 2 || fields.length > 3) throw new Error('Invalid card columns');
+                return { question: fields[0], answer: fields[1], tags: fields[2] ? fields[2].split(/\s+/).filter(Boolean) : [] };
+            });
+            return validateFlashcardImport(this.convertToAppFormat(cards, headers));
         } catch (error) {
             console.error('Error parsing Anki CSV:', error);
             throw new Error('Invalid Anki file format');
@@ -33,7 +27,7 @@ export class AnkiConverter {
     
     static parseHeaders(lines) {
         const headers = {
-            separator: ';',
+            separator: null,
             html: false,
             tags: [],
             notetype: null,
@@ -43,8 +37,11 @@ export class AnkiConverter {
         
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i].trim();
+            if (!line) { headers.headerEndIndex = i + 1; continue; }
             if (line.startsWith('#')) {
-                const [key, value] = line.substring(1).split(':').map(s => s.trim());
+                const colon = line.indexOf(':');
+                const key = line.slice(1, colon < 0 ? undefined : colon).trim();
+                const value = colon < 0 ? '' : line.slice(colon + 1).trim();
                 switch (key) {
                     case 'separator':
                         headers.separator = this.getSeparator(value);
@@ -73,55 +70,58 @@ export class AnkiConverter {
     
     static getSeparator(value) {
         const separators = {
-            'Comma': ',',
-            'Semicolon': ';',
-            'Tab': '\t',
-            'Space': ' ',
-            'Pipe': '|',
-            'Colon': ':'
+            'comma': ',',
+            'semicolon': ';',
+            'tab': '\t',
+            'space': ' ',
+            'pipe': '|',
+            'colon': ':'
         };
-        return separators[value] || value;
+        return separators[value.toLowerCase()] || value;
     }
     
-    static parseColumns(line, separator) {
-        return line.split(separator).map(col => col.trim());
-    }
-    
-    static parseCardLine(line, separator, columns) {
-        // Handle quoted fields with embedded separators
-        const fields = [];
-        let currentField = '';
-        let inQuotes = false;
-        
-        for (let i = 0; i < line.length; i++) {
-            const char = line[i];
-            
-            if (char === '"') {
-                if (inQuotes && line[i + 1] === '"') {
-                    // Handle escaped quotes
-                    currentField += '"';
-                    i++;
-                } else {
-                    inQuotes = !inQuotes;
-                }
-            } else if (char === separator && !inQuotes) {
-                fields.push(currentField);
-                currentField = '';
+    static parseRows(content, separator) {
+        const rows = [];
+        let row = [];
+        let field = '';
+        let quoted = false;
+        let closed = false;
+        const finishRow = () => {
+            row.push(field);
+            if (row.some(value => value.trim())) rows.push(row);
+            row = [];
+            field = '';
+            closed = false;
+        };
+        for (let index = 0; index < content.length; index++) {
+            const char = content[index];
+            if (!quoted && row.length === 0 && !field.trim() && char === '#') {
+                while (index < content.length && content[index] !== '\n') index++;
+                field = '';
+                continue;
+            }
+            if (quoted) {
+                if (char === '"') {
+                    if (content[index + 1] === '"') { field += '"'; index++; }
+                    else { quoted = false; closed = true; }
+                } else field += char;
+            } else if (char === separator) {
+                row.push(field); field = ''; closed = false;
+            } else if (char === '\n') {
+                finishRow();
+            } else if (char === '"' && field === '' && !closed) {
+                quoted = true;
+            } else if (closed) {
+                if (!/\s/.test(char)) throw new Error('Unexpected text after quoted field');
             } else {
-                currentField += char;
+                field += char;
             }
         }
-        fields.push(currentField);
-        
-        if (fields.length < 2) return null;
-        
-        return {
-            question: fields[0],
-            answer: fields[1],
-            tags: fields[2] ? fields[2].split(' ').filter(Boolean) : []
-        };
+        if (quoted) throw new Error('Unclosed quoted field');
+        finishRow();
+        return rows;
     }
-    
+
     static convertToAppFormat(cards, headers) {
         const chapter = {
             chapter: 0,
@@ -130,6 +130,7 @@ export class AnkiConverter {
         
         const processedCards = cards.map(card => ({
             id: crypto.randomUUID(),
+            chapter: chapter.chapter,
             question: this.processAnkiField(card.question, headers.html),
             answer: this.processAnkiField(card.answer, headers.html),
             created: new Date().toISOString(),
@@ -160,7 +161,7 @@ export class AnkiConverter {
         
         // Convert Anki media references
         field = field.replace(/\[sound:(.*?)\]/g, (match, filename) => 
-            `<audio controls src="${filename}"></audio>`);
+            `<audio controls src="${encodeURIComponent(filename)}"></audio>`);
             
         return field;
     }
@@ -183,7 +184,7 @@ export class AnkiConverter {
             for (const card of chapterSet.cards) {
                 const question = this.escapeField(card.question);
                 const answer = this.escapeField(card.answer);
-                const tags = card.tags.join(' ');
+                const tags = this.escapeField((card.tags || []).join(' '));
                 
                 lines.push(`${question};${answer};${tags}`);
             }

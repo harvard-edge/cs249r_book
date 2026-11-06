@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 from pathlib import Path
 
-from binder.cli.core.config import write_active_config
+import pytest
 
+from binder.cli.core.config import write_active_config
 
 SCRIPT = Path(__file__).resolve().parents[2] / "books" / "shared" / "scripts" / "save_latex_log.py"
 SPEC = importlib.util.spec_from_file_location("save_latex_log", SCRIPT)
@@ -23,6 +25,35 @@ def test_active_volume_reads_binder_config_source(tmp_path: Path) -> None:
     assert save_latex_log._active_volume(tmp_path) == "vol2"
 
 
+@pytest.mark.parametrize("volume", ["vol1", "vol2", "vol3", "vol4"])
+def test_active_volume_reads_direct_container_config(tmp_path, volume):
+    (tmp_path / "_quarto.yml").write_text(f"project:\n  output-dir: _build/pdf-{volume}\n")
+    assert save_latex_log._active_volume(tmp_path) == volume
+
+
+def test_html_config_is_not_treated_as_pdf(tmp_path):
+    (tmp_path / "_quarto.yml").write_text("# binder: config/_quarto-html-vol4.yml\nproject:\n  output-dir: _build/html-vol4\n")
+    assert save_latex_log._active_volume(tmp_path) is None
+
+
+def test_postrender_finds_books_root_and_current_index_intermediates(tmp_path, monkeypatch):
+    books = tmp_path / "books"
+    script = books / "shared/scripts/save_latex_log.py"
+    script.parent.mkdir(parents=True)
+    monkeypatch.setattr(save_latex_log, "__file__", str(script))
+    (books / "_quarto.yml").write_text("project:\n  output-dir: _build/pdf-vol4\n")
+    (books / "index.tex").write_text("Current render source")
+    (books / "index.aux").write_text("Current cross-reference metadata")
+    (books / "index.log").write_text("Current LaTeX build log")
+    def should_not_regenerate(*args):
+        raise AssertionError("Current build intermediates must be reused")
+    monkeypatch.setattr(save_latex_log, "_regenerate_auxiliary_files", should_not_regenerate)
+    save_latex_log.main()
+    output = books / "_build/pdf-vol4"
+    assert (output / "latex-build.log").read_text() == "Current LaTeX build log"
+    assert (output / "Machine-Learning-Systems-Vol4.aux").read_text() == "Current cross-reference metadata"
+
+
 def test_find_intermediate_accepts_quarto_index_stem(tmp_path: Path) -> None:
     aux = tmp_path / "index.aux"
     aux.write_text("\\newlabel{sec-test}{{1}{1}}\n", encoding="utf-8")
@@ -30,17 +61,31 @@ def test_find_intermediate_accepts_quarto_index_stem(tmp_path: Path) -> None:
     assert save_latex_log._find_intermediate(tmp_path, "Book-Vol2", ".aux") == aux
 
 
-def test_intermediate_must_be_at_least_as_new_as_retained_tex(tmp_path: Path) -> None:
+def test_current_index_is_preferred_over_stale_retained_stem(tmp_path):
+    old = tmp_path / "Book-Vol2.tex"
+    old.write_text("Stale previous build")
+    current = tmp_path / "index.tex"
+    current.write_text("Current Quarto render")
+    os.utime(old, (1_700_000_000, 1_700_000_000))
+    os.utime(current, (1_700_000_002, 1_700_000_002))
+    assert save_latex_log._find_intermediate(tmp_path, "Book-Vol2", ".tex") == current
+
+
+@pytest.mark.parametrize("age_seconds,expected", [(-2, False), (0, True), (2, True)])
+def test_intermediate_must_be_at_least_as_new_as_retained_tex(
+    tmp_path: Path, age_seconds: int, expected: bool
+) -> None:
     tex = tmp_path / "Book-Vol2.tex"
     aux = tmp_path / "Book-Vol2.aux"
     tex.write_text("new source", encoding="utf-8")
     aux.write_text("stale metadata", encoding="utf-8")
-    tex.touch()
+    # Container overlay filesystems can give rapid writes identical mtimes.
+    # Construct the required ordering rather than depending on clock resolution.
+    timestamp = 1_700_000_000
+    os.utime(tex, (timestamp, timestamp))
+    os.utime(aux, (timestamp + age_seconds, timestamp + age_seconds))
 
-    assert not save_latex_log._is_current_for_tex(aux, tex)
-
-    aux.touch()
-    assert save_latex_log._is_current_for_tex(aux, tex)
+    assert save_latex_log._is_current_for_tex(aux, tex) is expected
 
 
 def test_regenerate_auxiliary_files_uses_draft_mode(tmp_path: Path, monkeypatch) -> None:
@@ -60,6 +105,12 @@ def test_regenerate_auxiliary_files_uses_draft_mode(tmp_path: Path, monkeypatch)
     assert all(kwargs["cwd"] == tmp_path for _, kwargs in observed)
 
 
+def test_missing_retained_tex_does_not_crash_chapter_postrender(tmp_path):
+    aux = tmp_path / "index.aux"
+    aux.write_text("Chapter metadata")
+    assert not save_latex_log._is_current_for_tex(aux, tmp_path / "Book-Vol1.tex")
+
+
 def test_regenerate_auxiliary_files_stops_after_failed_pass(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -75,3 +126,66 @@ def test_regenerate_auxiliary_files_stops_after_failed_pass(
 
     assert not save_latex_log._regenerate_auxiliary_files(tmp_path, "Book-Vol2")
     assert len(calls) == 2
+
+
+def test_chapter_postrender_regenerates_and_preserves_selected_target(tmp_path, monkeypatch):
+    books = tmp_path / "books"
+    script = books / "shared/scripts/save_latex_log.py"
+    script.parent.mkdir(parents=True)
+    monkeypatch.setattr(save_latex_log, "__file__", str(script))
+    monkeypatch.delenv("QUARTO_PROJECT_OUTPUT_DIR", raising=False)
+    (books / "_quarto.yml").write_text(
+        "# binder: config/_quarto-pdf-vol4.yml\n"
+        "project:\n  output-dir: _build/pdf-vol4/chapters/appendix_control\n"
+        "book:\n  output-file: appendix_control\n"
+    )
+    tex = books / "appendix_control.tex"
+    tex.write_text("Current chapter TeX")
+    stale = books / "Machine-Learning-Systems-Vol4.aux"
+    stale.write_text("Previous full-volume labels")
+    os.utime(stale, (1_700_000_000, 1_700_000_000))
+    calls = []
+
+    def regenerate(directory, stem):
+        calls.append((directory, stem))
+        (directory / f"{stem}.aux").write_text(r"\newlabel{fig-test}{{1.1}{7}{Caption}{figure.1}{}}")
+        (directory / f"{stem}.log").write_text("Current chapter log")
+        return True
+
+    monkeypatch.setattr(save_latex_log, "_regenerate_auxiliary_files", regenerate)
+    save_latex_log.main()
+    output = books / "_build/pdf-vol4/chapters/appendix_control"
+    assert calls == [(books, "appendix_control")]
+    assert "fig-test" in (output / "appendix_control.aux").read_text()
+    assert (output / "latex-build.log").read_text() == "Current chapter log"
+    assert not (books / "_build/pdf-vol4/Machine-Learning-Systems-Vol4.aux").exists()
+
+
+def test_failed_regeneration_does_not_preserve_stale_aux(tmp_path, monkeypatch):
+    books = tmp_path / "books"
+    script = books / "shared/scripts/save_latex_log.py"
+    script.parent.mkdir(parents=True)
+    monkeypatch.setattr(save_latex_log, "__file__", str(script))
+    monkeypatch.delenv("QUARTO_PROJECT_OUTPUT_DIR", raising=False)
+    (books / "_quarto.yml").write_text("project:\n  output-dir: _build/pdf-vol4\n")
+    (books / "index.tex").write_text("New source")
+    aux = books / "index.aux"
+    aux.write_text("Old labels")
+    os.utime(aux, (1_700_000_000, 1_700_000_000))
+    def failed_regeneration(*args):
+        # A failed LaTeX pass can leave a fresh but incomplete AUX behind.
+        aux.write_text("Partial labels from failed pass")
+        return False
+
+    monkeypatch.setattr(save_latex_log, "_regenerate_auxiliary_files", failed_regeneration)
+    with pytest.raises(RuntimeError, match="Could not regenerate current PDF AUX"):
+        save_latex_log.main()
+    assert not (books / "_build/pdf-vol4/Machine-Learning-Systems-Vol4.aux").exists()
+
+
+def test_newer_index_aux_does_not_belong_to_retained_chapter_tex(tmp_path):
+    tex = tmp_path / "appendix_control.tex"
+    tex.write_text("Chapter source")
+    index_aux = tmp_path / "index.aux"
+    index_aux.write_text("Unrelated metadata")
+    assert not save_latex_log._is_current_for_tex(index_aux, tex)

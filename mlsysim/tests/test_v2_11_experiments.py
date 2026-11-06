@@ -229,3 +229,84 @@ def test_track_specific_rosters_reflect_deployment_domains():
 
     assert min(c.uplink_mbps for c in cloud_records) >= 300
     assert max(c.uplink_mbps for c in mobile_records) <= 25
+
+
+@pytest.mark.parametrize("track", TRACKS)
+def test_fleet_round_threshold_and_recovery_are_separate_gates(track):
+    from mlsysim.labs.experiments.v2_11_experiments import evaluate_fleet_round
+    common = dict(track_id=track, max_evidence_age_hours=24, max_clients=6,
+                  selection_policy="coverage", survivor_floor=2)
+    intact = evaluate_fleet_round(**common)
+    recovered = evaluate_fleet_round(**common, dropout_case="recoverable")
+    broken = evaluate_fleet_round(**common, dropout_case="missing_shares")
+    assert intact["aggregate_available"]
+    assert recovered["survivor_floor_pass"] and recovered["aggregate_available"]
+    assert broken["survivor_floor_pass"] and not broken["aggregate_available"]
+    assert recovered["survivor_ids"] == broken["survivor_ids"]
+    assert recovered["recovery_extra_exchanges"] == 1
+    assert intact["recovery_extra_exchanges"] == 0
+    assert recovered["survivor_ids"] == intact["compatible_ids"][:-1]
+    assert "not evaluated" in recovered["privacy_assurance"]
+
+
+def test_aggregation_floor_is_applied_after_compatibility_and_dropout():
+    from mlsysim.labs.experiments.v2_11_experiments import evaluate_fleet_round
+    result = evaluate_fleet_round("mobile", max_clients=4, survivor_floor=4,
+                                 dropout_case="recoverable")
+    assert result["selected_count"] == 4
+    assert len(result["survivor_ids"]) == 3
+    assert not result["survivor_floor_pass"]
+    assert result["recovery_pass"]
+    assert not result["aggregate_available"]
+    assert "survivor floor" in result["release_blockers"]
+
+
+def test_version_skew_rejects_individual_contributions_before_aggregation():
+    from mlsysim.labs.experiments.v2_11_experiments import evaluate_fleet_round
+    result = evaluate_fleet_round("mobile", max_clients=8, max_evidence_age_hours=24,
+                                 survivor_floor=2)
+    assert set(result["incompatible_ids"]) == {"c02", "c06"}
+    assert not set(result["incompatible_ids"]) & set(result["survivor_ids"])
+    assert result["update_versions"]["c02"][0] != result["release_tuple"]["base"]
+    assert result["update_versions"]["c06"][1] != result["release_tuple"]["adapter"]
+
+
+@pytest.mark.parametrize("track", TRACKS)
+def test_release_requires_validated_outcomes_coverage_hardware_and_compatible_state(track):
+    from mlsysim.labs.experiments.v2_11_experiments import evaluate_fleet_round
+    common = dict(track_id=track, max_clients=6, selection_policy="coverage", survivor_floor=3)
+    shadow = evaluate_fleet_round(**common)
+    promoted = evaluate_fleet_round(**common, validation_evidence="validated")
+    skew = evaluate_fleet_round(**common, validation_evidence="validated", release_state="base_only")
+    missing = evaluate_fleet_round(**common, validation_evidence="missing_cohort")
+    hardware = evaluate_fleet_round(**common, validation_evidence="hardware_failure")
+    regression = evaluate_fleet_round(**common, validation_evidence="regression")
+    assert shadow["aggregate_available"] and not shadow["promotion_allowed"]
+    assert promoted["promotion_allowed"]
+    assert promoted["release_action"] == "promote matched policy"
+    assert not skew["promotion_allowed"] and not skew["release_state_compatible"]
+    assert not missing["promotion_allowed"] and not missing["reporting_coverage_pass"]
+    assert not hardware["promotion_allowed"]
+    assert regression["release_action"] == "restore compatible baseline"
+    assert promoted["survivor_ids"] == shadow["survivor_ids"] == skew["survivor_ids"]
+
+
+@pytest.mark.parametrize("kwargs", [dict(survivor_floor=1), dict(survivor_floor=True),
+    dict(dropout_case="unknown"), dict(release_state="unchecked"), dict(validation_evidence="invented")])
+def test_fleet_round_rejects_unsupported_protocol_or_evidence(kwargs):
+    from mlsysim.labs.experiments.v2_11_experiments import evaluate_fleet_round
+    with pytest.raises(ValueError):
+        evaluate_fleet_round("mobile", **kwargs)
+
+
+def test_surviving_training_coverage_is_distinct_from_validation_reporting():
+    from mlsysim.labs.experiments.v2_11_experiments import evaluate_fleet_round
+    lost_training_cohort = evaluate_fleet_round("mobile", dropout_case="recoverable",
+                                              survivor_floor=2, validation_evidence="validated")
+    assert not lost_training_cohort["participation_coverage_pass"]
+    assert lost_training_cohort["reporting_coverage_pass"]
+    assert "surviving cohort representation" in lost_training_cohort["release_blockers"]
+    missing_reports = evaluate_fleet_round("mobile", validation_evidence="missing_cohort")
+    assert missing_reports["participation_coverage_pass"]
+    assert not missing_reports["reporting_coverage_pass"]
+    assert "cohort reporting coverage" in missing_reports["release_blockers"]

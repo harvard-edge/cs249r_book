@@ -109,7 +109,7 @@ export function buildContributeUrl(customBody?: string): string {
     '**Track:** <!-- cloud / edge / mobile / tinyml -->',
     '**Suggested Level:** <!-- L1 (recall) / L2 (understand) / L3 (apply) / L4 (analyze) / L5 (evaluate) / L6+ (create) -->',
     '**Topic:** <!-- Pick from existing topics or suggest a new one -->',
-    '**Subject and concepts:** <!-- Optional: ML Systems Taxonomy subject and concepts, see https://mlsysbook.ai/explore/ -->',
+    '**Subject and concepts:** <!-- Optional: ML Systems Taxonomy subject and concepts, see https://mlsysbook.ai/taxonomy/ -->',
     '**Zone:** <!-- recall / analyze / design / implement / diagnosis / specification / fluency / evaluation / realization / optimization / mastery -->',
     '',
     '### Scenario',

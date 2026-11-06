@@ -121,12 +121,42 @@ class Workload(BaseModel):
         return require_unit_family(v, ureg.byte / ureg.second, "data_rate", "data")
 
     def lower(self, precision: Quantity | str = BYTES_FP16) -> ComputationGraph:
-        """
-        Lowers the workload into a hardware-agnostic computation graph.
+        """Project stored workload facts into a computation graph.
 
-        Default implementation uses ``parameters`` and ``inference_flops``
-        directly.  Subclasses (Transformer, CNN, etc.) override this with
-        architecture-specific lowering.
+        Parameters
+        ----------
+        precision : Quantity or str, default: BYTES_FP16
+            Bytes per stored element, or a registered format such as 'fp16'.
+            A byte quantity specifies the width directly; it must be positive.
+
+        Returns
+        -------
+        ComputationGraph
+            Work in FLOPs, resident weight bytes, parameter count, arithmetic
+            intensity in FLOP/byte, and the available layer count.
+
+        Notes
+        -----
+        Equation: W = P * b and I = F / W. F uses inference_flops when supplied; otherwise F = 2 * P. If P is absent but model_size exists, W = model_size, P = 0, and missing FLOPs become zero.
+
+        Assumptions: one graph represents the work unit described by the workload family. With parameter count present, this base implementation computes W from P and b rather than preferring model_size. A zero-byte size-only workload has zero arithmetic intensity by convention.
+
+        Excludes: activation or cache storage, backward work, hardware efficiency, and precision-dependent operation counts. The 2P fallback is an approximation, not a graph trace.
+
+        References
+        ----------
+        Derivation: multiply parameter count by storage width to obtain weight
+        bytes, then divide the declared or approximated work by those bytes.
+        This is a demand-accounting projection; it does not predict device time.
+
+        Examples
+        --------
+        >>> from mlsysim.models.types import Workload
+        >>> from mlsysim.core.units import Q_
+        >>> model = Workload(name='Example', architecture='dense', parameters=Q_(100, 'count'))
+        >>> graph = model.lower('fp16')
+        >>> graph.weight_bytes == model.parameters.magnitude * Q_(2, 'byte')
+        True
         """
         from ..core.units import resolve_precision
         prec_qty = resolve_precision(precision)[1] if isinstance(precision, str) else precision
@@ -157,6 +187,47 @@ class Workload(BaseModel):
         )
 
     def size_in_bytes(self, precision: Quantity | str = BYTES_FP16) -> Quantity:
+        """Calculate stored model weights at the requested precision.
+
+        Parameters
+        ----------
+        precision : Quantity or str, default: BYTES_FP16
+            Bytes per stored element, or a registered format such as 'fp16'.
+            A byte quantity specifies the width directly; it must be positive.
+
+        Returns
+        -------
+        Quantity
+            Resident weight size with data units, normally bytes. A supplied
+            model_size retains its original compatible units when returned.
+
+        Notes
+        -----
+        Equation: W = P * b when parameter count P is available. A supplied
+        model_size takes precedence at FP16/BF16; if P is missing it is used
+        at every precision because there is no count from which to rescale.
+
+        Assumptions: all parameters use one element width. An explicit model_size
+        is an authoritative footprint at the default storage format. Without
+        parameters or model_size, the method raises NotImplementedError.
+
+        Excludes: gradients, optimizer states, activations, KV caches, quantization
+        scales, packing alignment, and allocator reserve.
+
+        References
+        ----------
+        Derivation: multiply the number of stored elements by bytes per element.
+        The model_size precedence is an implementation convention for workloads
+        whose stored footprint is known but whose parameter inventory is absent.
+
+        Examples
+        --------
+        >>> from mlsysim.models.types import Workload
+        >>> from mlsysim.core.units import Q_
+        >>> model = Workload(name='Example', architecture='dense', parameters=Q_(100, 'count'))
+        >>> model.size_in_bytes('fp16') == 2 * model.size_in_bytes('int8')
+        True
+        """
         if self.model_size is not None and precision in (BYTES_FP16, "fp16", "bf16"):
             return self.model_size
         if self.parameters is not None:
@@ -247,6 +318,57 @@ class TransformerWorkload(Workload):
         return self
 
     def get_kv_cache_size(self, seq_len: int, batch_size: int, precision: Quantity | str = BYTES_FP16) -> Quantity:
+        """Count cached attention state for a batch of sequences.
+
+        Parameters
+        ----------
+        seq_len : int
+            Nonnegative cached tokens per sequence, including any shared prefix
+            separately in every request; this method does not deduplicate pages.
+        batch_size : int
+            Nonnegative number of resident sequences.
+        precision : Quantity or str, default: BYTES_FP16
+            Bytes per stored element, or a registered format such as 'fp16'.
+            A byte quantity specifies the width directly; it must be positive.
+
+        Returns
+        -------
+        Quantity
+            Cache storage in bytes for all layers and sequences.
+
+        See Also
+        --------
+        mlsysim.physics.memory.calc_kv_cache_size : Standard KV tensor accounting.
+        mlsysim.physics.memory.calc_mla_cache_size : Compressed latent accounting.
+
+        Notes
+        -----
+        Equation: M_KV = 2 * L * H_KV * d_head * S * B * b for standard
+        multi-head or grouped-query attention. When both MLA ranks are present,
+        M_MLA = L * (kv_lora_rank + qk_rope_head_dim) * S * B * b.
+
+        Assumptions: all layers share the same attention geometry. Missing
+        hidden_dim and heads fall back to 4096 and 32 here; an explicit head_dim
+        overrides hidden_dim // heads. Missing kv_heads means full multi-head
+        attention. Both MLA dimensions must be present to select the latent path.
+
+        Excludes: query activations, weight storage, page rounding, cache sharing,
+        allocator metadata, and inference-engine workspaces.
+
+        References
+        ----------
+        Derivation: standard attention stores one key and one value vector per
+        KV head, layer, token, and sequence. MLA stores a shared latent vector
+        and the rotary-position key components instead of expanded head tensors.
+        The arithmetic is delegated to the two named cache-accounting functions.
+
+        Examples
+        --------
+        >>> from mlsysim import Models
+        >>> model = Models.Language.Llama3_8B
+        >>> model.get_kv_cache_size(128, 2) == 2 * model.get_kv_cache_size(128, 1)
+        True
+        """
         from ..core.units import resolve_precision
         from ..physics import calc_kv_cache_size, calc_mla_cache_size
         prec_qty = resolve_precision(precision)[1] if isinstance(precision, str) else precision
@@ -269,42 +391,191 @@ class TransformerWorkload(Workload):
 
     @property
     def head_width(self) -> int:
-        """Width of one attention head: ``head_dim`` when stated, else hidden_dim // heads (added 2026-10-20)."""
+        """Return the number of components in one attention head.
+
+        Returns
+        -------
+        int
+            Feature count per query/key head; a count without physical units.
+
+        Notes
+        -----
+        Equation: d_head = head_dim when explicitly set, else hidden_dim // heads.
+
+        Assumptions: the fallback requires populated hidden_dim and heads with a
+        positive head count. Integer division follows the registered geometry;
+        this property does not check divisibility.
+
+        Excludes: grouped-query sharing ratios, latent-cache rank, and validation
+        of a missing or inconsistent architectural specification.
+
+        References
+        ----------
+        Derivation: partition the hidden feature width evenly among query heads;
+        an explicit per-head width overrides that partition for architectures
+        whose projected head dimension differs from hidden_dim / heads.
+
+        Examples
+        --------
+        >>> from mlsysim import Models
+        >>> model = Models.Language.Llama3_8B
+        >>> model.head_width == model.hidden_dim // model.heads
+        True
+        """
         return self.head_dim or self.hidden_dim // self.heads
 
     @property
     def kv_width(self) -> int:
-        """Key (or value) width cached per layer per token: key-value heads x head width (added 2026-10-20)."""
+        """Return the expanded key or value feature width per layer.
+
+        Returns
+        -------
+        int
+            Components in one expanded key tensor, or one value tensor, per
+            token and layer. This is a feature count, not bytes.
+
+        Notes
+        -----
+        Equation: d_KV = (kv_heads or heads) * head_width.
+
+        Assumptions: absent kv_heads means one KV head for every query head.
+        This property describes expanded head geometry even for an MLA workload.
+
+        Excludes: the second tensor (key versus value), element byte width,
+        batch size, sequence length, and compressed MLA cache representation.
+
+        References
+        ----------
+        Derivation: concatenate the per-head feature vectors across the KV heads.
+        Cache storage additionally needs both K and V, storage width, and the
+        number of resident tokens; get_kv_cache_size performs that accounting.
+
+        Examples
+        --------
+        >>> from mlsysim import Models
+        >>> model = Models.Language.Llama3_8B
+        >>> model.kv_width == model.kv_heads * model.head_width
+        True
+        """
         return (self.kv_heads or self.heads) * self.head_width
 
     @property
     def queries_per_kv_head(self) -> int:
-        """Query heads that share one key-value head (one for multi-head attention; added 2026-10-20)."""
+        """Return the query-head sharing ratio for grouped attention.
+
+        Returns
+        -------
+        int
+            Number of query heads assigned to each KV head, dimensionless.
+
+        Notes
+        -----
+        Equation: sharing = heads // (kv_heads or heads).
+
+        Assumptions: query heads partition evenly across the registered KV
+        heads. Missing kv_heads denotes ordinary multi-head attention.
+
+        Excludes: unequal groups, runtime routing, and a divisibility check;
+        integer division preserves the implementation's architectural convention.
+
+        References
+        ----------
+        Derivation: divide the query-head count by the number of shared KV heads.
+        With equal query and KV head counts this ratio is one.
+
+        Examples
+        --------
+        >>> from mlsysim import Models
+        >>> model = Models.Language.Llama3_8B
+        >>> model.queries_per_kv_head * model.kv_heads == model.heads
+        True
+        """
         return self.heads // (self.kv_heads or self.heads)
 
     def training_memory(self, batch_size: int, seq_len: int, precision: str = "fp16", optimizer: str = "adam", strategy: str = "selective", zero_stage: int = 0, dp_size: int = 1, is_lora: bool = False, lora_rank: int = 16) -> Quantity:
-        """
-        Estimate training memory for a Transformer model.
-        
-        Source: Shoeybi et al. (2019), "Megatron-LM: Training Multi-Billion Parameter 
-                Language Models Using Model Parallelism"
-        Source: Rajbhandari et al. (2020), "ZeRO: Memory Optimizations Toward Training Trillion Parameter Models."
-        
-        Args:
-            batch_size: Mini-batch size (B)
-            seq_len: Sequence length (S)
-            precision: Precision format ('fp32', 'fp16', 'int8', 'int4')
-            optimizer: Optimizer type ('adam', 'sgd')
-            strategy: Recompute strategy ('none', 'selective', 'full')
-            zero_stage: ZeRO optimization stage (0, 1, 2, 3)
-            dp_size: Data parallel size for ZeRO sharding
-            is_lora: Whether Low-Rank Adaptation (PEFT) is used
-            
-        Returns:
-            Quantity[byte]: Total training memory per GPU
+        """Estimate per-device weights, gradients, optimizer state, and activations.
+
+        Parameters
+        ----------
+        batch_size : int
+            Positive sequences resident on this device for activation accounting.
+        seq_len : int
+            Positive tokens per sequence.
+        precision : str, default: 'fp16'
+            Registered weight and gradient format; optimizer storage uses its
+            own mixed-precision convention in optimizer_state_bytes.
+        optimizer : str, default: 'adam'
+            Optimizer convention: 'adam', 'adamw', 'sgd', or 'none'.
+        strategy : str, default: 'selective'
+            Activation recomputation mode: 'none', 'selective', or 'full',
+            delegated to calc_activation_memory.
+        zero_stage : int, default: 0
+            ZeRO stage: 0 leaves state local; 1 shards optimizer state;
+            2 also shards gradients; 3 also shards weights.
+        dp_size : int, default: 1
+            Positive number of data-parallel ranks sharing the sharded state.
+        is_lora : bool, default: False
+            Restrict trainable gradient and optimizer state to an approximate
+            adapter parameter fraction. Full frozen weights remain resident.
+        lora_rank : int, default: 16
+            Positive adapter rank when is_lora is true. The model assumes
+            adapters on Q, K, V, and O projections in every layer.
+
+        Returns
+        -------
+        Quantity
+            Modeled resident memory per device in GiB. This method does not
+            compare the result with a device capacity or declare feasibility.
+
+        See Also
+        --------
+        mlsysim.physics.memory.calc_activation_memory : Activation assumptions.
+        mlsysim.physics.memory.optimizer_state_bytes : Optimizer storage convention.
+
+        Notes
+        -----
+        Equation: M = M_weights + M_gradients + M_optimizer + M_activations.
+        Weights and gradients initially cost P * b each; optimizer state costs
+        P * optimizer_state_bytes(optimizer). LoRA multiplies gradient and
+        optimizer storage by min(8 * rank * hidden_dim * layers / P, 1).
+        ZeRO divides each selected state category by dp_size.
+
+        Assumptions: homogeneous data-parallel shards and the selected activation
+        formula. Missing hidden_dim uses 4096. The adapter estimate covers four
+        square attention projections, not every linear layer or architecture.
+        Optimizer state follows the shared mixed-precision byte convention.
+
+        Excludes: communication buffers, allocator reserve, runtime workspaces,
+        fragmentation, tensor-parallel activation partitioning, and peak transient
+        all-gather state. ZeRO sharding is a storage estimate, not a latency model.
+
+        References
+        ----------
+        Rajbhandari et al. (2020), "ZeRO: Memory Optimizations Toward Training
+        Trillion Parameter Models."
+        https://doi.org/10.1109/sc41405.2020.00024 (bibliography key: rajbhandari2020).
+        The LoRA projection count and frozen-weight accounting are explicit
+        implementation assumptions; the ZeRO citation supports state partitioning.
+
+        Examples
+        --------
+        >>> from mlsysim import Models
+        >>> model = Models.Language.Llama3_8B
+        >>> local = model.training_memory(1, 128, zero_stage=0)
+        >>> sharded = model.training_memory(1, 128, zero_stage=3, dp_size=2)
+        >>> sharded < local
+        True
         """
         from ..core.units import resolve_precision
         from ..physics import calc_activation_memory
+        from ..physics.memory import optimizer_state_bytes
+        from ..core._validation import validate_at_least
+
+        validate_at_least(dp_size, 1, "dp_size")
+        if zero_stage not in (0, 1, 2, 3):
+            raise ValueError("zero_stage must be 0, 1, 2, or 3")
+        if is_lora:
+            validate_at_least(lora_rank, 1, "lora_rank")
         
         _, precision_bytes = resolve_precision(precision)
         bpp = precision_bytes.to(ureg.byte).magnitude
@@ -315,13 +586,8 @@ class TransformerWorkload(Workload):
         weight_mem = n_params * bpp * ureg.byte
         grad_mem = n_params * bpp * ureg.byte
         
-        # 2. Optimizer States (Adam = 12 bytes/param for FP32 states)
-        if optimizer.lower() == "adam":
-            # Adam: master weights (4), momentum (4), variance (4) = 12 bytes/param
-            opt_mem = n_params * 12 * ureg.byte
-        else:
-            # SGD: master weights (4) = 4 bytes/param
-            opt_mem = n_params * 4 * ureg.byte
+        # 2. Shared mixed-precision optimizer accounting.
+        opt_mem = n_params * optimizer_state_bytes(optimizer)
             
         # LoRA: trainable fraction ≈ 2 * r * d_model * n_adapted_layers / total_params
         # For typical configs (all linear layers in attention + MLP):
@@ -358,7 +624,45 @@ class TransformerWorkload(Workload):
         return (weight_mem + grad_mem + opt_mem + act_mem).to(ureg.GiB)
 
     def lower(self, precision: Quantity | str = BYTES_FP16) -> ComputationGraph:
-        ops = self.inference_flops or (2 * self.parameters.to(ureg.count).magnitude * ureg.flop)
+        """Lower one Transformer forward work unit and its resident weights.
+
+        Parameters
+        ----------
+        precision : Quantity or str, default: BYTES_FP16
+            Bytes per stored element, or a registered format such as 'fp16'.
+            A byte quantity specifies the width directly; it must be positive.
+
+        Returns
+        -------
+        ComputationGraph
+            Work in FLOPs, resident weight bytes, parameter count, arithmetic
+            intensity in FLOP/byte, and the available layer count.
+
+        Notes
+        -----
+        Equation: F = inference_flops if specified, otherwise 2 * P; W = size_in_bytes(precision); I = F / W.
+
+        Assumptions: the registered FLOP count defines the work unit when supplied; the fallback represents parameter-dominated dense work for one token. Layer count is copied into the graph for later overhead modeling.
+
+        Excludes: attention over cached context, KV storage, backward work, activation traffic, and device timing. Do not interpret this graph alone as a complete decode model.
+
+        References
+        ----------
+        Derivation: multiply parameter count by storage width to obtain weight
+        bytes, then divide the declared or approximated work by those bytes.
+        This is a demand-accounting projection; it does not predict device time.
+
+        Examples
+        --------
+        >>> from mlsysim import Models
+        >>> model = Models.Language.Llama3_8B
+        >>> graph = model.lower('fp16')
+        >>> graph.weight_bytes == model.size_in_bytes('fp16')
+        True
+        """
+        from ..physics.transformer import calc_transformer_decode_flops
+
+        ops = self.inference_flops or calc_transformer_decode_flops(self.parameters)
         weights = self.size_in_bytes(precision)
         return ComputationGraph(
             name=self.name,
@@ -383,7 +687,48 @@ class SparseTransformerWorkload(TransformerWorkload):
     def lower(self, precision: Quantity | str = BYTES_FP16) -> ComputationGraph:
         # For MoE, total parameters define the memory footprint,
         # but active parameters define the computation flops.
-        ops = self.inference_flops or (2 * self.active_parameters.to(ureg.count).magnitude * ureg.flop)
+        """Separate active-expert compute from total resident MoE weights.
+
+        Parameters
+        ----------
+        precision : Quantity or str, default: BYTES_FP16
+            Bytes per stored element, or a registered format such as 'fp16'.
+            A byte quantity specifies the width directly; it must be positive.
+
+        Returns
+        -------
+        ComputationGraph
+            Work in FLOPs, resident weight bytes, parameter count, arithmetic
+            intensity in FLOP/byte, and the available layer count.
+
+        Notes
+        -----
+        Equation: F = inference_flops if supplied, otherwise 2 * P_active; W = size_in_bytes(precision) uses P_total; I = F / W.
+
+        Assumptions: all expert weights remain resident even when only a subset executes for a token. A declared inference_flops value overrides the active-parameter approximation.
+
+        Excludes: expert routing, inter-device dispatch, load imbalance, sparse memory fetch efficiency, attention-context work, and KV state.
+
+        References
+        ----------
+        Derivation: multiply parameter count by storage width to obtain weight
+        bytes, then divide the declared or approximated work by those bytes.
+        This is a demand-accounting projection; it does not predict device time.
+
+        Examples
+        --------
+        >>> from mlsysim.models.types import SparseTransformerWorkload
+        >>> from mlsysim.core.units import Q_
+        >>> model = SparseTransformerWorkload(name='MoE', architecture='moe', parameters=Q_(100, 'count'), active_parameters=Q_(25, 'count'), layers=1, experts=4)
+        >>> graph = model.lower('fp16')
+        >>> graph.total_ops == 2 * model.active_parameters.magnitude * Q_(1, 'flop')
+        True
+        >>> graph.weight_bytes == model.size_in_bytes('fp16')
+        True
+        """
+        from ..physics.transformer import calc_transformer_decode_flops
+
+        ops = self.inference_flops or calc_transformer_decode_flops(self.active_parameters)
         weights = self.size_in_bytes(precision) # uses self.parameters (total params)
         return ComputationGraph(
             name=self.name,
@@ -404,6 +749,42 @@ class CNNWorkload(Workload):
     width_multiplier: Optional[float] = None
 
     def lower(self, precision: Quantity | str = BYTES_FP16) -> ComputationGraph:
+        """Lower the declared convolutional forward-pass work.
+
+        Parameters
+        ----------
+        precision : Quantity or str, default: BYTES_FP16
+            Bytes per stored element, or a registered format such as 'fp16'.
+            A byte quantity specifies the width directly; it must be positive.
+
+        Returns
+        -------
+        ComputationGraph
+            Work in FLOPs, resident weight bytes, parameter count, arithmetic
+            intensity in FLOP/byte, and the available layer count.
+
+        Notes
+        -----
+        Equation: F = inference_flops; W = size_in_bytes(precision); I = F / W.
+
+        Assumptions: inference_flops describes one image at the registered input resolution. Precision changes stored weights but does not change the declared operation count.
+
+        Excludes: input-resolution scaling, convolution shape tracing, activation storage, backward work, and device-specific kernels.
+
+        References
+        ----------
+        Derivation: multiply parameter count by storage width to obtain weight
+        bytes, then divide the declared or approximated work by those bytes.
+        This is a demand-accounting projection; it does not predict device time.
+
+        Examples
+        --------
+        >>> from mlsysim import Models
+        >>> model = Models.Vision.ResNet50
+        >>> graph = model.lower('fp16')
+        >>> graph.total_ops == model.inference_flops
+        True
+        """
         weights = self.size_in_bytes(precision)
         return ComputationGraph(
             name=self.name,
@@ -426,6 +807,47 @@ class SSMWorkload(Workload):
         # State space model memory footprint is independent of sequence length (O(1) w.r.t seq_len)
         # Represents the recursive state vector maintained by the model (e.g., Mamba)
         # Typically: layers * batch * hidden_dim * state_size * precision
+        """Count persistent recurrent state for a batch of state-space sequences.
+
+        Parameters
+        ----------
+        batch_size : int
+            Nonnegative number of concurrent recurrent states.
+        precision : Quantity or str, default: BYTES_FP16
+            Bytes per stored element, or a registered format such as 'fp16'.
+            A byte quantity specifies the width directly; it must be positive.
+
+        Returns
+        -------
+        Quantity
+            Persistent recurrent-state storage in bytes.
+
+        Notes
+        -----
+        Equation: M_state = layers * batch_size * hidden_dim * state_size * b,
+        where b is bytes per element. Sequence length does not enter this product.
+
+        Assumptions: each layer retains a dense hidden_dim-by-state_size array
+        per sequence and updates it in place. All arrays use the requested width.
+
+        Excludes: convolution history, gate buffers, temporary activations,
+        weights, and architecture-specific state packing. This is the declared
+        recurrent-state tensor, not the full serving footprint.
+
+        References
+        ----------
+        Derivation: multiply the dimensions of the retained recurrent-state
+        array by element width. The state is overwritten per token, so this
+        storage accounting does not accumulate one array per history token.
+
+        Examples
+        --------
+        >>> from mlsysim.models.types import SSMWorkload
+        >>> from mlsysim.core.units import Q_
+        >>> model = SSMWorkload(name='SSM', architecture='ssm', parameters=Q_(100, 'count'), layers=2, hidden_dim=8, state_size=4)
+        >>> model.get_state_cache_size(2) == 2 * model.get_state_cache_size(1)
+        True
+        """
         from ..core.units import resolve_precision
         prec_qty = resolve_precision(precision)[1] if isinstance(precision, str) else precision
         bpp = prec_qty.to(ureg.byte).magnitude
@@ -433,7 +855,45 @@ class SSMWorkload(Workload):
         return (size_bytes * ureg.byte).to(ureg.byte)
 
     def lower(self, precision: Quantity | str = BYTES_FP16) -> ComputationGraph:
-        ops = self.inference_flops or (2 * self.parameters.to(ureg.count).magnitude * ureg.flop)
+        """Lower the declared state-space forward work and weights.
+
+        Parameters
+        ----------
+        precision : Quantity or str, default: BYTES_FP16
+            Bytes per stored element, or a registered format such as 'fp16'.
+            A byte quantity specifies the width directly; it must be positive.
+
+        Returns
+        -------
+        ComputationGraph
+            Work in FLOPs, resident weight bytes, parameter count, arithmetic
+            intensity in FLOP/byte, and the available layer count.
+
+        Notes
+        -----
+        Equation: F = inference_flops if supplied, otherwise 2 * P; W = size_in_bytes(precision); I = F / W.
+
+        Assumptions: the fallback approximates parameter-dominated work per recurrent step. A measured or separately derived operation count can be supplied through inference_flops.
+
+        Excludes: recurrent-state storage and traffic, scan kernel details, training sequence work, and temporary activations. Use get_state_cache_size separately for retained state.
+
+        References
+        ----------
+        Derivation: multiply parameter count by storage width to obtain weight
+        bytes, then divide the declared or approximated work by those bytes.
+        This is a demand-accounting projection; it does not predict device time.
+
+        Examples
+        --------
+        >>> from mlsysim.models.types import SSMWorkload
+        >>> from mlsysim.core.units import Q_
+        >>> model = SSMWorkload(name='SSM', architecture='ssm', parameters=Q_(100, 'count'), layers=2, hidden_dim=8, state_size=4)
+        >>> model.lower().weight_bytes == model.size_in_bytes()
+        True
+        """
+        from ..physics.transformer import calc_transformer_decode_flops
+
+        ops = self.inference_flops or calc_transformer_decode_flops(self.parameters)
         weights = self.size_in_bytes(precision)
         return ComputationGraph(
             name=self.name,
@@ -454,6 +914,42 @@ class DiffusionWorkload(Workload):
 
     def lower(self, precision: Quantity | str = BYTES_FP16) -> ComputationGraph:
         # Total inference flops = Flops per step * denoising steps
+        """Accumulate forward work across the configured denoising steps.
+
+        Parameters
+        ----------
+        precision : Quantity or str, default: BYTES_FP16
+            Bytes per stored element, or a registered format such as 'fp16'.
+            A byte quantity specifies the width directly; it must be positive.
+
+        Returns
+        -------
+        ComputationGraph
+            Work in FLOPs, resident weight bytes, parameter count, arithmetic
+            intensity in FLOP/byte, and the available layer count.
+
+        Notes
+        -----
+        Equation: F = denoising_steps * F_step; F_step is inference_flops when supplied, otherwise 2 * P. W = size_in_bytes(precision) is retained once; I = F / W.
+
+        Assumptions: every step executes the same declared work and reuses the same weights. inference_flops is per denoising step, unlike a total-generation FLOP count.
+
+        Excludes: resolution-dependent FLOP inference, classifier-free-guidance duplication, text-encoder and decoder work, per-step activation traffic, and sampler-specific overhead.
+
+        References
+        ----------
+        Derivation: multiply parameter count by storage width to obtain weight
+        bytes, then divide the declared or approximated work by those bytes.
+        This is a demand-accounting projection; it does not predict device time.
+
+        Examples
+        --------
+        >>> from mlsysim.models.types import DiffusionWorkload
+        >>> from mlsysim.core.units import Q_
+        >>> model = DiffusionWorkload(name='Diffusion', architecture='diffusion', parameters=Q_(100, 'count'), denoising_steps=4, resolution=64, inference_flops=Q_(200, 'flop'))
+        >>> model.lower().total_ops == model.denoising_steps * model.inference_flops
+        True
+        """
         base_ops = self.inference_flops or (2 * self.parameters.to(ureg.count).magnitude * ureg.flop)
         total_ops = base_ops * self.denoising_steps
         weights = self.size_in_bytes(precision)
@@ -478,6 +974,42 @@ class EmbodiedWorkload(Workload):
     hidden_dim: Optional[int] = None
 
     def lower(self, precision: Quantity | str = BYTES_FP16) -> ComputationGraph:
+        """Lower one declared embodied-policy evaluation.
+
+        Parameters
+        ----------
+        precision : Quantity or str, default: BYTES_FP16
+            Bytes per stored element, or a registered format such as 'fp16'.
+            A byte quantity specifies the width directly; it must be positive.
+
+        Returns
+        -------
+        ComputationGraph
+            Work in FLOPs, resident weight bytes, parameter count, arithmetic
+            intensity in FLOP/byte, and the available layer count.
+
+        Notes
+        -----
+        Equation: F = inference_flops if supplied, otherwise 2 * P; W = size_in_bytes(precision); I = F / W.
+
+        Assumptions: inference_flops describes one policy evaluation. action_chunk_horizon and observation_horizon are metadata and do not multiply this graph's work.
+
+        Excludes: sensor acquisition, observation encoding beyond the supplied FLOPs, iterative decoder passes, control-loop scheduling, and actuator dynamics.
+
+        References
+        ----------
+        Derivation: multiply parameter count by storage width to obtain weight
+        bytes, then divide the declared or approximated work by those bytes.
+        This is a demand-accounting projection; it does not predict device time.
+
+        Examples
+        --------
+        >>> from mlsysim.models.types import EmbodiedWorkload
+        >>> from mlsysim.core.units import Q_
+        >>> model = EmbodiedWorkload(name='Policy', architecture='vla', parameters=Q_(100, 'count'), action_chunk_horizon=8)
+        >>> model.lower().weight_bytes == model.size_in_bytes()
+        True
+        """
         base_ops = self.inference_flops or (2 * self.parameters.to(ureg.count).magnitude * ureg.flop)
         weights = self.size_in_bytes(precision)
         return ComputationGraph(

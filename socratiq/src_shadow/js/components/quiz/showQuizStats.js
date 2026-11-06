@@ -82,7 +82,7 @@ function showVerificationModal(shadowRoot, verificationResult, fileName) {
                 <!-- Header -->
                 <div class="px-6 py-4 border-b border-gray-200 rounded-t-lg">
                     <div class="flex justify-between items-center">
-                        <h3 class="text-lg font-semibold text-gray-900">PDF Verification Result</h3>
+                        <h3 class="text-lg font-semibold text-gray-900">Report metadata check</h3>
                         <button class="close-verification-modal text-gray-500 hover:text-gray-700">
                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
@@ -96,7 +96,7 @@ function showVerificationModal(shadowRoot, verificationResult, fileName) {
                     ${statusIcon}
                     
                     <h4 class="text-xl font-semibold mb-2 text-${statusColor}-600">
-                        ${verificationResult.isValid ? 'Verification Successful' : 'Verification Failed'}
+                        ${verificationResult.isValid ? 'Metadata matches' : 'Metadata mismatch'}
                     </h4>
                     
                     <p class="text-sm text-gray-600 mb-4">
@@ -229,16 +229,16 @@ function createStatsModal(shadowRoot) {
     
     const baseHTML = `
         <div class="overlay fixed inset-0 bg-black bg-opacity-50"></div>
-        <div class="min-h-screen px-4 text-center">
+        <div class="stats-layout min-h-screen px-4 text-center">
             <span class="inline-block h-screen align-middle" aria-hidden="true">&#8203;</span>
             
             <div class="modal-content inline-block w-full max-w-5xl my-8 text-left align-middle transition-all transform bg-white rounded-lg shadow-xl" 
                  style="max-height: fit-content;">
                 <!-- Header -->
-                <div class="sticky top-0 bg-white px-6 py-4 border-b border-gray-200 rounded-t-lg z-10">
-                    <div class="flex justify-between items-center">
+                <div class="stats-header sticky top-0 bg-white px-6 py-4 border-b border-gray-200 rounded-t-lg z-10">
+                    <div class="stats-header-row flex justify-between items-center">
                         <h2 class="text-2xl font-bold">Quiz Performance Dashboard</h2>
-                        <div class="flex items-center space-x-4">
+                        <div class="stats-header-actions flex items-center space-x-4">
                             <span id="badges-prompt" class="text-blue-300 font-semibold">Track your progress by taking quizzes! &nbsp;&nbsp;</span>
                             Badges:  &nbsp;
         <div id="badges" class="achievement-badges grid grid-cols-4 gap-2 items-center">
@@ -254,12 +254,12 @@ function createStatsModal(shadowRoot) {
                 </div>
 
                 <!-- Content -->
-                <div class="px-6 py-4 overflow-y-auto" style="max-height: calc(90vh - 180px);">
+                <div class="stats-body px-6 py-4 overflow-y-auto" style="max-height: calc(90vh - 180px);">
                     <div class="flex flex-col md:flex-row gap-6">
                         <!-- Left column: Chapter Progress -->
                         <div class="w-full md:w-2/5">
                             <div class="bg-gray-50 rounded-lg p-4">
-                                <h3 class="text-lg font-semibold mb-4">Chapter Progress</h3>
+                                <h3 class="text-lg font-semibold mb-4">Chapter Quiz Results</h3>
                                 
                                 <!-- Info component for pages viewed -->
                                 <div class="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
@@ -269,8 +269,8 @@ function createStatsModal(shadowRoot) {
                                         </svg>
                                         <div class="text-sm text-blue-700">
                                             <p class="font-medium mb-1">Pages Viewed So Far</p>
-                                            <p class="text-blue-600 mb-2">This chart shows pages you've visited and their quiz progress. It will automatically update as you explore more content on the site.</p>
-                                            <p class="text-blue-600"><strong>💡 Tip:</strong> Cumulative quizzes allow you to pass entire sections with a single quiz (score 60% or higher).</p>
+                                            <p class="text-blue-600 mb-2">This chart shows recorded section quiz results for pages you have visited.</p>
+                                            <p class="text-blue-600"><strong>💡 Tip:</strong> A passing cumulative quiz is marked separately. Chapter quiz totals are not available.</p>
                                         </div>
                                     </div>
                                 </div>
@@ -327,7 +327,7 @@ function createStatsModal(shadowRoot) {
                 </div>
 
                 <!-- Footer with action buttons - Now positioned at bottom -->
-                <div class="sticky bottom-0 bg-white px-6 py-4 border-t border-gray-200 rounded-b-lg">
+                <div class="stats-footer sticky bottom-0 bg-white px-6 py-4 border-t border-gray-200 rounded-b-lg">
                     <div class="flex justify-end space-x-4">
                         <button id="download-pdf-btn" 
                                 class="flex items-center space-x-2 bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg transition-colors duration-200">
@@ -517,8 +517,8 @@ function createStatsModal(shadowRoot) {
             const verificationResult = await verifyPDFReport(file);
             showVerificationModal(shadowRoot, verificationResult, file.name);
             resultDiv.innerHTML = verificationResult.isValid ? 
-                '<span class="text-green-500">✓ Valid Report</span>' :
-                '<span class="text-red-500">✗ Invalid Report</span>';
+                '<span class="text-green-500">✓ Metadata matches</span>' :
+                '<span class="text-red-500">✗ Metadata mismatch</span>';
         } catch (error) {
             console.error('Verification error:', error);
             resultDiv.innerHTML = '<span class="text-red-500">Error verifying report</span>';
@@ -713,6 +713,7 @@ export function initStatsDisplay(shadowRoot) {
 
     historyBtn.addEventListener('click', async () => {
         modal.classList.remove('hidden');
+        modal.querySelector('.close-modal')?.focus({preventScroll: true});
         try {
             // Destroy existing charts before creating new ones
             destroyAllCharts();
@@ -790,7 +791,7 @@ export function updateChapterQuizCount(chapterNumber) {
     try {
       const data = JSON.parse(localStorage.getItem(STORAGE_KEY_CHAPTERS));
       const chapter = data.find(c => c.chapter === chapterNumber);
-      if (chapter && chapter.quizzesTaken < chapter.totalQuizzes) {
+      if (chapter) {
         chapter.quizzesTaken++;
         localStorage.setItem(STORAGE_KEY_CHAPTERS, JSON.stringify(data));
       }
@@ -863,43 +864,15 @@ function createProgressChart(shadowRoot, chartId = 'chapterProgressChart') {
 
             const ctx = shadowRoot.querySelector(`#${chartId}`).getContext('2d');
             
-            // Minimum visible percentage for the "completed" portion
-            const MIN_VISIBLE_PERCENT = 2;
-            
-            // Convert to percentages with minimum visibility and quiz progress
             const chartData = data.map(chapter => {
-                // Handle both old and new data structures
-                let progress;
-                if (chapterProgress.has(chapter.url)) {
-                    // New chapterMap system - progress keyed by URL
-                    progress = chapterProgress.get(chapter.url);
-                } else if (chapterProgress.has(chapter.chapter)) {
-                    // Old system - progress keyed by chapter number
-                    progress = chapterProgress.get(chapter.chapter);
-                } else {
-                    // No progress found
-                    progress = { passedQuizzes: 0 };
-                }
-                
-                
-                const actualPercentage = (progress.passedQuizzes / 10) * 100;
-                
-                return {
-                    ...chapter,
-                    completionPercentage: progress.completedByCumulativeQuiz ? 
-                        100 : // Full completion for cumulative quiz
-                        (progress.passedQuizzes > 0 ? 
-                            actualPercentage : 
-                            MIN_VISIBLE_PERCENT),
-                    remainingPercentage: progress.completedByCumulativeQuiz ? 
-                        0 : // No remaining for cumulative quiz completion
-                        (progress.passedQuizzes > 0 ? 
-                            100 - actualPercentage : 
-                            100 - MIN_VISIBLE_PERCENT),
-                    completedByCumulativeQuiz: progress.completedByCumulativeQuiz,
+                const progress = chapterProgress.get(chapter.url) || chapterProgress.get(chapter.chapter) || {};
+                const totalAttempted = progress.totalAttempted || 0;
+                const passedQuizzes = progress.passedQuizzes || 0;
+                return { ...chapter, totalAttempted, passedQuizzes,
+                    otherResults: Math.max(0, totalAttempted - passedQuizzes),
+                    completedByCumulativeQuiz: Boolean(progress.completedByCumulativeQuiz),
                     cumulativeQuizTitle: progress.cumulativeQuizTitle,
-                    hasSectionQuizzes: (progress.passedQuizzes > 0 || progress.totalAttempted > 0) && !progress.completedByCumulativeQuiz
-                };
+                    hasSectionQuizzes: totalAttempted > 0 };
             });
 
             const minHeightPerChapter = 50; // Increased for multi-line labels
@@ -912,48 +885,31 @@ function createProgressChart(shadowRoot, chartId = 'chapterProgressChart') {
                     labels: chartData.map(chapter => {
                         // Always use the title from chapterMap data
                         const title = chapter.title || `Chapter ${chapter.chapter}`;
-                        // Split long titles into two lines
-                        if (title.length > 30) {
-                            const words = title.split(' ');
-                            const midPoint = Math.ceil(words.length / 2);
-                            const firstLine = words.slice(0, midPoint).join(' ');
-                            const secondLine = words.slice(midPoint).join(' ');
-                            return [firstLine, secondLine];
+                        const lines = [];
+                        for (const word of title.split(' ')) {
+                            const last = lines.length - 1;
+                            if (last < 0 || `${lines[last]} ${word}`.length > 20) lines.push(word);
+                            else lines[last] += ` ${word}`;
                         }
-                        return title;
+                        if (chapter.completedByCumulativeQuiz) lines.push('Cumulative quiz passed');
+                        return lines;
                     }),
                     datasets: [{
-                        label: 'Completed',
-                        data: chartData.map(chapter => chapter.completionPercentage),
-                        backgroundColor: chartData.map(chapter => {
-                            if (chapter.completedByCumulativeQuiz) {
-                                return '#10b981'; // Green for cumulative completion
-                            } else if (chapter.hasSectionQuizzes) {
-                                return '#3b82f6'; // Blue for section quiz progress
-                            } else {
-                                return '#e5e7eb'; // Gray for no quizzes
-                            }
-                        }),
-                        borderColor: chartData.map(chapter => {
-                            if (chapter.completedByCumulativeQuiz) {
-                                return '#059669'; // Dark green border
-                            } else if (chapter.hasSectionQuizzes) {
-                                return '#2563eb'; // Dark blue border
-                            } else {
-                                return '#9ca3af'; // Gray border
-                            }
-                        }),
+                        label: 'Passed section results',
+                        data: chartData.map(chapter => chapter.passedQuizzes),
+                        backgroundColor: '#3b82f6',
+                        borderColor: '#2563eb',
                         borderWidth: 1,
                         order: 1
-                    },
-                    {
-                        label: 'Remaining',
-                        data: chartData.map(chapter => chapter.remainingPercentage),
+                    }, {
+                        label: 'Other section results',
+                        data: chartData.map(chapter => chapter.otherResults),
                         backgroundColor: '#93c5fd',
                         borderColor: '#60a5fa',
                         borderWidth: 1,
                         order: 2
                     }]
+
                 },
                 options: {
                     indexAxis: 'y',
@@ -961,8 +917,8 @@ function createProgressChart(shadowRoot, chartId = 'chapterProgressChart') {
                     maintainAspectRatio: false,
                     layout: {
                         padding: {
-                            left: 40, // Increased left padding for labels
-                            right: 20,
+                            left: 8, // Leave room for wrapped chapter labels
+                            right: 12,
                             top: 10,
                             bottom: 10
                         }
@@ -974,40 +930,10 @@ function createProgressChart(shadowRoot, chartId = 'chapterProgressChart') {
                         tooltip: {
                             callbacks: {
                                 label: function(context) {
-                                    const chapter = data[context.dataIndex];
-                                    
-                                    // Handle both old and new data structures
-                                    let progress;
-                                    if (chapterProgress.has(chapter.url)) {
-                                        // New chapterMap system - progress keyed by URL
-                                        progress = chapterProgress.get(chapter.url);
-                                    } else if (chapterProgress.has(chapter.chapter)) {
-                                        // Old system - progress keyed by chapter number
-                                        progress = chapterProgress.get(chapter.chapter);
-                                    } else {
-                                        // No progress found
-                                        progress = { passedQuizzes: 0 };
-                                    }
-                                    
-                                    const actualPercentage = (progress.passedQuizzes / 10) * 100;
-                                    
-                                    if (context.dataset.label === 'Completed') {
-                                        if (progress.completedByCumulativeQuiz) {
-                                            return `✅ Completed by Cumulative Quiz: ${progress.cumulativeQuizTitle || 'Cumulative Quiz'}`;
-                                        } else if (progress.passedQuizzes > 0) {
-                                            return `📚 Section Quiz Progress: ${actualPercentage.toFixed(1)}% (${progress.passedQuizzes}/${progress.totalAttempted || 10} quizzes passed)`;
-                                        } else {
-                                            return '📖 No quizzes taken yet';
-                                        }
-                                    }
-                                    
-                                    if (progress.completedByCumulativeQuiz) {
-                                        return '✅ Page completed via cumulative quiz';
-                                    } else if (progress.passedQuizzes > 0) {
-                                        return `📚 Section quizzes: ${progress.totalAttempted || 10} taken, ${progress.passedQuizzes} passed`;
-                                    } else {
-                                        return '📖 No quizzes taken on this page';
-                                    }
+                                    const chapter = chartData[context.dataIndex];
+                                    const results = `${chapter.passedQuizzes} passed of ${chapter.totalAttempted} recorded section results`;
+                                    return chapter.completedByCumulativeQuiz
+                                        ? `${results}. Cumulative quiz passed.` : results;
                                 }
                             }
                         }
@@ -1017,14 +943,10 @@ function createProgressChart(shadowRoot, chartId = 'chapterProgressChart') {
                             stacked: true,
                             title: {
                                 display: true,
-                                text: 'Completion Percentage'
+                                text: 'Recorded section quiz results'
                             },
-                            ticks: {
-                                callback: function(value) {
-                                    return value + '%';
-                                }
-                            },
-                            max: 100
+                            beginAtZero: true,
+                            ticks: { precision: 0 }
                         },
                         y: {
                             stacked: true,
@@ -1076,57 +998,23 @@ function createCustomLegend(chartContainer, chartData) {
         existingLegend.remove();
     }
     
-    // Analyze chart data to determine which legend items to show
-    const hasCumulativeCompleted = chartData.some(chapter => chapter.completedByCumulativeQuiz);
-    const hasSectionQuizzes = chartData.some(chapter => chapter.hasSectionQuizzes);
-    const hasAnyProgress = chartData.some(chapter => chapter.completionPercentage > 2); // More than minimum visible percent
-    
-    const legendItems = [];
-    
-    if (hasCumulativeCompleted) {
-        legendItems.push({
-            color: '#10b981',
-            label: 'Completed (Cumulative Quiz)',
-            description: 'Pages completed via cumulative quiz'
-        });
-    }
-    
-    if (hasSectionQuizzes) {
-        legendItems.push({
-            color: '#3b82f6',
-            label: 'Section Quiz Progress',
-            description: 'Pages with section quiz progress'
-        });
-    }
-    
-    // Always show remaining, but also show a general "Progress" item if no specific types detected
-    if (!hasCumulativeCompleted && !hasSectionQuizzes) {
-        if (hasAnyProgress) {
-            legendItems.push({
-                color: '#3b82f6',
-                label: 'Quiz Progress',
-                description: 'Pages with quiz activity'
-            });
-        } else {
-            // No quiz activity yet - show informational item
-            legendItems.push({
-                color: '#3b82f6',
-                label: 'Quiz Progress',
-                description: 'Start taking quizzes to see your progress here'
-            });
-        }
-    }
-    
-    legendItems.push({
-        color: '#93c5fd',
-        label: 'Remaining',
-        description: hasAnyProgress ? 'Remaining quiz progress' : 'Available quiz content'
+    const legendItems = [{
+        color: '#3b82f6', label: 'Passed section results',
+        description: 'Passing results recorded for this page'
+    }, {
+        color: '#93c5fd', label: 'Other section results',
+        description: 'Recorded results below the passing threshold'
+    }];
+    if (chartData.some(chapter => chapter.completedByCumulativeQuiz)) legendItems.push({
+        color: '#10b981', label: 'Cumulative quiz passed',
+        description: 'Shown in the chapter label'
     });
-    
+
     // Create legend HTML
     const legendHTML = `
         <div class="custom-legend mt-4">
-            <h4 class="text-sm font-medium text-gray-700 mb-3">Progress Legend</h4>
+            <h4 class="text-sm font-medium text-gray-700 mb-3">Quiz Results</h4>
+            <p class="text-xs text-gray-500 mb-3">Chapter quiz totals are not available. Recorded results do not measure chapter completion.</p>
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 ${legendItems.map(item => `
                     <div class="flex items-center space-x-3 p-2 bg-gray-50 rounded-lg">
@@ -1161,7 +1049,7 @@ function adjustChartContainer(modal) {
     const chartSection = `
       <div class="w-full mb-6">
         <div class="bg-gray-50 rounded-lg p-4">
-          <h3 class="text-lg font-semibold mb-4">Chapter Progress</h3>
+          <h3 class="text-lg font-semibold mb-4">Chapter Quiz Results</h3>
           <div class="h-[400px]"> <!-- Fixed height container -->
             <canvas id="chapterProgressChart"></canvas>
           </div>

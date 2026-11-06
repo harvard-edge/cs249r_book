@@ -1,6 +1,5 @@
 import { Boarding } from "boarding.js";
-import "boarding.js/styles/main.css";
-import "boarding.js/styles/themes/basic.css";
+import {ensureBoardingStyles} from '../../libs/utils/boarding-styles.js';
 
 const SR_ONBOARDING_KEY = 'socratiq_sr_onboarding_completed';
 
@@ -220,6 +219,7 @@ export class SROnboardingHandler {
     }
 
     startOnboarding() {
+        ensureBoardingStyles();
         if (!this.hasCompletedOnboarding() && this.boarding) {
             
             setTimeout(() => {

@@ -210,32 +210,33 @@ export class DeckCreationHandler {
         try {
             console.log(`Creating deck: "${deckName}"`);
             
+            const newChapter = {
+                chapter: Date.now(),
+                title: deckName,
+                is_current: 1
+            };
+
             // Check if storage handler is in fallback mode
             if (this.modal.storageHandler.useFallback) {
                 console.log('Storage handler is in fallback mode, using fallback storage');
                 // Use the fallback storage method
-                const chapterNumber = Date.now(); // Use timestamp as unique chapter number
-                const newChapter = {
-                    chapter: chapterNumber,
-                    title: deckName,
-                    is_current: false
-                };
                 
                 // Add to fallback storage (localStorage)
                 await this.modal.storageHandler.addChapterFallback(newChapter);
             } else {
                 // Create the deck using the SQLite storage handler
-                const chapterNumber = Date.now(); // Use timestamp as unique chapter number
-                const newChapter = {
-                    chapter: chapterNumber,
-                    title: deckName,
-                    is_current: false
-                };
                 
                 // Add the new chapter to storage
                 await this.modal.storageHandler.addChapter(newChapter);
             }
             
+            // A newly created deck is the destination for the next card.
+            this.modal.chapterSets.set(newChapter.chapter, []);
+            this.modal.currentChapter = newChapter;
+            this.storageHandler.inMemoryData.currentChapter = newChapter;
+            this.storageHandler.inMemoryData.currentDeck = [];
+            await this.storageHandler.saveToLocalStorage();
+
             // Don't show alert - deck appears in panel automatically
             // alert(`Deck "${deckName}" created successfully!`);
             

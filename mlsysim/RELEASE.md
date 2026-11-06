@@ -5,23 +5,87 @@ workflow. Publishing happens when a tag matching `mlsysim-v*` is pushed to
 origin. The workflow authenticates to PyPI via **Trusted Publishing (OIDC)** —
 no PyPI API token is stored in the repo or in GitHub Secrets.
 
-## Happy path — the 3-step release
+## Prepare and validate the candidate
 
-Prerequisite: your changes must already be merged to `dev`, with the version
-bumped in `pyproject.toml`, `mlsysim/__init__.py`, `CITATION.cff`, and an entry
-added to `CHANGELOG.md`.
+Prepare release changes in an isolated worktree. Align `pyproject.toml`,
+`mlsysim/__init__.py`, `CITATION.cff`, and the top `CHANGELOG.md` entry. Install
+the development environment described in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ```bash
-# 1. Move to merged dev
-git checkout dev
-git pull --ff-only origin dev
-
-# 2. Tag the release (annotated, prefixed)
-git tag -a mlsysim-v0.1.2 -m "MLSys·im 0.1.2"
-
-# 3. Push the tag → the workflow fires automatically
-git push origin mlsysim-v0.1.2
+make check
+make publication-check
+make build
+python -m twine check dist/*
 ```
+
+Install the built wheel in a fresh environment outside the repository and run
+an import, registry lookup, solver call, and `mlsysim --help`. This catches
+missing packaged data and imports hidden by editable installation. Test the
+source distribution too when changing packaging rules.
+
+Before tagging, run the downstream checks in CONTRIBUTING.md. Examine changed
+scenario outputs and identify affected textbook or paper claims. Prose and
+figure corrections require their own review; a passing package suite does not
+clear that gate. The paper's generated-value freshness check must be resolved
+before a coordinated package/documentation release.
+
+## Compare downstream numerical outputs
+
+Use the same trusted consumer checkout and interpreter for both snapshots. Only
+change the selected MLSysIM package directory. This isolates implementation
+changes from edited chapter examples. The package directory must contain the
+`mlsysim/` import package; it may come from a baseline checkout or a Git archive.
+Never use a snapshot captured against different chapter sources as a baseline.
+
+From the repository root, with the baseline package at `/path/to/baseline/mlsysim`:
+
+```bash
+mlsysim/.venv/bin/python mlsysim/scripts/downstream_impact.py snapshot \
+  --package /path/to/baseline/mlsysim --output /tmp/impact-before.json
+mlsysim/.venv/bin/python mlsysim/scripts/downstream_impact.py snapshot \
+  --package mlsysim --output /tmp/impact-after.json
+mlsysim/.venv/bin/python mlsysim/scripts/downstream_impact.py compare \
+  /tmp/impact-before.json /tmp/impact-after.json --output /tmp/impact-review.json
+```
+
+The default scope discovers Python consumers in all textbook volumes and runs
+the paper's deterministic scenario sections. Each consumer runs in a separate
+process with a fresh snapshot bytecode cache; the tool checks the imported package path and captures source hashes,
+raw accessible numerical exports, formatted inline values, and nearby prose.
+A raw change remains visible even when rounding leaves the printed text unchanged.
+No prose is rewritten. The JSON report names outputs and explanatory passages
+that need a separate editorial decision.
+
+Exit status `0` means the declared numerical comparison is unchanged, `1` means
+changed outputs or skipped cells require review, and `2` means the comparison is
+incomplete (for example, source drift, missing coverage, or execution errors).
+Snapshot commands also fail on execution errors. Do not treat an incomplete run
+as an unchanged result, and do not suppress a changed number by repinning a test.
+Freeze package and consumer edits while collecting snapshots; concurrent source
+changes invalidate the run. Retain both snapshots with the report.
+
+For a narrow iteration, repeat `--glob 'books/vol1/13_model_serving/*.qmd'` and use
+`--no-paper` when appropriate; record that limited scope explicitly. The final
+release review must include every affected consumer. This tool does not execute
+browser labs or slides, does not render publications, suppresses Matplotlib save/show calls,
+and records `eval:false` cells as unexecuted. Its output cannot approve plots,
+layout, changed bottleneck explanations, or material outside the declared scope.
+Run the existing lab/Binder checks and inspect affected rendered publications
+separately before publication. Local timings have their own publication receipt
+gate and are excluded from the numerical scenario comparison.
+
+## Publish the reviewed release
+
+After the reviewed changes have been merged to `dev` and release approval has
+been given, tag the reviewed commit and push only that tag. For example, for
+the candidate prepared here:
+
+```bash
+git tag -a mlsysim-v0.3.1 <reviewed-dev-commit> -m "MLSys·im 0.3.1"
+git push origin mlsysim-v0.3.1
+```
+
+Pushing the tag publishes externally. Do not use it as a packaging test.
 
 From there, the workflow does everything:
 
@@ -48,12 +112,14 @@ Monitor the run: <https://github.com/harvard-edge/cs249r_book/actions/workflows/
 
 Run this locally to catch the easy failures before the workflow does:
 
-- [ ] `cd mlsysim && pytest tests/ -q` → 0 failures
+- [ ] `cd mlsysim && make check` → all package checks pass
+- [ ] `make publication-check` → displayed paper values and timing receipts pass
+- [ ] Baseline/candidate downstream report reviewed; every changed claim or incomplete check has an explicit disposition
 - [ ] Versions aligned: all four places read the same `X.Y.Z`
   ```bash
-  grep -E '^version = ' mlsysim/pyproject.toml
-  grep -E '^__version__ = ' mlsysim/mlsysim/__init__.py
-  grep -E '^version:' mlsysim/CITATION.cff
+  rg '^version = ' mlsysim/pyproject.toml
+  rg '^__version__ = ' mlsysim/mlsysim/__init__.py
+  rg '^version:' mlsysim/CITATION.cff
   head -3 mlsysim/CHANGELOG.md
   ```
 - [ ] CHANGELOG top entry is the version about to ship

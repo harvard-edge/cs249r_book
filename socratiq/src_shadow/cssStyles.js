@@ -1,4 +1,8 @@
-export const styles = `
+import utilities from './resources/study-utilities.css?inline';
+import katex from 'katex/dist/katex.min.css?inline';
+import {boardingStyles} from './js/libs/utils/boarding-styles.js';
+
+export const styles = `${utilities}\n${katex}\n${boardingStyles}
 
 /* SIMPLE THEME SYSTEM - NO !important */
 :host,
@@ -1189,6 +1193,133 @@ export const styles = `
 
 .toggle-checkbox:checked + .toggle-label {
   background-color: #48BB78;
+}
+
+/* Keep the existing deck controls usable when their modal narrows. */
+/* Keep fixed light surfaces from overriding the widget's existing dark palette. */
+:host([data-socratiq-theme="dark"]) .dark-mode {
+  --text-color: var(--socratiq-text);
+  --background-color: var(--socratiq-bg);
+  --border-color: var(--socratiq-border);
+  color: var(--socratiq-text);
+}
+:host([data-socratiq-theme="dark"]) #text-selection-menu > div,
+:host([data-socratiq-theme="dark"]) .stats-modal .modal-content,
+:host([data-socratiq-theme="dark"]) .stats-header,
+:host([data-socratiq-theme="dark"]) .stats-footer {
+  background-color: var(--socratiq-bg);
+  color: var(--socratiq-text);
+  border-color: var(--socratiq-border);
+}
+:host([data-socratiq-theme="dark"]) #markdown-preview,
+:host([data-socratiq-theme="dark"]) .streamdown-wrapper {
+  background-color: transparent;
+  color: var(--socratiq-text);
+}
+:host([data-socratiq-theme="dark"]) #user-input {
+  background-color: var(--socratiq-hover);
+  border-color: var(--socratiq-border);
+  color: var(--socratiq-text);
+}
+:host([data-socratiq-theme="dark"]) #user-input::placeholder { color: var(--socratiq-muted); }
+:host([data-socratiq-theme="dark"]) #enter-btn,
+:host([data-socratiq-theme="dark"]) #socratiq-study-close { color: var(--socratiq-text); }
+:host([data-socratiq-theme="dark"]) #showStats,
+:host([data-socratiq-theme="dark"]) #showViz { background-color: var(--socratiq-hover); }
+:host([data-socratiq-theme="dark"]) #chapterList button[data-chapter][class~="bg-blue-800/50"] {
+  color: var(--socratiq-text);
+}
+:host([data-socratiq-theme="dark"]) #text-selection-menu > div > .bg-zinc-100 {
+  background-color: var(--socratiq-bg);
+  color: var(--socratiq-muted);
+}
+:host([data-socratiq-theme="dark"]) .stats-body .bg-gray-50,
+:host([data-socratiq-theme="dark"]) .stats-body .bg-white {
+  background-color: var(--socratiq-hover);
+  color: var(--socratiq-text);
+}
+:host([data-socratiq-theme="dark"]) .stats-body .text-gray-500,
+:host([data-socratiq-theme="dark"]) .stats-body .text-gray-600,
+:host([data-socratiq-theme="dark"]) .stats-body .text-gray-700 { color: var(--socratiq-muted); }
+:host([data-socratiq-theme="dark"]) .stats-body .text-gray-800,
+:host([data-socratiq-theme="dark"]) .stats-body .text-gray-900 { color: var(--socratiq-text); }
+:host([data-socratiq-theme="dark"]) #socratiq-knowledge-graph-modal { color: #1f2328; }
+:host([data-socratiq-theme="dark"]) .stats-body .bg-blue-50 { background-color: var(--socratiq-accent-bg); }
+:host([data-socratiq-theme="dark"]) .stats-body .text-blue-600,
+:host([data-socratiq-theme="dark"]) .stats-body .text-blue-700 { color: var(--socratiq-accent); }
+/* Existing Chart.js labels use a dark ink color; keep their drawing surface light. */
+:host([data-socratiq-theme="dark"]) .stats-body canvas { background-color: white; }
+/* These sibling overlays must cover the workspace's z-9999 wrapper. */
+.stats-modal, .verification-modal, #socratiq-knowledge-graph-modal, #helpModal {
+  z-index: 100001 !important;
+}
+#sr-modal-content-container-controls { gap: 8px; flex-wrap: wrap; }
+#sr-controls-container { display: flex; flex-wrap: wrap; gap: 8px; }
+#sr-controls-container > button { margin-left: 0 !important; }
+#showAddCard { align-self: flex-start; flex-shrink: 0; white-space: nowrap; }
+@media (max-width: 640px) {
+  /* The stacked deck keeps its original actions; duplicate floating actions
+     would cover its search and import/export controls. */
+  #sr-floating-controls { display: none !important; }
+  .stats-modal .stats-layout { width: 100%; height: 100dvh; min-height: 0; padding: 0; }
+  .stats-modal .stats-layout > span[aria-hidden] { display: none; }
+  .stats-modal .modal-content { display: flex; flex-direction: column; width: 100%; height: 100dvh; max-height: 100dvh !important; margin: 0; padding: 0; overflow: hidden; }
+  .stats-modal .stats-header { flex: 0 0 auto; padding: 16px; }
+  .stats-modal .stats-header-row { position: relative; flex-direction: column; align-items: flex-start; gap: 10px; padding-right: 44px; }
+  .stats-modal .stats-header h2 { font-size: 20px; line-height: 1.25; }
+  .stats-modal .stats-header-actions { flex-wrap: wrap; gap: 8px; font-size: 12px; }
+  .stats-modal .stats-header-actions > * { margin-left: 0 !important; }
+  .stats-modal #badges-prompt { flex-basis: 100%; font-size: 12px; line-height: 1.4; }
+  .stats-modal .close-modal { position: absolute; top: 0; right: 0; display: flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; }
+  .stats-modal .stats-body { flex: 1 1 auto; min-height: 0; max-height: none !important; padding: 16px; }
+  .stats-modal .stats-footer { flex: 0 0 auto; padding: 12px; }
+  #socratiq-knowledge-graph-modal #list-view { top: 60px !important; padding: 12px !important; }
+  #socratiq-knowledge-graph-modal #list-view .list-item { flex-wrap: wrap; gap: 6px; padding: 8px 6px !important; }
+  #socratiq-knowledge-graph-modal #list-view .list-item > div:first-child { flex: 1 1 100% !important; min-width: 0; }
+  #socratiq-knowledge-graph-modal #list-view .list-item > div:first-child > span:last-child { overflow-wrap: anywhere; }
+  #socratiq-knowledge-graph-modal > div {
+    width: calc(100% - 24px) !important;
+    height: calc(100dvh - 24px) !important;
+    padding: 48px 12px 12px !important;
+  }
+  #socratiq-knowledge-graph-modal .knowledge-graph-layout { flex-direction: column; gap: 12px; min-height: 0; overflow-y: auto; }
+  #socratiq-knowledge-graph-modal .knowledge-graph-viewport { flex: 0 0 400px !important; width: 100%; height: 400px !important; }
+  #socratiq-knowledge-graph-modal .knowledge-graph-sidebar { flex: 0 0 auto; width: 100% !important; height: auto !important; padding: 16px !important; border-left: 0 !important; border-top: 1px solid #e2e8f0; }
+  #socratiq-knowledge-graph-modal .quiz-items-container { flex: 0 0 auto; max-height: 180px; margin-bottom: 0 !important; }
+  #socratiq-knowledge-graph-modal .knowledge-graph-actions { position: static !important; margin-top: 12px; padding-top: 12px !important; }
+  #closeModal_sr, #sr-import-btn, #sr-download-btn, #copyButton, #sr-share-btn {
+    min-width: 44px;
+    min-height: 44px;
+    align-items: center;
+    justify-content: center;
+  }
+  #sr-modal-content_inner {
+    top: 12px;
+    width: calc(100% - 24px);
+    max-height: calc(100dvh - 24px) !important;
+    padding: 16px;
+    margin-bottom: 12px;
+  }
+  #sr-modal-content_inner > .grid {
+    display: flex;
+    flex-direction: column;
+    margin-top: 48px;
+    overflow-y: auto !important;
+  }
+  #sr-sidebar {
+    position: static !important;
+    flex: 0 0 auto;
+    max-height: none !important;
+    overflow: visible !important;
+    border-right: 0;
+    border-bottom: 1px solid var(--socratiq-border);
+    padding-right: 0;
+    padding-bottom: 12px;
+  }
+  #sr-modal-content-container { flex: 0 0 auto; min-width: 0; max-height: none !important; padding-left: 0; overflow: visible; }
+  #sr-modal-content-container > .flex.items-center.justify-between.w-full { flex-wrap: wrap; gap: 8px; }
+  #sr-modal-content-container > .flex.items-center.justify-between.w-full > div:first-child { flex-basis: 100%; min-width: 0; }
+  #sr-modal-content-container > .flex.items-center.justify-between.w-full > div:last-child { margin-left: 0; }
 }
 
 `

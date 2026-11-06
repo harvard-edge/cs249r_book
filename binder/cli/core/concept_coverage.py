@@ -1,4 +1,9 @@
-"""Reconcile declared chapter concepts without certifying field completeness."""
+"""Reconcile declared chapter concepts against `taxonomy/taxonomy.yml` and `taxonomy/coverage-ledger.yml`.
+
+Validates `taxonomy/coverage-ledger.yml` against `CoverageLedgerModel` in
+`taxonomy/schema/mlsys-taxonomy.linkml.yml`, verifies manuscript evidence quotes and
+source hashes against chapter QMD files, and flags stale or orphaned review decisions.
+"""
 from __future__ import annotations
 
 from collections import Counter
@@ -8,16 +13,17 @@ from pathlib import Path
 import re
 import unicodedata
 
-import yaml
-
 from .concept_graph import ConceptGraphError, digest, load_graph
-from .field_graph import load_field
+from .field_graph import load_field, load_taxonomy_yaml
+from .taxonomy_schema import CONCEPT_ID_RE, get_class_slots, get_enum_values
 
 
-DECISION_KEYS = {"inventory_id", "chapter", "label", "role", "disposition", "field_concepts", "rationale", "reviewer", "reviewer_kind", "reviewed_on", "source_hash", "field_hash", "evidence"}
-
-
-DISPOSITIONS = {"mapped-to", "narrower-than", "broader-than", "candidate-new", "out-of-scope"}
+LEDGER_KEYS = set(get_class_slots("CoverageLedgerModel"))
+DECISION_KEYS = set(get_class_slots("CoverageLedgerDecision"))
+EVIDENCE_KEYS = set(get_class_slots("LedgerEvidenceQuote"))
+ROLES = set(get_enum_values("ConceptRoleEnum"))
+REVIEWER_KINDS = set(get_enum_values("ReviewerKindEnum"))
+DISPOSITIONS = set(get_enum_values("LedgerDispositionEnum"))
 TARGETED = {"mapped-to", "narrower-than", "broader-than"}
 
 
@@ -42,23 +48,31 @@ def decision_hashes(chapter, label, role, field_nodes, decision):
     return source_hash, _hash(content)
 
 
-def coverage_report(root: Path, volumes: tuple[str, ...] = ()) -> dict:
+def coverage_report(
+    root: Path,
+    volumes: tuple[str, ...] = (),
+    *,
+    graph: dict | None = None,
+    field: dict | None = None,
+) -> dict:
     """Inventory every declaration; suggestions never become review decisions.
 
     Edits to cited sections, the declaration, or dependent field records reopen
     a decision. IDs match catalog goal IDs; renaming a label or chapter orphans
     its decision and requires explicit rebinding.
     """
-    graph = load_graph(root)
-    field = load_field(root, graph)
+    if graph is None:
+        graph = load_graph(root)
+    if field is None:
+        field = load_field(root, graph)
     if field is None:
         raise ConceptGraphError("coverage: field model is required")
     field_nodes = {c["id"]: c for c in field["concepts"]}
-    path = root / "shared/concepts/coverage-ledger.yml"
-    ledger = yaml.safe_load(path.read_text()) if path.exists() else {"schema_version": 1, "decisions": []}
+    path = root / "taxonomy/coverage-ledger.yml"
+    ledger = load_taxonomy_yaml(path) if path.exists() else {"schema_version": 1, "decisions": []}
     if not isinstance(ledger, dict) or ledger.get("schema_version") != 1 or not isinstance(ledger.get("decisions"), list):
         raise ConceptGraphError("coverage: invalid ledger schema")
-    if set(ledger) - {"schema_version", "decisions"}:
+    if set(ledger) - LEDGER_KEYS:
         raise ConceptGraphError("coverage: unknown ledger keys")
     decisions = {}
     for decision in ledger["decisions"]:
@@ -82,12 +96,12 @@ def coverage_report(root: Path, volumes: tuple[str, ...] = ()) -> dict:
         except (ValueError, TypeError):
             raise ConceptGraphError(f"coverage: {ident} requires a nonfuture ISO reviewed_on") from None
         decision = {**decision, "reviewed_on": reviewed.isoformat()}
-        if decision["role"] not in {"primary", "secondary"}:
+        if decision["role"] not in ROLES:
             raise ConceptGraphError(f"coverage: invalid role {ident}")
-        if decision.get("reviewer_kind") not in {"human", "ai"}:
+        if decision.get("reviewer_kind") not in REVIEWER_KINDS:
             raise ConceptGraphError(f"coverage: invalid reviewer_kind {ident}")
         targets = decision.get("field_concepts", [])
-        if not isinstance(targets, list) or any(not isinstance(t, str) or not re.fullmatch(r"mlsys\.[a-z0-9-]+", t) for t in targets) or len(set(targets)) != len(targets):
+        if not isinstance(targets, list) or any(not isinstance(t, str) or not CONCEPT_ID_RE.fullmatch(t) for t in targets) or len(set(targets)) != len(targets):
             raise ConceptGraphError(f"coverage: invalid field targets {ident}")
         if bool(targets) != (decision["disposition"] in TARGETED):
             raise ConceptGraphError(f"coverage: disposition/targets mismatch {ident}")
@@ -95,13 +109,15 @@ def coverage_report(root: Path, volumes: tuple[str, ...] = ()) -> dict:
         if not isinstance(evidence, list) or not evidence:
             raise ConceptGraphError(f"coverage: decision requires manuscript evidence {ident}")
         for item in evidence:
-            if not isinstance(item, dict) or set(item) != {"section", "quote"} or any(not isinstance(item.get(k), str) or not item[k].strip() for k in ("section", "quote")):
+            if not isinstance(item, dict) or set(item) != EVIDENCE_KEYS or any(not isinstance(item.get(k), str) or not item[k].strip() for k in ("section", "quote")):
                 raise ConceptGraphError(f"coverage: invalid manuscript evidence {ident}")
         if any(len(re.findall(r"\w+", e["quote"])) < 6 for e in evidence):
             raise ConceptGraphError(f"coverage: manuscript quote too short {ident}")
         if len({(e["section"], e["quote"]) for e in evidence}) != len(evidence):
             raise ConceptGraphError(f"coverage: duplicate evidence {ident}")
         decisions[ident] = decision
+    from .taxonomy_schema import validate_linkml
+    validate_linkml({**ledger, "decisions": list(decisions.values())}, "CoverageLedgerModel", root, "coverage")
     aliases = {}
     for concept in field["concepts"]:
         for label in [concept["label"], *concept.get("aliases", [])]:
@@ -157,6 +173,7 @@ def coverage_report(root: Path, volumes: tuple[str, ...] = ()) -> dict:
 
 
 def write_coverage_report(root: Path, volumes: tuple[str, ...] = ()) -> dict:
+    """Compute the chapter-concept reconciliation report and write JSON and Markdown summaries to `books/_build/concepts/`."""
     report = coverage_report(root, volumes)
     folder = root / "books/_build/concepts"
     folder.mkdir(parents=True, exist_ok=True)

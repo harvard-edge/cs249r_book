@@ -11,8 +11,18 @@
   const layer=el('svg',{viewBox:'0 0 1000 1000',width:vb.width,height:vb.height,preserveAspectRatio:'none','aria-hidden':'true'});art.append(layer);
   const proof=document.createElement('p');proof.className=NAME+'-proof';
   let mounted=false,current=0,stageNode;
+  // Repaint the exact paused frame after a width/context change, never on scroll.
+  let lastFrame=null, resizeFrame=0, resizeGeometry='';
+  const resizeObserver=new ResizeObserver(()=>{
+   cancelAnimationFrame(resizeFrame);resizeFrame=requestAnimationFrame(()=>{
+    if(!stageNode||!lastFrame||!root.isConnected)return;
+    const geometry=[root.clientWidth,stageNode.clientWidth,art.getBoundingClientRect().width,!!root.closest('dialog')].join(':');
+    if(geometry===resizeGeometry)return;resizeGeometry=geometry;draw(...lastFrame);
+   });
+  });resizeObserver.observe(root);
   const tiles=[...art.querySelectorAll('rect')].filter(n=>+n.getAttribute('width')===25);const panels=[...art.querySelectorAll('rect')].filter(n=>+n.getAttribute('width')===180);
   function draw(from,to,p){
+   lastFrame=[from,to,p];
    layer.replaceChildren();root.dataset.animationProgress=String(p);
    const phase=p<1?from:to;const live=phase<4;
    tiles.forEach(n=>{const x=+n.getAttribute('x'),col=x<240?0:x<460?1:2;const count=col+3,pos=Math.round((x-(45+220*col))/30);n.style.opacity=live&&phase>=col+1?'1':'.12';n.setAttribute('fill',pos>=3?'#F7EDE3':'#E3F3F5');});
@@ -25,6 +35,6 @@
   const player=window.MLSysOriginalPlayer.create({root,outer:context.outer,title:CFG.question,scope:CFG.scope,steps,
    render(index,{stage,details}){current=index;root.dataset.step=String(index);if(!mounted){stageNode=stage;stage.tabIndex=0;stage.setAttribute('aria-label','Original diagram; scroll horizontally or use Expand for dense artwork');stage.classList.add(NAME+'-stage');stage.append(art);details.append(proof);mounted=true;}draw(index,index,1);root.dataset.originalState=JSON.stringify({index,kind:CFG.key});},
    transition({from,to,onFrame}){if(to!==from+1)return;onFrame(p=>draw(from,to,p));}
-  });return{pause:()=>player.pause(),destroy:()=>player.destroy()};
+  });return{pause:()=>player.pause(),destroy:()=>{resizeObserver.disconnect();cancelAnimationFrame(resizeFrame);player.destroy();}};
  };
 })();

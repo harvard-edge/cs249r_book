@@ -28,9 +28,6 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-# Labs that are exempt from standard protocol checks
-ORIENTATION_LABS = {"lab_00_introduction"}
-
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -44,7 +41,7 @@ def lab_stem(lab_path: str) -> str:
 
 
 def is_orientation(lab_path: str) -> bool:
-    return lab_stem(lab_path) in ORIENTATION_LABS
+    return lab_stem(lab_path).startswith("lab_00_")
 
 
 def extract_lab_number(lab_path: str) -> int | None:
@@ -289,7 +286,21 @@ class TestZoneStructure:
             pytest.skip("Lab 00 is orientation")
 
         source = read_source(lab_path)
-        has_hud = "lab-hud" in source or "LEDGER" in source
+        tree = ast.parse(source)
+        status_names = {
+            alias.asname or alias.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom)
+            and node.module == "mlsysbook_labs.notebook"
+            for alias in node.names
+            if alias.name == "notebook_status"
+        }
+        has_hud = "lab-hud" in source or "LEDGER" in source or any(
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id in status_names
+            for node in ast.walk(tree)
+        )
         assert has_hud, "Missing ledger HUD footer (class='lab-hud' or LEDGER zone)"
 
 

@@ -32,7 +32,7 @@ FIXTURE = r'''() => {
     const root = document.getElementById(id);
     const outer = root.parentElement;
     return players[id] = MLSysOriginalPlayer.create({
-      root, outer, title: 'Synthetic speed contract', scope: 'Clock test, not a measured ML workload.',
+      root, outer, layout: 'classic', title: 'Synthetic speed contract', scope: 'Clock test, not a measured ML workload.',
       steps: ['Ready', 'Read', 'Compute', 'Store'].map(label => ({label, description:label})),
       render(index, {stage, details}) {
         stage.innerHTML = '<svg viewBox="0 0 100 25"><circle r="5" cy="12"/></svg>';
@@ -229,35 +229,60 @@ def actual_mounts(args):
                     assert component_id, (key, 'stable component identity')
                     comp = page.locator('[id="' + component_id + '"]')
                     speed = comp.get_by_role('combobox', name=re.compile(r'^(Playback|Animation) speed$'))
-                    assert speed.is_visible(), key
-                    assert speed.locator('option').evaluate_all('(xs)=>xs.map(x=>x.value)') == RATES, key
-                    assert speed.input_value() == '1', key
+                    # The opt-in compact layout keeps speed out of the bar: the same four rates are
+                    # radio buttons in its Speed popover (the button shows the rate), and -/+ still apply.
+                    compact = comp.get_attribute('data-layout') == 'compact'
+                    want = '1.5'
+                    rate_of = (lambda: str(page.evaluate('(id)=>document.getElementById(id).dataset.speed', component_id))) if compact else speed.input_value
                     initial = comp.get_attribute('data-step')
                     stage = comp.locator('.mlsys-original-stage,.life-workspace')
                     assert stage.count() == 1, (key, 'stage selector')
                     baseline = stage.inner_html()
-                    for rate in RATES:
-                        speed.select_option(rate)
-                        assert comp.get_attribute('data-step') == initial, (key, rate, 'endpoint changed')
-                        assert stage.inner_html() == baseline, (key, rate, 'paused diagram changed')
-                        assert comp.get_attribute('data-playing') in (None, 'false'), key
-                        assert comp.get_attribute('data-running') in (None, 'false'), key
-                    comp.focus(); page.keyboard.press('+')
-                    assert speed.input_value() == '2', key
-                    page.keyboard.press('-')
-                    assert speed.input_value() == '1.5', key
+                    if compact:
+                        assert speed.count() == 0, (key, 'compact layout has no speed menu in the bar')
+                        options = comp.get_by_role('button', name=re.compile(r'^Speed \d(\.\d)?×$'))
+                        options.click()
+                        radios = comp.get_by_role('radiogroup', name='Playback speed').get_by_role('radio')
+                        assert radios.evaluate_all('(xs)=>xs.map(x=>x.value)') == RATES, key
+                        assert rate_of() == '1' and radios.evaluate_all('(xs)=>xs.find(x=>x.checked).value') == '1', key
+                        for rate in RATES:
+                            comp.get_by_role('radio', name=rate + '×', exact=True).check()
+                            assert rate_of() == rate, (key, rate)
+                            assert comp.get_attribute('data-step') == initial, (key, rate, 'endpoint changed')
+                            assert stage.inner_html() == baseline, (key, rate, 'paused diagram changed')
+                            assert comp.get_attribute('data-playing') in (None, 'false'), key
+                        page.keyboard.press('Escape')
+                        assert options.get_attribute('aria-expanded') == 'false', (key, 'popover Escape')
+                        comp.focus(); page.keyboard.press('+')
+                        assert rate_of() == '2', key
+                        page.keyboard.press('-')
+                        assert rate_of() == '1.5', key
+                    else:
+                        assert speed.is_visible(), key
+                        assert speed.locator('option').evaluate_all('(xs)=>xs.map(x=>x.value)') == RATES, key
+                        assert speed.input_value() == '1', key
+                        for rate in RATES:
+                            speed.select_option(rate)
+                            assert comp.get_attribute('data-step') == initial, (key, rate, 'endpoint changed')
+                            assert stage.inner_html() == baseline, (key, rate, 'paused diagram changed')
+                            assert comp.get_attribute('data-playing') in (None, 'false'), key
+                            assert comp.get_attribute('data-running') in (None, 'false'), key
+                        comp.focus(); page.keyboard.press('+')
+                        assert speed.input_value() == '2', key
+                        page.keyboard.press('-')
+                        assert speed.input_value() == '1.5', key
                     # Restart retains the reader preference; no target math is touched.
                     # CNN intentionally disables its redundant Restart button at0.
                     # The documented R shortcut exercises the same reset contract.
                     comp.focus(); page.keyboard.press('r')
-                    assert speed.input_value() == '1.5', key
+                    assert rate_of() == want, key
                     assert comp.get_attribute('data-step') == '0', key
                     expand = comp.get_by_role('button', name='Expand', exact=True)
                     expand.click()
                     dialog = page.locator('dialog[open]')
                     assert dialog.count() == 1, key
                     assert comp.get_attribute('data-step') == '0', (key, 'expand endpoint')
-                    assert speed.input_value() == '1.5', (key, 'expand speed')
+                    assert rate_of() == want, (key, 'expand speed')
                     assert comp.get_attribute('data-playing') in (None, 'false'), key
                     assert comp.get_attribute('data-running') in (None, 'false'), key
                     bounds = dialog.evaluate('(node)=>{const r=node.getBoundingClientRect();return {x:r.x,y:r.y,w:r.width,h:r.height,iw:innerWidth,ih:innerHeight}}')
@@ -278,7 +303,7 @@ def actual_mounts(args):
                     page.keyboard.press('Escape')
                     page.wait_for_function('()=>!document.querySelector("dialog[open]")')
                     page.evaluate('()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
-                    assert comp.get_attribute('data-step') == '0' and speed.input_value() == '1.5', key
+                    assert comp.get_attribute('data-step') == '0' and rate_of() == want, key
                     assert expand.evaluate('(button)=>button===document.activeElement'), (key, 'focus restore')
                     assert comp.get_attribute('data-playing') in (None, 'false'), key
                     assert comp.get_attribute('data-running') in (None, 'false'), key
@@ -286,7 +311,7 @@ def actual_mounts(args):
                     assert not errors, (key, errors)
                     if key == next(iter(links)):
                         comp.screenshot(path=str(args.output / f'actual-{name}-{width}-{theme}.png'))
-                    records.append(dict(key=key, engine=name, width=width, height=900, theme=theme, passed=True, url=url, endpoint='0', speed='1.5', speed_choices=RATES, bounds=bounds, expanded_screenshot=screenshot, checks=['default_rate','rate_choices','paused_scene_identity','scoped_speed_shortcuts','restart_keeps_rate','expanded_viewport','expanded_paused_state','sticky_close_toolbar','Escape_focus_restore']))
+                    records.append(dict(key=key, engine=name, width=width, height=900, theme=theme, passed=True, url=url, endpoint='0', speed=want, speed_choices=RATES, layout='compact' if compact else 'default', bounds=bounds, expanded_screenshot=screenshot, checks=['default_rate','rate_choices','paused_scene_identity','scoped_speed_shortcuts','restart_keeps_rate','expanded_viewport','expanded_paused_state','sticky_close_toolbar','Escape_focus_restore']))
                     (args.output/'actual-progress.json').write_text(json.dumps({'profiles':records}, indent=2)+'\n')
                     page.close()
             browser.close()

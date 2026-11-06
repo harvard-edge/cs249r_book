@@ -23,7 +23,7 @@ import MarkdownText from "@/components/MarkdownText";
 import QuestionFeedback from "@/components/QuestionFeedback";
 import HardwareRef from "@/components/HardwareRef";
 import NapkinCalc from "@/components/NapkinCalc";
-import AskInterviewer from "@/components/AskInterviewer";
+import AskInterviewer, { interviewerContext } from "@/components/AskInterviewer";
 import FirstRunExplainer from "@/components/FirstRunExplainer";
 import StarGate from "@/components/StarGate";
 import { shouldShowGate, incrementReveals } from "@/lib/star-gate";
@@ -539,7 +539,8 @@ export default function GauntletPage() {
             <HardwareRef defaultOpen={realism === "open"} />
             <NapkinCalc defaultOpen={realism === "open"} />
             <AskInterviewer
-              questionContext={q.scenario}
+              questionContext={interviewerContext(q)}
+              napkinMath={q.details.napkin_math}
               defaultOpen={realism === "open"}
               onAsk={(question) => recordClarification(q.id, question)}
             />

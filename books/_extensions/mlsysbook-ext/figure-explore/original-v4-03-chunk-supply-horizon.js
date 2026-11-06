@@ -14,7 +14,13 @@ window.MLSysFigureLessons["original-v4-03-chunk-supply-horizon"]=async(root,cont
  const equation=document.createElement('p');equation.className='v4b-equation';
  const note=document.createElement('p');note.className='v4b-note';note.textContent='Scroll the original artwork to inspect labels, or use Expand. Playback duration is illustrative.';
  const width=+originalView.split(' ')[2],height=+originalView.split(' ')[3];
- function follow(x,y){const scale=svg.getBoundingClientRect().width/width;canvas.scrollLeft=Math.max(0,x*scale-canvas.clientWidth/2);canvas.scrollTop=Math.max(0,y*scale-canvas.clientHeight/2);}
+ // Keep the endpoint in view when Expand or rotation changes the artwork scale.
+ // Scrolling alone does not trigger this observer, so manual inspection persists.
+ let focus=null,resizeFrame=0,disposed=false;
+ function recenter(){if(!focus||disposed)return;const scale=svg.getBoundingClientRect().width/width;canvas.scrollLeft=Math.max(0,focus[0]*scale-canvas.clientWidth/2);canvas.scrollTop=Math.max(0,focus[1]*scale-canvas.clientHeight/2);}
+ function follow(x,y){focus=[x,y];recenter();}
+ const cameraResize=typeof ResizeObserver==='function'?new ResizeObserver(()=>{if(!disposed&&!resizeFrame)resizeFrame=requestAnimationFrame(()=>{resizeFrame=0;recenter();});}):null;
+ cameraResize?.observe(canvas);cameraResize?.observe(svg);
  function mount(stage,details){if(!canvas.isConnected)stage.append(canvas,note);if(!readout.isConnected)details.append(readout,equation);}
  function dot(x,y,color='#007A87',r=5){return add('circle',{cx:x,cy:y,r,fill:color,stroke:'#fff','stroke-width':r/3,'data-motion-object':'true'});}
  function route(token,points,p){const lens=points.slice(1).map((b,i)=>Math.hypot(b[0]-points[i][0],b[1]-points[i][1]));let rem=p*lens.reduce((a,b)=>a+b,0),j=0;while(j<lens.length-1&&rem>lens[j]){rem-=lens[j];j++;}const q=lens[j]?rem/lens[j]:1,a=points[j],b=points[j+1];token.setAttribute('cx',a[0]+(b[0]-a[0])*q);token.setAttribute('cy',a[1]+(b[1]-a[1])*q);}
@@ -43,7 +49,7 @@ window.MLSysFigureLessons["original-v4-03-chunk-supply-horizon"]=async(root,cont
  function frame(t){const valid=t<D.horizon,first=t<D.latency?'unavailable':t<D.replacement?'in force':'replaced',age=t,error=D.initial+.5*D.slip*(age/1000)**2*1000;
   cursor.setAttribute('x1',X(t));cursor.setAttribute('x2',X(t));used.setAttribute('x2',X(Math.min(D.replacement,Math.max(D.latency,t))));supply.setAttribute('x2',X(t));supply.setAttribute('stroke',valid?'#B87333':'#A51C30');
   const counts={unavailable:0,queued:0,consumed:0,replaced:0,withheld:0};ticks.forEach(({time,mark,slash})=>{const status=time<D.latency?'unavailable':time<D.replacement&&time<=t?'consumed':t>=D.horizon&&time>=D.horizon?'withheld':t>=D.replacement&&time>=D.replacement?'replaced':'queued';counts[status]++;mark.dataset.status=status;mark.setAttribute('fill',status==='unavailable'?'#A0AEC0':status==='consumed'?'#1A4D3E':status==='withheld'?'#A51C30':'#B87333');mark.setAttribute('opacity',status==='replaced'?'.22':status==='queued'?'.55':'1');slash.setAttribute('display',status==='withheld'?'':'none');});
-  handoff.style.display=t>=D.latency&&t<D.replacement?'':'none';handoff.setAttribute('cx',X(Math.min(75,Math.max(50,Math.floor(t/D.step)*D.step))));root.dataset.setpointCounts=JSON.stringify(counts);
+  handoff.style.display=counts.consumed>0&&t<D.replacement?'':'none';handoff.setAttribute('cx',X(Math.min(75,Math.max(50,Math.floor(t/D.step)*D.step))));root.dataset.setpointCounts=JSON.stringify(counts);
   root.dataset.time=String(t);root.dataset.firstChunkState=first;root.dataset.firstEvidenceValid=String(valid);root.dataset.chunkExecutedMs=String(Math.min(D.period,Math.max(0,t-D.latency)));
   readout.textContent=`Chunk 0 capture age ${t.toFixed(1)} ms · ${first} · evidence ${valid?'within horizon':'expired'} · first-chunk execution ${Math.min(D.period,Math.max(0,t-D.latency)).toFixed(1)} ms · grid: ${counts.unavailable} unavailable, ${counts.consumed} handed off, ${counts.replaced} replaced, ${counts.withheld} withheld`;
   equation.textContent=`Chunk 0 error bound = e₀ + ½ a_slip t² = ${error.toFixed(2)} mm; tolerance ${D.tolerance.toFixed(1)} mm. Replacement ${D.replacement.toFixed(0)} ms < evidence horizon ${D.horizon.toFixed(1)} ms < supply ${D.span.toFixed(0)} ms. Lease validity is a separate requirement.`;
@@ -51,5 +57,6 @@ window.MLSysFigureLessons["original-v4-03-chunk-supply-horizon"]=async(root,cont
  function render(i,{stage,details}){root.dataset.lessonCommittedIndex=String(i);mount(stage,details);frame(times[i]);follow(X(times[i]),i<2?1320:i<4?1650:1970);}
  function transition({from,to,onFrame}){if(to!==from+1)return;onFrame(p=>{frame(times[from]+(times[to]-times[from])*p);root.dataset.animationProgress=String(p);});}
 
- return window.MLSysOriginalPlayer.create({root,outer:context.outer,title:"Why does buffered supply outlast permission?",scope:"Original direct-replacement timing strip. Exact chapter schedule and tracked-mug bound; no extra admission delay is charged. After replacement, the cursor inspects chunk 0 evidence and supply, not continued execution.",steps,render,transition});
+ const player=window.MLSysOriginalPlayer.create({root,outer:context.outer,title:"Why does buffered supply outlast permission?",scope:"Original direct-replacement timing strip. Exact chapter schedule and tracked-mug bound; no extra admission delay is charged. After replacement, the cursor inspects chunk 0 evidence and supply, not continued execution.",steps,render,transition});
+ const destroy=player.destroy;player.destroy=()=>{disposed=true;cameraResize?.disconnect();cancelAnimationFrame(resizeFrame);destroy();};return player;
 };})();

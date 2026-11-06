@@ -22,6 +22,7 @@ from ...systems.types import Fleet
 from ...infrastructure.types import Datacenter
 from .base import BaseOptimizer, ForwardModel
 
+
 class SustainabilityModel(ForwardModel):
     """
     Calculates Datacenter-scale Sustainability metrics.
@@ -44,13 +45,19 @@ class SustainabilityModel(ForwardModel):
     - facility energy applies PUE; operational carbon applies grid carbon
       intensity to facility energy; water applies WUE to facility energy.
     """
+
     requires = ("fleet",)
     produces = SustainabilityResult
 
-    def solve(self, fleet: Fleet, duration_days: float, datacenter: Optional[Datacenter] = None,
-              mfu: float = 1.0, embodied_carbon_per_device: float = 0.0) -> SustainabilityResult:
-        """
-        Calculate energy, carbon, and water footprint for a fleet operation.
+    def solve(
+        self,
+        fleet: Fleet,
+        duration_days: float,
+        datacenter: Optional[Datacenter] = None,
+        mfu: float = 1.0,
+        embodied_carbon_per_device: float = 0.0,
+    ) -> SustainabilityResult:
+        """Calculate energy, carbon, and water footprint for a fleet operation.
 
         Implements the formula contract in the class docstring: per-device
         power is an energy-proportionality model
@@ -81,21 +88,44 @@ class SustainabilityModel(ForwardModel):
         SustainabilityResult
             IT and facility energy (kWh), total carbon (kg CO2e, operational
             plus embodied), water usage (liters), and the PUE applied.
+
+        Notes
+        -----
+        Equation: P = TDP * (idle_fraction + dynamic_fraction * MFU); E_IT = P * devices * duration; E_facility = PUE * E_IT. Carbon is E_facility * grid intensity plus the full supplied embodied amount. Water uses facility energy in this solver, unlike WaterUseModel, whose explicit boundary is IT energy.
+
+        Assumptions: Constant utilization, PUE, and regional intensities over the run. Embodied carbon is charged fully rather than amortized.
+        Excludes: Measured power traces, host power beyond the assumed accelerator-based account, and lifetime allocation of embodied carbon.
+
+        References
+        ----------
+        Derivation: Integrate the assumed idle-plus-utilization power over the fleet
+        duration, apply PUE once, and multiply facility energy by regional carbon and
+        water intensities. This is an energy-accounting convention rather than a meter
+        measurement.
+
+        Examples
+        --------
+        >>> from mlsysim import Q_, Systems
+        >>> result = SustainabilityModel().solve(Systems.Clusters.Research_256, duration_days=1)
+        >>> result.total_energy_kwh >= result.it_energy_kwh
+        True
         """
         # 1. Resolve Environment
         dc = datacenter or fleet.datacenter
 
         # Flexibly handle if dc is already a GridProfile or a Datacenter
-        if hasattr(dc, 'grid'):
+        if hasattr(dc, "grid"):
             region = dc.grid
         else:
             region = dc or fleet.region
 
         if not region:
-             from ...infrastructure.registry import Grids
-             region = Grids.US_Avg
+            from ...infrastructure.registry import Grids
+
+            region = Grids.US_Avg
 
         from ...core._validation import validate_range, validate_nonnegative
+
         validate_range(mfu, 0.0, 1.0, "mfu")
         validate_nonnegative(embodied_carbon_per_device, "embodied_carbon_per_device")
 
@@ -107,6 +137,7 @@ class SustainabilityModel(ForwardModel):
             base_tdp = fleet.node.accelerator.tdp
         else:
             from ...hardware.registry import Hardware
+
             base_tdp = Hardware.Cloud.H100.tdp
         # Energy proportionality: Idle power is ~30% of TDP. Dynamic power scales with compute utilization (MFU).
         idle_power = base_tdp * cal.ENERGY_IDLE_FRACTION
@@ -118,19 +149,23 @@ class SustainabilityModel(ForwardModel):
         it_energy_kwh = (it_power_w * Q_(duration_hours, "hour")).to("kWh")
 
         # Apply PUE
-        pue = getattr(dc, 'pue', fleet.effective_pue)
+        pue = getattr(dc, "pue", fleet.effective_pue)
         total_energy_kwh = it_energy_kwh * pue
 
         # 4. Carbon Footprint (use total facility energy, PUE already applied)
         # Prefer the grid's own carbon_kg() helper; otherwise apply the raw
         # intensity, with /1000 converting gCO2e/kWh to kgCO2e/kWh.
-        carbon_kg = region.carbon_kg(total_energy_kwh.magnitude) if hasattr(region, 'carbon_kg') else total_energy_kwh.magnitude * (region.carbon_intensity_g_kwh / 1000.0)
+        carbon_kg = (
+            region.carbon_kg(total_energy_kwh.magnitude)
+            if hasattr(region, "carbon_kg")
+            else total_energy_kwh.magnitude * (region.carbon_intensity_g_kwh / 1000.0)
+        )
 
         # 5. Water Usage
         # Resolve WUE from dc.grid, dc, or region
-        if hasattr(dc, 'grid') and dc.grid:
+        if hasattr(dc, "grid") and dc.grid:
             wue = dc.grid.wue
-        elif hasattr(dc, 'wue'):
+        elif hasattr(dc, "wue"):
             wue = dc.wue
         else:
             wue = region.wue
@@ -154,6 +189,7 @@ class SustainabilityModel(ForwardModel):
             embodied_carbon_kg=embodied_kg,
         )
 
+
 class EconomicsModel(ForwardModel):
     """
     Calculates Total Cost of Ownership (TCO) including Capex and Opex.
@@ -174,6 +210,7 @@ class EconomicsModel(ForwardModel):
     - period CapEx and maintenance are prorated by duration over the
       amortization window.
     """
+
     requires = ("fleet",)
     produces = EconomicsResult
     _fallacies = {
@@ -182,9 +219,18 @@ class EconomicsModel(ForwardModel):
         "Cloud is always more expensive than on-prem": "Reality: for bursty or short-duration workloads, cloud spot instances can be 3-10x cheaper than amortized on-prem hardware sitting idle.",
     }
 
-    def solve(self, fleet: Fleet, duration_days: float, kwh_price: Optional[float] = None, datacenter: Optional[Any] = None, grid: Optional[Any] = None, mfu: float = 1.0, amortization_years: float = 3.0, infrastructure_multiplier: float = cal.DEFAULT_INFRASTRUCTURE_MULTIPLIER) -> EconomicsResult:
-        """
-        Calculates the TCO for a fleet over a specified duration.
+    def solve(
+        self,
+        fleet: Fleet,
+        duration_days: float,
+        kwh_price: Optional[float] = None,
+        datacenter: Optional[Any] = None,
+        grid: Optional[Any] = None,
+        mfu: float = 1.0,
+        amortization_years: float = 3.0,
+        infrastructure_multiplier: float = cal.DEFAULT_INFRASTRUCTURE_MULTIPLIER,
+    ) -> EconomicsResult:
+        """Calculate the TCO for a fleet over a specified duration.
 
         Parameters
         ----------
@@ -215,6 +261,26 @@ class EconomicsModel(ForwardModel):
             Financial metrics including CapEx, OpEx, and total TCO. Energy
             OpEx is facility-level (PUE-loaded via SustainabilityModel);
             maintenance accrues on FULL CapEx, not the amortized slice.
+
+        Notes
+        -----
+        Equation: TCO = amortized CapEx + energy OpEx + maintenance. Period CapEx = unit_cost * accelerator_count * infrastructure_multiplier * duration_days / (365 * amortization_years). Maintenance uses full CapEx; energy uses SustainabilityModel.
+
+        Assumptions: Constant prices and straight-line amortization over a positive horizon; missing accelerator price is treated as zero and must be supplied for procurement use.
+        Excludes: Financing, resale, tax, demand charges, and measured fleet billing.
+
+        References
+        ----------
+        Derivation: Allocate purchase cost uniformly over the amortization horizon,
+        charge maintenance on the full asset value, and add energy purchased during
+        the period. All cost fields are in USD.
+
+        Examples
+        --------
+        >>> from mlsysim import Q_, Systems
+        >>> result = EconomicsModel().solve(Systems.Clusters.Research_256, duration_days=1)
+        >>> result.tco_usd >= result.opex_energy_usd
+        True
         """
         sust_model = SustainabilityModel()
         energy_result = sust_model.solve(fleet, duration_days, datacenter=datacenter or grid, mfu=mfu)
@@ -226,7 +292,7 @@ class EconomicsModel(ForwardModel):
             # Mirrors how the energy model resolved its grid, so price and
             # carbon come from the same place when possible.
             target = grid or datacenter or fleet.datacenter or fleet.region
-            price = getattr(target, 'kwh_price', None)
+            price = getattr(target, "kwh_price", None)
             if price is None:
                 price = Infrastructure.Pricing.Cloud.ElectricityPerKwh.rate.magnitude
 
@@ -265,6 +331,7 @@ class EconomicsModel(ForwardModel):
             region_name=energy_result.region_name,
         )
 
+
 class ResponsibleEngineeringModel(ForwardModel):
     """
     Models the computational cost of responsible AI practices (Wall 20: Safety).
@@ -276,14 +343,18 @@ class ResponsibleEngineeringModel(ForwardModel):
     1. Abadi et al. (2016), "Deep Learning with Differential Privacy."
     2. Anil et al. (2022), "Large-Scale Differentially Private BERT."
     """
+
     requires = ("training_time",)
     produces = ResponsibleEngineeringResult
 
-    def solve(self, base_training_time: Quantity,
-              epsilon: float = 1.0, delta: float = 1e-5,
-              min_subgroup_prevalence: float = 0.01) -> ResponsibleEngineeringResult:
-        """
-        Calculate the compute and data overhead of responsible-AI guarantees.
+    def solve(
+        self,
+        base_training_time: Quantity,
+        epsilon: float = 1.0,
+        delta: float = 1e-5,
+        min_subgroup_prevalence: float = 0.01,
+    ) -> ResponsibleEngineeringResult:
+        """Calculate the compute and data overhead of responsible-AI guarantees.
 
         Two first-order cost models:
 
@@ -317,6 +388,26 @@ class ResponsibleEngineeringModel(ForwardModel):
         ResponsibleEngineeringResult
             DP slowdown factor (dimensionless), effective training time, and
             the data-collection multiplier.
+
+        Notes
+        -----
+        Equation: slowdown = 1 + c / max(epsilon, 0.01); effective_time = base_time * slowdown; data_factor = 1 / max(prevalence, 1e-6). The coefficient c is the declared pedagogical default in calibration.py, not a measured DP-SGD law.
+
+        Assumptions: Fixed illustrative coefficient and inverse-prevalence sampling account. Delta is reported but does not affect the slowdown.
+        Excludes: Privacy accounting, proof of differential privacy, actual clipping/noise implementation, and fairness certification.
+
+        References
+        ----------
+        Derivation: The inverse-epsilon slowdown is a pedagogical assumption. Inverse
+        prevalence follows the expected sample count needed to observe a subgroup;
+        neither expression proves privacy or fairness.
+
+        Examples
+        --------
+        >>> from mlsysim import Q_, Systems
+        >>> result = ResponsibleEngineeringModel().solve(Q_("1 hour"), epsilon=1)
+        >>> result.effective_training_time > Q_("1 hour")
+        True
         """
         dp_slowdown = 1.0 + (cal.DP_SGD_SLOWDOWN_COEFFICIENT / max(epsilon, 0.01))
         additional_data_factor = 1.0 / max(min_subgroup_prevalence, 1e-6)
@@ -333,6 +424,7 @@ class ResponsibleEngineeringModel(ForwardModel):
             fairness_data_ratio=additional_data_factor,
         )
 
+
 class PlacementOptimizer(BaseOptimizer):
     """
     Finds the datacenter region that minimizes TCO plus a carbon tax.
@@ -343,14 +435,19 @@ class PlacementOptimizer(BaseOptimizer):
     carbon/cost trade-off explicit: a cheap-but-dirty grid can lose to a
     pricier low-carbon one once carbon is priced in.
     """
+
     requires = ("fleet", "duration_days")
     produces = PlacementOptimizerResult
 
-    def solve(self, fleet: Fleet, duration_days: float,
-              regions: Optional[List[str]] = None,
-              carbon_tax_per_ton: float = 100.0, mfu: float = 1.0) -> PlacementOptimizerResult:
-        """
-        Determine the datacenter region minimizing TCO plus carbon tax.
+    def solve(
+        self,
+        fleet: Fleet,
+        duration_days: float,
+        regions: Optional[List[str]] = None,
+        carbon_tax_per_ton: float = 100.0,
+        mfu: float = 1.0,
+    ) -> PlacementOptimizerResult:
+        """Determine the datacenter region minimizing TCO plus carbon tax.
 
         Parameters
         ----------
@@ -373,8 +470,29 @@ class PlacementOptimizer(BaseOptimizer):
         PlacementOptimizerResult
             Best region with its TCO (USD), carbon footprint (metric tons),
             PUE, and the full ranked candidate list.
+
+        Notes
+        -----
+        Equation: objective = TCO_USD + carbon_kg / 1000 * carbon_tax_per_ton. Evaluate EconomicsModel independently for each recognized candidate and return the minimum.
+
+        Assumptions: Identical fleet, duration, and MFU across candidates; at least one region must resolve. The candidate list defines the search space.
+        Excludes: Network latency, data sovereignty, capacity availability, and provisioning constraints.
+
+        References
+        ----------
+        Derivation: Enumerate the supplied regions and minimize the sum of their
+        modeled financial cost and carbon mass priced in USD per metric ton. This is
+        finite candidate search, not a continuous geographic optimum.
+
+        Examples
+        --------
+        >>> from mlsysim import Q_, Systems
+        >>> result = PlacementOptimizer().solve(Systems.Clusters.Research_256, duration_days=1, regions=["Quebec"])
+        >>> result.best_region == "Quebec"
+        True
         """
         from ...infrastructure.registry import Infrastructure
+
         if regions is None:
             regions = ["US_Avg", "Quebec", "Iowa"]
         econ_model = EconomicsModel()
@@ -383,7 +501,8 @@ class PlacementOptimizer(BaseOptimizer):
 
         for region_name in regions:
             grid = getattr(Infrastructure.Grids, region_name, None)
-            if not grid: continue
+            if not grid:
+                continue
 
             res = econ_model.solve(fleet, duration_days=duration_days, grid=grid, mfu=mfu)
 
@@ -393,13 +512,15 @@ class PlacementOptimizer(BaseOptimizer):
             carbon_tons = res.carbon_footprint_kg / 1000.0  # kg -> metric tons
             total_cost = res.tco_usd + (carbon_tons * carbon_tax_per_ton)
 
-            candidates.append({
-                "region": region_name,
-                "tco": res.tco_usd,
-                "carbon": carbon_tons,
-                "pue": res.pue,
-                "objective": total_cost
-            })
+            candidates.append(
+                {
+                    "region": region_name,
+                    "tco": res.tco_usd,
+                    "carbon": carbon_tons,
+                    "pue": res.pue,
+                    "objective": total_cost,
+                }
+            )
 
         if not candidates:
             raise ValueError("No valid regions found for optimization.")
@@ -415,8 +536,9 @@ class PlacementOptimizer(BaseOptimizer):
             carbon_footprint=best["carbon"],
             pue=best["pue"],
             total_searched=len(candidates),
-            top_candidates=top_n
+            top_candidates=top_n,
         )
+
 
 __all__ = [
     "SustainabilityModel",

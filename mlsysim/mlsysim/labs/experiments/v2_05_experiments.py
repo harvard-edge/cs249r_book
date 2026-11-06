@@ -727,3 +727,59 @@ def activation_bytes_for_microbatch(
         precision_bytes=precision_bytes.to("byte").magnitude,
         strategy=activation_checkpointing,
     ).to("GB")
+
+
+def data_parallel_update(
+    shards: Sequence[Sequence[tuple[float, float]]], *,
+    reduction: Literal["valid-count", "worker-mean", "unnormalized-sum"] = "valid-count",
+    weight: float = 0.5, learning_rate: float = 0.1,
+) -> dict[str, Any]:
+    """Exact scalar squared-error SGD step on an explicitly supplied global batch.
+
+    Each (x, y) item has loss (w*x-y)^2/2. All workers start from the
+    same weight and apply one synchronous SGD update. This checks estimator
+    equivalence only; it predicts neither convergence nor model quality.
+    Empty shards contribute zero sum and zero valid items, not a local mean.
+    """
+    if reduction not in ("valid-count", "worker-mean", "unnormalized-sum"):
+        raise ValueError("unknown gradient reduction")
+    if not shards or not any(shards):
+        raise ValueError("the global batch must contain valid items")
+    values = [weight, learning_rate, *(v for shard in shards for pair in shard for v in pair)]
+    if not all(math.isfinite(v) for v in values) or learning_rate <= 0:
+        raise ValueError("finite inputs and a positive learning rate are required")
+    counts = [len(shard) for shard in shards]
+    sums = [math.fsum((weight * x - y) * x for x, y in shard) for shard in shards]
+    reference_gradient = math.fsum(sums) / sum(counts)
+    if reduction == "valid-count":
+        reduced = reference_gradient
+    elif reduction == "worker-mean":
+        if any(count == 0 for count in counts):
+            raise ValueError("an empty shard has no local mean")
+        reduced = math.fsum(total / count for total, count in zip(sums, counts)) / len(shards)
+    else:
+        reduced = math.fsum(sums)
+    reference_weight = weight - learning_rate * reference_gradient
+    next_weight = weight - learning_rate * reduced
+    return {
+        "fixture": "scalar squared-error, one synchronous SGD step",
+        "reduction": reduction, "initial_weight": weight, "learning_rate": learning_rate,
+        "worker_counts": counts, "worker_gradient_sums": sums,
+        "worker_gradient_means": [total / count if count else None for total, count in zip(sums, counts)],
+        "global_valid_count": sum(counts), "reference_gradient": reference_gradient,
+        "reduced_gradient": reduced, "reference_next_weight": reference_weight,
+        "next_weight": next_weight, "update_error": abs(next_weight - reference_weight),
+        "equivalent": math.isclose(next_weight, reference_weight, rel_tol=1e-12, abs_tol=1e-12),
+        "scope": "same examples, weights, SGD state, learning rate and update order; exact-real arithmetic model",
+    }
+
+
+def update_equivalence_fixture(partition: str, reduction: str) -> dict[str, Any]:
+    """A bounded teaching batch; repartitioning never changes its examples."""
+    # Scenario assumptions, dimensionless values, not a trained-model benchmark.
+    items = ((1.0, 1.0), (2.0, 1.0), (3.0, 2.0), (4.0, 3.0))
+    if partition not in ("equal", "unequal"):
+        raise ValueError("unknown batch partition")
+    cut = 2 if partition == "equal" else 1
+    result = data_parallel_update((items[:cut], items[cut:]), reduction=reduction)
+    return {**result, "partition": partition, "items": [list(item) for item in items]}

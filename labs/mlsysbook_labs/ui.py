@@ -461,8 +461,8 @@ ol[class~="fixed"][class~="top-0"][class~="z-100"][class~="max-h-screen"] {
   margin-right: auto !important;
   box-sizing: border-box !important;
 }
-.output.block > div,
-.output.block > div:not(:has(svg, canvas, iframe, table, marimo-ui-element, .js-plotly-plot, .plotly)) {
+/* Course shells own their bounded measure; legacy outputs keep this reset. */
+.output.block > div:not([style*="--nb-accent"]) {
   width: 100% !important;
   max-width: 100% !important;
   margin-left: auto !important;
@@ -500,7 +500,7 @@ marimo-callout-output {
   box-sizing: border-box !important;
 }
 div[role="tabpanel"],
-div[role="tabpanel"] > * {
+div[role="tabpanel"] > :not([style*="--nb-accent"]) {
   width: 100% !important;
   max-width: 100% !important;
   box-sizing: border-box !important;

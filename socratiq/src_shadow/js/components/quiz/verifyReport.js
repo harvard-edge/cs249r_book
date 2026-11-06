@@ -1,5 +1,25 @@
-import { uint8ArrayToBase64, generateContentHash } from '../../libs/utils/hashUtils.js';
-// import { compareWithLastGenerated } from '../../libs/utils/hashTestUtils.js';
+import { generateContentHash } from '../../libs/utils/hashUtils.js';
+
+function decodePdfLiteral(value) {
+    return value.replace(/\\(?:([0-7]{1,3})|\r\n|[\s\S])/g, escape => {
+        const literal = escape.slice(1);
+        if (/^[0-7]{1,3}$/.test(literal)) return String.fromCharCode(parseInt(literal, 8));
+        if (literal === '\r' || literal === '\n' || literal === '\r\n') return '';
+        return ({n: '\n', r: '\r', t: '\t', b: '\b', f: '\f'})[literal] ?? literal;
+    });
+}
+
+function extractVerificationContent(pdfSection) {
+    // Decode PDF strings instead of removing whitespace or parentheses from JSON.
+    // Older reports contain a JSON string directly; new reports encode its UTF-8.
+    const payload = [...pdfSection.matchAll(/\(((?:\\[\s\S]|[^\\)])*)\)\s*Tj/g)]
+        .map(match => decodePdfLiteral(match[1])).join('').trim();
+    const content = payload.startsWith('base64:')
+        ? new TextDecoder('utf-8', {fatal: true}).decode(Uint8Array.from(atob(payload.slice(7)), character => character.charCodeAt(0)))
+        : payload;
+    JSON.parse(content);
+    return content;
+}
 
 export async function verifyPDFReport(file) {
     return new Promise((resolve) => {
@@ -28,78 +48,21 @@ export async function verifyPDFReport(file) {
                     return;
                 }
 
-                // Extract content between markers and clean it
-                let contentToHash = contentStr
-                    .substring(startIndex + startMarker.length, endIndex)
-                    .replace(/\) Tj/g, '')           // Remove PDF text operators
-                    .replace(/ET\n?BT\n?/g, '')      // Remove PDF block markers
-                    .replace(/\/F\d+ \d+ Tf/g, '')   // Remove font commands
-                    .replace(/\d+(\.\d+)? TL/g, '')  // Remove leading commands
-                    .replace(/\d+(\.\d+)? \d+(\.\d+)? Td/g, '') // Remove positioning
-                    .replace(/\(/g, '')              // Remove opening parentheses
-                    .replace(/\)/g, '')              // Remove closing parentheses
-                    .replace(/T\*\s*\d*\.?g/g, '')   // Remove T* and g commands
-                    .replace(/\s+/g, '')             // Remove whitespace
-                    .trim();
-
-                // Try to extract just the JSON part
-                const jsonMatch = contentToHash.match(/({.*})/);
-                if (!jsonMatch) {
-                    console.error('Could not find JSON content in:', contentToHash);
-                    resolve({
-                        isValid: false,
-                        reason: 'PDF content could not be parsed as valid JSON data.',
-                        details: 'Invalid JSON structure in verification content'
-                    });
-                    return;
-                }
-
-                contentToHash = jsonMatch[1];
-
+                let contentToHash;
                 try {
-                    // Verify it's valid JSON
-                    const parsedContent = JSON.parse(contentToHash);
-                    // console.log('Successfully parsed JSON:', parsedContent);
+                    contentToHash = extractVerificationContent(contentStr.substring(startIndex + startMarker.length, endIndex));
                 } catch (error) {
-                    console.error('Content after cleaning');
                     resolve({
                         isValid: false,
-                        reason: 'PDF contains corrupted or invalid data structure.',
-                        details: 'JSON parsing failed after content extraction'
-                    });
-                    return;
-                }
-
-                // After extracting JSON content
-                try {
-                    // Parse and normalize the content
-                    const parsedContent = JSON.parse(contentToHash);
-                    
-                    // Normalize quiz titles
-                    if (parsedContent.highScores) {
-                        parsedContent.highScores = parsedContent.highScores.map(score => ({
-                            ...score,
-                            quizTitle: score.quizTitle.replace(/\s+/g, '')
-                        }));
-                    }
-                    
-                    // Re-stringify for hashing
-                    contentToHash = JSON.stringify(parsedContent);
-                    
-                    // console.log('Successfully normalized JSON:', parsedContent);
-                } catch (error) {
-                    console.error('Content normalization failed:', error);
-                    resolve({
-                        isValid: false,
-                        reason: 'PDF data normalization failed during verification process.',
-                        details: 'Content normalization error'
+                        reason: 'PDF contains invalid report metadata.',
+                        details: 'Verification metadata could not be decoded'
                     });
                     return;
                 }
 
                 // Extract verification data
                 const verificationSection = contentStr.slice(endIndex);
-                const hashPattern = /Verification Code:[^(]*\(([A-Fa-f0-9]{16})\)/;
+                const hashPattern = /(?:Verification Code|Metadata Checksum):[^(]*\(([A-Fa-f0-9]{16})\)/;
                 const timestampPattern = /Generated:[^(]*\(([\d]{4}-[\d]{2}-[\d]{2}T[\d]{2}:[\d]{2}:[\d]{2}\.[\d]{3}Z)\)/;
 
                 const hashMatch = verificationSection.match(hashPattern);
@@ -129,8 +92,8 @@ export async function verifyPDFReport(file) {
                 resolve({
                     isValid,
                     reason: isValid ? 
-                        'PDF verification successful! This is a valid quiz report generated by our system.' :
-                        'PDF verification failed. The content has been modified or corrupted.',
+                        'The embedded report metadata matches its checksum.' :
+                        'The embedded report metadata does not match its checksum.',
                     details: isValid ?
                         `Hash verification passed: ${extractedHash.substring(0, 8)}...` :
                         `Hash mismatch: Expected ${computedHash.substring(0, 8)}..., Found ${extractedHash.substring(0, 8)}...`,

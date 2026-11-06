@@ -50,6 +50,81 @@ class ClearanceQueryModel(ForwardModel):
               occupancy_cell_bytes: Quantity, map_edge: Quantity, slab_volume: Quantity,
               pitches: Sequence[Quantity], trilinear_reads: int,
               wcet: Optional[Quantity] = None) -> ClearanceQueryResult:
+        """Compare map-query reads and storage at each voxel pitch.
+
+        Parameters
+        ----------
+        tick_rate : Quantity
+            Positive permission-controller frequency, in Hz.
+        collision_allocation : Quantity
+            Time assigned to all collision queries per tick, in seconds.
+        hulls : int
+            Positive number of spherical hull queries sharing the allocation.
+        hull_radius : Quantity
+            Nonnegative radius of each collision hull, in meters.
+        protective_clearance : Quantity
+            Nonnegative extra clearance around each hull, in meters.
+        sram_bandwidth : Quantity
+            Positive sustained SRAM read bandwidth, in bytes per second.
+        esdf_cell_bytes : Quantity
+            Positive storage per signed-distance cell, in bytes.
+        occupancy_cell_bytes : Quantity
+            Positive storage per occupancy cell, in bytes.
+        map_edge : Quantity
+            Positive map side length used to estimate octree depth, in meters.
+        slab_volume : Quantity
+            Positive snapshot volume whose storage is counted, in cubic meters.
+        pitches : sequence of Quantity
+            Positive voxel widths in meters. Result rows are keyed by rounded
+            centimeters, so pitches must have distinct keys to retain every row.
+        trilinear_reads : int
+            Nonnegative number of corner-cell reads for one ESDF interpolation.
+        wcet : Quantity, optional
+            Positive reference worst-case execution time, in seconds. If supplied,
+            report allocation divided by this value; no WCET is inferred.
+
+        Returns
+        -------
+        ClearanceQueryResult
+            Tick and per-query times in microseconds, read budgets as counts, and
+            pitch-indexed storage in kilobytes and spatial error in meters.
+            Budget ratios describe this accounting model, not collision safety.
+
+        See Also
+        --------
+        mlsysim.physics.robotics.perception.calc_sphere_scan_cells : Sphere-grid scan count.
+        mlsysim.physics.robotics.perception.calc_octree_depth : Dependent octree levels.
+        mlsysim.physics.robotics.perception.calc_voxel_quantization_error : Cell-center spatial error.
+
+        Notes
+        -----
+        Equation: t_query = collision_allocation / hulls; reads_budget =
+            t_query * sram_bandwidth / esdf_cell_bytes. Dense storage counts
+            slab_volume / ``pitch**3`` cells; octree reads multiply sphere-scan cells
+            by tree depth, while the ESDF reads trilinear_reads corners.
+        Assumptions: one equal time allocation per hull, uniform cubic voxels,
+            fully sustained SRAM bandwidth, and a fixed interpolation read count.
+        Excludes: cache reuse, dependency stalls, tree traversal instructions,
+            scene reconstruction error, and certification of a collision checker.
+
+        References
+        ----------
+        Derivation: divide time and byte budgets by per-query and per-cell costs;
+            the spatial counts and quantization bound are supplied by the linked
+            sphere-scan, octree-depth, and voxel-quantization functions.
+
+        Examples
+        --------
+        A constructed controller gives each of two hulls half its collision budget.
+
+        >>> from mlsysim import Q_
+        >>> result = ClearanceQueryModel().solve(
+        ...     Q_(100, 'Hz'), Q_(2, 'ms'), 2, Q_(0.1, 'm'), Q_(0.05, 'm'),
+        ...     Q_(1, 'GB/s'), Q_(4, 'byte'), Q_(1, 'byte'), Q_(1, 'm'),
+        ...     Q_(1, 'm^3'), [Q_(0.1, 'm')], 8)
+        >>> result.query_time == Q_(1, 'ms')
+        True
+        """
         tick = (1 / tick_rate).to(ureg.microsecond)
         t_query = (collision_allocation / hulls).to(ureg.microsecond)
         budget = _ratio(t_query * sram_bandwidth, esdf_cell_bytes)
@@ -85,6 +160,58 @@ class HostMapSizingModel(ForwardModel):
 
     def solve(self, extent: Sequence[Quantity], pitch: Quantity, voxel_bytes: Quantity, surface_area: Quantity,
               band_half_width: Quantity, block_edge: int) -> HostMapSizingResult:
+        """Count dense-grid storage and ideal narrow-band block storage.
+
+        Parameters
+        ----------
+        extent : sequence of Quantity
+            Three positive workspace side lengths, in meters.
+        pitch : Quantity
+            Positive cubic voxel width, in meters.
+        voxel_bytes : Quantity
+            Positive bytes stored per voxel, excluding hash-table metadata.
+        surface_area : Quantity
+            Positive mapped surface area, in square meters.
+        band_half_width : Quantity
+            Positive distance stored on each side of the surface, in meters.
+        block_edge : int
+            Positive voxels per side of each cubic block.
+
+        Returns
+        -------
+        HostMapSizingResult
+            Workspace and band volumes in cubic meters, ideal cell/block counts,
+            dense storage in GB, band storage in MB, and dimensionless ratios.
+            Fractional block counts are retained; memory admission is not checked.
+
+        Notes
+        -----
+        Equation: V = extent[0] * extent[1] * extent[2]; N_dense = V / ``pitch**3``;
+            V_band = 2 * band_half_width * surface_area. N_blocks =
+            V_band / (block_edge * ``pitch)**3`` and each block stores
+            ``block_edge**3`` * voxel_bytes.
+        Assumptions: flat locally independent surface bands, identical voxel payloads,
+            and continuously divisible block occupancy.
+        Excludes: band overlap, workspace clipping, partial-block rounding, hash
+            keys, allocator overhead, and GPU residency constraints.
+
+        References
+        ----------
+        Derivation: volume divided by cubic-cell volume gives cell count;
+            multiplying a surface area by its two-sided band thickness gives the
+            narrow-band volume used in this geometric approximation.
+
+        Examples
+        --------
+        A constructed cubic workspace exposes the volume accounting directly.
+
+        >>> from mlsysim import Q_
+        >>> result = HostMapSizingModel().solve(
+        ...     [Q_(1, 'm')] * 3, Q_(0.1, 'm'), Q_(4, 'byte'),
+        ...     Q_(1, 'm^2'), Q_(0.05, 'm'), 4)
+        >>> result.workspace_volume == Q_(1, 'm^3')
+        True
+        """
         lx, ly, lz = extent
         v_ws = (lx * ly * lz).to(ureg.meter ** 3)
         n_dense = _ratio(v_ws, pitch ** 3)
@@ -107,6 +234,59 @@ class RaymarchTrafficModel(ForwardModel):
 
     def solve(self, width_px: int, height_px: int, frame_rate: Quantity, ray_length: Quantity, pitch: Quantity,
               bytes_per_step: Quantity, bandwidth: Quantity) -> RaymarchTrafficResult:
+        """Estimate uncached voxel-update traffic for a depth-image stream.
+
+        Parameters
+        ----------
+        width_px : int
+            Positive image width, in pixels.
+        height_px : int
+            Positive image height, in pixels.
+        frame_rate : Quantity
+            Positive depth-frame rate, in Hz.
+        ray_length : Quantity
+            Nonnegative traversed distance per ray, in meters.
+        pitch : Quantity
+            Positive distance between ray samples, in meters.
+        bytes_per_step : Quantity
+            Nonnegative bytes transferred per ray sample, in bytes.
+        bandwidth : Quantity
+            Positive available memory bandwidth, in bytes per second.
+
+        Returns
+        -------
+        RaymarchTrafficResult
+            Ray count per frame, steps per ray, traffic in GB/s, and traffic divided
+            by available bandwidth. A share above one identifies a bandwidth deficit
+            under the stated access model.
+
+        Notes
+        -----
+        Equation: rays = width_px * height_px; steps = ray_length / pitch;
+            traffic = frame_rate * rays * steps * bytes_per_step.
+        Assumptions: every pixel emits one equal-length ray and every step causes
+            the supplied byte transfer. Fractional step counts are retained.
+        Excludes: repeated-voxel reuse, culling, empty-space skipping, compression,
+            contention with other clients, and integer step rounding.
+
+        References
+        ----------
+        Derivation: multiply frames per second, rays per frame, steps per ray,
+            and bytes per step; the units reduce to bytes per second.
+
+        Examples
+        --------
+        Doubling the constructed frame rate doubles the traffic.
+
+        >>> from mlsysim import Q_
+        >>> model = RaymarchTrafficModel()
+        >>> args = (2, 2, Q_(1, 'Hz'), Q_(1, 'm'), Q_(0.1, 'm'),
+        ...         Q_(4, 'byte'), Q_(1, 'GB/s'))
+        >>> first = model.solve(*args)
+        >>> second = model.solve(*args[:2], args[2] * 2, *args[3:])
+        >>> second.traffic == first.traffic * 2
+        True
+        """
         rays = width_px * height_px
         steps = _ratio(ray_length, pitch)
         traffic = (frame_rate * rays * steps * bytes_per_step).to(ureg.gigabyte / ureg.second)
@@ -119,5 +299,44 @@ class EncoderRateModel(ForwardModel):
     produces = EncoderRateResult
 
     def solve(self, flop_per_frame: Quantity, frame_rate: Quantity, peak: Quantity) -> EncoderRateResult:
+        """Compare frame-encoder work demand with an available compute rate.
+
+        Parameters
+        ----------
+        flop_per_frame : Quantity
+            Nonnegative arithmetic work for one frame, in FLOPs.
+        frame_rate : Quantity
+            Nonnegative frame arrival rate, in Hz.
+        peak : Quantity
+            Positive compute capacity, in FLOPs per second. Supply an effective
+            rate instead if utilization losses should already be included.
+
+        Returns
+        -------
+        EncoderRateResult
+            Required and supplied rates in the units of peak, and their ratio.
+            The field shortfall is demand/capacity, not a percentage or latency.
+
+        Notes
+        -----
+        Equation: required = flop_per_frame * frame_rate; shortfall = required / peak.
+        Assumptions: every frame executes the same work, and throughput can be
+            compared with the supplied compute rate.
+        Excludes: memory traffic, queueing, launch overhead, and deadline guarantees.
+
+        References
+        ----------
+        Derivation: work per frame multiplied by frames per second is work per
+            second; division by supply gives dimensionless capacity demand.
+
+        Examples
+        --------
+        A constructed stream whose demand equals supply has unit demand ratio.
+
+        >>> from mlsysim import Q_
+        >>> result = EncoderRateModel().solve(Q_(10, 'flop'), Q_(2, 'Hz'), Q_(20, 'flop/s'))
+        >>> result.shortfall == 1
+        True
+        """
         required = (flop_per_frame * frame_rate).to(peak.units)
         return EncoderRateResult(required=required, peak=peak, shortfall=_ratio(required, peak))

@@ -3,7 +3,6 @@
 
 import mermaid from 'mermaid';
 import katex from 'katex';
-import 'katex/dist/katex.min.css';
 import markdownit from 'markdown-it';
 import markdownItContainer from 'markdown-it-container';
 import DOMPurify from 'dompurify';
@@ -27,6 +26,9 @@ async function initializeStreamdown() {
       theme: 'default',
       securityLevel: 'strict',
       fontFamily: 'monospace',
+      // SVG text survives sanitization; HTML foreignObject labels are removed.
+      htmlLabels: false,
+      flowchart: { htmlLabels: false },
       suppressErrorRendering: true
     });
     mermaidInitialized = true;
@@ -405,6 +407,12 @@ md.use(function(md) {
     const sourceUrl = token.sourceUrl;
     
     
+    if (!isValidReferenceId(targetId) || !safeReferenceUrl(sourceUrl)) {
+      return md.utils.escapeHtml(displayText || targetId || 'Source');
+    }
+    const href = safeReferenceUrl(sourceUrl);
+    href.hash = targetId;
+
     // Generate unique ID for this reference
     const refId = `custom-ref-${targetId}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     
@@ -432,13 +440,10 @@ md.use(function(md) {
     }
     
     return `<span class="custom-reference-container" style="position: relative; display: inline-block; max-width: 100%;">
-      <a href="javascript:void(0)" 
+      <a href="${md.utils.escapeHtml(href.href)}"
          class="custom-reference-pill" 
          id="${refId}" 
          ${dataAttributes.join(' ')}
-         onclick="handleCustomReferenceClick('${targetId}', event); return false;" 
-         onmouseenter="showCustomReferenceTooltip('${targetId}', event, '${md.utils.escapeHtml(displayText)}')" 
-         onmouseleave="hideCustomReferenceTooltip('${targetId}')" 
          style="
            display: inline-block; 
            background: #e5e7eb; 
@@ -458,8 +463,7 @@ md.use(function(md) {
            word-break: break-word;
            max-width: 100%;
          " 
-         onmouseover="this.style.background='#d1d5db'; this.style.transform='scale(1.1)'" 
-         onmouseout="this.style.background='#e5e7eb'; this.style.transform='scale(1)'">
+>
         ${md.utils.escapeHtml(displayText)}
       </a>
     </span>`;
@@ -472,115 +476,62 @@ md.use(function(md) {
  * Handle custom reference clicks
  * @param {string} targetId - The target ID to scroll to
  */
-function handleCustomReferenceClick(targetId, event) {
-  console.log(`🔍 handleCustomReferenceClick called with targetId: ${targetId}`);
-  
-  // Prevent any default link behavior
-  if (event) {
-    event.preventDefault();
-    event.stopPropagation();
-  }
-  
-  // Hide any open tooltips first
-  const tooltip = shadowEle ? shadowEle.querySelector('#global-custom-reference-tooltip') : document.getElementById('global-custom-reference-tooltip');
-  if (tooltip) {
-    tooltip.style.display = 'none';
-  }
-  
-  // Find the reference link element to check for cross-page navigation
-  // Search in shadow DOM where the reference links are actually located
-  const referenceLinks = shadowEle ? shadowEle.querySelectorAll(`[data-target-id="${targetId}"]`) : document.querySelectorAll(`[data-target-id="${targetId}"]`);
-  
-  if (referenceLinks.length > 0) {
-    const linkElement = referenceLinks[0];
-    const sourceUrl = linkElement.getAttribute('data-source-url');
-    const currentUrl = window.location.href;
-    
-    const quotedText = linkElement.getAttribute('data-quoted-text');
-    console.log(`🔍 Reference click: targetId="${targetId}", sourceUrl="${sourceUrl}"`);
-    
-    // Check if this is a cross-page reference
-    console.log(`🔍 URL comparison: sourceUrl="${sourceUrl}", currentUrl="${currentUrl}"`);
-    
-    // Normalize URLs for comparison (remove trailing slashes, query params, etc.)
-    const normalizeUrl = (url) => {
-      if (!url) return '';
-      return url.replace(/\/$/, '').split('?')[0].split('#')[0];
-    };
-    
-    const normalizedSourceUrl = normalizeUrl(sourceUrl);
-    const normalizedCurrentUrl = normalizeUrl(currentUrl);
-    
-    console.log(`🔍 Normalized URLs: source="${normalizedSourceUrl}", current="${normalizedCurrentUrl}"`);
-    
-    if (sourceUrl && normalizedSourceUrl !== normalizedCurrentUrl) {
-      console.log(`🔍 Cross-page reference detected: ${normalizedSourceUrl} !== ${normalizedCurrentUrl}`);
-      try {
-        const safeUrl = new URL(sourceUrl, window.location.origin);
-        if ((safeUrl.protocol === 'http:' || safeUrl.protocol === 'https:') && safeUrl.origin === window.location.origin) {
-          safeUrl.searchParams.set('scroll-to', targetId);
-          console.log(`🔍 Navigating to ${safeUrl.toString()} with scroll-to=${targetId}`);
-          window.location.href = safeUrl.toString();
-        } else {
-          console.warn(`⚠️ Blocked unsafe cross-page navigation URL: ${sourceUrl}`);
-        }
-      } catch (e) {
-        console.warn(`⚠️ Invalid cross-page navigation URL: ${sourceUrl}`, e);
-      }
-      return;
-    } else if (!sourceUrl) {
-      console.log(`❌ ERROR: No data-source-url found! Reference data may have been lost during save/load.`);
-    } else {
-      console.log(`🔍 Same-page reference detected: ${normalizedSourceUrl} === ${normalizedCurrentUrl}`);
-      console.log(`🔍 Proceeding with same-page scroll to target: ${targetId}`);
+function isValidReferenceId(value) {
+  return typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$/.test(value);
+}
+
+function safeReferenceUrl(value) {
+  try {
+    const url = new URL(value || window.location.href, window.location.href);
+    return ['http:', 'https:'].includes(url.protocol) &&
+      url.origin === window.location.origin && !url.username && !url.password ? url : null;
+  } catch { return null; }
+}
+
+// Sanitized Markdown carries data, never executable inline event attributes.
+const referenceInteractionRoots = new WeakSet();
+function initializeCustomReferenceInteractions(root) {
+  if (!root?.addEventListener || referenceInteractionRoots.has(root)) return;
+  referenceInteractionRoots.add(root);
+  const referenceFrom = event => {
+    const link = event.target?.closest?.('.custom-reference-pill');
+    return link && root.contains(link) && isValidReferenceId(link.dataset.targetId) ? link : null;
+  };
+  root.addEventListener('click', event => {
+    const link = referenceFrom(event);
+    if (link) handleCustomReferenceClick(link.dataset.targetId, event, link);
+  });
+  root.addEventListener('mouseover', event => {
+    const link = referenceFrom(event);
+    if (link && safeReferenceUrl(link.dataset.sourceUrl)) {
+      showCustomReferenceTooltip(link.dataset.targetId, event, link.dataset.displayText || 'Source');
     }
-  } else {
-    console.log(`🔍 No reference links found for targetId: ${targetId}`);
-  }
-  
-  // Same-page reference - try to find the target element by various methods
-  let targetElement = null;
-  
-  // Method 1: Direct ID match
-  targetElement = document.querySelector(`[data-fuzzy-id="${targetId}"]`);
-  if (targetElement) {
-    console.log(`🔍 Found target by direct ID: ${targetId}`);
-    scrollToCustomReference(targetElement);
+  });
+  root.addEventListener('mouseout', event => {
+    const link = referenceFrom(event);
+    if (link && !link.contains(event.relatedTarget)) hideCustomReferenceTooltip(link.dataset.targetId);
+  });
+}
+
+function handleCustomReferenceClick(targetId, event, linkElement) {
+  event?.preventDefault();
+  event?.stopPropagation();
+  if (!isValidReferenceId(targetId) || !linkElement) return;
+  const sourceUrl = safeReferenceUrl(linkElement.dataset.sourceUrl);
+  if (!sourceUrl) return;
+  const tooltip = shadowEle?.querySelector('#global-custom-reference-tooltip');
+  if (tooltip) tooltip.style.display = 'none';
+  const currentUrl = new URL(window.location.href);
+  const normalizePath = path => path.replace(/\/$/, '');
+  if (normalizePath(sourceUrl.pathname) !== normalizePath(currentUrl.pathname)) {
+    sourceUrl.searchParams.set('scroll-to', targetId);
+    sourceUrl.hash = '';
+    window.location.href = sourceUrl.href;
     return;
   }
-  
-  // Method 2: Partial ID match
-  const allElements = document.querySelectorAll('[data-fuzzy-id]');
-  for (const element of allElements) {
-    const elementId = element.getAttribute('data-fuzzy-id');
-    if (elementId && elementId.includes(targetId)) {
-      console.log(`🔍 Found target by partial ID match: ${elementId}`);
-      targetElement = element;
-      break;
-    }
-  }
-  
-  if (targetElement) {
-    scrollToCustomReference(targetElement);
-    return;
-  }
-  
-  // Method 3: Text content search
-  const paragraphs = document.querySelectorAll('p, div, section, article');
-  for (const paragraph of paragraphs) {
-    const text = paragraph.textContent || '';
-    if (text.includes(targetId) || text.toLowerCase().includes(targetId.toLowerCase())) {
-      console.log(`🔍 Found target by text content: ${targetId}`);
-      targetElement = paragraph;
-      break;
-    }
-  }
-  
-  if (targetElement) {
-    scrollToCustomReference(targetElement);
-  } else {
-    console.warn(`🔍 No target found for custom reference: ${targetId}`);
-  }
+  const target = Array.from(document.querySelectorAll('[data-fuzzy-id]'))
+    .find(element => element.getAttribute('data-fuzzy-id') === targetId) || document.getElementById(targetId);
+  if (target) scrollToCustomReference(target);
 }
 
 /**
@@ -597,6 +548,7 @@ function scrollToCustomReference(targetElement) {
   
   // Add highlight class
   targetElement.classList.add('custom-reference-highlight');
+  targetElement.animate?.([{ backgroundColor: 'rgba(59, 130, 246, 0.25)' }, { backgroundColor: 'transparent' }], { duration: 3000 });
   
   // Scroll to element
   try {
@@ -627,6 +579,7 @@ function scrollToCustomReference(targetElement) {
  * @param {string} displayText - The display text
  */
 function showCustomReferenceTooltip(targetId, event, displayText) {
+  const referenceLink = event.target?.closest?.('.custom-reference-pill');
   
   // Clear any existing hide timeout
   if (window.customTooltipHideTimeout) {
@@ -688,7 +641,8 @@ function showCustomReferenceTooltip(targetId, event, displayText) {
   truncatedContent = truncatedContent.replace(/\s+/g, ' ').trim();
   
   // Create or get the global tooltip element in shadow DOM
-  const container = shadowEle || document;
+  const referenceRoot = referenceLink?.getRootNode();
+  const container = shadowEle || (referenceRoot?.nodeType === 11 ? referenceRoot : document.body);
   let tooltip = container.querySelector('#global-custom-reference-tooltip');
   if (!tooltip) {
     tooltip = document.createElement('div');
@@ -743,7 +697,7 @@ function showCustomReferenceTooltip(targetId, event, displayText) {
   link.textContent = isCrossPage ? 'Go to page →' : 'Go to target →';
   link.addEventListener('click', (e) => {
     e.preventDefault();
-    handleCustomReferenceClick(targetId);
+    handleCustomReferenceClick(targetId, e, referenceLink);
   });
   link.addEventListener('mouseover', () => { link.style.textDecoration = 'underline'; });
   link.addEventListener('mouseout', () => { link.style.textDecoration = 'none'; });
@@ -815,6 +769,7 @@ export function initiateMarkdown(shadowElement) {
   initializeStreamdown();
   // Initialize reference renderer
   initializeReferenceRenderer(shadowElement);
+  initializeCustomReferenceInteractions(shadowElement);
   
   // Make custom reference functions globally available
   if (typeof window !== 'undefined') {
@@ -951,7 +906,8 @@ async function processMarkdownWithStreamdown(text, parseIncomplete = true) {
         mermaidContainer.appendChild(errorDiv);
       }
       
-      codeBlock.parentElement.parentElement.replaceWith(mermaidContainer);
+      // Replace the fenced block, retaining the temporary markdown root.
+      codeBlock.parentElement.replaceWith(mermaidContainer);
     } else {
       // Handle regular code blocks with STREAMDOWN's highlighting
       try {
@@ -1013,6 +969,7 @@ async function processMarkdownWithStreamdown(text, parseIncomplete = true) {
 
 // Main markdown update function using STREAMDOWN
 export async function updateMarkdownPreview(text, clone, isResearch = 0, markdownPreviewId = '') {
+  initializeCustomReferenceInteractions(clone.getRootNode());
   let preview;
   if (markdownPreviewId) {
     preview = clone.querySelector('#' + markdownPreviewId);
@@ -1651,6 +1608,7 @@ export class StreamdownMarkdownRenderer {
 
   // Reinitialize custom features
   reinitializeCustomFeatures(preview) {
+    initializeCustomReferenceInteractions(this.shadowElement);
     // Initialize editable inputs
     initializeSpoilerEditing(preview);
     

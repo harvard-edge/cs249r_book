@@ -50,7 +50,7 @@ def fetch_workflow_jobs(repo: str, run_id: str, token: str) -> list[dict]:
                 page += 1
         except Exception as e:
             print(f"⚠️ Warning: Could not fetch jobs from GitHub API: {e}", file=sys.stderr)
-            break
+            raise RuntimeError("Cannot establish complete workflow job evidence") from e
     return jobs
 
 
@@ -59,61 +59,48 @@ def evaluate_volume_status(volume: dict, jobs: list[dict]) -> dict:
     vol_marker = volume["marker"]
     vol_jobs = [j for j in jobs if vol_marker in j.get("name", "")]
 
-    badge_path = STATUS_DIR / f"{volume['key']}.json"
-    existing_badge = {}
-    if badge_path.exists():
-        try:
-            existing_badge = json.loads(badge_path.read_text(encoding="utf-8"))
-        except Exception:
-            pass
+    def badge(message: str, color: str) -> dict:
+        return {"schemaVersion": 1, "label": volume["label"], "message": message, "color": color}
 
+    shared_markers = ("Pre-commit Checks", "Collect Results", "EPUB validate")
+    shared_gates = [j for j in jobs if any(
+        marker in j.get("name", "")
+        for marker in shared_markers
+    )]
+    if any(j.get("conclusion") in {"failure", "timed_out", "action_required", "startup_failure"}
+           for j in shared_gates):
+        return badge("failing", "red")
+
+    # 2026-11-05: absent, skipped, or unfinished jobs are not success evidence.
+    # Never reuse an older green badge when this run has no successful build.
     if not vol_jobs:
-        # If no jobs ran for this volume in this run (e.g. single-volume build),
-        # preserve the existing status if available, else default to passing.
-        if existing_badge:
-            return existing_badge
-        return {
-            "schemaVersion": 1,
-            "label": volume["label"],
-            "message": "passing",
-            "color": "brightgreen",
-        }
-
-    # Check for failures
-    failed = any(
-        j.get("conclusion") in ["failure", "timed_out", "action_required", "stale"]
-        for j in vol_jobs
-    )
-    if failed:
-        return {
-            "schemaVersion": 1,
-            "label": volume["label"],
-            "message": "failing",
-            "color": "red",
-        }
-
-    # Check if all completed jobs succeeded
-    all_succeeded = all(
-        j.get("conclusion") in ["success", "skipped"]
-        for j in vol_jobs
-        if j.get("status") == "completed"
-    )
-
-    if all_succeeded:
-        return {
-            "schemaVersion": 1,
-            "label": volume["label"],
-            "message": "passing",
-            "color": "brightgreen",
-        }
-
-    # If still in progress or inconclusive, keep existing or mark in-progress
-    return existing_badge or {
-        "schemaVersion": 1,
-        "label": volume["label"],
-        "message": "building",
-        "color": "yellow",
-    }
+        return badge("not validated", "lightgrey")
+    if any(j.get("conclusion") in {"failure", "timed_out", "action_required", "stale", "startup_failure"}
+           for j in vol_jobs):
+        return badge("failing", "red")
+    if any(j.get("status") != "completed" for j in vol_jobs):
+        return badge("building", "yellow")
+    if any(j.get("conclusion") == "cancelled" for j in vol_jobs):
+        return badge("cancelled", "orange")
+    if any(j.get("conclusion") != "success" for j in vol_jobs):
+        return badge("not validated", "lightgrey")
+    if any(not any(marker in j.get("name", "") for j in shared_gates)
+           for marker in shared_markers):
+        return badge("not validated", "lightgrey")
+    if any(j.get("status") != "completed" for j in shared_gates):
+        return badge("building", "yellow")
+    if any(j.get("conclusion") == "cancelled" for j in shared_gates):
+        return badge("cancelled", "orange")
+    if any(j.get("conclusion") != "success" for j in shared_gates):
+        return badge("not validated", "lightgrey")
+    # Disabled matrix entries finish successfully after a skip step. Require
+    # executed build steps for every published format, not just green job headers.
+    for format_name in ("HTML", "PDF", "EPUB"):
+        if not any(f"Build {format_name}" in step.get("name", "")
+                   and step.get("status") == "completed" and step.get("conclusion") == "success"
+                   for job in vol_jobs for step in job.get("steps", [])):
+            return badge("not validated", "lightgrey")
+    return badge("passing", "brightgreen")
 
 
 def update_status_files(jobs: list[dict]) -> None:

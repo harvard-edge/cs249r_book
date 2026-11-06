@@ -723,7 +723,100 @@ def simulate_warm_capacity(
     }
 
 
-def gang_backfill_comparison(track_id: str) -> dict[str, Any]:
+def allocation_reconciliation(reconcile_delay_min: float = 3, fenced: bool = True) -> dict[str, Any]:
+    """Replay lost observation, lease expiry, replacement and a late writer.
+
+    Times and versions are an explicit synthetic protocol fixture, not a model
+    of detection accuracy. Lease expiry alone cannot stop a partitioned owner.
+    The storage/device fence rejects older allocation epochs after reassignment.
+    """
+    delay = _finite(reconcile_delay_min, "reconcile_delay_min")
+    if not isinstance(fenced, bool):
+        raise ValueError("fenced must be boolean")
+    expiry = 5.0  # fixture: last successful renewal at zero, five-minute lease
+    placement = 1.0
+    replacement = expiry + delay if fenced else placement
+    events = [
+        {"time_min": 0.0, "phase": "admission", "epoch": 1, "effect": "quota and full bundle admitted"},
+        {"time_min": placement, "phase": "placement", "epoch": 2, "effect": "replacement selected; old owner unobserved"},
+        {"time_min": expiry, "phase": "lease", "epoch": 1, "effect": "old lease expires; process may still run"},
+        {"time_min": replacement, "phase": "reconciliation", "epoch": 2,
+         "effect": "install fence then activate replacement" if fenced else "activate without fencing"},
+        {"time_min": max(expiry, replacement) + 1, "phase": "late old-owner write", "epoch": 1,
+         "effect": "rejected by epoch fence" if fenced else "accepted: conflicting owners"},
+    ]
+    return {"model_id": "allocation_reconciliation", "inputs": {"reconcile_delay_min": delay, "fenced": fenced},
+            "events": sorted(events, key=lambda row: row["time_min"]), "replacement_start_min": replacement,
+            "late_write_accepted": not fenced, "exclusive_effect_preserved": fenced,
+            "lease_expiry_min": expiry, "fence_epoch": 2 if fenced else None}
+
+
+def elastic_resize(target_slots: int = 4, remaining_work: float = 20,
+                   transition_min: float = 3, target_validated: bool = True) -> dict[str, Any]:
+    """Fixed-target retained-work comparison on a declared synthetic rate curve.
+
+    A supported size alone does not establish equal target quality. The caller
+    must supply that contract; otherwise the time comparison is unavailable.
+    """
+    slots = _positive_int(target_slots, "target_slots")
+    work = _finite(remaining_work, "remaining_work", 1e-12)
+    transition = _finite(transition_min, "transition_min")
+    if not isinstance(target_validated, bool):
+        raise ValueError("target_validated must be boolean")
+    # Explicit illustrative workload profile; normalized retained-work units/min.
+    curve = {2: 1.0, 4: 1.7, 6: 2.1, 8: 2.3}
+    reason = None
+    if slots not in curve:
+        reason = "size outside range or unsupported two-slot increment"
+    elif not target_validated:
+        reason = "equal target-quality criterion not validated across sizes"
+    rate = curve.get(slots)
+    base = work / curve[2]
+    resized = None if reason else (base if slots == 2 else transition + work / rate)
+    saved_rate = None if rate is None else 1 / curve[2] - 1 / rate
+    boundary = None if not saved_rate else transition / saved_rate
+    return {"model_id": "elastic_resize", "inputs": {"target_slots": slots, "remaining_work": work,
+            "transition_min": transition, "target_validated": target_validated},
+            "contract": {"minimum": 2, "maximum": 8, "increment": 2, "rate_curve": curve},
+            "eligible": reason is None, "reason": reason, "keep_time_min": base,
+            "resize_time_min": resized, "amortization_work": boundary,
+            "decision": "unavailable" if reason else ("resize" if resized < base else "keep"),
+            "events": [] if reason else [
+                {"phase": "validated resize boundary", "duration_min": 0, "slots": 2},
+                {"phase": "transition: checkpoint, redistribute, rejoin", "duration_min": transition if slots != 2 else 0, "slots": slots},
+                {"phase": "retained work to same target", "duration_min": work / rate, "slots": slots}]}
+
+
+def utilization_trace(replayed_steps: int = 8) -> dict[str, Any]:
+    """Account three named tiers from a supplied time interval and step log.
+
+    Four complete slots are held for ten minutes; two other held slots belong
+    to an incomplete gang and are excluded from allocated capacity. The active
+    counter includes replay and communication. Retained progress is normalized
+    by this workload's fault-free one-step-per-slot-minute rate.
+    """
+    replay = _finite(replayed_steps, "replayed_steps")
+    if int(replay) != replay or replay > 24:
+        raise ValueError("replayed_steps must be an integer from zero to 24")
+    duration, complete, incomplete, fleet = 10.0, 4, 2, 8
+    active_minutes, completed_steps, baseline_rate = 32.0, 24, 1.0
+    retained = completed_steps - int(replay)
+    allocated_minutes = complete * duration
+    productive_minutes = retained / baseline_rate
+    return {"model_id": "utilization_trace", "inputs": {"replayed_steps": int(replay)},
+            "duration_min": duration, "fleet_slots": fleet, "held_slots": complete + incomplete,
+            "incomplete_held_slots": incomplete, "allocated_slot_min": allocated_minutes,
+            "active_slot_min": active_minutes, "productive_slot_min": productive_minutes,
+            "completed_steps": completed_steps, "replayed_steps": int(replay), "retained_steps": retained,
+            "fault_free_steps_per_slot_min": baseline_rate,
+            "allocated_fleet_pct": 100 * allocated_minutes / (fleet * duration),
+            "active_fleet_pct": 100 * active_minutes / (fleet * duration),
+            "productive_fleet_pct": 100 * productive_minutes / (fleet * duration),
+            "active_of_allocated_pct": 100 * active_minutes / allocated_minutes,
+            "productive_of_allocated_pct": 100 * productive_minutes / allocated_minutes}
+
+
+def gang_backfill_comparison(track_id: str, reconcile_delay_min: float = 3) -> dict[str, Any]:
     """Compare partial hold, FIFO gang scheduling, and backfill on one trace."""
     fixture = track_fixture(track_id)
     per_node = fixture["accelerators_per_node"]
@@ -773,9 +866,12 @@ def gang_backfill_comparison(track_id: str) -> dict[str, Any]:
     horizon = fixture["long_duration_min"] + 12
     fifo = simulate_schedule(fixture["nodes"], jobs, "fifo_gang", horizon)
     backfill = simulate_schedule(fixture["nodes"], jobs, "backfill", horizon)
+    partial["control_plane"] = allocation_reconciliation(reconcile_delay_min, False)
+    fifo["control_plane"] = allocation_reconciliation(reconcile_delay_min, True)
+    backfill["control_plane"] = allocation_reconciliation(reconcile_delay_min, True)
     return {
         "model_id": "v2_08_experiments",
-        "inputs": {"track_id": track_id},
+        "inputs": {"track_id": track_id, "reconcile_delay_min": reconcile_delay_min},
         "partial": partial,
         "fifo": fifo,
         "backfill": backfill,
@@ -823,7 +919,7 @@ def topology_wait_curve(
     return [topology_wait_comparison(track_id, w, payload_gb, iterations) for w in waits]
 
 
-def preemption_comparison(track_id: str, urgent_arrival_min: float, checkpoint_interval_min: float) -> dict[str, Any]:
+def preemption_comparison(track_id: str, urgent_arrival_min: float, checkpoint_interval_min: float, resize_slots: int = 4, remaining_work: float = 20, transition_min: float = 3, target_validated: bool = True) -> dict[str, Any]:
     """Compare FIFO with priority preemption on one identical fleet trace."""
     fixture = track_fixture(track_id)
     total = len(fixture["nodes"]) * fixture["accelerators_per_node"]
@@ -838,6 +934,8 @@ def preemption_comparison(track_id: str, urgent_arrival_min: float, checkpoint_i
             "same_domain": False,
             "resources": {"accelerators": total, "cpu_cores": total * 2, "memory_gb": total * 8},
             "checkpoint_interval_min": checkpoint_interval_min,
+            "resize_slots": resize_slots, "remaining_work": remaining_work,
+            "transition_min": transition_min, "target_validated": target_validated,
         },
         {
             "id": "urgent",
@@ -855,21 +953,27 @@ def preemption_comparison(track_id: str, urgent_arrival_min: float, checkpoint_i
         },
     ]
     horizon = fixture["long_duration_min"] + checkpoint_interval_min + 10
+    baseline = simulate_schedule(fixture["nodes"], jobs, "fifo_gang", horizon)
+    result = simulate_schedule(fixture["nodes"], jobs, "priority_preempt", horizon)
+    baseline["elastic"] = elastic_resize(2, remaining_work, transition_min, target_validated)
+    result["elastic"] = elastic_resize(resize_slots, remaining_work, transition_min, target_validated)
     return {
         "model_id": "v2_08_experiments",
         "inputs": {
             "track_id": track_id,
             "urgent_arrival_min": urgent_arrival_min,
             "checkpoint_interval_min": checkpoint_interval_min,
+            "resize_slots": resize_slots, "remaining_work": remaining_work,
+            "transition_min": transition_min, "target_validated": target_validated,
         },
-        "baseline": simulate_schedule(fixture["nodes"], jobs, "fifo_gang", horizon),
-        "result": simulate_schedule(fixture["nodes"], jobs, "priority_preempt", horizon),
+        "baseline": baseline,
+        "result": result,
         "urgent_work": fixture["urgent_work"],
         "background_work": fixture["background_work"],
     }
 
 
-def fairness_comparison(track_id: str) -> dict[str, Any]:
+def fairness_comparison(track_id: str, replayed_steps: int = 8) -> dict[str, Any]:
     """Compare equal accelerator counts with allocation by dominant share."""
     fixture = track_fixture(track_id)
     total_accelerators = len(fixture["nodes"]) * fixture["accelerators_per_node"]
@@ -908,11 +1012,15 @@ def fairness_comparison(track_id: str) -> dict[str, Any]:
             "network_gbps": capacity["network_gbps"] / 4,
         },
     }
+    baseline = dominant_shares(capacity, equal_allocations)
+    result = dominant_resource_fairness(capacity, bundles)
+    baseline["utilization_trace"] = utilization_trace(0)
+    result["utilization_trace"] = utilization_trace(replayed_steps)
     return {
         "model_id": "v2_08_experiments",
-        "inputs": {"track_id": track_id},
-        "baseline": dominant_shares(capacity, equal_allocations),
-        "result": dominant_resource_fairness(capacity, bundles),
+        "inputs": {"track_id": track_id, "replayed_steps": replayed_steps},
+        "baseline": baseline,
+        "result": result,
         "resource_label": fixture["resource_label"],
     }
 
@@ -945,6 +1053,7 @@ def warm_capacity_comparison(track_id: str, warm_reserve: int, demand_scale: flo
 
 
 __all__ = [
+    "allocation_reconciliation", "elastic_resize", "utilization_trace",
     "POLICIES",
     "RESOURCE_KEYS",
     "TRACKS",

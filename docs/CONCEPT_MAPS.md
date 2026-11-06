@@ -41,7 +41,7 @@ and are excluded from the student map selector when a learner volume view exists
 - `learner_graph` defines finer concepts and question or volume views, with exact
   chapter-section excerpts. The original focused serving maps remain available.
 
-`site/explore/atlas.yml` stores only volume navigation metadata. It does not own
+`taxonomy/atlas.yml` stores only volume navigation metadata. It does not own
 concepts or edges. Source excerpts establish provenance and freshness, not
 semantic entailment. Review must confirm the predicate, direction, and
 qualification of each proposed edge before its status becomes `reviewed`.
@@ -207,10 +207,10 @@ it does not imply that detailed semantic maps have been authored for every chapt
 
 ## Generated locations
 
-- `site/explore/catalog.json`: series ownership/reuse catalog, volume metadata, and map manifest.
-- `site/explore/atlas.html`: offline series preview with embedded catalog and detailed maps.
-- `site/explore/volumes/volN.json`: volume teaching overview.
-- `site/explore/maps/<map-id>/`: map JSON, DOT, and SVG.
+- `taxonomy/catalog.json`: series ownership/reuse catalog, volume metadata, and map manifest.
+- `taxonomy/atlas.html`: offline series preview with embedded catalog and detailed maps.
+- `taxonomy/volumes/volN.json`: volume teaching overview.
+- `taxonomy/maps/<map-id>/`: map JSON, DOT, and SVG.
 - `books/volN/<chapter>/concepts-generated/`: portable local chapter viewer.
 - `books/_build/concepts/chapters.json`: manifest used by the HTML injection filter.
 
@@ -408,14 +408,20 @@ steps in the repeatable workflow.
 
 ## Field reference model and book alignment
 
-The field landscape is independent of the book-derived volume maps. Its source
-is `shared/concepts/ml-systems-field.yml`: stable `mlsys.*` identities,
-definitions, navigation families, per-concept applicability, external reading
-references, conditioned propositions, and selected views. A global concept has
+The field landscape is independent of the book-derived volume maps. Its single
+source of truth is `taxonomy/taxonomy.yml`, governed by the LinkML
+metamodel `taxonomy/schema/mlsys-taxonomy.linkml.yml` (`UnifiedTaxonomyModel`):
+5 subject groups (`F, S, P, Q, T`), 20 areas, and 101 subject rows, stable
+`mlsys.*` identities (each with a primary `home:` subject pointer), definitions,
+navigation families, per-concept applicability, external reading references,
+17 controlled relations and conditioned propositions, practitioner guides (roles,
+symptoms, learning paths), and the explicit SKOS hierarchy slice (`skos_hierarchy`).
+Subject concept lists (`row.concepts`) and `views[id=all]` are derived automatically
+by the compiler from `Concept.home` and `concepts`. A global concept has
 no chapter owner. The chapter YAML contracts remain authoritative for what the
 books teach; they are not definitions of the field's boundary.
 
-`shared/concepts/mlsysbook-alignment.yml` supplies a separate many-to-many overlay
+`taxonomy/mlsysbook-alignment.yml` supplies a separate many-to-many overlay
 of explicitly authored field-concept-to-book-concept links. These are related
 passages, not inferred synonyms. The compiler resolves the exact existing learner
 ID, chapter section, URL, and current section hash. Deleted identities fail the
@@ -445,8 +451,8 @@ sources, and `field-preview.html` are ignored build artifacts. Invalid field
 records fail before existing outputs are replaced. No external model or network
 request is needed during a build.
 
-The website page is `site/explore/field.qmd`, linked from the book explorer.
-The standalone local preview is `site/explore/field-preview.html`. Both use the
+The website page is `taxonomy/field.qmd`, linked from the book explorer.
+The standalone local preview is `taxonomy/field-preview.html`. Both use the
 same data and SVG geometry. The viewer supports background drag, wheel panning,
 modified-wheel zoom, keyboard pan/zoom, family focus, full-model search, book-link
 highlighting, and concept-to-concept exploration. HTML explanations and the
@@ -570,7 +576,8 @@ proposal changes no live student navigation or concept ownership.
 
 ### Implemented taxonomy pilot
 
-The authored pilot is `shared/concepts/ml-systems-taxonomy.yml`. It reuses field
+The explicit SKOS hierarchy slice lives under `skos_hierarchy` in the canonical
+`taxonomy/taxonomy.yml`. It reuses field
 concept IDs and defines two additional subject topics, with explicit draft
 broader/narrower placements for parallel execution strategies and learning
 paradigms. Learning paradigms may overlap; their sibling placement asserts

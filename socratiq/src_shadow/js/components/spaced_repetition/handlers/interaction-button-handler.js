@@ -1,4 +1,5 @@
 import { showPopover } from '../../../libs/utils/utils.js';
+import { MAX_IMPORT_BYTES, validateFlashcardImport } from '../utils/import-validation.js';
 import { AnkiConverter } from '../utils/anki-converter.js';
 
 
@@ -58,13 +59,16 @@ export class SpacedRepetitionInteractionHandler {
         input.addEventListener('change', async (e) => {
             try {
                 const file = e.target.files[0];
+                if (!file) return;
+                if (file.size > MAX_IMPORT_BYTES) throw new Error('Import file is too large');
                 const reader = new FileReader();
+                reader.onerror = () => showPopover(this.shadowRoot, 'Error reading file', 'error');
 
                 reader.onload = async (event) => {
                     try {
                         let importedData;
                         
-                        if (file.name.endsWith('.json')) {
+                        if (/\.json$/i.test(file.name)) {
                             // Handle JSON format
                             importedData = JSON.parse(event.target.result);
                         } else {
@@ -72,13 +76,15 @@ export class SpacedRepetitionInteractionHandler {
                             importedData = AnkiConverter.parseAnkiCSV(event.target.result);
                         }
                         
+                        importedData = validateFlashcardImport(importedData);
+
                         // Show loading state
-                        const loadingId = this.modal.notificationHandler.showLoadingState('Importing flashcards...');
+                        const loadingId = this.storageHandler.notificationHandler.showLoadingState('Importing flashcards...');
 
                         try {
                             await this.storageHandler.mergeImportedData(importedData);
                             
-                            this.modal.notificationHandler.updateNotification(
+                            this.storageHandler.notificationHandler.updateNotification(
                                 loadingId,
                                 'Flashcards imported successfully!',
                                 'success'
@@ -91,7 +97,7 @@ export class SpacedRepetitionInteractionHandler {
                             showPopover(this.shadowRoot, 'Data imported successfully!', 'success');
                         } catch (importError) {
                             console.error('Error importing data:', importError);
-                            this.modal.notificationHandler.updateNotification(
+                            this.storageHandler.notificationHandler.updateNotification(
                                 loadingId,
                                 'Failed to import flashcards',
                                 'error'

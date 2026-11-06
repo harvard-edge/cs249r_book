@@ -29,3 +29,25 @@ for readings and deadlines.
 - [Lab Template](LAB_TEMPLATE.md): structure used by the lab authors.
 
 Staff qualification and implementation notes remain under `staff/`.
+
+## Chapter companions: explore before the physical studio
+
+The chapter-aligned browser companions complement this hardware studio. Start with
+[`lab_00_orientation.py`](lab_00_orientation.py), then follow the chapter order
+through the final transfer investigation. Each chapter uses four concept-owned
+parts, visible goals and route, reactive reference evidence, saved comparisons,
+and one downloadable discussion. The [chapter inventory](../config/lab-inventory.qmd)
+connects every companion to the studio session it supports.
+
+The browser project is the book's warehouse mobile manipulator. The studio uses
+the SO-101 station. A warehouse reference calculation is not a measurement of
+that station, and a constructed incident trace is not a physical trial. These
+companions issue no hardware commands and do not alter the studio's status or
+replace staff qualification. Physical instructions and approved station limits
+remain in the existing studio and Station Reference Card.
+
+Concepts and student-visible goals are authored once in `concepts/`; the packaged
+learning contracts are generated from those maps. MLSysIM owns study cases and
+calculations. `mlsysbook_labs.physical_companion` owns the shared interaction;
+`build_companions.py` checks the thin chapter entrypoints. No chapter notebook
+contains a private copy of the physics or narrative.

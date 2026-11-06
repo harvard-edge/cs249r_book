@@ -122,4 +122,6 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    if os.environ.get("TAXONOMY_ONLY") == "1":
+        sys.exit(0)
     sys.exit(main())

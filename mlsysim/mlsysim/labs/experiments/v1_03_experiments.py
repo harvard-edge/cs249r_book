@@ -560,7 +560,12 @@ def hold_workflow_decision(track_id: str, decision_point: str) -> dict[str, Any]
 
 
 def evaluate_release_checks(track_id: str, check_plan: str) -> dict[str, Any]:
-    """Apply concrete checks to seeded defects and report escaped defects."""
+    """Report detection coverage, without repairing or validating a release.
+
+    ``release_defensible`` and ``decision`` are legacy coverage-only fields;
+    they must not be interpreted as evidence that detected defects were fixed.
+    Use ``release_gate_trial`` for repair and compatible-retest decisions.
+    """
     if check_plan not in ("offline", "target", "combined"):
         raise ValueError("check_plan must be one of offline, target, combined")
     track = _track(track_id)
@@ -589,9 +594,103 @@ def evaluate_release_checks(track_id: str, check_plan: str) -> dict[str, Any]:
         "escaped_defect_count": len(escaped),
         "inspection_days": _days(cost),
         "release_defensible": not escaped,
+        "coverage_complete": not escaped,
+        "repairs_performed": False,
+        "target_validation_established": False,
         "decision": "hold" if escaped else "release",
         "evidence_scope": (
-            "Detection results apply only to the named seeded defects; unseeded failure modes remain a limitation."
+            "Detection coverage only: no repair or compatible retest was performed. Results apply only to the named seeded defects; unseeded failure modes remain a limitation."
+        ),
+        "scenario_notice": SCENARIO_NOTICE,
+    }
+
+
+def release_gate_trial(
+    track_id: str,
+    check_plan: str,
+    repair_defects: tuple[str, ...] | list[str] = (),
+    phase: str = "inspect",
+    evidence_version: int | None = None,
+    retest_plan: str | None = None,
+) -> dict[str, Any]:
+    """Inspect, repair, and retest a bounded illustrative package.
+
+    Each seeded defect is one gate. Initial inspections reveal failures; a
+    supported repair removes only a named, detected defect in this fixture.
+    Repair creates package version 2 and invalidates version 1 evidence. Only
+    compatible retesting can turn repaired gates into passes. Missing coverage
+    remains missing evidence, and unrepaired findings remain failures.
+
+    This is an explicit artifact/evidence state machine, not a simulation of
+    repair efficacy or a validation claim about the learner's target system.
+    ``None`` evidence_version requests evidence on the current package.
+    ``retest_plan`` permits a narrower retest than the original inspection.
+    """
+    inspection = evaluate_release_checks(track_id, check_plan)
+    if phase not in ("inspect", "repair", "retest"):
+        raise ValueError("phase must be one of inspect, repair, retest")
+    if not isinstance(repair_defects, (tuple, list)) or any(
+        not isinstance(defect, str) for defect in repair_defects
+    ):
+        raise ValueError("repair_defects must be a list or tuple of defect IDs")
+    repairs = tuple(sorted(set(repair_defects)))
+    detected = set(inspection["detected_defects"])
+    if not set(repairs) <= detected:
+        raise ValueError("supported repairs must name defects detected by the inspection")
+    if phase == "inspect" and repairs:
+        raise ValueError("inspect phase cannot apply repairs")
+    if evidence_version is not None and (
+        isinstance(evidence_version, bool)
+        or not isinstance(evidence_version, int)
+        or evidence_version < 1
+    ):
+        raise ValueError("evidence_version must be a positive integer or None")
+    retest_plan = check_plan if retest_plan is None else retest_plan
+    retest = evaluate_release_checks(track_id, retest_plan)
+    artifact_version = 2 if repairs else 1
+    requested_version = artifact_version if evidence_version is None else evidence_version
+    if requested_version > artifact_version:
+        raise ValueError("evidence_version cannot name a package that does not exist")
+    compatible = requested_version == artifact_version if phase == "retest" else None
+    retested = set(retest["detected_defects"]) if phase == "retest" and compatible else set()
+    gates = []
+    for defect in inspection["seeded_defects"]:
+        if defect in repairs:
+            status = "pass" if defect in retested else "repaired_unverified"
+        elif defect in detected or defect in retested:
+            status = "detected_failure"
+        else:
+            status = "missing_evidence"
+        gates.append({"defect_id": defect, "status": status})
+    passing = tuple(gate["defect_id"] for gate in gates if gate["status"] == "pass")
+    blocking = tuple(gate["defect_id"] for gate in gates if gate["status"] != "pass")
+    return {
+        "track_id": track_id,
+        "inputs": {
+            "track_id": track_id, "check_plan": check_plan,
+            "repair_defects": repairs, "phase": phase,
+            "evidence_version": requested_version, "retest_plan": retest_plan,
+        },
+        "phase": phase,
+        "artifact_id": f"{track_id}-workflow-package-v{artifact_version}",
+        "artifact_version": artifact_version,
+        "inspection_artifact_version": 1,
+        "evidence_version": requested_version if phase == "retest" else None,
+        "evidence_compatible": compatible,
+        "evidence_rejected": phase == "retest" and not compatible,
+        "gates": tuple(gates),
+        "inspection_detected_defects": tuple(sorted(detected)),
+        "detected_defects": tuple(sorted(detected | retested)),
+        "repaired_defects": repairs,
+        "passing_defects": passing,
+        "missing_evidence": tuple(gate["defect_id"] for gate in gates if gate["status"] == "missing_evidence"),
+        "blocking_defects": blocking,
+        "release_gate_passed": not blocking,
+        "decision": "bounded_fixture_pass" if not blocking else "hold",
+        "scope_notice": (
+            "A pass covers only the seeded gates on this illustrative package and evidence version. "
+            "Repairs are stipulated fixture interventions, not measured repair success; "
+            "this does not establish target-system or deployment readiness."
         ),
         "scenario_notice": SCENARIO_NOTICE,
     }
@@ -672,6 +771,7 @@ _REPLAY_MODELS = {
     "v1_03_experiments.simulate_iterations",
     "v1_03_experiments.evaluate_release_checks",
     "v1_03_experiments.feedback_timeline",
+    "v1_03_experiments.release_gate_trial",
 }
 
 
@@ -696,6 +796,13 @@ def replay(model_key: str, inputs: Mapping[str, Any]) -> dict[str, Any]:
     """
     if model_key not in _REPLAY_MODELS:
         raise ValueError(f"unknown V1-03 replay model: {model_key}")
+
+    if model_key == "v1_03_experiments.release_gate_trial":
+        payload = _replay_payload(
+            inputs,
+            {"track_id", "check_plan", "repair_defects", "phase", "evidence_version", "retest_plan"},
+        )
+        return release_gate_trial(**payload)
 
     if model_key == "v1_03_experiments.trace_requirement":
         payload = _replay_payload(inputs, {"track_id", "requirement_id"})
@@ -744,6 +851,7 @@ def track_summary(track_id: str) -> Mapping[str, Any]:
             key: {"label": value["label"], "limit": value["limit"]}
             for key, value in track["requirements"].items()
         },
+        "release_defects": tuple(sorted(track["defects"])),
         "default_requirement": track["default_requirement"],
         "development_budget_days": track["development_budget_days"],
         "release_floor_pct": track["release_floor_pct"],

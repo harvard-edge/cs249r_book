@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, fields, is_dataclass, replace
 import json
+import hashlib
 from math import ceil, floor, sqrt
 from typing import Any, Literal, Mapping, Sequence
 
@@ -1023,9 +1024,13 @@ def canary_experiment(
         evidence_policy=scenario.canary_policy,
         stop_on_decision=stop_on_decision,
     )
+    return _canary_report(scenario, result, inputs)
+
+
+def _canary_report(scenario: OperationsScenario, result: CanaryResult, inputs: dict[str, Any]) -> dict[str, Any]:
     return {
         "inputs": inputs,
-        "canary_fraction_pct": 100 * canary_fraction,
+        "canary_fraction_pct": 100 * inputs["canary_fraction"],
         "exposed_requests": result.exposed_requests,
         "exposed_failures": result.exposed_failures,
         "candidate_labeled": result.candidate_labeled,
@@ -1109,6 +1114,262 @@ def incident_experiment(
     }
 
 
+def release_capacity_profile(track_id: str) -> dict[str, Any]:
+    """Registry-backed artifact allocation in a deliberately bounded shared pool.
+
+    The whole device capacity is not a deployment guarantee. Protected work is
+    assumed to reserve all but three artifact copies. An active background job
+    reserves another one-and-a-half copies until the next supplied trace window.
+    These reservations are declared teaching assumptions, not device measurements.
+    TinyML reserves flash banks, not simultaneous inference SRAM or cloud replicas.
+    """
+    get_track_scenario(track_id)
+    from mlsysim import Hardware, Models, BYTES_INT8, BYTES_FP16, fmt_memory
+    if track_id == "tinyml":
+        device = Hardware.Tiny.ESP32_S3
+        copy = Models.Tiny.DS_CNN.size_in_bytes(BYTES_INT8)
+        physical = device.memory.flash_capacity
+        resource = "flash banks"
+        artifact = "DS-CNN update-bank reference"
+    elif track_id == "mobile":
+        device = Hardware.Mobile.iPhone15Pro
+        copy = Models.Vision.MobileNetV2.size_in_bytes(BYTES_FP16)
+        physical = device.memory.capacity
+        resource = "shared application memory"
+        artifact = "MobileNetV2 application reference"
+    elif track_id == "edge":
+        device = Hardware.Edge.JetsonOrinNano
+        copy = Models.Vision.ResNet50.size_in_bytes(BYTES_FP16)
+        physical = device.memory.capacity
+        resource = "local accelerator memory"
+        artifact = "ResNet-50 perception reference"
+    else:
+        from mlsysim.labs.experiments.v1_13_experiments import get_recommendation_serving_scenario
+        device = Hardware.Cloud.H100
+        copy = get_recommendation_serving_scenario().resident_model_memory
+        physical = device.memory.capacity
+        resource = "recommendation endpoint device memory"
+        artifact = "native recommendation allocation reference"
+    pool = min(physical, copy * 3)
+    protected = physical - pool
+    background = copy * 1.5
+    return {"artifact": artifact, "resource": resource,
+            "physical_bytes": float(physical.to("byte").magnitude),
+            "copy_bytes": float(copy.to("byte").magnitude),
+            "protected_bytes": float(protected.to("byte").magnitude),
+            "background_bytes": float(background.to("byte").magnitude),
+            "pool_bytes": float(pool.to("byte").magnitude),
+            "physical_display": fmt_memory(physical), "copy_display": fmt_memory(copy),
+            "protected_display": fmt_memory(protected), "background_display": fmt_memory(background),
+            "pool_display": fmt_memory(pool)}
+
+
+def rollout_experiment(track_id: str, *, canary_fraction: float,
+                       reservation_plan: str = "overlap") -> dict[str, Any]:
+    """Capacity-screen rollout before using its finite, outcome-labeled trace.
+
+    Waiting releases a declared background reservation but moves launch one
+    trace window later. The observation deadline stays fixed. Only outcome
+    labels that mature by that deadline may enter the gate. Canary routing
+    never shrinks either installed artifact. A zero-traffic hold installs no
+    candidate; it is not a shadow evaluation.
+    """
+    scenario = get_track_scenario(track_id)
+    _validate_ratio(canary_fraction, "canary_fraction")
+    if reservation_plan not in ("overlap", "wait"):
+        raise ValueError("reservation_plan must be overlap or wait")
+    profile = release_capacity_profile(track_id)
+    event_times = sorted({float(row.event_time.to("hour").magnitude) for row in scenario.canary_observations})
+    delay = event_times[1] - event_times[0] if reservation_plan == "wait" and canary_fraction > 0 else 0.0
+    label_delay = float(scenario.monitoring.label_delay.to("hour").magnitude)
+    horizon = max(event_times) + label_delay
+    copies = 1 + int(canary_fraction > 0)
+    required = copies * profile["copy_bytes"]
+    available = profile["pool_bytes"] - (profile["background_bytes"] if reservation_plan == "overlap" or canary_fraction == 0 else 0.0)
+    fits = required <= available
+    executed_fraction = canary_fraction if fits else 0.0
+    observations = tuple(replace(row, event_time=row.event_time + Q_(delay, "hour"))
+                         for row in scenario.canary_observations
+                         if float(row.event_time.to("hour").magnitude) + delay + label_delay <= horizon)
+    result = evaluate_canary(observations, canary_fraction=executed_fraction,
+                             label_delay=scenario.monitoring.label_delay,
+                             evidence_policy=scenario.canary_policy, stop_on_decision=False)
+    inputs = {"track_id": track_id, "canary_fraction": canary_fraction, "reservation_plan": reservation_plan}
+    output = _canary_report(scenario, result, {**inputs, "canary_fraction": executed_fraction})
+    evidence_decision = output["decision"]
+    output.update(inputs=inputs, canary_fraction_pct=100 * canary_fraction,
+                  decision="hold_capacity" if not fits else evidence_decision,
+                  capacity_fits=fits, resident_copies=copies, required_bytes=required,
+                  available_bytes=available, allocation=profile, launch_delay_hours=delay,
+                  observation_horizon_hours=horizon, evidence_decision=evidence_decision,
+                  failures=[] if fits else ["candidate_copy_capacity"],
+                  limitation="Declared artifact reservations and finite supplied outcome trace only; execution SRAM, compute contention, allocator fragmentation, power and statistical significance are not established.")
+    return output
+
+
+def release_recovery_experiment(track_id: str, *, proxy_threshold: float,
+                                sampling_interval_hours: float, rollback_minutes: float,
+                                affected_fraction: float, restore: str = "weights_only",
+                                inflight: str = "reuse_mutated", logs: str = "retain",
+                                incident_cause: str = "release_contract") -> dict[str, Any]:
+    """Retest new and already-admitted requests against their exact release bundle.
+
+    A component-version compatibility fixture checks versioned weights, fitted
+    transformation, and cache namespace. It does not replay request outputs or
+    cache contents, or predict model quality.
+    The active request was admitted to candidate v2. It may finish with that
+    pinned bundle, or be explicitly canceled; a routing change cannot silently
+    relabel it as a v1 request. Degraded logs are a separate future-training gate.
+    """
+    if restore not in ("weights_only", "weights_transform", "complete_bundle"):
+        raise ValueError("unknown restore policy")
+    if inflight not in ("reuse_mutated", "drain_pinned", "cancel_confirmed"):
+        raise ValueError("unknown in-flight policy")
+    if logs not in ("retain", "quarantine"):
+        raise ValueError("unknown log policy")
+    if incident_cause not in ("release_contract", "population_shift"):
+        raise ValueError("unknown incident cause")
+    timing = incident_experiment(track_id, proxy_threshold=proxy_threshold,
+                                sampling_interval_hours=sampling_interval_hours,
+                                rollback_minutes=rollback_minutes, affected_fraction=affected_fraction)
+    previous = {"weights": "weights-v1", "transform": "transform-v1", "cache_namespace": "cache-v1"}
+    candidate = {"weights": "weights-v2", "transform": "transform-v2", "cache_namespace": "cache-v2"}
+    selected = {**candidate, "weights": previous["weights"]}
+    if restore in ("weights_transform", "complete_bundle"):
+        selected["transform"] = previous["transform"]
+    if restore == "complete_bundle":
+        selected["cache_namespace"] = previous["cache_namespace"]
+    def retest(request_id: str, expected: Mapping[str, str], actual: Mapping[str, str], *, canceled: bool = False):
+        checks = {key: actual[key] == expected[key] for key in expected}
+        return {"request_id": request_id, "expected_bundle": dict(expected), "actual_bundle": dict(actual),
+                "component_checks": checks, "canceled_confirmed": canceled,
+                "completed": not canceled, "compatible": None if canceled else all(checks.values())}
+    requests = [retest("new-request", previous, selected)]
+    active_bundle = candidate if inflight in ("drain_pinned", "cancel_confirmed") else selected
+    requests.append(retest("admitted-v2-request", candidate, active_bundle,
+                           canceled=inflight == "cancel_confirmed"))
+    incompatible = [row["request_id"] for row in requests if row["compatible"] is False]
+    detected = timing["detected_hours"] is not None
+    serving_restored = detected and not incompatible
+    cause_repaired = incident_cause == "release_contract"
+    logs_isolated = logs == "quarantine"
+    verified = serving_restored and cause_repaired and logs_isolated
+    scenario = get_track_scenario(track_id)
+    drain_hours = float(scenario.incident_policy.validation_duration.to("hour").magnitude) if inflight == "drain_pinned" else 0.0
+    validated = (timing["recovery_validated_hours"] + drain_hours
+                 if verified and timing["recovery_validated_hours"] is not None else None)
+    mttr = None if validated is None else validated - timing["incident_started_hours"]
+    failures = (["request_bundle_incompatibility"] if incompatible else [])
+    if not cause_repaired:
+        failures.append("population_change_unresolved")
+    if not logs_isolated:
+        failures.append("degraded_logs_not_quarantined")
+    if not detected:
+        failures.append("incident_not_detected")
+    inputs = {**timing["inputs"], "restore": restore, "inflight": inflight, "logs": logs,
+              "incident_cause": incident_cause}
+    return {**timing, "inputs": inputs, "timing_reference": timing, "requests": requests,
+            "previous_bundle": previous, "candidate_bundle": candidate, "selected_bundle": selected,
+            "serving_contract_restored": serving_restored, "cause_repaired": cause_repaired,
+            "degraded_logs_quarantined": logs_isolated, "incompatible_requests": incompatible,
+            "confirmed_cancellations": sum(row["canceled_confirmed"] for row in requests),
+            "retained_candidate_copies": int(inflight == "drain_pinned"),
+            "additional_drain_hours": drain_hours, "verified_recovery": verified,
+            "recovery_status": "verified_in_fixture" if verified else "unresolved",
+            "recovery_validated_hours": validated, "mean_time_to_recovery_hours": mttr,
+            "met_recovery_objective": verified and mttr <= timing["recovery_objective_hours"],
+            "total_incident_cost_usd": None, "recovered_quality_pct": None,
+            "exposed_requests": None, "exposure_cost_usd": None, "response_labor_cost_usd": None,
+            "failures": failures,
+            "failure_explanations": [{
+                "request_bundle_incompatibility": "At least one request uses an incompatible release bundle",
+                "population_change_unresolved": "Rollback does not repair the declared population change",
+                "degraded_logs_not_quarantined": "Degraded-window training data remain unquarantined",
+                "incident_not_detected": "The selected monitor has not detected the incident",
+            }[failure] for failure in failures],
+            "limitation": "Component-version compatibility checks for two request IDs; no request-output or cache-content replay. Declared response durations and one log-quarantine obligation. Compatible bundles do not certify predictive quality, repair population shift, or cleanse downstream data. Unresolved post-cutover harm and total cost are unavailable."}
+
+
+def parity_experiment(
+    track_id: str,
+    *,
+    serving_transform: str = "swapped",
+    release_bundle: str = "compatible",
+) -> dict[str, Any]:
+    """Replay recorded requests through fixed training and serving transforms.
+
+    A deliberately swapped request association preserves the complete marginal
+    distribution. The fitted-state case changes the transformation itself.
+    Content identities describe this teaching artifact, not real deployment
+    certification. A weights-only restoration leaves incompatible fitted state;
+    a missing-state bundle cannot be exactly replayed.
+    """
+    get_track_scenario(track_id)
+    if serving_transform not in ("matched", "swapped", "refitted"):
+        raise ValueError("serving_transform must be matched, swapped, or refitted")
+    if release_bundle not in ("compatible", "weights_only", "missing_state"):
+        raise ValueError("release_bundle must be compatible, weights_only, or missing_state")
+    raw_values = (0.0, 2.0, 4.0, 6.0)
+    fitted_state = {"offset": 0.0, "scale": 2.0}
+    training = [(value - fitted_state["offset"]) / fitted_state["scale"] for value in raw_values]
+    serving = list(training)
+    if serving_transform == "swapped":
+        serving.reverse()
+    elif serving_transform == "refitted":
+        serving = [(value - 2.0) / fitted_state["scale"] for value in raw_values]
+    # All bundles restore the same weights: the difference is recoverable state.
+    restored_state = (
+        dict(fitted_state)
+        if release_bundle == "compatible"
+        else ({"offset": 2.0, "scale": 2.0} if release_bundle == "weights_only" else None)
+    )
+    artifact = {
+        "code": "linear-transform.v1",
+        "data": list(raw_values),
+        "configuration": {"feature": "fixed-reference-feature"},
+        "environment": "deterministic-scalar.v1",
+        "weights": [1.0],
+        "fitted_state": restored_state,
+    }
+    digest = hashlib.sha256(json.dumps(artifact, sort_keys=True).encode()).hexdigest()
+    rows = [
+        {
+            "request_id": f"request-{index}",
+            "raw_value": raw,
+            "training_value": train,
+            "serving_value": serve,
+            "matches": train == serve,
+        }
+        for index, (raw, train, serve) in enumerate(zip(raw_values, training, serving))
+    ]
+    replayed = (
+        None
+        if restored_state is None
+        else [(value - restored_state["offset"]) / restored_state["scale"] for value in raw_values]
+    )
+    return {
+        "track_id": track_id,
+        "inputs": {
+            "track_id": track_id,
+            "serving_transform": serving_transform,
+            "release_bundle": release_bundle,
+        },
+        "reference_name": "Request-keyed transform replay reference",
+        "assumption": "Illustrative fixed scalar feature; not a native project model or empirical measurement.",
+        "rows": rows,
+        "request_count": len(rows),
+        "mismatch_count": sum(not row["matches"] for row in rows),
+        "aggregate_distribution_matches": sorted(training) == sorted(serving),
+        "request_parity_passes": all(row["matches"] for row in rows),
+        "release_bundle": artifact,
+        "release_identity": "sha256:" + digest,
+        "replay_available": restored_state is not None,
+        "replayed_values": replayed,
+        "compatible_retest_passes": replayed == training,
+        "limitation": "Passing this finite replay does not prove parity on unseen inputs or restore external cached state.",
+    }
+
+
 def replay_experiment(model_key: str, inputs: Mapping[str, Any]) -> dict[str, Any]:
     """Replay one captured experiment from its exact JSON input mapping.
 
@@ -1121,6 +1382,9 @@ def replay_experiment(model_key: str, inputs: Mapping[str, Any]) -> dict[str, An
         "v1_14.retraining": retraining_experiment,
         "v1_14.canary": canary_experiment,
         "v1_14.incident": incident_experiment,
+        "v1_14.parity": parity_experiment,
+        "v1_14.rollout": rollout_experiment,
+        "v1_14.release_recovery": release_recovery_experiment,
     }
     try:
         runner = dispatch[model_key]
@@ -1166,6 +1430,7 @@ def replay_capture(snapshot: Mapping[str, Any]) -> dict[str, Any]:
 
 __all__ = [
     "TRACKS",
+    "parity_experiment",
     "CanaryEvidencePolicy",
     "CanaryObservation",
     "CanaryResult",
@@ -1192,6 +1457,7 @@ __all__ = [
     "restore_experiment",
     "retraining_experiment",
     "canary_experiment",
+    "release_capacity_profile", "rollout_experiment", "release_recovery_experiment",
     "serialize_experiment",
     "to_jsonable",
 ]

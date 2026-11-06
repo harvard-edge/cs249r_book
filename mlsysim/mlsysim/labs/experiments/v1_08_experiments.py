@@ -4,8 +4,8 @@ The convergence and numerical-outcome traces in this module are finite,
 explicitly illustrative fixtures.  They let a learner compare time to the same
 target without pretending that hardware throughput predicts convergence.
 Physical memory is computed by :class:`TrainingMemoryModel`; execution time is
-composed from visible input, forward, backward, recomputation, and optimizer
-stage timings.
+composed from supplied input/optimizer fixtures and analytical forward, backward,
+and recomputation work at an explicitly assumed fraction of dense precision peak.
 
 All four teaching tracks use GPT-2 as a common *development-host teaching
 workload*.  This does not imply that GPT-2 is deployed on a TinyML, mobile, or
@@ -18,7 +18,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from mlsysim import Hardware, Models
+from mlsysim import Hardware, Literature, Models
 from mlsysim.core.units import Q_, resolve_precision
 from mlsysim.engine.solvers.training import TrainingMemoryModel
 
@@ -142,39 +142,18 @@ _INPUT_STAGE_FIXTURES = {
     },
 }
 
-# Entries are (forward, backward) for one physical microbatch.
-_COMPUTE_STAGE_FIXTURES = {
-    "tinyml": {
-        4: {"fp32": (8.9, 17.8), "bf16": (6.3, 12.7), "fp16": (6.1, 12.2), "fp8": (4.6, 9.1)},
-        8: {"fp32": (15.3, 30.6), "bf16": (10.9, 21.8), "fp16": (10.5, 21.0), "fp8": (7.9, 15.7)},
-        32: {"fp32": (53.8, 107.5), "bf16": (38.4, 76.8), "fp16": (36.9, 73.7), "fp8": (27.6, 55.3)},
-    },
-    "mobile": {
-        4: {"fp32": (11.5, 22.9), "bf16": (8.2, 16.4), "fp16": (7.9, 15.7), "fp8": (5.9, 11.8)},
-        8: {"fp32": (19.7, 39.5), "bf16": (14.1, 28.2), "fp16": (13.5, 27.1), "fp8": (10.1, 20.3)},
-        32: {"fp32": (69.4, 138.9), "bf16": (49.6, 99.2), "fp16": (47.6, 95.2), "fp8": (35.7, 71.4)},
-    },
-    "edge": {
-        4: {"fp32": (15.2, 30.3), "bf16": (10.8, 21.7), "fp16": (10.4, 20.8), "fp8": (7.8, 15.6)},
-        8: {"fp32": (26.1, 52.2), "bf16": (18.6, 37.3), "fp16": (17.9, 35.8), "fp8": (13.4, 26.8)},
-        32: {"fp32": (91.8, 183.7), "bf16": (65.6, 131.2), "fp16": (63.0, 126.0), "fp8": (47.2, 94.5)},
-    },
-    "cloud": {
-        4: {"fp32": (19.6, 39.2), "bf16": (14.0, 28.0), "fp16": (13.4, 26.9), "fp8": (10.1, 20.2)},
-        8: {"fp32": (33.7, 67.5), "bf16": (24.1, 48.2), "fp16": (23.1, 46.3), "fp8": (17.4, 34.7)},
-        32: {"fp32": (118.7, 237.4), "bf16": (84.8, 169.6), "fp16": (81.4, 162.8), "fp8": (61.1, 122.1)},
-    },
-}
+# Explicit scenario assumptions for arithmetic efficiency, not hardware specs
+# or measured utilization. Only supported finite batches are exposed below.
+_ARITHMETIC_EFFICIENCY = {"baseline": 0.50, "faster_arithmetic": 0.65}
 
-# This alternative arithmetic path is intentionally limited to the BF16
-# bottleneck experiment. It is an observed scenario alternative, not a rate
-# multiplier that can be applied to arbitrary configurations.
-_ARITHMETIC_STAGE_FIXTURES = {
-    "tinyml": {4: (5.0, 9.9), 8: (8.5, 17.0), 32: (29.9, 59.8)},
-    "mobile": {4: (6.4, 12.8), 8: (11.0, 22.0), 32: (38.7, 77.4)},
-    "edge": {4: (8.4, 16.9), 8: (14.5, 29.1), 32: (51.2, 102.4)},
-    "cloud": {4: (10.9, 21.8), 8: (18.8, 37.6), 32: (66.2, 132.4)},
-}
+
+def _dense_peak(profile: Mapping[str, Any], precision: str):
+    # These hosts share BF16/FP16 dense Tensor Core throughput. No sparsity bonus.
+    # Vendor tables: https://www.nvidia.com/en-gb/data-center/a100/
+    # and https://www.nvidia.com/en-eu/data-center/h100/ (sparse rates excluded).
+    key = {"bf16": "fp16_dense", "fp16": "fp16_dense"}.get(precision, precision)
+    return key, profile["hardware"].compute.precision_flops.get(key)
+
 
 # Optimizer state remains FP32 in this scenario, so these update-stage times do
 # not change when activation/compute precision changes.
@@ -283,6 +262,61 @@ def memory_outcome(
     }
 
 
+def adaptation_outcome(
+    track_id: str,
+    *,
+    adaptation_scope: str = "full",
+    physical_batch: int | None = None,
+    accumulation_steps: int | None = None,
+    precision: str = "bf16",
+    optimizer: str = "adamw",
+    checkpointing: str = "none",
+) -> dict[str, Any]:
+    """Account for full or restricted adaptation without inventing progress.
+
+    Restricted adaptation is a bounded, hypothetical recipe: one tenth of the
+    existing parameters are trainable, distributed through the model. The
+    backward path still crosses the frozen layers, so the solver retains its
+    full activation estimate. This is not a detached frozen-prefix recipe or
+    an adapter architecture; no extra adapter weights are silently introduced.
+    """
+    fractions = {"full": 1.0, "restricted": 0.1}
+    if adaptation_scope not in fractions:
+        raise ValueError("adaptation_scope must be full or restricted")
+    baseline = memory_outcome(
+        track_id, physical_batch=physical_batch,
+        accumulation_steps=accumulation_steps, precision=precision,
+        optimizer=optimizer, checkpointing=checkpointing,
+    )
+    profile = track_profile(track_id)
+    memory = TrainingMemoryModel().solve(
+        profile["model"], profile["hardware"],
+        batch_size=baseline["effective_batch"], seq_len=profile["seq_len"],
+        precision=precision, optimizer=optimizer,
+        activation_checkpointing=checkpointing,
+        gradient_accumulation_steps=baseline["accumulation_steps"],
+        trainable_fraction=fractions[adaptation_scope],
+    )
+    result = dict(baseline)
+    for field in ("weights", "gradients", "optimizer_state", "activations", "communication_buffers"):
+        result[f"{field}_gb"] = round(getattr(memory, field).to("GB").magnitude, 6)
+    result.update({
+        "model_key": "v1_08_experiments.adaptation_outcome",
+        "adaptation_scope": adaptation_scope,
+        "trainable_fraction": fractions[adaptation_scope],
+        "total_memory_gb": round(memory.total_memory.to("GB").magnitude, 6),
+        "memory_utilization": round(memory.memory_utilization, 6),
+        "feasible": memory.feasible,
+        "constraint_trace": tuple(memory.constraint_trace),
+        "quality_evidence": None,
+        "quality_status": "Unavailable: no supplied matched adaptation-scope progress observations.",
+        "activation_assumption": "Backward dependencies cross frozen layers; forward activations remain retained. This is not a detached frozen prefix.",
+        "state_boundary": "Optimizer state includes the solver's master-copy and optimizer allocations; no timing or quality reduction is inferred from freezing.",
+        "inputs": {**baseline["inputs"], "adaptation_scope": adaptation_scope},
+    })
+    return result
+
+
 def stage_timing(
     track_id: str,
     *,
@@ -294,12 +328,12 @@ def stage_timing(
     input_policy: str = "baseline",
     compute_policy: str = "baseline",
 ) -> dict[str, Any]:
-    """Compose one optimizer-update time from finite supplied stage fixtures.
+    """Compose an update from finite input fixtures and analytical arithmetic time.
 
     Input, forward, backward, and recomputation occur for every physical
     microbatch.  The optimizer stage occurs once after all accumulated
-    gradients form the effective batch. Unlisted physical batches fail rather
-    than being filled in by an invented utilization curve.
+    gradients form the effective batch. Arithmetic efficiency is an explicit scenario assumption, not measured telemetry.
+    Unlisted physical batches fail rather than being extrapolated.
     """
     profile = track_profile(track_id)
     _validate_choices(precision, optimizer, checkpointing)
@@ -323,10 +357,18 @@ def stage_timing(
 
     raw_input_ms, overlapped_input_ms = _INPUT_STAGE_FIXTURES[track_id][physical_batch][input_policy]
     visible_input_ms = raw_input_ms - overlapped_input_ms
-    if compute_policy == "baseline":
-        forward_ms, backward_ms = _COMPUTE_STAGE_FIXTURES[track_id][physical_batch][precision]
-    else:
-        forward_ms, backward_ms = _ARITHMETIC_STAGE_FIXTURES[track_id][physical_batch]
+    peak_key, peak = _dense_peak(profile, precision)
+    supported = peak is not None
+    # 6ND counts a single microbatch's forward + backward work. Accumulation
+    # repeats it below; the effective batch must not be multiplied here again.
+    model_ops = Q_(profile["model"].parameters.to("param").magnitude
+                   * Literature.Chinchilla.ComputeConstant
+                   * physical_batch * profile["seq_len"], "flop")
+    efficiency = _ARITHMETIC_EFFICIENCY[compute_policy]
+    # No hardware execution time exists for an unsupported numerical format.
+    # Temporary zeros allow composition; public fields become None below.
+    arithmetic_ms = (model_ops / (peak * efficiency)).to("millisecond").magnitude if supported else 0.0
+    forward_ms, backward_ms = arithmetic_ms / 3, arithmetic_ms * 2 / 3
     recompute_ms = forward_ms * _RECOMPUTE_FORWARD_FRACTION[checkpointing]
     optimizer_ms = _OPTIMIZER_STAGE_FIXTURES[track_id][optimizer]
     microstep_time = sum(
@@ -358,17 +400,21 @@ def stage_timing(
         "precision": precision,
         "optimizer": optimizer,
         "checkpointing": checkpointing,
+        "arithmetic_efficiency_assumption": efficiency,
+        "arithmetic_timing_basis": "Analytical 6ND / (dense precision peak × assumed arithmetic efficiency); not a measured stage profile.",
+        "performance_supported": supported,
+        "peak_key": peak_key,
         "raw_input_ms": round(raw_input_ms, 6),
         "overlapped_input_ms": round(overlapped_input_ms, 6),
         "visible_input_ms": round(visible_input_ms, 6),
-        "forward_ms": round(forward_ms, 6),
-        "backward_ms": round(backward_ms, 6),
-        "recompute_ms": round(recompute_ms, 6),
+        "forward_ms": round(forward_ms, 6) if supported else None,
+        "backward_ms": round(backward_ms, 6) if supported else None,
+        "recompute_ms": round(recompute_ms, 6) if supported else None,
         "optimizer_ms": round(optimizer_ms, 6),
-        "microstep_ms": round(microstep_ms, 6),
-        "update_time_ms": round(update_time_ms, 6),
-        "samples_per_second": round(effective_batch / (update_time_ms / 1000.0), 6),
-        "dominant_stage": dominant_stage,
+        "microstep_ms": round(microstep_ms, 6) if supported else None,
+        "update_time_ms": round(update_time_ms, 6) if supported else None,
+        "samples_per_second": round(effective_batch / (update_time_ms / 1000.0), 6) if supported else None,
+        "dominant_stage": dominant_stage if supported else "unavailable",
         "input_policy": input_policy,
         "compute_policy": compute_policy,
         "timing_assumption": FIXTURE_NOTE,
@@ -382,6 +428,44 @@ def stage_timing(
             "input_policy": input_policy,
             "compute_policy": compute_policy,
         },
+    }
+
+
+def model_flops_diagnostic(track_id: str, timing: Mapping[str, Any], *, fits: bool = True) -> dict[str, Any]:
+    """Analytical dense 6ND MFU for a supplied full-adaptation timing replay.
+
+    Dense BF16 and FP16 Tensor Core peaks share the registry's fp16_dense
+    capability on these development hosts. Sparse peaks are never credited.
+    Busy time is the replay's device-stage occupancy, not profiler telemetry.
+    Recomputed forward work occupies device time but earns no model-FLOP credit.
+    """
+    profile = track_profile(track_id)
+    if timing["track_id"] != track_id:
+        raise ValueError("timing track must match the diagnostic track")
+    tokens = timing["effective_batch"] * profile["seq_len"]
+    useful = Q_(profile["model"].parameters.to("param").magnitude
+                * Literature.Chinchilla.ComputeConstant * tokens, "flop")
+    peak_key, peak = _dense_peak(profile, timing["precision"])
+    duration = Q_(timing["update_time_ms"], "millisecond") if timing["update_time_ms"] is not None else None
+    ratio = (useful / (peak * duration)).to("").magnitude if peak is not None and duration is not None else None
+    busy_ms = timing["accumulation_steps"] * sum(timing[k] for k in ("forward_ms", "backward_ms", "recompute_ms")) + timing["optimizer_ms"] if duration is not None else None
+    reason = ("No run: training state exceeds capacity." if not fits else
+              "No registered dense peak for this precision on this host." if peak is None else
+              "Supplied stage timing is inconsistent with this precision's peak; MFU is unavailable." if ratio > 1 else "")
+    return {
+        "model_name": profile["model"].name,
+        "tokens_per_update": tokens,
+        "useful_model_flops": useful.to("flop").magnitude,
+        "peak_key": peak_key,
+        "precision": timing["precision"],
+        "dense_peak_tflops": peak.to("TFLOPs / second").magnitude if peak is not None else None,
+        "update_time_ms": timing["update_time_ms"],
+        "busy_fraction": busy_ms / timing["update_time_ms"] if fits and busy_ms is not None else None,
+        "mfu": ratio if not reason else None,
+        "status": "unavailable" if reason else "analytical reference",
+        "reason": reason,
+        "counting_convention": "6 × parameters × effective-batch tokens; forward + backward, excluding rematerialization, padding and optimizer work.",
+        "boundary": "Supplied teaching replay, not a measured profile; MFU does not measure convergence or identify the bottleneck by itself.",
     }
 
 
@@ -433,7 +517,7 @@ def compare_time_to_target(
     target_observation = next(((step, quality) for step, quality in trace if quality >= _TARGET_QUALITY), None)
     reached_target = target_observation is not None
     updates = target_observation[0] if target_observation else None
-    total_time = Q_(updates * timing["update_time_ms"], "millisecond") if updates is not None else None
+    total_time = Q_(updates * timing["update_time_ms"], "millisecond") if updates is not None and timing["update_time_ms"] is not None else None
     total_time_ms = total_time.to("millisecond").magnitude if total_time is not None else None
     total_time_seconds = total_time.to("second").magnitude if total_time is not None else None
     total_time_hours = total_time.to("hour").magnitude if total_time is not None else None
@@ -444,7 +528,10 @@ def compare_time_to_target(
     )
     cost_usd = cost.to("USD").magnitude if cost is not None else None
     samples_presented = updates * timing["effective_batch"] if updates is not None else None
+    diagnostic = model_flops_diagnostic(track_id, timing, fits=memory["feasible"])
     violations: list[str] = []
+    if memory["feasible"] and diagnostic["mfu"] is None:
+        violations.append("unvalidated_precision_timing")
     if not memory["feasible"]:
         violations.append("memory")
     if not reached_target:
@@ -471,6 +558,7 @@ def compare_time_to_target(
         "schedule_limit_hours": profile["schedule_limit_hours"],
         "cost_limit_usd": profile["cost_limit_usd"],
         "timing": timing,
+        "model_flops_diagnostic": diagnostic,
         "memory": memory,
         "feasible": not violations,
         "violations": tuple(violations),
@@ -608,7 +696,7 @@ def checkpoint_experiment(track_id: str, *, checkpointing: str) -> dict[str, Any
     }
 
 
-def bottleneck_experiment(track_id: str, *, intervention: str) -> dict[str, Any]:
+def bottleneck_experiment(track_id: str, *, intervention: str, input_stress: bool = False) -> dict[str, Any]:
     """Apply a cause-specific intervention to the same training baseline."""
     interventions: dict[str, dict[str, Any]] = {
         "none": {},
@@ -618,9 +706,11 @@ def bottleneck_experiment(track_id: str, *, intervention: str) -> dict[str, Any]
     }
     if intervention not in interventions:
         raise ValueError(f"intervention must be one of {', '.join(interventions)}")
-    common = {"evidence_family": "effective_batch", "evidence_key": 32}
+    if not isinstance(input_stress, bool):
+        raise ValueError("input_stress must be boolean")
+    common = {"evidence_family": "effective_batch", "evidence_key": 32, "input_policy": "starved" if input_stress else "baseline"}
     baseline = compare_time_to_target(track_id, **common)
-    result = compare_time_to_target(track_id, **common, **interventions[intervention])
+    result = compare_time_to_target(track_id, **{**common, **interventions[intervention]})
     return {
         "track_id": track_id,
         "intervention": intervention,
@@ -637,6 +727,7 @@ def bottleneck_experiment(track_id: str, *, intervention: str) -> dict[str, Any]
 
 
 _REPLAY_KEYS = {
+    "v1_08_experiments.adaptation_outcome",
     "v1_08_experiments.optimizer_experiment",
     "v1_08_experiments.batch_experiment",
     "v1_08_experiments.precision_experiment",
@@ -693,6 +784,10 @@ def replay(model_key: str, inputs: Mapping[str, Any]) -> dict[str, Any]:
         raise ValueError(f"unknown Chapter 8 replay model_key: {model_key}")
     data = _replay_mapping(inputs)
 
+    if model_key == "v1_08_experiments.adaptation_outcome":
+        _require_exact_keys(data, _MEMORY_INPUT_KEYS | {"adaptation_scope"})
+        return adaptation_outcome(**data)
+
     if model_key == "v1_08_experiments.memory_outcome":
         _require_exact_keys(data, _MEMORY_INPUT_KEYS)
         return memory_outcome(**data)
@@ -714,6 +809,7 @@ def replay(model_key: str, inputs: Mapping[str, Any]) -> dict[str, Any]:
 
 
 __all__ = [
+    "adaptation_outcome",
     "CONVERGENCE_TRACES",
     "FIXTURE_NOTE",
     "NUMERICAL_FIXTURES",
@@ -724,6 +820,7 @@ __all__ = [
     "checkpoint_experiment",
     "compare_time_to_target",
     "convergence_trace",
+    "model_flops_diagnostic",
     "memory_experiment",
     "memory_outcome",
     "optimizer_experiment",

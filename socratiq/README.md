@@ -1,178 +1,139 @@
-# Socratiq — AI Learning Widget
+# SocratiQ
 
-Socratiq is an AI-powered learning widget that injects itself into any static HTML page (Quarto books, textbooks, documentation sites) via a single `<script>` tag. It runs entirely in a Shadow DOM so it never conflicts with the host page's styles or scripts.
+SocratiQ is the book's in-page tutor and study workspace. The shared reader is
+included in the HTML configuration for all four volumes. The larger study bundle
+loads only when a reader opens **Study tools**.
 
-## What it does
+## Reading and studying
 
-- **AI Chat** — Ask questions about the page content. The widget reads the surrounding text as context and streams answers using configurable LLM providers (Cloudflare AI Gateway, Gemini, Groq).
-- **Quiz generation** — Generates contextual quizzes from selected text or entire sections. Supports multiple-choice, short-answer, and spaced repetition (flashcard) modes.
-- **Highlight & ask** — Select any text on the page to instantly ask a follow-up question or generate a quiz about that passage.
-- **Knowledge graph** — Visualizes relationships between concepts on the current page.
-- **Progress tracking** — Tracks quiz scores and chapter visits in a local IndexedDB database, with a spaced repetition scheduler for revisiting weak areas.
-- **Markdown rendering** — Streams and renders full markdown (including KaTeX math, Mermaid diagrams, syntax-highlighted code) in the chat panel.
-- **Chat history** — Saves and restores conversations per page, with export and share functionality.
-- **Onboarding & settings** — First-run onboarding flow, theme support (light/dark auto-detection), and a settings panel for choosing LLM model and difficulty level.
+The reader supports selected text → **Explain this**, follow-up questions,
+**Simplify**, **Show an example**, and **Check my understanding**. On touch
+screens, **Choose a paragraph** previews a passage before a request is sent.
+**Recent passages** retains up to five discussions and drafts on the current
+page. **Start over** clears only the current discussion. **Copy answer** includes
+source provenance; the source link returns to the passage in the same tab.
 
-The widget is gated behind a `socratiq=true` cookie or URL parameter so it can be embedded in production sites and toggled per-user without affecting other visitors.
+**Study tools** opens the existing workspace for quizzes, flashcards, saved
+conversations, progress, the knowledge graph, settings, and exports. Returning to
+the reader preserves its current discussion. The workspace mounts once per page;
+opening it does not enable a persistent activation cookie.
 
-## 🚀 Quick Start
+The first deliberate reader opening offers a skippable tour; **Replay tour**
+reopens it. **Learning preferences** saves the explanation level and optional
+background/goal in this browser, shared with study settings. Saving preferences
+sends nothing; subsequent AI requests include them. **Clear preferences** resets
+the intermediate level and clears both text fields. No account or device sync is
+provided.
 
-### Prerequisites
-- Node.js (v18+ recommended)
-- npm
+AI-generated explanations and questions can be wrong. A source link identifies
+the supplied passage; it does not establish that every generated claim is
+supported. Check-understanding feedback is not a graded assessment or evidence
+of mastery. The graph's extracted relationships are not authored prerequisite
+relationships.
 
-### Installation
+## Data and service boundaries
 
-```bash
-git clone https://github.com/harvard-edge/cs249r_book.git
-cd cs249r_book/socratiq
-npm install
-```
+- Reader discussions live in page memory and disappear on reload or navigation.
+- Study records use browser-local IndexedDB and local storage. They are not
+  synchronized to an account or another device. Browser data deletion also
+  removes these records; use the workspace's exports to retain study material.
+- Progress summarizes recorded results and cumulative-quiz outcomes. An unknown
+  number of available chapter quizzes is not replaced with an invented target.
+- Quiz identities include their source page so matching titles in different
+  volumes do not share scores. Old records without an unambiguous source remain
+  unassigned rather than being attributed to an arbitrary volume.
+- Schema repairs preserve existing stores and records. Saved chat HTML is
+  sanitized on restoration; imports are validated before writes.
+- Selecting or previewing text does not send it. Asking for AI help sends the
+  selected passage, local section context, question, and bounded conversation
+  history to the configured proxy. Study AI actions likewise send their requested
+  source content. There is no reader usage or learning analytics pipeline.
+- Cloud quiz submission and collaborative synchronization are unavailable. Local
+  storage does not imply that those services have been restored.
 
-### Development
+The production chat gateway is `https://mlsysbook.ai/api/socratiq`.
+Its source and operating contract are documented in
+[cloudflare/](cloudflare/README.md). Reader and study Groq defaults use the shared
+configuration in `src_shared/provider-config.js`; provider credentials stay on
+the Worker. The gateway supports the explicitly allowed Groq models and rejects
+unsupported providers without choosing a fallback. The study workspace's custom
+API option is an explicit user override, separate from the public gateway.
 
-```bash
-npm run dev
-```
+The Worker is activated with a dedicated encrypted Groq credential, after
+verification of Groq and Cloudflare Free plans. Activation and local transport
+tests do not establish live model quality or available quota. Local tests use
+constructed upstream responses. The deployment health check establishes dispatch
+only; live inference controls and browser checks establish different parts of the
+request path. See the gateway README for limits, disable/rollback procedures,
+provider privacy, and the manual deployment workflow. No API key belongs in a
+book script or build.
 
-This starts the Vite dev server on `http://localhost:4175` (auto-increments if the port is occupied), opens the encryption textbook test page at `/test_website/encryption_textbook/`, injects the widget with HMR enabled, and sets the `socratiq=true` cookie automatically. Changes in `src_shadow/` are reflected instantly in the browser.
-
-> Uses `vite.config.dev.mjs`, which intercepts requests to test pages, strips any production script tags, and replaces them with the local dev entry point (`/js/index.js`) plus the Vite HMR client.
-
-## 🛠️ Scripts
-
-| Command | Description |
-|---------|-------------|
-| `npm run dev` | **Primary dev command.** HMR dev server on port `4175` with widget injected into the test page. |
-| `npm run dev:vite` | Alias for `dev`. |
-| `npm run build:vite` | Production build → `dist_vite/bundle.js`. Also copies output to Quarto book destinations. |
-| `npm run build:quarto` | Alias for `build:vite`. |
-| `npm run preview:vite` | Serves the production build locally for final verification. |
-
-## ⌨️ Keyboard Shortcuts
-
-| Shortcut | Action |
-|----------|--------|
-| `Ctrl+/` / `⌘+/` | Toggle the widget panel open/closed |
-| `Ctrl+Enter` / `⌘+Enter` | Save a flashcard in the spaced repetition modal |
-
-The widget automatically detects the user's OS and shows the correct modifier key (`⌘` on Mac, `Ctrl` elsewhere) in all UI hints.
-
-## 📂 Project Structure
-
-- **`src_shadow/`** — All widget source code.
-  - `js/index.js` — Entry point. Bootstraps the widget, attaches Shadow DOM, wires all components.
-  - `js/components/` — UI components: quiz, chat, highlight menu, settings, spaced repetition, knowledge graph, onboarding, etc.
-  - `js/libs/` — Agents (LLM streaming), utilities, IndexedDB helpers, fuzzy matching.
-  - `configs/` — LLM provider configs, prompt templates, system prompts.
-  - `indexHtml.js` / `cssStyles.js` — Widget HTML and CSS injected into the Shadow DOM at runtime.
-
-- **`test_website/`** — Static HTML pages used for local development and testing.
-  - `encryption_textbook/` — Primary test page (cryptography textbook).
-  - `mlsys_book_removed_most/` — Secondary test page (ML systems book excerpt).
-
-- **`dist_vite/`** — Production build output (`bundle.js` + assets).
-
-- **`cloudflare/`** — Backend infrastructure.
-  - `proxy-worker/` — Cloudflare Worker that proxies LLM API requests (keeps API keys server-side).
-  - `sync-server/` — Collaborative sync and session logic.
-
-- **`vite.config.dev.mjs`** — Dev server config with injection middleware and HMR.
-- **`vite.config.prod.mjs`** — Production build config (single-file bundle, copies to Quarto destinations).
-
-## Embedding in a page
-
-Add to the bottom of any HTML page:
-
-```html
-<script type="module" src="path/to/bundle.js"></script>
-```
-
-Then navigate to the page with `?socratiq=true` to activate the widget (sets a persistent cookie). Subsequent visits load the widget automatically.
-
-## ⚙️ Configuration
-
-All configuration is centralised in two files — **you should never need to touch anything else** to deploy the widget on a new site.
-
-### `src_shadow/configs/env_configs.js` — Backend & Runtime
-
-This is the **primary config file**. Change these before deploying:
-
-```js
-// Switch between local wrangler dev workers and production Cloudflare Workers
-export const USE_LOCAL_WORKERS = false;   // true → localhost:8787/8788
-
-// The topic the widget scopes its answers to (used in the system prompt)
-export const MAIN_TOPIC = 'MLSysBook.AI: Principles and Practices of Machine Learning Systems Engineering';
-
-// AI provider model selection — change any model here, takes effect everywhere
-export const PROVIDER_MODELS = {
-  GROQ:        { model: 'llama-3.1-8b-instant',  stream: true  },
-  GEMINI:      { model: 'gemini-2.5-flash',       stream: true  },
-  // ... see file for full list
-};
-
-// Max characters of page text sent per LLM call
-export const SIZE_LIMIT_LLM_CALL = 6000;
-```
-
-| Variable | What it controls |
-|---|---|
-| `USE_LOCAL_WORKERS` | `true` → hit `localhost:8787/8788` (wrangler dev); `false` → production workers |
-| `MAIN_TOPIC` | Injected into every system prompt to keep answers on-topic |
-| `PROVIDER_MODELS` | Model name + streaming flag per provider, tried in order on fallback |
-| `SIZE_LIMIT_LLM_CALL` | Text truncation limit before sending to AI (tokens ~= chars/4) |
-| `WORKER_URL_AI` / `WORKER_URL_AI_STREAM` | Resolved automatically from `USE_LOCAL_WORKERS` — don't set manually |
-
-### `src_shadow/configs/client.config.js` — Prompts & UX
-
-Contains all LLM **prompt templates** and UI copy. Edit these to customise what the AI says:
-
-| Export | What it controls |
-|---|---|
-| `quiz_prompt` | Section quiz prompt template (3 questions) |
-| `QUIZ_SUMMATIVE_PROMPT` | Cumulative quiz prompt template (10 questions) |
-| `SYSTEM_PROMPT_ORIG` | Base system prompt (uses `MAIN_TOPIC` from env_configs) |
-| `DIFFICULTY_LEVELS` | Array of 4 difficulty prompts (Beginner → Bloom's Taxonomy) |
-| `PROGRESS_REPORT_PROMPT` | Progress report analysis prompt |
-| `TEXT_EXTRACTION_CONFIG` | `MAX_TOKENS`, DOM selectors for content vs nav extraction |
-| `getConfigs(type)` | Factory — returns a config object for `'quiz'`, `'explain'`, `'query'`, `'summative'`, `'progress_report'` |
-
-### Local worker development
+## Build and test
 
 ```bash
-# 1. Start the Cloudflare Worker locally (in cloudflare/proxy-worker/)
-wrangler dev
-
-# 2. Set USE_LOCAL_WORKERS = true in env_configs.js
-
-# 3. Start the widget dev server
-npm run dev
+cd socratiq
+npm ci
+npx playwright install chromium webkit
+npm run build:reader
+npm run build:vite
+npm run test:local
+npm run test:gateway
+npm run test:reader:browser
+cd ..
+python -m pytest -q binder/tests/test_socratiq_html_integration.py --confcutdir=binder/tests
 ```
 
-Revert `USE_LOCAL_WORKERS = false` before building for production.
+The reader build writes `books/shared/assets/scripts/socratiq/reader.js`. The
+study build writes `books/shared/assets/scripts/socratiq/study.js` and the legacy
+artifact at `binder/tools/scripts/socratiQ/bundle.js`. Commit generated artifacts
+with their source changes. Both builds embed WOFF2 math fonts without duplicate
+TTF/WOFF copies. Quarto stages the shared directory in every volume;
+the study loader resolves its URL beside the deployed reader script, preserving
+the volume prefix. The `socratiq-validate.yml` workflow checks rebuild drift and
+runs local, browser, and Quarto integration tests.
 
-## 🎨 Theme Detection
+Tests using constructed responses exercise behavior, not model quality. Storage
+tests use isolated browser data. Chromium and WebKit viewport tests cover phone
+and tablet layouts; they do not replace physical-device checks of native
+selection handles, software keyboards, or assistive technology.
 
-The widget auto-detects light/dark mode using the following priority order:
+Optional live checks send public or author-constructed passages to the configured
+service and save raw evidence. They are excluded from CI:
 
-1. `window.SocratiqWidgetTheme = 'dark' | 'light'` — explicit host-page override (highest priority)
-2. Quarto color scheme toggle button (`.quarto-color-scheme-toggle`)
-3. `document.body.classList` contains `dark-mode`
-4. **Page background luminance** — the actual rendered background color (takes priority over system preference)
-5. System `prefers-color-scheme: dark` — only used when background luminance is indeterminate
-6. Body text luminance as a final heuristic
+```bash
+node tests/reader-live-smoke.mjs /tmp/socratiq-live-UNIQUE-RUN
+node tests/reader-quality-probes.mjs /tmp/socratiq-probes-UNIQUE-RUN
+```
 
-This means the widget follows the **page's visual theme**, not the OS setting — a light-background page always gets a light widget even if the user's OS is in dark mode.
+Review the saved answers against the source and the declared criteria. Do not
+interpret these small, unscored probes as learning-effectiveness measurements.
 
-## 🔌 API Architecture
+## Code map
 
-All LLM calls are routed through a Cloudflare Worker proxy (`cloudflare/proxy-worker/`) which holds the API keys. The widget itself never has access to API keys. Providers are tried in order: **Groq → Gemini → Cerebras → SambaNova → Mistral → OpenRouter → HuggingFace → Awan**.
+| Location | Responsibility |
+| --- | --- |
+| `src_reader/index.js` | Book entry point and configuration |
+| `src_reader/context.js` | Visible passage capture, math source, bounded context, source return |
+| `src_reader/picker.js` | Explicit paragraph picking |
+| `src_reader/ui.js` | Reader interaction and request lifecycle |
+| `src_reader/passage-sessions.js` | Bounded discussion snapshots and restoration |
+| `src_reader/environment.js` | Theme, viewport geometry, and listener cleanup |
+| `src_reader/study.js` | Lazy study loading and recovery |
+| `src_reader/transport.mjs` | Request validation, streaming, cancellation, and service errors |
+| `src_reader/render.js`, `styles.js` | Sanitized Markdown/math and responsive presentation |
+| `src_shadow/js/index.js` | Study bootstrap and embedded open/close bridge |
+| `src_shadow/js/components/` | Quizzes, flashcards, progress, history, graph, settings |
+| `src_shadow/js/libs/` | Provider adapters, storage, and shared utilities |
+| `src_shadow/configs/` | Study provider settings and prompts |
 
-For quiz generation the proxy uses `llama-3.1-8b-instant` (Groq) by default, falling back to `gemini-2.5-flash`. Chat/query uses streaming via `proxy-worker-streaming.mlsysbook.workers.dev`.
+For standalone study development, `npm run dev` starts the Vite fixture with
+legacy activation enabled. The book integration instead uses an explicit
+embedded bridge and keeps the reader as its single entry point.
 
-## Notes
+## Release and rollback
 
-- COOP/COEP headers (`Cross-Origin-Embedder-Policy: require-corp`, `Cross-Origin-Opener-Policy: same-origin`) are required for OPFS-backed IndexedDB and SharedArrayBuffer features. The dev server sets these automatically.
-- The production build uses `vite-plugin-singlefile` to inline all assets into a single `bundle.js` with no external dependencies.
-- To force a specific theme on a page, set `window.SocratiqWidgetTheme = 'light'` (or `'dark'`) before the widget script loads.
+Publish through the existing book release process after review. Neither a local
+merge nor a successful build updates the public website. Confirm live inference
+and operational ownership before describing a release as restored. Removing the
+reader script includes from `books/config/_quarto-html-vol{1,2,3,4}.yml` disables
+the companion without changing book content or deleting stored study records.

@@ -356,8 +356,8 @@ def register(app: typer.Typer) -> None:
             console.print(f"[yellow]deprecated[/yellow] {match.path}")
             return
 
-        if match.question.chain is not None and not force:
-            console.print(f"[red]refusing[/red]: {question_id} is in chain {match.question.chain.id!r}; "
+        if bool(match.question.chains) and not force:
+            console.print(f"[red]refusing[/red]: {question_id} is in chain {', '.join(chain.id for chain in match.question.chains or [])!r}; "
                           "pass --force if you really mean it")
             raise typer.Exit(code=ExitCode.USER_ABORTED)
 
@@ -424,9 +424,9 @@ def register(app: typer.Typer) -> None:
             raise typer.Exit(code=ExitCode.VALIDATION_FAILURE)
 
         # Chain-breakage check: refuse if question is in a chain unless user opts in.
-        if match.question.chain is not None and not force_chain:
+        if bool(match.question.chains) and not force_chain:
             console.print(
-                f"[red]refusing[/red]: {question_id} is in chain {match.question.chain.id!r}. "
+                f"[red]refusing[/red]: {question_id} is in chain {', '.join(chain.id for chain in match.question.chains or [])!r}. "
                 "Pass --i-understand-chain-breakage to proceed (breaks chain integrity)."
             )
             raise typer.Exit(code=ExitCode.USER_ABORTED)
@@ -528,7 +528,7 @@ def register(app: typer.Typer) -> None:
         """Promote a question to the curated exemplar pool.
 
         Refuses unless provenance is ``human`` or
-        ``llm-then-human-edited`` with ``human_reviewed_at`` set — per §12.2
+        ``llm-then-human-edited`` with a verified ``human_reviewed`` record — per §12.2
         (David R3-N-9 resolution in code). For external PRs, CI gates on a
         maintainer-approval label ``exemplar-approved``.
         """
@@ -538,21 +538,21 @@ def register(app: typer.Typer) -> None:
             console.print(f"[red]error[/red]: id not found: {question_id}")
             raise typer.Exit(code=ExitCode.VALIDATION_FAILURE)
 
-        prov = match.question.provenance.value
+        prov = match.question.provenance
         if prov == "human":
             pass  # eligible
         elif prov == "llm-then-human-edited":
-            gm = match.question.generation_meta
-            if gm is None or gm.human_reviewed_at is None:
+            review = match.question.human_reviewed
+            if review is None or review.status != "verified" or not review.by or not review.date:
                 console.print(
                     "[red]refusing[/red]: llm-then-human-edited requires "
-                    "generation_meta.human_reviewed_at to be set."
+                    "human_reviewed to record verified status, reviewer, and date."
                 )
                 raise typer.Exit(code=ExitCode.VALIDATION_FAILURE)
         else:
             console.print(
                 f"[red]refusing[/red]: provenance={prov!r} is not exemplar-eligible "
-                "(must be 'human' or 'llm-then-human-edited' with human_reviewed_at)."
+                "(must be 'human' or 'llm-then-human-edited' with a verified human review)."
             )
             raise typer.Exit(code=ExitCode.VALIDATION_FAILURE)
 

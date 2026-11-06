@@ -19,15 +19,43 @@ from mlsysim.core._validation import validate_at_least
 
 
 def calc_group_relative_coefficients(rewards, stabilizer: float = 0.0, bessel: bool = False):
-    """
-    Group-relative (GRPO) coefficients of one group of rollout rewards.
+    """Normalize rollout rewards by their within-group dispersion.
 
-        A_i = (r_i - mean(r)) / (std(r) + epsilon)
+    Parameters
+    ----------
+    rewards : iterable of float
+        Dimensionless scalar rewards for one group; at least one value.
+    stabilizer : float, optional
+        Nonnegative denominator offset in reward units; defaults to zero.
+    bessel : bool, optional
+        Use the sample standard deviation with divisor G - 1; requires G >= 2.
 
-    ``std`` divides by ``G`` (the population dispersion) or, with ``bessel``,
-    by ``G - 1``, as PyTorch-style ``nanstd`` does. A group whose rewards all
-    tie has zero dispersion; every coefficient is then zero when ``epsilon`` is
-    positive (and undefined when it is zero). Returns ``(mean, std, coefficients)``.
+    Returns
+    -------
+    tuple
+        Mean reward, standard deviation, and list of dimensionless normalized coefficients.
+
+    Notes
+    -----
+    Equation: A_i = (r_i - mean(r)) / (std(r) + stabilizer).
+
+    Assumptions: Rewards share one scale; the population divisor is G unless bessel is true.
+
+    Excludes: Policy updates, clipping, learning dynamics, and any claim that reward normalization improves quality.
+
+    Tied rewards have zero dispersion. With zero stabilizer the division is undefined and raises ZeroDivisionError; a positive stabilizer produces zero coefficients.
+
+    References
+    ----------
+    Derivation: Center each reward and divide by its group dispersion; the sample variant replaces G with G - 1 in the variance denominator.
+
+    Examples
+    --------
+    >>> mean, std, coefficients = calc_group_relative_coefficients([0, 1])
+    >>> coefficients == [-1.0, 1.0]
+    True
+    >>> calc_group_relative_coefficients([1, 1], stabilizer=1)[2] == [0.0, 0.0]
+    True
     """
     values = [float(r) for r in rewards]
     group = len(values)
@@ -39,13 +67,41 @@ def calc_group_relative_coefficients(rewards, stabilizer: float = 0.0, bessel: b
 
 
 def calc_continuation_fork_tokens(turns: int, tokens_per_turn: int, branches: int, boundaries=None):
-    """
-    Generated tokens when ``branches`` continuations are forked after each listed turn.
+    """Count generated tokens for independent continuation forks.
 
-    A fork after turn ``k`` reruns the remaining ``H - k`` turns once per
-    branch. ``boundaries=None`` forks at every boundary ``k = 1 .. H - 1``, so
-    the total is ``H T (1 + m (H - 1) / 2)``: it grows with the square of the
-    horizon. Returns ``(base_tokens, branch_count, total_tokens)``.
+    Parameters
+    ----------
+    turns : int
+        Turns in the base trajectory; at least two.
+    tokens_per_turn : int
+        Generated tokens per turn, assumed fixed and nonnegative.
+    branches : int
+        Continuations sampled at each selected boundary; nonnegative.
+    boundaries : iterable of int or None, optional
+        Distinct turn indices strictly between zero and turns; None selects every interior boundary.
+
+    Returns
+    -------
+    tuple
+        Base generated-token count, total fork count, and total generated-token count.
+
+    Notes
+    -----
+    Equation: total = ``H*T`` + ``m*T*sum_k(H`` - k); all boundaries give ``H*T*(1`` + ``m*(H`` - 1)/2).
+
+    Assumptions: Each branch independently generates every remaining turn, and all turns have the same token cost.
+
+    Excludes: Shared generated suffixes, early termination, input prefill, and caching.
+
+    References
+    ----------
+    Derivation: Add the ``H*T`` base trajectory to m continuations of length H - k at every selected boundary k.
+
+    Examples
+    --------
+    >>> base, forks, total = calc_continuation_fork_tokens(3, 10, 2)
+    >>> (base, forks, total) == (3 * 10, 2 * 2, 3 * 10 + 2 * 10 * (2 + 1))
+    True
     """
     validate_at_least(turns, 2, "turns")
     ks = list(range(1, turns)) if boundaries is None else list(boundaries)
@@ -57,23 +113,74 @@ def calc_continuation_fork_tokens(turns: int, tokens_per_turn: int, branches: in
 
 
 def calc_binary_mean_se_bound(samples: int) -> float:
-    """
-    Largest standard error of the mean of ``k`` binary outcomes: ``1 / (2 sqrt k)``.
+    """Bound the standard error of an independent binary sample mean.
 
-    A Bernoulli variance ``p (1 - p)`` is at most 1/4, reached at ``p = 1/2``.
-    The difference of two independent such means is bounded by ``sqrt 2`` times it.
+    Parameters
+    ----------
+    samples : int
+        Number of independent Bernoulli samples; at least one.
+
+    Returns
+    -------
+    float
+        Maximum standard error in probability units.
+
+    Notes
+    -----
+    Equation: SE <= 1 / ``(2*sqrt(samples))``.
+
+    Assumptions: Samples are independent and identically distributed Bernoulli outcomes.
+
+    Excludes: Dependence, selection bias, confidence-interval coverage, and finite-population correction.
+
+    The difference of two independent means with equal sample counts has a standard-error bound sqrt(2) times this value.
+
+    References
+    ----------
+    Derivation: Bernoulli variance ``p*(1`` - p) is maximized at p = 1/2, then divide that variance by the sample count.
+
+    Examples
+    --------
+    >>> calc_binary_mean_se_bound(4) == calc_binary_mean_se_bound(1) / 2
+    True
     """
     validate_at_least(samples, 1, "binary samples")
     return 1 / (2 * math.sqrt(samples))
 
 
 def calc_ratio_clip_room(probability: float, epsilon: float):
-    """
-    How far one update may raise a token's probability under a symmetric ratio clip.
+    """Return the upper ratio-clip threshold and its absolute increment.
 
-    The ratio of new to old probability is capped at ``1 + epsilon``, so the
-    ceiling is ``(1 + epsilon) p`` and the absolute rise allowed is
-    ``epsilon p``: large for a dominant token, tiny for a rare one. Returns
-    ``(ceiling, rise)``.
+    Parameters
+    ----------
+    probability : float
+        Old token probability between zero and one.
+    epsilon : float
+        Nonnegative dimensionless upper-ratio allowance.
+
+    Returns
+    -------
+    tuple
+        Unclamped probability threshold (1 + epsilon)*p and increment epsilon*p.
+
+    Notes
+    -----
+    Equation: ceiling = (1 + ``epsilon)*probability``; rise = ``epsilon*probability``.
+
+    Assumptions: The upper ratio threshold is supplied as a hypothetical bound on a probability update.
+
+    Excludes: Renormalization, clipping at probability one, and a guarantee that PPO clipping constrains actual updates.
+
+    A clipped policy objective is not a hard probability constraint. This function computes the ratio threshold only, and the threshold can exceed one.
+
+    References
+    ----------
+    Derivation: Multiply the old probability by an allowed ratio and subtract the old value to express the increment.
+
+    Examples
+    --------
+    >>> ceiling, rise = calc_ratio_clip_room(0.5, 0.25)
+    >>> ceiling - 0.5 == rise
+    True
     """
     return (1 + epsilon) * probability, epsilon * probability

@@ -141,7 +141,7 @@ def test_equal_budget_capture_matches_bounded_overlap_arguments_and_is_finite_js
         traffic_pattern="incast",
         overlap_window=Q_(5, "ms"),
     )
-    assert result["inputs"]["overlap_window"] == {"value": 5.0, "unit": "ms"}
+    assert result["inputs"]["overlap_window"] == {"value": 5.0, "unit": "millisecond"}
     assert result["first"]["inputs"]["topology_id"] == "aligned"
     assert result["second"]["inputs"]["topology_id"] == "grouped"
     assert result["first"]["hidden_by_ready_compute_ms"] <= 5

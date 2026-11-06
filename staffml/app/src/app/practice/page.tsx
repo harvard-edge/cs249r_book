@@ -15,7 +15,7 @@ import NapkinCalc from "@/components/NapkinCalc";
 // shareable links to the 4,754 cohort-tagged IDs renamed to the clean
 // form on 2026-04-25.
 import idRedirects from "@/data/id-redirects.json";
-import AskInterviewer from "@/components/AskInterviewer";
+import AskInterviewer, { interviewerContext } from "@/components/AskInterviewer";
 import MarkdownText from "@/components/MarkdownText";
 import MCQOptions from "@/components/MCQOptions";
 import NapkinMathDisplay from "@/components/NapkinMathDisplay";
@@ -305,7 +305,14 @@ function PracticePage() {
     }
 
     // Default to L1 for brand-new users (no attempts yet)
-    if (getAttempts().length === 0 && !searchParams.get('q') && !searchParams.get('topic') && !searchParams.get('level')) {
+    if (
+      getAttempts().length === 0 &&
+      !searchParams.get('q') &&
+      !searchParams.get('topic') &&
+      !searchParams.get('subject') &&
+      !searchParams.get('concept') &&
+      !searchParams.get('level')
+    ) {
       setSelectedLevel("L1");
     }
 
@@ -375,18 +382,19 @@ function PracticePage() {
         return true;
       });
       if (taxPool.length > 0) {
+        const picked = taxPool[Math.floor(Math.random() * taxPool.length)];
         skipFilterCount.current = 1;
         setPool(taxPool);
-        setSelectedTrack(trackOnly || taxPool[0].track);
-        if (levelParam) setSelectedLevel(levelParam);
-        const subject = getSubjectById(subjectParam || taxPool[0].taxonomy_subject || "");
+        setCurrent(picked);
+        setSelectedTrack(trackOnly || picked.track);
+        setSelectedLevel(levelParam || picked.level);
+        const subject = getSubjectById(subjectParam || picked.taxonomy_subject || "");
         if (conceptParam) {
           setSourceTopic({ id: conceptParam, name: getConceptLabel(conceptParam) || conceptParam,
             href: subject ? `/?subject=${encodeURIComponent(subject.id)}` : "/" });
         } else if (subject) {
           setSourceTopic({ id: subject.id, name: subject.name, href: `/?subject=${encodeURIComponent(subject.id)}` });
         }
-        pickRandom(taxPool);
         return; // Skip other param handling
       }
     }
@@ -418,7 +426,8 @@ function PracticePage() {
     const trackParam = searchParams.get('track');
     const areaParam = searchParams.get('area');
     if (trackParam && getTracks().includes(trackParam)) setSelectedTrack(trackParam);
-    if (areaParam && getTaxAreaById(areaParam)) setSelectedArea(areaParam);
+    const resolvedArea = areaParam ? getTaxAreaById(areaParam) : undefined;
+    if (resolvedArea) setSelectedArea(resolvedArea.id);
     else if (areaParam && getCompetencyAreas().includes(areaParam)) setLegacyArea(areaParam);
 
     // Compute weakest area from progress
@@ -1526,7 +1535,8 @@ function PracticePage() {
               <NapkinCalc defaultOpen={false} />
               <AskInterviewer
                 key={`${current.id}-${showAnswer ? "study" : "interview"}`}
-                questionContext={current.scenario}
+                questionContext={interviewerContext(current)}
+                napkinMath={current.details.napkin_math}
                 defaultOpen={true}
                 mode={showAnswer ? "study" : "interview"}
                 canonicalAnswer={showAnswer ? current.details.realistic_solution : undefined}

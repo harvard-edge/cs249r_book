@@ -2,12 +2,14 @@
 """
 PDF Compression Tool for MLSysBook
 
-This tool compresses PDF files using Ghostscript with optimized settings for
-academic textbooks. It reduces file size while maintaining readability and
-print quality suitable for educational content.
+This tool offers verified lossless stream optimization and Ghostscript quality
+presets for academic textbooks. Lossless mode checks every rendered page and
+document navigation before publishing the candidate. An already optimized input
+may grow; reported size statistics retain that result rather than claiming savings.
 
 Usage:
     python compress_pdf.py --input input.pdf --output output.pdf [options]
+    python compress_pdf.py --input input.pdf --output output.pdf --quality lossless
 
 Author: MLSysBook Team
 License: MIT
@@ -20,8 +22,80 @@ import platform
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Optional
+
+
+def verify_lossless_pdf(source, candidate) -> int:
+    """Reject a rewrite that changes page content, navigation, or page geometry."""
+    if len(source) != len(candidate):
+        raise RuntimeError("Lossless compression changed the page count")
+    if source.get_toc() != candidate.get_toc():
+        raise RuntimeError("Lossless compression changed the document outline")
+    if source.metadata != candidate.metadata or source.get_xml_metadata() != candidate.get_xml_metadata():
+        raise RuntimeError("Lossless compression changed document metadata")
+    if source.get_page_labels() != candidate.get_page_labels():
+        raise RuntimeError("Lossless compression changed page labels")
+    if source.embfile_names() != candidate.embfile_names():
+        raise RuntimeError("Lossless compression changed attachment names")
+    for name in source.embfile_names():
+        if source.embfile_get(name) != candidate.embfile_get(name):
+            raise RuntimeError(f"Lossless compression changed attachment {name}")
+    for number, (before, after) in enumerate(zip(source, candidate), start=1):
+        for box in ("mediabox", "cropbox", "trimbox", "bleedbox", "artbox", "rotation"):
+            if getattr(before, box) != getattr(after, box):
+                raise RuntimeError(f"Lossless compression changed page {number} {box}")
+        if before.get_text() != after.get_text():
+            raise RuntimeError(f"Lossless compression changed page {number} text")
+        # Object numbers may change during garbage collection; link destinations must not.
+        def links(page):
+            return [{k: v for k, v in link.items() if k not in {"xref", "id"}}
+                    for link in page.get_links()]
+        if links(before) != links(after):
+            raise RuntimeError(f"Lossless compression changed page {number} links")
+        # Inspect every rendered page, including diagrams, rather than relying on text alone.
+        if before.get_pixmap(dpi=72, alpha=True).samples != after.get_pixmap(dpi=72, alpha=True).samples:
+            raise RuntimeError(f"Lossless compression changed page {number} rendering")
+    return len(source)
+
+
+def compress_lossless(input_path: Path, output_path: Path) -> dict:
+    """Deflate and deduplicate PDF streams without resampling images or rewriting fonts.
+
+    PyMuPDF's lossless save avoids the Ghostscript conversion that stalls on the
+    Volume II manuscript. The candidate is verified before atomically replacing
+    the destination; failed verification leaves any existing destination intact.
+    """
+    import pymupdf
+
+    if input_path.resolve() == output_path.resolve():
+        raise ValueError("Input and output must be different PDF files")
+    if input_path.suffix.lower() != ".pdf" or output_path.suffix.lower() != ".pdf":
+        raise ValueError("Input and output must be PDF files")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    original_size = input_path.stat().st_size
+    with pymupdf.open(input_path) as source:
+        if not source.is_pdf or source.needs_pass or source.is_repaired:
+            raise ValueError("Lossless compression requires an intact, unencrypted PDF")
+        with tempfile.TemporaryDirectory(prefix=".pdf-lossless-", dir=output_path.parent) as scratch:
+            candidate_path = Path(scratch) / "candidate.pdf"
+            source.save(candidate_path, garbage=4, deflate=True,
+                        deflate_images=True, deflate_fonts=True)
+            with pymupdf.open(candidate_path) as candidate:
+                verified_pages = verify_lossless_pdf(source, candidate)
+            final_size = candidate_path.stat().st_size
+            os.replace(candidate_path, output_path)
+        pdf_format = source.metadata.get("format", "PDF")
+    return {
+        "original_size": original_size,
+        "final_size": final_size,
+        "compression_ratio": (1 - final_size / original_size) * 100,
+        "size_saved": original_size - final_size,
+        "quality_preset": "lossless",
+        "pdf_compatibility": pdf_format,
+        "verified_pages": verified_pages,
+    }
 
 class PDFCompressor:
     """
@@ -268,7 +342,7 @@ class PDFCompressor:
 def create_argument_parser() -> argparse.ArgumentParser:
     """Create and configure the command-line argument parser."""
     parser = argparse.ArgumentParser(
-        description="Compress PDF files using Ghostscript with optimized settings for academic textbooks.",
+        description="Compress PDFs with verified lossless optimization or Ghostscript quality presets.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -285,6 +359,7 @@ Quality Presets:
   prepress:  Highest quality (300+ dpi) - for professional printing
   default:   Ghostscript default settings - no optimization
   minimal:   Exact match to original workflow commands - for compatibility
+  lossless:  Deflate/deduplicate streams; verify every page, link, and outline
 
 PDF Compatibility:
   1.3: Oldest, most compatible (Acrobat 4.0+)
@@ -313,7 +388,7 @@ PDF Compatibility:
 
     parser.add_argument(
         '--quality', '-q',
-        choices=['screen', 'ebook', 'printer', 'prepress', 'default', 'minimal'],
+        choices=['screen', 'ebook', 'printer', 'prepress', 'default', 'minimal', 'lossless'],
         default='ebook',
         help='Compression quality preset (default: ebook)'
     )
@@ -323,7 +398,7 @@ PDF Compatibility:
         choices=['1.3', '1.4', '1.5', '1.6', '1.7'],
         default='1.4',
         metavar='VERSION',
-        help='PDF compatibility level (default: 1.4)'
+        help='Ghostscript PDF compatibility level; lossless preserves the source format (default: 1.4)'
     )
 
     parser.add_argument(
@@ -352,15 +427,16 @@ def main() -> int:
     args = parser.parse_args()
 
     try:
-        # Create compressor instance
-        compressor = PDFCompressor(
-            quality=args.quality,
-            compatibility=args.compatibility,
-            verbose=args.verbose
-        )
-
-        # Perform compression
-        stats = compressor.compress(args.input, args.output)
+        if args.quality == 'lossless':
+            stats = compress_lossless(args.input, args.output)
+            print(f"Verified identical rendering and content on all {stats['verified_pages']} pages.")
+        else:
+            compressor = PDFCompressor(
+                quality=args.quality,
+                compatibility=args.compatibility,
+                verbose=args.verbose
+            )
+            stats = compressor.compress(args.input, args.output)
 
         # Success message
         print(f"\n🎉 PDF compression successful!")

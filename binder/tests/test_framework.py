@@ -6,6 +6,8 @@ import json
 
 import pytest
 import yaml
+from rdflib import Graph, Literal
+from rdflib.namespace import RDF, RDFS, SKOS
 
 from core.concept_graph import ConceptGraphError
 from core.framework import framework_artifacts, load_framework
@@ -16,23 +18,23 @@ def candidate(tmp_path):
     model = dict(schema_version=1, id="mlsys.framework", title="ML systems candidate framework", version="0.1-draft",
                  status="editorial-draft", scope="A provisional subject boundary.",
                  sources=[dict(id="skos", title="SKOS", url="https://www.w3.org/TR/skos-reference/", role="Design reference")],
-                 dimensions={name: [dict(id=name + ".one", label=name.title())] for name in ("activities", "layers", "concerns")},
-                 areas=[dict(id="area.execution", label="Execution area", question="How does work execute?", scope="Runtime concerns.",
-                             rows=[dict(id="row.state", label="Retained state", definition="The resources retained by execution.",
-                                        concepts=["mlsys.state", "mlsys.capacity"], activities=["activities.one"], layers=["layers.one"], concerns=["concerns.one"])])],
-                 gaps=[dict(id="gap.candidate", label="Candidate topic", reason="Investigate the boundary.", status="candidate")])
+                 dimensions={name: [dict(id=name + "-one", label=name.title())] for name in ("activities", "layers", "concerns")},
+                 areas=[dict(id="area-execution", label="Execution area", question="How does work execute?", scope="Runtime concerns.",
+                             rows=[dict(id="row-state", label="Retained state", definition="The resources retained by execution.",
+                                        concepts=["mlsys.state", "mlsys.capacity"], activities=["activities-one"], layers=["layers-one"], concerns=["concerns-one"])])],
+                 gaps=[dict(id="gap-candidate", label="Candidate topic", reason="Investigate the boundary.", status="candidate")])
     field = dict(concepts=[dict(id="mlsys.state", label="State", definition="Retained information."),
                            dict(id="mlsys.capacity", label="Capacity", definition="Available storage.")],
                  relationships=[dict(id="relation", source="mlsys.state", target="mlsys.capacity", predicate="occupies")],
                  book_links=[dict(concept="mlsys.state", book_concept="vol1.state", volume="vol1", label="State", chapter_title="Execution", url="https://mlsysbook.ai/state", depth="not-assessed", status="draft")])
-    path = tmp_path / "shared/concepts/ml-systems-framework.yml"
+    path = tmp_path / "taxonomy/taxonomy.yml"
     path.parent.mkdir(parents=True)
     path.write_text(yaml.safe_dump(model, sort_keys=False))
     return tmp_path, model, field
 
 
 def write(root, model):
-    (root / "shared/concepts/ml-systems-framework.yml").write_text(yaml.safe_dump(model, sort_keys=False))
+    (root / "taxonomy/taxonomy.yml").write_text(yaml.safe_dump(model, sort_keys=False))
 
 
 def test_missing_optional_framework_preserves_old_build(tmp_path):
@@ -50,7 +52,8 @@ def test_candidate_home_links_and_empty_contexts_do_not_claim_coverage(candidate
     assert row["book_link_count"] == 1
     assert row["book_volumes"] == ["vol1"]
     assert row["contexts"] == []
-    assert framework["summary"] == dict(groups=0, areas=1, rows=1, concepts=2, book_links=1, linked_concepts=1, gaps=1)
+    assert framework["summary"] == dict(groups=0, areas=1, rows=1, concepts=2, book_links=1, linked_concepts=1, gaps=1,
+                                        roles=0, symptoms=0, learning_paths=0)
     assert "coverage" not in row and "competence" not in row
     assert field == before
     assert original["areas"][0]["rows"][0].get("contexts") is None
@@ -61,23 +64,24 @@ def test_candidate_home_links_and_empty_contexts_do_not_claim_coverage(candidate
     (lambda m: m.update(version="1.0"), "0.1-draft"),
     (lambda m: m["sources"][0].update(url="javascript:alert(1)"), "unsafe source"),
     (lambda m: m["sources"].append(deepcopy(m["sources"][0])), "duplicate source ID"),
-    (lambda m: m["dimensions"]["activities"].append(dict(id="activities.two", label="Activities")), "duplicate activities label"),
+    (lambda m: m["dimensions"]["activities"].append(dict(id="activities-two", label="Activities")), "duplicate activities label"),
     (lambda m: m["areas"][0]["rows"][0].update(activities=["nonexistent"]), "unknown.*activities"),
     (lambda m: m["areas"][0]["rows"][0].update(concepts=["mlsys.unknown"]), "unknown.*concepts"),
     (lambda m: m["areas"][0]["rows"][0].update(concepts=["mlsys.state"]), "unassigned.*capacity"),
     (lambda m: m["areas"][0]["rows"][0].update(concepts=["mlsys.state", "mlsys.state", "mlsys.capacity"]), "duplicate.*concepts"),
     (lambda m: m["areas"][0]["rows"][0].update(status="reviewed"), "remain draft"),
     (lambda m: m["gaps"][0].update(status="confirmed"), "candidate status"),
-    (lambda m: m["areas"][0]["rows"][0].update(id="mlsys.state"), "overlapping row identity"),
+    (lambda m: m["areas"][0]["rows"][0].update(id="area-execution"), "overlapping row identity"),
     (lambda m: m["areas"][0].update(group="stack"), "no groups are defined"),
     (lambda m: m.update(groups=[dict(id="stack", label="Stack", question="What runs it?")]), "requires a known group"),
     (lambda m: (m.update(groups=[dict(id="stack", label="Stack", question="What runs it?"), dict(id="spare", label="Spare", question="Unused?")]),
                 m["areas"][0].update(group="stack")), "groups without areas: spare"),
-    (lambda m: (m.update(groups=[dict(id="row.state", label="Stack", question="What runs it?")]),
-                m["areas"][0].update(group="row.state")), "overlapping row identity"),
+    (lambda m: (m.update(groups=[dict(id="row-state", label="Stack", question="What runs it?")]),
+                m["areas"][0].update(group="row-state")), "overlapping row identity"),
     (lambda m: m["areas"][0]["rows"][0].update(book_chapters=["chapter five"]), "malformed chapter code"),
     (lambda m: m["areas"][0]["rows"][0].update(book_chapters=["v1/07"]), "does not resolve"),
-    (lambda m: m["areas"][0]["rows"][0].update(excludes=["Storage ([[row.missing]])"]), "cites unknown row or area row.missing"),
+    (lambda m: m["areas"][0]["rows"][0].update(excludes=["Storage ([[row-missing]])"]), "cites unknown row or area row-missing"),
+    (lambda m: m["sources"][0].update(**{"run rules).": None}), "unknown keys"),
 ])
 def test_bad_edits_fail_before_exports(candidate, mutation, error):
     root, model, field = candidate
@@ -90,7 +94,7 @@ def test_bad_edits_fail_before_exports(candidate, mutation, error):
 def test_duplicate_home_across_distinct_rows_rejected(candidate):
     root, model, field = candidate
     other = deepcopy(model["areas"][0]["rows"][0])
-    other.update(id="row.other", label="Other row")
+    other.update(id="row-other", label="Other row")
     model["areas"][0]["rows"].append(other)
     write(root, model)
     with pytest.raises(ConceptGraphError, match="exactly one candidate home"):
@@ -106,11 +110,11 @@ def test_new_field_concept_requires_explicit_home_decision(candidate):
 
 def test_contexts_are_optional_but_must_be_known_when_authored(candidate):
     root, model, field = candidate
-    model["dimensions"]["contexts"] = [dict(id="context.physical", label="Physical systems")]
-    model["areas"][0]["rows"][0]["contexts"] = ["context.physical"]
+    model["dimensions"]["contexts"] = [dict(id="context-physical", label="Physical systems")]
+    model["areas"][0]["rows"][0]["contexts"] = ["context-physical"]
     write(root, model)
-    assert load_framework(root, field)["areas"][0]["rows"][0]["contexts"] == ["context.physical"]
-    model["areas"][0]["rows"][0]["contexts"] = ["context.unknown"]
+    assert load_framework(root, field)["areas"][0]["rows"][0]["contexts"] == ["context-physical"]
+    model["areas"][0]["rows"][0]["contexts"] = ["context-unknown"]
     write(root, model)
     with pytest.raises(ConceptGraphError, match="unknown.*contexts"):
         load_framework(root, field)
@@ -122,9 +126,12 @@ def test_exports_share_authored_rows_and_preserve_unmapped_concepts(candidate):
     write(root, model)
     framework = load_framework(root, field)
     artifacts = framework_artifacts(root, field, framework)
-    site = root / "site/explore"
-    # Three internal files plus six public downloads.
-    assert len(artifacts) == 9
+    site = root / "taxonomy"
+    # Three internal files plus nine core downloads when taxonomy/schema/ is absent from tmp_path, apart from the
+    # generated identifier pages; the full release (with mlsys-taxonomy.linkml.yml and mlsys-taxonomy.schema.json)
+    # is verified against the live taxonomy in test_linkml_schema.py.
+    assert len([p for p in artifacts if p.name != "index.html"]) == 12
+    assert site / "concept" / field["concepts"][0]["id"] / "index.html" in artifacts
     data = json.loads(artifacts[site / "framework-data.json"])
     assert data["concepts"] == field["concepts"]
     assert data["relationships"] == field["relationships"]
@@ -141,10 +148,23 @@ def test_exports_share_authored_rows_and_preserve_unmapped_concepts(candidate):
     assert artifacts == framework_artifacts(root, field, framework)
 
 
+def test_untyped_candidate_relationship_keeps_wording_without_inventing_type(candidate):
+    root, model, field = candidate
+    artifacts = framework_artifacts(root, field, load_framework(root, field))
+    graph = Graph().parse(data=artifacts[root / "taxonomy/downloads/mlsys-taxonomy.ttl"], format="turtle")
+    statements = list(graph.subjects(RDF.type, RDF.Statement))
+    assert len(statements) == len(field["relationships"])
+    statement = statements[0]
+    assert graph.value(statement, RDF.predicate) == SKOS.related
+    assert graph.value(statement, RDFS.label) == Literal("occupies", lang="en")
+    # Reification must not turn that description into an asserted typed edge.
+    assert (graph.value(statement, RDF.subject), SKOS.related, graph.value(statement, RDF.object)) not in graph
+
+
 def test_empty_candidate_row_and_secondary_links_do_not_inflate_home_counts(candidate):
     root, model, field = candidate
-    model["areas"][0]["rows"].append(dict(id="row.proposed", label="Proposed subject", definition="A candidate beyond the current inventory.",
-        concepts=[], secondary_concepts=["mlsys.state"], activities=["activities.one"], layers=["layers.one"], concerns=["concerns.one"],
+    model["areas"][0]["rows"].append(dict(id="row-proposed", label="Proposed subject", definition="A candidate beyond the current inventory.",
+        concepts=[], secondary_concepts=["mlsys.state"], activities=["activities-one"], layers=["layers-one"], concerns=["concerns-one"],
         includes=["Retained state implications"], excludes=["Storage ownership"], warrants=["skos"]))
     write(root, model)
     framework = load_framework(root, field)
@@ -155,7 +175,7 @@ def test_empty_candidate_row_and_secondary_links_do_not_inflate_home_counts(cand
     assert framework["summary"]["concepts"] == 2
     assert framework["summary"]["book_links"] == 1
     artifacts = framework_artifacts(root, field, framework)
-    site = root / "site/explore"
+    site = root / "taxonomy"
     rows = list(csv.DictReader(io.StringIO(artifacts[site / "framework-table.csv"].decode())))
     assert len(rows) == 2
     assert rows[1]["concept_ids"] == ""
@@ -194,7 +214,7 @@ def test_csv_preserves_scope_boundaries_and_source_warrants(candidate):
     write(root, model)
     framework = load_framework(root, field)
     exports = framework_artifacts(root, field, framework)
-    result = list(csv.DictReader(io.StringIO(exports[root / "site/explore/framework-table.csv"].decode())))[0]
+    result = list(csv.DictReader(io.StringIO(exports[root / "taxonomy/framework-table.csv"].decode())))[0]
     assert json.loads(result["includes"]) == row["includes"]
     assert json.loads(result["excludes"]) == row["excludes"]
     assert result["warrant_source_ids"] == "skos"
@@ -202,7 +222,7 @@ def test_csv_preserves_scope_boundaries_and_source_warrants(candidate):
     assert json.loads(result["warrant_source_titles"]) == ["SKOS"]
     assert result["warrant_role"] == "design-reading-not-claim-proof"
     assert result["inventory_status"] == "draft-inventory"
-    assert result["source_file"] == "shared/concepts/ml-systems-framework.yml"
+    assert result["source_file"] == "taxonomy/taxonomy.yml"
     assert result["area_question"] == area["question"]
     assert result["row_display_label"] == "State"
 
@@ -210,14 +230,14 @@ def test_csv_preserves_scope_boundaries_and_source_warrants(candidate):
 def test_gap_label_derives_from_subject_row_without_duplicate_text(candidate):
     root, model, field = candidate
     gap = model["gaps"][0]
-    gap.update(subject_row="row.state")
+    gap.update(subject_row="row-state")
     del gap["label"]
     write(root, model)
     assert load_framework(root, field)["gaps"][0]["label"] == "Retained state"
     gap["label"] = "Outdated duplicated label"
     write(root, model)
     assert load_framework(root, field)["gaps"][0]["label"] == "Retained state"
-    gap["subject_row"] = "row.unknown"
+    gap["subject_row"] = "row-unknown"
     write(root, model)
     with pytest.raises(ConceptGraphError, match="unknown gap subject_row"):
         load_framework(root, field)
@@ -254,9 +274,25 @@ def test_groups_and_chapter_pointers_resolve_without_claiming_depth(candidate):
     assert rows[0]["group_id"] == "stack" and rows[0]["group_label"] == "Stack"
 
 
+def test_chapter_pointer_ignores_leftover_build_folders(candidate):
+    # 2026-10-27: an untracked books/vol1/02_ml_systems/ (old rendered HTML) beside the renamed
+    # 02_system_paradigms/ made `v1/02` ambiguous and failed every concepts build in the main checkout.
+    root, model, field = candidate
+    chapter = root / "books/vol1/02_system_paradigms"
+    chapter.mkdir(parents=True)
+    (chapter / "02_system_paradigms.qmd").write_text("# System Paradigms\n")
+    leftover = root / "books/vol1/02_ml_systems"
+    leftover.mkdir(parents=True)
+    (leftover / "02_ml_systems.html").write_text("<html></html>")
+    model["areas"][0]["rows"][0].update(book_chapters=["v1/02"])
+    write(root, model)
+    framework = load_framework(root, field)
+    assert framework["areas"][0]["rows"][0]["book_chapters"][0]["chapter"] == "vol1/02_system_paradigms"
+
+
 def test_scope_references_render_current_labels(candidate):
     root, model, field = candidate
-    model["areas"][0]["rows"][0].update(excludes=["Persisting state ([[row.state]]) and the area ([[area.execution]])"])
+    model["areas"][0]["rows"][0].update(excludes=["Persisting state ([[row-state]]) and the area ([[area-execution]])"])
     write(root, model)
     framework = load_framework(root, field)
     reference = {path.name: data.decode() for path, data in framework_artifacts(root, field, framework).items()}["framework-reference.md"]
@@ -284,6 +320,12 @@ def test_readable_codes_must_nest_and_reach_every_download(candidate):
     assert artifacts["mlsys-taxonomy-subjects.csv"].splitlines()[1].startswith("S1.1,Stack,")
     assert 'skos:notation "S1.1"' in artifacts["mlsys-taxonomy.ttl"]
     assert artifacts["mlsys-concept-graph.graphml"].count("<node ") == 2
+    # Researchers and instructors read gaps and book passages from the release, not the YAML.
+    assert outline["gaps"] == [{"id": "gap-candidate", "topic": "", "subject": "", "status": "candidate",
+                                "reason": "Investigate the boundary."}]
+    state = next(c for c in outline["concepts"] if c["id"] == "mlsys.state")
+    assert state["book_passages"] == [{"volume": "vol1", "chapter": "Execution", "url": "https://mlsysbook.ai/state"}]
+    assert artifacts["mlsys-taxonomy-concepts.csv"].splitlines()[0].endswith(",background,taught_in,added_in,literary_warrant,corpus_chapters,organizational_warrant,user_warrant_proxy")
 
 
 @pytest.mark.parametrize("edit,error", [
@@ -297,3 +339,64 @@ def test_bad_codes_fail(candidate, edit, error):
     write(root, model)
     with pytest.raises(ConceptGraphError, match=error):
         load_framework(root, field)
+
+
+def test_sparse_and_disconnected_graphs_do_not_require_invented_edges(candidate):
+    root, model, field = candidate
+    model["version"] = "0.3-draft"
+    write(root, model)
+    load_framework(root, field)
+    # Two separate 3-cycles satisfy degree >= 2 everywhere but are disconnected.
+    ids = [f"mlsys.c{i}" for i in range(6)]
+    field["concepts"] = [dict(id=c, label=c, definition="A concept.") for c in ids]
+    field["relationships"] = [
+        dict(id=f"r{i}", source=a, target=b, predicate="links")
+        for i, (a, b) in enumerate([
+            ("mlsys.c0", "mlsys.c1"), ("mlsys.c1", "mlsys.c2"), ("mlsys.c2", "mlsys.c0"),
+            ("mlsys.c3", "mlsys.c4"), ("mlsys.c4", "mlsys.c5"), ("mlsys.c5", "mlsys.c3"),
+        ])
+    ]
+    model["areas"][0]["rows"][0]["concepts"] = ids
+    write(root, model)
+    load_framework(root, field)
+    field["relationships"].append(dict(id="bridge", source="mlsys.c2", target="mlsys.c3", predicate="links"))
+    assert load_framework(root, field)["summary"]["concepts"] == 6
+
+
+# 2026-10-28: reader guides (roles, symptoms, learning paths) may only point at existing subjects and
+# concepts, and a symptom's checks and levers must share a relationship with one of its causes.
+def _guide_field():
+    return {"concepts": [{"id": i, "label": i} for i in ("mlsys.state", "mlsys.capacity", "mlsys.lever")],
+            "relationships": [{"source": "mlsys.lever", "relation": "reduces", "target": "mlsys.state"}]}
+
+
+def _write_guides(root, symptom_levers, role_core=("row-state", "row-b", "row-c")):
+    guides = {"schema_version": 1,
+              "roles": [{"id": "r", "label": "Role", "summary": "Does things.", "core": list(role_core)}],
+              "symptoms": [{"id": "s", "label": "Symptom", "signal": "Something is slow.", "causes": ["mlsys.state"],
+                            "levers": list(symptom_levers)}],
+              "learning_paths": [{"id": "p", "label": "Path", "audience": "Students.",
+                                  "steps": [{"subject": "row-state", "why": "First."}, {"subject": "row-b", "why": "Second."},
+                                            {"subject": "row-c", "why": "Third."}]}]}
+    (root / "taxonomy/taxonomy.yml").write_text(yaml.safe_dump(guides, sort_keys=False))
+
+
+def test_guides_compile_and_reach_the_release(tmp_path):
+    from core.framework import _guides
+    (tmp_path / "taxonomy").mkdir(parents=True)
+    _write_guides(tmp_path, ["mlsys.lever"])
+    rows = {"row-state": {}, "row-b": {}, "row-c": {}}
+    guides = _guides(tmp_path, rows, _guide_field())
+    assert guides["symptoms"][0]["levers"] == ["mlsys.lever"] and len(guides["learning_paths"][0]["steps"]) == 3
+
+
+@pytest.mark.parametrize("levers, core, error", [
+    (["mlsys.capacity"], ("row-state", "row-b", "row-c"), "shares no relationship"),
+    (["mlsys.lever"], ("row-missing",), "unknown r core value"),
+])
+def test_guides_reject_ungrounded_entries(tmp_path, levers, core, error):
+    from core.framework import _guides
+    (tmp_path / "taxonomy").mkdir(parents=True)
+    _write_guides(tmp_path, levers, core)
+    with pytest.raises(ConceptGraphError, match=error):
+        _guides(tmp_path, {"row-state": {}, "row-b": {}, "row-c": {}}, _guide_field())

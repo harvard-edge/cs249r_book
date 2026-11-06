@@ -4,12 +4,16 @@ This guide walks you through deploying the Ask Interviewer Worker to Cloudflare 
 
 The Worker code lives in [`worker/`](worker/). The StaffML client (this directory) consumes it via the `NEXT_PUBLIC_INTERVIEWER_ENDPOINT` env var.
 
+The deployed service is `staffml-interviewer`; `staffml-interviewer-worker` is its private npm package. The existing production route is `https://mlsysbook.ai/api/staffml-interviewer`. See the [Cloudflare service inventory](../CLOUDFLARE.md) before changing resource names, bindings, or URLs.
+
+The provisioning steps below are for a new account or an explicitly planned migration. The checked-in production configuration already contains namespace IDs and routes. For an existing deployment, reuse those identities and skip namespace creation. For a separate environment, choose a suffixed Worker name, provision separate storage and secrets, and review the routes before deploying; the current configuration targets production.
+
 ---
 
 ## Prerequisites
 
 - A free Cloudflare account ([sign up](https://dash.cloudflare.com/sign-up))
-- Node.js 18+ installed locally
+- Node.js 22+ installed locally (as required by the Worker package)
 - ~10 minutes
 
 ---
@@ -29,7 +33,7 @@ The login command opens a browser to authorize Wrangler with your Cloudflare acc
 ### 2. Create the rate-limit KV namespace
 
 ```bash
-npx wrangler kv namespace create RATE_LIMIT_KV
+npx wrangler kv namespace create staffml-interviewer-rate-limit
 ```
 
 > **Note on Wrangler syntax:** older docs (and older Wrangler v2) used
@@ -38,16 +42,9 @@ npx wrangler kv namespace create RATE_LIMIT_KV
 > `Unknown arguments: kv:namespace`, upgrade Wrangler or use the new
 > syntax shown here.
 
-This prints something like:
+Wrangler returns the new namespace ID and a suggested configuration entry.
 
-```
-🌀 Creating namespace with title "staffml-interviewer-RATE_LIMIT_KV"
-✨ Success!
-Add the following to your configuration file in your kv_namespaces array:
-{ binding = "RATE_LIMIT_KV", id = "abc123def456..." }
-```
-
-**Copy the `id` value** and paste it into [`worker/wrangler.toml`](worker/wrangler.toml), replacing `REPLACE_WITH_KV_NAMESPACE_ID`:
+**Copy only the `id` value** into the intended environment's [`worker/wrangler.toml`](worker/wrangler.toml) entry. Keep the runtime binding `RATE_LIMIT_KV`; a namespace title and a binding name are separate:
 
 ```toml
 [[kv_namespaces]]
@@ -63,11 +60,10 @@ but `/waitlist` will return 503 and the client UI will transparently
 fall back to `mailto:` so no submissions are lost.
 
 ```bash
-npx wrangler kv namespace create WAITLIST_KV
+npx wrangler kv namespace create staffml-interviewer-waitlist
 ```
 
-**Copy the new `id` value** and paste it into `worker/wrangler.toml`,
-replacing `REPLACE_WITH_WAITLIST_KV_NAMESPACE_ID`:
+**Copy only the new `id` value** into the intended environment's `worker/wrangler.toml` entry, keeping the runtime binding `WAITLIST_KV`:
 
 ```toml
 [[kv_namespaces]]
@@ -112,7 +108,7 @@ Expected response:
 { "ok": true, "providers": ["cf-workers-ai"], "waitlist": true }
 ```
 
-If you see `cf-workers-ai` in the providers list, the Cloudflare Workers AI binding is working. The Worker is live with the default Llama 3.1 8B floor model. `"waitlist": true` means the WAITLIST_KV binding is configured; `false` means /waitlist will return 503 until you provision the namespace.
+If you see `cf-workers-ai` in the providers list, the Cloudflare Workers AI binding is working. The Worker is live with the default Llama 3.3 70B floor model. `"waitlist": true` means the WAITLIST_KV binding is configured; `false` means /waitlist will return 503 until you provision the namespace.
 
 Test an actual question:
 
@@ -129,7 +125,7 @@ You should get back a JSON response with `answer`, `provider`, `vendorLabel`, `m
 
 ### 5. Wire StaffML to the Worker
 
-In your StaffML build environment (locally for `npm run dev`, or in your CI for production):
+The client defaults to `https://mlsysbook.ai/api/staffml-interviewer`, which is also configured by the site workflows. For a separate deployment, override the base URL in your StaffML build environment:
 
 ```bash
 export NEXT_PUBLIC_INTERVIEWER_ENDPOINT=https://staffml-interviewer.your-subdomain.workers.dev
@@ -149,7 +145,7 @@ Rebuild StaffML. The Ask Interviewer panel will now POST to your Worker.
 
 The Worker is built around an adapter pattern. Adding a new provider is **one command** — no code changes, no redeploy gymnastics.
 
-### Groq (recommended next upgrade — Llama 3.1 70B, free tier)
+### Groq (recommended next upgrade — GPT-OSS 120B, free tier)
 
 1. Get a free key at [console.groq.com/keys](https://console.groq.com/keys)
 2. Run:
@@ -158,6 +154,8 @@ The Worker is built around an adapter pattern. Adding a new provider is **one co
    npx wrangler secret put GROQ_API_KEY
    ```
 3. Paste your key when prompted. The Worker now prefers Groq for every request, falling back to Cloudflare Workers AI on error.
+
+The free tier allows 8,000 tokens per minute on GPT-OSS 120B, and Groq counts the requested `max_tokens` against that budget. A few students asking at once is enough to reach it, after which requests fall back to Workers AI until the minute resets. The worker logs each provider failure, so `npx wrangler tail` shows how often that happens.
 
 Verify with:
 
@@ -178,14 +176,14 @@ npx wrangler secret put OPENAI_API_KEY
 
 ```bash
 npx wrangler secret put ANTHROPIC_API_KEY
-# default model: claude-3-5-haiku-latest
+# default model: claude-haiku-5-5
 ```
 
 ### Google Gemini
 
 ```bash
 npx wrangler secret put GEMINI_API_KEY
-# default model: gemini-1.5-flash
+# default model: gemini-3.8-flash
 # Note: Google's free Gemini API may use prompts to improve products.
 # The Worker exposes this in the privacyNote that the panel displays.
 ```

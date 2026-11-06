@@ -354,3 +354,117 @@ def test_serialized_inputs_replay_results_without_unit_or_default_drift():
 def test_invalid_inputs_fail_explicitly(call):
     with pytest.raises(ValueError):
         call()
+
+
+from mlsysim.labs.experiments.v2_07_experiments import (
+    fault_verification_trace, gray_failure_trace, elastic_recovery_trace,
+)
+
+
+def test_arithmetic_corruption_survives_valid_crc_but_recomputation_detects_it():
+    unchecked = fault_verification_trace(verification="none")
+    selective = fault_verification_trace(verification="rank0")
+    checked = fault_verification_trace(verification="all")
+    for trace in (unchecked, selective, checked):
+        assert trace["attempts"][0]["transport_crc_valid"]
+        assert trace["attempts"][0]["reduced_mean"] != trace["reference_mean"]
+        assert all(trace["attempts"][0]["heartbeat_alive"])
+    assert unchecked["attempts"][0]["accepted_wrong_value"]
+    assert selective["attempts"][0]["accepted_wrong_value"]
+    assert checked["attempts"][0]["arithmetic_mismatches"] == [3]
+    assert not checked["attempts"][0]["accepted"]
+    assert checked["verification_recomputations"] > selective["verification_recomputations"]
+
+
+def test_fault_axes_change_retry_manifestation_and_scope_independently():
+    transient = fault_verification_trace()
+    recurring = fault_verification_trace(persistence="intermittent")
+    permanent = fault_verification_trace(persistence="permanent")
+    assert [row["fault_active"] for row in transient["attempts"]] == [True, False, False]
+    assert [row["fault_active"] for row in recurring["attempts"]] == [True, False, True]
+    assert all(row["fault_active"] for row in permanent["attempts"])
+    rack = fault_verification_trace(scope="rack")
+    assert rack["affected_ranks"] == [2, 3]
+    assert rack["attempts"][0]["arithmetic_mismatches"] == [2, 3]
+    stopped = fault_verification_trace(manifestation="fail_stop")
+    slow = fault_verification_trace(manifestation="degraded")
+    assert not stopped["attempts"][0]["collective_completes"]
+    assert all(slow["attempts"][0]["heartbeat_alive"])
+    assert slow["attempts"][0]["step_duration_units"] > transient["attempts"][0]["step_duration_units"]
+
+
+def test_progress_monitor_detects_gray_rank_while_aggressive_threshold_flags_healthy():
+    heartbeat = gray_failure_trace(detector="heartbeat")
+    progress = gray_failure_trace(detector="progress")
+    assert all(heartbeat["heartbeat_alive"])
+    assert not heartbeat["detected"]
+    assert progress["suspected_ranks"] == [3]
+    assert progress["barrier_step_units"] == max(progress["rank_step_units"])
+    assert not progress["false_positive_ranks"]
+    assert gray_failure_trace(incident="healthy", threshold=0.5)["false_positive_ranks"] == [0, 1, 2, 3]
+    assert not gray_failure_trace(incident="healthy", threshold=2)["detected"]
+    assert gray_failure_trace(incident="crash", detector="heartbeat")["response"] == "recover stopped rank"
+
+
+@pytest.mark.parametrize("broken,gate", [
+    ({"preserve_batch": False}, "effective_batch_preserved"),
+    ({"data_cursor": "rewind"}, "exactly_once_data"),
+    ({"data_cursor": "skip"}, "exactly_once_data"),
+    ({"reconstruct_state": False}, "all_state_reconstructable"),
+    ({"fence_epoch": False}, "stale_writer_fenced"),
+])
+def test_elastic_recovery_requires_each_independent_invariant(broken, gate):
+    passing = elastic_recovery_trace()
+    failed = elastic_recovery_trace(**broken)
+    assert passing["safe_to_resume"]
+    assert not failed["safe_to_resume"]
+    assert not failed["gates"][gate]
+    assert all(value for key, value in failed["gates"].items() if key != gate)
+    assert passing["after"]["accumulation"] > passing["before"]["accumulation"]
+
+
+@pytest.mark.parametrize("evaluate,kwargs", [
+    (fault_verification_trace, {"persistence": "intermittent", "scope": "rack", "verification": "rank0"}),
+    (gray_failure_trace, {"threshold": 0.5, "incident": "healthy"}),
+    (elastic_recovery_trace, {"data_cursor": "skip", "fence_epoch": False}),
+])
+def test_fault_trace_json_inputs_replay_every_output(evaluate, kwargs):
+    result = evaluate(**kwargs)
+    payload = json.loads(json.dumps(result, allow_nan=False))
+    assert evaluate(**payload["inputs"]) == result
+    payload["inputs"].clear()
+    assert evaluate(**result["inputs"]) == result
+
+
+@pytest.mark.parametrize("call", [
+    lambda: fault_verification_trace(persistence="unknown"),
+    lambda: fault_verification_trace(manifestation="unknown"),
+    lambda: fault_verification_trace(scope="unknown"),
+    lambda: fault_verification_trace(verification="unknown"),
+    lambda: gray_failure_trace(threshold=math.nan),
+    lambda: gray_failure_trace(threshold=0),
+    lambda: gray_failure_trace(detector="unknown"),
+    lambda: elastic_recovery_trace(data_cursor="unknown"),
+    lambda: elastic_recovery_trace(preserve_batch="yes"),
+])
+def test_fault_trace_rejects_unsupported_policy_inputs(call):
+    with pytest.raises(ValueError):
+        call()
+
+
+@pytest.mark.parametrize("fault,failed_gate", [("mixed_step", "consistent_cut"), ("unpublished", "manifest_published"), ("missing_shard", "consistent_cut")])
+def test_valid_bytes_are_insufficient_without_a_committed_complete_consistent_cut(fault, failed_gate):
+    fixture = checkpoint_fault_fixture("cloud", fault=fault)
+    assert fixture["baseline"]["restore_step"] == 400
+    assert fixture["result"]["restore_step"] == 300
+    newest = fixture["result"]["generation_checks"][-1]
+    assert newest["completed"] and newest["digest_valid"]
+    assert not newest[failed_gate]
+    assert not newest["eligible"]
+    assert select_restore_checkpoint(**fixture["result"]["inputs"]) == fixture["result"]
+
+
+def test_matching_shard_steps_still_require_the_complete_expected_set():
+    result = select_restore_checkpoint([{"step": 10, "completed": True, "digest_valid": True, "shard_steps": [10, 10], "expected_shards": 3, "manifest_published": True}], failure_step=12)
+    assert not result["recoverable"]
+    assert not result["generation_checks"][0]["consistent_cut"]

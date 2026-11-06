@@ -5,6 +5,30 @@ import { TokenCounter } from '../utils/tokenCounter.js';
  * Supports multiple API formats including OpenAI, Ollama, Gemini, etc.
  */
 export class CustomAPIAdapter {
+  // SettingsManager publishes current custom settings after its event reaches
+  // the workspace. Use that session value before the persisted, redacted copy.
+  static getRuntimeSettings() {
+    let saved = {};
+    try {
+      const raw = globalThis.localStorage?.getItem('userSettings');
+      const parsed = raw && raw.length <= 65536 ? JSON.parse(raw) : null;
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) saved = parsed;
+    } catch { /* A blocked or damaged local store must not erase session settings. */ }
+    const session = globalThis.window?.customAPISettings;
+    if (session && typeof session === 'object' && !Array.isArray(session) && typeof session.enabled === 'boolean' && typeof session.provider === 'string' && typeof session.endpoint === 'string') {
+      return {...saved, customAPI: {
+        enabled: session.enabled, provider: session.provider, endpoint: session.endpoint,
+        model: typeof session.model === 'string' ? session.model : '',
+        apiKey: typeof session.apiKey === 'string' ? session.apiKey : '',
+        saveLocally: session.saveLocally === true,
+      }};
+    }
+    // Honor an opted-out legacy record even if an older version wrote its key.
+    if (saved.customAPI && saved.customAPI.saveLocally !== true) {
+      saved = {...saved,customAPI:{...saved.customAPI,apiKey:''}};
+    }
+    return saved;
+  }
   
   /**
    * Main entry point for custom API calls
@@ -13,7 +37,7 @@ export class CustomAPIAdapter {
    * @param {boolean} isStreaming - Whether to use streaming
    * @returns {AsyncGenerator|null} - Generator for streaming response or null if no custom API
    */
-  static async *callCustomAPI(prompt, settings, isStreaming = true) {
+  static async *callCustomAPI(prompt, settings, isStreaming = true, suppliedMessages) {
     // Check if custom API is configured
     if (!this.hasCustomAPIConfig(settings)) {
       return null; // Signal to use default APIs
@@ -22,16 +46,16 @@ export class CustomAPIAdapter {
     const config = this.getCustomAPIConfig(settings);
     
     try {
-      console.log(`[CUSTOM_API] Using custom API: ${config.provider} at ${config.endpoint}`);
+
       
       if (isStreaming) {
-        yield* this._callCustomAPIStreaming(prompt, config);
+        yield* this._callCustomAPIStreaming(prompt, config, suppliedMessages);
       } else {
-        yield* this._callCustomAPINonStreaming(prompt, config);
+        yield* this._callCustomAPINonStreaming(prompt, config, suppliedMessages);
       }
     } catch (error) {
-      console.error('[CUSTOM_API] Custom API failed, falling back to default:', error);
-      return null; // Signal fallback
+      console.error('[CUSTOM_API] Custom API request failed');
+      throw error; // The caller decides whether it is safe to fall back.
     }
   }
   
@@ -71,7 +95,7 @@ export class CustomAPIAdapter {
       'ollama': 'gemma3:270m',
       'openai': 'gpt-3.5-turbo',
       'open-router': 'meta-llama/llama-4-scout:free',
-      'groq': 'llama-3.1-8b-instant',
+      'groq': 'openai/gpt-oss-20b',
       'google-gemini': 'gemini-2.5-flash',
       'anthropic': 'claude-3-sonnet-20240229'
     };
@@ -84,8 +108,8 @@ export class CustomAPIAdapter {
    * @param {Object} config - API configuration
    * @returns {AsyncGenerator} - Generator for streaming response
    */
-  static async *_callCustomAPIStreaming(prompt, config) {
-    const messages = [{ role: 'user', content: prompt }];
+  static async *_callCustomAPIStreaming(prompt, config, suppliedMessages) {
+    const messages = suppliedMessages?.length ? suppliedMessages : [{ role: 'user', content: prompt }];
     
     // Check token count and optimize if needed
     TokenCounter.logTokenUsage(messages, `Custom API ${config.provider} Streaming`);
@@ -93,7 +117,7 @@ export class CustomAPIAdapter {
     if (TokenCounter.wouldExceedLimit(messages, TokenCounter.getSafeGroqLimit())) {
       console.warn(`[CUSTOM_API] Request too large for ${config.provider}, attempting to optimize...`);
       
-      if (prompt.length > 15000) {
+      if (!suppliedMessages?.length && prompt.length > 15000) {
         console.log(`[CUSTOM_API] Truncating large prompt from ${prompt.length} to 15000 characters`);
         messages[0].content = prompt.substring(0, 15000) + "\n\n[Content truncated due to size limits]";
       }
@@ -134,14 +158,14 @@ export class CustomAPIAdapter {
    * @param {Object} config - API configuration
    * @returns {AsyncGenerator} - Generator for response
    */
-  static async *_callCustomAPINonStreaming(prompt, config) {
-    const messages = [{ role: 'user', content: prompt }];
+  static async *_callCustomAPINonStreaming(prompt, config, suppliedMessages) {
+    const messages = suppliedMessages?.length ? suppliedMessages : [{ role: 'user', content: prompt }];
     
     // Determine API format based on provider
     const requestBody = this._formatRequestForProvider(messages, config, false);
     
     // Handle Gemini's special endpoint format
-    const endpoint = this._getEndpointForProvider(config);
+    const endpoint = this._getEndpointForProvider(config, false);
     
     const response = await fetch(endpoint, {
       method: 'POST',
@@ -186,11 +210,14 @@ export class CustomAPIAdapter {
    * @returns {Object} - Formatted request body
    */
   static _formatRequestForProvider(messages, config, streaming = true) {
+    const system = messages.filter(message => message.role === 'system').map(message => message.content).join('\n\n');
+    const conversation = messages.filter(message => message.role !== 'system');
     switch (config.provider) {
       case 'ollama':
         return {
           model: config.model,
-          prompt: messages[0].content,
+          prompt: conversation.length === 1 ? conversation[0].content : conversation.map(message => `${message.role}: ${message.content}`).join('\n\n'),
+          ...(system ? { system } : {}),
           stream: streaming,
           options: {
             temperature: 0.7
@@ -209,10 +236,11 @@ export class CustomAPIAdapter {
         
       case 'google-gemini':
         return {
-          contents: [{
-            role: "user",
-            parts: [{ text: messages[0].content }]
-          }],
+          contents: conversation.map(message => ({
+            role: message.role === 'assistant' ? 'model' : 'user',
+            parts: [{ text: message.content }],
+          })),
+          ...(system ? { systemInstruction: { parts: [{ text: system }] } } : {}),
           generationConfig: {
             temperature: 0.7
           }
@@ -222,7 +250,8 @@ export class CustomAPIAdapter {
         return {
           model: config.model,
           max_tokens: 1000,
-          messages: messages,
+          messages: conversation,
+          ...(system ? { system } : {}),
           stream: streaming
         };
         
@@ -242,12 +271,12 @@ export class CustomAPIAdapter {
    * @param {Object} config - API configuration
    * @returns {string} - Endpoint URL
    */
-  static _getEndpointForProvider(config) {
+  static _getEndpointForProvider(config, streaming = true) {
     if (config.provider === 'google-gemini' && config.apiKey) {
       // Gemini uses API key as query parameter
       const model = config.model || 'gemini-2.5-flash';
       const baseUrl = config.endpoint.replace(/\/$/, ''); // Remove trailing slash
-      return `${baseUrl}/models/${model}:streamGenerateContent?key=${config.apiKey}`;
+      return `${baseUrl}/models/${model}:${streaming ? 'streamGenerateContent' : 'generateContent'}?${streaming ? 'alt=sse&' : ''}key=${encodeURIComponent(config.apiKey)}`;
     }
     return config.endpoint;
   }
@@ -399,7 +428,7 @@ export class CustomAPIAdapter {
     try {
       const testPrompt = "Hello";
       const requestBody = this._formatRequestForProvider([{ role: 'user', content: testPrompt }], config, false);
-      const endpoint = this._getEndpointForProvider(config);
+      const endpoint = this._getEndpointForProvider(config, false);
       
       const response = await fetch(endpoint, {
         method: 'POST',

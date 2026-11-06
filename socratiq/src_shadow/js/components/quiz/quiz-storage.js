@@ -8,14 +8,31 @@ import { getDBInstance } from "../../libs/utils/indexDb.js";
  * @returns {string} - The normalized URL
  */
 function normalizeUrlForCumulativeQuiz(url) {
-    try {
-        const urlObj = new URL(url);
-        // Remove query parameters, fragments, and trailing slashes
-        return `${urlObj.protocol}//${urlObj.host}${urlObj.pathname}`.replace(/\/$/, '');
-    } catch (error) {
-        console.warn('Error normalizing URL for cumulative quiz:', error);
-        return url;
-    }
+    const urlObj = new URL(url, window.location.href);
+    return `${urlObj.origin}${urlObj.pathname}`.replace(/\/$/, '');
+}
+
+// Keep the installed stores and their key paths. Old title-only rows remain
+// available to aggregate reports, but cannot be assigned to a page by guessing.
+export function getQuizIdentity(quizTitle, pageUrl = window.location.href) {
+    return `quiz:${JSON.stringify([pageUrl ? normalizeUrlForCumulativeQuiz(pageUrl) : null, quizTitle])}`;
+}
+
+function quizMetadata(quizTitle, pageUrl, sourcePageUrls = []) {
+    const normalizedUrl = pageUrl ? normalizeUrlForCumulativeQuiz(pageUrl) : null;
+    return {
+        quizId: getQuizIdentity(quizTitle, normalizedUrl),
+        pageUrl: normalizedUrl,
+        sourcePageUrls: [...new Set(sourcePageUrls.map(normalizeUrlForCumulativeQuiz))]
+    };
+}
+
+function displayHighScore(record) {
+    return record && {
+        ...record,
+        quizId: record.quizId || record.quizTitle,
+        quizTitle: record.title || record.quizTitle
+    };
 }
 
 async function updateQuizStreak(score) {
@@ -47,31 +64,98 @@ async function initDB() {
     }
 }
 
-async function getHighScore(quizTitle) {
+// The read and update share a write transaction so other tabs cannot overwrite
+// an attempt or a better score using a stale snapshot.
+function updateQuizRecord(dbManager, storeName, key, update, sharedTransaction = null) {
+    return new Promise((resolve, reject) => {
+        const transaction = sharedTransaction || dbManager.db.transaction(storeName, 'readwrite');
+        const store = transaction.objectStore(storeName);
+        const request = store.get(key);
+        request.onsuccess = () => {
+            try {
+                const record = update(request.result);
+                if (record) {
+                    const write = store.put(record);
+                    if (sharedTransaction) {
+                        write.onsuccess = () => resolve();
+                        write.onerror = () => reject(write.error);
+                    }
+                } else if (sharedTransaction) resolve();
+            } catch (error) {
+                transaction.abort();
+                reject(error);
+            }
+        };
+        request.onerror = () => reject(request.error);
+        if (!sharedTransaction) {
+            transaction.oncomplete = () => resolve();
+            transaction.onerror = () => reject(transaction.error || request.error);
+            transaction.onabort = () => reject(transaction.error || new Error('Quiz storage update aborted'));
+        }
+    });
+}
+
+function quizRequest(request) {
+    return new Promise((resolve, reject) => {
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+    });
+}
+
+async function persistQuizSubmission(incorrectQuestions, score, title, quizType, pageUrl, sourcePageUrls, quizData, selectedAnswers) {
+    const manager = await initDB();
+    const transaction = manager.db.transaction([
+        'quizHighScores', 'quizHistory', 'quizStats', 'quizAttempts',
+        'ongoingIncorrectQuestions', 'cumulativeQuizScores', 'pageCompletions', 'chapterMap'
+    ], 'readwrite');
+    const committed = new Promise((resolve, reject) => {
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => reject(transaction.error || new Error('Quiz submission failed'));
+        transaction.onabort = () => reject(transaction.error || new Error('Quiz submission aborted'));
+    });
+    const storage = { manager, transaction };
+    try {
+        await Promise.all([
+            saveQuizResult(incorrectQuestions, score, title, quizType, pageUrl, sourcePageUrls, storage),
+            updateQuizAttempts(storage),
+            saveQuizHistory(title, quizData, selectedAnswers, pageUrl, sourcePageUrls, storage)
+        ]);
+        await committed;
+    } catch (error) {
+        try { transaction.abort(); } catch { /* It may already have aborted. */ }
+        await committed.catch(() => {});
+        throw error;
+    }
+}
+
+async function getHighScore(quizTitle, pageUrl = window.location.href) {
     try {
         const dbManager = await initDB();
-        return await dbManager.getByKey('quizHighScores', quizTitle);
+        return displayHighScore(await dbManager.getByKey('quizHighScores', getQuizIdentity(quizTitle, pageUrl)));
     } catch (error) {
         console.error('Error getting high score:', error);
         throw error;
     }
 }
 
-async function updateHighScore(quizTitle, newScore) {
+async function updateHighScore(quizTitle, newScore, metadata, storage = null) {
     if (!quizTitle) {
         throw new Error('Quiz title is required for updating high score');
     }
 
     try {
-        const dbManager = await initDB();
-        const highScoreData = {
-            quizTitle: quizTitle,
-            score: newScore,
-            percentageScore: (newScore.correct / newScore.total * 100).toFixed(2),
-            achievedAt: new Date().toISOString()
-        };
-        
-        await dbManager.update('quizHighScores', highScoreData);
+        const dbManager = storage?.manager || await initDB();
+        await updateQuizRecord(dbManager, 'quizHighScores', metadata.quizId, existing => {
+            if (existing && existing.score.correct / existing.score.total >= newScore.correct / newScore.total) return null;
+            return {
+                ...metadata,
+                quizTitle: metadata.quizId,
+                title: quizTitle,
+                score: newScore,
+                percentageScore: (newScore.correct / newScore.total * 100).toFixed(2),
+                achievedAt: new Date().toISOString()
+            };
+        }, storage?.transaction);
     } catch (error) {
         console.error('Error updating high score:', error);
         throw error;
@@ -81,16 +165,16 @@ async function updateHighScore(quizTitle, newScore) {
 async function getAllHighScores() {
     try {
         const dbManager = await initDB();
-        return await dbManager.getAll('quizHighScores');
+        return (await dbManager.getAll('quizHighScores')).map(displayHighScore);
     } catch (error) {
         console.error('Error getting all high scores:', error);
         throw error;
     }
 }
 
-async function saveToIndexDB(storeName, data) {
+async function saveToIndexDB(storeName, data, storage = null) {
     try {
-        const dbManager = await initDB();
+        const dbManager = storage?.manager || await initDB();
         
         // Add required ID fields based on store configuration
         const dataWithId = {
@@ -105,90 +189,72 @@ async function saveToIndexDB(storeName, data) {
             dataWithId.score = dataWithId.score || 0;
         }
         
-        return await dbManager.add(storeName, dataWithId);
+        return storage ? await quizRequest(storage.transaction.objectStore(storeName).add(dataWithId)) : await dbManager.add(storeName, dataWithId);
     } catch (error) {
         console.error('Error saving to indexDB:', error);
         throw error;
     }
 }
 
-async function updateQuizAttempts() {
+async function updateQuizAttempts(storage = null) {
     try {
-        const dbManager = await initDB();
+        const dbManager = storage?.manager || await initDB();
         const today = new Date().toISOString().split('T')[0];
         
-        const attempts = await dbManager.getAll('quizAttempts');
-        const todayAttempt = attempts.find(attempt => attempt.date === today);
-        
-        if (todayAttempt) {
-            todayAttempt.attempts += 1;
-            await dbManager.update('quizAttempts', todayAttempt);
-        } else {
-            await dbManager.add('quizAttempts', { date: today, attempts: 1 });
-        }
+        await updateQuizRecord(dbManager, 'quizAttempts', today, existing => ({
+            date: today,
+            attempts: (existing?.attempts || 0) + 1
+        }), storage?.transaction);
     } catch (error) {
         console.error('Error updating quiz attempts:', error);
         throw error;
     }
 }
 
-async function updateIncorrectQuestions(newIncorrectQuestions) {
+async function updateIncorrectQuestions(newIncorrectQuestions, metadata, quizTitle, storage = null) {
+    newIncorrectQuestions = newIncorrectQuestions.map(question => ({...question, ...metadata, quizTitle}));
     try {
-        const dbManager = await initDB();
-        const storeKey = 'ongoingIncorrectQuestions'; // Match the store name from db_configs_one.js
-        const incorrectQuestions = await dbManager.getByKey(storeKey, 'current'); // Use consistent ID
-        
-        if (incorrectQuestions) {
+        const dbManager = storage?.manager || await initDB();
+        await updateQuizRecord(dbManager, 'ongoingIncorrectQuestions', 'current', existing => {
             const questionMap = new Map();
-            
-            incorrectQuestions.questions.forEach(q => {
-                questionMap.set(q.question, q);
-            });
-            
-            newIncorrectQuestions.forEach(q => {
-                questionMap.set(q.question, q);
-            });
-            
-            const updatedQuestions = Array.from(questionMap.values());
-            
-            await dbManager.update(storeKey, {
-                id: 'current', // Use consistent ID
-                questions: updatedQuestions,
-                date: new Date().toISOString(), // Add date for the index
+            for (const question of [...(existing?.questions || []), ...newIncorrectQuestions]) {
+                questionMap.set(JSON.stringify([question.quizId || null, question.question]), question);
+            }
+            return {
+                id: 'current',
+                questions: [...questionMap.values()],
+                date: new Date().toISOString(),
                 lastUpdated: new Date().toISOString()
-            });
-        } else {
-            await dbManager.add(storeKey, {
-                id: 'current', // Use consistent ID
-                questions: newIncorrectQuestions,
-                date: new Date().toISOString(), // Add date for the index
-                lastUpdated: new Date().toISOString()
-            });
-        }
+            };
+        }, storage?.transaction);
     } catch (error) {
         console.error('Error updating incorrect questions:', error);
         throw error;
     }
 }
 
-async function saveQuizResult(incorrectQuestions, score, title, quizType = 'section') {
+async function saveQuizResult(incorrectQuestions, score, title, quizType = 'section', pageUrl = window.location.href, sourcePageUrls = [], storage = null) {
     if (!title) {
         console.error('Quiz title is required');
         return;
     }
     
+    const isCumulative = quizType === 'cumulative' || title.toLowerCase().includes('cumulative');
+    const metadata = {
+        ...quizMetadata(title, pageUrl, sourcePageUrls),
+        quizType: isCumulative ? 'cumulative' : 'section',
+        isCumulative
+    };
     const timestamp = new Date().toISOString();
     const date = timestamp.split('T')[0];
     
-    // Determine if this is a cumulative quiz
-    const isCumulative = quizType === 'cumulative' || title.toLowerCase().includes('cumulative');
-    
     try {
         await Promise.all([
-            updateIncorrectQuestions(incorrectQuestions),
-            updateHighScore(title, score),
+            updateIncorrectQuestions(incorrectQuestions, metadata, title, storage),
+            updateHighScore(title, score, metadata, storage),
             saveToIndexDB('quizStats', {
-                id: `quiz-${Date.now()}`, // Add unique ID
+                id: `quiz-${crypto.randomUUID()}`,
+                ...metadata,
                 date,
                 timestamp,
                 title,
@@ -196,16 +262,18 @@ async function saveQuizResult(incorrectQuestions, score, title, quizType = 'sect
                 percentageScore: (score.correct / score.total * 100).toFixed(2),
                 quizType: isCumulative ? 'cumulative' : 'section', // Track quiz type
                 isCumulative: isCumulative // Boolean flag for easy filtering
-            })
+            }, storage)
         ]);
         
         // Update enhanced table for both quiz types
-        const currentPageUrl = window.location.href;
-        await updateQuizScoreInEnhancedTable(title, score, currentPageUrl, quizType);
+        // Only page-scoped quizzes can change chapter completion. Preserve a
+        // selected multi-page scope in the attempt without crediting the host page.
+        const isPageScoped = metadata.pageUrl && metadata.sourcePageUrls.every(url => url === metadata.pageUrl);
+        if (isPageScoped) await updateQuizScoreInEnhancedTable(title, score, metadata.pageUrl, isCumulative ? 'cumulative' : 'section', storage);
         
         // If it's a cumulative quiz, also update the old page completion system for backward compatibility
-        if (isCumulative) {
-            await updatePageCompletionFromCumulativeQuiz(title, score);
+        if (isCumulative && isPageScoped) {
+            await updatePageCompletionFromCumulativeQuiz(title, score, metadata.pageUrl, storage);
         }
     } catch (error) {
         console.error('Error in saveQuizResult:', error);
@@ -219,19 +287,26 @@ export function enhanceQuizSubmit(originalHandleQuizSubmit, quizForm, title) {
         
         let quizTitle = title;
         if (!quizTitle) {
-            // Try to get the last quiz title from localStorage
-            quizTitle = localStorage.getItem('lastQuizTaken');
+            quizTitle = quizForm.getAttribute('data-quiz-title');
             
             if (!quizTitle) {
                 console.error('Quiz title is missing');
                 showPopover(quizForm, 'Quiz results not saved - missing quiz title', 'error');
                 return;
             }
-        } else {
-            // Save the current quiz title to localStorage
-            localStorage.setItem('lastQuizTaken', quizTitle);
         }
-        
+        // Old restored quizzes without captured URLs remain unassigned.
+        let pageUrl = quizForm.getAttribute('data-context-url');
+        let sourcePageUrls = [];
+        try {
+            sourcePageUrls = JSON.parse(quizForm.getAttribute('data-source-page-urls') || '[]');
+            if (!Array.isArray(sourcePageUrls) || sourcePageUrls.some(url => typeof url !== 'string')) throw new Error('Invalid quiz source scope');
+        } catch (error) {
+            // A damaged saved scope cannot establish chapter attribution.
+            pageUrl = null;
+            sourcePageUrls = [];
+        }
+
         const selectedAnswers = quizForm.querySelectorAll('input[type="radio"]:checked');
         const totalQuestions = quizForm.querySelectorAll('div.mb-8').length;
         let correctCount = 0;
@@ -314,19 +389,23 @@ export function enhanceQuizSubmit(originalHandleQuizSubmit, quizForm, title) {
         const quizType = quizTitle.toLowerCase().includes('cumulative') ? 'cumulative' : 'section';
         
         try {
-            await Promise.all([
-                saveQuizResult(incorrectQuestions, score, quizTitle, quizType),
-                updateQuizAttempts(),
-                saveQuizHistory(quizTitle, quizData, selectedAnswers)
-            ]);
-            updateQuizStreak(score);
-            incrementQuizCounter();
+            await persistQuizSubmission(incorrectQuestions, score, quizTitle, quizType, pageUrl, sourcePageUrls, quizData, selectedAnswers);
         } catch (error) {
             console.error('Error saving quiz results:', error);
             showPopover(quizForm, 'Error saving quiz results', 'error');
+            return false;
         }
 
+        // localStorage cannot participate in the IndexedDB transaction. These
+        // aggregate badges are best effort after the attempt has committed.
+        try {
+            await updateQuizStreak(score);
+            incrementQuizCounter();
+        } catch (error) {
+            console.warn('Unable to update quiz counters:', error);
+        }
         originalHandleQuizSubmit.call(this, event);
+        return true;
     };
 }
 
@@ -372,22 +451,21 @@ export async function getChapterProgress() {
     }
 }
 
-async function saveQuizHistory(quizTitle, quizData, selectedAnswers) {
+async function saveQuizHistory(quizTitle, quizData, selectedAnswers, pageUrl = window.location.href, sourcePageUrls = [], storage = null) {
     try {
-        const dbManager = await initDB();
+        const dbManager = storage?.manager || await initDB();
         
-        // Create the history object with a proper ID
+        const metadata = quizMetadata(quizTitle, pageUrl, sourcePageUrls);
         const historyData = {
-            id: quizTitle, // Using quizTitle as the unique identifier
+            ...metadata,
+            id: metadata.quizId,
             quizTitle: quizTitle,
             attempts: []
         };
 
-        // Try to get existing history first
-        const existingHistory = await dbManager.getByKey('quizHistory', quizTitle);
-        
         // Create new attempt entry
         const newAttempt = {
+            ...metadata,
             date: new Date().toISOString(),
             answers: Array.from(selectedAnswers).map(answer => {
                 const questionDiv = answer.closest('.mb-8');
@@ -428,16 +506,11 @@ async function saveQuizHistory(quizTitle, quizData, selectedAnswers) {
             quizData: quizData
         };
 
-        if (existingHistory) {
-            // If history exists, append the new attempt
-            existingHistory.attempts.push(newAttempt);
-            await dbManager.update('quizHistory', existingHistory);
-        } else {
-            // If no history exists, create new entry with first attempt
-            historyData.attempts.push(newAttempt);
-            await dbManager.add('quizHistory', historyData);
-        }
-        
+        await updateQuizRecord(dbManager, 'quizHistory', metadata.quizId, existing => ({
+            ...(existing || historyData),
+            attempts: [...(existing?.attempts || []), newAttempt]
+        }), storage?.transaction);
+
         return newAttempt;
     } catch (error) {
         console.error('Error saving quiz history:', error);
@@ -445,10 +518,13 @@ async function saveQuizHistory(quizTitle, quizData, selectedAnswers) {
     }
 }
 
-async function getQuizHistory(quizTitle) {
+async function getQuizHistory(quizTitle, pageUrl = window.location.href) {
     try {
         const dbManager = await initDB();
-        const history = await dbManager.getByKey('quizHistory', quizTitle);
+        const key = typeof quizTitle === 'object'
+            ? quizTitle.quizId || quizTitle.id || quizTitle.quizTitle
+            : pageUrl === null ? quizTitle : getQuizIdentity(quizTitle, pageUrl);
+        const history = await dbManager.getByKey('quizHistory', key);
         
         return history?.attempts || [];
     } catch (error) {
@@ -464,6 +540,8 @@ export async function getQuizHistoryStats() {
         
         return allHistory.map(history => ({
             quizTitle: history.quizTitle,
+            quizId: history.quizId || history.id,
+            pageUrl: history.pageUrl || null,
             totalAttempts: history.attempts.length,
             averageScore: history.attempts.reduce((sum, attempt) => 
                 sum + (attempt.score.correct / attempt.score.total), 0) / history.attempts.length,
@@ -482,73 +560,41 @@ export async function getQuizHistoryStats() {
  * @param {string} pageUrl - The current page URL
  * @param {string} quizType - The quiz type ('section' or 'cumulative')
  */
-async function updateQuizScoreInEnhancedTable(quizTitle, score, pageUrl, quizType) {
+async function updateQuizScoreInEnhancedTable(quizTitle, score, pageUrl, quizType, storage = null) {
     try {
-        const dbManager = await initDB();
+        const dbManager = storage?.manager || await initDB();
         const normalizedUrl = normalizeUrlForCumulativeQuiz(pageUrl);
         const percentage = parseFloat((score.correct / score.total * 100).toFixed(1));
         const passed = percentage >= 60;
         const isCumulative = quizType === 'cumulative';
         
         // Get existing record for this URL
-        const existingRecord = await dbManager.getByKey('cumulativeQuizScores', normalizedUrl);
-        
-        let quizRecord;
-        if (existingRecord) {
-            // Update existing record
-            quizRecord = {
-                ...existingRecord,
-                // Update with latest quiz data
-                lastQuizTitle: quizTitle,
-                lastQuizType: quizType,
-                lastQuizScore: {
-                    correct: score.correct,
-                    total: score.total,
-                    percentage: percentage,
-                    passed: passed
-                },
-                lastUpdated: new Date().toISOString(),
-                // Track quiz history
-                quizHistory: existingRecord.quizHistory || [],
-                // Update completion status
-                completedByCumulativeQuiz: isCumulative && passed,
-                cumulativeQuizTitle: isCumulative ? quizTitle : existingRecord.cumulativeQuizTitle
-            };
-            
-            // Add to quiz history
-            quizRecord.quizHistory.push({
-                quizTitle: quizTitle,
-                quizType: quizType,
-                score: {
-                    correct: score.correct,
-                    total: score.total,
-                    percentage: percentage,
-                    passed: passed
-                },
-                completedAt: new Date().toISOString()
-            });
-            
-        } else {
-            // Create new record
-            quizRecord = {
-                normalizedUrl: normalizedUrl,
-                originalUrl: pageUrl,
-                pageTitle: document.title || 'Untitled',
-                domain: new URL(pageUrl).hostname,
-                // Current quiz data
-                lastQuizTitle: quizTitle,
-                lastQuizType: quizType,
-                lastQuizScore: {
-                    correct: score.correct,
-                    total: score.total,
-                    percentage: percentage,
-                    passed: passed
-                },
-                // Completion tracking
-                completedByCumulativeQuiz: isCumulative && passed,
-                cumulativeQuizTitle: isCumulative ? quizTitle : null,
-                // Quiz history
-                quizHistory: [{
+        await updateQuizRecord(dbManager, 'cumulativeQuizScores', normalizedUrl, existingRecord => {
+
+            let quizRecord;
+            if (existingRecord) {
+                // Update existing record
+                quizRecord = {
+                    ...existingRecord,
+                    // Update with latest quiz data
+                    lastQuizTitle: quizTitle,
+                    lastQuizType: quizType,
+                    lastQuizScore: {
+                        correct: score.correct,
+                        total: score.total,
+                        percentage: percentage,
+                        passed: passed
+                    },
+                    lastUpdated: new Date().toISOString(),
+                    // Track quiz history
+                    quizHistory: existingRecord.quizHistory || [],
+                    // Update completion status
+                    completedByCumulativeQuiz: Boolean(existingRecord.completedByCumulativeQuiz || (isCumulative && passed)),
+                    cumulativeQuizTitle: isCumulative ? quizTitle : existingRecord.cumulativeQuizTitle
+                };
+
+                // Add to quiz history
+                quizRecord.quizHistory.push({
                     quizTitle: quizTitle,
                     quizType: quizType,
                     score: {
@@ -558,18 +604,52 @@ async function updateQuizScoreInEnhancedTable(quizTitle, score, pageUrl, quizTyp
                         passed: passed
                     },
                     completedAt: new Date().toISOString()
-                }],
-                // Metadata
-                firstQuizAt: new Date().toISOString(),
-                lastUpdated: new Date().toISOString()
-            };
-        }
-        
-        await dbManager.update('cumulativeQuizScores', quizRecord);
+                });
+
+            } else {
+                // Create new record
+                quizRecord = {
+                    normalizedUrl: normalizedUrl,
+                    originalUrl: pageUrl,
+                    pageTitle: document.title || 'Untitled',
+                    domain: new URL(pageUrl).hostname,
+                    // Current quiz data
+                    lastQuizTitle: quizTitle,
+                    lastQuizType: quizType,
+                    lastQuizScore: {
+                        correct: score.correct,
+                        total: score.total,
+                        percentage: percentage,
+                        passed: passed
+                    },
+                    // Completion tracking
+                    completedByCumulativeQuiz: isCumulative && passed,
+                    cumulativeQuizTitle: isCumulative ? quizTitle : null,
+                    // Quiz history
+                    quizHistory: [{
+                        quizTitle: quizTitle,
+                        quizType: quizType,
+                        score: {
+                            correct: score.correct,
+                            total: score.total,
+                            percentage: percentage,
+                            passed: passed
+                        },
+                        completedAt: new Date().toISOString()
+                    }],
+                    // Metadata
+                    firstQuizAt: new Date().toISOString(),
+                    lastUpdated: new Date().toISOString()
+                };
+            }
+
+            return quizRecord;
+        }, storage?.transaction);
         console.log(`✅ Quiz score recorded for: ${normalizedUrl} (${quizType}, ${percentage}%)`);
         
     } catch (error) {
         console.error('Error updating quiz score in enhanced table:', error);
+        if (storage) throw error;
     }
 }
 
@@ -578,9 +658,9 @@ async function updateQuizScoreInEnhancedTable(quizTitle, score, pageUrl, quizTyp
  * @param {string} quizTitle - The cumulative quiz title
  * @param {Object} score - The quiz score
  */
-async function updatePageCompletionFromCumulativeQuiz(quizTitle, score) {
+async function updatePageCompletionFromCumulativeQuiz(quizTitle, score, pageUrl, storage = null) {
     try {
-        const dbManager = await initDB();
+        const dbManager = storage?.manager || await initDB();
         const passed = parseFloat((score.correct / score.total * 100).toFixed(2)) >= 60;
         
         if (!passed) {
@@ -588,25 +668,16 @@ async function updatePageCompletionFromCumulativeQuiz(quizTitle, score) {
             return;
         }
         
-        // Extract page title from cumulative quiz title
-        // Format: "Cumulative Quiz - Page Title" -> "Page Title"
-        const pageTitle = quizTitle.replace(/^Cumulative Quiz - /i, '').trim();
-        
-        // Get all chapterMap entries to find the matching page
-        const { getAllChapterMapEntries } = await import('../../libs/utils/tocExtractor.js');
-        const chapterMapEntries = await getAllChapterMapEntries();
-        
-        // Find the page that matches this cumulative quiz
-        const matchingPage = chapterMapEntries.find(page => 
-            page.title.toLowerCase().includes(pageTitle.toLowerCase()) ||
-            pageTitle.toLowerCase().includes(page.title.toLowerCase())
-        );
-        
+        const normalizedUrl = normalizeUrlForCumulativeQuiz(pageUrl);
+        const matchingPage = storage
+            ? await quizRequest(storage.transaction.objectStore('chapterMap').get(normalizedUrl))
+            : await dbManager.getByKey('chapterMap', normalizedUrl);
+
         if (matchingPage) {
             // Create or update page completion record
             const completionData = {
-                id: `completion-${matchingPage.url}`,
-                pageUrl: matchingPage.url,
+                id: `completion-${normalizedUrl}`,
+                pageUrl: normalizedUrl,
                 pageTitle: matchingPage.title,
                 completedByCumulativeQuiz: true,
                 cumulativeQuizTitle: quizTitle,
@@ -614,7 +685,8 @@ async function updatePageCompletionFromCumulativeQuiz(quizTitle, score) {
                 score: score
             };
             
-            await dbManager.update('pageCompletions', completionData);
+            if (storage) await quizRequest(storage.transaction.objectStore('pageCompletions').put(completionData));
+            else await dbManager.update('pageCompletions', completionData);
             console.log(`✅ Page completion recorded for: ${matchingPage.title}`);
         } else {
             console.warn(`⚠️ No matching page found for cumulative quiz: ${quizTitle}`);
@@ -622,6 +694,7 @@ async function updatePageCompletionFromCumulativeQuiz(quizTitle, score) {
         
     } catch (error) {
         console.error('Error updating page completion from cumulative quiz:', error);
+        if (storage) throw error;
     }
 }
 

@@ -881,6 +881,7 @@ export class KnowledgeGraph {
 
         // Create wrapper div for graph, sidebar, and right panel
         const wrapper = document.createElement('div');
+        wrapper.className = 'knowledge-graph-layout';
         wrapper.style.cssText = `
             display: flex;
             width: 100%;
@@ -891,11 +892,14 @@ export class KnowledgeGraph {
 
         // Create graph container with explicit dimensions
         const graphContainer = document.createElement('div');
+        graphContainer.className = 'knowledge-graph-viewport';
         graphContainer.style.cssText = `
             flex: 1;
             position: relative;
-            min-height: 500px; // Ensure minimum height
+            min-width: 0;
+            min-height: 0;
             height: 100%;
+            overflow: hidden;
         `;
         wrapper.appendChild(graphContainer);
 
@@ -903,7 +907,7 @@ export class KnowledgeGraph {
 
         // Create sidebar
         const sidebar = document.createElement('div');
-        sidebar.className = 'sidebar'; // Add class name for identification
+        sidebar.className = 'sidebar knowledge-graph-sidebar';
         sidebar.style.cssText = `
             width: 250px;
             background: #f7fafc;
@@ -960,6 +964,7 @@ export class KnowledgeGraph {
     
         // Add button container fixed to bottom
         const buttonContainer = document.createElement('div');
+        buttonContainer.className = 'knowledge-graph-actions';
         buttonContainer.style.cssText = `
             position: absolute;
             bottom: 20px;
@@ -1219,19 +1224,16 @@ export class KnowledgeGraph {
         
         // Create radial tree visualization
         this.createRadialTree(graphContainer);
+        if (window.matchMedia('(max-width: 640px)').matches) this.switchToListView();
 
         // Add legend with detail level buttons
         const legend = document.createElement('div');
         legend.style.cssText = `
-            position: absolute;
-            top: 20px;
-            left: 20px;
             background: rgba(255, 255, 255, 0.9);
-            padding: 15px;
+            padding: 10px 0;
             border-radius: 8px;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
             z-index: 2;
-            min-width: 200px;
         `;
 
         const legendTitle = document.createElement('h3');
@@ -1282,16 +1284,19 @@ export class KnowledgeGraph {
             legend.appendChild(itemDiv);
         });
 
-        graphContainer.appendChild(legend);
+        const guide = document.createElement('details');
+        guide.style.cssText = 'flex: 0 0 auto; margin: 12px 0; max-height: 220px; overflow: auto;';
+        const guideSummary = document.createElement('summary');
+        guideSummary.textContent = 'Graph legend and guide';
+        guideSummary.style.cssText = 'cursor: pointer; font-size: 12px; color: #2d3748;';
+        guide.append(guideSummary, legend);
+        sidebar.insertBefore(guide, quizItemsContainer);
 
         // After adding the legend to graphContainer, add the explanation card
         const explanation = document.createElement('div');
         explanation.style.cssText = `
-            position: absolute;
-            top: ${legend.offsetHeight + 40}px;
-            left: 20px;
             background: rgba(255, 255, 255, 0.9);
-            padding: 15px;
+            padding: 10px 0;
             border-radius: 8px;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
             z-index: 2;
@@ -1322,7 +1327,7 @@ export class KnowledgeGraph {
             </p>
         `;
 
-        graphContainer.appendChild(explanation);
+        guide.appendChild(explanation);
     }
 
     addViewToggle(container) {
@@ -1359,7 +1364,12 @@ export class KnowledgeGraph {
         `;
 
         // Create toggle switch
-        const toggleSwitch = document.createElement('div');
+        const toggleSwitch = document.createElement('button');
+        toggleSwitch.type = 'button';
+        toggleSwitch.className = 'knowledge-graph-view-toggle';
+        toggleSwitch.setAttribute('role', 'switch');
+        toggleSwitch.setAttribute('aria-label', 'List view');
+        toggleSwitch.setAttribute('aria-checked', 'false');
         toggleSwitch.style.cssText = `
             position: relative;
             width: 40px;
@@ -1415,6 +1425,7 @@ export class KnowledgeGraph {
     switchToListView() {
         console.log('Switching to list view...');
         this.currentView = 'list';
+        this.toggleSwitch.setAttribute('aria-checked', 'true');
         
         // Update toggle appearance
         this.toggleSwitch.style.background = '#718096';
@@ -1450,6 +1461,7 @@ export class KnowledgeGraph {
 
     switchToTreeView() {
         this.currentView = 'tree';
+        this.toggleSwitch.setAttribute('aria-checked', 'false');
         
         // Update toggle appearance
         this.toggleSwitch.style.background = '#4299e1';
@@ -1533,7 +1545,7 @@ export class KnowledgeGraph {
         console.log('Tree data:', this.treeData);
         
         // Add info panel at the top
-        const infoPanel = document.createElement('div');
+        const infoPanel = document.createElement(window.matchMedia('(max-width: 640px)').matches ? 'details' : 'div');
         infoPanel.style.cssText = `
             background: #f7fafc;
             border: 1px solid #e2e8f0;
@@ -1592,6 +1604,12 @@ export class KnowledgeGraph {
             </div>
         `;
         
+        if (infoPanel.tagName === 'DETAILS') {
+            const summary = document.createElement('summary');
+            summary.textContent = 'List view guide';
+            summary.style.cssText = 'cursor: pointer; font-weight: bold;';
+            infoPanel.prepend(summary);
+        }
         listContainer.appendChild(infoPanel);
         
         // Add column headers for the list items
@@ -1740,6 +1758,7 @@ export class KnowledgeGraph {
         // Add expand icon for items with children
         if (data.children && data.children.length > 0) {
             const expandIcon = document.createElement('span');
+            expandIcon.className = 'knowledge-graph-expand-icon';
             expandIcon.style.cssText = `
                 font-size: 12px;
                 color: #718096;
@@ -1804,8 +1823,8 @@ export class KnowledgeGraph {
             console.log('Could not get visit date:', error);
         }
         
-        // Return a placeholder date for now
-        return new Date().toLocaleDateString();
+        // An absent visit receipt does not establish a visit date.
+        return 'Unknown';
     }
 
     /**
@@ -1850,8 +1869,8 @@ export class KnowledgeGraph {
             data.isExpanded = !data.isExpanded;
             
             // Update icon
-            const icon = element.querySelector('span:last-child');
-            icon.textContent = data.isExpanded ? '▼' : '▶';
+            const icon = element.querySelector('.knowledge-graph-expand-icon');
+            if (icon) icon.textContent = data.isExpanded ? '▼' : '▶';
             
             // Instead of recreating the entire list, just toggle the children visibility
             this.toggleChildrenVisibility(element, data);
@@ -1911,7 +1930,7 @@ export class KnowledgeGraph {
             .attr('width', width)
             .attr('height', height)
             .attr('viewBox', [-cx, -cy, width, height])
-            .attr('style', 'width: 100%; height: auto; font: 12px sans-serif;');
+            .attr('style', 'display: block; width: 100%; height: 100%; font: 12px sans-serif;');
 
         // Add zoom behavior
         const g = svg.append('g');
@@ -3012,6 +3031,7 @@ function createLoadingSpinner() {
 export function showKnowledgeGraph(shadowRoot) {
     if (!modalInstance) {
         const modal = document.createElement('div');
+        modal.id = 'socratiq-knowledge-graph-modal';
         modal.style.cssText = `
             position: fixed;
             top: 0;
@@ -3097,6 +3117,7 @@ export function showKnowledgeGraph(shadowRoot) {
 
     // Show modal and add spinner
     modal.style.display = 'flex';
+    closeButton.focus({preventScroll: true});
     const spinner = createLoadingSpinner();
     content.appendChild(spinner);
 

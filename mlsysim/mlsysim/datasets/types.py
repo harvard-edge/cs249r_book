@@ -43,8 +43,33 @@ class DatasetProfile(BaseModel):
 
     @property
     def mean_compressed_image_size(self) -> Optional[Quantity]:
-        """Mean compressed (as-distributed) bytes per training example:
-        training_archive_size / training_examples. None if either is unset."""
+        """Average the distributed training archive over its examples.
+
+        Returns
+        -------
+        Quantity or None
+            Mean compressed bytes per training example; None if archive size or example count is absent.
+
+        Notes
+        -----
+        Equation: mean_bytes = training_archive_size / training_examples.
+
+        Assumptions: the archive and count describe the same training split, with a positive count. Archive container overhead is included in the average.
+
+        Excludes: decoded image tensors, variation among examples, augmentation buffers, and validation/test splits.
+
+        References
+        ----------
+        Derivation: divide total stored bytes by the number of archived examples. Despite the legacy image name, the arithmetic does not inspect image content.
+
+        Examples
+        --------
+        >>> from mlsysim.datasets.types import DatasetProfile
+        >>> from mlsysim.core.units import Q_
+        >>> data = DatasetProfile(name='Archive', training_archive_size=Q_('10 MB'), training_examples=Q_(100, 'count'))
+        >>> data.mean_compressed_image_size * data.training_examples.magnitude == data.training_archive_size
+        True
+        """
         if self.training_archive_size is None or self.training_examples is None:
             return None
         n = self.training_examples.to(ureg.count).magnitude
