@@ -1,0 +1,1 @@
+import{o as e}from"./tooltip-mT3CGest.js";function t(e){function t(e){return!!e?.schema&&Array.isArray(e.schema.fields)&&typeof e.toArray==`function`}return(t(e)?e:n(e)).toArray()}t.responseType=`arrayBuffer`;function n(t,n){return e(t,n??{useProxy:!0})}export{t};

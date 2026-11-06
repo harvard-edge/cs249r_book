@@ -1,0 +1,1 @@
+import{t as e}from"./mbox-skR0V6cu.js";export{e as mbox};

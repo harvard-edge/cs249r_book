@@ -1,0 +1,1 @@
+import{t as e}from"./_hasPath-BmRQipI0.js";var t=Object.prototype.hasOwnProperty;function n(e,n){return e!=null&&t.call(e,n)}function r(t,r){return t!=null&&e(t,r,n)}export{r as t};

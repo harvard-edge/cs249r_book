@@ -1,0 +1,1 @@
+import{i as e,r as t}from"./get-DjNf4SIX.js";import{O as n,b as r,g as i,p as a}from"./isArrayLikeObject-DnwgSs_Z.js";function o(o,s,c){s=e(s,o);for(var l=-1,u=s.length,d=!1;++l<u;){var f=t(s[l]);if(!(d=o!=null&&c(o,f)))break;o=o[f]}return d||++l!=u?d:(u=o==null?0:o.length,!!u&&i(u)&&r(f,u)&&(n(o)||a(o)))}export{o as t};

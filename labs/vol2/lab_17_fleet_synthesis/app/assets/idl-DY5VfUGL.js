@@ -1,0 +1,1 @@
+import{t as e}from"./idl-BHq7WyPV.js";export{e as idl};

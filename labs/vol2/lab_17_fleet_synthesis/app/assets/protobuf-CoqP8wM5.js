@@ -1,0 +1,1 @@
+import{t as e}from"./protobuf-Ci5XvpF4.js";export{e as protobuf};

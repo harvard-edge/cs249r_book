@@ -1,0 +1,1 @@
+import{t as e}from"./ttcn-1CwPIugQ.js";export{e as ttcn};

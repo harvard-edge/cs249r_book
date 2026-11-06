@@ -1,0 +1,1 @@
+import{t as e}from"./mathematica-CwlrU_TQ.js";export{e as mathematica};

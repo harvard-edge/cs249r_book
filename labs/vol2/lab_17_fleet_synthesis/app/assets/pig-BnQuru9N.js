@@ -1,0 +1,1 @@
+import{t as e}from"./pig-CrKTIB-m.js";export{e as pig};

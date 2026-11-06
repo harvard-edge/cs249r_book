@@ -1,0 +1,1 @@
+import{t as e}from"./ttcn-cfg-CHYEAF6D.js";export{e as ttcnCfg};

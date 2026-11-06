@@ -1,0 +1,1 @@
+import{f as e,r as t}from"./useEvent-Dfcbgjhg.js";var n=e(0);function r(){t.set(n,e=>e+1)}function i(e){function t(e){return async t=>{let n=await e(t);return(n.success||n.restartRequired)&&r(),n}}return{...e,addPackage:t(e.addPackage),removePackage:t(e.removePackage)}}export{n,i as r,r as t};
