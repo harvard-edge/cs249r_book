@@ -36,14 +36,16 @@ def plain(value: Any) -> Any:
     """Convert supported result types without losing quantity units."""
     if isinstance(value, Enum):
         return value.value
-    if dataclasses.is_dataclass(value) and not isinstance(value, type):
-        return plain(dataclasses.asdict(value))
     if hasattr(value, "magnitude") and hasattr(value, "units"):
         return {"value": plain(value.magnitude), "unit": str(value.units)}
     if hasattr(value, "model_dump"):
         return plain(value.model_dump(mode="python"))
     if hasattr(value, "to_dict"):
         return plain(value.to_dict())
+    # EvidenceCapture is a dataclass containing encoded JSON. Its public export
+    # must be decoded before recursive privacy filtering can inspect the fields.
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        return plain(dataclasses.asdict(value))
     if isinstance(value, Mapping):
         return {str(key): plain(item) for key, item in value.items()}
     if isinstance(value, (tuple, list)):

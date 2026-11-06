@@ -1,4 +1,5 @@
 import json
+from dataclasses import dataclass
 import sqlite3
 import sys
 
@@ -40,6 +41,21 @@ def test_private_fields_filtered_recursively_without_mutating_input(tmp_path):
     assert output["payload"] == {"nested": {"latency": 4}}
     assert output["context"]["config"] == {"batch_size": 8}
     assert data["student_id"] == "alice"
+
+
+def test_json_backed_capture_uses_public_export_before_filtering(tmp_path):
+    @dataclass(frozen=True)
+    class Capture:
+        _snapshot_json: str
+
+        def to_dict(self):
+            return json.loads(self._snapshot_json)
+
+    capture = Capture('{"result":{"latency":4},"decision":"private reflection"}')
+    with ForgeSession(context(), mode="offline", directory=tmp_path) as session:
+        publish_capture(session, capture)
+    output = json.loads(next(tmp_path.rglob("*.json")).read_text())
+    assert output["payload"] == {"result": {"latency": 4}}
 
 
 def test_unconfirmed_delivery_is_not_retried(tmp_path):
