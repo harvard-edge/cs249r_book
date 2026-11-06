@@ -16,6 +16,7 @@ from typing import Any
 PRIVATE_FIELDS = frozenset({
     "student_id", "student_name", "email", "username", "hostname", "user_id",
     "reflection", "reflections", "interpretation", "interpretations", "discussion",
+    "prediction", "predictions",
     "decision", "decisions", "recommendation", "rationale", "markdown", "text",
     "residual_risk", "password", "secret", "token", "api_key", "authorization",
     "credentials", "cookie", "cookies",

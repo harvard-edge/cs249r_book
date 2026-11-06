@@ -111,6 +111,15 @@ def test_pipeline_callback_preserves_result_and_stage_identity(tmp_path):
     assert result == {"value": 3, "unit": "ms"}
 
 
+def test_pipeline_survives_local_evidence_storage_failure():
+    class BrokenStorage:
+        def capture(self, *args, **kwargs):
+            raise OSError("disk unavailable")
+
+    with pytest.warns(RuntimeWarning, match="lesson continues"):
+        PipelineCallback(BrokenStorage(), experiment_id="x").on_stage_end("solver", {"x": 1})
+
+
 def test_metrics_and_artifacts(tmp_path):
     artifact = tmp_path / "result.json"
     artifact.write_text('{"accuracy": 0.8, "email": "private@example.com"}')
