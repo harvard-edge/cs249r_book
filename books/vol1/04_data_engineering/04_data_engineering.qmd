@@ -168,169 +168,88 @@ class LabelingComputeRatio:
 ```{python}
 #| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────
-# │ DATASET SIZE GROWTH (LEGO)
+# │ DATASET SIZE LANDMARKS (LEGO)
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: Opening of Data as Code and @fig-dataset-size-growth.
-# │
-# │ Goal: Quantify the multi-decade growth of training dataset sizes before and
-# │       after the deep-learning transition in 2010.
-# │ Show: Doubling every ~34 months before 2010 and ~8 months after across 668
-# │       notable models, crossing the 1.28M ImageNet-1k lighthouse to reach
-# │       hundreds of trillions of datapoints.
-# │ How: Least-squares fits of log10(training_dataset_size) on publication date
-# │      over vol1/04_data_engineering/data/notable_model_datasets.csv, split at 2010.
-# │
+# │ Goal: Show selected training-data scales without pooling incompatible units.
+# │ Show: Image-corpus sizes and language-model training tokens separately.
+# │ How: Source-resolved landmarks in data/dataset_size_landmarks.csv; no fit.
+# │ Provenance: Published paper values, not a census or measured growth rate.
 # └─────────────────────────────────────────────────────────────────────────────
-import datetime as dt
-import math
 import numpy as np
 from mlsysim import viz
 from mlsysim.fmt import check, fmt_int
 
-def _decimal_year(s):
-    d = dt.date.fromisoformat(s)
-    return d.year + (d.timetuple().tm_yday - 1) / 365.25
-
-# ┌── LEGO ───────────────────────────────────────────────
 class DatasetGrowth:
-    """Training dataset sizes of notable models over time."""
-
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    series = viz.load_series("vol1/04_data_engineering/data/notable_model_datasets.csv")
-    split_year = 2010  # scenario assumption: deep-learning transition split year
-    rows = [r for r in series.entries if r["training_dataset_size"]]
-
+    # Each row carries its unit, source, and counting convention.
+    rows = viz.load_series("vol1/04_data_engineering/data/dataset_size_landmarks.csv").entries
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    years = np.array([_decimal_year(r["date"]) for r in rows])
-    log_sizes = np.array([float(np.log10(r["training_dataset_size"])) for r in rows])
-    _early = years < split_year
-    early_slope, early_intercept = (float(x) for x in np.polyfit(years[_early], log_sizes[_early], 1))
-    late_slope, late_intercept = (float(x) for x in np.polyfit(years[~_early], log_sizes[~_early], 1))
-    early_doubling_months = 12 * math.log10(2) / early_slope
-    late_doubling_months = 12 * math.log10(2) / late_slope
-    largest_size = max(r["training_dataset_size"] for r in rows)
+    # Retain publication years and counts without fitting across units.
+    years = np.array([r["year"] for r in rows])
     model_count = len(rows)
-
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(24 <= early_doubling_months <= 48, f"Expected ~34-month doubling before 2010, got {early_doubling_months:.0f}.")
-    check(5 <= late_doubling_months <= 12, f"Expected ~8-month doubling after 2010, got {late_doubling_months:.0f}.")
-    check(largest_size >= 1e14, "Largest training datasets exceed 100 trillion datapoints.")
-
+    # Unlike units must remain in separate panels.
+    check({r["unit"] for r in rows} == {"images", "tokens"}, "Landmarks require separate image and token panels.")
+    check(
+        all(r["count"] > 0 and r["source_url"] and r["counting_convention"] for r in rows),
+        "Every landmark needs a positive count and source semantics.",
+    )
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    early_doubling_str = fmt_int(round(early_doubling_months), commas=False)
-    late_doubling_str = fmt_int(round(late_doubling_months), commas=False)
+    # Prose count derives from the selected rows.
     model_count_str = fmt_int(model_count)
 ```
 
 A missing accent in a speech corpus, a mislabeled class, or a feature computed one way in training and another in serving becomes a defect in system behavior with no line of code to point to. Because a machine learning system learns its behavior from data, the trained model is a compressed summary of its training set. It can represent only the evidence that data contains, and it treats the data's labels as the definition of a correct answer. In the lifecycle that @sec-ml-workflow lays out, the work of building that training set is Stage 2, which ends by handing a versioned dataset to model development; every later stage inherits what that dataset contains and what it lacks.
 
-The bitter lesson (@sec-introduction-bitter-lesson-79c7) explains why this dependence on data has grown rather than shrunk. Methods that learn from data at scale have repeatedly overtaken methods built on hand-encoded knowledge, so the knowledge that engineers once wrote into programs must now arrive through data. Across `{python} DatasetGrowth.model_count_str` notable models published since 1950 (@fig-dataset-size-growth), training dataset sizes show how far that shift has gone [@epochai2026notable]. Until 2010, dataset size doubled roughly every `{python} DatasetGrowth.early_doubling_str` months; after 2010, as deep learning and web-scale collection took hold, it doubled about every `{python} DatasetGrowth.late_doubling_str` months, climbing from tens of thousands of examples in early vision benchmarks past the million-image scale of ImageNet to trillions of tokens in modern language models.
+The bitter lesson (@sec-introduction-bitter-lesson-79c7) explains why this dependence on data has grown rather than shrunk. Methods that learn from data at scale have repeatedly overtaken methods built on hand-encoded knowledge, so the knowledge that engineers once wrote into programs must now arrive through data. The `{python} DatasetGrowth.model_count_str` selected models in @fig-dataset-size-growth illustrate the resulting range of training-data scales. The image corpora extend from handwritten digits to billions of images, while the language models process hundreds of billions to trillions of tokens. These counts describe different units and counting conventions, so they cannot establish a common doubling time or a common storage requirement.
 
-::: {#fig-dataset-size-growth fig-env="figure" fig-pos="htb" fig-cap="**Training Dataset Sizes of Notable Models, 1950 to the Present**: Each point is one notable model, colored by domain, plotted by publication date on a logarithmic axis. Dashed lines show least-squares fits before and after 2010, and the dotted horizontal line marks the ImageNet-1k training split used by this chapter's ResNet-50 workload. The steeper post-2010 slope moves training sets past single-machine memory and turns data delivery into a throughput bottleneck. Data from @epochai2026notable." fig-alt="Scatter plot of training dataset sizes in datapoints on a logarithmic axis from 1 to 10 to the 16 against publication dates from 1950 to 2026. Gray, blue, green, and red points mark other, vision, games, and language models, with a horizontal dotted line near 1.28 million for ImageNet-1k. A shallow dashed fit from 1950 to 2010 is labeled with its doubling time, and a steeper dashed fit from 2010 onward rises through dense clusters of vision and language models above 10 to the 12. Perceptron Mark I, TD-Gammon, LeNet-5, AlexNet, GPT-3, Chinchilla, DeepSeek-V3, and Qwen3 are labeled."}
+::: {#fig-dataset-size-growth fig-env="figure" fig-pos="htb" fig-cap="**Training Data Scales of Selected Models**: The top panel shows image-corpus sizes; the bottom shows tokens processed during language-model pre-training, which can include repeated text. Both vertical axes are logarithmic, and the panels have different publication-year ranges. These selected landmarks illustrate scale, not a representative sample or fitted growth rate. The dotted line marks the ImageNet-1k training split used by this chapter's ResNet-50 workload. Counts come from the model papers [@lecun1998; @krizhevsky2012imagenet; @zhai2022scaling; @dehghani2023scaling; @brown2020language; @hoffmann2022chinchilla; @deepseek2025v3; @yang2025qwen3]." fig-alt="Two vertically stacked scatter plots with logarithmic vertical axes. The upper panel plots image counts for LeNet-5, AlexNet, ViT-G/14, and ViT-22B against publication year, with a dotted ImageNet-1k reference line. The lower panel plots training-token counts for GPT-3, Chinchilla, DeepSeek-V3, and Qwen3 against publication year. Every point is labeled; no fitted lines connect the points."}
 
 ```{python}
 #| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────
-# │ DATASET SIZE GROWTH (FIGURE)
+# │ DATASET SIZE LANDMARKS (FIGURE)
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: @fig-dataset-size-growth.
-# │
-# │ Goal: Plot training dataset sizes of notable models over seven decades.
-# │ Show: Scatter by domain with two fitted segments split at 2010 and the
-# │       ImageNet-1k lighthouse line.
-# │ How: DatasetGrowth and ResNetTrainingScenario (above); book_style.setup_plot().
-# │
+# │ Goal: Preserve the historical scale comparison with explicit counting units.
+# │ Show: Selected image corpora above; processed training tokens below.
+# │ How: DatasetGrowth and ResNetTrainingScenario; separate axes and no fit.
 # └─────────────────────────────────────────────────────────────────────────────
 from binder.tools.figures import style as book_style
 
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(6.2, 4.4))
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(6.2, 5.8))
+ax.remove()
+axes = fig.subplots(2, 1)
 _D = DatasetGrowth
-_dom = {"Language": COLORS["RedLine"], "Vision": COLORS["BlueLine"], "Games": COLORS["GreenLine"]}
-_d = np.array([r["domain"] if r["domain"] in _dom else "Other" for r in _D.rows])
-for _k, _c in list(_dom.items()) + [("Other", COLORS["grid"])]:
-    _m = _d == _k
-    ax.scatter(
-        _D.years[_m],
-        10 ** _D.log_sizes[_m],
-        s=10,
-        color=_c,
-        alpha=0.7 if _k != "Other" else 0.6,
-        label=_k,
-        zorder=3 if _k != "Other" else 2,
-    )
-for _lo, _hi, _sl, _ic in (
-    (1950, _D.split_year, _D.early_slope, _D.early_intercept),
-    (_D.split_year, 2026.8, _D.late_slope, _D.late_intercept),
-):
-    _xx = np.linspace(_lo, _hi, 50)
-    ax.plot(_xx, 10 ** (_sl * _xx + _ic), "--", color=COLORS["primary"], lw=1.2, zorder=4)
-
-_y_early = 10 ** (_D.early_slope * 1970 + _D.early_intercept)
-ax.annotate(
-    f"{_D.early_doubling_str}-month doubling\n(pre-2010)",
-    xy=(1970, _y_early),
-    xytext=(1965, _y_early * 45),
-    ha="center",
-    fontsize=9,
-    color=COLORS["primary"],
-    arrowprops=dict(arrowstyle="->", color=COLORS["primary"], lw=0.8),
-    bbox=dict(facecolor="white", alpha=0.92, edgecolor="none", pad=0.3),
-    zorder=6,
-)
-_y_late = 10 ** (_D.late_slope * 2011.8 + _D.late_intercept)
-ax.annotate(
-    f"{_D.late_doubling_str}-month doubling\n(post-2010)",
-    xy=(2011.8, _y_late),
-    xytext=(2017.0, 2e2),
-    ha="center",
-    fontsize=9,
-    color=COLORS["primary"],
-    arrowprops=dict(arrowstyle="->", color=COLORS["primary"], lw=0.8),
-    bbox=dict(facecolor="white", alpha=0.92, edgecolor="none", pad=0.3),
-    zorder=6,
-)
-_landmarks = {
-    "Perceptron Mark I": ("Perceptron Mark I", (10, -14), "left"),
-    "TD-Gammon": ("TD-Gammon", (-4, 16), "center"),
-    "LeNet-5": ("LeNet-5 (MNIST)", (-8, -22), "right"),
-    "AlexNet": ("AlexNet", (-18, 10), "right"),
-    "GPT-3 175B (davinci)": ("GPT-3", (-22, -6), "right"),
-    "Chinchilla": ("Chinchilla", (-24, 1), "right"),
-    "DeepSeek-V3": ("DeepSeek-V3", (-24, 5), "right"),
-    "Qwen3-235B-A22B": ("Qwen3", (-14, 17), "right"),
+_offsets = {
+    "LeNet-5": (6, 8, "left"),
+    "AlexNet": (-6, 10, "right"),
+    "ViT-G/14": (-8, 10, "right"),
+    "ViT-22B": (6, -16, "left"),
+    "GPT-3": (6, 8, "left"),
+    "Chinchilla": (6, -16, "left"),
+    "DeepSeek-V3": (-8, 8, "right"),
+    "Qwen3": (5, 8, "left"),
 }
-for _key, (_lbl, _off, _ha) in _landmarks.items():
-    for _x, _r in zip(_D.years, _D.rows):
-        if _r["model"] == _key:
-            ax.annotate(
-                _lbl,
-                (_x, _r["training_dataset_size"]),
-                xytext=_off,
-                textcoords="offset points",
-                ha=_ha,
-                fontsize=9,
-                zorder=7,
-                arrowprops=dict(arrowstyle="-", color=COLORS["secondary"], lw=0.6),
-                bbox=dict(facecolor="white", alpha=0.92, edgecolor="none", pad=0.2),
-            )
-            break
-
-ax.axhline(ResNetTrainingScenario.train_images, color=COLORS["primary"], lw=0.8, ls=":", zorder=1)
-ax.text(
-    1948.5,
-    ResNetTrainingScenario.train_images * 1.45,
-    "chapter lighthouse (ImageNet-1k, 1.28M)",
-    ha="left",
-    va="bottom",
-    fontsize=9,
-    color=COLORS["primary"],
-)
-ax.set_yscale("log")
-ax.set_xlim(1947, 2028)
-ax.set_ylim(1, 3e16)
-ax.set_xlabel("Publication date")
-ax.set_ylabel("Training dataset size (datapoints, log scale)")
-ax.legend(loc="upper left", frameon=True, framealpha=0.95, fontsize=9)
+for ax, unit, color, marker, xlim, ylim in (
+    (axes[0], "images", COLORS["BlueLine"], "s", (1996, 2027), (1e4, 1e11)),
+    (axes[1], "tokens", COLORS["RedLine"], "o", (2019.5, 2026.7), (1e11, 3e14)),
+):
+    for year, row in zip(_D.years, _D.rows):
+        if row["unit"] != unit:
+            continue
+        ax.scatter(year, row["count"], s=35, color=color, marker=marker, zorder=3)
+        dx, dy, ha = _offsets[row["model"]]
+        ax.annotate(row["model"], (year, row["count"]), xytext=(dx, dy), textcoords="offset points", ha=ha, fontsize=9)
+    ax.set_yscale("log")
+    ax.set_xlim(*xlim)
+    ax.set_ylim(*ylim)
+    ax.set_xlabel("Publication year")
+    ax.set_ylabel("Images in corpus" if unit == "images" else "Training tokens processed")
+axes[0].axhline(ResNetTrainingScenario.train_images, color=COLORS["secondary"], lw=0.8, ls=":", zorder=1)
+axes[0].text(1997, ResNetTrainingScenario.train_images * 1.5, "ImageNet-1k reference", fontsize=9, va="bottom", color=COLORS["secondary"])
+fig.tight_layout(h_pad=1.2)
 plt.show()
 plt.close()
 ```
@@ -1564,9 +1483,9 @@ Raw volume cannot substitute for checking what the examples mean, because an unc
 # │ Goal: Set reported pre-training corpus growth against the estimated stock
 # │       of public human-generated text.
 # │ Show: ~2.9× per year growth from GPT-3 (300 billion tokens) to Qwen3
-# │       (36 trillion); median stock ~300 trillion tokens; fit reaches it ~2028.
+# │       (36 trillion); fixed 2024 modeled stock; fit reaches its median late this decade.
 # │ How: Least-squares fit of log10(tokens) on release date over
-# │      data/pretraining_tokens.csv; stock from PublicTextStock.
+# │      data/pretraining_tokens.csv; fixed 2024 stock from data/public_text_stock.csv.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 import datetime as dt
@@ -1607,9 +1526,9 @@ class TrainingDataSupply:
     crossing_year_str = fmt_int(round(median_crossing_year), commas=False)
 ```
 
-Even a well-governed crawl draws on a finite supply. Within the post-2010 climb of @fig-dataset-size-growth, the text corpora that give large language models their initial training grew at a fitted rate of about `{python} TrainingDataSupply.growth_mult_str` per year, from the `{python} TrainingDataSupply.first_tokens_str` tokens that trained GPT-3 in 2020 to the `{python} TrainingDataSupply.last_tokens_str` reported for Qwen3 in 2025 [@brown2020language; @yang2025qwen3]. @Fig-running-out-of-human-data sets that climb against the estimated stock of public human-generated text, roughly `{python} TrainingDataSupply.stock_median_str` tokens once quality and repetition are accounted for [@villalobos2024will], and at the fitted rate the largest corpora reach the middle of that estimate around `{python} TrainingDataSupply.crossing_year_str`. Once quality text runs short, acquiring more of it stops being a purchasing decision, and filtering, deduplication, and the selection methods of @sec-data-selection decide how much each additional token is worth. A wake-word model meets its own version of the limit far sooner. No crawl holds enough clean recordings of one phrase in every accent and acoustic setting, so the KWS pipeline has to commission the data it lacks.
+Even a well-governed crawl draws on a finite supply. For the selected language models, reported pretraining token totals grew at a fitted rate of about `{python} TrainingDataSupply.growth_mult_str` per year, from the `{python} TrainingDataSupply.first_tokens_str` tokens that trained GPT-3 in 2020 to the `{python} TrainingDataSupply.last_tokens_str` reported for Qwen3 in 2025 [@brown2020language; @yang2025qwen3]. @Fig-running-out-of-human-data sets that climb against the estimated stock of public human-generated text, with a modeled 2024 median of `{python} TrainingDataSupply.stock_median_str` effective tokens after adjustments for quality and repeated use [@villalobos2024will]. Holding that stock fixed, this chapter's fitted token totals reach its median around `{python} TrainingDataSupply.crossing_year_str`. This comparison does not reproduce the study's growing-stock forecast or establish exhaustion of unique text, because training-token totals can include repetitions. Once quality text runs short, acquiring more of it stops being a purchasing decision, and filtering, deduplication, and the selection methods of @sec-data-selection decide how much each additional token is worth. A wake-word model meets its own version of the limit far sooner. No crawl holds enough clean recordings of one phrase in every accent and acoustic setting, so the KWS pipeline has to commission the data it lacks.
 
-::: {#fig-running-out-of-human-data fig-env="figure" fig-pos="htb" fig-cap="**Training Data Approaching the Stock of Public Text**: Reported pre-training tokens for landmark language models from 2020 to 2025 on a logarithmic axis, with a least-squares fit, against the estimated stock of public human-generated text (shaded band, 90 percent interval; dotted line, median). The projection is a dated constraint scenario rather than a forecast, because data selection, synthetic generation, multimodal data, licensing, and filtering policy all change the usable supply. Stock estimate from @villalobos2024will; token counts from the model reports [@brown2020language; @rae2021scaling; @hoffmann2022chinchilla; @chowdhery2022palm; @touvron2023llama; @touvron2023llama2; @dubey2024llama; @qwen2024qwen25; @deepseek2025v3; @yang2025qwen3]." fig-alt="Log-scale scatter plot of training tokens against release date from 2020 to 2028. Ten labeled points rise from GPT-3 and Gopher near 300 billion tokens in 2020 and 2021 to Qwen3 near 36 trillion in 2025, with a dashed fitted line that continues upward. An orange shaded band spans 100 trillion to 1 quadrillion tokens with a dotted median line near 300 trillion, and the fitted line enters the band around 2027."}
+::: {#fig-running-out-of-human-data fig-env="figure" fig-pos="htb" fig-cap="**Training Data Approaching the Stock of Public Text**: Reported pre-training tokens for landmark language models from 2020 to 2025 on a logarithmic axis, with a least-squares fit, against the modeled effective stock of public human-generated text in 2024 (shaded band, 95 percent interval; dotted line, median). The stock is held fixed as a reference for this chapter's extrapolation, not projected forward as in the cited study. Training-token totals can include repeated text; their crossing does not demonstrate exhaustion of unique data. Stock values are from figure 3 of @villalobos2024will; token counts from the model reports [@brown2020language; @rae2021scaling; @hoffmann2022chinchilla; @chowdhery2022palm; @touvron2023llama; @touvron2023llama2; @dubey2024llama; @qwen2024qwen25; @deepseek2025v3; @yang2025qwen3]." fig-alt="Log-scale scatter plot of training tokens against release date from 2020 to 2028. Ten labeled points rise from GPT-3 and Gopher near 300 billion tokens in 2020 and 2021 to Qwen3 near 36 trillion in 2025, with a dashed fitted line that continues upward. An orange shaded band marks the fixed 2024 effective-stock estimate, with a dotted median line. The dashed fit crosses the band and its median toward the right of the plot."}
 
 ```{python}
 #| echo: false
@@ -1629,7 +1548,7 @@ fig, ax, COLORS, plt = book_style.setup_plot(figsize=(6.2, 4.4))
 _T = TrainingDataSupply
 ax.axhspan(_T.stock["low"], _T.stock["high"], color=COLORS["OrangeLine"], alpha=0.15, zorder=0)
 ax.axhline(_T.stock["median"], color=COLORS["OrangeLine"], lw=1, ls=":", zorder=1)
-ax.text(2020.1, _T.stock["median"] * 1.4, "Estimated stock of public human text (90% interval)", fontsize=9, color=COLORS["OrangeLine"], va="bottom")
+ax.text(2020.1, _T.stock["median"] * 1.4, "Fixed 2024 effective-stock estimate (95% interval)", fontsize=9, color=COLORS["OrangeLine"], va="bottom")
 _xx = np.linspace(2020, 2028.5, 100)
 ax.plot(
     _xx,

@@ -16,6 +16,7 @@ def fixture_project(tmp_path, monkeypatch):
     script.parent.mkdir(parents=True)
     monkeypatch.setattr(exporter, "__file__", str(script))
     (books / "_quarto.yml").write_text("book:\n  chapters: [chapter.qmd]\n")
+    (books / "index.tex").write_text("Current TeX")
     (books / "chapter.qmd").write_text(
         '# Chapter\n\n::: {#fig-second fig-cap="Second source figure" fig-alt="Second"}\n:::\n\n'
         '::: {#fig-first fig-cap="First source figure" fig-alt="First"}\n:::\n'
@@ -53,3 +54,45 @@ def test_numbered_frontmatter_and_part_figures_are_included(tmp_path):
     figures = exporter.extract_qmd_figures(tmp_path)
     assert {row["label"] for row in figures} == {"fig-dependencies", "fig-chain"}
     assert {row["chapter"] for row in figures} == {"Preface", "Principles"}
+
+
+def test_chapter_export_ignores_other_target_and_stale_aux(tmp_path):
+    import os
+
+    (tmp_path / '_quarto.yml').write_text('book:\n  output-file: appendix_control\n')
+    tex = tmp_path / 'appendix_control.tex'
+    tex.write_text('Current chapter')
+    os.utime(tex, (1_700_000_002, 1_700_000_002))
+    stale = tmp_path / 'appendix_control.aux'
+    stale.write_text('Old chapter labels')
+    os.utime(stale, (1_700_000_000, 1_700_000_000))
+    (tmp_path / 'Machine-Learning-Systems-Vol4.aux').write_text('Unrelated full volume')
+    output = tmp_path / 'output'
+    output.mkdir()
+    assert exporter.find_figure_aux(tmp_path, output) is None
+    current = output / 'appendix_control.aux'
+    current.write_text('Current labels')
+    assert exporter.find_figure_aux(tmp_path, output) == current
+
+
+def test_chapter_export_rejects_newer_unrelated_index_aux(tmp_path):
+    (tmp_path / '_quarto.yml').write_text('book:\n  output-file: appendix_control\n')
+    (tmp_path / 'appendix_control.tex').write_text('Current chapter')
+    (tmp_path / 'index.aux').write_text('Newer unrelated metadata')
+    output = tmp_path / 'output'
+    output.mkdir()
+    assert exporter.find_figure_aux(tmp_path, output) is None
+
+
+def test_index_tex_still_supports_renamed_preserved_target_aux(tmp_path):
+    (tmp_path / '_quarto.yml').write_text('book:\n  output-file: Book\n')
+    (tmp_path / 'index.tex').write_text('Current Quarto source')
+    aux = tmp_path / 'index.aux'
+    aux.write_text('Current metadata')
+    output = tmp_path / 'output'
+    output.mkdir()
+    assert exporter.find_figure_aux(tmp_path, output) == aux
+    preserved = output / 'Book.aux'
+    preserved.write_text(aux.read_text())
+    aux.unlink()
+    assert exporter.find_figure_aux(tmp_path, output) == preserved
