@@ -43,6 +43,22 @@ if (mermaidThemeEl) {
 mermaid.initialize(mermaidOpts);
 
 const _quartoMermaid = {
+  // Keep this in sync with setSvgAlt in core/svg.ts.
+  setSvgAlt(svg, alt) {
+    if (typeof alt !== "string") {
+      return;
+    }
+    // fig-alt overrides the accessible name, while accDescr remains available.
+    svg.removeAttribute("aria-labelledby");
+    svg.setAttribute("role", "img");
+    if (alt === "") {
+      svg.removeAttribute("aria-label");
+      svg.setAttribute("aria-hidden", "true");
+    } else {
+      svg.setAttribute("aria-label", alt);
+    }
+  },
+
   // NB: there's effectively a copy of this function
   // in `core/svg.ts`.
   // if you change something here, you must keep it consistent there as well.
@@ -260,6 +276,7 @@ window.addEventListener(
       }
 
       const svg = el.querySelector("svg");
+      _quartoMermaid.setSvgAlt(svg, el.dataset.figAlt);
       const parent = el.parentElement;
       parent.removeChild(el);
       parent.appendChild(svg);
