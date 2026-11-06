@@ -93,6 +93,7 @@ RUN echo "🚀 === STARTING SYSTEM DEPENDENCIES INSTALLATION ===" && \
     curl \
     git \
     cmake \
+    poppler-utils \
     pkg-config && \
     echo "📦 All system packages installed successfully" && \
     \
