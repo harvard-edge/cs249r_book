@@ -5,6 +5,12 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 LABS_ROOT="${LABS_ROOT:-labs}"
 LABS_DIR="${REPO_ROOT}/${LABS_ROOT}"
 MLSYSIM_DIR="${REPO_ROOT}/mlsysim"
+LABS_VOLUMES="${LABS_VOLUMES:-1 2 3 4}"
+read -r -a LABS_VOLUME_ARGS <<< "${LABS_VOLUMES}"
+if [ "${#LABS_VOLUME_ARGS[@]}" -eq 0 ]; then
+  echo "ERROR: LABS_VOLUMES must name at least one volume (1–4)." >&2
+  exit 1
+fi
 
 if [ ! -d "${LABS_DIR}" ]; then
   echo "ERROR: Labs root does not exist: ${LABS_DIR}" >&2
@@ -32,9 +38,9 @@ if ! command -v quarto >/dev/null 2>&1; then
 fi
 
 # Check chapter ownership before compiling goals, inventory, or browser wheels.
-python3 "${LABS_DIR}/tools/check_learning_contracts.py"
-python3 "${LABS_DIR}/tools/build_learning_paths.py"
-python3 "${LABS_DIR}/tools/build_learning_paths.py" --check
+python3 "${LABS_DIR}/tools/check_learning_contracts.py" --volumes "${LABS_VOLUME_ARGS[@]}"
+python3 "${LABS_DIR}/tools/build_learning_paths.py" --volumes "${LABS_VOLUME_ARGS[@]}"
+python3 "${LABS_DIR}/tools/build_learning_paths.py" --volumes "${LABS_VOLUME_ARGS[@]}" --check
 python3 "${LABS_DIR}/tools/build_lab_inventory.py"
 python3 "${LABS_DIR}/tools/build_lab_inventory.py" --check
 
