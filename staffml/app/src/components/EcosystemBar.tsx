@@ -437,22 +437,8 @@ export default function EcosystemBar() {
       // dark page background.
       borderBottom: isDark ? `1px solid ${borderColor}` : 'none',
       transition: 'background-color 0.2s, border-color 0.2s',
-      // Why `overflow-x: clip` (not `hidden`):
-      // At iPad landscape (1024 px) and other narrow desktop widths, the 7
-      // left dropdowns + 6 right-side icons + brand exceed the viewport.
-      // Without containment, that overflow propagates to body.scrollWidth
-      // and the whole page scrolls horizontally. Quarto sites avoid the
-      // same scroll because their navbar lives inside `.fixed-top`
-      // (position:fixed), which is removed from normal flow — body width
-      // never sees the navbar's true content width. We achieve the same
-      // visual result without changing positioning by clipping the X axis
-      // on this wrapper.
-      // `clip` (not `hidden`) is critical: per CSS Overflow Module 3, when
-      // `overflow-x: clip` is paired with `overflow-y: visible`, the Y axis
-      // stays visible. `overflow-x: hidden` would force `overflow-y: auto`
-      // and clip the dropdown menus that extend below the bar. Browser
-      // support: Safari 16+, Chrome 90+, Firefox 81+; older browsers fall
-      // back to `visible` (no regression vs current behavior).
+      // Contain unexpected horizontal overflow without clipping dropdowns
+      // vertically. Responsive breakpoints keep every header control in view.
       overflowX: 'clip' as const,
       // Pin overflow-y explicitly visible so WebKit cannot reinterpret it
       // as `auto` when overflow-x is `clip` (the spec exempts `clip` from
@@ -480,8 +466,8 @@ export default function EcosystemBar() {
             }}
           />
           {/* Mirror Quarto's brand-title abbreviation: show the full
-              "Machine Learning Systems" only when the desktop nav is up
-              (>= nav-xl, 1400 px); below that, switch to the abbreviated
+              "Machine Learning Systems" only when the full desktop labels fit
+              (>= nav-xl, 1536 px); below that, switch to the abbreviated
               "ML Systems" — same swap Quarto sites do via _mobile.scss
               `@media (max-width: 1199px)`. Without this, narrow widths
               ellipsis-truncated the full title mid-word, which read as
@@ -497,9 +483,9 @@ export default function EcosystemBar() {
           <span className="sr-only">Machine Learning Systems</span>
         </a>
 
-        {/* Desktop nav — appears at Bootstrap's lg breakpoint (992px) to match
-            the Quarto navbar (collapse-below: lg in navbar-common.yml). */}
-        <div className="hidden nav-lg:flex" style={{ alignItems: 'center', gap: 0, flex: 1, marginLeft: 16, minWidth: 0 }}>
+        {/* The ecosystem row needs more room than the app's own Nav:
+            show its compact desktop controls only once they all fit. */}
+        <div className="hidden nav-ecosystem:flex" style={{ alignItems: 'center', gap: 0, flex: 1, marginLeft: 16, minWidth: 0 }}>
           {/* Left menus */}
           <div style={{ display: 'flex', alignItems: 'center' }}>
             {LEFT_MENUS.map(renderDropdown)}
@@ -563,11 +549,11 @@ export default function EcosystemBar() {
 
         {/* Mobile hamburger — display is controlled entirely by Tailwind
             responsive classes; do NOT set `display` in the inline style,
-            because an inline `display: flex` would beat the `nav-lg:hidden`
-            media-query rule and leave the hamburger visible at 992 px+. */}
+            because an inline `display: flex` would beat the `nav-ecosystem:hidden`
+            media-query rule and leave the hamburger visible at 1152 px+. */}
         <button
           onClick={() => setMobileOpen(!mobileOpen)}
-          className="flex nav-lg:hidden items-center"
+          className="flex nav-ecosystem:hidden items-center"
           style={{
             color: NAV_COLOR,
             padding: 8,
@@ -589,7 +575,7 @@ export default function EcosystemBar() {
       {/* Mobile expanded */}
       {mobileOpen && (
         <div
-          className="nav-lg:hidden"
+          className="nav-ecosystem:hidden"
           style={{
             borderTop: `1px solid ${borderColor}`,
             backgroundColor: bgColor,

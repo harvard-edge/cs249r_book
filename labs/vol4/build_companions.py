@@ -5,6 +5,7 @@ import argparse
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
+VERSION_TOKEN = "MLSYSIM_VERSION"
 BODY = '''import marimo
 
 __generated_with = "0.23.1"
@@ -19,7 +20,7 @@ async def _():
     if sys.platform == "emscripten":
         import micropip
         await micropip.install(["pydantic", "pint", "plotly", "pandas"], keep_going=False)
-        await micropip.install("../../wheels/mlsysim-0.3.0-py3-none-any.whl", keep_going=False)
+        await micropip.install("../../wheels/mlsysim-MLSYSIM_VERSION-py3-none-any.whl", keep_going=False)
         await micropip.install("../../wheels/mlsysbook_labs-0.1.0-py3-none-any.whl", keep_going=False)
     else:
         labs_dir = Path(__file__).resolve().parents[1]
@@ -100,6 +101,21 @@ if __name__ == "__main__":
 '''
 
 
+def render_entrypoint(contract: dict) -> str:
+    try:
+        import tomllib
+    except ImportError:
+        import tomli as tomllib
+
+    version = tomllib.loads((ROOT / "mlsysim/pyproject.toml").read_text())["project"]["version"]
+    chapter = contract["chapter"]
+    slug = Path(contract["source_notebook"]).stem
+    return (BODY.replace(VERSION_TOKEN, version)
+            .replace("CHAPTER_PAD", f"{chapter:02d}")
+            .replace("CHAPTER", str(chapter))
+            .replace("BOOK_ANCHOR", contract.get("book_anchor", "sec-" + slug.split("_", 2)[-1])))
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--check', action='store_true')
@@ -107,9 +123,7 @@ def main():
     errors=[]
     for source in sorted((ROOT/'labs/vol4/concepts').glob('*_concepts.yml')):
         contract=yaml.safe_load(source.read_text())['lab_concept_map']
-        chapter=contract['chapter']
-        slug=Path(contract['source_notebook']).stem
-        text=BODY.replace('CHAPTER_PAD',f'{chapter:02d}').replace('CHAPTER',str(chapter)).replace('BOOK_ANCHOR',contract.get('book_anchor','sec-'+slug.split('_',2)[-1]))
+        text=render_entrypoint(contract)
         output=ROOT/contract['source_notebook']
         if args.check:
             if not output.exists() or output.read_text()!=text:
