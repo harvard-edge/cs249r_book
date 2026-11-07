@@ -1,0 +1,83 @@
+name: 'Book · Reviewed Figure Assets'
+
+on:
+  push:
+    branches: [dev]
+    paths:
+      - '.github/workflows/book-reviewed-figure-assets.yml'
+      - 'binder/tests/test_reviewed_figure_assets.py'
+      - 'pyproject.toml'
+      - 'books/_extensions/mlsysbook-ext/figure-explore/canonical-art/**'
+      - 'books/_extensions/mlsysbook-ext/figure-explore/figure-registry.json'
+      - 'books/shared/filters/reviewed_figure_assets.lua'
+      - 'books/config/shared/base/diagram.yml'
+      - 'books/config/shared/html/filters.yml'
+      - 'books/config/shared/pdf/filters.yml'
+      - 'books/config/shared/epub/filters.yml'
+      - 'books/_extensions/pandoc-ext/diagram/**'
+      - 'books/vol*/**/*.qmd'
+  pull_request:
+    paths:
+      - '.github/workflows/book-reviewed-figure-assets.yml'
+      - 'binder/tests/test_reviewed_figure_assets.py'
+      - 'pyproject.toml'
+      - 'books/_extensions/mlsysbook-ext/figure-explore/canonical-art/**'
+      - 'books/_extensions/mlsysbook-ext/figure-explore/figure-registry.json'
+      - 'books/shared/filters/reviewed_figure_assets.lua'
+      - 'books/config/shared/base/diagram.yml'
+      - 'books/config/shared/html/filters.yml'
+      - 'books/config/shared/pdf/filters.yml'
+      - 'books/config/shared/epub/filters.yml'
+      - 'books/_extensions/pandoc-ext/diagram/**'
+      - 'books/vol*/**/*.qmd'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  reviewed-figure-assets:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Set Up Quarto
+        uses: quarto-dev/quarto-actions/setup@v2
+        with:
+          # Match binder/docker/{linux,windows}/Dockerfile.
+          version: '1.9.27'
+
+      - name: Install the Diagram Test Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            texlive-luatex texlive-latex-extra texlive-pictures \
+            texlive-fonts-recommended fonts-texgyre poppler-utils
+          python -m pip install pytest PyYAML
+
+      - name: Run the Actual Quarto Binding and Drift Tests
+        run: |
+          command -v quarto lualatex pdftocairo
+          quarto --version
+          python -m pytest -q binder/tests/test_reviewed_figure_assets.py \
+            --junitxml="$RUNNER_TEMP/reviewed-figure-assets.xml"
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+
+          report = Path(os.environ['RUNNER_TEMP']) / 'reviewed-figure-assets.xml'
+          cases = ET.parse(report).findall('.//testcase')
+          assert cases, 'No reviewed-figure tests executed'
+          assert not any(case.find('skipped') is not None for case in cases), \
+              'Actual Quarto tests must run; skipped tests do not satisfy this gate'
+          PY
