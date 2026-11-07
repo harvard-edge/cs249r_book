@@ -9,9 +9,9 @@ Runs as the site's Quarto pre-render step. Three tiers of source:
   3. Credentialed  - GA4 readership and Buttondown subscribers. Skipped
                      unless the corresponding secret is in the environment.
 
-Any source that fails leaves the previous value untouched, so a rate limit or
-an expired credential degrades to the last known good number rather than to a
-blank page. Failures are reported on stderr and, in CI, annotated as warnings.
+Failed sources retain cached values. REQUIRE_GA4=1 additionally blocks a live
+publish when GA4 credentials or required metrics are unavailable. Offline builds
+may use cached readership, explicitly marked stale in the diagnostics.
 
 Output: site/config/stats-cache.json, consumed by inject_stats.py.
 """
@@ -54,20 +54,20 @@ GA4_PROPERTY_ID = os.environ.get("GA4_PROPERTY_ID", "419684623")
 # as marketing. Newsletter mockup copy keeps the rounded style.
 PLUS_STYLE = {"merged_prs", "subscribers"}
 
-# Figures that only ever grow in reality, whatever the measurement of them does.
-MONOTONIC_KEYS = ("readers", "countries")
+GA4_METRICS = ("readers", "countries", "readers_monthly")
 
 # When set, the figures currently on the live page are read back and used as the
-# floor for MONOTONIC_KEYS. The scheduled refresh publishes stats.json without
+# fallback and comparison evidence. The scheduled refresh publishes stats.json without
 # committing its cache, so the committed file can be days behind what the site
-# actually shows; without this the high-water check in main() would measure
-# against a stale figure and could still publish a number lower than the one
-# already on the page.
+# actually shows. Fresh GA4 readings always replace these values, including
+# downward corrections; a published estimate is not a floor for a new report.
 PUBLISHED_STATS_URL = os.environ.get("PUBLISHED_STATS_URL", "").strip()
 
-# Consecutive clamped runs before the build is failed rather than warned. The
-# schedule is every six hours, so eight is about two days.
-CLAMP_ALARM_RUNS = 8
+# Operational review thresholds, not statistical significance or elapsed time.
+# A reader estimate more than 5% below its historical reference triggers review
+# after eight fresh observations. Country corrections never drive this counter.
+READER_DROP_PERCENT = 5
+READER_DROP_ALARM_OBSERVATIONS = 8
 
 warnings: list[str] = []
 
@@ -108,30 +108,47 @@ def fetch_published() -> dict:
     })
     try:
         with urllib.request.urlopen(request, timeout=20) as response:
-            return json.loads(response.read().decode("utf-8")).get("display", {})
+            published = json.loads(response.read().decode("utf-8")).get("display", {})
+            if not isinstance(published, dict):
+                raise ValueError("published stats display must be an object")
+            return published
     except Exception as exc:  # noqa: BLE001 - degrade to the committed cache
         warn(f"could not read published stats ({exc}); "
-             "using the committed cache as the baseline")
+             "cached fallback is available only when a live baseline is not required")
         return {}
 
 
-def seed_from_published(values: dict, published: dict) -> None:
-    """Raise the baseline to whatever the live page is currently showing.
+def count_value(value) -> bool:
+    """GA4 count fields must be nonnegative integers, never booleans or strings."""
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
 
-    Only ever raises. A published figure lower than the cached one is ignored,
-    so this corrects a stale baseline but never lowers one.
-    """
-    for key in MONOTONIC_KEYS:
+
+def published_count(value) -> int | None:
+    if not isinstance(value, str) or not re.fullmatch(r"(?:\d+|\d{1,3}(?:,\d{3})+)", value):
+        return None
+    return int(value.replace(",", ""))
+
+
+def seed_from_published(values: dict, source: dict, published: dict) -> None:
+    """Use the latest published observations as fallback, never as display floors."""
+    for key in (*GA4_METRICS, "diag_readers_reference", "diag_readers_drop_streak"):
         raw = published.get(key)
-        if not isinstance(raw, str):
-            continue
-        try:
-            live = int(raw.replace(",", ""))
-        except ValueError:
-            continue        # a "1,100+" style figure is not a hard baseline
-        current = values.get(key)
-        if not isinstance(current, int) or live > current:
+        live = published_count(raw)
+        if live is not None:
             values[key] = live
+            source[key] = "published"
+    last_success = published.get("diag_ga4_last_success")
+    if isinstance(last_success, str) and last_success:
+        values["diag_ga4_last_success"] = last_success
+        source["diag_ga4_last_success"] = "published"
+
+
+def valid_published_baseline(published) -> bool:
+    if not isinstance(published, dict):
+        return False
+    keys = (*GA4_METRICS, *(key for key in ("diag_readers_reference", "diag_readers_drop_streak")
+                            if key in published))
+    return all(published_count(published.get(key)) is not None for key in keys)
 
 
 def render(key: str, value: int) -> str:
@@ -385,9 +402,9 @@ def fetch_ga4() -> dict:
         # would have dropped the headline by that gap and then frozen it under
         # the high-water rule for months while it climbed back.
         #
-        # So the approximation is kept and its downside is handled instead: the
-        # high-water rule in main() absorbs the wobble, which is small enough
-        # (0.27% against a documented 1.6% bound) to recover within a run or two.
+        # Keep the metric's current estimate, including downward corrections.
+        # main() monitors substantial persistent reader drops independently;
+        # it never replaces a fresh reading with an older, higher estimate.
         totals = run(all_time)
         if totals.rows:
             out["readers"] = int(totals.rows[0].metric_values[0].value)
@@ -480,17 +497,27 @@ def fetch_subscribers() -> int | None:
 # --------------------------------------------------------------------------
 
 def main() -> int:
+    warnings.clear()
     cache = {}
     if CACHE_PATH.is_file():
         cache = json.loads(CACHE_PATH.read_text(encoding="utf-8"))
     values: dict[str, int | str] = dict(cache.get("values", {}))
     source: dict[str, str] = dict(cache.get("source", {}))
-    # What the page is currently publishing, captured before this run starts
-    # overwriting it, so a figure that only ever grows can be held to that.
-    # Seeded from the live page first, because the committed cache is not
-    # necessarily what the site is showing.
+    # The committed fallback can lag scheduled updates to the published file.
+    require_ga4 = os.environ.get("REQUIRE_GA4") == "1"
     published = fetch_published()
-    seed_from_published(values, published)
+    if require_ga4 and PUBLISHED_STATS_URL and not valid_published_baseline(published):
+        print("::error::Required published stats baseline is unavailable or malformed; "
+              "refusing to overwrite reader evidence from an older checkout cache.",
+              file=sys.stderr)
+        return 1
+    if not isinstance(published, dict):
+        published = {}
+    seed_from_published(values, source, published)
+    # The old shared counter mixed country corrections with reader drops. It
+    # cannot seed the new reader-only evidence and must not keep blocking builds.
+    values.pop("diag_clamp_streak", None)
+    source.pop("diag_clamp_streak", None)
     previous: dict[str, int | str] = dict(values)
 
     def record(key: str, value, origin: str) -> None:
@@ -526,42 +553,44 @@ def main() -> int:
     record("stars", fetch_stars(), "github")
     record("merged_prs", fetch_merged_prs(), "github")
 
-    for key, value in fetch_ga4().items():
-        record(key, value, "ga4")
+    configured = bool(os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+                      or os.environ.get("GA4_SERVICE_ACCOUNT_JSON"))
+    ga4 = fetch_ga4()
+    if not isinstance(ga4, dict):
+        ga4 = {}
+    unavailable = [key for key in GA4_METRICS if not count_value(ga4.get(key))]
+    complete = not unavailable
+    for key, value in ga4.items():
+        if key not in GA4_METRICS or count_value(value):
+            record(key, value, "ga4")
+    record("diag_ga4_status", "fresh" if complete else
+           "stale:offline" if not configured and not require_ga4 else "stale:unavailable", "derived")
+    if complete:
+        record("diag_ga4_last_success", datetime.now(timezone.utc).isoformat(timespec="seconds"), "derived")
+    else:
+        warn("GA4 metrics unavailable or malformed: " + ", ".join(unavailable)
+             + "; cached fields remain stale")
+    ga4_failure = require_ga4 and (not configured or not complete)
 
-    # Cumulative readership and country reach only ever grow in reality. The
-    # measurement of them does not: a sampled response, or the residual error
-    # in an approximated metric, can return less than was published last time.
-    # Showing that would tell a visitor the book had lost readers, and would
-    # run the counter on the card backwards. Hold the high-water mark instead,
-    # and say in the cache that it was held.
-    #
-    # This is a safety net, not the fix. If it fires often, the metric feeding
-    # it is the thing to change; diag_total_users and diag_ga4_quality are
-    # there to show which.
-    clamped = False
-    for key in MONOTONIC_KEYS:
-        prior, fresh = previous.get(key), values.get(key)
-        if isinstance(prior, int) and isinstance(fresh, int) and fresh < prior:
-            warn(f"GA4 returned {key}={fresh:,}, below the published "
-                 f"{prior:,}; holding the higher figure")
-            values[key] = prior
-            source[key] = "ga4+highwater"
-            clamped = True
-
-    # One clamp is noise. A clamp on every run for two days is a broken
-    # pipeline, and the dangerous part is that the page would look perfectly
-    # healthy while showing a frozen number. Carry the streak in the published
-    # file, because this job never commits its cache, and make enough noise to
-    # be seen when it stops looking like noise.
-    try:
-        streak = int(str(published.get("diag_clamp_streak", "0")).replace(",", ""))
-    except ValueError:
-        streak = 0
-    streak = streak + 1 if clamped else 0
-    values["diag_clamp_streak"] = streak
-    source["diag_clamp_streak"] = "derived"
-    alarm = streak >= CLAMP_ALARM_RUNS
+    reference = previous.get("diag_readers_reference")
+    if not count_value(reference):
+        prior_readers = previous.get("readers")
+        reference = prior_readers if count_value(prior_readers) else 0
+    streak = previous.get("diag_readers_drop_streak")
+    streak = streak if count_value(streak) else 0
+    if complete:
+        fresh = ga4["readers"]
+        if reference and fresh * 100 < reference * (100 - READER_DROP_PERCENT):
+            streak += 1
+            warn(f"GA4 readers={fresh:,} is more than {READER_DROP_PERCENT}% below "
+                 f"the reader reference {reference:,}; fresh drop observation {streak}")
+        else:
+            streak = 0
+            reference = max(reference, fresh)
+    # Missing data cannot erase prior drop evidence or count as recovery.
+    record("diag_readers_reference", reference, "derived")
+    record("diag_readers_drop_streak", streak, "derived")
+    alarm = complete and streak >= READER_DROP_ALARM_OBSERVATIONS
 
     record("subscribers", fetch_subscribers(), "buttondown")
 
@@ -601,17 +630,17 @@ def main() -> int:
     print(f"  wrote {CACHE_PATH.relative_to(REPO_ROOT)} "
           f"({len(display)} values, {len(warnings)} warning(s))", file=sys.stderr)
 
-    if alarm:
-        # Annotated as an error and returned non-zero so the run goes red. The
-        # publish step is skipped, which is the point: stop quietly restating a
-        # figure the source no longer supports.
-        print(f"::error::Readership has been held at the high-water mark for "
-              f"{streak} consecutive runs. GA4 is reporting materially less "
-              f"than the published figure, which is no longer explainable as "
-              f"estimator noise. Check that tracking is still installed.",
+    if ga4_failure:
+        print("::error::REQUIRE_GA4=1 requires configured credentials and fresh valid "
+              "readers, countries, and readers_monthly metrics; refusing a stale publish.",
               file=sys.stderr)
-        return 1
-    return 0
+    if alarm:
+        print(f"::error::GA4 readers stayed more than {READER_DROP_PERCENT}% below "
+              f"their reference for {streak} fresh observations. This operational "
+              "guard requires investigation; it is not a statistical significance "
+              "test or an elapsed-time claim. Check tracking and report changes.",
+              file=sys.stderr)
+    return 1 if ga4_failure or alarm else 0
 
 
 if __name__ == "__main__":
