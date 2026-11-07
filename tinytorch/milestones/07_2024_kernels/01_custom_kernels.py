@@ -33,7 +33,7 @@ available on this machine.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   Module 01 (Tensor)        : YOUR strided tensor data structure
   Module 17 (Acceleration)  : YOUR tiled_matmul, fused_gelu, im2col, im2col_conv2d, col2im
-  Optional                  : a C++ compiler (bundled SIMD kernel), Apple GPU or CUDA + Triton
+  Optional                  : a C++ compiler (bundled SIMD kernel), Apple GPU, CUDA (nvcc), or CUDA + Triton
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 🏗️ ARCHITECTURE:
@@ -297,6 +297,19 @@ def native_mps(A, B):
             "warnings": [] if ok else ["bundled mps_matmul disagrees with NumPy"]}
 
 
+def native_cuda(A, B):
+    try:
+        from tinytorch.extensions.cuda_ops import has_cuda_support, cuda_matmul, cuda_build_info
+        if not has_cuda_support():
+            return {"status": f"not available ({cuda_build_info().get('error') or 'no nvcc or NVIDIA GPU'})"}
+    except Exception as error:
+        return {"status": f"not available (import failed: {error})"}
+    ok = np.allclose(cuda_matmul(A, B, stage="tiled"), A @ B, rtol=GEMM_RTOL, atol=GEMM_ATOL)
+    return {"status": "NVIDIA GPU via hand-written CUDA (tiled stage, nvcc + ctypes)",
+            "gemm_ms": time_ms(lambda: cuda_matmul(A, B, stage="tiled")),
+            "warnings": [] if ok else ["bundled cuda_matmul disagrees with NumPy"]}
+
+
 def native_triton(x, bias):
     try:
         from tinytorch.extensions.triton_gelu import triton_fused_gelu, _HAS_TRITON
@@ -329,12 +342,14 @@ def run_part_b(acc, Tensor):
 
     paths = {"C++ SIMD (bundled)": native_simd(acc, Tensor, A, B, x, bias),
              "Apple Metal MPS (bundled)": native_mps(A, B),
+             "NVIDIA CUDA (bundled)": native_cuda(A, B),
              "OpenAI Triton (bundled)": native_triton(x, bias)}
 
     print(f"\n  GEMM {M}x{K}x{N} (median ms; ratio is relative to YOUR tiled_matmul)")
     print(f"    {'YOUR tiled_matmul (tile 64)':<32} {yours_gemm:9.3f} ms   baseline")
     print(f"    {'NumPy np.matmul (BLAS)':<32} {numpy_gemm:9.3f} ms   {ratio_text(yours_gemm, numpy_gemm)}")
-    for name, key in (("C++ SIMD (bundled)", "gemm_ms"), ("Apple Metal MPS (bundled)", "gemm_ms")):
+    for name, key in (("C++ SIMD (bundled)", "gemm_ms"), ("Apple Metal MPS (bundled)", "gemm_ms"),
+                      ("NVIDIA CUDA (bundled)", "gemm_ms")):
         if key in paths[name]:
             print(f"    {name:<32} {paths[name][key]:9.3f} ms   {ratio_text(yours_gemm, paths[name][key])}")
     print("    (Each block product in YOUR tiled_matmul is a NumPy BLAS call, so it can beat a")
