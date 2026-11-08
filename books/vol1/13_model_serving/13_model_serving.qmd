@@ -853,7 +853,7 @@ The deployment tiers differ first in their operating envelopes (latency targets,
 
 :::
 
-Whichever tier hosts it, a networked deployment runs the model inside a server process, and each such replica must turn an irregular stream of requests into work its accelerator can execute efficiently. That conversion is the job of the inference server's internal architecture.
+Temporal and spatial placement fix when predictions are computed and which form of the model fits the target hardware tier's memory and power envelope. On the networked tiers where this chapter's ResNet-50 and LLM services run, each model replica still has to accept live client traffic inside a server process.
 
 ## Serving System Architecture {#sec-model-serving-serving-system-architecture-4879}
 
@@ -1964,7 +1964,7 @@ class AdaptiveResolutionCalc:
 
 #### Adaptive resolution {#sec-model-serving-adaptive-resolution-cb4e}
 
-Adaptive resolution\index{Adaptive resolution!content-based selection} lets production systems select resolution dynamically based on content. One approach runs a lightweight classifier at $128{\times}128$ to categorize content type, then selects task-appropriate resolution with documents at $512{\times}512$, landscapes at $224{\times}224$, and faces at $384{\times}384$. In this illustrative scenario, the policy provides `{python} AdaptiveResolutionCalc.adaptive_throughput_improvement_mult_str` throughput improvement with `{python} AdaptiveResolutionCalc.adaptive_accuracy_retention_str` accuracy retention vs. fixed high resolution. This pattern trades preprocessing cost from running the lightweight classifier for inference savings on the main model. The stage after the model, postprocessing, usually costs far less, but it still crosses the device boundary and spends host CPU time.
+Adaptive resolution\index{Adaptive resolution!content-based selection} lets production systems select resolution dynamically based on content. One approach runs a lightweight classifier at $128{\times}128$ to categorize content type, then selects task-appropriate resolution with documents at $512{\times}512$, landscapes at $224{\times}224$, and faces at $384{\times}384$. In this illustrative scenario, the policy provides `{python} AdaptiveResolutionCalc.adaptive_throughput_improvement_mult_str` throughput improvement with `{python} AdaptiveResolutionCalc.adaptive_accuracy_retention_str` accuracy retention vs. fixed high resolution. This pattern trades preprocessing cost from running the lightweight classifier for inference savings on the main model.
 
 ### Postprocessing {#sec-model-serving-postprocessing-3b24}
 
@@ -2127,7 +2127,7 @@ A request's latency is spent across every stage of its path, not only in the mod
 
 :::
 
-Tracing an isolated request reveals the intrinsic execution time of each pipeline phase. In production, however, multiple requests arrive concurrently and contend for shared accelerators, CPU cores, and memory buses, introducing queuing delays that dwarf raw computation time.
+Stage-by-stage timing, resolution scaling, postprocessing placement, and host-device pipelining set the service time and steady-state duty cycle of a replica when requests arrive in an orderly stream. Once unscheduled clients send requests faster than a worker can retire them, waiting time in the queue rather than work inside the stages begins to dominate the latency budget.
 
 ## Queuing Theory {#sec-model-serving-queuing-theory-tail-latency-29a6}
 
@@ -3132,7 +3132,7 @@ $$ \BatchedRequestLatency\approx \underbrace{ \frac{\BatchSize-1}{2\ArrivalRate}
 
 @Eq-batching-tax shows that increasing $\BatchSize$ raises arithmetic intensity and amortizes memory bandwidth across inputs, while its price is a modest inference inflation in $\BatchServiceTime(\BatchSize)$ and a formation delay for early arrivals. Evaluated as a formation-plus-service component comparison using the service times from @tbl-model-serving-batching-throughput-tradeoff at `{python} BatchingTax.lambda_qps_str`, moving from batch 1 to batch 32 increases formation wait from `{python} BatchingTax.wait_time_b1_ms_str` to `{python} BatchingTax.wait_time_b32_ms_str`. That is a `{python} BatchingTax.penalty_ratio_mult_str` increase in isolated stage latency (`{python} BatchingTax.lat_b1_ms_str` to `{python} BatchingTax.lat_b32_ms_str`).
 
-Batch-one service, however, cannot sustain `{python} BatchingTax.lambda_qps_str` on a single worker whose peak service rate is only `{python} BatchingTax.b1_rate_rps_str`. Without batching, worker backlog diverges toward infinity, so `{python} BatchingTax.lat_b1_ms_str` does not represent a viable steady-state response time at this arrival rate. Batching is what makes `{python} BatchingTax.lambda_qps_str` feasible on that hardware in the first place, demonstrating that grouping requests can lower loaded end-to-end response time even while adding formation delay. Sizing $\BatchSize$ is therefore an operational stability screen before it is an economic optimization. Operators first enforce queue stability ($\ArrivalRate < \EffectiveServiceRate(\BatchSize)$) and then select the batch size that maximizes throughput within the memory ceiling and latency SLO $(\LatencySlo)$. Because @eq-batching-tax assumes the batcher waits for a full count of $\BatchSize$ requests before launching, the two batching policies below differ in how they relax that count-only assumption when traffic fluctuates.
+Batch-one service, however, cannot sustain `{python} BatchingTax.lambda_qps_str` on a single worker whose peak service rate is only `{python} BatchingTax.b1_rate_rps_str`. Without batching, worker backlog diverges toward infinity, so `{python} BatchingTax.lat_b1_ms_str` does not represent a viable steady-state response time at this arrival rate. Batching is what makes `{python} BatchingTax.lambda_qps_str` feasible on that hardware in the first place, demonstrating that grouping requests can lower loaded end-to-end response time even while adding formation delay. Sizing $\BatchSize$ is therefore an operational stability screen before it is an economic optimization. Operators first enforce queue stability ($\ArrivalRate < \EffectiveServiceRate(\BatchSize)$) and then select the batch size $\BatchSize$ that maximizes throughput within the memory ceiling and latency SLO $(\LatencySlo)$ under @eq-batching-tax.
 
 ### Static vs. dynamic batching {#sec-model-serving-static-vs-dynamic-batching-fd0a}
 
@@ -3921,7 +3921,7 @@ class RuntimeSelectionOpener:
     speedup_floor_mult_str = fmt_multiple(speedup_floor, precision=0, commas=False)
 ```
 
-Running an unchanged ResNet-50 model through a compiled C++ engine rather than an eager Python interpreter cuts batch-one latency on the reference H100 by more than `{python} RuntimeSelectionOpener.speedup_floor_mult_str`, without altering a single weight. Dynamic batching and request scheduling govern how requests are grouped and queued, but an execution engine still has to map the resulting tensor operations onto physical execution units and memory hierarchies. The **inference runtime**\index{Inference runtime!execution engine}, the software layer that schedules tensor operations and manages device resources, therefore changes both latency and throughput for a fixed model architecture. Runtime engineering proceeds in two steps. Selection chooses the execution engine that fits the deployment target, and configuration tunes that engine for the model, hardware, input shapes, and latency budget.
+Running an unchanged ResNet-50 model through a compiled C++ engine rather than an eager Python interpreter cuts batch-one latency on the reference H100 by more than `{python} RuntimeSelectionOpener.speedup_floor_mult_str`, without altering a single weight. The **inference runtime**\index{Inference runtime!execution engine}, the software layer that maps tensor operations onto physical execution units and manages device memory hierarchies, therefore changes both latency and throughput for a fixed model architecture. Runtime engineering proceeds in two steps. Selection chooses the execution engine that fits the deployment target, and configuration tunes that engine for the model, hardware, input shapes, and latency budget.
 
 ### Runtime constraint map {#sec-ml-frameworks-quantitative-framework-efficiency-comparison-3b77}
 
@@ -4292,7 +4292,7 @@ Precision selection carries direct infrastructure sizing consequences. Under the
 
 ## Node-Level Optimization {#sec-model-serving-nodelevel-optimization-3d9d}
 
-Runtime selection and precision tuning operate at the model level, determining what computation runs and what numerical format it uses. In the reference ResNet-50 service, however, the forward pass accounts for `{python} LatencyTableCalc.l_inf_ms_str` out of `{python} LatencyTableCalc.l_total_ms_str` end to end, and once a compiled engine shrinks that forward pass to `{python} LatencyBudgetCalc.tensorrt_inference_ms_str`, host preprocessing alone consumes `{python} LatencyBudgetCalc.tensorrt_preprocess_pct_str` of the remaining time. An isolated model benchmark hides those host-side costs: JPEG decoding on CPU cores, copies across the PCIe bus, and the driver work that launches each kernel.
+In the reference ResNet-50 service, the forward pass accounts for `{python} LatencyTableCalc.l_inf_ms_str` out of `{python} LatencyTableCalc.l_total_ms_str` end to end, and once a compiled engine shrinks that forward pass to `{python} LatencyBudgetCalc.tensorrt_inference_ms_str`, host preprocessing alone consumes `{python} LatencyBudgetCalc.tensorrt_preprocess_pct_str` of the remaining time. An isolated model benchmark hides those host-side costs: JPEG decoding on CPU cores, copies across the PCIe bus, and the driver work that launches each kernel.
 
 A request and its model cross four physical boundaries. The storage boundary governs how a new replica loads its weights, and @sec-model-serving-model-lifecycle-management-ff2e and @sec-model-serving-loading-strategies-eb38 develop it. The other three lie on the active request path of a warmed node, and node-level optimization targets them:
 
@@ -4389,11 +4389,11 @@ Optimizing inference follows the request path from the outside in across four st
 
 :::
 
-A node tuned this way runs each request near its physical limit, but only once it is running. The compiled engine that makes the steady state fast took tens of seconds to build, its weights must cross storage, host memory, and the PCIe bus before the first request arrives, and its preprocessing must match what training used. How a replica reaches that steady state, and whether it computes what training computed once there, decides whether the fast node is also a correct and available one.
+Graph compilation, host resource isolation, CPU vectorization, and timeline profiling bring a serving node close to its physical limit once the replica is warmed up and running. That steady-state speed still leaves open what happens at the edges of a replica's lifecycle, when a container first starts or a new model version replaces an active one.
 
 ## Model Loading and Versioning {#sec-model-serving-model-lifecycle-management-ff2e}
 
-Every optimization so far assumed a replica that is already warmed up in device memory and a host pipeline that reproduces the exact transformations used during training. Both assumptions fail at the edges of a replica's lifecycle. Provisioning a new container or swapping an active model stalls traffic until weights and compiled engines are resident on the device, and any drift between training and serving preprocessing silently corrupts accuracy even when every latency target is met.
+Provisioning a new container or swapping an active model stalls traffic until weights and compiled engines are resident on the device, and any drift between training and serving preprocessing silently corrupts accuracy even when every latency target is met. Across a replica's lifecycle, serving infrastructure must bound cold-start initialization, stage checkpoints in local caches, share device memory safely across co-located models, and keep host transformations identical to training.
 
 ### Cold start and initialization dynamics {#sec-model-serving-model-loading-initialization-cc5a}
 
@@ -4680,7 +4680,7 @@ The serving-specific manifestation of skew is **preprocessing divergence**\index
 
 :::
 
-A replica that loads quickly, runs predictably, and computes what training computed completes fixed-output serving. Every workload so far, however, has treated a request as one completed prediction. The fastest-growing category of serving workloads violates this assumption entirely. Large language models generate outputs token by token, with each token depending on every previous one. A single request may produce hundreds or thousands of tokens over seconds of elapsed time, yet must feel responsive from the first token onward. The shift from *fixed-output* to *variable-length, streaming-output* serving reopens each tool developed so far, from the latency budget to the runtime.
+A replica that loads quickly, isolates co-located models, and computes the same features training used completes the lifecycle of a fixed-output service. Every workload so far, however, has treated a request as a single forward pass that returns one completed prediction, and shifting to *variable-length, streaming-output* generation reopens each tool developed so far, from the latency budget to the runtime.
 
 ## LLM Serving {#sec-model-serving-llm-serving-b8bf}
 
@@ -4861,7 +4861,7 @@ Batching changes which bytes dominate. Each sequence also reads its own KV cache
 
 Switching a chat endpoint from greedy decoding to four-way beam search quadruples both the arithmetic per step and the KV-cache memory each active user holds. The sampling algorithm executed at each step therefore shapes serving cost directly. Greedy decoding\index{Greedy decoding!LLM generation} takes the highest-scoring token and needs one forward pass per token, though it can fall into repetitive output because it never revisits an early choice. Beam search\index{Beam search!decoding strategy} keeps several candidate sequences and multiplies both computational work and KV-cache footprint by the beam width. Stochastic sampling\index{Sampling!temperature, top-k, top-p} instead draws each token at random from the model's output, after scaling the logits by a temperature and restricting the draw to the most likely tokens with top-$\TopTokenSampleCount$\index{Top-k!sampling} or top-$\NucleusProbabilityMass$ nucleus sampling\index{Nucleus sampling!top-p} [@holtzman2020curious]. For the serving system, beam width multiplies the state each request holds, while the sampling variants add only a small per-step reduction whose cost depends on its kernel implementation.
 
-Interactive LLM services commonly return tokens as they are produced rather than waiting for complete generation. This streaming response\index{Streaming response!LLM serving} transforms the user experience. A two-second total generation feels responsive when tokens stream continuously, but feels broken when users stare at a blank screen for two seconds. Streaming requires infrastructure support for incremental responses and client-side rendering. Once generation streams token by token, the serving unit changes from one fixed-output prediction to a stateful sequence whose length is unknown when it is admitted and whose memory footprint grows on every step. The unknown length breaks the fixed-batch scheduling developed for fixed-output models, and the growing state turns accelerator memory into the next constraint.
+Interactive LLM services commonly return tokens as they are produced rather than waiting for complete generation. This streaming response\index{Streaming response!LLM serving} transforms the user experience. A two-second total generation feels responsive when tokens stream continuously, but feels broken when users stare at a blank screen for two seconds. Streaming requires infrastructure support for incremental responses and client-side rendering.
 
 ### Continuous batching {#sec-model-serving-continuous-batching-8bb6}
 
@@ -5434,7 +5434,7 @@ The chat-energy calculation showed that how many sequences share each weight str
 
 ## Economics and Planning {#sec-model-serving-economics-capacity-planning-3e7e}
 
-A team that has raised an H100's ResNet-50 throughput several-fold through batching still faces a fleet-level question, namely whether serving a `{python} CapacityPlanningCalc.cp_peak_qps_str` target within the same p99 latency SLO costs less on a few H100s or on several times as many lower-cost T4s. Batching, precision tuning, kernel fusion, graph compilation, and the LLM levers that share each weight stream across sequences all improve single-node performance, but production deployment requires choosing how many machines to rent, of what type, and at what total bill. Serving infrastructure cost grows continuously with request volume [@zhang2019mark], while training cost follows a one-time dataset, model, and optimization budget. The bitter lesson sharpens this asymmetry. The methods that win are the ones that scale, so successive models grow larger, and while training pays for that scale once, serving pays for it on every request.
+A team that has raised an H100's ResNet-50 throughput several-fold through batching still faces a fleet-level question, namely whether serving a `{python} CapacityPlanningCalc.cp_peak_qps_str` target within the same p99 latency SLO costs less on a few H100s or on several times as many lower-cost T4s. Serving infrastructure cost grows continuously with request volume [@zhang2019mark], while training cost follows a one-time dataset, model, and optimization budget. The bitter lesson sharpens this asymmetry. The methods that win are the ones that scale, so successive models grow larger, and while training pays for that scale once, serving pays for it on every request.
 
 ::: {.column-margin .margin-pointer}
 ↩ The bitter lesson, that general methods which scale with computation keep outperforming hand-engineered ones, is established in @sec-introduction-bitter-lesson-79c7.
