@@ -153,7 +153,7 @@ $\LatencyBandwidthCrossoverSize = \MessageStartupLatency\times \LinkBandwidth=$ 
 
 The $\MessageStartupLatency$-$\LinkBandwidth$ model assumes a message is a single, atomic transfer. In practice, networks pipeline messages: a sender can inject a new packet before the previous one has been fully received. The **LogGP model**\index{LogGP model} [@alexandrov1995] extends LogP with a long-message gap parameter:
 
-- **$\MessageInjectionGap$ (gap)**: The minimum interval between consecutive message injections at the sender. This models the NIC's injection rate limit.
+- **$\MessageInjectionGap$ (gap)**: The minimum interval between consecutive message injections at the sender. This interval models the NIC's injection rate limit.
 - **$\SenderOverhead$, $\ReceiverOverhead$ (overhead)**: The CPU time consumed by the processor to initiate or complete a message, during which it cannot do useful compute.
 
 For a long message of $\PointToPointMessageSize$ bytes, LogGP models transfer time by separating network transit from endpoint processor overhead and per-byte injection gaps:
@@ -359,11 +359,11 @@ class CommAlgorithmSelection:
 
 Modern clusters have a two-level topology: GPUs within a node are connected by NVLink (`{python} CommAlgorithmSelection.nvlink_bw_gb_per_s_str`), while nodes are connected by InfiniBand (`{python} CommAlgorithmSelection.ib_ndr_beta_gb_per_s_str`). Hierarchical AllReduce exploits this asymmetry in three phases:
 
-1. **Intra-node reduce** (NVLink): Each node reduces its `{python} CommAlgorithmSelection.gpus_per_host_str` local GPUs to a single result using NVLink's `{python} CommAlgorithmSelection.nvlink_bw_gb_per_s_str` bandwidth. This is fast because NVLink's per-direction rate is `{python} CommAlgorithmSelection.nvlink_to_ndr_ratio_mult_str` that of an InfiniBand NDR port.
+1. **Intra-node reduce** (NVLink): Each node reduces its `{python} CommAlgorithmSelection.gpus_per_host_str` local GPUs to a single result using NVLink's `{python} CommAlgorithmSelection.nvlink_bw_gb_per_s_str` bandwidth. This local reduction is fast because NVLink's per-direction rate is `{python} CommAlgorithmSelection.nvlink_to_ndr_ratio_mult_str` that of an InfiniBand NDR port.
 2. **Inter-node AllReduce** (InfiniBand): An AllReduce combines the per-node results across nodes. Only one representative per `{python} CommAlgorithmSelection.gpus_per_host_str` local GPUs participates, so the inter-node ring has one-eighth as many participants as a flat GPU-level ring.
 3. **Intra-node broadcast** (NVLink): Each node broadcasts the global result to its `{python} CommAlgorithmSelection.gpus_per_host_str` local GPUs.
 
-The hierarchical approach reduces the inter-node ring size from all GPUs to one representative per `{python} CommAlgorithmSelection.gpus_per_host_str` local GPUs, cutting the latency-step term by about `{python} CommAlgorithmSelection.gpus_per_host_str`$\times$ while keeping local aggregation on fast intra-node links. The inter-node representative still exchanges the full reduced tensor; the gain is not a universal reduction of payload bytes by the number of local GPUs. NCCL selects among topology-aware algorithms such as Ring, Tree, CollNet variants, NVLS/NVLSTree, and PAT based on the collective, message size, topology, architecture, and version. Hierarchical communication is common on multi-node systems but is not a universal default. The cost structure of collectives lets an engineer reason about data-parallel overhead. Pipeline parallelism, in contrast, introduces a different kind of overhead, idle time caused by the sequential dependency between pipeline stages.
+The hierarchical approach reduces the inter-node ring size from all GPUs to one representative per `{python} CommAlgorithmSelection.gpus_per_host_str` local GPUs, cutting the latency-step term by about `{python} CommAlgorithmSelection.gpus_per_host_str`$\times$ while keeping local aggregation on fast intra-node links. The inter-node representative still exchanges the full reduced tensor; the gain is not a universal reduction of payload bytes by the number of local GPUs. NCCL selects among topology-aware algorithms such as Ring, Tree, CollNet variants, NVLS/NVLSTree, and PAT based on the collective, message size, topology, architecture, and version. Hierarchical communication is common on multi-node systems but is not a universal default. Together, these collective cost models let an engineer reason about data-parallel overhead. Pipeline parallelism, in contrast, introduces a different kind of overhead, idle time caused by the sequential dependency between pipeline stages.
 
 ## Pipeline Arithmetic {#sec-appdx-comm-foundations-pipeline-arithmetic}
 
@@ -462,7 +462,7 @@ Compression is beneficial when $\CompressedCommunicationTime < \TransferTimeForP
 
 $$ \CodecEncodeTime + \CodecDecodeTime < \TransferTimeForPayload(\CollectivePayloadSize) - \TransferTimeForPayload\!\left(\frac{\CollectivePayloadSize}{\CompressionRatio}\right) $$ {#eq-compression-breakeven}
 
-In the bandwidth-dominated regime ($\CollectivePayloadSize\gg \LatencyBandwidthCrossoverSize$), the communication time scales linearly with message size, and the right-hand side simplifies to approximately $\TransferTimeForPayload(\CollectivePayloadSize) \times (1 - 1/\CompressionRatio)$. For high compression ratios ($\CompressionRatio \gg 1$), this approaches $\TransferTimeForPayload(\CollectivePayloadSize)$, so compression is worthwhile as long as the codec overhead is less than the uncompressed communication time.
+In the bandwidth-dominated regime ($\CollectivePayloadSize\gg \LatencyBandwidthCrossoverSize$), the communication time scales linearly with message size, and the right-hand side simplifies to approximately $\TransferTimeForPayload(\CollectivePayloadSize) \times (1 - 1/\CompressionRatio)$. For high compression ratios ($\CompressionRatio \gg 1$), this bound approaches $\TransferTimeForPayload(\CollectivePayloadSize)$, so compression is worthwhile as long as the codec overhead is less than the uncompressed communication time.
 
 ```{python}
 #| echo: false
