@@ -148,7 +148,7 @@ class InferenceSetup:
     llm_ttft_slo_ms_str = fmt_time(llm_ttft_slo, ms, precision=0, commas=False)
 ```
 
-A language model that costs millions of dollars to train over two months can, once deployed to a global user base at thousands of queries per second, consume a comparable sum in inference compute within weeks. Inference is then no longer a temporary batch job. It is a continuous, latency-sensitive service.
+Once a trained model is deployed to a global user base at thousands of queries per second, its workload shifts from a bounded batch job to a continuous, latency-sensitive service. Every architectural choice in that service must balance the recurring cost of held accelerators against the strict response deadlines of live traffic.
 
 Running that continuous service takes more than an efficient steady-state replica. Fleet efficiency characterizes a replica by three quantities, each averaged over windows of hours to weeks. The first is model bandwidth utilization (MBU), which measures how close the replica's decode steps come to the bandwidth floor, the time needed to stream each step's weight and KV-cache bytes at peak memory bandwidth. The second is how long the replica takes to become ready. The third is the fraction of the time the replica holds its accelerators that it spends doing useful work at the ideal rate the bandwidth floor sets, which combines the runtime and program factors of ML goodput. Serving policy determines how that capacity is shared when requests arrive unevenly and each carries a latency target. A faster decode step supplies a better service rate, but it does not determine how long requests wait to join a batch, which replica receives them, which requests receive scarce cache space, or when the fleet needs another replica. These decisions connect the local execution toolkit to user-visible performance under load.
 
@@ -1753,7 +1753,7 @@ A load test can locate the stability boundary, where arrivals equal service capa
 
 ### Static and dynamic batching for vision models {#sec-inference-scale-static-dynamic-batching-vision-models-4623}
 
-Static batching\index{Static batching}, which waits until exactly $\BatchSize$ requests arrive before launching a forward pass, leaves early requests stranded during traffic lulls until their latency budgets expire. Vision models otherwise present the simplest batching case: preprocessed inputs share a fixed tensor shape and execute in a predictable time, so single-machine batching applies directly and fleet scale adds only the question of where batches form.
+Vision models provide the most direct test of these efficiency and queueing curves because preprocessed inputs share a fixed tensor shape and execute in a predictable time, leaving batch formation and placement as the primary fleet-scale decisions. Static batching\index{Static batching}, which waits until exactly $\BatchSize$ requests arrive before launching a forward pass, leaves early requests stranded during traffic lulls until their latency budgets expire.
 
 Dynamic batching collects requests for a maximum time window $\BatchingWindow$ or until reaching maximum batch size $\MaxBatchSize$, whichever occurs first. For Poisson arrivals with rate $\ArrivalRate$ (requests arriving independently of one another at that constant average rate), @eq-dynamic-batch-latency organizes expected request latency into queueing, formation, and execution contributions:
 
@@ -3364,7 +3364,7 @@ Available Memory for KV = `{python} KVCacheCapacityEstimator.total_hbm_decimal_g
 
 ### The fragmentation problem {#sec-inference-scale-fragmentation-problem-28be}
 
-An allocator that reserves a contiguous HBM slab for every sequence's maximum permitted length strands KV-cache memory in unused reservations and noncontiguous gaps [@kwon2023]. Traditional contiguous allocation creates two distinct forms of this waste.
+Reaching that byte-counting capacity limit requires every free byte of the KV pool to remain usable, yet an allocator that reserves a contiguous HBM slab for every sequence's maximum permitted length strands KV-cache memory in unused reservations and noncontiguous gaps [@kwon2023]. Traditional contiguous allocation creates two distinct forms of this waste.
 
 ```{python}
 #| echo: false
@@ -5904,7 +5904,7 @@ class FanoutTailBudget:
     leaf_slow_budget_pct_str = fmt_percent(round(leaf_slow_budget, 4), precision=2, commas=False, style="prose")  # prose says "about"
 ```
 
-When a serving request fans out to `{python} FanoutTailBudget.leaves_str` backend shards that each meet their own p99 latency target independently, the assembled response misses that threshold about `{python} FanoutTailBudget.request_slow_pct_str` of the time. Many serving requests are not one call but a set of parallel sub-requests whose results must all return before the response can be assembled. Examples are a ranking query that scores candidates on many shards, a recommendation that looks up embeddings across tables, and a sharded model whose replicas must all finish a step. Because the request completes only when its slowest leaf returns, it inherits the tail of every leaf it touches, the way a series system fails when any one component fails. If each of $\SeriesComponentCount$ leaves independently exceeds its own latency threshold with probability $\IndependentEventProbability$, the request exceeds it with probability $1 - (1 - \IndependentEventProbability)^{\SeriesComponentCount}$.
+Judging routing by completed-request tail latency is hardest when one request must wait on multiple destinations at once. When a serving request fans out to `{python} FanoutTailBudget.leaves_str` backend shards that each meet their own p99 latency target independently, the assembled response misses that threshold about `{python} FanoutTailBudget.request_slow_pct_str` of the time. Many serving requests are not one call but a set of parallel sub-requests whose results must all return before the response can be assembled. Examples are a ranking query that scores candidates on many shards, a recommendation that looks up embeddings across tables, and a sharded model whose replicas must all finish a step. Because the request completes only when its slowest leaf returns, it inherits the tail of every leaf it touches, the way a series system fails when any one component fails. If each of $\SeriesComponentCount$ leaves independently exceeds its own latency threshold with probability $\IndependentEventProbability$, the request exceeds it with probability $1 - (1 - \IndependentEventProbability)^{\SeriesComponentCount}$.
 
 Reading the same expression backward turns it into a budgeting rule. To keep the whole request within its p99 target, each of the `{python} FanoutTailBudget.leaves_str` leaves may be slow only about `{python} FanoutTailBudget.leaf_slow_budget_pct_str` of the time, so the leaf target moves from p99 to roughly p99.99. Fan-out width is therefore a tail-latency cost that the service pays per request, and the levers act on different terms. Fewer, larger shards lower $\SeriesComponentCount$. Queue-aware routing and isolation lower $\IndependentEventProbability$ by keeping leaves out of their own queueing tails. A deadline with a partial or default result, as in the search cascade of @sec-inference-scale-google-search-ranking-aab2, caps the damage when a leaf still misses. Hedged requests lower $\IndependentEventProbability$ further at the price of duplicated work. The independence assumption is optimistic, because a shared switch, host, or hot key slows many leaves together, so the measured composed tail is the quantity to budget, not the formula alone.
 
@@ -5975,7 +5975,7 @@ The mechanism is the suppression of repeated unlucky placement. If $\HighOccupan
 
 ### Weighted and adaptive load balancing {#sec-inference-scale-weighted-adaptive-load-balancing-1c03}
 
-Sending equal request rates to replicas with different hardware capacities saturates the slower tier while leaving the faster tier underutilized. In a mixed A100 and T4 fleet, the lower-capacity replicas reach saturation first as demand increases; equal routing does not imply overload at every arrival rate. Weighted assignment accounts for measured capacity by allocating the following long-run request share to each server:
+Uniform two-choice probing still assumes that every bin drains work at the same rate, whereas sending equal request rates to replicas with different hardware capacities saturates the slower tier while leaving the faster tier underutilized. In a mixed A100 and T4 fleet, the lower-capacity replicas reach saturation first as demand increases; equal routing does not imply overload at every arrival rate. Weighted assignment accounts for measured capacity by allocating the following long-run request share to each server:
 
 $$\Pr(\text{route to server } \ServerIndex) = \frac{\ServerRoutingWeight_i}{\sum_j \ServerRoutingWeight_j}$$
 
@@ -6390,7 +6390,7 @@ An inference worker whose HTTP server responds `200 OK` to a shallow ping can st
 
 ### Circuit breakers and backpressure {#sec-inference-scale-circuit-breakers-backpressure-e61c}
 
-When a GPU inference server slows down, routing more requests to it can turn a local problem into a fleet-wide failure. Consider an illustrative rise in service time from 50 ms to 500 ms. Queues accumulate, client timeouts generate retries, and rerouted work consumes neighboring replicas' headroom. The cause might be a stalled dependency, device degradation, or resource contention. The load balancer needs a policy for withdrawing an unhealthy replica while controlling the displaced load.
+Periodic health probes catch outright replica failures, yet a GPU inference server that merely slows down can pass readiness checks while turning a local degradation into a fleet-wide failure. Consider an illustrative rise in service time from 50 ms to 500 ms. Queues accumulate, client timeouts generate retries, and rerouted work consumes neighboring replicas' headroom. Whether the cause is a stalled dependency, device degradation, or resource contention, failover alone is not enough without a policy that both withdraws the degraded replica and bounds the displaced load.
 
 The circuit breaker pattern\index{Circuit breaker!circuit breaker pattern} [@nygard2007releaseit] limits repeated work sent to an unhealthy destination. In the closed state, the server receives normal traffic. When the configured error, timeout, or latency threshold is exceeded, the breaker opens and requests fail fast or become candidates for rerouting. After a recovery interval, a half-open state admits limited probes, closing on recovery or reopening on failure (@fig-circuit-breaker). Opening a breaker does not create replacement capacity, so rerouting must respect admission limits and retry budgets or it can overload the surviving replicas.
 
@@ -7962,7 +7962,7 @@ Rerouting is only part of regional failover. The destination needs accessible, a
 
 ### Cost optimization across regions {#sec-inference-scale-cost-optimization-across-regions-c1c2}
 
-Running every batch job and latency-tolerant query in the primary interactive region overpays whenever another compliant region has cheaper spot or off-peak GPU capacity. Because GPU pricing varies by provider, contract, region, and time, @tbl-gpu-region-pricing uses a hypothetical price snapshot to show how placement can balance cost against latency requirements; it must not be used for procurement.
+The same cross-region routing machinery that redirects traffic during an outage can also lower steady-state spend, because running every batch job and latency-tolerant query in the primary interactive region overpays whenever another compliant region has cheaper spot or off-peak GPU capacity. Because GPU pricing varies by provider, contract, region, and time, @tbl-gpu-region-pricing uses a hypothetical price snapshot to show how placement can balance cost against latency requirements; it must not be used for procurement.
 
 | **Region**  | **H100 spot price** | **On-demand** | **Latency to US users** |
 |:------------|:-------------------:|:-------------:|:-----------------------:|
