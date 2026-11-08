@@ -86,7 +86,6 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
           <p class="reader-source-label">Selected passage</p>
           <a class="reader-source-link" target="_blank" rel="noopener noreferrer"></a>
           <p class="reader-quote"></p>
-          <p class="reader-caution">AI explanations can be wrong. Check them against the source.</p>
         </section>
         <div class="reader-instruction">
           <strong>Select a passage to begin.</strong>
@@ -109,12 +108,13 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
         <button class="reader-retry" type="button">Retry</button>
       </div>
       <form class="reader-composer" aria-disabled="true">
-        <textarea rows="1" aria-label="Ask a follow-up question" placeholder="Select a passage to begin" disabled></textarea>
+        <textarea rows="1" aria-label="Ask a follow-up question" aria-describedby="socratiq-reader-footnote" placeholder="Select a passage to begin" disabled></textarea>
         <button class="reader-send" type="submit" aria-label="Send question" title="Send" disabled>
           <span aria-hidden="true">↑</span>
         </button>
         <button class="reader-stop" type="button" aria-label="Stop explanation" hidden>Stop</button>
       </form>
+      <p id="socratiq-reader-footnote" class="reader-footnote">SocratiQ uses AI and can make mistakes. Check claims in the book.</p>
     </section>
   `;
   root.appendChild(shell);

@@ -253,8 +253,10 @@ export const readerStyles = `
   .reader-shell[data-theme="dark"] .reader-error { border-color: #74414e; background: #39272d; color: #ffdce4; }
   .reader-retry { flex: 0 0 auto; border: 0; background: none; color: inherit; cursor: pointer; font-weight: 700; text-decoration: underline; }
 
-  .reader-composer { display: flex; align-items: flex-end; gap: 8px; padding: 11px 13px 13px; border-top: 1px solid #eee7e9; background: #fffdfd; }
+  .reader-composer { display: flex; align-items: flex-end; gap: 8px; padding: 10px 13px 5px; border-top: 1px solid #eee7e9; background: #fffdfd; }
   .reader-shell[data-theme="dark"] .reader-composer { border-color: #3d373d; background: #211e22; }
+  .reader-footnote { margin: 0; padding: 0 13px 8px; background: #fffdfd; color: #665b61; font-size: 10.5px; line-height: 1.3; text-align: center; }
+  .reader-shell[data-theme="dark"] .reader-footnote { background: #211e22; color: #c9bec5; }
   .reader-composer textarea { min-width: 0; min-height: 42px; max-height: 110px; flex: 1 1 auto; resize: vertical; padding: 10px 11px; border: 1px solid #dcd2d7; border-radius: 10px; background: #fff; color: #272329; font-size: 13px; line-height: 1.35; }
   .reader-composer textarea::placeholder { color: #8a7f85; }
   .reader-shell[data-theme="dark"] .reader-composer textarea { border-color: #514950; background: #2b272c; color: #f5f0f2; }
@@ -304,7 +306,10 @@ export const readerStyles = `
   }
   .reader-shell[data-compact="true"] .reader-header { padding-block: 8px; }
   .reader-shell[data-compact="true"] .reader-header-note { display: none; }
+  .reader-shell[data-compact="true"] .reader-privacy { padding-block: 5px; }
   .reader-shell[data-compact="true"] .reader-source { position: static; }
+  .reader-shell[data-compact="true"] .reader-composer { padding-block: 6px 3px; }
+  .reader-shell[data-compact="true"] .reader-footnote { padding-bottom: 5px; }
 
   @media (pointer: coarse) {
     .reader-panel button, .reader-launcher, .selection-action { min-height: 44px; min-width: 44px; }
