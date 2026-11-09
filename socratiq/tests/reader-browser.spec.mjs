@@ -36,6 +36,9 @@ for (const volume of ['vol1', 'vol2', 'vol3', 'vol4']) {
     expect(requests).toHaveLength(0);
     await explain(page);
     await expect(page.getByText('Explanation ready.', {exact: true})).toBeVisible();
+    await expect(page.locator('#socratiq-reader .reader-footnote')).toHaveText(
+      'SocratiQ uses AI and can make mistakes. Check claims in the book.',
+    );
     await expect(page.getByRole('button', {name: 'Stop explanation'})).toBeHidden();
     await expect(page.getByRole('button', {name: 'Retry', exact: true})).toBeHidden();
     await expect(page.locator('#socratiq-reader .reader-thread .katex')).toBeVisible();
@@ -72,6 +75,7 @@ test('mobile selection and dark panel fit viewport', async ({page}, testInfo) =>
   expect(rect.x).toBeGreaterThanOrEqual(0); expect(rect.x + rect.width).toBeLessThanOrEqual(390);
   expect(rect.y).toBeGreaterThanOrEqual(0); expect(rect.y + rect.height).toBeLessThanOrEqual(844);
   await expect(page.getByRole('button', {name: 'Send question'})).toBeInViewport();
+  await expect(page.locator('#socratiq-reader .reader-footnote')).toBeInViewport();
   await page.screenshot({path: testInfo.outputPath('mobile-dark.png')});
 });
 
