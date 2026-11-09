@@ -154,13 +154,34 @@ function updateColorScheme(shadowEle) {
 
     console.log('[THEME DEBUG] Final isDarkMode:', isDarkMode);
 
-    // Set theme attribute on host element
+    // Set theme and volume attributes on host element
     const themeValue = isDarkMode ? "dark" : "light";
-    console.log('[THEME DEBUG] Setting theme value to:', themeValue);
+    const detectVolume = () => {
+        const normalize = (v) => {
+            const s = String(v || "").trim().toLowerCase();
+            return /^vol[1-4]$/.test(s) ? s : "";
+        };
+        const explicit = normalize(window.SocratiqWidgetVolume) ||
+            normalize(document.documentElement?.dataset?.socratiqVolume) ||
+            normalize(document.body?.dataset?.socratiqVolume) ||
+            normalize(document.querySelector('script[data-volume]')?.dataset?.volume);
+        if (explicit) return explicit;
+        const themeColor = document.querySelector('meta[name="theme-color"]')?.content?.trim().toLowerCase();
+        if (themeColor === '#1f407a') return 'vol2';
+        if (themeColor === '#581c87') return 'vol3';
+        if (themeColor === '#065f46') return 'vol4';
+        if (themeColor === '#a51c30' || themeColor === '#8e1537') return 'vol1';
+        const pathMatch = location.pathname.match(/\/(vol[1-4])(\/|$)/i);
+        if (pathMatch) return pathMatch[1].toLowerCase();
+        return 'vol1';
+    };
+    const volumeValue = detectVolume();
+    console.log('[THEME DEBUG] Setting theme value to:', themeValue, 'volume:', volumeValue);
     
     const hostTarget = shadowEle.host || shadowEle;
     if (hostTarget?.setAttribute) {
         hostTarget.setAttribute("data-socratiq-theme", themeValue);
+        hostTarget.setAttribute("data-socratiq-volume", volumeValue);
         console.log('[THEME DEBUG] Set host element theme attribute:', hostTarget.getAttribute("data-socratiq-theme"));
         
         // Log computed styles to debug CSS variables
@@ -176,6 +197,7 @@ function updateColorScheme(shadowEle) {
     const widgetRoot = shadowEle.querySelector?.('.socratiq-widget-root');
     if (widgetRoot?.setAttribute) {
         widgetRoot.setAttribute("data-socratiq-theme", themeValue);
+        widgetRoot.setAttribute("data-socratiq-volume", volumeValue);
         console.log('[THEME DEBUG] Set widget root theme attribute:', widgetRoot.getAttribute("data-socratiq-theme"));
         
         // Log computed styles for widget root

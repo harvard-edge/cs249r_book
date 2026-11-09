@@ -251,7 +251,7 @@ this.createModal().then(async () => {
                                 style="background-color: ${isDark ? '#21262d' : '#ffffff'} !important; color: ${isDark ? '#e6edf3' : '#1f2328'} !important; border-color: ${isDark ? '#30363d' : '#d0d7de'} !important;" 
                                 placeholder="Search all...">
                             <svg class="absolute left-3 top-2.5 h-4 w-4 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2">
-                                <path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" stroke="#4169E1"></path>
+                                <path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" stroke="currentColor"></path>
                             </svg>
 
                         </div>
@@ -319,7 +319,7 @@ this.createModal().then(async () => {
                                 <button id="showViz" class="px-3 py-2 text-sm ${themeClasses.bgButton} ${themeClasses.bgButtonHover} rounded-md" style="color: var(--socratiq-text) !important;">
                                     Show Interactive UI
                                 </button>
-                                <button id="startReview" class="px-3 py-2 text-sm ${themeClasses.bgAccent} ${themeClasses.bgAccentHover} ${themeClasses.textAccent} rounded-md" style="color: ${isDark ? '#58a6ff' : '#0969da'} !important;">
+                                <button id="startReview" class="px-3 py-2 text-sm ${themeClasses.bgAccent} ${themeClasses.bgAccentHover} ${themeClasses.textAccent} rounded-md" style="color: var(--socratiq-accent) !important;">
                                     Review Cards
                                 </button>
                             </div>
@@ -394,7 +394,7 @@ this.createModal().then(async () => {
                                 <div class="relative">
                                     <div id="answerEditor" class="min-h-[200px] border rounded-md ${themeClasses.inputBorder}"></div>
                                     <button id="generateAnswer" class="absolute top-2 right-2 p-1.5 text-gray-500 hover:text-blue-800 rounded-md hover:bg-gray-100 dark:hover:bg-zinc-600">
-                                        <svg data-slot="icon" fill="none" stroke-width="1.5" stroke="#4169E1" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" class="w-5 h-5">
+                                        <svg data-slot="icon" fill="none" stroke-width="1.5" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" class="w-5 h-5">
                                             <path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456ZM16.894 20.567 16.5 21.75l-.394-1.183a2.25 2.25 0 0 0-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 0 0 1.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 0 0 1.423 1.423l1.183.394-1.183.394a2.25 2.25 0 0 0-1.423 1.423Z"></path>
                                         </svg>
                                     </button>
@@ -663,13 +663,13 @@ this.createModal().then(async () => {
             padding: 0 4px;
             margin: 0 2px;
             border-radius: 4px;
-            background-color: rgba(59, 130, 246, 0.1);
-            color: #3b82f6;
+            background-color: rgba(var(--socratiq-accent-rgb, 142, 21, 55), 0.1);
+            color: var(--socratiq-accent, #8e1537);
             font-weight: 500;
         }
         .dark .tag-highlight {
-            background-color: rgba(59, 130, 246, 0.2);
-            color: #60a5fa;
+            background-color: rgba(var(--socratiq-accent-rgb, 142, 21, 55), 0.2);
+            color: var(--socratiq-accent, #c77088);
         }
 
         /* Style both inline and multiline code blocks */
@@ -1996,20 +1996,7 @@ this.createModal().then(async () => {
           });
         });
 
-        // Add click handler for main Decks dropdown
-        const decksButton = this.shadowRoot.querySelector(
-          '[data-dropdown="chapters"]'
-        );
-        if (decksButton && chapterList) {
-          decksButton.closest("button").addEventListener("click", () => {
-            chapterList.classList.toggle("hidden");
-            decksButton.style.transform = chapterList.classList.contains(
-              "hidden"
-            )
-              ? "rotate(0deg)"
-              : "rotate(180deg)";
-          });
-        }
+        // Main Decks dropdown click listener is already registered in SpacedRepetitionUIHandler (ui-handler.js)
 
         if (this.currentChapter) {
           const currentChapterBtn = chapterList.querySelector(
@@ -2162,7 +2149,7 @@ this.createModal().then(async () => {
         top: 8px !important;
         right: 8px !important;
         z-index: 10 !important;
-        color: royalblue !important;
+        color: var(--socratiq-accent, #8e1537) !important;
         background: transparent !important;
     }
             .dark #generateAnswer:hover {
@@ -2189,7 +2176,7 @@ this.createModal().then(async () => {
       const isLastUsed = getLastReviewQuality(card) === quality;
 
       return isLastUsed
-        ? `${baseClasses} ring-1 ring-blue-500/20" style="background-color: ${isDark ? '#1f2937' : '#dbeafe'} !important; color: ${isDark ? '#58a6ff' : '#0969da'} !important;"`
+        ? `${baseClasses} ring-1 ring-blue-500/20" style="background-color: var(--socratiq-accent-bg) !important; color: var(--socratiq-accent) !important;"`
         : baseClasses;
     };
 
@@ -2719,10 +2706,10 @@ this.createModal().then(async () => {
         // Reset to default state
         const isSelected = currentCard.lastReviewQuality === quality;
         const bgColor = isSelected 
-          ? (isDark ? 'rgba(30, 58, 138, 0.2)' : '#dbeafe')
+          ? (isDark ? 'rgba(30, 58, 138, 0.2)' : '#f7e6ea')
           : (isDark ? 'rgba(55, 65, 81, 0.5)' : '#f9fafb');
         const textColor = isDark ? '#f9fafb' : '#111827';
-        const borderStyle = isSelected ? '1px solid rgba(59, 130, 246, 0.2)' : 'none';
+        const borderStyle = isSelected ? '1px solid rgba(142, 21, 55, 0.2)' : 'none';
         
         btn.style.backgroundColor = bgColor + ' !important';
         btn.style.color = textColor + ' !important';
@@ -2804,7 +2791,7 @@ this.createModal().then(async () => {
                     <!-- Review Buttons -->
                     <div class="flex gap-2 mt-4">
                         <button class="px-3 py-2 text-xs rounded flex flex-col items-start flex-1 min-w-0 hover:bg-gray-100 dark:hover:bg-zinc-600/50"
-                                style="background-color: ${cards[cardIndex]?.lastReviewQuality === 0 ? (isDark ? 'rgba(30, 58, 138, 0.2)' : '#dbeafe') : (isDark ? 'rgba(55, 65, 81, 0.5)' : '#f9fafb')} !important; color: ${isDark ? '#f9fafb' : '#111827'} !important; ${cards[cardIndex]?.lastReviewQuality === 0 ? 'border: 1px solid rgba(59, 130, 246, 0.2) !important;' : ''}"
+                                style="background-color: ${cards[cardIndex]?.lastReviewQuality === 0 ? (isDark ? 'rgba(30, 58, 138, 0.2)' : '#f7e6ea') : (isDark ? 'rgba(55, 65, 81, 0.5)' : '#f9fafb')} !important; color: ${isDark ? '#f9fafb' : '#111827'} !important; ${cards[cardIndex]?.lastReviewQuality === 0 ? 'border: 1px solid rgba(142, 21, 55, 0.2) !important;' : ''}"
                                 onclick="event.stopPropagation(); this.closest('#cardReviewModal').dispatchEvent(new CustomEvent('reviewCard', {detail: {index: ${cardIndex}, quality: 0}}))">
                             <div class="flex items-center gap-2">
                                 <svg class="w-4 h-4 flex-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -2815,7 +2802,7 @@ this.createModal().then(async () => {
                         </button>
 
                         <button class="px-3 py-2 text-xs rounded flex flex-col items-start flex-1 min-w-0 hover:bg-gray-100 dark:hover:bg-zinc-600/50"
-                                style="background-color: ${cards[cardIndex]?.lastReviewQuality === 2 ? (isDark ? 'rgba(30, 58, 138, 0.2)' : '#dbeafe') : (isDark ? 'rgba(55, 65, 81, 0.5)' : '#f9fafb')} !important; color: ${isDark ? '#f9fafb' : '#111827'} !important; ${cards[cardIndex]?.lastReviewQuality === 2 ? 'border: 1px solid rgba(59, 130, 246, 0.2) !important;' : ''}"
+                                style="background-color: ${cards[cardIndex]?.lastReviewQuality === 2 ? (isDark ? 'rgba(30, 58, 138, 0.2)' : '#f7e6ea') : (isDark ? 'rgba(55, 65, 81, 0.5)' : '#f9fafb')} !important; color: ${isDark ? '#f9fafb' : '#111827'} !important; ${cards[cardIndex]?.lastReviewQuality === 2 ? 'border: 1px solid rgba(142, 21, 55, 0.2) !important;' : ''}"
                                 onclick="event.stopPropagation(); this.closest('#cardReviewModal').dispatchEvent(new CustomEvent('reviewCard', {detail: {index: ${cardIndex}, quality: 2}}))">
                             <div class="flex items-center gap-2">
                                 <svg class="w-4 h-4 flex-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -2826,7 +2813,7 @@ this.createModal().then(async () => {
                         </button>
 
                         <button class="px-3 py-2 text-xs rounded flex flex-col items-start flex-1 min-w-0 hover:bg-gray-100 dark:hover:bg-zinc-600/50"
-                                style="background-color: ${cards[cardIndex]?.lastReviewQuality === 3 ? (isDark ? 'rgba(30, 58, 138, 0.2)' : '#dbeafe') : (isDark ? 'rgba(55, 65, 81, 0.5)' : '#f9fafb')} !important; color: ${isDark ? '#f9fafb' : '#111827'} !important; ${cards[cardIndex]?.lastReviewQuality === 3 ? 'border: 1px solid rgba(59, 130, 246, 0.2) !important;' : ''}"
+                                style="background-color: ${cards[cardIndex]?.lastReviewQuality === 3 ? (isDark ? 'rgba(30, 58, 138, 0.2)' : '#f7e6ea') : (isDark ? 'rgba(55, 65, 81, 0.5)' : '#f9fafb')} !important; color: ${isDark ? '#f9fafb' : '#111827'} !important; ${cards[cardIndex]?.lastReviewQuality === 3 ? 'border: 1px solid rgba(142, 21, 55, 0.2) !important;' : ''}"
                                 onclick="event.stopPropagation(); this.closest('#cardReviewModal').dispatchEvent(new CustomEvent('reviewCard', {detail: {index: ${cardIndex}, quality: 3}}))">
                             <div class="flex items-center gap-2">
                                 <svg class="w-4 h-4 flex-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -2837,7 +2824,7 @@ this.createModal().then(async () => {
                         </button>
 
                         <button class="px-3 py-2 text-xs rounded flex flex-col items-start flex-1 min-w-0 hover:bg-gray-100 dark:hover:bg-zinc-600/50"
-                                style="background-color: ${cards[cardIndex]?.lastReviewQuality === 5 ? (isDark ? 'rgba(30, 58, 138, 0.2)' : '#dbeafe') : (isDark ? 'rgba(55, 65, 81, 0.5)' : '#f9fafb')} !important; color: ${isDark ? '#f9fafb' : '#111827'} !important; ${cards[cardIndex]?.lastReviewQuality === 5 ? 'border: 1px solid rgba(59, 130, 246, 0.2) !important;' : ''}"
+                                style="background-color: ${cards[cardIndex]?.lastReviewQuality === 5 ? (isDark ? 'rgba(30, 58, 138, 0.2)' : '#f7e6ea') : (isDark ? 'rgba(55, 65, 81, 0.5)' : '#f9fafb')} !important; color: ${isDark ? '#f9fafb' : '#111827'} !important; ${cards[cardIndex]?.lastReviewQuality === 5 ? 'border: 1px solid rgba(142, 21, 55, 0.2) !important;' : ''}"
                                 onclick="event.stopPropagation(); this.closest('#cardReviewModal').dispatchEvent(new CustomEvent('reviewCard', {detail: {index: ${cardIndex}, quality: 5}}))">
                             <div class="flex items-center gap-2">
                                 <svg class="w-4 h-4 flex-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -2855,7 +2842,7 @@ this.createModal().then(async () => {
                             ← Previous
                         </button>
                         <button id="flipCardBtn" class="px-4 py-2 text-sm rounded-md hover:bg-blue-200 dark:hover:bg-blue-800/40 flex items-center gap-2"
-                                style="background-color: ${isDark ? 'rgba(30, 58, 138, 0.3)' : '#dbeafe'} !important; color: ${isDark ? '#93c5fd' : '#1d4ed8'} !important;">
+                                style="background-color: ${isDark ? 'rgba(30, 58, 138, 0.3)' : '#f7e6ea'} !important; color: ${isDark ? '#dfaab8' : '#681029'} !important;">
                             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4">
                                 <path stroke-linecap="round" stroke-linejoin="round" d="M7.5 21 3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" />
                             </svg>
@@ -2897,9 +2884,9 @@ this.createModal().then(async () => {
         );
         if (clickedButton) {
           // Set selected state
-          const bgColor = isDark ? 'rgba(30, 58, 138, 0.2)' : '#dbeafe';
+          const bgColor = isDark ? 'rgba(30, 58, 138, 0.2)' : '#f7e6ea';
           const textColor = isDark ? '#f9fafb' : '#111827';
-          const borderStyle = '1px solid rgba(59, 130, 246, 0.2)';
+          const borderStyle = '1px solid rgba(142, 21, 55, 0.2)';
           clickedButton.style.backgroundColor = bgColor + ' !important';
           clickedButton.style.color = textColor + ' !important';
           clickedButton.style.border = borderStyle + ' !important';

@@ -67,14 +67,35 @@ export function createReaderEnvironment({ host, shell }) {
     return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
   }
 
+  function detectVolume() {
+    const normalize = value => {
+      const text = String(value || '').trim().toLowerCase();
+      return /^vol[1-4]$/.test(text) ? text : '';
+    };
+    const explicit = normalize(window.SocratiqWidgetVolume) ||
+      normalize(document.documentElement?.dataset?.socratiqVolume) ||
+      normalize(document.body?.dataset?.socratiqVolume) ||
+      normalize(document.querySelector('script[data-volume]')?.dataset?.volume);
+    if (explicit) return explicit;
+    const themeColor = document.querySelector('meta[name="theme-color"]')?.content?.trim().toLowerCase();
+    if (themeColor === '#1f407a') return 'vol2';
+    if (themeColor === '#581c87') return 'vol3';
+    if (themeColor === '#065f46') return 'vol4';
+    if (themeColor === '#a51c30' || themeColor === '#8e1537') return 'vol1';
+    const pathMatch = location.pathname.match(/\/(vol[1-4])(\/|$)/i);
+    if (pathMatch) return pathMatch[1].toLowerCase();
+    return 'vol1';
+  }
+
   function updateTheme() {
     shell.dataset.theme = detectTheme();
+    shell.dataset.volume = detectVolume();
   }
 
   function installThemeTracking() {
     const observer = new MutationObserver(updateTheme);
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style', 'data-bs-theme'] });
-    if (document.body) observer.observe(document.body, { attributes: true, attributeFilter: ['class', 'style'] });
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style', 'data-bs-theme', 'data-socratiq-volume'] });
+    if (document.body) observer.observe(document.body, { attributes: true, attributeFilter: ['class', 'style', 'data-socratiq-volume'] });
     document.addEventListener('socratiqThemeChanged', updateTheme);
     return observer;
   }

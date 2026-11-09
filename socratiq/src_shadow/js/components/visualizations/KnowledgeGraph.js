@@ -55,20 +55,20 @@ export class KnowledgeGraph {
         this.VIEWPORT_BUFFER = 200; // pixels outside viewport to render
         
         this.colors = {
-            chapter: '#2c5282',
-            section: '#4299e1',
-            selected: '#63b3ed',
+            chapter: '#560d22',
+            section: '#8e1537',
+            selected: '#dfaab8',
             chapterLink: '#cbd5e0',
             linkGreen: '#48bb78',
             linkYellow: '#ecc94b',
             linkRed: '#f56565',
-            linkBlue: '#4299e1',
+            linkBlue: '#8e1537',
             // Domain-based colors
             domainColors: {
-                'example.com': '#2c5282',
+                'example.com': '#560d22',
                 'github.com': '#24292e',
                 'stackoverflow.com': '#f48024',
-                'default': '#4299e1'
+                'default': '#8e1537'
             }
         };
     }
@@ -460,14 +460,14 @@ export class KnowledgeGraph {
         // Simple color scheme based on heading level
         const levelColors = {
             1: '#1a365d', // Dark blue for H1s
-            2: '#2c5282', // Darker blue for H2s
-            3: '#3182ce', // Medium blue for H3s
-            4: '#4299e1', // Light blue for H4s
+            2: '#560d22', // Darker blue for H2s
+            3: '#74132f', // Medium blue for H3s
+            4: '#8e1537', // Light blue for H4s
             5: '#63b3ed', // Lighter blue for H5s
             6: '#90cdf4'  // Lightest blue for H6s
         };
         
-        return levelColors[level] || '#4299e1';
+        return levelColors[level] || '#8e1537';
     }
 
     calculateNodeOpacity(level) {
@@ -573,7 +573,7 @@ export class KnowledgeGraph {
 
     calculateLinkColor(level, type) {
         const typeColors = {
-            hierarchical: '#4299e1',
+            hierarchical: '#8e1537',
             sequential: '#cbd5e0',
             'cross-page': '#e2e8f0'
         };
@@ -793,7 +793,7 @@ export class KnowledgeGraph {
             width: 20px;
             height: 20px;
             border: 2px solid #f3f3f3;
-            border-top: 2px solid #4299e1;
+            border-top: 2px solid #8e1537;
             border-radius: 50%;
             animation: spin 1s linear infinite;
         `;
@@ -871,7 +871,7 @@ export class KnowledgeGraph {
             
             const hasSelectedNodes = this.selectedNodes.size > 0;
             generateButton.disabled = !hasSelectedNodes;
-            generateButton.style.backgroundColor = hasSelectedNodes ? '#4299e1' : '#CBD5E0';
+            generateButton.style.backgroundColor = hasSelectedNodes ? '#8e1537' : '#CBD5E0';
             generateButton.style.cursor = hasSelectedNodes ? 'pointer' : 'not-allowed';
             
             // Save selected nodes to localStorage
@@ -1007,11 +1007,11 @@ export class KnowledgeGraph {
         enableTooltip(generateButton, "Select nodes to generate custom quiz", container);
     
         generateButton.addEventListener('mouseover', () => {
-            generateButton.style.backgroundColor = '#3182ce';
+            generateButton.style.backgroundColor = '#74132f';
         });
     
         generateButton.addEventListener('mouseout', () => {
-            generateButton.style.backgroundColor = '#4299e1';
+            generateButton.style.backgroundColor = '#8e1537';
         });
     
         generateButton.addEventListener('click', async () => {
@@ -1139,7 +1139,7 @@ export class KnowledgeGraph {
             justify-content: center;
             width: 100%;
             padding: 8px 16px;
-            background-color: #4299e1;
+            background-color: #8e1537;
             color: white;
             border: none;
             border-radius: 6px;
@@ -1152,11 +1152,11 @@ export class KnowledgeGraph {
         `;
 
         analyzeButton.addEventListener('mouseover', () => {
-            analyzeButton.style.backgroundColor = '#3182ce';
+            analyzeButton.style.backgroundColor = '#74132f';
         });
 
         analyzeButton.addEventListener('mouseout', () => {
-            analyzeButton.style.backgroundColor = '#4299e1';
+            analyzeButton.style.backgroundColor = '#8e1537';
         });
 
         analyzeButton.addEventListener('click', async () => {
@@ -1248,7 +1248,7 @@ export class KnowledgeGraph {
 
 
         const legendItems = [
-            { color: '#4299e1', label: 'Pages & Topics (clickable)' },
+            { color: '#8e1537', label: 'Pages & Topics (clickable)' },
             { color: '#999', label: 'Sections & Subsections' },
             { color: '#ff6b6b', label: 'Truncated (too many items)' },
             { color: '#ffd700', label: 'Selected for Quiz' },
@@ -1285,7 +1285,7 @@ export class KnowledgeGraph {
         });
 
         const guide = document.createElement('details');
-        guide.style.cssText = 'flex: 0 0 auto; margin: 12px 0; max-height: 220px; overflow: auto;';
+        guide.style.cssText = 'flex: 0 0 auto; margin: 6px 0; max-height: 335px; overflow: auto;';
         const guideSummary = document.createElement('summary');
         guideSummary.textContent = 'Graph legend and guide';
         guideSummary.style.cssText = 'cursor: pointer; font-size: 12px; color: #2d3748;';
@@ -1296,34 +1296,22 @@ export class KnowledgeGraph {
         const explanation = document.createElement('div');
         explanation.style.cssText = `
             background: rgba(255, 255, 255, 0.9);
-            padding: 10px 0;
+            padding: 6px 0 4px 0;
             border-radius: 8px;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
             z-index: 2;
             max-width: 300px;
             font-family: monospace;
-            font-size: 12px;
-            line-height: 1.4;
+            font-size: 11px;
+            line-height: 1.3;
         `;
 
         explanation.innerHTML = `
-            <h3 style="margin: 0 0 10px 0; font-size: 14px; color: #2d3748;">Radial Knowledge Tree</h3>
-            <p style="margin: 0 0 8px 0; color: #4a5568;">
-                This radial tree shows your learning structure:<br>
-                • Center = Root of knowledge<br>
-                • Branches = Pages & Topics<br>
-                • Leaves = Sections & Details
-            </p>
-            <p style="margin: 0 0 8px 0; color: #4a5568;">
-                Interactive Features:<br>
-                • Click blue nodes to expand<br>
-                • Click gray nodes to select<br>
-                • Generate quizzes from selections
-            </p>
+            <h3 style="margin: 0 0 4px 0; font-size: 12.5px; color: #2d3748;">Radial Knowledge Tree</h3>
             <p style="margin: 0; color: #4a5568;">
-                Tip: Use zoom to explore<br>
-                different branches of your<br>
-                knowledge tree.
+                • Center = Root · Branches = Topics<br>
+                • Click crimson nodes to expand<br>
+                • Click gray nodes to select for quiz
             </p>
         `;
 
@@ -1353,7 +1341,7 @@ export class KnowledgeGraph {
         const treeLabel = document.createElement('span');
         treeLabel.textContent = 'Tree';
         treeLabel.style.cssText = `
-            color: #4299e1;
+            color: #8e1537;
             font-weight: bold;
         `;
 
@@ -1374,7 +1362,7 @@ export class KnowledgeGraph {
             position: relative;
             width: 40px;
             height: 20px;
-            background: #4299e1;
+            background: #8e1537;
             border-radius: 10px;
             cursor: pointer;
             transition: all 0.3s ease;
@@ -1431,7 +1419,7 @@ export class KnowledgeGraph {
         this.toggleSwitch.style.background = '#718096';
         this.toggleSlider.style.left = '22px';
         this.treeLabel.style.color = '#718096';
-        this.listLabel.style.color = '#4299e1';
+        this.listLabel.style.color = '#8e1537';
         this.listLabel.style.fontWeight = 'bold';
         this.treeLabel.style.fontWeight = 'normal';
         
@@ -1464,9 +1452,9 @@ export class KnowledgeGraph {
         this.toggleSwitch.setAttribute('aria-checked', 'false');
         
         // Update toggle appearance
-        this.toggleSwitch.style.background = '#4299e1';
+        this.toggleSwitch.style.background = '#8e1537';
         this.toggleSlider.style.left = '2px';
-        this.treeLabel.style.color = '#4299e1';
+        this.treeLabel.style.color = '#8e1537';
         this.treeLabel.style.fontWeight = 'bold';
         this.listLabel.style.color = '#718096';
         this.listLabel.style.fontWeight = 'normal';
@@ -1559,7 +1547,7 @@ export class KnowledgeGraph {
         `;
         
         infoPanel.innerHTML = `
-            <div style="font-weight: bold; margin-bottom: 8px; color: #2c5282;">KNOWLEDGE GRAPH LIST VIEW - ALL NODES</div>
+            <div style="font-weight: bold; margin-bottom: 8px; color: #560d22;">KNOWLEDGE GRAPH LIST VIEW - ALL NODES</div>
             <div style="margin-bottom: 6px;">• Shows ALL pages and ALL heading levels (H1-H6)</div>
             <div style="margin-bottom: 6px;">• Click pages to expand topics</div>
             <div style="margin-bottom: 6px;">• Click H1 topics to expand sections</div>
@@ -1567,7 +1555,7 @@ export class KnowledgeGraph {
             <div style="margin-bottom: 6px;">• Selected items appear in sidebar</div>
             <div style="margin-bottom: 6px;">• Use "Generate Custom Quiz" to create quiz</div>
             
-            <div style="margin-top: 12px; margin-bottom: 8px; font-weight: bold; color: #2c5282;">ICON LEGEND:</div>
+            <div style="margin-top: 12px; margin-bottom: 8px; font-weight: bold; color: #560d22;">ICON LEGEND:</div>
             <div style="display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 8px;">
                 <div style="display: flex; align-items: center; gap: 4px;">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path><path d="M8 2v4"></path><path d="M12 2v4"></path><path d="M16 2v4"></path></svg>
@@ -1957,7 +1945,7 @@ export class KnowledgeGraph {
 
         // Sort the tree and apply the layout with optimized separation
         const root = d3.tree()
-            .size([2 * Math.PI, Math.min(this.width, this.height) / 2 - 40])
+            .size([2 * Math.PI, Math.min(this.width, this.height) / 2 - 115])
             .separation((a, b) => {
                 // Reduce separation for better performance
                 if (a.parent == b.parent) {
@@ -1999,18 +1987,18 @@ export class KnowledgeGraph {
                 } else if (d.data.isTruncated) {
                     return '#ff6b6b'; // Truncated nodes
                 } else if (d.children) {
-                    return '#4299e1'; // Expandable nodes
+                    return '#8e1537'; // Expandable nodes
                 } else {
                     return '#999'; // Leaf nodes
                 }
             })
             .attr('stroke', d => {
                 if (this.selectedNodes.has(d.data.id)) {
-                    return '#ff6b6b';
+                    return '#8e1537';
                 } else if (d.data.isTruncated) {
                     return '#e53e3e';
                 } else if (d.children) {
-                    return '#2c5282';
+                    return '#560d22';
                 }
                 return 'none';
             })
@@ -2041,25 +2029,40 @@ export class KnowledgeGraph {
                 this.handleRadialNodeClick(event, d);
             });
 
-        // Add labels
+        // Add labels: keep internal spine/branch nodes horizontal so vertical spine labels never collide
         nodes.append('text')
-            .attr('dy', '0.31em')
-            .attr('x', d => d.x < Math.PI === !d.children ? 6 : -6)
-            .attr('text-anchor', d => d.x < Math.PI === !d.children ? 'start' : 'end')
-            .attr('transform', d => d.x >= Math.PI ? 'rotate(180)' : null)
+            .attr('dy', d => {
+                if (d.children) {
+                    return d.depth === 0 ? '1.65em' : '-0.95em';
+                }
+                return '0.31em';
+            })
+            .attr('x', d => {
+                if (d.children) return 0;
+                return d.x < Math.PI ? 8 : -8;
+            })
+            .attr('text-anchor', d => {
+                if (d.children) return 'middle';
+                return d.x < Math.PI ? 'start' : 'end';
+            })
+            .attr('transform', d => {
+                if (d.children) {
+                    return `rotate(${90 - d.x * 180 / Math.PI})`;
+                }
+                return d.x >= Math.PI ? 'rotate(180)' : null;
+            })
             .attr('paint-order', 'stroke')
             .attr('stroke', 'white')
-            .attr('stroke-width', 3)
+            .attr('stroke-width', 3.5)
             .attr('fill', 'currentColor')
             .style('font-size', d => {
-                if (d.depth === 0) return '14px';
+                if (d.depth === 0) return '13px';
                 if (d.depth === 1) return '12px';
-                return '10px';
+                return '10.5px';
             })
             .style('font-weight', d => d.depth <= 2 ? 'bold' : 'normal')
             .text(d => {
-                // Truncate long labels more aggressively
-                const maxLength = d.depth <= 1 ? 12 : 8; // Much shorter
+                const maxLength = d.depth === 0 ? 18 : (d.depth === 1 ? 18 : 24);
                 return d.data.name.length > maxLength ? 
                     d.data.name.substring(0, maxLength) + '...' : 
                     d.data.name;
@@ -2087,7 +2090,7 @@ export class KnowledgeGraph {
         `;
         
         // Build tooltip content
-        let content = `<div style="font-weight: bold; margin-bottom: 8px; color: #4299e1;">${d.data.name}</div>`;
+        let content = `<div style="font-weight: bold; margin-bottom: 8px; color: #8e1537;">${d.data.name}</div>`;
         
         if (d.data.isTruncated) {
             content += `<div style="color: #ff6b6b; font-style: italic;">Truncated content</div>`;
@@ -2298,7 +2301,7 @@ export class KnowledgeGraph {
                 type: 'hierarchical',
                 level: child.level,
                 weight: 2,
-                color: '#4299e1'
+                color: '#8e1537'
             }));
             
             this.links.push(...newLinks);
@@ -2389,7 +2392,7 @@ export class KnowledgeGraph {
     }
 
     toggleNodeSelection(node) {
-        const sidebar = this.container.querySelector('.sidebar') || this.container;
+        const sidebar = this.wholeContainer?.querySelector('.quiz-items-container') || this.wholeContainer?.querySelector('.sidebar') || this.container.querySelector('.sidebar') || this.container;
         console.log("Sidebar found:", sidebar)
         if (this.selectedNodes.has(node.id)) {
             // Deselect node
@@ -2399,13 +2402,6 @@ export class KnowledgeGraph {
             if (listItem) {
                 listItem.style.opacity = '0';
                 setTimeout(() => listItem.remove(), 300);
-            }
-            
-            // Hide right panel if no selections
-            if (this.selectedNodes.size === 0) {
-                if (rightPanel) {
-                    rightPanel.style.display = 'none';
-                }
             }
         } else {
             // Select node
@@ -2435,7 +2431,7 @@ export class KnowledgeGraph {
         if (generateButton) {
             const hasSelectedNodes = this.selectedNodes.size > 0;
             generateButton.disabled = !hasSelectedNodes;
-            generateButton.style.backgroundColor = hasSelectedNodes ? '#4299e1' : '#CBD5E0';
+            generateButton.style.backgroundColor = hasSelectedNodes ? '#8e1537' : '#CBD5E0';
             generateButton.style.cursor = hasSelectedNodes ? 'pointer' : 'not-allowed';
         }
         
@@ -2497,8 +2493,8 @@ export class KnowledgeGraph {
             justify-content: space-between;
             padding: 8px 12px;
             margin: 5px 0;
-            background: #e6fffa;
-            border: 1px solid #38b2ac;
+            background: #fcf4f6;
+            border: 1px solid #dfaab8;
             border-radius: 6px;
             font-size: 12px;
             color: #2d3748;
@@ -2562,7 +2558,7 @@ export class KnowledgeGraph {
             if (generateButton) {
                 const hasSelectedNodes = this.selectedNodes.size > 0;
                 generateButton.disabled = !hasSelectedNodes;
-                generateButton.style.backgroundColor = hasSelectedNodes ? '#4299e1' : '#CBD5E0';
+                generateButton.style.backgroundColor = hasSelectedNodes ? '#8e1537' : '#CBD5E0';
                 generateButton.style.cursor = hasSelectedNodes ? 'pointer' : 'not-allowed';
             }
         });
@@ -2591,7 +2587,7 @@ export class KnowledgeGraph {
         if (generateButton) {
             const hasSelectedNodes = this.selectedNodes.size > 0;
             generateButton.disabled = !hasSelectedNodes;
-            generateButton.style.backgroundColor = hasSelectedNodes ? '#4299e1' : '#CBD5E0';
+            generateButton.style.backgroundColor = hasSelectedNodes ? '#8e1537' : '#CBD5E0';
             generateButton.style.cursor = hasSelectedNodes ? 'pointer' : 'not-allowed';
         }
         
@@ -2704,9 +2700,9 @@ export class KnowledgeGraph {
                 if (this.selectedNodes.has(d.id)) {
                     return '#ffd700';
                 } else if (d.hasChildren && !d.isExpanded) {
-                    return '#4299e1'; // Blue border for expandable nodes
+                    return '#8e1537'; // Blue border for expandable nodes
                 } else if (d.isExpanded) {
-                    return '#2c5282'; // Darker border for expanded nodes
+                    return '#560d22'; // Darker border for expanded nodes
                 }
                 return 'none';
             })

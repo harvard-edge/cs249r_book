@@ -18,7 +18,7 @@ export const htmlContent = `
       style="width: 100%; max-width: 400px; pointer-events: auto;">
       <!-- Actual slide-out menu with defined max-width -->
       <div class="p-4 bg-gray-100 dark:bg-zinc-700 shadow-lg rounded-lg h-full flex flex-col overflow-auto"
-        style="max-width: 400px; box-shadow: 4px 0 15px rgba(0,0,0,0.25);">
+        style="max-width: 400px; background-color: var(--socratiq-hover, #fcf8f9); border-left: 1px solid var(--socratiq-border, #d8c5cb); box-shadow: 0 22px 64px rgba(31,14,22,0.22);">
 
         <div class="flex items-center justify-between mb-4">
           <h2 class="text-lg text-zinc-800 dark:text-white">
@@ -183,14 +183,14 @@ export const htmlContent = `
             <div id="reference-btn-container_temp" class="flex space-x-2 text-xs font-mono">
               <a href="https://mlsysbook.ai/"
                 class="inline-block bg-blue-100 text-zinc-900 px-4 py-0.5 rounded-md" target="_blank"
-                rel="noopener noreferrer" title="TinyML Textbook">1</a>
+                rel="noopener noreferrer" title="Machine Learning Systems Textbook">1</a>
               <!-- Omitted buttons as they are not links -->
               <a href="https://github.com/harvard-edge/cs249r_book"
                 class="inline-block bg-blue-100 text-zinc-900 px-4 py-0.5 rounded-md" target="_blank"
-                rel="noopener noreferrer" title="TinyML GitHub Repo">2</a>
-              <a href="https://www.edx.org/certificates/professional-certificate/harvardx-tiny-machine-learning"
+                rel="noopener noreferrer" title="MLSysBook GitHub Repository">2</a>
+              <a href="https://doi.org/10.1145/3743646.3750010"
                 class="inline-block bg-blue-100 text-zinc-900 px-4 py-0.5 rounded-md" target="_blank"
-                rel="noopener noreferrer" title="TinyML on EdX">3</a>
+                rel="noopener noreferrer" title="SocratiQ Research Paper (WCAE '25; arXiv:2502.00341)">3</a>
 
             </div>
 
@@ -434,17 +434,17 @@ export const htmlContent = `
       transition: max-height 0.3s ease-in-out;
     }
     
-    #difficulty-dropdown-toggle.rotated {
+    #difficulty-dropdown-toggle.rotated svg {
       transform: rotate(180deg);
     }
     
     /* Toggle switch styles */
     .toggle-checkbox:checked {
       right: 0;
-      border-color: #3b82f6;
+      border-color: var(--socratiq-accent, #8e1537);
     }
     .toggle-checkbox:checked + .toggle-label {
-      background-color: #3b82f6;
+      background-color: var(--socratiq-accent, #8e1537);
     }
   </style>
   </div>
@@ -458,7 +458,7 @@ export const htmlContent = `
   padding: 10px 15px;
   border-radius: 5px;
   box-shadow: 0 2px 4px rgba(0,0,0,0.1),
-              0 0 15px rgba(66, 153, 225, 0.3);
+              0 0 15px rgba(var(--socratiq-accent-rgb, 142, 21, 55), 0.3);
   font-family: system-ui, -apple-system, sans-serif;
   color: #2d3748;
   animation: glow 2s infinite alternate;
@@ -485,12 +485,12 @@ export const htmlContent = `
       @keyframes glow {
         from {
           box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1),
-            0 0 15px rgba(66, 153, 225, 0.3);
+            0 0 15px rgba(var(--socratiq-accent-rgb, 142, 21, 55), 0.3);
         }
 
         to {
           box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1),
-            0 0 20px rgba(66, 153, 225, 0.5);
+            0 0 20px rgba(var(--socratiq-accent-rgb, 142, 21, 55), 0.5);
         }
       }
     </style>
@@ -512,8 +512,8 @@ export const htmlContent = `
   <div id="modal1" class="modal">
     <!-- Modal content -->
 
-    <div class="bg-white p-6 rounded-lg shadow-lg max-w-sm mx-auto mt-10" style="background-color: var(--socratiq-bg, #ffffff); color: var(--socratiq-text, #1f2328);">
-      <div class="flex justify-between items-center mb-4">
+    <div class="bg-white p-3.5 rounded-lg shadow-lg mx-auto" style="width: 100%; max-height: 92vh; overflow-y: auto; box-sizing: border-box; background-color: var(--socratiq-bg, #ffffff); color: var(--socratiq-text, #1f2328);">
+      <div class="flex justify-between items-center mb-2.5">
         <span class="text-lg font-semibold dark:text-white">Settings</span>
         <button id='close-btn' class="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300">
           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
@@ -523,22 +523,22 @@ export const htmlContent = `
         </button>
       </div>
 
-      <details id="study-learner-preferences" class="mb-6 p-3 border rounded-lg">
+      <details id="study-learner-preferences" class="mb-3 p-2.5 border border-zinc-200 dark:border-zinc-700 rounded-lg">
         <summary class="cursor-pointer font-semibold">Learning preferences</summary>
         <p class="text-xs mt-2" style="color:var(--socratiq-muted,#4c566a)">Shared with the reader. Saved in this browser and included when you ask AI. Avoid sensitive details.</p>
         <label class="block text-sm mt-3">What do you already know? (optional)
-          <textarea id="study-learner-background" rows="2" maxlength="1200" class="w-full p-2 border rounded mt-1 bg-transparent" placeholder="I know Python; hardware is new to me."></textarea>
+          <textarea id="study-learner-background" rows="2" maxlength="1200" class="w-full p-2 border border-zinc-300 dark:border-zinc-600 rounded mt-1 bg-transparent" placeholder="I know Python; hardware is new to me."></textarea>
         </label>
         <label class="block text-sm mt-3">How should explanations help you? (optional)
-          <textarea id="study-learner-instructions" rows="2" maxlength="800" class="w-full p-2 border rounded mt-1 bg-transparent" placeholder="Define symbols and use everyday analogies."></textarea>
+          <textarea id="study-learner-instructions" rows="2" maxlength="800" class="w-full p-2 border border-zinc-300 dark:border-zinc-600 rounded mt-1 bg-transparent" placeholder="Define symbols and use everyday analogies."></textarea>
         </label>
         <p class="text-xs mt-2" style="color:var(--socratiq-muted,#4c566a)">Use Understanding Level below to change your level.</p>
-        <div class="flex flex-wrap gap-2 mt-3"><button id="study-learner-save" type="button" class="p-2 border rounded">Save preferences</button><button id="study-learner-clear" type="button" class="p-2 border rounded">Clear preferences</button></div>
+        <div class="flex flex-wrap gap-2 mt-3"><button id="study-learner-save" type="button" class="p-2 border border-zinc-300 dark:border-zinc-600 rounded hover:bg-gray-50 dark:hover:bg-zinc-800">Save preferences</button><button id="study-learner-clear" type="button" class="p-2 border border-zinc-300 dark:border-zinc-600 rounded hover:bg-gray-50 dark:hover:bg-zinc-800">Clear preferences</button></div>
         <p id="study-learner-status" class="text-xs mt-2" style="color:var(--socratiq-muted,#4c566a)" role="status" aria-live="polite"></p>
       </details>
       <!-- Use your own AI Section -->
-      <div class="mb-6 p-4 border border-zinc-200 dark:border-zinc-700 rounded-lg" style="background-color: var(--socratiq-bg, #ffffff); color: var(--socratiq-text, #1f2328);">
-        <div class="flex items-center justify-between mb-4">
+      <div class="mb-3 p-2.5 border border-zinc-200 dark:border-zinc-700 rounded-lg" style="background-color: var(--socratiq-bg, #ffffff); color: var(--socratiq-text, #1f2328);">
+        <div class="flex items-center justify-between mb-2">
           <h3 class="text-md font-semibold text-zinc-900 dark:text-white">Use your own AI</h3>
           
           <!-- Custom API Toggle Switch -->
@@ -625,7 +625,7 @@ export const htmlContent = `
       </div>
 
       <!-- Add this at the top of the settings modal -->
-      <div class="mb-6 border-b pb-4">
+      <div class="mb-3 border-b border-zinc-200 dark:border-zinc-700 pb-2.5">
         <label class="flex items-center justify-between">
           <span class="text-sm font-medium text-zinc-900 dark:text-zinc-300">
             Push content when menu opens
@@ -640,55 +640,55 @@ export const htmlContent = `
       </div>
 
       <!-- Difficulty Level Dropdown -->
-      <div class="mb-6">
-        <button id="difficulty-dropdown-toggle" class="w-full flex justify-between items-center p-3 bg-gray-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg hover:bg-gray-100 dark:hover:bg-zinc-700 transition-colors">
+      <div class="mb-3">
+        <button id="difficulty-dropdown-toggle" class="w-full flex justify-between items-center p-2.5 bg-gray-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg hover:bg-gray-100 dark:hover:bg-zinc-700 transition-colors">
           <span class="text-sm font-medium text-zinc-900 dark:text-white">Understanding Level Info</span>
           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4 text-zinc-500 dark:text-zinc-400 transition-transform duration-200">
             <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
           </svg>
         </button>
         
-        <div id="difficulty-content" class="difficulty-content-collapsed mt-2">
-          <div class="p-4 border border-zinc-200 dark:border-zinc-700 rounded-lg">
-            <div class="grid grid-cols-2 gap-4">
-              <div class="difficulty-level beginner-level">
+        <div id="difficulty-content" class="difficulty-content-collapsed mt-1.5">
+          <div class="p-2 border border-zinc-200 dark:border-zinc-700 rounded-lg">
+            <div class="grid grid-cols-2 gap-2">
+              <div class="difficulty-level beginner-level p-1.5 rounded">
                 <div class="flex items-center gap-2">
-                  <span class="text-xl">🚲</span>
+                  <span class="text-lg">🚲</span>
                   <span class="font-semibold text-sm dark:text-white">Beginner</span>
                 </div>
-                <p class="text-xs text-zinc-600 dark:text-zinc-400">For learners who are new to machine learning systems and are building foundational knowledge of concepts, tools, and basic implementations.</p>
+                <p class="text-xs leading-snug text-zinc-600 dark:text-zinc-400">For learners who are new to machine learning systems and are building foundational knowledge of concepts, tools, and basic implementations.</p>
               </div>
               
-              <div class="difficulty-level intermediate-level">
+              <div class="difficulty-level intermediate-level p-1.5 rounded">
                 <div class="flex items-center gap-2">
-                  <span class="text-xl">🚗</span>
+                  <span class="text-lg">🚗</span>
                   <span class="font-semibold text-sm dark:text-white">Intermediate</span>
                 </div>
-                <p class="text-xs text-zinc-600 dark:text-zinc-400">For learners who have a working understanding of machine learning principles and are ready to design and optimize systems for real-world applications.</p>
+                <p class="text-xs leading-snug text-zinc-600 dark:text-zinc-400">For learners who have a working understanding of machine learning principles and are ready to design and optimize systems for real-world applications.</p>
               </div>
               
-              <div class="difficulty-level advanced-level">
+              <div class="difficulty-level advanced-level p-1.5 rounded">
                 <div class="flex items-center gap-2">
-                  <span class="text-xl">🚁</span>
+                  <span class="text-lg">🚁</span>
                   <span class="font-semibold text-sm dark:text-white">Advanced</span>
                 </div>
-                <p class="text-xs text-zinc-600 dark:text-zinc-400">For learners with significant experience in machine learning systems, focused on tackling complex problems, scaling solutions, and innovating in the field.</p>
+                <p class="text-xs leading-snug text-zinc-600 dark:text-zinc-400">For learners with significant experience in machine learning systems, focused on tackling complex problems, scaling solutions, and innovating in the field.</p>
               </div>
               
-              <div class="difficulty-level agi-level">
+              <div class="difficulty-level agi-level p-1.5 rounded">
                 <div class="flex items-center gap-2">
-                  <span class="text-xl">🛸</span>
+                  <span class="text-lg">🛸</span>
                   <span class="font-semibold text-sm dark:text-white">Bloom's Taxonomy</span>
                 </div>
-                <p class="text-xs text-zinc-600 dark:text-zinc-400">Bloom's Taxonomy: Bloom's Taxonomy is an educational framework classifying cognitive skills from basic recall to complex evaluation. 
-                  <a class="text-blue-500 text-sm hover:text-zinc-800 dark:hover:text-zinc-900"  href="https://en.wikipedia.org/wiki/Bloom%27s_taxonomy" target="_blank">Read More</a></p>
+                <p class="text-xs leading-snug text-zinc-600 dark:text-zinc-400">An educational framework classifying cognitive skills from basic recall to complex evaluation. 
+                  <a class="text-blue-500 dark:text-blue-300 text-xs underline hover:text-blue-700 dark:hover:text-blue-200" href="https://en.wikipedia.org/wiki/Bloom%27s_taxonomy" target="_blank" rel="noopener noreferrer">Read More</a></p>
               </div>
             </div>
           </div>
         </div>
       </div>
 
-      <div class="mb-6">
+      <div class="mb-1">
         <label for="understanding-level" class="block mb-2 font-medium text-zinc-900 dark:text-zinc-300">Understanding
           Level</label>
         <input type="range" id="understanding-slider" name="understanding-level" min="0" max="3" value="2"
@@ -808,9 +808,9 @@ export const htmlContent = `
           margin-bottom: 12px;
         }
         #quizModal .quiz-option-card:hover {
-          border-color: #6366f1;
-          box-shadow: 0 0 0 3px rgba(99,102,241,0.12);
-          background: rgba(99,102,241,0.04);
+          border-color: var(--socratiq-accent, #8e1537);
+          box-shadow: 0 0 0 3px rgba(var(--socratiq-accent-rgb, 142, 21, 55), 0.12);
+          background: rgba(var(--socratiq-accent-rgb, 142, 21, 55), 0.04);
         }
         #quizModal .quiz-option-icon {
           width: 40px;
@@ -857,8 +857,8 @@ export const htmlContent = `
 
       <!-- Section Quiz -->
       <button class="quiz-option-card" id="section-quiz-btn">
-        <div class="quiz-option-icon" style="background: rgba(99,102,241,0.1);">
-          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="#6366f1">
+        <div class="quiz-option-icon" style="background: rgba(var(--socratiq-accent-rgb, 142, 21, 55), 0.1); color: var(--socratiq-accent, #8e1537);">
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor">
             <path stroke-linecap="round" stroke-linejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 0 0 2.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 0 0-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 0 0 .75-.75 2.25 2.25 0 0 0-.1-.664m-5.8 0A2.251 2.251 0 0 1 13.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25Z" />
           </svg>
         </div>

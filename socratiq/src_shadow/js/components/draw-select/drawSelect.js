@@ -211,7 +211,7 @@ function _extractTextInPath(polygon) {
         // Skip scripts, styles, hidden elements and widget internals
         if (['script', 'style', 'noscript', 'svg'].includes(tag)) return NodeFilter.FILTER_REJECT;
         // Skip anything inside the socratiq widget shadow host
-        if (p.closest?.('socratiq-widget, #socratiq-more-dropdown, #socratiq-meditation-nudge')) return NodeFilter.FILTER_REJECT;
+        if (p.closest?.('socratiq-widget, #socratiq-reader, #widget-chat-container, #socratiq-more-dropdown, #socratiq-meditation-nudge')) return NodeFilter.FILTER_REJECT;
         const cs = getComputedStyle(p);
         if (cs.display === 'none' || cs.visibility === 'hidden' || cs.opacity === '0') return NodeFilter.FILTER_REJECT;
         return NodeFilter.FILTER_ACCEPT;

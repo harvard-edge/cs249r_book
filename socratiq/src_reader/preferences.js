@@ -56,7 +56,9 @@ export function saveLearnerPreferences(value, storage = browserStorage()) {
     const raw = storage.getItem('userSettings');
     const legacy = raw && raw.length <= 65536 ? JSON.parse(raw) : null;
     if (legacy && typeof legacy === 'object' && !Array.isArray(legacy)) {
-      legacy.sliderValue = LEVELS.indexOf(preferences.level);
+      if (!(preferences.level === 'advanced' && Number(legacy.sliderValue) === 3)) {
+        legacy.sliderValue = LEVELS.indexOf(preferences.level);
+      }
       if (legacy.customAPI && typeof legacy.customAPI === 'object' && legacy.customAPI.saveLocally !== true && 'apiKey' in legacy.customAPI) {
         legacy.customAPI = {...legacy.customAPI, apiKey: ''};
       }

@@ -398,7 +398,7 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
 
   function handleSelectionShortcut(event) {
     if (picker?.active || studyBusy || studyActive) return;
-    if (event.key.toLowerCase() !== 'e' || !event.ctrlKey || !event.shiftKey || event.altKey || event.metaKey) return;
+    if (event.key.toLowerCase() !== 'e' || !event.shiftKey || event.altKey || (event.ctrlKey === event.metaKey)) return;
     let source;
     try {
       source = captureSelection();

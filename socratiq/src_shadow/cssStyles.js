@@ -7,16 +7,98 @@ export const styles = `${utilities}\n${katex}\n${boardingStyles}
 /* SIMPLE THEME SYSTEM - NO !important */
 :host,
 .socratiq-widget-root {
-    --socratiq-text: #1f2328; /* Light theme default: dark text */
+    --socratiq-brand-50: 250 241 244;
+    --socratiq-brand-100: 247 230 234;
+    --socratiq-brand-200: 238 208 215;
+    --socratiq-brand-300: 223 170 184;
+    --socratiq-brand-400: 201 116 139;
+    --socratiq-brand-500: 142 21 55;
+    --socratiq-brand-600: 116 19 47;
+    --socratiq-brand-700: 95 14 37;
+    --socratiq-brand-800: 76 11 30;
+    --socratiq-brand-900: 58 9 23;
+    --socratiq-brand-950: 36 5 14;
+    --socratiq-text: #272329; /* Light theme default: warm dark text */
     --socratiq-bg: #ffffff;
-    --socratiq-muted: #4c566a;
-    --socratiq-border: #d0d7de;
-    --socratiq-hover: #f6f8fa;
-    --socratiq-accent: #0969da;
-    --socratiq-accent-bg: #dbeafe;
-    --socratiq-accent-hover: #bfdbfe;
+    --socratiq-muted: #5e5157;
+    --socratiq-border: #d8c5cb;
+    --socratiq-hover: #fcf8f9;
+    --socratiq-accent: #8e1537;
+    --socratiq-accent-strong: #74132f;
+    --socratiq-accent-rgb: 142, 21, 55;
+    --socratiq-accent-bg: #f7e6ea;
+    --socratiq-accent-hover: #eed0d7;
     color: var(--socratiq-text);
     background: var(--socratiq-bg);
+}
+
+:host([data-socratiq-volume="vol2"]),
+.socratiq-widget-root[data-socratiq-volume="vol2"] {
+    --socratiq-brand-50: 241 245 251;
+    --socratiq-brand-100: 227 236 248;
+    --socratiq-brand-200: 198 216 240;
+    --socratiq-brand-300: 155 187 228;
+    --socratiq-brand-400: 107 159 212;
+    --socratiq-brand-500: 31 64 122;
+    --socratiq-brand-600: 22 47 89;
+    --socratiq-brand-700: 18 38 73;
+    --socratiq-brand-800: 14 29 56;
+    --socratiq-brand-900: 10 21 41;
+    --socratiq-brand-950: 6 13 26;
+    --socratiq-muted: #4e5968;
+    --socratiq-border: #c5d1e0;
+    --socratiq-hover: #f7f9fc;
+    --socratiq-accent: #1f407a;
+    --socratiq-accent-strong: #162f59;
+    --socratiq-accent-rgb: 31, 64, 122;
+    --socratiq-accent-bg: #e3ecf8;
+    --socratiq-accent-hover: #c6d8f0;
+}
+
+:host([data-socratiq-volume="vol3"]),
+.socratiq-widget-root[data-socratiq-volume="vol3"] {
+    --socratiq-brand-50: 248 243 252;
+    --socratiq-brand-100: 240 230 250;
+    --socratiq-brand-200: 223 201 244;
+    --socratiq-brand-300: 200 162 236;
+    --socratiq-brand-400: 176 124 226;
+    --socratiq-brand-500: 88 28 135;
+    --socratiq-brand-600: 67 20 102;
+    --socratiq-brand-700: 54 16 82;
+    --socratiq-brand-800: 41 12 63;
+    --socratiq-brand-900: 29 8 45;
+    --socratiq-brand-950: 18 5 28;
+    --socratiq-muted: #585063;
+    --socratiq-border: #d2c5e0;
+    --socratiq-hover: #faf8fc;
+    --socratiq-accent: #581c87;
+    --socratiq-accent-strong: #431466;
+    --socratiq-accent-rgb: 88, 28, 135;
+    --socratiq-accent-bg: #f0e6fa;
+    --socratiq-accent-hover: #dfc9f4;
+}
+
+:host([data-socratiq-volume="vol4"]),
+.socratiq-widget-root[data-socratiq-volume="vol4"] {
+    --socratiq-brand-50: 238 250 246;
+    --socratiq-brand-100: 219 242 234;
+    --socratiq-brand-200: 184 228 213;
+    --socratiq-brand-300: 134 208 184;
+    --socratiq-brand-400: 78 184 152;
+    --socratiq-brand-500: 6 95 70;
+    --socratiq-brand-600: 4 70 52;
+    --socratiq-brand-700: 3 56 41;
+    --socratiq-brand-800: 2 42 31;
+    --socratiq-brand-900: 2 29 22;
+    --socratiq-brand-950: 1 17 13;
+    --socratiq-muted: #4b5d57;
+    --socratiq-border: #bfd6ce;
+    --socratiq-hover: #f6fbf9;
+    --socratiq-accent: #065f46;
+    --socratiq-accent-strong: #044634;
+    --socratiq-accent-rgb: 6, 95, 70;
+    --socratiq-accent-bg: #dbf2ea;
+    --socratiq-accent-hover: #b8e4d5;
 }
 
 :host([data-socratiq-theme="dark"]),
@@ -26,9 +108,38 @@ export const styles = `${utilities}\n${katex}\n${boardingStyles}
     --socratiq-muted: #9ca3af;
     --socratiq-border: #30363d;
     --socratiq-hover: #21262d;
-    --socratiq-accent: #58a6ff;
-    --socratiq-accent-bg: #1f2937;
-    --socratiq-accent-hover: #374151;
+    --socratiq-accent: #E85D75;
+    --socratiq-accent-strong: #f07b8e;
+    --socratiq-accent-rgb: 232, 93, 117;
+    --socratiq-accent-bg: #2d161e;
+    --socratiq-accent-hover: #3d1d28;
+}
+
+:host([data-socratiq-theme="dark"][data-socratiq-volume="vol2"]),
+.socratiq-widget-root[data-socratiq-theme="dark"][data-socratiq-volume="vol2"] {
+    --socratiq-accent: #6B9FD4;
+    --socratiq-accent-strong: #8ab6e3;
+    --socratiq-accent-rgb: 107, 159, 212;
+    --socratiq-accent-bg: #152238;
+    --socratiq-accent-hover: #1e304d;
+}
+
+:host([data-socratiq-theme="dark"][data-socratiq-volume="vol3"]),
+.socratiq-widget-root[data-socratiq-theme="dark"][data-socratiq-volume="vol3"] {
+    --socratiq-accent: #C084FC;
+    --socratiq-accent-strong: #d2a4fd;
+    --socratiq-accent-rgb: 192, 132, 252;
+    --socratiq-accent-bg: #241436;
+    --socratiq-accent-hover: #321c4a;
+}
+
+:host([data-socratiq-theme="dark"][data-socratiq-volume="vol4"]),
+.socratiq-widget-root[data-socratiq-theme="dark"][data-socratiq-volume="vol4"] {
+    --socratiq-accent: #34D399;
+    --socratiq-accent-strong: #5eead4;
+    --socratiq-accent-rgb: 52, 211, 153;
+    --socratiq-accent-bg: #0d2922;
+    --socratiq-accent-hover: #133b31;
 }
 
 #text-selection-menu{
@@ -67,7 +178,7 @@ export const styles = `${utilities}\n${katex}\n${boardingStyles}
   
   /* Table headers */
   th {
-    background-color: #009879; /* A nice green background */
+    background-color: var(--socratiq-accent, #8e1537); /* Volume brand header background */
     color: #ffffff; /* White text color */
     text-align: left; /* Align text to the left */
     padding: 12px 15px; /* Add some padding */
@@ -197,7 +308,7 @@ export const styles = `${utilities}\n${katex}\n${boardingStyles}
     #submit-quiz-btn {
       margin-top: 1rem; /* Tailwind class mt-4 */
       width: 100%; /* Tailwind class w-full */
-      background-color: black; /* Tailwind class bg-blue-500 */
+      background-color: var(--socratiq-accent, #8e1537); /* Tailwind class bg-blue-500 */
       color: white; /* Tailwind class text-white */
       padding: 0.5rem 1rem; /* Tailwind classes px-4 py-2 */
       border-radius: 0.25rem; /* Tailwind class rounded */
@@ -206,13 +317,13 @@ export const styles = `${utilities}\n${katex}\n${boardingStyles}
     }
     
     #submit-quiz-btn:hover {
-      background-color: #2779bd; /* Tailwind class hover:bg-blue-600 */
+      background-color: var(--socratiq-accent-strong, #74132f); /* Tailwind class hover:bg-blue-600 */
     }
     
     .submit-quiz-btn {
       margin-top: 1rem; /* Tailwind class mt-4 */
       width: 100%; /* Tailwind class w-full */
-      background-color: black; /* Tailwind class bg-blue-500 */
+      background-color: var(--socratiq-accent, #8e1537); /* Tailwind class bg-blue-500 */
       color: white; /* Tailwind class text-white */
       padding: 0.5rem 1rem; /* Tailwind classes px-4 py-2 */
       border-radius: 0.25rem; /* Tailwind class rounded */
@@ -221,7 +332,7 @@ export const styles = `${utilities}\n${katex}\n${boardingStyles}
     }
     
     .submit-quiz-btn:hover {
-      background-color: #2779bd; /* Tailwind class hover:bg-blue-600 */
+      background-color: var(--socratiq-accent-strong, #74132f); /* Tailwind class hover:bg-blue-600 */
     }
     
   
@@ -247,7 +358,7 @@ export const styles = `${utilities}\n${katex}\n${boardingStyles}
     details > .spoiler-content,
     details > p,
     details > em {
-      color: black;
+      color: var(--socratiq-text, #1f2328);
       font-style: normal !important; /* This will override other styles unless they also use !important */
     }
   /*   
@@ -279,10 +390,11 @@ export const styles = `${utilities}\n${katex}\n${boardingStyles}
       -webkit-appearance: none; /* Override default CSS styles */
       appearance: none;
       width: 100%; /* Full-width */
-      height: 5px; /* Specified height */
-      background: black; /* Black track */
+      height: 6px; /* Specified height */
+      background: var(--socratiq-border, #d8c5cb);
+      border-radius: 9999px;
       outline: none; /* Remove outline */
-      opacity: 0.7; /* Partial transparency */
+      opacity: 0.9;
       transition: opacity .2s; /* Transition for the slider */
     }
     
@@ -299,17 +411,23 @@ export const styles = `${utilities}\n${katex}\n${boardingStyles}
     input[type=range]::-webkit-slider-thumb {
       -webkit-appearance: none; /* Override default CSS styles */
       appearance: none;
-      width: 25px; /* Width of the thumb */
-      height: 25px; /* Height of the thumb */
-      background: black; /* Black thumb */
+      width: 18px; /* Width of the thumb */
+      height: 18px; /* Height of the thumb */
+      border-radius: 50%;
+      background: var(--socratiq-accent, #8e1537);
+      border: 2px solid var(--socratiq-bg, #ffffff);
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
       cursor: pointer; /* Cursor on hover */
     }
   
     /* Style for Mozilla Firefox */
     input[type=range]::-moz-range-thumb {
-      width: 25px; /* Width of the thumb */
-      height: 25px; /* Height of the thumb */
-      background: black; /* Black thumb */
+      width: 18px; /* Width of the thumb */
+      height: 18px; /* Height of the thumb */
+      border-radius: 50%;
+      background: var(--socratiq-accent, #8e1537);
+      border: 2px solid var(--socratiq-bg, #ffffff);
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
       cursor: pointer; /* Cursor on hover */
     }
   
@@ -320,12 +438,12 @@ export const styles = `${utilities}\n${katex}\n${boardingStyles}
     
     /* Additional style for the focus state on Webkit browsers */
     input[type=range]:focus::-webkit-slider-thumb {
-      background: #333; /* Darker shade when focused */
+      background: var(--socratiq-accent, #74132f);
     }
   
     /* Additional style for the focus state on Mozilla Firefox */
     input[type=range]:focus::-moz-range-thumb {
-      background: #333; /* Darker shade when focused */
+      background: var(--socratiq-accent, #74132f);
     }
   
     /* Show the popup div on hover */
@@ -382,8 +500,8 @@ export const styles = `${utilities}\n${katex}\n${boardingStyles}
     z-index: 100;
     left: 50%;
     top: 50%;
-    padding: 10px;
-    width: 400px;
+    padding: 6px;
+    width: min(480px, 94vw);
     height: fit-content;
     transform: translate(-50%, -50%); /* Center the modal */
     /* overflow: auto; */
@@ -407,7 +525,8 @@ export const styles = `${utilities}\n${katex}\n${boardingStyles}
   
   /* Modal Content */
   .modal-content {
-    background-color: #fefefe;
+    background-color: var(--socratiq-bg, #ffffff);
+    color: var(--socratiq-text, #1f2328);
     margin: 15% auto;
     padding: 20px;
     /* border: 1px solid #888; */
@@ -462,7 +581,7 @@ export const styles = `${utilities}\n${katex}\n${boardingStyles}
   
 #enter-btn:hover {
   transform: translateY(-50%) scale(1.1);
-  color: #3b82f6; /* Tailwind's blue-500 */
+  color: var(--socratiq-accent, #8e1537); /* Tailwind's blue-500 */
 }
 
 #enter-btn svg {
@@ -520,7 +639,7 @@ export const styles = `${utilities}\n${katex}\n${boardingStyles}
       /* --background-color: #1e1e1e; */
       --text-color: black;
       /* --border-color: #333; */
-      --link-color: #4ea0f6;
+      --link-color: var(--socratiq-accent, #E85D75);
       /* --secondary-background-color: #2a2a2a; */
   }
   
@@ -546,7 +665,7 @@ export const styles = `${utilities}\n${katex}\n${boardingStyles}
     --background-color: #ffffff;
     --text-color: #333333;
     --border-color: #ddd;
-    --link-color: #007bff;
+    --link-color: var(--socratiq-accent, #8e1537);
     --secondary-background-color: #f9f9f9;
   }
   
@@ -586,7 +705,7 @@ export const styles = `${utilities}\n${katex}\n${boardingStyles}
   
   
   #menu-toggle:checked~label {
-    background-color: #2563eb;
+    background-color: var(--socratiq-accent-strong, #74132f);
     /* Darker shade for active state */
   }
   
@@ -632,13 +751,13 @@ export const styles = `${utilities}\n${katex}\n${boardingStyles}
   
   @keyframes inner-pulse {
     0% {
-      box-shadow: inset 0 0 10px rgba(0, 123, 255, 0.7), inset 0 0 20px rgba(0, 123, 255, 0.5);
+      box-shadow: inset 0 0 10px rgba(var(--socratiq-accent-rgb, 142, 21, 55), 0.7), inset 0 0 20px rgba(var(--socratiq-accent-rgb, 142, 21, 55), 0.5);
     }
     50% {
-      box-shadow: inset 0 0 15px rgba(0, 123, 255, 1), inset 0 0 30px rgba(0, 123, 255, 0.8);
+      box-shadow: inset 0 0 15px rgba(var(--socratiq-accent-rgb, 142, 21, 55), 1), inset 0 0 30px rgba(var(--socratiq-accent-rgb, 142, 21, 55), 0.8);
     }
     100% {
-      box-shadow: inset 0 0 10px rgba(0, 123, 255, 0.7), inset 0 0 20px rgba(0, 123, 255, 0.5);
+      box-shadow: inset 0 0 10px rgba(var(--socratiq-accent-rgb, 142, 21, 55), 0.7), inset 0 0 20px rgba(var(--socratiq-accent-rgb, 142, 21, 55), 0.5);
     }
   }
   
@@ -803,17 +922,17 @@ export const styles = `${utilities}\n${katex}\n${boardingStyles}
     text-align: left;
     transition: background 0.12s;
   }
-  .dropdown-item:hover { background: rgba(99,102,241,0.08); color: #6366f1; }
+  .dropdown-item:hover { background: rgba(var(--socratiq-accent-rgb, 142, 21, 55), 0.08); color: var(--socratiq-accent, #8e1537); }
   .dropdown-item.active {
-    background: rgba(99,102,241,0.12);
-    color: #6366f1;
+    background: rgba(var(--socratiq-accent-rgb, 142, 21, 55), 0.12);
+    color: var(--socratiq-accent, #8e1537);
     font-weight: 600;
   }
 
   /* Draw-to-select active indicator on the ⋯ button */
   #more-options-button.draw-active {
-    color: #6366f1;
-    background: rgba(99,102,241,0.12);
+    color: var(--socratiq-accent, #8e1537);
+    background: rgba(var(--socratiq-accent-rgb, 142, 21, 55), 0.12);
     border-radius: 6px;
   }
 
@@ -910,7 +1029,7 @@ export const styles = `${utilities}\n${katex}\n${boardingStyles}
   }
   
   .search-input:focus {
-    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+    box-shadow: 0 0 0 2px rgba(var(--socratiq-accent-rgb, 142, 21, 55), 0.2);
   }
 
 
@@ -937,7 +1056,7 @@ export const styles = `${utilities}\n${katex}\n${boardingStyles}
 /* For Firefox */
 #message-container {
   scrollbar-width: thin;
-  scrollbar-color: #0d6efd transparent;
+  scrollbar-color: var(--socratiq-accent, #8e1537) transparent;
   overflow-x: hidden; /* hide horizontal scrollbar */
 }
 
@@ -1080,7 +1199,7 @@ export const styles = `${utilities}\n${katex}\n${boardingStyles}
     }
 
     .boarding-button {
-        background: #007bff;
+        background: var(--socratiq-accent, #8e1537);
         color: white;
         border: none;
         padding: 8px 16px;
@@ -1089,7 +1208,7 @@ export const styles = `${utilities}\n${katex}\n${boardingStyles}
     }
 
     .boarding-button:hover {
-        background: #0056b3;
+        background: var(--socratiq-accent-strong, #74132f);
     }
 
 #floating-ai-btn .menu-item {
@@ -1184,7 +1303,7 @@ export const styles = `${utilities}\n${katex}\n${boardingStyles}
 /* Toggle switch styles */
 .toggle-checkbox:checked {
   right: 0;
-  border-color: #68D391;
+  border-color: var(--socratiq-accent, #8e1537);
 }
 
 .toggle-label {
@@ -1192,7 +1311,7 @@ export const styles = `${utilities}\n${katex}\n${boardingStyles}
 }
 
 .toggle-checkbox:checked + .toggle-label {
-  background-color: #48BB78;
+  background-color: var(--socratiq-accent, #8e1537);
 }
 
 /* Keep the existing deck controls usable when their modal narrows. */

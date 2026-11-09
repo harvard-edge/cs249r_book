@@ -141,8 +141,9 @@ export async function extractPageTOC(options = {}) {
       const headings = contentElement.querySelectorAll(config.headingSelector);
       
       headings.forEach((heading, index) => {
-        // Skip hidden headings
+        // Skip hidden headings and Quarto TOC / sidebar / widget chrome headings
         if (heading.offsetParent === null) return;
+        if (heading.id === 'toc-title' || heading.closest('nav#TOC, #TOC, #quarto-margin-sidebar, .sidebar, #socratiq-reader, #widget-chat-container')) return;
         
         // Get heading text (strip HTML if includeHtml is false)
         const text = config.includeHtml ? heading.innerHTML : heading.textContent.trim();

@@ -100,7 +100,7 @@ export class SettingsManager {
       if (this.isSyncingLearnerPreferences) return;
       const preference = readLearnerPreferences();
       const level = ['beginner', 'intermediate', 'advanced'].indexOf(preference.level);
-      if (this.settings.sliderValue !== level) {
+      if (this.settings.sliderValue !== level && !(this.settings.sliderValue === 3 && preference.level === 'advanced')) {
         const initializing = this.isInitializing;
         this.isInitializing = true;
         const slider = this.shadowEle.querySelector('#understanding-slider');
@@ -189,7 +189,7 @@ export class SettingsManager {
       const event = new CustomEvent("aiActionCompleted", {
         detail: { 
           type: "system_prompt", 
-          text: DIFFICULTY_LEVELS[this.settings.sliderValue]
+          text: this.generateSystemPrompt()
         },
       });
       window.dispatchEvent(event);
@@ -208,7 +208,7 @@ export class SettingsManager {
       if (index === this.settings.sliderValue) {
         level.classList.add('bg-blue-50', 'dark:bg-zinc-700', 'p-2', 'rounded');
       } else {
-        level.classList.remove('bg-blue-50', 'dark:bg-zinc-700', 'p-2', 'rounded');
+        level.classList.remove('bg-blue-50', 'dark:bg-zinc-700');
       }
     });
   }
@@ -250,7 +250,7 @@ export class SettingsManager {
       if (index === this.settings.sliderValue) {
         level.classList.add('bg-blue-50', 'dark:bg-zinc-700', 'p-2', 'rounded');
       } else {
-        level.classList.remove('bg-blue-50', 'dark:bg-zinc-700', 'p-2', 'rounded');
+        level.classList.remove('bg-blue-50', 'dark:bg-zinc-700');
       }
     });
 
@@ -260,7 +260,15 @@ export class SettingsManager {
     const answersDescription = '';
     // Prompt generation also runs during startup and sync; it has no UI side effects.
     
-    return `Tailor your response for a: ${understanding}. ${answersDescription} ${useBlooms ? 'Apply Bloom\'s Taxonomy in your response structure.' : ''}`;
+    const volumeMatch = typeof window !== 'undefined' ? window.location?.pathname?.match(/(?:^|\/)(vol[1-4])(?:\/|$)/)?.[1] : '';
+    const volumeScope = {
+      vol1: 'Ground explanations in Volume I (single-machine ML systems, the D·A·M Data-Algorithm-Machine taxonomy, and the iron law).',
+      vol2: 'Ground explanations in Volume II (distributed fleet ML systems, the C³ Computation-Communication-Coordination taxonomy, and the fleet law).',
+      vol3: 'Ground explanations in Volume III (agentic ML systems, H·S·A Harness-State-Action exposures, and invariant closure).',
+      vol4: 'Ground explanations in Volume IV (physical AI systems crossing a causal boundary and action irreversibility).',
+    }[volumeMatch] || 'Ground explanations in the Machine Learning Systems textbook taxonomy (D·A·M for single machines, C³ for fleets, H·S·A for agentic systems, and causal boundaries for physical AI).';
+
+    return `Tailor your response for a: ${understanding}. ${volumeScope} ${answersDescription} ${useBlooms ? 'Apply Bloom\'s Taxonomy in your response structure.' : ''}`;
   }
 
   generateSettings() {
@@ -348,7 +356,7 @@ export class SettingsManager {
         if (index === this.settings.sliderValue) {
           level.classList.add('bg-blue-50', 'dark:bg-zinc-700', 'p-2', 'rounded');
         } else {
-          level.classList.remove('bg-blue-50', 'dark:bg-zinc-700', 'p-2', 'rounded');
+          level.classList.remove('bg-blue-50', 'dark:bg-zinc-700');
         }
       });
     }
@@ -760,9 +768,11 @@ export function setupModal(shadowEle) {
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
+    width: min(480px, 92vw);
+    height: fit-content;
     z-index: 100000; /* Higher than overlay */
     display: none;
-    max-height: 90vh;
+    max-height: 92vh;
     overflow-y: auto;
     border-radius: 0.5rem;
     box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);

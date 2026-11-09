@@ -24,7 +24,9 @@ function createModal() {
     markdownContent.className = 'markdown-body space-y-4';
     // markdownContent.innerHTML =  `<iframe id="youtubeVideo" width="100%" height="315" src="https://www.youtube.com/embed/mIT9nIsxCe0?enablejsapi=1" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>`
     //convertMarkdownToHTML(helpMarkdown);
-    markdownContent.innerHTML =  `<div id="youtubeVideo-container"></div>` //<iframe id="youtubeVideo"></iframe>`
+    const volMatch = typeof window !== 'undefined' ? window.location?.pathname?.match(/(?:^|\/)(vol[1-4])(?:\/|$)/)?.[1] : '';
+    const guideHref = `/${volMatch || 'vol1'}/shared/frontmatter/socratiq/socratiq.html`;
+    markdownContent.innerHTML = `<p class="text-sm mb-3">Read the <a href="${guideHref}" target="_blank" rel="noopener noreferrer" class="text-blue-600 dark:text-blue-300 underline font-medium">SocratiQ User Guide</a> or our paper in the <a href="https://doi.org/10.1145/3743646.3750010" target="_blank" rel="noopener noreferrer" class="text-blue-600 dark:text-blue-300 underline font-medium">WCAE '25 proceedings</a> (<a href="https://arxiv.org/abs/2502.00341" target="_blank" rel="noopener noreferrer" class="text-blue-600 dark:text-blue-300 underline font-medium">arXiv:2502.00341</a>).</p><div id="youtubeVideo-container"></div>`;
 
     content.appendChild(markdownContent);
     modalContainer.appendChild(content);
@@ -39,7 +41,7 @@ function createModal() {
     emailButton.className = 'bg-gray-600 rounded-lg p-2 hover:bg-gray-300 text-white';
     emailButton.id = 'emailButtonHelpModal';
     emailButton.onclick = () => {
-        window.location.href = 'mailto:tinyml.aichat@gmail.com?subject=Help with TinyML';
+        window.location.href = 'mailto:tinyml.aichat@gmail.com?subject=Help with SocratiQ';
     };
 
     // Create and add Close button at the bottom of the modal
