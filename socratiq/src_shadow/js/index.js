@@ -820,15 +820,15 @@ async function handleGeneralAction(
   showProgressItem(progress, progressCount);
 
   let new_ans = `<details class="user-input-resubmit" style="
-background-color: rgba(13, 110, 253, 0.05);
-border: 1px solid rgba(13, 110, 253, 0.2);
+background-color: rgba(142, 21, 55, 0.05);
+border: 1px solid rgba(142, 21, 55, 0.2);
 border-radius: 4px;
 padding: 0.5rem;
 margin-bottom: 1.5rem;
 ">
 <summary style="
   cursor: pointer;
-  color: #0d6efd;
+  color: var(--socratiq-accent, #8e1537);
   font-weight: 500;
   padding: 0.25rem;
 ">User's Input</summary>
@@ -1166,15 +1166,15 @@ async function handleQueryActionStream(
 
 
   let new_ans = `<details class="user-input-resubmit" style="
-  background-color: rgba(13, 110, 253, 0.05);
-  border: 1px solid rgba(13, 110, 253, 0.2);
+  background-color: rgba(142, 21, 55, 0.05);
+  border: 1px solid rgba(142, 21, 55, 0.2);
   border-radius: 4px;
   padding: 0.5rem;
   margin-bottom: 1.5rem;
 ">
   <summary style="
     cursor: pointer;
-    color: #0d6efd;
+    color: var(--socratiq-accent, #8e1537);
     font-weight: 500;
     padding: 0.25rem;
   ">User's Input</summary>
@@ -1240,7 +1240,7 @@ async function handleQueryActionStream(
   const enhancedPrompt = prompt.replace('{{background_context}}', backgroundContext);
 
   if (tempDifficultyLevel) {
-    newprompt = `${tempDifficultyLevel} \n\n BACKGROUND KNOWLEDGE: ${"this is a textbook about Machine Learning Systems and tinyML called mlsysbook.ai "} \n\n QUESTION: ${text} \n\n ${enhancedPrompt}`;
+    newprompt = `${tempDifficultyLevel} \n\n ${SYSTEM_PROMPT} \n\n QUESTION: ${text} \n\n ${enhancedPrompt}`;
   } else {
     newprompt = `${SYSTEM_PROMPT} \n\n QUESTION: ${text} \n\n ${enhancedPrompt}`;
   }
@@ -2529,12 +2529,12 @@ export function setListeners() {
           box-sizing: border-box;
         }
         #socratiq-more-dropdown .dropdown-item:hover {
-          background: rgba(99,102,241,0.09);
-          color: #6366f1;
+          background: rgba(142, 21, 55,0.09);
+          color: #8e1537;
         }
         #socratiq-more-dropdown .dropdown-item.active {
-          background: rgba(99,102,241,0.13);
-          color: #6366f1;
+          background: rgba(142, 21, 55,0.13);
+          color: #8e1537;
           font-weight: 600;
         }
         @keyframes sqDropRise {
@@ -2691,13 +2691,13 @@ We are currently unable to connect to our servers. Showing relevant content from
 
     // Add the user's input section
     offlineResponse += `<details class="user-input-resubmit" style="
-      background-color: rgba(13, 110, 253, 0.05);
-      border: 1px solid rgba(13, 110, 253, 0.2);
+      background-color: rgba(142, 21, 55, 0.05);
+      border: 1px solid rgba(142, 21, 55, 0.2);
       border-radius: 4px;
       padding: 0.5rem;
       margin-bottom: 1.5rem;
     ">
-      <summary style="cursor: pointer; color: #0d6efd; font-weight: 500; padding: 0.25rem;">
+      <summary style="cursor: pointer; color: var(--socratiq-accent, #8e1537); font-weight: 500; padding: 0.25rem;">
         User's Input
       </summary>
       <div class="editable-container" style="padding: 0.5rem;">

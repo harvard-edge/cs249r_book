@@ -419,7 +419,7 @@ function showReferenceTooltip(refId, event, definition) {
     <a href="javascript:void(0)" 
        onclick="handleReferenceClick('${refId}', event); return false;"
        style="
-         color: #3b82f6;
+         color: #8e1537;
          text-decoration: none;
          font-size: 0.75rem;
          font-weight: 500;
@@ -769,13 +769,13 @@ export function addReferenceStyles(container) {
     
     /* Cross-page reference styles */
     .reference-pill[data-source-url]:not([data-source-url=""]) {
-      background: #dbeafe;
-      color: #1e40af;
-      border: 1px solid #93c5fd;
+      background: #f7e6ea;
+      color: #5c0e24;
+      border: 1px solid #e0b0be;
     }
     
     .reference-pill[data-source-url]:not([data-source-url=""]):hover {
-      background: #bfdbfe;
+      background: #eed0d7;
       transform: scale(1.1);
     }
     
@@ -788,7 +788,7 @@ export function addReferenceStyles(container) {
     }
     
     .reference-pill:focus {
-      outline: 2px solid #3b82f6;
+      outline: 2px solid #8e1537;
       outline-offset: 2px;
     }
     
@@ -819,27 +819,27 @@ export function addReferenceStyles(container) {
     
     /* Paragraph highlight styles */
     .paragraph-highlight {
-      background: rgba(59, 130, 246, 0.1) !important;
-      border-left: 3px solid #3b82f6 !important;
+      background: rgba(142, 21, 55, 0.1) !important;
+      border-left: 3px solid #8e1537 !important;
       transition: all 0.3s ease !important;
       animation: highlightPulse 0.5s ease-in-out;
     }
     
     @keyframes highlightPulse {
-      0% { background: rgba(59, 130, 246, 0.2); }
-      50% { background: rgba(59, 130, 246, 0.15); }
-      100% { background: rgba(59, 130, 246, 0.1); }
+      0% { background: rgba(142, 21, 55, 0.2); }
+      50% { background: rgba(142, 21, 55, 0.15); }
+      100% { background: rgba(142, 21, 55, 0.1); }
     }
     
     /* Fuzzy highlight styles - consistent with fuzzy match system */
     @keyframes highlightFade {
-      0% { background-color: rgba(59, 130, 246, 0.2); }
-      50% { background-color: rgba(59, 130, 246, 0.4); }
-      100% { background-color: rgba(59, 130, 246, 0.1); }
+      0% { background-color: rgba(142, 21, 55, 0.2); }
+      50% { background-color: rgba(142, 21, 55, 0.4); }
+      100% { background-color: rgba(142, 21, 55, 0.1); }
     }
     
     .fuzzy-highlight {
-      background-color: rgba(59, 130, 246, 0.1);
+      background-color: rgba(142, 21, 55, 0.1);
       scroll-margin-top: 100px;
     }
     

@@ -86,12 +86,12 @@ function _buildHTML() {
         <svg id="med-svg" viewBox="0 0 220 220" width="210" height="210" style="position:absolute;inset:0;cursor:pointer;touch-action:none;">
           <circle cx="110" cy="110" r="90" fill="none" stroke="var(--socratiq-border,#e5e7eb)" stroke-width="18"/>
           <circle id="med-arc" cx="110" cy="110" r="90" fill="none"
-            stroke="#6366f1" stroke-width="18"
+            stroke="#8e1537" stroke-width="18"
             stroke-linecap="round"
             stroke-dasharray="565.48" stroke-dashoffset="565.48"
             transform="rotate(-90 110 110)"
             style="transition:stroke 0.3s;"/>
-          <circle id="med-thumb" cx="110" cy="20" r="10" fill="#6366f1"/>
+          <circle id="med-thumb" cx="110" cy="20" r="10" fill="#8e1537"/>
         </svg>
         <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none;">
           <div id="med-time-display" style="font-size:2.4rem;font-weight:700;font-variant-numeric:tabular-nums;line-height:1;">0:00</div>
@@ -102,10 +102,10 @@ function _buildHTML() {
       <!-- Play / Reset -->
       <div style="display:flex;gap:12px;justify-content:center;align-items:center;margin-bottom:20px;">
         <button id="med-play" style="
-          background:#6366f1;color:#fff;border:none;cursor:pointer;
+          background:#8e1537;color:#fff;border:none;cursor:pointer;
           border-radius:50%;width:52px;height:52px;font-size:1.3rem;
           display:flex;align-items:center;justify-content:center;
-          transition:background 0.2s;box-shadow:0 4px 14px rgba(99,102,241,0.4);
+          transition:background 0.2s;box-shadow:0 4px 14px rgba(142, 21, 55,0.4);
         ">▶</button>
         <button id="med-reset" style="
           background:var(--socratiq-input-bg,#f3f4f6);color:var(--socratiq-text-muted,#6b7280);border:1px solid var(--socratiq-border,#e5e7eb);cursor:pointer;
@@ -132,7 +132,7 @@ function _buildHTML() {
           <button class="med-sound-opt"        data-sound="silence" style="padding:5px 12px;border-radius:8px;font-size:0.75rem;cursor:pointer;border:1px solid var(--socratiq-border,#e5e7eb);background:var(--socratiq-input-bg,#f3f4f6);color:var(--socratiq-text-muted,#6b7280);">🔇 None</button>
         </div>
         <button id="med-preview-sound" style="
-          margin-top:8px;background:none;border:none;color:#6366f1;
+          margin-top:8px;background:none;border:none;color:#8e1537;
           font-size:0.72rem;cursor:pointer;text-decoration:underline;
         ">▶ Preview sound</button>
       </div>
@@ -175,25 +175,25 @@ function _buildCSS() {
     animation: med-breathe 16s ease-in-out infinite;
   }
   #med-arc.breathing {
-    filter: drop-shadow(0 0 8px #6366f1);
+    filter: drop-shadow(0 0 8px #8e1537);
   }
-  #med-play:hover { background: #4f46e5 !important; }
+  #med-play:hover { background: #74132f !important; }
   #med-reset:hover { opacity: 0.8; }
   #med-interval-toggle.active {
-    background: #6366f1 !important;
+    background: #8e1537 !important;
     color: #fff !important;
-    border-color: #6366f1 !important;
+    border-color: #8e1537 !important;
   }
-  #med-interval-toggle:hover { background: rgba(99,102,241,0.08) !important; color: #6366f1 !important; }
-  #med-interval-input:focus { border-color: #6366f1 !important; }
+  #med-interval-toggle:hover { background: rgba(142, 21, 55,0.08) !important; color: #8e1537 !important; }
+  #med-interval-input:focus { border-color: #8e1537 !important; }
   .med-sound-opt.active {
-    background: #6366f1 !important;
+    background: #8e1537 !important;
     color: #fff !important;
-    border-color: #6366f1 !important;
+    border-color: #8e1537 !important;
   }
-  .med-sound-opt:hover { background: rgba(99,102,241,0.08) !important; color: #6366f1 !important; }
+  .med-sound-opt:hover { background: rgba(142, 21, 55,0.08) !important; color: #8e1537 !important; }
   #med-close:hover { opacity: 0.8; }
-  #med-preview-sound:hover { color: #818cf8 !important; }
+  #med-preview-sound:hover { color: #E85D75 !important; }
 
   @keyframes med-nudge-in {
     from { opacity:0; transform:translateY(-16px) scale(0.96); }
@@ -355,9 +355,9 @@ function _wire(shadowRoot, modal) {
 
   function _applyPulseState() {
     if (pulseEnabled) {
-      pulseToggle.style.color = '#6366f1';
-      pulseToggle.style.borderColor = '#6366f1';
-      pulseToggle.style.background = 'rgba(99,102,241,0.08)';
+      pulseToggle.style.color = '#8e1537';
+      pulseToggle.style.borderColor = '#8e1537';
+      pulseToggle.style.background = 'rgba(142, 21, 55,0.08)';
       pulseIcon.textContent = '◉';
       pulseLabel.textContent = 'Pulse: on';
       if (running) { card.classList.add('breathing'); arc.classList.add('breathing'); }
@@ -459,7 +459,7 @@ function _showNudge(shadowRoot, sound = 'bell') {
     background:#0f172a;color:#e2e8f0;
     border-radius:18px;padding:24px 22px 20px;
     box-shadow:0 16px 48px rgba(0,0,0,0.55);
-    border:1px solid #6366f155;
+    border:1px solid #8e153755;
     display:flex;flex-direction:column;gap:14px;
   `;
   nudge.innerHTML = `
@@ -476,7 +476,7 @@ function _showNudge(shadowRoot, sound = 'bell') {
     </div>
     <div style="display:flex;gap:8px;">
       <button id="med-nudge-start" style="
-        flex:1;background:#6366f1;color:#fff;border:none;border-radius:10px;
+        flex:1;background:#8e1537;color:#fff;border:none;border-radius:10px;
         padding:9px 14px;font-size:0.82rem;font-weight:600;cursor:pointer;
         transition:background 0.2s;
       ">Start Meditation</button>
@@ -499,7 +499,7 @@ function _showNudge(shadowRoot, sound = 'bell') {
       }
       #${NUDGE_ID} { animation: med-nudge-in 0.22s ease-out; }
       @media (prefers-reduced-motion: reduce) { #${NUDGE_ID} { animation: none; } }
-      #med-nudge-start:hover { background: #4f46e5 !important; }
+      #med-nudge-start:hover { background: #74132f !important; }
       #med-nudge-dismiss:hover { background: #334155 !important; color:#e2e8f0 !important; }
     `;
     document.head.appendChild(s);

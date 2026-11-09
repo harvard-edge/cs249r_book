@@ -198,14 +198,14 @@ md.use(markdownItContainer, 'spoiler', {
       }
 
       return `<details style="
-        background-color: rgba(13, 110, 253, 0.05);
-        border: 1px solid rgba(13, 110, 253, 0.2);
+        background-color: rgba(142, 21, 55, 0.05);
+        border: 1px solid rgba(142, 21, 55, 0.2);
         border-radius: 4px;
         padding: 0.5rem;
         margin-bottom: 1.5rem;
       "><summary style="
         cursor: pointer;
-        color: #0d6efd;
+        color: var(--socratiq-accent, #8e1537);
         font-weight: 500;
         padding: 0.25rem;
       ">${md.utils.escapeHtml(m[1])}</summary>
@@ -258,7 +258,7 @@ md.use(markdownItContainer, 'info', {
       return `<div class="info-box" style="
         background-color: #f8f9fa;
         border: 1px solid #e9ecef;
-        border-left: 4px solid #0d6efd;
+        border-left: 4px solid #8e1537;
         border-radius: 4px;
         padding: 1rem;
         margin: 1rem 0;
@@ -548,7 +548,7 @@ function scrollToCustomReference(targetElement) {
   
   // Add highlight class
   targetElement.classList.add('custom-reference-highlight');
-  targetElement.animate?.([{ backgroundColor: 'rgba(59, 130, 246, 0.25)' }, { backgroundColor: 'transparent' }], { duration: 3000 });
+  targetElement.animate?.([{ backgroundColor: 'rgba(142, 21, 55, 0.25)' }, { backgroundColor: 'transparent' }], { duration: 3000 });
   
   // Scroll to element
   try {
@@ -687,7 +687,7 @@ function showCustomReferenceTooltip(targetId, event, displayText) {
   }
   const link = document.createElement('a');
   link.href = '#';
-  link.style.color = '#3b82f6';
+  link.style.color = '#8e1537';
   link.style.textDecoration = 'none';
   link.style.fontSize = '0.75rem';
   link.style.fontWeight = '500';
@@ -1159,13 +1159,13 @@ export async function updateMarkdownPreview(text, clone, isResearch = 0, markdow
         
         /* Cross-page custom reference styles */
         .custom-reference-pill[data-source-url]:not([data-source-url=""]) {
-          background: #dbeafe;
-          color: #1e40af;
-          border: 1px solid #93c5fd;
+          background: #f7e6ea;
+          color: #5c0e24;
+          border: 1px solid #e0b0be;
         }
         
         .custom-reference-pill[data-source-url]:not([data-source-url=""]):hover {
-          background: #bfdbfe;
+          background: #eed0d7;
           transform: scale(1.1);
         }
         
@@ -1178,16 +1178,16 @@ export async function updateMarkdownPreview(text, clone, isResearch = 0, markdow
         }
         
         .custom-reference-highlight {
-          background-color: rgba(59, 130, 246, 0.1);
+          background-color: rgba(142, 21, 55, 0.1);
           scroll-margin-top: 100px;
         }
         .custom-reference-highlight.animate {
           animation: customHighlightFade 2s ease-out;
         }
         @keyframes customHighlightFade {
-          0% { background-color: rgba(59, 130, 246, 0.2); }
-          50% { background-color: rgba(59, 130, 246, 0.4); }
-          100% { background-color: rgba(59, 130, 246, 0.1); }
+          0% { background-color: rgba(142, 21, 55, 0.2); }
+          50% { background-color: rgba(142, 21, 55, 0.4); }
+          100% { background-color: rgba(142, 21, 55, 0.1); }
         }
       </style>
       ${htmlContent}
@@ -1579,16 +1579,16 @@ export class StreamdownMarkdownRenderer {
               transform: scale(1.1);
             }
             .custom-reference-highlight {
-              background-color: rgba(59, 130, 246, 0.1);
+              background-color: rgba(142, 21, 55, 0.1);
               scroll-margin-top: 100px;
             }
             .custom-reference-highlight.animate {
               animation: customHighlightFade 2s ease-out;
             }
             @keyframes customHighlightFade {
-              0% { background-color: rgba(59, 130, 246, 0.2); }
-              50% { background-color: rgba(59, 130, 246, 0.4); }
-              100% { background-color: rgba(59, 130, 246, 0.1); }
+              0% { background-color: rgba(142, 21, 55, 0.2); }
+              50% { background-color: rgba(142, 21, 55, 0.4); }
+              100% { background-color: rgba(142, 21, 55, 0.1); }
             }
           </style>
           ${htmlContent}

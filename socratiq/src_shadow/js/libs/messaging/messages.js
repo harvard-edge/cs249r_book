@@ -79,14 +79,14 @@ export function get_message_element(shadowEle, type, ele='') {
       Object.assign(clone.style, {
         position: 'relative',
         borderRadius: '15px',
-        border: '2px solid rgba(59, 130, 246, 0.2)'
+        border: '2px solid rgba(142, 21, 55, 0.2)'
       });
   
       // Create and add keyframe animation
       const keyframes = [
-        { border: '2px solid rgba(59, 130, 246, 0.2)' },
-        { border: '2px solid rgba(59, 130, 246, 0.8)' },
-        { border: '2px solid rgba(59, 130, 246, 0.2)' }
+        { border: '2px solid rgba(142, 21, 55, 0.2)' },
+        { border: '2px solid rgba(142, 21, 55, 0.8)' },
+        { border: '2px solid rgba(142, 21, 55, 0.2)' }
       ];
   
       const animation = clone.animate(keyframes, {

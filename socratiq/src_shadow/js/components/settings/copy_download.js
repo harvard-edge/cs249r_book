@@ -274,12 +274,12 @@ async function handleSearch(highlightButton, buttonContainer, aiMessage, origina
                 styles.id = 'highlight-styles';
                 styles.textContent = `
                     @keyframes highlightFade {
-                        0% { background-color: rgba(59, 130, 246, 0.2); }
-                        50% { background-color: rgba(59, 130, 246, 0.4); }
-                        100% { background-color: rgba(59, 130, 246, 0.1); }
+                        0% { background-color: rgba(142, 21, 55, 0.2); }
+                        50% { background-color: rgba(142, 21, 55, 0.4); }
+                        100% { background-color: rgba(142, 21, 55, 0.1); }
                     }
                     .fuzzy-highlight {
-                        background-color: rgba(59, 130, 246, 0.1);
+                        background-color: rgba(142, 21, 55, 0.1);
                         scroll-margin-top: 100px;
                     }
                     .fuzzy-highlight.animate {

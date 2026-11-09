@@ -417,7 +417,7 @@ export function showPopover(shadowEle, message, type = "info", duration = 3000) 
     // Set style based on type
     switch(type) {
         case "info":
-            popover.style.backgroundColor = 'rgba(59, 130, 246, 0.9)'; // Blue
+            popover.style.backgroundColor = 'rgba(142, 21, 55, 0.9)'; // Crimson
             popover.style.color = 'white';
             break;
         case "error":
@@ -429,7 +429,7 @@ export function showPopover(shadowEle, message, type = "info", duration = 3000) 
             popover.style.color = 'white';
             break;
         default:
-            popover.style.backgroundColor = 'rgba(59, 130, 246, 0.9)'; // Default blue
+            popover.style.backgroundColor = 'rgba(142, 21, 55, 0.9)'; // Default crimson
             popover.style.color = 'white';
     }
 
