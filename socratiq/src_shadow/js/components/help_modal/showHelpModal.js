@@ -128,6 +128,6 @@ function stopYouTubeVideo(modal) {
         iframe.contentWindow.postMessage(JSON.stringify({
             'event': 'command',
             'func': 'pauseVideo'
-        }), '*');
+        }), 'https://www.youtube.com');
     }
 }

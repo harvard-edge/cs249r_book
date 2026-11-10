@@ -203,7 +203,7 @@ export async function initiateResearch(query, token, randomID, searchTerms, num_
 ////////////////////////////////////////////////////////////////////////////////////////
 
 
-const PLOS_API_URL = 'http://api.plos.org/search';
+const PLOS_API_URL = 'https://api.plos.org/search';
 const ELSEVIER_API_URL = 'https://api.elsevier.com/content/search/scopus';
 const ELSEVIER_API_KEY = 'a9d938cf9d721824035e1c7ddc26d362';
 const LOC_API_URL = 'https://www.loc.gov/search/';

@@ -1,5 +1,6 @@
 import { SOCRATIQ_API_BASE, SHARED_PROVIDER, MAX_OUTPUT_TOKENS } from '../src_shared/provider-config.js';
 import { formatChapterTaxonomyPrompt } from '../src_shared/taxonomy-map.js';
+import { readActiveByokConfig, buildByokRequest, parseByokEvent, redactSecrets } from '../src_shared/byok-provider.js';
 import { learnerCalibration } from './calibration.mjs';
 
 const DEFAULT_ENDPOINT = `${SOCRATIQ_API_BASE}/ai/stream`;
@@ -267,18 +268,33 @@ export function createExplanationRequest({
     try {
       if (controller.signal.aborted) throw abortError(controller.signal, timedOut, cancelledByCaller);
 
+      const byokConfig = readActiveByokConfig();
+      const usingByok = Boolean(byokConfig?.enabled);
+      const byokReq = usingByok
+        ? buildByokRequest({
+            config: byokConfig,
+            messages: budgeted.messages,
+            maxTokens: MAX_TOKENS,
+            stream: true,
+          })
+        : null;
+
       let response;
       try {
         response = await Promise.race([
-          fetchImpl(requestUrl, {
+          fetchImpl(usingByok ? byokReq.url : requestUrl, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
-            body: JSON.stringify({
-              model,
-              messages: budgeted.messages,
-              max_tokens: MAX_TOKENS,
-              stream: true,
-            }),
+            headers: usingByok
+              ? byokReq.headers
+              : { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+            body: usingByok
+              ? byokReq.body
+              : JSON.stringify({
+                  model,
+                  messages: budgeted.messages,
+                  max_tokens: MAX_TOKENS,
+                  stream: true,
+                }),
             signal: controller.signal,
           }),
           abortGate.promise,
@@ -289,6 +305,13 @@ export function createExplanationRequest({
       }
 
       if (!response?.ok) {
+        if (response?.status === 401 || response?.status === 403) {
+          throw new Error(
+            usingByok
+              ? 'Your custom API key was rejected by the provider. Check or replace your key in model settings.'
+              : `The explanation service rejected the request (HTTP ${response?.status ?? 'unknown'}).`,
+          );
+        }
         if (response?.status === 429) throw new Error('The explanation request limit was reached. Wait about a minute before retrying. A shorter passage or a new conversation may help reduce the request size.');
         if (response?.status >= 500) throw new Error('The explanation service is temporarily unavailable. Please try again.');
         throw new Error(`The explanation service rejected the request (HTTP ${response?.status ?? 'unknown'}).`);
@@ -309,9 +332,15 @@ export function createExplanationRequest({
         if (!eventData.length) return;
         const rawData = eventData.join('\n');
         eventData = [];
-        const parsed = contentFromEvent(rawData);
+        const parsed = usingByok ? parseByokEvent(rawData, byokReq.format) : contentFromEvent(rawData);
         if (parsed.done) {
           sawDone = true;
+          if (parsed.finishReason) finishReason = parsed.finishReason;
+          if (parsed.content) {
+            sawContent = true;
+            accumulated += parsed.content;
+            if (onChunk) await onChunk(accumulated);
+          }
           return;
         }
         if (parsed.finishReason) finishReason = parsed.finishReason;
@@ -382,7 +411,7 @@ export function createExplanationRequest({
     } catch (error) {
       if (controller.signal.aborted) throw abortError(controller.signal, timedOut, cancelledByCaller);
       if (error instanceof TypeError || error instanceof RangeError) throw error;
-      if (error instanceof Error) throw error;
+      if (error instanceof Error) throw new Error(redactSecrets(error.message));
       throw new Error('The explanation request could not be completed. Please try again.');
     } finally {
       clearTimeout(timeout);

@@ -128,9 +128,9 @@ export const htmlContent = `
                       </div> -->
             <div id="markdown-preview" class="text-sm text-zinc-800 dark:text-zinc-200 chat-message">
               SocratiQ is an AI Generative Learning Assistant, designed to make learning more efficient, engaging and
-              accessible. We welcome your <a href="https://forms.gle/jmWJcdzN2TXXjHWn7" target="_blank"
+              accessible. We welcome your <a href="https://forms.gle/jmWJcdzN2TXXjHWn7" target="_blank" rel="noopener noreferrer"
                 class="text-blue-500 hover:text-blue-700" title="Provide your feedback here">Feedback</a>. Learn more
-              about <a href="https://www.youtube.com/watch?v=mIT9nIsxCe0" target="_blank"
+              about <a href="https://www.youtube.com/watch?v=mIT9nIsxCe0" target="_blank" rel="noopener noreferrer"
                 class="text-blue-500 hover:text-blue-700"
                 title="Watch the SocratiQ Introduction on YouTube">SocratiQ</a>.
             </div>
@@ -301,6 +301,8 @@ export const htmlContent = `
           <!-- <p class="font-bold">Be cautious</p> -->
           <p>SocratiQ uses AI and can make mistakes. Check claims in the book.<span> <a href="#" id="openModal-feedback"
                 class="underline text-blue-600 dark:text-blue-400 hover:text-zinc-800 dark:hover:text-zinc-100">Provide feedback</a>
+              · <span id="study-model-status">Free shared model</span> · <button type="button" id="open-byok-settings"
+                class="underline text-blue-600 dark:text-blue-400 hover:text-zinc-800 dark:hover:text-zinc-100 bg-transparent border-0 p-0 cursor-pointer">Connect your own Gemini / Claude</button>
             </span></p>
         </div>
       </div>
@@ -564,13 +566,22 @@ export const htmlContent = `
         
         <!-- Custom API Configuration (initially hidden) -->
         <div id="custom-api-config" class="hidden">
+          <div class="mb-3">
+            <button type="button" id="study-openrouter-sso"
+              class="w-full py-2 px-3 rounded-md text-white font-semibold text-sm transition-colors"
+              style="background-color: var(--socratiq-accent, #8e1537);">
+              Sign in with OpenRouter (1-Click SSO — Gemini / Claude / GPT)
+            </button>
+          </div>
           <!-- API Provider Dropdown -->
         <div class="mb-4">
           <label for="ai-provider" class="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-2">AI Provider</label>
           <select id="ai-provider" class="w-full px-3 py-2 border border-zinc-300 dark:border-zinc-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-zinc-700 dark:text-white">
             <option value="">Select an AI provider</option>
             <option value="google-gemini">Google Gemini API</option>
+            <option value="anthropic">Anthropic Claude API</option>
             <option value="open-router">Open Router API</option>
+            <option value="openai">OpenAI API</option>
             <option value="groq">GROQ API</option>
             <option value="ollama">OLLAMA API</option>
           </select>
@@ -581,7 +592,7 @@ export const htmlContent = `
           <label for="api-model" class="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-2">Model</label>
           <input type="text" id="api-model" 
             class="w-full px-3 py-2 border border-zinc-300 dark:border-zinc-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-zinc-700 dark:text-white"
-            placeholder="Model name (e.g., gemini-2.5-flash, gpt-3.5-turbo)">
+            placeholder="Model name (e.g., gemini-2.5-flash, claude-sonnet-4-20250514)">
         </div>
 
         <!-- API Endpoint URL Input -->
@@ -594,8 +605,12 @@ export const htmlContent = `
 
         <!-- API Key Input -->
         <div class="mb-4">
-          <label for="api-key" class="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-2">API Key (Optional)</label>
-          <input type="password" id="api-key" 
+          <div class="flex items-center justify-between mb-2">
+            <label for="api-key" class="block text-sm font-medium text-zinc-700 dark:text-zinc-300">API Key (Session-only by default)</label>
+            <a id="study-api-key-portal" href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer"
+              class="text-xs underline text-blue-600 dark:text-blue-400">Get free Gemini key ↗</a>
+          </div>
+          <input type="password" id="api-key" autocomplete="off" spellcheck="false"
             class="w-full px-3 py-2 border border-zinc-300 dark:border-zinc-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-zinc-700 dark:text-white"
             placeholder="Enter your API key (leave empty for local APIs like Ollama)">
         </div>
