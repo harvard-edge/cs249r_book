@@ -18,7 +18,7 @@ window.MLSysFigureLessons["original-v1-tensor-memory-layout"]=async(root,{outer,
  function prepare(i){const s=steps[i].evidence;if(s)tracks=[{source:rn[s.rowOffset],dest:out[0],text:String(s.value)},{source:cn[s.columnOffset],dest:out[1],text:String(s.value)}];}
 
  steps=steps.map((s,i)=>({...s,description:(i?'On completion: ':'Initial state: ')+s.description}));
- function render(i,{stage,details}){clearResize();current=i;tracks=[];if(!stage.contains(diagram))stage.append(diagram,status);if(!details.contains(detail))details.append(detail,inspection);draw(i);root.dataset.lessonState=String(i);root.dataset.stateEvidence=JSON.stringify(steps[i].evidence||{});}
+ function render(i,{stage,details}){clearResize();current=i;tracks=[];if(!stage.contains(diagram))stage.append(diagram);if(!details.contains(detail))details.append(status,detail,inspection);draw(i);root.dataset.lessonState=String(i);root.dataset.stateEvidence=JSON.stringify(steps[i].evidence||{});}
  const controller=window.MLSysOriginalPlayer.create({root,outer,layout:'compact',intro:'Map each (i, j) index of the 2 × 3 tensor to its 1D storage offset using row-major strides [3, 1] and column-major strides [1, 2].',title:"How does the same index reach different storage offsets?",scope:"The source 2 \u00d7 3 tensor and both alternative serializations. Each cell is one scalar element; offsets count elements. No byte width or cache model is assumed. The logical tensor is a view of either alternative storage, not a third allocation.",steps,render,transition:({to,onFrame,signal})=>{
   tracks=[];prepare(to);const size=28,gap=6;
   const flight=tracks.map(({source,dest,text},index)=>{

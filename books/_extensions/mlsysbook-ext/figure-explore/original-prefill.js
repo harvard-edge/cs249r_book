@@ -59,8 +59,8 @@
     view.addEventListener('change',updateView);
     function render(index,context){
       current=index;stage=context.stage;
-      if(!stage.contains(svg)){stage.append(svg,inset);}
-      if(context.details&&!context.details.contains(cacheStatus)){context.details.append(cacheStatus);}
+      if(!stage.contains(svg)){stage.append(svg);}
+      if(context.details&&!context.details.contains(cacheStatus)){context.details.append(cacheStatus,inset);}
       const [,,kind,count,k=0]=lesson[index];
       tokenLabels.forEach(({g,label},i)=>{let visible=false;if(i===0)visible=index>=3;else if(i===1)visible=index>=6;else if(i===2)visible=index>=7;else if(i===3)visible=index>=10;else if(i===4)visible=index>=11;else if(i===5)visible=index>=14;label.style.visibility=visible?'visible':'hidden';g.firstChild.setAttribute('fill',visible?'#dcfda6':'#fff');});
       cache.forEach((cell,i)=>{cell.style.fill=i<count?'rgb(98.039246%, 83.137512%, 68.624878%)':'white';cacheLabels[i].style.visibility=i<count?'visible':'hidden';cacheLabels[i].style.opacity='1';cell.style.strokeWidth=(kind==='read'&&i<count)?'1.4':'.59776';});

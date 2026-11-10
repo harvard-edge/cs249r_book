@@ -132,7 +132,7 @@
         if (!mounted) {
           stage.classList.add('original-fsdp-workspace');stageNode=document.createElement('div');stageNode.className='original-fsdp-stage';stageNode.tabIndex=0;
           stageNode.setAttribute('aria-label','Original FSDP phase history; scroll horizontally to inspect phases');
-          stageNode.append(art);stage.append(stageNode,livePanel);details.append(cue,optional);
+          stageNode.append(art);stage.append(stageNode);details.append(cue,livePanel,optional);
           stageNode.addEventListener('scroll',keepLabels,{passive:true});
           resizeObserver=new ResizeObserver(scheduleCenterPhase);resizeObserver.observe(stageNode);mounted=true;
         }

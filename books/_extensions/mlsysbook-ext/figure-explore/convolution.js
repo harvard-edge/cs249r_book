@@ -80,15 +80,22 @@
     const outputLayer = make('g',{}), particles = make('g',{'aria-hidden':'true'});
     const valueLayer=make('g',{'data-values-on-diagram':''});
     svg.append(outputPlane,outputLayer,valueLayer,particles);
-    const controls = node('div','','life-controls'), buttons={};
-    for (const [id,label] of [['next','Next'],['back','Back'],['play','Play'],['restart','Restart']]) {
-      const b=node('button',label); b.type='button'; b.dataset.control=id;
+    const titleHeading = node('h4', 'How does a moving input window produce one output while sharing the filter?', 'mlsys-original-title');
+    const introPara = node('p', 'Slide the shared 3 × 3 vertical-edge filter across the 7 × 7 input grid to compute and store all 25 output activations.', 'mlsys-original-intro');
+    const assumptions = node('details', '', 'mlsys-original-assumptions');
+    const assumptionsSummary = node('summary', 'Assumptions', 'mlsys-original-assumptions-summary');
+    const scope=node('p','Single input channel · stride 1 · no padding or bias · output before activation. The filter is used without flipping.','life-scope mlsys-original-scope');
+    assumptions.append(assumptionsSummary, scope);
+    const label=node('label','','life-sequence mlsys-original-sequence'), menu=node('select');
+    menu.setAttribute('aria-label','Animation sequence'); label.append(menu);
+    const controls = node('div','','life-controls mlsys-original-controls'), buttons={};
+    for (const [id,btnLabel] of [['play','Play'],['back','Back'],['next','Next'],['restart','Restart']]) {
+      const b=node('button',btnLabel,'mlsys-original-btn'); b.type='button'; b.dataset.control=id;
       b.setAttribute('aria-keyshortcuts',({next:'N',back:'P',play:'K',restart:'R'})[id]);
-      controls.append(b); buttons[id]=b;
+      buttons[id]=b;
     }
-    const scanButton=node('button','Complete the scan');scanButton.type='button';scanButton.dataset.control='scan';
-    controls.append(scanButton);
-    const expandButton=node('button','Expand');expandButton.type='button';expandButton.setAttribute('aria-haspopup','dialog');controls.append(expandButton);
+    const scanButton=node('button','Complete the scan','mlsys-original-btn');scanButton.type='button';scanButton.dataset.control='scan';
+    const expandButton=node('button','Expand','mlsys-original-btn');expandButton.type='button';expandButton.setAttribute('aria-haspopup','dialog');
     const dialog=node('dialog','','life-expanded'),closeButton=node('button','Close expanded animation','life-expanded-close');closeButton.type='button';
     dialog.setAttribute('aria-label','Expanded convolution animation');dialog.append(closeButton);outer.append(dialog);
     const placeholder=document.createComment('Convolution inline position');
@@ -100,14 +107,21 @@
     speedMenu.id=outer.id+'-convolution-speed';speedLabel.htmlFor=speedMenu.id;
     const rates=[.5,1,1.5,2];let speed=1;
     rates.forEach(rate=>{const option=node('option',`${rate}×`);option.value=rate;speedMenu.append(option);});speedMenu.value='1';
-    speedMenu.setAttribute('aria-label','Playback speed');speedLabel.append(speedMenu);controls.append(speedLabel);
-    const scope=node('p','Single input channel · stride 1 · no padding or bias · output before activation. The filter is used without flipping.','life-scope');
-    const label=node('label','Step ','life-sequence'), menu=node('select');
-    menu.setAttribute('aria-label','Animation sequence'); label.append(menu);
-    const narration=node('div','','life-narration'), heading=node('strong'), explanation=node('p');
+    speedMenu.setAttribute('aria-label','Playback speed');speedLabel.append(speedMenu);
+    controls.append(buttons.play, label, buttons.back, buttons.next, buttons.restart, expandButton, speedLabel);
+    const narration=node('div','','life-narration mlsys-original-narration'), heading=node('strong'), explanation=node('p');
     narration.setAttribute('aria-live','polite'); narration.append(heading,explanation);
     const canvas=node('div','','life-art'); canvas.append(svg);
-    const workspace=node('div','','life-workspace'), inset=node('details','','life-values');
+    const legend=node('div','','life-legend');
+    for (const [text,color] of [['Input window','#ff8000'],['Input contributions','#2455d6'],['Output activations','#a64ca6']]) {
+      const chip=node('span',text); chip.style.setProperty('--chip',color); legend.append(chip);
+    }
+    const stageWrap=node('div','','mlsys-original-stage');
+    stageWrap.append(canvas, legend);
+    const dockWrap=node('div','','mlsys-original-dock');
+    const keys=node('p','Keys: K Play/Pause · P / N Step · R Restart · −/+ Speed · Expand opens full view','life-keys');
+    dockWrap.append(controls, keys);
+    const workspace=node('div','','life-workspace mlsys-original-details'), inset=node('details','','life-values');
     inset.setAttribute('aria-label','Detailed calculation for the selected window');
     const example=window.MLSysConvolutionValues;
     if (!example || !Array.isArray(example.positions)) throw new Error('Missing convolution example data.');
@@ -126,16 +140,13 @@
     }
     const equation=node('p','','life-row-equation'), total=node('p','','life-calculation-total');
     calculation.append(calculationLabel,rowControls,equation,total);
-    workspace.append(canvas,calculation,sourceLink,inset);
-    const keys=node('p','Keyboard: N Next · P Back · K Play/Pause · R Restart · −/+ Speed. Expand opens a full-window view. Focus the animation to use shortcuts.','life-keys');
-    const legend=node('div','','life-legend');
-    for (const [text,color] of [['Input window','#ff8000'],['Input contributions','#2455d6'],['Output activations','#a64ca6']]) {
-      const chip=node('span',text); chip.style.setProperty('--chip',color); legend.append(chip);
-    }
+    const progressRow=node('div','','life-progress-row');
     const progress=node('p','','life-progress'), checkpoint=node('p','','life-checkpoint'), takeaway=node('p','','life-takeaway');
+    progressRow.append(progress, scanButton);
     checkpoint.textContent='Two windows show the pattern. Complete the scan applies the same filter at the remaining positions; Next continues the detailed steps.';
     takeaway.textContent='The same filter weights produce every output. Overlapping windows reuse input values, creating opportunities to reuse data in fast memory. The drawing shows logical computation; the execution schedule determines which data remains on chip.';
-    panel.append(controls,keys,scope,label,narration,workspace,legend,progress,checkpoint,takeaway);
+    workspace.append(calculation, progressRow, checkpoint, takeaway, sourceLink, inset);
+    panel.append(titleHeading, introPara, assumptions, stageWrap, dockWrap, narration, workspace);
     const movement=Number(outer.dataset.mlsysMovementMs), hold=Number(outer.dataset.mlsysReadingPauseMs);
     if (!(movement>0) || !(hold>=0)) throw new Error('Missing build-time timing.');
     const media=matchMedia('(prefers-reduced-motion: reduce)');
@@ -147,7 +158,7 @@
       states.push({row,col,phase:'combine',title:`Position (${row}, ${col}): combine the inputs`,text:`Each of the 9 active input values is multiplied by its matching filter weight. The three row totals sum to ${sumsText} = ${pos.output}.`});
       states.push({row,col,phase:'write',title:`Position (${row}, ${col}): store the output`,text:`Output ${pos.output} is stored in cell (${row}, ${col}) of the 5 × 5 output grid (${count} of 25 outputs complete). Adjacent stride-1 windows reuse overlapping input values.`});
     }
-    states.forEach((s,i) => {const o=node('option',`${i+1}. ${s.title}`);o.value=i;menu.append(o);});
+    states.forEach((s,i) => {const o=node('option',`${i+1} / ${states.length} · ${s.title}`);o.value=i;menu.append(o);});
     let index=0, completed=0, running=false, moving=false, motionPaused=false, resumeAutoplay=false, scanning=false, timer=null, effects=[], finishAction=null, motionFrame=null, motionTick=null, holdRemaining=null, holdStarted=null;
     const coordinates=s => {
       if(s.pose) return {window:[orangeOrigin,add(orangeOrigin,scale(lower.x,3)),add(orangeOrigin,scale(add(lower.x,lower.y),3)),add(orangeOrigin,scale(lower.y,3))],output:originalOutput,shift:{x:0,y:0}};
@@ -187,7 +198,7 @@
       scanButton.title=index<6?'Available after the first two output values are stored.':'Apply the shared filter at the remaining positions.';
       buttons.back.disabled=index===0; buttons.restart.disabled=index===0&&!moving;
       buttons.next.disabled=index===states.length-1&&!moving;
-      buttons.next.textContent=moving?'Finish':'Next'; buttons.play.textContent=running||(moving&&!motionPaused)?'Pause':index===states.length-1?'Replay':'Play';
+      buttons.next.textContent='Next'; buttons.play.textContent=running||(moving&&!motionPaused)?'Pause':index===states.length-1?'Replay':'Play';
       Object.assign(panel.dataset,{step:String(index),committed:String(completed),moving:String(moving),running:String(running)});
     }
     function paintDiagramValues(s) {
