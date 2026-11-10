@@ -200,6 +200,21 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
   let studyActive = false;
   let destroyed = false;
 
+  function publishActiveSource(source = activeSource) {
+    try {
+      window.__SOCRATIQ_ACTIVE_SOURCE__ = source ? {
+        quote: source.quote,
+        section: source.section,
+        title: source.title,
+        volume: source.volume,
+        url: source.url,
+      } : null;
+    } catch {
+      // Ignore environments where window properties are read-only.
+    }
+  }
+  publishActiveSource(null);
+
   studyButton.addEventListener('click', async () => {
     if (studyBusy || studyActive || typeof onOpenStudy !== 'function') return;
     studyBusy = true;
@@ -210,6 +225,7 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
     picker?.stop();
     pendingSource = null;
     hideSelectionAction();
+    publishActiveSource(activeSource);
     try {
       await onOpenStudy();
       if (!destroyed) suspendForStudy();
@@ -226,6 +242,7 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
   function suspendForStudy() {
     if (destroyed) return;
     studyActive = true;
+    publishActiveSource(activeSource);
     clearTimeout(selectionTimer);
     picker?.stop();
     pendingSource = null;
@@ -484,6 +501,7 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
     } else {
       activeSource = source;
     }
+    publishActiveSource(activeSource);
     renderSource(activeSource);
     sessions.render(activeSource);
     updateComposerState();
@@ -736,6 +754,7 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
     host,
     destroy() {
       destroyed = true;
+      publishActiveSource(null);
       window.removeEventListener('socratiq:open', suspendForStudy);
       window.removeEventListener('socratiq:close', resumeFromStudy);
       picker?.destroy();

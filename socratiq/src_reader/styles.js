@@ -74,8 +74,7 @@ export const readerStyles = `
     --reader-accent-dark-border: #215446;
   }
 
-  .reader-shell[data-theme="dark"] { color: #f5f0f2; }
-  .reader-shell[data-theme="dark"] { color-scheme: dark; }
+  .reader-shell[data-theme="dark"] { color: #f5f0f2; color-scheme: dark; }
   .reader-shell [hidden] { display: none !important; }
 
   button, textarea { font: inherit; }
@@ -233,8 +232,7 @@ export const readerStyles = `
   .reader-shell[data-theme="dark"] .reader-instruction button { background: #211e22; color: #f5f0f2; }
   .reader-picker button:focus-visible, .reader-session-select:focus-visible { outline: 3px solid var(--reader-accent-focus); outline-offset: 2px; }
   .reader-source { position: sticky; top: 0; z-index: 1; padding: 13px 16px 12px; border-bottom: 1px solid #eee7e9; background: #fffdfd; }
-  .reader-shell[data-theme="dark"] .reader-source { background: #211e22; }
-  .reader-shell[data-theme="dark"] .reader-source { border-color: #3d373d; }
+  .reader-shell[data-theme="dark"] .reader-source { background: #211e22; border-color: #3d373d; }
   .reader-source-label { margin: 0 0 5px; color: #877a81; font-size: 10px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; }
   .reader-source-link { color: var(--reader-accent-text); font-weight: 650; text-decoration: none; }
   .reader-source-link:hover { text-decoration: underline; }

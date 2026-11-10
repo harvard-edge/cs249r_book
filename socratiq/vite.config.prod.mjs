@@ -26,6 +26,13 @@ export default defineConfig({
         inlineDynamicImports: true,
         entryFileNames: 'bundle.js',
         assetFileNames: 'assets/[name][extname]',
+        minify: {
+          compress: {
+            treeshake: {
+              manualPureFunctions: ['console.log', 'console.debug', 'console.time', 'console.timeEnd'],
+            },
+          },
+        },
       },
       external: [],
     },

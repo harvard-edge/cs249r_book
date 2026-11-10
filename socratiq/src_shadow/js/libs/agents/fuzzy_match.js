@@ -225,11 +225,8 @@ function computeNgramSimilarity(text1, text2, n = 3) {
 export async function findSimilarParagraphsNonBlocking(aiResponse, numMatches = 5) {
     const responseFingerprint = computeTextFingerprint(aiResponse);
     
-    console.time('Finding rough matches');
     const roughMatches = findClosestFingerprints(responseFingerprint, 15); // Get more candidates for better results
-    console.timeEnd('Finding rough matches');
     
-    console.time('N-gram similarity calculation');
     const similarities = [];
     
     for (const match of roughMatches) {
@@ -247,7 +244,6 @@ export async function findSimilarParagraphsNonBlocking(aiResponse, numMatches = 
             similarity
         });
     }
-    console.timeEnd('N-gram similarity calculation');
 
     return similarities
         .sort((a, b) => b.similarity - a.similarity)

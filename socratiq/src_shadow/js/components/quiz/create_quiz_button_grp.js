@@ -305,18 +305,18 @@ export function createButtonGroup(shadowRoot) {
 
     shareButton.addEventListener('click', (e) => {
         e.preventDefault();
-        const markdownPreview = e.currentTarget.closest('#markdown-preview');
-        if (markdownPreview) {
-            const content = markdownPreview.innerText || markdownPreview.textContent;
-            const emailSubject = 'Shared Content';
-            const emailBody = encodeURIComponent(content);
-            const mailtoLink = `mailto:?subject=${encodeURIComponent(emailSubject)}&body=${emailBody}`;
-            
-            // Open mailto link in new window/tab
-            window.open(mailtoLink, '_blank');
-        } else {
+        const markdownPreview = e.currentTarget.closest('#markdown-preview, #quiz-form, #quiz, .socratiq-quiz');
+        if (!markdownPreview) {
             console.warn('Share button clicked - No markdown preview found');
+            return;
         }
+        const content = markdownPreview.innerText || markdownPreview.textContent;
+        const emailSubject = 'Shared Content';
+        const emailBody = encodeURIComponent(content);
+        const mailtoLink = `mailto:?subject=${encodeURIComponent(emailSubject)}&body=${emailBody}`;
+        
+        // Open mailto link in new window/tab
+        window.open(mailtoLink, '_blank');
     });
 
         srButton.addEventListener('click', async (e) => {
@@ -333,7 +333,8 @@ export function createButtonGroup(shadowRoot) {
 
             try {
 
-        const markdownPreview = e.currentTarget.closest('#markdown-preview');
+        const markdownPreview = e.currentTarget.closest('#markdown-preview, #quiz-form, #quiz, .socratiq-quiz');
+        if (!markdownPreview) return;
 
                 // Get content from the message
                 // const content = markdownPreview.getAttribute('data-markdown') || 
@@ -376,20 +377,18 @@ export function createButtonGroup(shadowRoot) {
     highlightButton.addEventListener('click', async (e) => {
         e.preventDefault();
 
-        const markdownPreview = e.currentTarget.closest('#markdown-preview');
-        if (markdownPreview) {
-            try {
-                const content = markdownPreview.innerText || markdownPreview.textContent;
-                await navigator.clipboard.writeText(content);
-                
-                // Show checkmark animation
-                const originalPath = highlightButton.querySelector('path').getAttribute('d');
-                showCheckmark(highlightButton, originalPath);
-                
-            } catch (err) {
-                console.error('Failed to copy content:', err);
-            }
-        } else {
+        const markdownPreview = e.currentTarget.closest('#markdown-preview, #quiz-form, #quiz, .socratiq-quiz');
+        if (!markdownPreview) return;
+        try {
+            const content = markdownPreview.innerText || markdownPreview.textContent;
+            await navigator.clipboard.writeText(content);
+            
+            // Show checkmark animation
+            const originalPath = highlightButton.querySelector('path').getAttribute('d');
+            showCheckmark(highlightButton, originalPath);
+            
+        } catch (err) {
+            console.error('Failed to copy content:', err);
         }
     });
 

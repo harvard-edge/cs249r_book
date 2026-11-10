@@ -268,14 +268,15 @@ export class DeckCreationHandler {
         
         const firstElement = focusableElements[0];
         const lastElement = focusableElements[focusableElements.length - 1];
+        const activeElement = this.modal.shadowRoot?.activeElement || document.activeElement;
 
         if (e.shiftKey) {
-            if (document.activeElement === firstElement) {
+            if (activeElement === firstElement) {
                 e.preventDefault();
                 lastElement.focus();
             }
         } else {
-            if (document.activeElement === lastElement) {
+            if (activeElement === lastElement) {
                 e.preventDefault();
                 firstElement.focus();
             }

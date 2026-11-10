@@ -12,7 +12,7 @@ export function revealSource(source, {document: doc = document, window: win = do
   const node = saved?.range.startContainer;
   let target = saved?.element.isConnected && node?.isConnected && node.ownerDocument === doc
     ? (node.nodeType === 1 ? node : node.parentElement) : null;
-  if (target) target = target.closest('p, li, blockquote, pre, figure, h1, h2, h3, h4, h5, h6, section, main, article') || target;
+  if (target) target = target.closest('p, li, blockquote, figcaption, dd, pre, figure, h1, h2, h3, h4, h5, h6, section, main, article, [role="main"]') || target;
   if (!target) {
     try {
       const url = new URL(source.url, win.location.href);
@@ -22,7 +22,7 @@ export function revealSource(source, {document: doc = document, window: win = do
       target = id ? doc.getElementById(id) : null;
     } catch { return false; }
   }
-  if (!target?.isConnected || !target.closest('main, article') || target.closest(EXCLUDED)) return false;
+  if (!target?.isConnected || !target.closest('main, article, [role="main"]') || target.closest(EXCLUDED)) return false;
   target.scrollIntoView({block: 'center', behavior: win.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth'});
   const tabindex = target.getAttribute('tabindex');
   if (tabindex === null) {
@@ -121,8 +121,8 @@ export function captureSelection({document: doc = document, window: win = window
 export function captureParagraph(node, {document: doc = document, window: win = doc.defaultView, volume, version = ''} = {}) {
   const target = elementOf(node);
   if (!target?.isConnected || target.ownerDocument !== doc || excludedAncestor(target) || target.closest(PARAGRAPH_INTERACTIVE)) return null;
-  const paragraph = target.closest('p');
-  if (!paragraph?.closest('main, article') || paragraph.closest(EXCLUDED) || paragraph.querySelector(`${EXCLUDED}, ${PARAGRAPH_CONTROLS}`)) return null;
+  const paragraph = target.closest('p') || target.closest('li, blockquote, figcaption, dd');
+  if (!paragraph?.closest('main, article, [role="main"]') || excludedAncestor(paragraph) || paragraph.closest(EXCLUDED) || paragraph.querySelector(`${EXCLUDED}, ${PARAGRAPH_CONTROLS}`)) return null;
   const range = doc.createRange();
   range.selectNodeContents(paragraph);
   return captureRange(range, {document: doc, window: win, volume, version});
@@ -131,7 +131,7 @@ export function captureParagraph(node, {document: doc = document, window: win = 
 function captureRange(range, {document: doc, window: win, volume, version}) {
   const start = elementOf(range.startContainer);
   const end = elementOf(range.endContainer);
-  const main = start?.closest('main, article');
+  const main = start?.closest('main, article, [role="main"]');
   if (!main || !main.contains(end) || excludedAncestor(start) || excludedAncestor(end)) return null;
   const section = elementOf(range.commonAncestorContainer).closest('section') || main;
   const mathItems = mathItemsWithin(win, section);

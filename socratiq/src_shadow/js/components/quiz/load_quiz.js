@@ -131,7 +131,11 @@ export async function ini_quiz(shadowRoot, quizData, title, chapterTitle, attrib
                 errorMessage = `Error: AI returned object instead of quiz array: ${JSON.stringify(quizData).substring(0, 100)}...`;
             }
             
-            quizForm.innerHTML = `<div class="error">${errorMessage}</div>`;
+            const errorDiv = document.createElement('div');
+            errorDiv.className = 'error';
+            errorDiv.textContent = errorMessage;
+            quizForm.innerHTML = '';
+            quizForm.appendChild(errorDiv);
             return;
         }
 

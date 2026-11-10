@@ -319,11 +319,12 @@ export class FlashcardVisualization {
             });
 
             // Add card nodes and links for this chapter
-            cards.forEach(card => {
+            cards.forEach((card, cardIndex) => {
                 nodes.push({
                     id: `card-${card.id}`,
                     type: 'card',
                     card: card,
+                    cardIndex: cardIndex,
                     radius: 8,
                     quality: card.quality || 0,
                     chapter: chapterNum
@@ -377,7 +378,7 @@ export class FlashcardVisualization {
                     const showCardEvent = new CustomEvent('show-card', {
                         detail: {
                             chapterNum: d.chapter,
-                            cardIndex: d.index-1,
+                            cardIndex: d.cardIndex ?? (d.index - 1),
                             card: d.card
                         },
                         bubbles: true,
@@ -537,10 +538,12 @@ export class FlashcardVisualization {
     // Add method to update review count for today
     updateTodayReview(updatedHistory) {
         if (this.currentView === 'heatmap') {
-            const today = new Date().toDateString();
-            const todayCount = (updatedHistory && updatedHistory[today.split('T')[0]]) || 0;
+            const now = new Date();
+            const todayIso = now.toISOString().split('T')[0];
+            const today = now.toDateString();
+            const todayCount = (updatedHistory && (updatedHistory[todayIso] ?? updatedHistory[today])) || 0;
             
-            const todayCell = this.svg.select(`.day[data-date="${today}"]`);
+            const todayCell = this.svg.select(`.day[data-date="${todayIso}"], .day[data-date="${today}"]`);
             if (todayCell.node()) {
                 todayCell
                     .attr('data-count', todayCount)

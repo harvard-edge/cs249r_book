@@ -4,6 +4,7 @@ import { showPopover } from '../../libs/utils/utils.js';
 import { generateProgressReport } from '../progressReport/progressReport.js';
 import { getDBInstance } from '../../libs/utils/indexDb.js';
 import { getAllChapterMapEntries } from '../../libs/utils/tocExtractor.js';
+import { escapeSidebarText } from '../../utils/sanitize.js';
 
 let modalInstance = null;
 
@@ -2090,7 +2091,7 @@ export class KnowledgeGraph {
         `;
         
         // Build tooltip content
-        let content = `<div style="font-weight: bold; margin-bottom: 8px; color: #8e1537;">${d.data.name}</div>`;
+        let content = `<div style="font-weight: bold; margin-bottom: 8px; color: #8e1537;">${escapeSidebarText(d.data.name)}</div>`;
         
         if (d.data.isTruncated) {
             content += `<div style="color: #ff6b6b; font-style: italic;">Truncated content</div>`;
@@ -2100,12 +2101,12 @@ export class KnowledgeGraph {
                 const childName = child.data.name.length > 25 ? 
                     child.data.name.substring(0, 25) + '...' : 
                     child.data.name;
-                content += `<div style="margin-left: 12px; margin-bottom: 2px;">• ${childName}</div>`;
+                content += `<div style="margin-left: 12px; margin-bottom: 2px;">• ${escapeSidebarText(childName)}</div>`;
             });
         } else if (d.data.pageTitle) {
-            content += `<div style="color: #cbd5e0;">Page: ${d.data.pageTitle}</div>`;
+            content += `<div style="color: #cbd5e0;">Page: ${escapeSidebarText(d.data.pageTitle)}</div>`;
             if (d.data.domain) {
-                content += `<div style="color: #cbd5e0;">Domain: ${d.data.domain}</div>`;
+                content += `<div style="color: #cbd5e0;">Domain: ${escapeSidebarText(d.data.domain)}</div>`;
             }
         }
         
@@ -2398,7 +2399,7 @@ export class KnowledgeGraph {
             // Deselect node
             this.selectedNodes.delete(node.id);
             
-            const listItem = sidebar.querySelector(`[data-id="${node.id}"]`);
+            const listItem = sidebar.querySelector(`[data-id="${CSS.escape(String(node.id))}"]`);
             if (listItem) {
                 listItem.style.opacity = '0';
                 setTimeout(() => listItem.remove(), 300);
@@ -2461,7 +2462,7 @@ export class KnowledgeGraph {
         console.log('Adding node to sidebar:', node.id);
         
         // Check if this item is already in the sidebar
-        const existingItem = sidebar.querySelector(`[data-quiz-id="${node.id}"]`);
+        const existingItem = sidebar.querySelector(`[data-quiz-id="${CSS.escape(String(node.id))}"]`);
         console.log('Existing item:', existingItem);
         if (existingItem) {
             console.log('Item already exists, returning');
@@ -2517,9 +2518,9 @@ export class KnowledgeGraph {
         
         quizItem.innerHTML = `
             <div style="flex: 1; margin-right: 8px;">
-                <div style="font-weight: 500; margin-bottom: 2px;">${node.name || node.label}</div>
-                <div style="font-size: 10px; color: #718096; margin-bottom: 1px;">${domain}</div>
-                <div style="font-size: 9px; color: #a0aec0;">${visitDate}</div>
+                <div style="font-weight: 500; margin-bottom: 2px;">${escapeSidebarText(node.name || node.label)}</div>
+                <div style="font-size: 10px; color: #718096; margin-bottom: 1px;">${escapeSidebarText(domain)}</div>
+                <div style="font-size: 9px; color: #a0aec0;">${escapeSidebarText(visitDate)}</div>
             </div>
             <button class="remove-quiz-item" style="
                 background: #e53e3e;
@@ -3053,20 +3054,24 @@ export function showKnowledgeGraph(shadowRoot) {
             flex-direction: column;
         `;
 
+        const closeKnowledgeGraphModal = () => {
+            modal.style.display = 'none';
+            document.removeEventListener('keydown', handleEscape);
+        };
+
         // Add click handlers for modal
         modal.addEventListener('click', (e) => {
             if (e.target === modal) {
-                modal.style.display = 'none';
+                closeKnowledgeGraphModal();
             }
         });
 
         // Add escape key handler
         const handleEscape = (e) => {
             if (e.key === 'Escape') {
-                modal.style.display = 'none';
+                closeKnowledgeGraphModal();
             }
         };
-        document.addEventListener('keydown', handleEscape);
 
         // Clean up event listener when modal is hidden
         const observer = new MutationObserver((mutations) => {
@@ -3098,13 +3103,13 @@ export function showKnowledgeGraph(shadowRoot) {
         shadowRoot.appendChild(modal);
 
         closeButton.onclick = () => {
-            modal.style.display = 'none';
+            closeKnowledgeGraphModal();
         };
 
-        modalInstance = { modal, content };
+        modalInstance = { modal, content, handleEscape, closeKnowledgeGraphModal };
     }
 
-    const { modal, content } = modalInstance;
+    const { modal, content, handleEscape } = modalInstance;
     
     // Clear previous content except close button
     const closeButton = content.firstChild;
@@ -3113,6 +3118,8 @@ export function showKnowledgeGraph(shadowRoot) {
 
     // Show modal and add spinner
     modal.style.display = 'flex';
+    document.removeEventListener('keydown', handleEscape);
+    document.addEventListener('keydown', handleEscape);
     closeButton.focus({preventScroll: true});
     const spinner = createLoadingSpinner();
     content.appendChild(spinner);

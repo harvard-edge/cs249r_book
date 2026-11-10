@@ -347,9 +347,10 @@ export function highlightNextMatch(button, currentIndex) {
         
         // Show similarity score in popover
         const similarity = Math.round(match.similarity * 100);
-        const shadowRoot = button.closest('.shadow-root') || document.body;
+        const root = button.getRootNode();
+        const container = root instanceof ShadowRoot ? root : document.body;
         showPopover(
-            shadowRoot,
+            container,
             `Match ${nextIndex + 1} of ${matches.length} (${similarity}% similar)`,
             "info",
             2000
