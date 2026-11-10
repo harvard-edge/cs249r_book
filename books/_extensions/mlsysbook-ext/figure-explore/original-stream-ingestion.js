@@ -64,16 +64,16 @@
       return {seen, head, ring, tail, omitted, write: later.length % TAIL, staged: false};
     }
     snapshots.push({...snapshot(BYTES.length), staged: true});
-    const steps = [{label: 'Start with fixed capture memory', description: 'The child has separate stdout and stderr pipes. The adapter drains whichever pipe is ready. The head and tail have fixed capacities; the optional full-record path requires separate authorization.'}];
+    const steps = [{label: 'Start with fixed capture memory', description: 'The child process emits 16 ASCII bytes (A through P) across separate stdout and stderr pipes. The non-blocking readiness loop drains whichever pipe is ready into a fixed 4-byte head buffer and an 8-byte circular tail ring, capping total capture memory at 12 byte slots.'}];
     for (let i = 0; i < BYTES.length; i++) {
       const n = i + 1, s = snapshots[n], channel = i % 2 ? 'stderr' : 'stdout';
       let description;
-      if (n <= HEAD) description = `The readiness loop reads ${BYTES[i]} from ${channel} and fills the next head cell. Once full, these first ${HEAD} bytes remain unchanged.`;
-      else if (n <= HEAD + TAIL) description = `The head is full. Read ${BYTES[i]} from ${channel} into tail slot ${(n - HEAD - 1) % TAIL}. The tail is still filling; no captured byte has been omitted.`;
-      else description = `Read ${BYTES[i]} from ${channel} into tail slot ${(n - HEAD - 1) % TAIL}, replacing the oldest tail byte ${snapshots[n - 1].ring[(n - HEAD - 1) % TAIL]}. The omission count becomes ${s.omitted}; allocated capture capacity does not grow.`;
+      if (n <= HEAD) description = `The readiness loop reads byte ${n} of 16 (${BYTES[i]}) from ${channel} into head slot ${n - 1} (${s.head.length} / ${HEAD} head slots filled; ${s.head.length + s.tail.length} / 12 total capture slots). Once full, these first ${HEAD} bytes remain fixed.`;
+      else if (n <= HEAD + TAIL) description = `The 4-byte head is full, so byte ${n} of 16 (${BYTES[i]}) from ${channel} writes into tail ring slot ${(n - HEAD - 1) % TAIL} (${s.tail.length} / ${TAIL} tail slots filled; ${s.head.length + s.tail.length} / 12 total capture slots; 0 bytes omitted).`;
+      else description = `Byte ${n} of 16 (${BYTES[i]}) from ${channel} writes into tail ring slot ${(n - HEAD - 1) % TAIL}, overwriting oldest tail byte ${snapshots[n - 1].ring[(n - HEAD - 1) % TAIL]}. Capture memory stays capped at 12 / 12 byte slots while omitted middle bytes increase to ${s.omitted} (${n} read = 4 head + 8 tail + ${s.omitted} omitted).`;
       steps.push({label: n <= HEAD ? `Read ${BYTES[i]}: fill the head` : n <= HEAD + TAIL ? `Read ${BYTES[i]}: fill the tail` : `Read ${BYTES[i]}: overwrite the oldest tail byte`, description});
     }
-    steps.push({label: 'Stage the bounded observation', description: 'After the child exits successfully, serialize the head, an omission notice, and the tail in chronological order. No full record was authorized, so no handle is available. The next model call still needs a separate token-budget check.'});
+    steps.push({label: 'Stage the bounded observation', description: 'After the child exits with status 0, the adapter serializes the 4-byte head (A B C D), the omission notice (4 bytes omitted: E F G H), and the 8-byte tail in chronological order (I J K L M N O P) into a 12-byte bounded observation.'});
     const canvas = document.createElement('div'); canvas.className = 'osi-canvas'; canvas.tabIndex = 0; canvas.setAttribute('aria-label', 'Original capture diagram. Scroll sideways to inspect. The view follows the current buffer.'); canvas.append(svg);
     const swipe = document.createElement('p'); swipe.className = 'osi-swipe'; swipe.textContent = 'Swipe the diagram sideways to inspect. The view follows each byte into its buffer.';
     function follow(x) {
@@ -137,7 +137,7 @@
         if (progress >= 1) packet.setAttribute('visibility', 'hidden');
       });
     }
-    const player = window.MLSysOriginalPlayer.create({root, outer: context.outer, title: 'How can capture stay bounded while a child keeps writing?', scope: 'Illustrative ASCII bytes A–P: four head slots and eight tail slots, matching the drawn buffers. The alternating channels show one observed readiness order, not a causal order between stdout and stderr. No full-record retention is authorized in this example.', steps, render, transition});
+    const player = window.MLSysOriginalPlayer.create({root, outer: context.outer, layout: 'compact', title: 'How can capture stay bounded while a child keeps writing?', intro: 'Trace 16 output bytes through a 4-byte head buffer and an 8-byte tail ring so capture memory stays capped at 12 byte slots.', scope: 'Bounded stream capture of 16 ASCII bytes (A through P) alternating across stdout and stderr into a 4-byte head buffer and an 8-byte circular tail ring (12 byte slots total, with bytes E through H omitted).', steps, render, transition});
     return player;
   };
 })();

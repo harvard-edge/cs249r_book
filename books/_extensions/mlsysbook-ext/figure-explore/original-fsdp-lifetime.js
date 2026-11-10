@@ -12,14 +12,14 @@
     ['present', 'present', '', '', 'shard', ''],
   ];
   const steps = [
-    {label: 'Begin with persistent shards', description: 'The rank owns parameter and optimizer shards. Full parameters have not yet been gathered for this unit.'},
-    {label: 'Gather forward parameters', description: 'AllGather reconstructs full parameters for this unit. Persistent shards remain owned by the rank.'},
-    {label: 'Forward creates saved activations', description: 'Forward uses the gathered parameters and produces saved activations. Backward will need those activations later.'},
-    {label: 'Release gathered parameters', description: 'After forward, the gathered full parameters are released. The saved activations stay live because backward has not consumed them.'},
-    {label: 'Gather backward parameters', description: 'AllGather reconstructs the same unit’s full parameters again. The saved forward activations are still available.'},
-    {label: 'Backward produces a full gradient', description: 'Backward reads the full parameters and saved activations and produces a full local gradient. They remain live while their final consumers execute.'},
-    {label: 'Release consumed backward state', description: 'Backward has finished its last reads. Release the gathered full parameters and saved activations; the full local gradient remains ready for ReduceScatter.'},
-    {label: 'Reduce the gradient to its owned shard', description: 'ReduceScatter combines gradient contributions and leaves this rank’s reduced gradient shard for the local optimizer update. Persistent parameter and optimizer shards remain.'},
+    {label: 'Begin with persistent shards', description: 'Before entering the 6 execution phase columns for this sharding unit, 1 rank permanently holds only 2 persistent allocations: its 1/N Parameter shard (row 1) and 1/N Optimizer shard (row 2). Gathered parameters, activations, and gradients are not yet allocated.'},
+    {label: 'Gather forward parameters', description: 'In phase column 1 (Gather forward, collective 1 of 3), AllGather reconstructs the unit’s full parameters across ranks into row 3 (Gathered parameters: live). Total resident allocations rise to 3 rows (Parameter shard, Optimizer shard, and Gathered parameters).'},
+    {label: 'Forward creates saved activations', description: 'In phase column 2 (Forward compute), the forward pass consumes the live Gathered parameters and writes row 4 (Saved activations: live) for backpropagation. Resident allocations reach 4 rows (plus row 6 dashed optional next-unit prefetch if overlap headroom permits).'},
+    {label: 'Release gathered parameters', description: 'In phase column 3 (Release parameters), FSDP frees row 3 (Gathered parameters) immediately after forward compute to reclaim HBM for subsequent layers, dropping resident allocations to 3 rows. Row 4 (Saved activations) must remain live until backward compute consumes it.'},
+    {label: 'Gather backward parameters', description: 'In phase column 4 (Gather backward, collective 2 of 3), a second AllGather reconstructs row 3 (Gathered parameters: live) just before this unit’s backward pass, bringing resident allocations back to 4 rows alongside the retained Saved activations.'},
+    {label: 'Backward produces a full gradient', description: 'In phase column 5 (Backward compute), backward kernels read both row 3 (Gathered parameters) and row 4 (Saved activations) to compute row 5 (Gradient buffer: full). Simultaneously live allocations peak at 5 rows (or 6 if optional backward prefetch is active).'},
+    {label: 'Release consumed backward state', description: 'As soon as backward compute finishes its final reads in column 5, FSDP releases both row 3 (Gathered parameters) and row 4 (Saved activations), leaving 3 resident rows: the 2 persistent shards and the unreduced full local gradient in row 5.'},
+    {label: 'Reduce the gradient to its owned shard', description: 'In phase column 6 (Reduce / update, collective 3 of 3), ReduceScatter sums the full gradient across ranks and replaces row 5 with this rank’s 1/N reduced gradient shard (shard), ready for the local optimizer update on the 2 persistent shards.'},
   ];
   const phaseFor = index => Math.min(5, Math.max(0, index - 1));
   window.MLSysFigureLessons = window.MLSysFigureLessons || {};
@@ -122,9 +122,10 @@
       if(cell.value){cell.value.style.opacity='1';cell.value.textContent=index===6&&column===5&&row===4?'full':live[column][row];}
     }
     const controller = window.MLSysOriginalPlayer.create({
-      root, outer: context.outer,
+      root, outer: context.outer, layout: 'compact',
       title: 'Why can gathered weights disappear while activations remain?',
-      scope: 'One rank, one sharding unit, with resharding after forward. Columns are execution phases, not memory locations or equal time intervals. Cells show logical lifetimes, not bytes; buffers may be shared or reused.',
+      intro: 'Step through 6 execution phases on 1 FSDP rank to see why gathered parameters are released between forward and backward while saved activations remain live.',
+      scope: 'One rank executing 1 FSDP sharding unit (ZeRO-3 with reshard-after-forward) across 6 execution phase columns and 6 allocation rows. Each unit performs 3 collectives per step (forward AllGather, backward AllGather, and gradient ReduceScatter). Rows track logical buffer residency (from 2 persistent shards up to 5 live allocations during backward compute), not physical memory addresses or equal time durations.',
       steps: steps.map((step, index) => ({label: step.label, get description() { return currentIndex === index ? step.description : 'On completion: ' + step.description; }})),
       render(index, {stage, details}) {
         currentIndex=index;
@@ -140,7 +141,7 @@
         const column = phaseFor(index);
         currentOutline.setAttribute('x', 166 + column * 80);
         const resident = index === 0 ? [] : [live[column][2] && 'full parameters', live[column][3] && 'saved activations', live[column][4] && (index===6||live[column][4] === 'full' ? 'full local gradient' : 'reduced gradient shard')].filter(Boolean);
-        cue.textContent = `Resident now: parameter shard and optimizer shard${resident.length ? '; ' + resident.join('; ') : ''}.`;
+        cue.textContent = `Resident now (${2 + resident.length} of 6 rows active): parameter shard and optimizer shard${resident.length ? '; ' + resident.join('; ') : ''}.`;
         cue.dataset.fsdpStep = index;
         centerPhase(index);
       },

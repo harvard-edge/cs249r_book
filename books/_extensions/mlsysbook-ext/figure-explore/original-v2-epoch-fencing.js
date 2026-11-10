@@ -10,13 +10,13 @@
     return node;
   };
   const steps = [
-    {label: 'The old worker holds token 7', description: 'The coordinator and checkpoint store recognize epoch 7. The old worker can reach storage with token 7; later timeline regions are shown faintly as a reference.'},
-    {label: 'Lease expires; ownership changes', description: 'The coordinator grants epoch 8. The paused old worker still holds token 7, and the store still enforces epoch 7. Lease expiry alone has not fenced the old worker.'},
-    {label: 'Advance the store fence', description: 'The checkpoint store now enforces epoch 8. This resource-side change must finish before replacement writes proceed. A write carrying token 7 will now be rejected.'},
-    {label: 'Replacement receives token 8', description: 'The replacement holds token 8 after the store fence is advanced. It is ready to write; no replacement write has been accepted yet.'},
-    {label: 'Accept the replacement write', description: 'The write arrives with token 8. The checkpoint store checks it against the enforced epoch and accepts it. The token travels with the write; the coordinator is not the enforcement point.'},
-    {label: 'Old worker resumes with token 7', description: 'The old worker resumes without learning that its lease expired. Its local token remains 7. It can still send a write, but it cannot bypass the store fence.'},
-    {label: 'Reject the stale write', description: 'The token-7 write reaches the protected boundary and is rejected. Ownership changed at the coordinator, but safety depends on enforcement at every protected resource; this figure shows the checkpoint store.'},
+    {label: 'The old worker holds token 7', description: 'In the initial state, the coordinator and checkpoint store both recognize membership epoch 7 (accepts epoch >= 7). The old worker holds fencing token 7 and can legitimately write to storage while its lease is active.'},
+    {label: 'Lease expires; ownership changes', description: 'When the lease expires, the coordinator advances ownership to epoch 8 while the old worker sits paused or partitioned with token 7. Because the checkpoint store still enforces epoch >= 7, lease expiry alone has not yet protected storage from a late token-7 write.'},
+    {label: 'Advance the store fence', description: 'Before admitting replacement writes, recovery sends the violet advance-fence update to the checkpoint store, raising its rule to accepts epoch >= 8. Any subsequent write carrying token 7 (7 < 8) will now be rejected at the storage boundary.'},
+    {label: 'Replacement receives token 8', description: 'Once the store fence enforces epoch >= 8, the replacement worker starts in the second lane holding fencing token 8. It is now authorized to write, though no replacement checkpoint write has arrived at storage yet.'},
+    {label: 'Accept the replacement write', description: 'The replacement worker sends a write carrying token 8 along the green arrow to the checkpoint store. The store checks token 8 >= enforced epoch 8 and accepts it directly at the resource boundary.'},
+    {label: 'Old worker resumes with token 7', description: 'After a long GC pause or network partition, the old worker resumes in the third lane without knowing its lease expired. Its local state still carries stale token 7, and it attempts to write to storage.'},
+    {label: 'Reject the stale write', description: 'The old worker’s write arrives with token 7 along the red arrow and is blocked at the red X because token 7 < enforced epoch 8. Coordinator leases decide ownership, but resource-side epoch fencing enforces safety.'},
   ];
   window.MLSysFigureLessons = window.MLSysFigureLessons || {};
   window.MLSysFigureLessons[NAME] = async (root, context) => {
@@ -84,17 +84,17 @@
       const state = {coordinatorEpoch: index >= 1 ? 8 : 7, storeFence: index >= 2 ? 8 : 7,
         oldToken: 7, replacementToken: index >= 3 ? 8 : null,
         accepted: index >= 4, oldResumed: index >= 5, rejected: index >= 6};
-      readout.textContent = `Coordinator: epoch ${state.coordinatorEpoch} · Store fence: ${state.storeFence} · Old token: ${state.oldToken}. ` +
+      readout.textContent = `Coordinator: epoch ${state.coordinatorEpoch} · Store rule: accept token >= ${state.storeFence} · Old token: ${state.oldToken} · Replacement token: ${state.replacementToken ?? 'none'}. ` +
         (index === 1 ? 'Fence update pending; replacement writes must wait.' :
-         index >= 6 ? 'Token 8 accepted; token 7 rejected.' :
-         index >= 4 ? 'Replacement write accepted; stale write not yet received.' :
-         index >= 2 ? 'Token 7 is fenced; no write has been accepted.' : 'No recovery action completed.');
+         index >= 6 ? 'Token 8 >= 8 accepted; token 7 < 8 rejected.' :
+         index >= 4 ? 'Replacement write (8 >= 8) accepted; stale write not yet received.' :
+         index >= 2 ? 'Token 7 is fenced (7 < 8); no write has been accepted.' : 'No recovery action completed.');
       root.dataset.originalState = JSON.stringify(state); center(index);
     }
     const player = window.MLSysOriginalPlayer.create({
-      root, outer: context.outer, viewControls, title: 'Why does lease expiry need a storage fence?',
+      root, outer: context.outer, layout: 'compact', viewControls, title: 'Why does lease expiry need a storage fence?',
       intro: 'Follow tokens 7 and 8 to the checkpoint store and distinguish changed ownership from an enforced fence.',
-      scope: 'Original four-lane recovery timeline. One protected checkpoint store; monotonically increasing membership epochs 7 and 8. Replacement writes wait for the store fence. No failure-detection or network timing model.',
+      scope: 'Four-lane recovery timeline with one protected checkpoint store and monotonically increasing membership epochs 7 and 8. Replacement writes wait until the store fence advances to epoch 8; no failure-detection or network latency model is assumed.',
       steps,
       render(index, {stage, details}) {
         if (!mounted) {

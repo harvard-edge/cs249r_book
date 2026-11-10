@@ -34,22 +34,31 @@ window.MLSysFigureLessons["original-v4-05-action-taps"]=async(root,context)=>{
  const cells=[98,255,414,574].map(x=>add('text',{x,y:322,'text-anchor':'middle','font-size':8,fill:'#1A202C'},'—'));
  const moving=dot(131,95,'#B87333',5),copy=dot(131,95,'#007A87',4);
  const steps=[
- ['One admitted command, four distinct taps','A normalized toy scalar at each interface illustrates a clamped request followed by a stall. Values at different taps need not share a coordinate frame or denote the same physical quantity.'],
- ['Record the request','The operator asks for +1.0 in its native interface. The moving copy records the request before kinematic mapping; at the endpoint tap 1 is retained in the log. This proposal has no actuation permission.'],
- ['Map the command','Kinematic mapping produces +0.8 in the command interface. At the endpoint tap 2 retains this new representation, while tap 1 remains in the synchronized log.'],
- ['Enforce a clamp','Follow the proposal through the permission path; at the endpoint +0.8 has been modified to +0.4 in the same normalized command interface. The intervention must remain attributed; a permitted command is not automatically an expert target.'],
- ['Apply the admitted command','Follow the +0.4 admitted command toward the drives; at the endpoint it has reached the plant path. Command delivery is distinct from mechanical response; the plant can resist the requested motion.'],
- ['Measure the stalled plant','At this endpoint the encoders have measured zero motion over the observation interval while effort can persist against the latch. A zero measured velocity does not prove the operator requested a stop.'],
- ['Keep the full tuple','The hardware-synchronized log retains Asked, Mapped, Allowed, and Done. A dataset label must match the policy interface and retain intervention attribution; the measured response is proprioceptive state, not an interchangeable action label.']
+ ['One admitted command, four distinct taps','On the application processor, the policy or operator block prepares a command before any of the 4 taps are written to the hardware-synchronized telemetry log.'],
+ ['Record the request','Tap 1 logs the raw request a_req = +1.0 in native operator coordinates before kinematic mapping; this unvalidated proposal carries no actuation permission.'],
+ ['Map the command','Kinematic mapping transforms the request into the joint command interface and logs Tap 2 as a_cmd = +0.8 before crossing the black-channel proposal boundary.'],
+ ['Enforce a clamp','On the discrete safety MCU, the 1 kHz permission path applies velocity and barrier limits, clamping +0.8 down to Tap 3 (a_enf = +0.4) and logging the intervention.'],
+ ['Apply the admitted command','The admitted command a_enf = +0.4 drives the motor current loops and applies effort to the physical plant, where the latch strike plate resists motion.'],
+ ['Measure the stalled plant','Optical joint encoders measure displacement over Δt and log Tap 4 as a_meas = 0.0 because contact stalls the joint even while motor holding torque persists.'],
+ ['Keep the full tuple','The synchronized log retains all 4 taps (+1.0, +0.8, +0.4, 0.0): training on +1.0 alone hides the safety clamp, whereas training on 0.0 mistakes a mechanical stall for a stop command.']
  ].map(([label,description],i)=>({label,get description(){return root.dataset.lessonCommittedIndex===String(i)?description:'Next endpoint, not yet completed: '+description;}}));
  const endpoints=[[131,95],[131,95],[272,95],[506,95],[594,180],[594,262],[594,262]];
  const routes={2:[[131,95],[272,95]],3:[[272,95],[506,95]],4:[[506,95],[594,95],[594,180]],5:[[594,180],[594,262]]};
+ const stepReadouts=[
+  'Log tuple [a_req, a_cmd, a_enf, a_meas] = [—, —, —, —] · Active block: Policy or operator (Application processor).',
+  'Log tuple [a_req, a_cmd, a_enf, a_meas] = [+1.0, —, —, —] · Tap 1 (Asked) recorded in user space; no actuation authority.',
+  'Log tuple [a_req, a_cmd, a_enf, a_meas] = [+1.0, +0.8, —, —] · Tap 2 (Mapped) recorded after inverse-kinematics retargeting.',
+  'Log tuple [a_req, a_cmd, a_enf, a_meas] = [+1.0, +0.8, +0.4, —] · Tap 3 (Allowed) recorded on 1 kHz safety MCU after clamping +0.8 → +0.4.',
+  'Log tuple [a_req, a_cmd, a_enf, a_meas] = [+1.0, +0.8, +0.4, —] · Admitted +0.4 delivered to drives and plant against latch contact.',
+  'Log tuple [a_req, a_cmd, a_enf, a_meas] = [+1.0, +0.8, +0.4, 0.0] · Tap 4 (Done) logs 0.0 encoder motion while holding torque persists.',
+  'Log tuple [a_req, a_cmd, a_enf, a_meas] = [+1.0, +0.8, +0.4, 0.0] · Complete PTP-synchronized record preserves intervention and stall attribution.'
+ ];
  function frame(i,p=1){
   const known=[i>=1,i>=2,i>=3,i>=5];cells.forEach((el,j)=>el.textContent=known[j]?values[j]:'—');
   blocks.forEach(el=>el.classList.remove('v4b-active'));const b=[0,0,1,2,3,4,4][i];blocks[b].classList.add('v4b-active');
   moving.setAttribute('cx',endpoints[i][0]);moving.setAttribute('cy',endpoints[i][1]);copy.style.display='none';
   root.dataset.tapStep=String(i);root.dataset.logged=known.map((v,j)=>v?j+1:null).filter(Boolean).join(',');root.dataset.request='1';root.dataset.mapped='0.8';root.dataset.enforced='0.4';root.dataset.measured=i>=5?'0':'pending';
-  readout.textContent=i===0?'No command has crossed the permission path.':i<3?'Proposal values are recorded; actuation has not been admitted.':i<5?'Clamp attributed: mapped +0.8 → allowed +0.4.':'Measured motion 0.0; admitted effort can persist against contact.';
+  readout.textContent=stepReadouts[i];
   equation.textContent='Declared normalized toy: request +1.0 → mapping +0.8 → clamp +0.4 → measured motion 0.0. These are interface values, not a physical unit conversion.';
  }
  function render(i,{stage,details}){root.dataset.lessonCommittedIndex=String(i);mount(stage,details);frame(i);follow(...endpoints[i]);}
@@ -58,6 +67,6 @@ window.MLSysFigureLessons["original-v4-05-action-taps"]=async(root,context)=>{
    root.dataset.animationProgress=String(p);});
  }
 
- const player=window.MLSysOriginalPlayer.create({root,outer:context.outer,title:"Why keep Asked, Mapped, Allowed, and Done?",scope:"Original four-tap architecture. Declared normalized toy values illustrate a clamp and stall; logical causal order, not measured network timing.",steps,render,transition});
+ const player=window.MLSysOriginalPlayer.create({root,outer:context.outer,layout:'compact',intro:'Follow one command across 4 telemetry taps as mapping scales +1.0 to +0.8, the 1 kHz permission path clamps +0.4, and contact yields 0.0 motion.',title:"Why keep Asked, Mapped, Allowed, and Done?",scope:"Four-stream action tap tuple (a_req, a_cmd, a_enf, a_meas) across the unprivileged Linux application processor and the 1 kHz discrete safety MCU over a black-channel link. Normalized scalar values (+1.0 request, +0.8 mapped, +0.4 clamped, 0.0 measured velocity against a latch) illustrate causal stage order rather than a physical unit conversion.",steps,render,transition});
  const destroy=player.destroy;player.destroy=()=>{disposed=true;cameraResize?.disconnect();cancelAnimationFrame(resizeFrame);destroy();};return player;
 };})();

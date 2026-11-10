@@ -38,14 +38,14 @@
     root.classList.add('mlsys-original-intersample-overshoot');
     const states=[{t:0,pine:false},{t:.25,pine:false},{t:.5,pine:false},{t:.75,pine:false},{t:1,pine:false},{t:0,pine:true},{t:.5,pine:true},{t:1,pine:true}];
     const steps=[
-      ['Check the sampled endpoints','Both hollow bronze sample points lie below the physical velocity ceiling. Those checks say nothing yet about the continuous velocity between them.'],
-      ['Reach the ceiling between samples','Positive acceleration accumulates velocity. The growing shaded area raises the bronze interpolant to the ceiling before the midpoint; equality is not an overspeed violation.'],
-      ['Expose the hidden peak','The full positive acceleration area produces the maximum velocity rise. Bronze exceeds the ceiling even though both endpoint sample checks pass.'],
-      ['Reduce velocity with negative area','After the instantaneous reversal, negative acceleration removes accumulated velocity. Bronze returns to the ceiling; its earlier overspeed excursion still occurred.'],
-      ['Return to the next valid sample','The equal negative area cancels the velocity gain. The second sample passes, but that does not erase the interior violation.'],
-      ['Reserve the full possible rise','Keep exactly the same acceleration schedule and sample interval. Lower the pine endpoint ceiling by the full derived rise; do not lower acceleration to hide the excursion.'],
-      ['Use the same rise from the contracted baseline','The same positive acceleration area now takes pine exactly to the physical velocity ceiling. This comparison changes endpoint velocity, not acceleration.'],
-      ['Complete the bounded comparison','The negative area returns pine to its contracted endpoint. Its maximum just reaches the ceiling under these assumptions; the bronze counterexample remains visible for comparison.']
+      ['Check the sampled endpoints','At normalized time t/T = 0, both hollow bronze sample points (at t/T = 0 and t/T = 1) sit at v = 2.5 below the physical velocity ceiling of 3, showing that endpoint checks alone say nothing about continuous velocity across interval 1.'],
+      ['Reach the ceiling between samples','Across the first quarter of interval 1 (t/T = 0.25), positive acceleration a = +2 accumulates area Δv = 2(0.25) = 0.5, raising the bronze velocity curve from 2.5 to the dashed red ceiling of 3 before the midpoint.'],
+      ['Expose the hidden peak','At the midpoint t/T = 0.5, the full positive acceleration area Δv = a_max T / 2 = 2(1)/2 = 1.0 drives the bronze velocity curve from 2.5 to a hidden peak of 3.5, exceeding the physical ceiling of 3 by 0.5 despite passing both endpoint checks.'],
+      ['Reduce velocity with negative area','After the instantaneous sign reversal to a = -2 at t/T = 0.5, negative acceleration removes 0.5 of velocity by t/T = 0.75 (net Δv = 0.5), bringing the bronze curve back down to the ceiling of 3 after its earlier overspeed excursion.'],
+      ['Return to the next valid sample','At t/T = 1, the full negative acceleration area (-1.0) cancels the earlier +1.0 velocity gain and returns the bronze curve to v = 2.5; the second sampled endpoint passes, but the interior violation up to 3.5 already occurred.'],
+      ['Reserve the full possible rise','Resetting to t/T = 0 with the same acceleration bound of 2 and interval 1, contract the pine sample ceiling by the worst-case rise Δv_max = a_max T / 2 = 1.0 so the sampled endpoints start at 3 - 1 = 2.0 instead of 2.5.'],
+      ['Use the same rise from the contracted baseline','At the midpoint t/T = 0.5, the identical positive acceleration area Δv = 1.0 raises the pine velocity curve from its contracted 2.0 baseline to 3.0, touching the physical velocity ceiling of 3 without exceeding it.'],
+      ['Complete the bounded comparison','At t/T = 1, the negative acceleration area returns the pine curve to its contracted endpoint of 2.0 while the bronze counterexample (peak 3.5) remains visible, proving that reserving a margin of 1 on the endpoints certifies the continuous interpolant.']
     ].map(([label,description])=>({label,description}));
     steps.forEach((step,i)=>{const description=step.description;Object.defineProperty(step,'description',{get(){return root.dataset.lessonCommittedIndex===String(i)?description:'On completion: '+description;}});});
     const f=v=>String(Number(v.toFixed(4)));
@@ -93,7 +93,7 @@
       return v;
     }
     function render(index,{stage,details}){root.dataset.lessonCommittedIndex=String(index);
-      if(!canvas.isConnected)stage.append(canvas,key,hint,status,equation);if(!caveat.isConnected)details.append(caveat);
+      if(!canvas.isConnected)stage.append(canvas,key,hint);if(details&&!status.isConnected)details.append(status,equation,caveat);
       const s=states[index],v=draw(s.t,s.pine);
       if(index===0)equation.textContent=`Bronze samples: ${f(d.candidate_endpoint)} ≤ ${f(d.limit)}. Interior extrema have not been checked by these two tests.`;
       else if(index===5)equation.textContent=`Reserve = aT/2 = ${f(d.reserve)}; contracted sample ceiling = ${f(d.limit)} − ${f(d.reserve)} = ${f(d.contracted_endpoint)}.`;
@@ -102,6 +102,6 @@
       const scale=svg.getBoundingClientRect().width/680;canvas.scrollLeft=Math.max(0,v.x*scale-canvas.clientWidth/2);
     }
     function transition({from,to,onFrame}){if(to!==from+1||states[from].pine!==states[to].pine)return;const a=states[from],b=states[to];onFrame(p=>draw(a.t+(b.t-a.t)*p,b.pine));}
-    return window.MLSysOriginalPlayer.create({root,outer:context.outer,title:'Can both samples pass while velocity exceeds its limit?',scope:'Normalized illustrative values, not machine measurements. Both curves use the same acceleration bound and interval. The source assumes an instantaneous sign reversal with no finite jerk bound. Playback speed is schematic.',steps,render,transition});
+    return window.MLSysOriginalPlayer.create({root,outer:context.outer,layout:'compact',title:'Can both samples pass while velocity exceeds its limit?',intro:'Trace how a bang-bang acceleration pulse of ±2 over interval 1 raises velocity by 1.0 past the limit of 3 unless endpoints reserve a margin of 1.',scope:'Normalized illustrative values (not machine measurements): sample interval T = 1, acceleration bound a_max = 2 (bang-bang +2 on [0, 0.5] and -2 on [0.5, 1] with instantaneous sign reversal and no finite jerk bound), physical velocity ceiling v_max = 3, uncontracted bronze sample endpoints v = 2.5 (peak 3.5), velocity reserve Δv_max = a_max T / 2 = 1.0, and contracted pine sample ceiling v_max - Δv_max = 2.0 (peak 3.0).',steps,render,transition});
   };
 })();

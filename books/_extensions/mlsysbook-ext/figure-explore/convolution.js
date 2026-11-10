@@ -139,11 +139,13 @@
     const movement=Number(outer.dataset.mlsysMovementMs), hold=Number(outer.dataset.mlsysReadingPauseMs);
     if (!(movement>0) || !(hold>=0)) throw new Error('Missing build-time timing.');
     const media=matchMedia('(prefers-reduced-motion: reduce)');
-    const states=[{pose:true,title:'The drawing in the chapter',text:'The orange window in the lower input grid determines the violet cell above it. The blue lines connect that window to its output.'}];
+    const states=[{pose:true,title:'The drawing in the chapter',text:'The orange 3 × 3 window in the 7 × 7 input grid determines the single violet cell in the 5 × 5 output grid above it, connected by the four blue projection lines.'}];
     for (let row=0; row<5; row++) for (let col=0; col<5; col++) {
-      states.push({row,col,phase:'move',title:`Position (${row}, ${col}): move the window`,text:'The same 3 × 3 filter moves to this input window. Only the window position changes; the filter weights are reused.'});
-      states.push({row,col,phase:'combine',title:`Position (${row}, ${col}): combine the inputs`,text:'Each of the nine input values is multiplied by its filter weight. The contributions are summed to form one output activation.'});
-      states.push({row,col,phase:'write',title:`Position (${row}, ${col}): store the output`,text:'One activation is now stored in the corresponding output cell. The other input values remain available for overlapping windows.'});
+      const pos=example.positions.find(p=>p.row===row&&p.column===col),count=row*5+col+1;
+      const sumsText=pos.row_sums.map(x=>x<0?`(${x})`:String(x)).join(' + ');
+      states.push({row,col,phase:'move',title:`Position (${row}, ${col}): move the window`,text:`The shared 3 × 3 vertical-edge filter slides to input rows ${row}–${row+2}, columns ${col}–${col+2}. Only the window coordinates change; the 9 filter weights remain stationary.`});
+      states.push({row,col,phase:'combine',title:`Position (${row}, ${col}): combine the inputs`,text:`Each of the 9 active input values is multiplied by its matching filter weight. The three row totals sum to ${sumsText} = ${pos.output}.`});
+      states.push({row,col,phase:'write',title:`Position (${row}, ${col}): store the output`,text:`Output ${pos.output} is stored in cell (${row}, ${col}) of the 5 × 5 output grid (${count} of 25 outputs complete). Adjacent stride-1 windows reuse overlapping input values.`});
     }
     states.forEach((s,i) => {const o=node('option',`${i+1}. ${s.title}`);o.value=i;menu.append(o);});
     let index=0, completed=0, running=false, moving=false, motionPaused=false, resumeAutoplay=false, scanning=false, timer=null, effects=[], finishAction=null, motionFrame=null, motionTick=null, holdRemaining=null, holdStarted=null;

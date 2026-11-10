@@ -3,17 +3,17 @@
 
 const stages=[{label:'Open 1',start:0,end:7.5,row:0},{label:'Open 2',start:30,end:37.5,row:0},{label:'Read 1',start:7.5,end:20,row:1,batch:1},{label:'Read 2',start:20,end:30,row:1,batch:2},{label:'Read 3',start:37.5,end:50,row:1,batch:3},{label:'Train 1',start:20,end:35,row:2,batch:1},{label:'Train 2',start:35,end:50,row:2,batch:2},{label:'Train 3',start:50,end:65,row:2,batch:3}],states=[];
 function add(label,description,time,ready,active,completed,kind='event',batch=null){states.push({label,description,time,ready,active,completed,kind,batch,ledger:{time,ready,active,completed},readout:`Last completed boundary: ${time} min. Ready for training: ${ready.length?ready.map(i=>'B'+i).join(', '):'none'}. GPU: ${active?'training B'+active:'no active batch at this endpoint'}. Completed: ${completed.length?completed.map(i=>'B'+i).join(', '):'none'}.`});}
-add('Start the first file open','The future bars are the original planned schedule. No batch is ready yet.',0,[],null,[]);
-add('Open 1 finishes; Read 1 begins','The first open completes before reading its first batch. No training batch exists yet.',7.5,[],null,[]);
-add('Read 1 produces ready batch B1','The first read finishes. B1 is ready; its training stage has not consumed it yet.',20,[1],null,[],'ready',1);
-add('Train B1 while preparing B2','Training consumes ready B1 and Read 2 starts. They use different resources; Read 2 is preparing the next batch, not the input still being used by Train 1.',20,[],1,[],'consume',1);
-add('B2 becomes ready while B1 trains','Read 2 finishes at minute 30, so B2 waits ready while Train 1 continues. Open 2 can proceed in parallel.',30,[2],1,[],'ready',2);
-add('Train 1 finishes','B1 is complete. B2 remains ready; consuming it is a distinct next action.',35,[2],null,[1]);
-add('Train 2 consumes ready B2','The same B2 prepared by Read 2 enters Train 2. Its read is not repeated.',35,[],2,[1],'consume',2);
-add('Open 2 finishes; Read 3 begins','Read 3 uses the file opened by Open 2 while B2 continues training.',37.5,[],2,[1]);
-add('B3 is ready and Train 2 is complete','At the same source timeline boundary, Read 3 and Train 2 finish independently. Their results are ready B3 and completed B2.',50,[3],null,[1,2],'ready',3);
-add('Train 3 consumes ready B3','The final ready batch enters the accelerator only after its read has finished.',50,[],3,[1,2],'consume',3);
-add('All three training stages finish','The same individual open/read/train durations have overlapped in the source schedule. This endpoint demonstrates dependency and occupancy, not a universal speedup.',65,[],null,[1,2,3]);
+add('Start the first file open','At 00:00 (0 min), Open 1 starts on the Open lane. No batch has been read into memory yet, so the Train lane waits idle.',0,[],null,[]);
+add('Open 1 finishes; Read 1 begins','At 7.5 min, Open 1 finishes opening the first file and Read 1 starts loading batch B1 on the Read lane. No training batch is ready yet.',7.5,[],null,[]);
+add('Read 1 produces ready batch B1','At 00:20 (20 min), Read 1 finishes (12.5 min duration) and stages ready batch B1 in host memory for the trainer.',20,[1],null,[],'ready',1);
+add('Train B1 while preparing B2','At 00:20 (20 min), Train 1 consumes ready B1 on the accelerator while Read 2 starts prefetching B2 in parallel on the Read lane.',20,[],1,[],'consume',1);
+add('B2 becomes ready while B1 trains','At 00:30 (30 min), Read 2 finishes (10 min duration) so B2 waits ready in memory while Train 1 is still running (until 35 min), and Open 2 starts in parallel.',30,[2],1,[],'ready',2);
+add('Train 1 finishes','At 35 min, Train 1 finishes batch B1 (15 min duration). Prefetched batch B2 is already waiting in the ready buffer.',35,[2],null,[1]);
+add('Train 2 consumes ready B2','At 35 min, Train 2 immediately consumes ready B2 with zero I/O stall because Read 2 overlapped with Train 1.',35,[],2,[1],'consume',2);
+add('Open 2 finishes; Read 3 begins','At 37.5 min, Open 2 completes and Read 3 starts loading B3 from the second file while Train 2 continues on the accelerator.',37.5,[],2,[1]);
+add('B3 is ready and Train 2 is complete','At 50 min, Read 3 finishes staging B3 at the same timeline boundary where Train 2 finishes B2 (2 of 3 batches complete).',50,[3],null,[1,2],'ready',3);
+add('Train 3 consumes ready B3','At 50 min, Train 3 immediately consumes ready B3 on the accelerator without waiting on storage open or read latency.',50,[],3,[1,2],'consume',3);
+add('All three training stages finish','At 01:05 (65 min), Train 3 completes B3. Overlapping Open and Read with Train kept the accelerator continuously busy from 20 min to 65 min across all 3 batches.',65,[],null,[1,2,3]);
 const tx=t=>.073+.899*t/65,ys=[.076,.277,.477],colors=['#e6e6e6','#d9f4ff','#ddf3e5'];
 // Follow-view geometry from the source art: pinned lane-name column, epoch bar, axis tick labels.
 // The step's focus: the labels of the bars this endpoint is about (a bar that just finished, the
