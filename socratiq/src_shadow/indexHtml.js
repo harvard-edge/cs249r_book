@@ -24,10 +24,11 @@ export const htmlContent = `
           <h2 class="text-lg text-zinc-800 dark:text-white">
             SocratiQ
           </h2>
-          <div class="flex space-x-2">
+          <div class="flex items-center space-x-2">
 
-            <span id="new-chat-btn" 
-              class="hover:text-blue-300 text-sm text-zinc-600 dark:text-zinc-400">
+            <span id="new-chat-btn" role="button" tabindex="0" aria-label="New conversation"
+              class="hover:text-blue-300 text-sm text-zinc-600 dark:text-zinc-400 min-w-[36px] min-h-[36px] inline-flex items-center justify-center cursor-pointer"
+              style="min-width: 36px; min-height: 36px; display: inline-flex; align-items: center; justify-content: center; cursor: pointer;">
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
                 stroke="currentColor" class="w-6 h-6" style="width: 1.5rem; height: 1.5rem;">
                 <path stroke-linecap="round" stroke-linejoin="round"
@@ -47,8 +48,9 @@ export const htmlContent = `
 
           </span> -->
 
-  <span id="knowledge-graph-btn" 
-              class="hover:text-blue-300 text-sm text-zinc-600 dark:text-zinc-400">
+  <span id="knowledge-graph-btn" role="button" tabindex="0" aria-label="Knowledge graph"
+              class="hover:text-blue-300 text-sm text-zinc-600 dark:text-zinc-400 min-w-[36px] min-h-[36px] inline-flex items-center justify-center cursor-pointer"
+              style="min-width: 36px; min-height: 36px; display: inline-flex; align-items: center; justify-content: center; cursor: pointer;">
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6" style="width: 1.5rem; height: 1.5rem;">
   <path stroke-linecap="round" stroke-linejoin="round" d="M9.75 3.104v5.714a2.25 2.25 0 0 1-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 0 1 4.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15.3M14.25 3.104c.251.023.501.05.75.082M19.8 15.3l-1.57.393A9.065 9.065 0 0 1 12 15a9.065 9.065 0 0 0-6.23-.693L5 14.5m14.8.8 1.402 1.402c1.232 1.232.65 3.318-1.067 3.611A48.309 48.309 0 0 1 12 21c-2.773 0-5.491-.235-8.135-.687-1.718-.293-2.3-2.379-1.067-3.61L5 14.5" />
 </svg>
@@ -57,8 +59,9 @@ export const htmlContent = `
             </span>
 
 
-            <span id="chat-quiz-btn"
-              class="hover:text-blue-300 text-sm text-zinc-600 dark:text-zinc-400">
+            <span id="chat-quiz-btn" role="button" tabindex="0" aria-label="Chapter quiz"
+              class="hover:text-blue-300 text-sm text-zinc-600 dark:text-zinc-400 min-w-[36px] min-h-[36px] inline-flex items-center justify-center cursor-pointer"
+              style="min-width: 36px; min-height: 36px; display: inline-flex; align-items: center; justify-content: center; cursor: pointer;">
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
                 stroke="currentColor" class="w-6 h-6" style="width: 1.5rem; height: 1.5rem;">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 6a7.5 7.5 0 1 0 7.5 7.5h-7.5V6Z" />
@@ -67,8 +70,9 @@ export const htmlContent = `
 
             </span>
 
-            <span id="help-btn"
-              class="hover:text-blue-300 text-sm text-zinc-600 dark:text-zinc-400">
+            <span id="help-btn" role="button" tabindex="0" aria-label="Help"
+              class="hover:text-blue-300 text-sm text-zinc-600 dark:text-zinc-400 min-w-[36px] min-h-[36px] inline-flex items-center justify-center cursor-pointer"
+              style="min-width: 36px; min-height: 36px; display: inline-flex; align-items: center; justify-content: center; cursor: pointer;">
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
                 stroke="currentColor" class="w-6 h-6" style="width: 1.5rem; height: 1.5rem;">
                 <path stroke-linecap="round" stroke-linejoin="round"
@@ -77,8 +81,9 @@ export const htmlContent = `
 
             </span>
 
-            <span id="settings-btn" 
-              class="hover:text-blue-300 text-sm text-zinc-600 dark:text-zinc-400">
+            <span id="settings-btn" role="button" tabindex="0" aria-label="Settings"
+              class="hover:text-blue-300 text-sm text-zinc-600 dark:text-zinc-400 min-w-[36px] min-h-[36px] inline-flex items-center justify-center cursor-pointer"
+              style="min-width: 36px; min-height: 36px; display: inline-flex; align-items: center; justify-content: center; cursor: pointer;">
 
 
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
@@ -130,10 +135,10 @@ export const htmlContent = `
                 title="Watch the SocratiQ Introduction on YouTube">SocratiQ</a>.
             </div>
 
-            <div id="utility-btn-container" class="absolute bottom-1 right-2 text-blue-400 flex space-x-2 p-2">
+            <div id="utility-btn-container" class="absolute bottom-1 right-2 text-blue-400 flex items-center space-x-2 p-2">
               <!-- Buttons with icons -->
 
-              <button id='highlight-btn' class="w-4 h-4  flex items-center justify-center hover:text-blue-700"
+              <button id='highlight-btn' class="w-6 h-6 p-1 flex items-center justify-center hover:text-blue-700"
                 title="Highlight">
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
                   stroke="currentColor" class="icons">
@@ -142,7 +147,7 @@ export const htmlContent = `
                 </svg>
               </button>
 
-                   <button id='sr-send-btn' class="w-4 h-4 st-send-btn mr-2 flex items-center justify-center hover:text-blue-700"
+                   <button id='sr-send-btn' class="w-6 h-6 p-1 st-send-btn mr-2 flex items-center justify-center hover:text-blue-700"
                >
                 
 
@@ -153,21 +158,21 @@ export const htmlContent = `
 
               </button>
 
-              <button id='share-btn' class="w-4 h-4  flex items-center justify-center hover:text-blue-700"
+              <button id='share-btn' class="w-6 h-6 p-1 flex items-center justify-center hover:text-blue-700"
                 title="Share"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
                   stroke="currentColor" class="icons">
                   <path stroke-linecap="round" stroke-linejoin="round"
                     d="M7.217 10.907a2.25 2.25 0 1 0 0 2.186m0-2.186c.18.324.283.696.283 1.093s-.103.77-.283 1.093m0-2.186 9.566-5.314m-9.566 7.5 9.566 5.314m0 0a2.25 2.25 0 1 0 3.935 2.186 2.25 2.25 0 0 0-3.935-2.186Zm0-12.814a2.25 2.25 0 1 0 3.933-2.185 2.25 2.25 0 0 0-3.933 2.185Z" />
                 </svg>
               </button>
-              <button id='copy-btn' class="w-4 h-4  mr-1 mt-1  flex items-center justify-center hover:text-blue-700"
+              <button id='copy-btn' class="w-6 h-6 p-1 mr-1 flex items-center justify-center hover:text-blue-700"
                 title="Copy"><svg id="copy-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"
                   stroke-width="1.5" stroke="currentColor">
                   <path stroke-linecap="round" stroke-linejoin="round"
                     d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.75a1.125 1.125 0 0 1-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H6.75a9.06 9.06 0 0 1 1.5.124m7.5 10.376h3.375c.621 0 1.125-.504 1.125-1.125V11.25c0-4.46-3.243-8.161-7.5-8.876a9.06 9.06 0 0 0-1.5-.124H9.375c-.621 0-1.125.504-1.125 1.125v3.5m7.5 10.375H9.375a1.125 1.125 0 0 1-1.125-1.125v-9.25m12 6.625v-1.875a3.375 3.375 0 0 0-3.375-3.375h-1.5a1.125 1.125 0 0 1-1.125-1.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H9.75" />
                 </svg>
               </button>
-              <button id='download-btn' class="w-4 h-4  mr-2  flex items-center justify-center hover:text-blue-700"
+              <button id='download-btn' class="w-6 h-6 p-1 mr-2 flex items-center justify-center hover:text-blue-700"
                 title="Download"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"
                   stroke-width="1.5" stroke="currentColor" class="icons">
                   <path stroke-linecap="round" stroke-linejoin="round"
@@ -180,7 +185,7 @@ export const htmlContent = `
             </div>
 
 
-            <div id="reference-btn-container_temp" class="flex space-x-2 text-xs font-mono">
+            <div id="reference-btn-container_temp" class="flex space-x-2 text-xs font-mono mb-7 pb-6" style="margin-bottom: 28px;">
               <a href="https://mlsysbook.ai/"
                 class="inline-block bg-blue-100 text-zinc-900 px-4 py-0.5 rounded-md" target="_blank"
                 rel="noopener noreferrer" title="Machine Learning Systems Textbook">1</a>
@@ -214,26 +219,26 @@ export const htmlContent = `
         <div id="input-container" class="mt-4 relative">
           <!-- <div id="ai-prompt-label" style="font-size: 12px; color: rgb(85, 85, 85); margin-bottom: 8px; display: block;">Included context:</div> -->
 
-          <div style="display: flex; gap: 8px; margin-bottom: 8px;">
-            <button id="context-button" title="Context">
+          <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 8px; flex-wrap: nowrap;">
+            <button id="context-button" title="Context" class="min-h-[38px] py-1.5 px-2.5 text-xs whitespace-nowrap inline-flex items-center justify-center" style="min-height: 38px; padding: 6px 10px; font-size: 12px; white-space: nowrap; display: inline-flex; align-items: center; justify-content: center;">
               <div style="display: flex; align-items: center;"> 
-                <span style="font-size: 1.2rem; font-weight: bold; color: #6b7280;">@</span>
+                <span style="font-size: 1.1rem; line-height: 1; font-weight: bold; color: #6b7280;">@</span>
                 <span style="font-size: 12px; margin-left: 4px;">Add Context</span>
               </div>
             </button>
 
-            <button id="quiz-button" title="Quiz">
-              <div style="display: flex;"> 
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" style="width: 1.2rem; height: 1.2rem;">
+            <button id="quiz-button" title="Quiz" class="min-h-[38px] py-1.5 px-2.5 text-xs whitespace-nowrap inline-flex items-center justify-center" style="min-height: 38px; padding: 6px 10px; font-size: 12px; white-space: nowrap; display: inline-flex; align-items: center; justify-content: center;">
+              <div style="display: flex; align-items: center;"> 
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" style="width: 1.1rem; height: 1.1rem; flex-shrink: 0;">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M8.242 5.992h12m-12 6.003H20.24m-12 5.999h12M4.117 7.495v-3.75H2.99m1.125 3.75H2.99m1.125 0H5.24m-1.92 2.577a1.125 1.125 0 1 1 1.591 1.59l-1.83 1.83h2.16M2.99 15.745h1.125a1.125 1.125 0 0 1 0 2.25H3.74m0-.002h.375a1.125 1.125 0 0 1 0 2.25H2.99" />
                 </svg>
                 <span style="font-size: 12px; margin-left: 4px;">Quiz me</span>
               </div>
             </button>
 
-            <button id="flashcards-button" title="Flashcards">
-              <div style="display: flex;"> 
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" style="width: 1.2rem; height: 1.2rem;">
+            <button id="flashcards-button" title="Flashcards" class="min-h-[38px] py-1.5 px-2.5 text-xs whitespace-nowrap inline-flex items-center justify-center" style="min-height: 38px; padding: 6px 10px; font-size: 12px; white-space: nowrap; display: inline-flex; align-items: center; justify-content: center;">
+              <div style="display: flex; align-items: center;"> 
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" style="width: 1.1rem; height: 1.1rem; flex-shrink: 0;">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0 1 11.186 0Z" />
                 </svg>
                 <span style="font-size: 12px; margin-left: 4px;">Flashcards</span>
@@ -429,9 +434,15 @@ export const htmlContent = `
     }
     
     .difficulty-content-expanded {
-      max-height: 500px;
+      max-height: 950px;
       overflow: hidden;
       transition: max-height 0.3s ease-in-out;
+    }
+
+    @media (max-width: 639px) {
+      #difficulty-content .grid {
+        grid-template-columns: minmax(0, 1fr) !important;
+      }
     }
     
     #difficulty-dropdown-toggle.rotated svg {
@@ -536,7 +547,7 @@ export const htmlContent = `
       </details>
       <!-- Use your own AI Section -->
       <div class="mb-3 p-2.5 border border-zinc-200 dark:border-zinc-700 rounded-lg" style="background-color: var(--socratiq-bg, #ffffff); color: var(--socratiq-text, #1f2328);">
-        <div class="flex items-center justify-between mb-2">
+        <div class="flex items-center justify-between gap-3 flex-wrap mb-2" style="gap: 12px; flex-wrap: wrap;">
           <h3 class="text-md font-semibold text-zinc-900 dark:text-white">Use your own AI</h3>
           
           <!-- Custom API Toggle Switch -->
@@ -648,7 +659,7 @@ export const htmlContent = `
         
         <div id="difficulty-content" class="difficulty-content-collapsed mt-1.5">
           <div class="p-2 border border-zinc-200 dark:border-zinc-700 rounded-lg">
-            <div class="grid grid-cols-2 gap-2">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <div class="difficulty-level beginner-level p-1.5 rounded">
                 <div class="flex items-center gap-2">
                   <span class="text-lg">🚲</span>
@@ -935,7 +946,7 @@ export const htmlContent = `
 
 
 
-    <div id="reference-btn-container" class="flex space-x-2 text-xs font-mono">
+    <div id="reference-btn-container" class="flex space-x-2 text-xs font-mono mb-7 pb-6" style="margin-bottom: 28px;">
       <!-- <button id="reference-btn" class="bg-blue-100 text-zinc-900 px-4 py-0.5 rounded-md">1</button> -->
 
     </div>

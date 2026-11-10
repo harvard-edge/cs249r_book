@@ -1,5 +1,6 @@
 // import { generateUniqueId } from '../../libs/utils/utils.js';
 import {addToCopyContainer} from '../highlight_menu/send_text_highlight.js';
+import {searchTaxonomyItems} from '../../../../src_shared/taxonomy-map.js';
 let currentFilter = null;
 
 export function setupAtMentions(shadowRoot) {
@@ -14,8 +15,9 @@ export function setupAtMentions(shadowRoot) {
     left: 0;
     width: 100%;
     max-height: 250px;
-    background: white;
-    border: 1px solid #e2e8f0;
+    background: var(--socratiq-study-surface-elevated, #ffffff);
+    color: var(--socratiq-study-text, #0f172a);
+    border: 1px solid var(--socratiq-study-border, #e2e8f0);
     border-radius: 0.5rem;
     box-shadow: 0 -4px 6px -1px rgba(0, 0, 0, 0.1);
     z-index: 50;
@@ -66,6 +68,8 @@ export function setupAtMentions(shadowRoot) {
         return '🔑';
       case 'section':
         return '📚';
+      case 'taxonomy':
+        return '🧭';
       default:
         return '📎';
     }
@@ -125,6 +129,17 @@ export function setupAtMentions(shadowRoot) {
       }
     }
 
+    // Search ML Systems Taxonomy items (kept after sections, subsections, and keywords in 'all')
+    const currentUrl = typeof window !== 'undefined' ? (window.location?.href || '') : '';
+    const taxonomyItems = searchTaxonomyItems(normalizedSearch, currentUrl);
+    for (const taxItem of taxonomyItems) {
+      results.push({
+        type: 'taxonomy',
+        key: taxItem.key,
+        value: taxItem.value,
+      });
+    }
+
     return results;
   }
 
@@ -162,6 +177,17 @@ export function setupAtMentions(shadowRoot) {
           textToAdd = window.sectionData[key].content;
         }
         break;
+      case 'taxonomy': {
+        const currentUrl = typeof window !== 'undefined' ? (window.location?.href || '') : '';
+        const taxMatch = searchTaxonomyItems('', currentUrl).find(
+          item => item.key === key || item.title === key || item.code === key
+        );
+        if (taxMatch) {
+          prefix = `[Taxonomy: ${taxMatch.title}]\n`;
+          textToAdd = taxMatch.content;
+        }
+        break;
+      }
     }
     
     return prefix + textToAdd.trim();
@@ -228,7 +254,7 @@ export function setupAtMentions(shadowRoot) {
   }
 
   function handleFolderNavigation(direction) {
-    const filters = ['all', 'section', 'subsection', 'keyword'];
+    const filters = ['all', 'section', 'subsection', 'keyword', 'taxonomy'];
     const currentIndex = selectedFolderIndex;
     
     if (direction === 'right') {
@@ -250,7 +276,7 @@ export function setupAtMentions(shadowRoot) {
     }
 
     const folderHtml = `
-      <div class="folder-filters flex space-x-2 p-2 border-b border-gray-200">
+      <div class="folder-filters flex flex-wrap gap-1.5 p-2 border-b border-gray-200">
         <div class="folder-filter p-1.5 rounded-md cursor-pointer flex items-center hover:bg-gray-100 ${!currentFilter ? 'bg-blue-100' : ''}" 
              data-filter="all">
           <span class="mr-1">📁</span>
@@ -270,6 +296,11 @@ export function setupAtMentions(shadowRoot) {
              data-filter="keyword">
           <span class="mr-1">🔑</span>
           <span>Keywords</span>
+        </div>
+        <div class="folder-filter p-1.5 rounded-md cursor-pointer flex items-center hover:bg-gray-100 ${currentFilter === 'taxonomy' ? 'bg-blue-100' : ''}" 
+             data-filter="taxonomy">
+          <span class="mr-1">🧭</span>
+          <span>Taxonomy</span>
         </div>
       </div>
     `;
@@ -348,7 +379,7 @@ export function setupAtMentions(shadowRoot) {
         case 'Enter':
           e.preventDefault(); // Prevent enter from triggering send
           if (isFolderFocused && selectedFolderIndex >= 0) {
-            const filters = ['all', 'section', 'subsection', 'keyword'];
+            const filters = ['all', 'section', 'subsection', 'keyword', 'taxonomy'];
             currentFilter = filters[selectedFolderIndex] === 'all' ? null : filters[selectedFolderIndex];
             showDropup(searchTerm);
           } else if (selectedIndex >= 0 && selectedIndex < visibleItems.length) {

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createExplanationRequest, DEFAULT_ENDPOINT, MAX_TOKENS, INPUT_CHARACTER_BUDGET } from '../src_reader/transport.mjs';
+import { createExplanationRequest, buildSystemPrompt, DEFAULT_ENDPOINT, MAX_TOKENS, INPUT_CHARACTER_BUDGET } from '../src_reader/transport.mjs';
+import { resolveChapterTaxonomy, formatChapterTaxonomyPrompt, TAXONOMY_GROUPS, TAXONOMY_SUBJECTS } from '../src_shared/taxonomy-map.js';
 
 const encoder = new TextEncoder();
 
@@ -307,5 +308,32 @@ test('rejects oversized answers and unterminated events without rendering unboun
       source: source(), question: 'Explain.', onChunk: text => chunks.push(text),
     }), expected);
     assert.equal(chunks.length, 0);
+  }
+});
+
+test('resolveChapterTaxonomy and formatChapterTaxonomyPrompt resolve vol1-vol4 and inject F/S/P/Q/T into buildSystemPrompt', async () => {
+  assert.deepEqual(Object.keys(TAXONOMY_GROUPS), ['F', 'S', 'P', 'Q', 'T']);
+  assert.ok(Object.keys(TAXONOMY_SUBJECTS).length >= 50);
+
+  const chapterSamples = [
+    ['vol1', 'https://mlsysbook.ai/vol1/01_introduction/', 'vol1/01_introduction', 'F1.1'],
+    ['vol2', 'https://mlsysbook.ai/vol2/01_introduction/', 'vol2/01_introduction', 'F1.2'],
+    ['vol3', 'https://mlsysbook.ai/vol3/01_introduction/', 'vol3/01_introduction', 'T1.3'],
+    ['vol4', 'https://mlsysbook.ai/vol4/01_boundary/', 'vol4/01_boundary', 'Q4.1'],
+  ];
+
+  for (const [vol, url, expectedSlug, expectedSubject] of chapterSamples) {
+    const resolved = resolveChapterTaxonomy(url);
+    assert.ok(resolved, `resolves chapter taxonomy for ${vol}`);
+    assert.equal(resolved.slug, expectedSlug);
+    assert.equal(resolved.volume, vol);
+    assert.ok(resolved.subjects.includes(expectedSubject), `${vol} includes ${expectedSubject}`);
+
+    const promptLine = formatChapterTaxonomyPrompt(url);
+    assert.match(promptLine, /Foundations \(F\), Stack \(S\), Lifecycle \(P\), Qualities \(Q\), and System Types \(T\)/);
+    assert.ok(promptLine.includes(expectedSubject), `formatChapterTaxonomyPrompt includes ${expectedSubject}`);
+
+    const systemPrompt = buildSystemPrompt(url);
+    assert.ok(systemPrompt.includes(promptLine), `buildSystemPrompt injects chapter taxonomy for ${vol}`);
   }
 });

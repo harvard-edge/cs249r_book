@@ -48,7 +48,7 @@ const prev_chats = `
       <!-- Chat items will be inserted here -->
     </ul>
 
-    <div class="mt-4 flex justify-between">
+    <div class="mt-4 flex justify-between gap-2.5" style="gap: 10px;">
       <button 
         id="reset-btn" 
         class="flex items-center px-4 py-2 text-yellow-700 dark:text-yellow-300 bg-yellow-50 dark:bg-yellow-900/30 rounded-lg hover:bg-yellow-100 dark:hover:bg-yellow-900/50 transition-colors duration-200"
@@ -98,7 +98,7 @@ function addItem(shadowEle, entry) {
       style="background-color: var(--socratiq-hover, #fafafa); color: var(--socratiq-text, #1f2328);"
     >
       <span class="text-gray-700 dark:text-zinc-200 group-hover:text-blue-600 font-medium truncate" style="color: var(--socratiq-text, #374151);"></span>
-      <div class="flex items-center space-x-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+      <div class="flex items-center space-x-2 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity duration-200">
         <div data-load-chat class="p-1.5 rounded-lg hover:bg-blue-100 transition-colors duration-200">
           <svg
             xmlns="http://www.w3.org/2000/svg"

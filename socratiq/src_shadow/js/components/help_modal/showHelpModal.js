@@ -6,12 +6,13 @@ function createModal() {
 
     // Create a container for the entire modal content
     const modalContainer = document.createElement('div');
-    modalContainer.className = 'bg-white shadow-lg rounded-lg relative max-w-lg mx-auto';
+    modalContainer.className = 'bg-white shadow-lg rounded-lg relative max-w-lg mx-auto min-h-[180px] gap-5';
     modalContainer.style.backgroundColor = 'var(--socratiq-bg, #ffffff)';
     modalContainer.style.color = 'var(--socratiq-text, #1f2328)';
-    modalContainer.style.maxWidth = '400px'; // Limit the width of the modal
+    modalContainer.style.maxWidth = '460px'; // Limit the width of the modal
     modalContainer.id="helpModalContainer";
-    modalContainer.style.width = '100%'; // Ensures it fills the modal area but respects maxWidth
+    modalContainer.style.width = 'min(460px, calc(100vw - 24px))'; // Ensures it fills the modal area but keeps 12px margin on mobile
+    modalContainer.style.margin = '0 auto';
     modalContainer.onclick = event => event.stopPropagation(); // Prevent clicks from closing modal
 
     // Create scrollable content area
@@ -74,7 +75,7 @@ function toggleHelpModal(shadowEle) {
 
     if (isHidden) {
         modal.classList.remove('hidden');
-        youtubeVid.innerHTML = `<iframe id="youtubeVideo" width="100%" height="315" src="https://www.youtube.com/embed/mIT9nIsxCe0?enablejsapi=1" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>`;
+        youtubeVid.innerHTML = `<iframe id="youtubeVideo" width="100%" height="200" style="width: 100%; aspect-ratio: 16 / 9; height: auto; min-height: 180px; max-height: 240px; border: 0; border-radius: 8px; display: block;" src="https://www.youtube.com/embed/mIT9nIsxCe0?enablejsapi=1" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>`;
     } else {
         modal.classList.add('hidden');
         stopYouTubeVideo(modal);

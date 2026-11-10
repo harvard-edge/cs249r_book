@@ -13,6 +13,7 @@ const LEARNING_QUESTIONS = {
   simplify: 'Explain this passage in simpler language, defining any essential technical terms.',
   example: 'Show a concrete example that helps me understand this passage.',
   check: 'Check my understanding of this passage. Ask me one conceptual question at a time. Do not reveal the answer until I respond; then give feedback before asking another question.',
+  taxonomy: "Locate this passage in the ML Systems Taxonomy (Foundations F, Stack S, Lifecycle P, Qualities Q, System Types T): name the relevant taxonomy subject area(s), connect it to this volume's analytical lens, and explain what upstream or downstream system layers it constrains.",
 };
 
 /**
@@ -33,6 +34,19 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
   const host = document.createElement('div');
   host.id = 'socratiq-reader';
   document.body.appendChild(host);
+  if (!document.getElementById('socratiq-host-layout')) {
+    const hostLayoutStyle = document.createElement('style');
+    hostLayoutStyle.id = 'socratiq-host-layout';
+    hostLayoutStyle.textContent = `
+      #tbl-socratiq-controls table.table, #tbl-socratiq-controls table { display: table !important; width: 100% !important; table-layout: fixed !important; }
+      #tbl-socratiq-controls th, #tbl-socratiq-controls td { white-space: normal !important; overflow-wrap: break-word !important; word-break: normal !important; }
+      @media (max-width: 800px) {
+        #quarto-back-to-top { bottom: 4.5rem !important; }
+        body { padding-bottom: 4.25rem; }
+      }
+    `;
+    document.head.appendChild(hostLayoutStyle);
+  }
   const root = host.attachShadow({ mode: 'open' });
 
   const style = document.createElement('style');
@@ -98,6 +112,7 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
           <button type="button" data-learning="simplify">Simplify</button>
           <button type="button" data-learning="example">Show an example</button>
           <button type="button" data-learning="check">Check my understanding</button>
+          <button type="button" data-learning="taxonomy">Map to taxonomy</button>
           <button type="button" class="reader-reset">Start over</button>
           <button class="reader-choose" type="button">Choose another paragraph</button>
         </div>
@@ -262,6 +277,7 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
     requestAnimationFrame(() => studyButton.focus({preventScroll: true}));
   }
   window.addEventListener('socratiq:open', suspendForStudy);
+  window.addEventListener('socratiq:study-open', suspendForStudy);
   window.addEventListener('socratiq:close', resumeFromStudy);
 
   const picker = typeof captureParagraph === 'function' ? createParagraphPicker({
@@ -756,7 +772,9 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
       destroyed = true;
       publishActiveSource(null);
       window.removeEventListener('socratiq:open', suspendForStudy);
+      window.removeEventListener('socratiq:study-open', suspendForStudy);
       window.removeEventListener('socratiq:close', resumeFromStudy);
+      document.getElementById('socratiq-host-layout')?.remove();
       picker?.destroy();
       stopRequest('Response stopped.');
       clearTimeout(selectionTimer);

@@ -5,6 +5,7 @@ import { generateProgressReport } from '../progressReport/progressReport.js';
 import { getDBInstance } from '../../libs/utils/indexDb.js';
 import { getAllChapterMapEntries } from '../../libs/utils/tocExtractor.js';
 import { escapeSidebarText } from '../../utils/sanitize.js';
+import { TAXONOMY_GROUPS, resolveChapterTaxonomy } from '../../../../src_shared/taxonomy-map.js';
 
 let modalInstance = null;
 
@@ -64,14 +65,57 @@ export class KnowledgeGraph {
             linkYellow: '#ecc94b',
             linkRed: '#f56565',
             linkBlue: '#8e1537',
-            // Domain-based colors
+            // Domain-based & ML Systems Taxonomy Group colors
             domainColors: {
+                F: '#2563eb',
+                S: '#7c3aed',
+                P: '#059669',
+                Q: '#d97706',
+                T: '#dc2626',
                 'example.com': '#560d22',
                 'github.com': '#24292e',
                 'stackoverflow.com': '#f48024',
                 'default': '#8e1537'
             }
         };
+    }
+
+    getDomainColor(domain = '', url = '') {
+        const domainStr = String(domain || '').trim();
+        const groupPrefix = domainStr.match(/^([FSPQT])(?:\s*·|$)/)?.[1];
+        if (groupPrefix && this.colors.domainColors[groupPrefix]) {
+            return this.colors.domainColors[groupPrefix];
+        }
+        if (groupPrefix && TAXONOMY_GROUPS[groupPrefix]?.color) {
+            return TAXONOMY_GROUPS[groupPrefix].color;
+        }
+        const tax = resolveChapterTaxonomy(url || domainStr);
+        if (tax?.primaryGroup && this.colors.domainColors[tax.primaryGroup]) {
+            return this.colors.domainColors[tax.primaryGroup];
+        }
+        return this.colors.domainColors[domainStr] || this.colors.domainColors.default;
+    }
+
+    getNodeColor(d) {
+        const nodeData = d?.data || d || {};
+        const nodeId = nodeData.id;
+        if (nodeId && this.selectedNodes.has(nodeId)) {
+            return '#ffd700';
+        }
+        if (nodeData.isTruncated) {
+            return '#ff6b6b';
+        }
+        const url = nodeData.url || nodeData.pageUrl || '';
+        const domain = nodeData.domain || '';
+        const tax = resolveChapterTaxonomy(url);
+        const isTaxonomyDomain = /^[FSPQT](?:\s*·|$)/.test(String(domain).trim());
+        if (tax || isTaxonomyDomain) {
+            return this.getDomainColor(domain, url);
+        }
+        if (d?.children) {
+            return '#8e1537';
+        }
+        return '#999';
     }
     clearVisualization(container) {
         d3.select(container).selectAll('svg').remove();
@@ -457,7 +501,11 @@ export class KnowledgeGraph {
         return levelSizes[level] || 10;
     }
 
-    calculateNodeColor(level, domain) {
+    calculateNodeColor(level, domain, url = '') {
+        const domainStr = String(domain || '').trim();
+        if (/^[FSPQT](?:\s*·|$)/.test(domainStr) || resolveChapterTaxonomy(url || domainStr)) {
+            return this.getDomainColor(domainStr, url);
+        }
         // Simple color scheme based on heading level
         const levelColors = {
             1: '#1a365d', // Dark blue for H1s
@@ -1921,6 +1969,20 @@ export class KnowledgeGraph {
             .attr('viewBox', [-cx, -cy, width, height])
             .attr('style', 'display: block; width: 100%; height: 100%; font: 12px sans-serif;');
 
+        // Top-left watermark title (kept out of radial center so it never collides behind the root node)
+        const watermarkGroup = svg.append('g')
+            .attr('class', 'knowledge-graph-watermark')
+            .attr('transform', `translate(${-cx}, ${-cy})`);
+        watermarkGroup.append('text')
+            .attr('x', 24)
+            .attr('y', 32)
+            .attr('text-anchor', 'start')
+            .style('font-size', '16px')
+            .style('font-weight', '600')
+            .style('fill', '#4a5568')
+            .style('pointer-events', 'none')
+            .text('Knowledge Graph');
+
         // Add zoom behavior
         const g = svg.append('g');
         
@@ -1982,17 +2044,7 @@ export class KnowledgeGraph {
 
         // Add circles for nodes
         nodes.append('circle')
-            .attr('fill', d => {
-                if (this.selectedNodes.has(d.data.id)) {
-                    return '#ffd700';
-                } else if (d.data.isTruncated) {
-                    return '#ff6b6b'; // Truncated nodes
-                } else if (d.children) {
-                    return '#8e1537'; // Expandable nodes
-                } else {
-                    return '#999'; // Leaf nodes
-                }
-            })
+            .attr('fill', d => this.getNodeColor(d))
             .attr('stroke', d => {
                 if (this.selectedNodes.has(d.data.id)) {
                     return '#8e1537';
@@ -2063,7 +2115,8 @@ export class KnowledgeGraph {
             })
             .style('font-weight', d => d.depth <= 2 ? 'bold' : 'normal')
             .text(d => {
-                const maxLength = d.depth === 0 ? 18 : (d.depth === 1 ? 18 : 24);
+                if (d.depth === 0) return '';
+                const maxLength = d.depth === 1 ? 18 : 24;
                 return d.data.name.length > maxLength ? 
                     d.data.name.substring(0, maxLength) + '...' : 
                     d.data.name;
@@ -2092,10 +2145,18 @@ export class KnowledgeGraph {
         
         // Build tooltip content
         let content = `<div style="font-weight: bold; margin-bottom: 8px; color: #8e1537;">${escapeSidebarText(d.data.name)}</div>`;
+        const tax = resolveChapterTaxonomy(d.data.pageUrl || d.data.url || '');
+        const isTaxBadge = /^[FSPQT](?:\s*·|$)/.test(String(d.data.domain || '').trim());
+        const taxLabel = isTaxBadge
+            ? d.data.domain
+            : (tax ? `${tax.primaryGroup} · ${tax.subjects.slice(0, 3).join(', ')}` : '');
         
         if (d.data.isTruncated) {
             content += `<div style="color: #ff6b6b; font-style: italic;">Truncated content</div>`;
         } else if (d.children && d.children.length > 0) {
+            if (taxLabel) {
+                content += `<div style="margin-bottom: 6px; color: #cbd5e0;">Taxonomy: ${escapeSidebarText(taxLabel)}</div>`;
+            }
             content += `<div style="margin-bottom: 6px; color: #cbd5e0;">Children (${d.children.length}):</div>`;
             d.children.forEach(child => {
                 const childName = child.data.name.length > 25 ? 
@@ -2105,7 +2166,9 @@ export class KnowledgeGraph {
             });
         } else if (d.data.pageTitle) {
             content += `<div style="color: #cbd5e0;">Page: ${escapeSidebarText(d.data.pageTitle)}</div>`;
-            if (d.data.domain) {
+            if (taxLabel) {
+                content += `<div style="color: #cbd5e0;">Taxonomy: ${escapeSidebarText(taxLabel)}</div>`;
+            } else if (d.data.domain && !/^(127\.0\.0\.1|localhost)$/i.test(String(d.data.domain).trim())) {
                 content += `<div style="color: #cbd5e0;">Domain: ${escapeSidebarText(d.data.domain)}</div>`;
             }
         }
@@ -2502,8 +2565,16 @@ export class KnowledgeGraph {
         `;
         
         // Get additional info for the component
-        const pageUrl = node.pageUrl || '';
+        const pageUrl = node.pageUrl || node.url || '';
         const domain = node.domain || '';
+        const tax = resolveChapterTaxonomy(pageUrl);
+        const isTaxBadge = /^[FSPQT](?:\s*·|$)/.test(String(domain).trim());
+        const taxLabel = isTaxBadge
+            ? domain
+            : (tax ? `${tax.primaryGroup} · ${tax.subjects.slice(0, 3).join(', ')}` : '');
+        const subtitleDisplay = taxLabel
+            ? `Taxonomy: ${escapeSidebarText(taxLabel)}`
+            : (/^(127\.0\.0\.1|localhost)$/i.test(String(domain).trim()) ? '' : escapeSidebarText(domain));
         const visitDate = this.getVisitDate(pageUrl);
         
         // LOG: Verify content is being added to data attributes
@@ -2519,7 +2590,7 @@ export class KnowledgeGraph {
         quizItem.innerHTML = `
             <div style="flex: 1; margin-right: 8px;">
                 <div style="font-weight: 500; margin-bottom: 2px;">${escapeSidebarText(node.name || node.label)}</div>
-                <div style="font-size: 10px; color: #718096; margin-bottom: 1px;">${escapeSidebarText(domain)}</div>
+                <div style="font-size: 10px; color: #718096; margin-bottom: 1px;">${subtitleDisplay}</div>
                 <div style="font-size: 9px; color: #a0aec0;">${escapeSidebarText(visitDate)}</div>
             </div>
             <button class="remove-quiz-item" style="
@@ -3087,15 +3158,24 @@ export function showKnowledgeGraph(shadowRoot) {
 
         const closeButton = document.createElement('button');
         closeButton.textContent = '×';
+        closeButton.setAttribute('aria-label', 'Close knowledge graph');
         closeButton.style.cssText = `
             position: absolute;
             top: 10px;
             right: 10px;
+            width: 40px;
+            height: 40px;
+            min-width: 40px;
+            min-height: 40px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 9999px;
             border: none;
             background: none;
             font-size: 24px;
             cursor: pointer;
-            z-index: 1;
+            z-index: 20;
         `;
 
         content.appendChild(closeButton);

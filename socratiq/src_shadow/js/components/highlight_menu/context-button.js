@@ -1,4 +1,5 @@
 import {addToCopyContainer} from './send_text_highlight.js';
+import {searchTaxonomyItems} from '../../../../src_shared/taxonomy-map.js';
 
 export function insertContextButton(shadowRoot) {
   const contextButton = shadowRoot.querySelector('#context-button');
@@ -24,8 +25,9 @@ export function insertContextButton(shadowRoot) {
     right: 0;
     width: 100%;
     max-height: 250px;
-    background: white;
-    border: 1px solid #e2e8f0;
+    background: var(--socratiq-study-surface-elevated, #ffffff);
+    color: var(--socratiq-study-text, #0f172a);
+    border: 1px solid var(--socratiq-study-border, #e2e8f0);
     border-radius: 0.5rem;
     box-shadow: 0 -4px 6px -1px rgba(0, 0, 0, 0.1);
     z-index: 50;
@@ -48,6 +50,9 @@ export function insertContextButton(shadowRoot) {
     </div>
     <div class="folder-filter p-1.5 rounded-md cursor-pointer flex items-center hover:bg-gray-100" data-filter="keyword">
       <span class="mr-1">🔑</span><span>Keywords</span>
+    </div>
+    <div class="folder-filter p-1.5 rounded-md cursor-pointer flex items-center hover:bg-gray-100" data-filter="taxonomy">
+      <span class="mr-1">🧭</span><span>Taxonomy</span>
     </div>
   `;
 
@@ -158,11 +163,31 @@ export function insertContextButton(shadowRoot) {
       }
     }
 
+    // Search ML Systems Taxonomy items (placed after sections/subsections/keywords in 'all' so index-0 tests stay unchanged)
+    if (!filter || filter === 'taxonomy') {
+      const currentUrl = typeof window !== 'undefined' ? (window.location?.href || '') : '';
+      const taxonomyMatches = searchTaxonomyItems(filterText, currentUrl);
+      const itemsToInclude = filter === 'taxonomy' || normalizedFilter
+        ? taxonomyMatches
+        : taxonomyMatches.slice(0, 6);
+      for (const taxItem of itemsToInclude) {
+        visibleItems.push({
+          type: 'taxonomy',
+          key: taxItem.key,
+          value: {
+            title: taxItem.title,
+            content: taxItem.content
+          }
+        });
+      }
+    }
+
     // Populate the results
     visibleItems.forEach(item => {
       const icon = item.type === 'section' ? '📚' : 
                   item.type === 'subsection' ? '📑' : 
-                  item.type === 'keyword' ? '🔑' : '📎';
+                  item.type === 'keyword' ? '🔑' :
+                  item.type === 'taxonomy' ? '🧭' : '📎';
       
       const resultItem = createResultItem(
         icon, 

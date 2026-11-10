@@ -231,7 +231,7 @@ this.createModal().then(async () => {
 
             <div 
                 id="sr-modal-content_inner"
-                class="relative top-10 mx-auto mb-6 p-5 w-[90%] max-w-4xl shadow-lg rounded-md ${themeClasses.modalBg}"
+                class="relative top-10 mx-auto mb-6 p-3 sm:p-6 w-[90%] max-w-4xl shadow-lg rounded-md ${themeClasses.modalBg}"
                style="max-height: calc(100vh - 80px); background-color: var(--socratiq-bg) !important; color: var(--socratiq-text) !important; display: flex; flex-direction: column;"
                 >
                     <!-- Close button -->
@@ -242,7 +242,7 @@ this.createModal().then(async () => {
 </button>
                     <div class="grid grid-cols-4 mt-8 gap-4" style="flex: 1; min-height: 0; overflow: hidden;">
                         <!-- Sidebar -->
-                        <div id="sr-sidebar" class="col-span-1 border-r overflow-y-auto ${themeClasses.border} pr-4" style="max-height: 100%; overflow-y: auto;">
+                        <div id="sr-sidebar" class="col-span-1 border-r max-h-[180px] overflow-y-auto sm:max-h-none ${themeClasses.border} pr-4" style="max-height: 100%; overflow-y: auto;">
                         <!-- Search input -->
                         <div class="relative mb-4">
                             <input type="text" 
@@ -278,14 +278,14 @@ this.createModal().then(async () => {
                         <div>
                             <button class="w-full flex items-center justify-between px-3 py-2 text-sm text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-zinc-800/50 rounded-md">
                                 <div class="flex items-center gap-2">
-                                    <svg class="w-4 h-4 transform transition-transform" data-dropdown="tags" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="transform: rotate(180deg);">
+                                    <svg class="w-4 h-4 transform transition-transform" data-dropdown="tags" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="transform: rotate(${typeof window !== 'undefined' && window.innerWidth <= 640 ? '0deg' : '180deg'});">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
                                     </svg>
                                     <span>Tags</span>
                                 </div>
                                 <span id="totalTagCount" class="text-xs">${this.getInitialTagCount()}</span>
                             </button>
-                            <div id="tagList" class="mt-1 space-y-1" style="max-height: 200px; overflow-y: auto;">
+                            <div id="tagList" class="mt-1 space-y-1 ${typeof window !== 'undefined' && window.innerWidth <= 640 ? 'hidden' : ''}" style="max-height: 200px; overflow-y: auto;">
                                 <!-- Tags will be rendered here -->
                             </div>
                         </div>
@@ -1667,7 +1667,7 @@ this.createModal().then(async () => {
           
           chaptersContent += `
             <div class="chapter-container group">
-                <button class="w-full flex justify-between px-3 py-2 text-sm text-gray-600 dark:text-gray-300 ${hoverClasses} rounded-md ${activeClasses} min-h-[2.5rem]" data-chapter="${escapeSidebarText(chapter.chapter)}">
+                <button class="w-full flex justify-between gap-2 px-3 py-2 text-sm text-gray-600 dark:text-gray-300 ${hoverClasses} rounded-md ${activeClasses} min-h-[2.5rem]" style="gap: 8px;" data-chapter="${escapeSidebarText(chapter.chapter)}">
                     <div class="flex gap-2">
                         <svg class="w-4 h-4 transform transition-transform duration-200" 
                              data-dropdown="chapter-${escapeSidebarText(chapter.chapter)}"
@@ -1696,7 +1696,7 @@ this.createModal().then(async () => {
                     </div>
                 </button>
                 <div class="chapter-cards ml-6 mt-1 space-y-0 ${
-                  isCurrentChapter ? "" : "hidden"
+                  isCurrentChapter && (typeof window === "undefined" || window.innerWidth > 640) ? "" : "hidden"
                 }">
                     ${cards
                       .map(
