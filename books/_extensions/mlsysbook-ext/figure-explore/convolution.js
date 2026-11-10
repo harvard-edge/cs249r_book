@@ -128,7 +128,6 @@
     const insetTitle=node('summary','Inspect the calculation');
     const sourceLink=node('a','Illustrative values from the vertical-line example below','life-value-source'); sourceLink.href='#'+example.source_anchor;
     const valueScope=node('p',example.scope,'life-value-scope'), valuesBody=node('div');
-    inset.append(insetTitle,valueScope,valuesBody);
     const calculation=node('section','','life-calculation');
     calculation.setAttribute('aria-label','Calculation linked to the highlighted row');
     const calculationLabel=node('strong','Multiply matching cells, then add'), rowControls=node('div','','life-row-controls');
@@ -145,7 +144,8 @@
     progressRow.append(progress, scanButton);
     checkpoint.textContent='Two windows show the pattern. Complete the scan applies the same filter at the remaining positions; Next continues the detailed steps.';
     takeaway.textContent='The same filter weights produce every output. Overlapping windows reuse input values, creating opportunities to reuse data in fast memory. The drawing shows logical computation; the execution schedule determines which data remains on chip.';
-    workspace.append(calculation, progressRow, checkpoint, takeaway, sourceLink, inset);
+    inset.append(insetTitle, calculation, progressRow, checkpoint, takeaway, sourceLink, valueScope, valuesBody);
+    workspace.append(inset);
     panel.append(titleHeading, introPara, assumptions, stageWrap, dockWrap, narration, workspace);
     const movement=Number(outer.dataset.mlsysMovementMs), hold=Number(outer.dataset.mlsysReadingPauseMs);
     if (!(movement>0) || !(hold>=0)) throw new Error('Missing build-time timing.');
