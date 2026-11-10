@@ -961,6 +961,10 @@ async function processMarkdownWithStreamdown(text, parseIncomplete = true) {
   // No need to call processReferences from reference_renderer.js as it handles footnote references
   // and would interfere with our custom reference system
 
+  for (const anchor of tempDiv.querySelectorAll('a')) {
+    anchor.setAttribute('rel', 'noopener noreferrer');
+  }
+
   return tempDiv.innerHTML;
 }
 

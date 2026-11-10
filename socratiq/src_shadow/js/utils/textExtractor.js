@@ -154,6 +154,43 @@ export function extractReadableBookText(rootElement = typeof document !== 'undef
   };
 
   visit(rootElement);
+  if (typeof rootElement.querySelectorAll === 'function') {
+    const panels = [...rootElement.querySelectorAll('[data-mlsys-explore] .mlsys-explore-panel')];
+    const pairs = [];
+    for (const panel of panels) {
+      if (panel.closest?.('form, fieldset, nav, aside, [hidden], [inert]')) continue;
+      for (const ctrl of panel.querySelectorAll('input[type="range"], select')) {
+        if (ctrl.closest?.('form, fieldset, [hidden], [inert]')) continue;
+        let label = (ctrl.getAttribute('aria-label') || '').trim();
+        if (!label && ctrl.id && ctrl.ownerDocument) {
+          const explicit = ctrl.ownerDocument.querySelector(`label[for="${ctrl.id.replace(/"/g, '\\"')}"]`);
+          if (explicit) label = explicit.textContent.trim();
+        }
+        if (!label) {
+          const parentLabel = ctrl.closest('label');
+          if (parentLabel) {
+            label = [...parentLabel.childNodes]
+              .filter(n => n !== ctrl && !(n.nodeType === 1 && n.contains(ctrl)))
+              .map(n => n.textContent || '')
+              .join(' ')
+              .trim();
+          }
+        }
+        if (!label && ctrl.previousElementSibling && /^(LABEL|SPAN)$/i.test(ctrl.previousElementSibling.tagName)) {
+          label = ctrl.previousElementSibling.textContent.trim();
+        }
+        label = label.replace(/[:\s]+$/, '').replace(/\s+/g, ' ').trim();
+        const rawValue = ctrl.tagName === 'SELECT'
+          ? (ctrl.selectedOptions?.[0]?.textContent || ctrl.value || '')
+          : (ctrl.value || '');
+        const value = String(rawValue).replace(/\s+/g, ' ').trim();
+        if (label && value) pairs.push(`${label} = ${value}`);
+      }
+    }
+    if (pairs.length) {
+      parts.push(` [Interactive figure parameters: ${pairs.join(', ')}] `);
+    }
+  }
   return parts.join('').replace(/\s+/g, ' ').trim();
 }
 

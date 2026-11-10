@@ -15,17 +15,28 @@ export function createReaderEnvironment({ host, shell }) {
     const topEdge = viewport?.offsetTop ?? 0;
     const width = viewport?.width ?? window.innerWidth;
     const height = viewport?.height ?? window.innerHeight;
-    const buttonWidth = selectionButton.offsetWidth || 144;
+    selectionButton.style.left = `${leftEdge + 8}px`;
+    const buttonWidth = selectionButton.offsetWidth || 220;
     const buttonHeight = selectionButton.offsetHeight || 44;
     const selectionLeft = Number(rect.left ?? rect.x ?? 0);
     const selectionTop = Number(rect.top ?? rect.y ?? 0);
     const selectionWidth = Number(rect.width ?? Math.max(0, Number(rect.right) - selectionLeft));
     const selectionBottom = Number(rect.bottom ?? (selectionTop + Number(rect.height ?? 0)));
-    let left = selectionLeft + Math.max(0, (selectionWidth - buttonWidth) / 2);
+    let left = selectionWidth < buttonWidth
+      ? selectionLeft
+      : selectionLeft + Math.max(0, Math.min((selectionWidth - buttonWidth) / 2, 40));
     let top = selectionTop - buttonHeight - 9;
     if (top < topEdge + 8) top = selectionBottom + 9;
-    left = Math.min(Math.max(left, leftEdge + 8), leftEdge + width - buttonWidth - 8);
-    top = Math.min(Math.max(top, topEdge + 8), topEdge + height - buttonHeight - 8);
+    left = Math.min(Math.max(left, leftEdge + 8), Math.max(leftEdge + 8, leftEdge + width - buttonWidth - 8));
+    let maxTop = topEdge + height - buttonHeight - 8;
+    const launcher = shell.querySelector('.reader-launcher');
+    if (launcher && !launcher.hidden) {
+      const lr = launcher.getBoundingClientRect();
+      if (lr.width > 0 && left + buttonWidth > lr.left - 6) {
+        maxTop = Math.min(maxTop, lr.top - buttonHeight - 8);
+      }
+    }
+    top = Math.min(Math.max(top, topEdge + 8), Math.max(topEdge + 8, maxTop));
     selectionButton.style.left = `${left}px`;
     selectionButton.style.top = `${top}px`;
   }
