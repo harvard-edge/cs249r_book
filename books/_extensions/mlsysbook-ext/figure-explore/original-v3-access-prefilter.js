@@ -5,7 +5,7 @@ const spec = {
   "viewBox": "0 0 720 400",
   "asset": "retrieval_access_control_prefilter.svg",
   "question": "Why can eligible neighbors stay unreachable after access filtering?",
-  "scope": "The original filtered graph and response sketches. A blue ring records an examined eligible node; it does not change permission. Cases compare an added entry with an exact scan. Query q stays fixed. No vectors, distances, ranking, latency, or empirical recall are fabricated.",
+  "scope": "Filtered proximity-graph retrieval under an access-control mask (panel A, 3 left-side and 3 right-side eligible nodes separated by a masked bridge) compared against 2 remedies in panel B: seeding an extra eligible entry point or running an exact scan over the 5 displayed eligible nodes.",
   "purpose": "Exhaust the permitted walk without crossing masked bridges, then show how an eligible seed or direct scoring changes reachability without broadening authority.",
   "guard": "Access permission and graph reachability are distinct. Masked links remain unavailable in every state. The right-hand sketches are alternative responses, not the same graph physically transforming. Exact scanning covers its eligible candidate set but does not remove authorization checks or establish a universal performance benefit.",
   "slots": {
@@ -48,8 +48,8 @@ const spec = {
       "label": "Extra eligible entry point",
       "states": [
         {
-          "label": "Preserve the caller’s eligible set",
-          "description": "Green nodes are eligible under the unchanged caller scope; dashed gray nodes and links are masked. The query q remains fixed. Eligibility does not itself provide a traversable route.",
+          "label": "Preserve the caller eligible set",
+          "description": "In panel A, green nodes are eligible under the caller scope while dashed gray nodes and edges are masked out. Although 3 eligible nodes sit near query q on the right side of the bridge, permission alone does not create a traversable graph path from the left entry.",
           "text": {
             "stall": "entry not expanded",
             "reach": "eligible near q, still unreachable",
@@ -81,7 +81,7 @@ const spec = {
         },
         {
           "label": "Enter the filtered graph",
-          "description": "Walk from the original blue entry to an eligible neighbor. When the hop finishes, the search has not crossed a masked node or acquired any new permission.",
+          "description": "Greedy graph walk starts at the original blue entry on the left and hops to its first eligible green neighbor (1 of 3 left-side eligible nodes examined). Masked nodes and edges remain untraversed.",
           "text": {
             "stall": "walk frontier",
             "reach": "eligible near q, still unreachable",
@@ -140,7 +140,7 @@ const spec = {
         },
         {
           "label": "Exhaust the reachable eligible frontier",
-          "description": "Exhaust the reachable eligible component without using masked links. When this action finishes, the frontier is empty even though eligible nodes near q remain disconnected. No walk passes through a forbidden bridge.",
+          "description": "The walk visits the remaining 2 left-side eligible neighbors (all 3 left-side eligible nodes now ringed in blue), and the frontier stalls at the masked bridge. The 3 eligible nodes near query q remain unreachable from the original entry.",
           "text": {
             "stall": "frontier stalled",
             "reach": "eligible near q, still unreachable",
@@ -223,7 +223,7 @@ const spec = {
         },
         {
           "label": "Seed the disconnected eligible region",
-          "description": "Use the separate extra-entry response in panel B. When the new seed reaches its eligible neighbor, the search can start inside that permitted component without traversing the masked bridge.",
+          "description": "In panel B (middle sketch), seeding 1 extra eligible entry point inside the right-side permitted component reaches the first of the 3 disconnected eligible nodes near query q without crossing any masked bridge.",
           "text": {
             "stall": "frontier stalled",
             "reach": "A: original reachability failure retained",
@@ -313,7 +313,7 @@ const spec = {
         },
         {
           "label": "Traverse inside the eligible region",
-          "description": "Traverse the existing edge inside the eligible component. When the hop finishes, another permitted candidate is reached; the scope remains identical.",
+          "description": "From that seeded node, the walk follows an unmasked edge inside the right-side component to reach the second of the 3 eligible nodes near query q under the same caller scope.",
           "text": {
             "stall": "frontier stalled",
             "reach": "A: original reachability failure retained",
@@ -413,7 +413,7 @@ const spec = {
         },
         {
           "label": "Reach the remaining eligible candidate",
-          "description": "Follow the remaining original eligible edge. When the hop finishes, the remote eligible candidate has become reachable through the added seed, not a new authorization grant.",
+          "description": "One more hop along an eligible edge reaches the third of the 3 right-side eligible nodes near query q. All 6 eligible nodes across both components are now examined.",
           "text": {
             "stall": "frontier stalled",
             "reach": "A: original reachability failure retained",
@@ -523,7 +523,7 @@ const spec = {
         },
         {
           "label": "Return candidates without relaxing permission",
-          "description": "Return candidates examined within the original permission scope. Partitioning is another static response shown in panel B; neither the remedy selector nor a search result grants access to masked objects.",
+          "description": "Candidate retrieval finishes using only permitted nodes within the original caller scope. Neither extra entry points nor exact eligible scans grant access to masked objects.",
           "text": {
             "stall": "frontier stalled",
             "reach": "A: original reachability failure retained",
@@ -623,8 +623,8 @@ const spec = {
       "label": "Exact scan of eligible set",
       "states": [
         {
-          "label": "Preserve the caller’s eligible set",
-          "description": "Green nodes are eligible under the unchanged caller scope; dashed gray nodes and links are masked. The query q remains fixed. Eligibility does not itself provide a traversable route.",
+          "label": "Preserve the caller eligible set",
+          "description": "In panel A, green nodes are eligible under the caller scope while dashed gray nodes and edges are masked out. Although 3 eligible nodes sit near query q on the right side of the bridge, permission alone does not create a traversable graph path from the left entry.",
           "text": {
             "stall": "entry not expanded",
             "reach": "eligible near q, still unreachable",
@@ -656,7 +656,7 @@ const spec = {
         },
         {
           "label": "Enter the filtered graph",
-          "description": "Walk from the original blue entry to an eligible neighbor. When the hop finishes, the search has not crossed a masked node or acquired any new permission.",
+          "description": "Greedy graph walk starts at the original blue entry on the left and hops to its first eligible green neighbor (1 of 3 left-side eligible nodes examined). Masked nodes and edges remain untraversed.",
           "text": {
             "stall": "walk frontier",
             "reach": "eligible near q, still unreachable",
@@ -715,7 +715,7 @@ const spec = {
         },
         {
           "label": "Exhaust the reachable eligible frontier",
-          "description": "Exhaust the reachable eligible component without using masked links. When this action finishes, the frontier is empty even though eligible nodes near q remain disconnected. No walk passes through a forbidden bridge.",
+          "description": "The walk visits the remaining 2 left-side eligible neighbors (all 3 left-side eligible nodes now ringed in blue), and the frontier stalls at the masked bridge. The 3 eligible nodes near query q remain unreachable from the original entry.",
           "text": {
             "stall": "frontier stalled",
             "reach": "eligible near q, still unreachable",
@@ -798,7 +798,7 @@ const spec = {
         },
         {
           "label": "Switch to an exact eligible scan",
-          "description": "Use the separate exact-scan response in panel B. The query directly scores eligible candidates; it does not need graph reachability or permission to masked nodes.",
+          "description": "In panel B (bottom sketch), when the filtered graph is small or heavily fragmented, retrieval switches to an exact scan of the eligible set and scores the first of 5 displayed eligible candidates directly against query q.",
           "text": {
             "stall": "frontier stalled",
             "reach": "A: original reachability failure retained",
@@ -892,7 +892,7 @@ const spec = {
         },
         {
           "label": "Score eligible candidates directly",
-          "description": "Continue scoring eligible candidates directly. When this scoring pass finishes, these candidates have been examined without a graph detour through masked objects.",
+          "description": "Direct scoring evaluates 2 more eligible candidates (3 of 5 displayed eligible nodes scored) without relying on graph edges or crossing masked bridge nodes.",
           "text": {
             "stall": "frontier stalled",
             "reach": "A: original reachability failure retained",
@@ -1006,7 +1006,7 @@ const spec = {
         },
         {
           "label": "Complete eligible scoring",
-          "description": "Finish scoring the displayed eligible set. When the pass finishes, no eligible candidate in this displayed scan was skipped for graph disconnection. No numerical similarity ranking is invented.",
+          "description": "The exact scan finishes scoring all 5 displayed eligible candidates directly against query q, ensuring that zero eligible candidates are missed due to graph disconnection.",
           "text": {
             "stall": "frontier stalled",
             "reach": "A: original reachability failure retained",
@@ -1140,7 +1140,7 @@ const spec = {
         },
         {
           "label": "Return candidates without relaxing permission",
-          "description": "Return candidates examined within the original permission scope. Partitioning is another static response shown in panel B; neither the remedy selector nor a search result grants access to masked objects.",
+          "description": "Candidate retrieval finishes using only permitted nodes within the original caller scope. Neither extra entry points nor exact eligible scans grant access to masked objects.",
           "text": {
             "stall": "frontier stalled",
             "reach": "A: original reachability failure retained",
@@ -1282,10 +1282,10 @@ window.MLSysFigureLessons[spec.name]=async(root,context)=>{
  const frames=()=>spec.variants?spec.variants.find(v=>v.id===variant).states:spec.states;
  const steps=frames().map(s=>({label:s.label,description:s.description}));
  let choice;
- if(spec.variants){choice=document.createElement('label');choice.className='v3-original-choice';choice.textContent=spec.variantLabel+' ';const select=document.createElement('select');select.setAttribute('aria-label',spec.variantLabel);spec.variants.forEach(v=>{const o=document.createElement('option');o.value=v.id;o.textContent=v.label;select.append(o);});select.addEventListener('change',()=>{variant=select.value;frames().forEach((s,i)=>{Object.assign(steps[i],{label:s.label,description:s.description});const option=root.querySelector('.mlsys-original-sequence select').options[i];option.textContent=(i+1)+'. '+s.label;});player.go(0);});choice.append(select);}
+ if(spec.variants){choice=document.createElement('label');choice.className='v3-original-choice';choice.textContent=spec.variantLabel+' ';const select=document.createElement('select');select.setAttribute('aria-label',spec.variantLabel);spec.variants.forEach(v=>{const o=document.createElement('option');o.value=v.id;o.textContent=v.label;select.append(o);});select.addEventListener('change',()=>{variant=select.value;const seq=root.querySelector('.mlsys-original-sequence select');frames().forEach((s,i)=>{Object.assign(steps[i],{label:s.label,description:s.description});if(seq&&seq.options[i])seq.options[i].textContent=(i+1)+' / '+steps.length+' · '+s.label;});player.go(0);});choice.append(select);}
  function follow(x,y){active=[x,y];const scale=svg.getBoundingClientRect().width/vb.width;if(canvas.scrollWidth>canvas.clientWidth)canvas.scrollLeft=Math.max(0,x*scale-canvas.clientWidth/2);if(canvas.scrollHeight>canvas.clientHeight)canvas.scrollTop=Math.max(0,y*scale-canvas.clientHeight/2);}
  function render(i,{stage,details}){
-  if(!canvas.isConnected){if(choice)root.insertBefore(choice,root.querySelector('.mlsys-original-stage'));stage.append(cue,canvas);details.append(readout);}
+  if(!canvas.isConnected){stage.append(cue,canvas);details.append(readout);}
   const frame=frames()[i];packet.setAttribute('visibility','hidden');markerLayer.replaceChildren();
   for(const [key,b]of Object.entries(bindings)){b.node.innerHTML=b.original;if(b.font)b.node.setAttribute('font-size',b.font);b.node.removeAttribute('opacity');const value=Object.assign({},spec.defaults,frame.text)[key];if(value!==undefined)b.node.textContent=value;if(spec.slots[key].font)b.node.setAttribute('font-size',spec.slots[key].font);b.node.removeAttribute('textLength');if(spec.slots[key].width&&b.node.getComputedTextLength()>spec.slots[key].width)b.node.setAttribute('textLength',spec.slots[key].width);b.node.setAttribute('lengthAdjust','spacingAndGlyphs');}
   for(const c of circles)for(const k of ['fill','stroke','stroke-width']){if(c[k]!==null)c.n.setAttribute(k,c[k]);}
@@ -1302,7 +1302,7 @@ window.MLSysFigureLessons[spec.name]=async(root,context)=>{
   const width=Math.max(28,Math.min(112,motion.label.length*6+12));packet.querySelector('rect').setAttribute('x',-width/2);packet.querySelector('rect').setAttribute('width',width);packet.querySelector('text').textContent=motion.label;packet.dataset.role=motion.role||'state';packet.setAttribute('visibility','visible');
   onFrame(p=>{let d=total*p,j=0;while(j<lengths.length-1&&d>lengths[j]){d-=lengths[j];j++;}const t=lengths[j]?d/lengths[j]:0,a=route[j],b=route[j+1],x=a[0]+(b[0]-a[0])*t,y=a[1]+(b[1]-a[1])*t;packet.setAttribute('transform',`translate(${x} ${y})`);follow(...(motion.lock_camera?frame.camera:[x,y]));if(p>=1)packet.setAttribute('visibility','hidden');});
  }
- player=window.MLSysOriginalPlayer.create({root,outer:context.outer,title:spec.question,scope:spec.scope,steps,render,transition});
+ player=window.MLSysOriginalPlayer.create({root,outer:context.outer,layout:'compact',title:spec.question,intro:'Trace why a scope mask stalls greedy graph traversal after 3 left-side nodes and compare seeding an extra entry point against scoring eligible nodes directly.',scope:spec.scope,viewControls:choice,steps,render,transition});
  const resize=new ResizeObserver(()=>follow(...active));resize.observe(canvas);const destroy=player.destroy;player.destroy=()=>{resize.disconnect();destroy();};return player;
 };
 })();

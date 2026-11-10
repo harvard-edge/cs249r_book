@@ -5,7 +5,7 @@ const spec = {
   "viewBox": "0 0 760 370",
   "asset": "idempotency_nonce_execution_flow.svg",
   "question": "Why does a lost reply need a new attempt, but the same operation ID?",
-  "scope": "Illustrative IDs op_A, a1/a2/a3, payload P, and retained result R on the original runtime/endpoint diagram. The endpoint authorizes each attempt within caller C/resource R and an active retention window. This example supports one atomic effect-and-result transaction.",
+  "scope": "Idempotent tool execution model for 1 logical operation (op_A) scoped to caller C, resource R, and payload P across 3 transport attempts (a1, a2, and a3) and 4 endpoint lookup branches (Completed, In flight, Payload conflict, and Unseen).",
   "purpose": "Follow one operation through a committed effect, lost response, safe retry, and rejected payload conflict while preserving identity.",
   "guard": "Deduplication requires the endpoint contract and retention scope. It does not make arbitrary external effects transactional. A timeout leaves the client uncertain; a new attempt is not a new intent. Pending/unresolved branches remain reference alternatives, not extra executed effects.",
   "slots": {
@@ -75,7 +75,7 @@ const spec = {
   "states": [
     {
       "label": "Admit one operation identity",
-      "description": "Admit one illustrative operation op_A, bound to caller C, resource R, and payload P. Attempt IDs identify transmissions, while the operation ID identifies the intended effect.",
+      "description": "The runtime admits 1 logical operation identity (op_A) bound to caller C, resource R, and payload P across up to 3 transport attempts (a1, a2, and a3). Attempt IDs identify individual network transmissions, whereas op_A identifies the single intended state transition.",
       "text": {
         "intent": "op_A · C / R · payload P",
         "attempt": "No attempt sent",
@@ -111,7 +111,7 @@ const spec = {
     },
     {
       "label": "Send attempt a1",
-      "description": "Send op_A with fresh attempt a1. When the request reaches lookup, the endpoint checks authorization and its scoped retention record before deciding whether to execute.",
+      "description": "The runtime transmits op_A with first attempt ID a1 and payload P across the request boundary. The tool endpoint checks authorization and looks up (C, R, op_A) across its 4 lookup branches (Completed, In flight, Payload conflict, or Unseen).",
       "text": {
         "intent": "op_A · C / R · payload P",
         "attempt": "Attempt a1",
@@ -162,7 +162,7 @@ const spec = {
     },
     {
       "label": "Commit effect and result atomically",
-      "description": "The operation is unseen. When this one transaction commits, the effect and retained result R become durable together. Neither is presented as committed before the transaction finishes.",
+      "description": "Because op_A is unseen in the retention window, the endpoint takes the 4th branch (Unseen) and executes 1 atomic transaction that commits the external effect and records retained result R together.",
       "text": {
         "intent": "op_A · C / R · payload P",
         "attempt": "Attempt a1",
@@ -233,7 +233,7 @@ const spec = {
     },
     {
       "label": "Lose the committed reply",
-      "description": "The endpoint has committed, but the reply is lost. When the client times out, its outcome is unknown; the endpoint’s retained completion record still exists.",
+      "description": "The endpoint has committed the effect and stored result R, but the response packet for attempt a1 is lost on the network. When the client times out, client knowledge is unknown even though the endpoint completion record is durable.",
       "text": {
         "intent": "op_A · C / R · payload P",
         "attempt": "Attempt a1",
@@ -284,7 +284,7 @@ const spec = {
     },
     {
       "label": "Retry with fresh attempt a2",
-      "description": "Send fresh attempt a2 with the same op_A, scope, and payload P. A transport retry must not create a new logical operation.",
+      "description": "The retry policy sends a 2nd transport attempt (a2) carrying the exact same operation ID op_A, scope C/R, and payload P. Generating a fresh operation ID on timeout would risk executing the mutation twice.",
       "text": {
         "intent": "op_A · C / R · payload P",
         "attempt": "Attempt a2",
@@ -347,7 +347,7 @@ const spec = {
     },
     {
       "label": "Return the retained result",
-      "description": "The completed lookup branch returns R. When the response arrives, the client can establish the recorded outcome without applying the effect again.",
+      "description": "Endpoint lookup matches (C, R, op_A) with identical payload P in the 1st branch (Completed: same payload) and returns retained result R directly to the runtime without re-executing the external effect.",
       "text": {
         "intent": "op_A · C / R · payload P",
         "attempt": "Attempt a2",
@@ -414,7 +414,7 @@ const spec = {
     },
     {
       "label": "Probe a mismatched payload",
-      "description": "Send a separate malformed probe a3 with op_A but payload P2. This is not a valid mutation of the earlier intent; the endpoint must compare the bound payload.",
+      "description": "To test conflict handling, a 3rd transport attempt (a3) reuses operation ID op_A under caller C and resource R but substitutes a different payload P2.",
       "text": {
         "intent": "op_A · C / R · payload P",
         "attempt": "Attempt a3",
@@ -465,7 +465,7 @@ const spec = {
     },
     {
       "label": "Reject the ID conflict",
-      "description": "When the payload comparison finishes, return an ID conflict. The original effect and retained result R remain unchanged; no second effect is executed.",
+      "description": "Endpoint lookup detects that op_A is already bound to payload P rather than P2 and routes attempt a3 to the 3rd branch (Payload conflict), returning a deterministic conflict error while leaving the committed effect and retained result R untouched.",
       "text": {
         "intent": "op_A · C / R · payload P",
         "attempt": "Attempt a3",
@@ -567,7 +567,7 @@ window.MLSysFigureLessons[spec.name]=async(root,context)=>{
   const width=Math.max(28,Math.min(112,motion.label.length*6+12));packet.querySelector('rect').setAttribute('x',-width/2);packet.querySelector('rect').setAttribute('width',width);packet.querySelector('text').textContent=motion.label;packet.dataset.role=motion.role||'state';packet.setAttribute('visibility','visible');
   onFrame(p=>{let d=total*p,j=0;while(j<lengths.length-1&&d>lengths[j]){d-=lengths[j];j++;}const t=lengths[j]?d/lengths[j]:0,a=route[j],b=route[j+1],x=a[0]+(b[0]-a[0])*t,y=a[1]+(b[1]-a[1])*t;packet.setAttribute('transform',`translate(${x} ${y})`);follow(...(motion.lock_camera?frame.camera:[x,y]));if(p>=1)packet.setAttribute('visibility','hidden');});
  }
- player=window.MLSysOriginalPlayer.create({root,outer:context.outer,title:spec.question,scope:spec.scope,steps,render,transition});
+ player=window.MLSysOriginalPlayer.create({root,outer:context.outer,layout:'compact',title:spec.question,intro:'Follow 1 logical operation across 3 transport attempts to see how endpoint lookup commits once, deduplicates a timed-out retry, and rejects a mismatched payload.',scope:spec.scope,steps,render,transition});
  const resize=new ResizeObserver(()=>follow(...active));resize.observe(canvas);const destroy=player.destroy;player.destroy=()=>{resize.disconnect();destroy();};return player;
 };
 })();

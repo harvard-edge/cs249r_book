@@ -31,11 +31,11 @@ window.MLSysFigureLessons["original-v4-07-open-vs-closed-loop"]=async(root,conte
  const base=add('g',{'data-motion-object':'true'});const chassis=add('rect',{x:-48,y:-26,width:96,height:52,rx:6,fill:'#fff',stroke:'#A51C30','stroke-width':8});base.append(chassis);const heading=add('path',{d:'M 0 0 H 63 L 42 -15 M 63 0 L 42 15',fill:'none',stroke:'#A51C30','stroke-width':8});base.append(heading);
  const trace=add('path',{d:'',fill:'none',stroke:'#A51C30','stroke-width':15,opacity:.55,'data-motion-object':'true'});
  const steps=[
- ['Start from the recorded centerline','Both views start at zero lateral offset. The one-degree heading bias is scored on recorded inputs; this figure isolates its unmitigated physical consequence.'],
- ['Advance two meters','Follow both markers: replay returns its next input to the recorded centerline, while the physical state retains the lateral displacement caused by previous admitted motion.'],
- ['Advance four meters','The same angular score remains fixed. The physical offset grows with distance because the biased heading persists; replay does not feed the displaced state back into its next input.'],
- ['Advance six meters','Observe the remaining side clearance decrease. A real permission path must intervene before clearance exhaustion, reserving response time and stopping motion.'],
- ['Spend the side clearance','At this endpoint the unmitigated physical trajectory reaches the 0.15 m side-clearance line. This is a collision horizon, not a permissible braking trigger or a demonstration of a safe controller.']
+ ['Start from the recorded centerline','At x = 0.00 m (t = 0.00 s), both the blue replay marker in panel (a) and the red base in panel (b) start on the centerline with 0.150 m of rack side clearance and a 1.0° heading bias.'],
+ ['Advance two meters','At x = 2.00 m (t = 1.33 s at 1.5 m/s), panel (a) scores the 1.0° bias at 3.05 × 10⁻⁴ rad² MSE and resets to y = 0.000 m, whereas panel (b) integrates prior motion to y = 0.035 m (0.115 m clearance left).'],
+ ['Advance four meters','At x = 4.00 m (t = 2.67 s), offline replay still reports the same 3.05 × 10⁻⁴ rad² per-step score on the centerline, while the physical base in panel (b) drifts to y = 0.070 m (0.080 m clearance left).'],
+ ['Advance six meters','At x = 6.00 m (t = 4.00 s), physical lateral drift in panel (b) reaches y = 0.105 m, leaving only 0.045 m of side clearance—where a permission path must already intervene to reserve stopping distance.'],
+ ['Spend the side clearance','At x = 8.59 m (t = 5.73 s), the unmitigated physical trajectory in panel (b) crosses the 0.15 m side-clearance line while panel (a) replay remains flat at 0.000 m.']
  ].map(([label,description],i)=>({label,get description(){return root.dataset.lessonCommittedIndex===String(i)?description:'Next endpoint, not yet completed: '+description;}}));
  const positions=[0,2,4,6,D.exhausted];
  function frame(x){const y=x*Math.tan(D.theta),remaining=D.clearance-y;
@@ -47,6 +47,6 @@ window.MLSysFigureLessons["original-v4-07-open-vs-closed-loop"]=async(root,conte
  function render(i,{stage,details}){root.dataset.lessonCommittedIndex=String(i);mount(stage,details);frame(positions[i]);follow(X(positions[i]),Y(positions[i]*Math.tan(D.theta)));}
  function transition({from,to,onFrame}){if(to!==from+1)return;onFrame(p=>{frame(positions[from]+(positions[to]-positions[from])*p);root.dataset.animationProgress=String(p);});}
 
- const player=window.MLSysOriginalPlayer.create({root,outer:context.outer,title:"Why does the same heading error spend physical clearance?",scope:"Original two-panel plot, exact fixed one-degree heading series and axes. Navigation-stack illustration; base icon position follows the plotted trajectory, icon size is schematic. No feedback correction or stopping intervention is simulated.",steps,render,transition});
+ const player=window.MLSysOriginalPlayer.create({root,outer:context.outer,layout:'compact',intro:'Compare recorded-state replay against physical rollout as a 1.0° heading bias at 1.5 m/s exhausts 0.15 m side clearance in 5.73 s.',title:"Why does the same heading error spend physical clearance?",scope:"Warehouse aisle navigation stack at the v = 1.5 m/s drive limit with a persistent Δθ = 1.0° (0.0175 rad) heading bias and 0.15 m (15 cm) rack side clearance. Panel (a) resets each step to the recorded centerline (constant angular MSE = 3.05 × 10⁻⁴ rad²), while panel (b) integrates unmitigated planar kinematics y = x tan(1°) without feedback correction or braking reserve.",steps,render,transition});
  const destroy=player.destroy;player.destroy=()=>{disposed=true;cameraResize?.disconnect();cancelAnimationFrame(resizeFrame);destroy();};return player;
 };})();

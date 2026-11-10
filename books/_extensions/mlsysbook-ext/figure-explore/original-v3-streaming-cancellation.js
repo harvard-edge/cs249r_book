@@ -127,7 +127,7 @@ const spec = {
       "states": [
         {
           "label": "Receive a quarantined stream",
-          "description": "The runtime quarantines partial JSON. Provider decoding and KV allocation remain active; no fragment is eligible for tool dispatch.",
+          "description": "The runtime opens a quarantined stream buffer under a 4,096-token output allowance; parser state starts at q0 while provider decoding and KV allocation remain active.",
           "text": {
             "service": "Decode active",
             "budget": "allowance: 4,096 tokens",
@@ -170,7 +170,7 @@ const spec = {
         },
         {
           "label": "Hold the opening brace",
-          "description": "The opening brace advances local parsing only. When validation finishes, the fragment remains held; parsing is not authorization.",
+          "description": "Token 1 ('{') advances the local stream validator from q0 to q1; when validation finishes, the fragment remains held in quarantine because parsing is not authorization.",
           "text": {
             "service": "Decode active",
             "budget": "allowance: 4,096 tokens",
@@ -228,7 +228,7 @@ const spec = {
         },
         {
           "label": "Hold a permitted key",
-          "description": "The query key is permitted. When this parse action finishes, the incomplete proposal is still quarantined.",
+          "description": "Token 2 ('\"query\"') is permitted by the schema and advances the parser from q1 to q2; tokens 3 through 95 stay quarantined until a complete object is validated.",
           "text": {
             "service": "Decode active",
             "budget": "allowance: 4,096 tokens",
@@ -286,7 +286,7 @@ const spec = {
         },
         {
           "label": "Reject the forbidden key locally",
-          "description": "At token 96, force is not in the allowed schema. When rejection finishes, the runtime records a local failure and refuses tool dispatch, regardless of provider cooperation.",
+          "description": "At token 96, key '\"force\":' violates the allowed schema; the validator enters REJECTED, records a local status failure, and refuses tool dispatch regardless of provider cooperation.",
           "text": {
             "service": "Decode active",
             "budget": "allowance: 4,096 tokens",
@@ -344,7 +344,7 @@ const spec = {
         },
         {
           "label": "Send cancellation upstream",
-          "description": "Send a cancellation request along the original upstream control path. Sending does not establish that decoding stopped or that KV was released.",
+          "description": "The runtime sends a cancel request along the upstream control path to stop the remaining 4,096 - 96 = 4,000 decode steps; sending alone does not prove remote stop.",
           "text": {
             "service": "Decode active",
             "budget": "allowance: 4,096 tokens",
@@ -406,7 +406,7 @@ const spec = {
         },
         {
           "label": "Wait for provider confirmation",
-          "description": "Wait for a provider outcome. While confirmation is absent, retain remote resource ownership; the local proposal remains rejected.",
+          "description": "The runtime awaits provider confirmation while the local proposal stays rejected; until the service confirms stop, remote decoding and KV ownership remain active.",
           "text": {
             "service": "Decode active",
             "budget": "allowance: 4,096 tokens",
@@ -449,7 +449,7 @@ const spec = {
         },
         {
           "label": "Observe the provider outcome",
-          "description": "If the provider honors cancellation, decoding stops and this request leaves the batch when that outcome is confirmed. This is not guaranteed merely by sending cancellation.",
+          "description": "When the provider honors cancellation at step 96, remote decoding stops, avoiding up to 4,000 decode steps, and the request leaves the continuous batch.",
           "text": {
             "service": "Decode stopped",
             "budget": "allowance: 4,096 tokens",
@@ -515,7 +515,7 @@ const spec = {
         },
         {
           "label": "Resolve remote resource ownership",
-          "description": "Only after decoding and its consumers stop may the provider release KV. When release completes, the request no longer owns those blocks.",
+          "description": "Only after decoding and all device consumers stop at step 96 may the provider release KV cache memory; when release finishes, the request relinquishes those blocks.",
           "text": {
             "service": "Decode stopped",
             "budget": "allowance: 4,096 tokens",
@@ -579,7 +579,7 @@ const spec = {
       "states": [
         {
           "label": "Receive a quarantined stream",
-          "description": "The runtime quarantines partial JSON. Provider decoding and KV allocation remain active; no fragment is eligible for tool dispatch.",
+          "description": "The runtime quarantines partial JSON under a 4,096-token output allowance while all three parser nodes wait (q0: waiting). Provider decoding and KV allocation remain active, and no fragment is eligible for tool dispatch.",
           "text": {
             "service": "Decode active",
             "budget": "allowance: 4,096 tokens",
@@ -622,7 +622,7 @@ const spec = {
         },
         {
           "label": "Hold the opening brace",
-          "description": "The opening brace advances local parsing only. When validation finishes, the fragment remains held; parsing is not authorization.",
+          "description": "Streaming token { arrives at the first incremental parser box and advances state q0 → q1 (held). Local parsing is not execution authorization, so the partial proposal stays quarantined.",
           "text": {
             "service": "Decode active",
             "budget": "allowance: 4,096 tokens",
@@ -680,7 +680,7 @@ const spec = {
         },
         {
           "label": "Hold a permitted key",
-          "description": "The query key is permitted. When this parse action finishes, the incomplete proposal is still quarantined.",
+          "description": "The permitted schema key \"query\" arrives at the second parser box and advances state q1 → q2 (held). Because the JSON object is still incomplete and unvalidated, the runtime keeps the proposal quarantined.",
           "text": {
             "service": "Decode active",
             "budget": "allowance: 4,096 tokens",
@@ -738,7 +738,7 @@ const spec = {
         },
         {
           "label": "Reject the forbidden key locally",
-          "description": "At token 96, force is not in the allowed schema. When rejection finishes, the runtime records a local failure and refuses tool dispatch, regardless of provider cooperation.",
+          "description": "At decode step 96, forbidden key \"force\" hits the third parser box and triggers REJECTED (key not in schema). The local runtime records the rejection and blocks tool dispatch immediately, regardless of provider cooperation.",
           "text": {
             "service": "Decode active",
             "budget": "allowance: 4,096 tokens",
@@ -796,7 +796,7 @@ const spec = {
         },
         {
           "label": "Send cancellation upstream",
-          "description": "Send a cancellation request along the original upstream control path. Sending does not establish that decoding stopped or that KV was released.",
+          "description": "The runtime sends a cancel signal along the dashed upstream control path to the model service. Sending the request marks cancel as sent (unconfirmed) without yet proving that remote decoding stopped.",
           "text": {
             "service": "Decode active",
             "budget": "allowance: 4,096 tokens",
@@ -858,7 +858,7 @@ const spec = {
         },
         {
           "label": "Wait for provider confirmation",
-          "description": "Wait for a provider outcome. While confirmation is absent, retain remote resource ownership; the local proposal remains rejected.",
+          "description": "Before provider confirmation arrives, the local proposal stays rejected and never dispatched, while remote decode status remains active and KV ownership remains held.",
           "text": {
             "service": "Decode active",
             "budget": "allowance: 4,096 tokens",
@@ -901,7 +901,7 @@ const spec = {
         },
         {
           "label": "Observe the provider outcome",
-          "description": "In this separate case, cancellation is not honored. Decoding may continue, and neither batch departure nor skipped work is established.",
+          "description": "In this provider case, cancellation at step 96 is not honored: remote decoding may continue toward the 4,096-token allowance, so the 4,000 skipped decode steps are not established.",
           "text": {
             "service": "Decode active",
             "budget": "allowance: 4,096 tokens",
@@ -967,7 +967,7 @@ const spec = {
         },
         {
           "label": "Resolve remote resource ownership",
-          "description": "The provider still has active consumers in this case. KV ownership remains held; local rejection alone cannot release remote storage.",
+          "description": "Because the provider still has active consumers, KV cache ownership remains held; local rejection at step 96 guarantees local tool safety even when remote storage is not released.",
           "text": {
             "service": "Decode active",
             "budget": "allowance: 4,096 tokens",
@@ -1051,10 +1051,10 @@ window.MLSysFigureLessons[spec.name]=async(root,context)=>{
  const frames=()=>spec.variants?spec.variants.find(v=>v.id===variant).states:spec.states;
  const steps=frames().map(s=>({label:s.label,description:s.description}));
  let choice;
- if(spec.variants){choice=document.createElement('label');choice.className='v3-original-choice';choice.textContent=spec.variantLabel+' ';const select=document.createElement('select');select.setAttribute('aria-label',spec.variantLabel);spec.variants.forEach(v=>{const o=document.createElement('option');o.value=v.id;o.textContent=v.label;select.append(o);});select.addEventListener('change',()=>{variant=select.value;frames().forEach((s,i)=>Object.assign(steps[i],{label:s.label,description:s.description}));player.go(0);});choice.append(select);}
+ if(spec.variants){choice=document.createElement('label');choice.className='v3-original-choice';choice.textContent=spec.variantLabel+' ';const select=document.createElement('select');select.setAttribute('aria-label',spec.variantLabel);spec.variants.forEach(v=>{const o=document.createElement('option');o.value=v.id;o.textContent=v.label;select.append(o);});select.addEventListener('change',()=>{variant=select.value;const seq=root.querySelector('.mlsys-original-sequence select');frames().forEach((s,i)=>{Object.assign(steps[i],{label:s.label,description:s.description});if(seq&&seq.options[i])seq.options[i].textContent=(i+1)+' / '+steps.length+' · '+s.label;});player.go(0);});choice.append(select);}
  function follow(x,y){active=[x,y];const scale=svg.getBoundingClientRect().width/vb.width;if(canvas.scrollWidth>canvas.clientWidth)canvas.scrollLeft=Math.max(0,x*scale-canvas.clientWidth/2);if(canvas.scrollHeight>canvas.clientHeight)canvas.scrollTop=Math.max(0,y*scale-canvas.clientHeight/2);}
  function render(i,{stage,details}){
-  if(!canvas.isConnected){if(choice)root.insertBefore(choice,root.querySelector('.mlsys-original-stage'));stage.append(cue,canvas);details.append(readout);}
+  if(!canvas.isConnected){stage.append(cue,canvas);details.append(readout);}
   const frame=frames()[i];packet.setAttribute('visibility','hidden');markerLayer.replaceChildren();
   for(const [key,b]of Object.entries(bindings)){b.node.innerHTML=b.original;if(b.font)b.node.setAttribute('font-size',b.font);b.node.removeAttribute('opacity');const value=Object.assign({},spec.defaults,frame.text)[key];if(value!==undefined)b.node.textContent=value;if(spec.slots[key].font)b.node.setAttribute('font-size',spec.slots[key].font);b.node.removeAttribute('textLength');if(spec.slots[key].width&&b.node.getComputedTextLength()>spec.slots[key].width)b.node.setAttribute('textLength',spec.slots[key].width);b.node.setAttribute('lengthAdjust','spacingAndGlyphs');}
   for(const c of circles)for(const k of ['fill','stroke','stroke-width']){if(c[k]!==null)c.n.setAttribute(k,c[k]);}
@@ -1071,7 +1071,7 @@ window.MLSysFigureLessons[spec.name]=async(root,context)=>{
   const width=Math.max(28,Math.min(112,motion.label.length*6+12));packet.querySelector('rect').setAttribute('x',-width/2);packet.querySelector('rect').setAttribute('width',width);packet.querySelector('text').textContent=motion.label;packet.dataset.role=motion.role||'state';packet.setAttribute('visibility','visible');
   onFrame(p=>{let d=total*p,j=0;while(j<lengths.length-1&&d>lengths[j]){d-=lengths[j];j++;}const t=lengths[j]?d/lengths[j]:0,a=route[j],b=route[j+1],x=a[0]+(b[0]-a[0])*t,y=a[1]+(b[1]-a[1])*t;packet.setAttribute('transform',`translate(${x} ${y})`);follow(...(motion.lock_camera?frame.camera:[x,y]));if(p>=1)packet.setAttribute('visibility','hidden');});
  }
- player=window.MLSysOriginalPlayer.create({root,outer:context.outer,title:spec.question,scope:spec.scope,steps,render,transition});
+ player=window.MLSysOriginalPlayer.create({root,outer:context.outer,layout:'compact',title:spec.question,intro:'Trace how rejecting an invalid schema key at token 96 under a 4,096-token allowance stops local dispatch immediately and skips up to 4,000 remote decode steps when honored.',scope:spec.scope,viewControls:choice,steps,render,transition});
  const resize=new ResizeObserver(()=>follow(...active));resize.observe(canvas);const destroy=player.destroy;player.destroy=()=>{resize.disconnect();destroy();};return player;
 };
 })();

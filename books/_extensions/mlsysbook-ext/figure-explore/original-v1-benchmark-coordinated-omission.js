@@ -91,9 +91,9 @@ window.MLSysFigureLessons[NAME]=async(root,{outer,verifiedArtwork})=>{
  }
  let committed=0,mounted=false;
  const steps=states.map(([label,describe],i)=>({label,get description(){return committed===i?describe(ledgers[i]):'In progress: '+label.toLowerCase()+'. The counts below still describe the last completed step.';}}));
- return window.MLSysOriginalPlayer.create({root,outer,title:'Why does a closed-loop client record fewer delayed requests?',
+ return window.MLSysOriginalPlayer.create({root,outer,layout:'compact',intro:`Step the time cursor across the shaded server pause to compare ${F.sentInPause[0]} open-loop arrivals against ${F.sentInPause[1]} closed-loop arrival during the stall.`,title:'Why does a closed-loop client record fewer delayed requests?',
   scope:'The original schematic timeline: one server pause and the drawn request intervals under two arrival policies. Every count is a count of drawn requests, not a measurement. Horizontal position is schematic time with no units, and animation speed represents no duration. Response order follows the drawing, not a queueing model.',steps,
-  render(i,{stage}){committed=i;if(!mounted){stage.append(source,ledgerBox);mounted=true;}paint(D.cursors[i]);commit(i);delete root.dataset.pending;},
+  render(i,{stage,details}){committed=i;if(!mounted){stage.append(source);(details||stage).append(ledgerBox);mounted=true;}paint(D.cursors[i]);commit(i);delete root.dataset.pending;},
   transition({from,to,onFrame}){root.dataset.pending=String(to);const a=D.cursors[from],b=D.cursors[to];onFrame(p=>{paint(a+(b-a)*p);root.dataset.animationProgress=String(p);});}
  });
 };})();

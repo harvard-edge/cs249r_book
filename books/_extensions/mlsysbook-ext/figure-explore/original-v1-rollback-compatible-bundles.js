@@ -48,7 +48,7 @@ window.MLSysFigureLessons[NAME]=async(root,{outer,verifiedArtwork})=>{
  const body=table.tBodies[0],toy=document.createElement('p');toy.className='rb-toy';toy.textContent='Toy request markers R1–R6 (illustrative: the chapter gives no request counts, rates, or durations).';table.setAttribute('aria-label','Toy request ledger');
  // Each label/description is one causal change; counters in D derive from the per-request ledger.
  const text=[
-  ['Bundle 2 is the routing target','The router admits requests to the candidate. R1–R4 each carry the complete Bundle 2: weights 2, schema 2, namespace 2. Bundle 1 stays loaded as a standby. Records from these requests fall in the degraded window.'],
+  ['Bundle 2 is the routing target','Before rollback in this 6-request trace (R1–R6), the router admits R1–R4 to candidate Bundle 2 (weights 2, schema 2, namespace 2; 4 in flight), while Bundle 1 stays loaded on standby (0 in flight). Records from R1–R4 fall in the degraded window.'],
   ['Cutover selects Bundle 1','Rollback changes one routing decision covering weights 1, schema 1, and namespace 1 together. No request moves: R1–R4 stay pinned to Bundle 2, so its in-flight count is still 4.'],
   ['New requests pin to Bundle 1','R5 and R6 arrive after rollback and take the solid green path. Both bundles now serve at once: new requests on Bundle 1, earlier requests on Bundle 2.'],
   ['Pinned requests finish on Bundle 2','R1 and R2 complete in the vector space they started in. Bundle 2’s in-flight count drops from 4 to 2; it must stay loaded for R3 and R4.'],
@@ -100,9 +100,9 @@ window.MLSysFigureLessons[NAME]=async(root,{outer,verifiedArtwork})=>{
    [r,q.admitted?q.admitted+' cutover':'—',q.bundle?'Bundle '+q.bundle:'—',STATUS[q.status]].forEach((v,k)=>{const c=document.createElement(k?'td':'th');if(!k)c.scope='row';c.textContent=v;tr.append(c);});return tr;}));
   root.dataset.ledger=JSON.stringify({target:st.target,b1_in_flight:st.b1,b2_in_flight:st.b2,b2_state:st.b2_state,refused:st.refused,log_records:st.log.length,log_flagged:st.log_flagged,requests:Object.fromEntries(D.requests.map(r=>[r,st.requests[r].status]))});
  }
- const player=window.MLSysOriginalPlayer.create({root,outer,title:'When can the candidate bundle be released after rollback?',
+ const player=window.MLSysOriginalPlayer.create({root,outer,layout:'compact',intro:'Trace 6 requests across a router rollback from Bundle 2 to Bundle 1 to see why Bundle 2 cannot be released until all 4 pinned requests drain.',title:'When can the candidate bundle be released after rollback?',
   scope:'The original rollback figure with six toy request markers, R1–R6. Their number, order, and completion pattern are illustrative: the chapter gives no request counts, rates, or durations, and movement speed encodes none. No drain timeout is modeled. Degraded-window records are counted for requests admitted to Bundle 2.',steps,
-  render(i,{stage}){committed=i;if(!mounted){stage.append(source,summary,toy,table);mounted=true;}paint(deskLayer,DESK,i,i,1);paint(mobLayer,MOB,i,i,1);readout(i);delete root.dataset.pending;},
+  render(i,{stage,details}){committed=i;if(!mounted){stage.append(source);(details||stage).append(summary,toy,table);mounted=true;}paint(deskLayer,DESK,i,i,1);paint(mobLayer,MOB,i,i,1);readout(i);delete root.dataset.pending;},
   transition({from,to,onFrame}){root.dataset.pending=String(to);onFrame(p=>{paint(deskLayer,DESK,from,to,p);paint(mobLayer,MOB,from,to,p);root.dataset.animationProgress=String(p);});}
  });
  return player;

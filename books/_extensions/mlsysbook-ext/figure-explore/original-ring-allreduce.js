@@ -42,13 +42,13 @@
   }
   const names = ['Start with local chunks', 'ReduceScatter · round 1', 'ReduceScatter · round 2', 'ReduceScatter · round 3', 'AllGather · round 1', 'AllGather · round 2', 'AllGather · round 3'];
   const explanations = [
-    'Each GPU starts with its own contribution to chunks A–D. Follow A; the other chunks advance on the same rounds.',
-    'GPU 0 sends its A contribution to GPU 1. GPU 1 adds its own A contribution; every other link simultaneously carries its scheduled chunk.',
-    'GPU 1 forwards the partial A sum to GPU 2, which adds its own contribution. A now contains three distinct ranks.',
-    'GPU 2 forwards A to GPU 3. GPU 3 adds the last contribution. Each rank now owns one finished shard: B, C, D, or A.',
-    'GPU 3 copies the finished A sum over the wrap-around link to GPU 0. AllGather forwards finished sums; it does not add them again.',
-    'GPU 0 forwards the same finished A sum to GPU 1. Other finished chunks also move one hop.',
-    'GPU 1 forwards the finished A sum to GPU 2. Every GPU now has all four finished sums.'
+    'Start on row (a) with 4 GPUs (GPU 0–GPU 3) holding their own local contributions to chunks A–D (1 of 4 rank contributions per tile, 0 of 6 ring rounds completed). Follow amber-outlined chunk A from GPU 0 while B, C, and D step in parallel on the other links.',
+    'In ReduceScatter round 1 of 3, every GPU sends 1 chunk (size M/4) clockwise: GPU 0 sends A₀ to GPU 1 (forming partial sum A₀ + A₁, 2/4 fill), while GPU 1 sends B₁→GPU 2, GPU 2 sends C₂→GPU 3, and GPU 3 sends D₃→GPU 0 over the wrap-around link.',
+    'In ReduceScatter round 2 of 3, each GPU forwards the partial sum it just updated (2 × M/4 bytes sent per GPU so far): GPU 1 sends A₀ + A₁ to GPU 2, which adds A₂ to hold A₀ + A₁ + A₂ (3 of 4 rank contributions, 3/4 gray fill).',
+    'In ReduceScatter round 3 of 3 (3 × M/4 bytes sent per GPU), GPU 2 sends A₀ + A₁ + A₂ to GPU 3, which adds A₃ to complete green full sum ΣA. All 4 GPUs now own 1 distinct fully reduced shard: ΣB on GPU 0, ΣC on GPU 1, ΣD on GPU 2, and ΣA on GPU 3.',
+    'Row (b) begins AllGather round 1 of 3 (round 4 of 6 overall, 4 × M/4 bytes sent per GPU): each GPU sends its finished green shard 1 hop clockwise without adding again. GPU 3 copies ΣA over the bottom wrap-around link to GPU 0, while ΣB→GPU 1, ΣC→GPU 2, and ΣD→GPU 3.',
+    'In AllGather round 2 of 3 (round 5 of 6 overall, 5 × M/4 bytes sent per GPU), each GPU forwards the finished sum it received in the previous round: GPU 0 copies ΣA to GPU 1 (so GPUs 3, 0, and 1 now hold ΣA) while ΣB, ΣC, and ΣD also advance 1 hop.',
+    'In AllGather round 3 of 3 (round 6 of 6 overall), GPU 1 copies ΣA to GPU 2. Every GPU now holds all 4 green full sums (ΣA, ΣB, ΣC, ΣD) after sending 2(N − 1)/N × M = (6/4)M = 1.5M bytes across the 6 rounds.'
   ];
   window.MLSysFigureLessons = window.MLSysFigureLessons || {};
   window.MLSysFigureLessons['original-ring-allreduce'] = async (root, context) => {
@@ -104,9 +104,10 @@
       }
     }
     const controller = window.MLSysOriginalPlayer.create({
-      root, outer: context.outer,
+      root, outer: context.outer, layout: 'compact',
       title: 'How does a partial chunk become a sum on every GPU?',
-      scope: 'Four GPUs, chunks A–D. Each step completes one logical round. Subscripts identify contributing GPUs, not numeric values. Motion does not represent hardware timing.',
+      intro: 'Follow chunk A around a 4-GPU ring across 3 ReduceScatter rounds and 3 AllGather rounds to see how 6 steps reduce and distribute all 4 chunks.',
+      scope: 'A 4-GPU logical ring (GPU 0 → GPU 1 → GPU 2 → GPU 3 → GPU 0) with a gradient of size M split into 4 equal chunks (A, B, C, D of size M/4). Row (a) executes N − 1 = 3 ReduceScatter rounds (adding disjoint contributions), and row (b) executes N − 1 = 3 AllGather rounds (copying finished sums ΣA–ΣD), totaling 6 rounds and 6 × (M/4) = 1.5M bytes sent per GPU.',
       steps: names.map((label, index) => ({label, get description() { return currentIndex === index ? explanations[index] : 'On completion: ' + explanations[index]; }})),
       render(index, {stage, details}) {
         currentIndex=index;
@@ -126,8 +127,8 @@
         headings[1].textContent = index < 3 ? '(b) AllGather follows ReduceScatter' : `(b) AllGather: ${index - 3} of 3 rounds complete`;
         if (index <= 3) {
           const rank = index, provenance = snapshots[index][rank][0].map(r => `A${String.fromCharCode(8320 + r)}`).join(' + ');
-          cue.textContent = `Follow A · GPU ${rank}: ${provenance}${index === 3 ? ' = ΣA. All four contributions are now included.' : '. This partial sum is still waiting for other ranks.'}`;
-        } else cue.textContent = `Follow A · ΣA is now on GPUs ${[3, ...Array.from({length: index - 3}, (_, i) => i)].join(', ')}. The contributor set stays {0, 1, 2, 3}; this phase copies rather than adds.`;
+          cue.textContent = `Follow A · GPU ${rank}: ${provenance}${index === 3 ? ' = ΣA. All four contributions are now included.' : '. This partial sum is still waiting for other ranks.'} · Per-GPU bytes sent: ${index} × (M/4).`;
+        } else cue.textContent = `Follow A · ΣA is now on GPUs ${[3, ...Array.from({length: index - 3}, (_, i) => i)].join(', ')}. The contributor set stays {0, 1, 2, 3}; this phase copies rather than adds. · Per-GPU bytes sent: ${index} × (M/4)${index === 6 ? ' = 1.5M' : ''}.`;
       },
       transition({from, to, onFrame}) {
         if (to !== from + 1 || !transfers[to]) return;
