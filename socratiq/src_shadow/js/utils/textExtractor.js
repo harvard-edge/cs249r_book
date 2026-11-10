@@ -1,6 +1,34 @@
 // textExtractor.js
 import { TEXT_EXTRACTION_CONFIG } from '../../configs/client.config.js';
 
+const READABLE_BOOK_EXCLUDE_SELECTOR = [
+  'nav',
+  'aside:not(.column-margin)',
+  'header',
+  'footer',
+  'script',
+  'style',
+  'noscript',
+  'form',
+  'button',
+  'input',
+  'select',
+  'textarea',
+  '#socratiq-reader',
+  '#widget-chat-container',
+  '#collaborative-widget-host',
+  '.chapter-concept-map',
+  '.mlsys-figure-tabs',
+  '.mlsys-explore-panel',
+  'textarea.pseudocode',
+  'mjx-assistive-mml',
+  '[data-socratiq-ignore]',
+  '[hidden]',
+  '[inert]',
+  '[aria-hidden="true"]',
+  ...(TEXT_EXTRACTION_CONFIG.excludeSelectors || TEXT_EXTRACTION_CONFIG.NAV_SELECTORS || [])
+].filter((value, index, self) => value && self.indexOf(value) === index).join(', ');
+
 /**
  * Estimates the number of tokens in a text string
  * Rough approximation: 1 token ≈ 4 characters for English text
@@ -20,28 +48,126 @@ function estimateTokens(text) {
  * @returns {boolean} - True if element should be excluded
  */
 function shouldExcludeElement(element) {
-  // Check if element matches any navigation selectors
-  const navSelectors = TEXT_EXTRACTION_CONFIG.NAV_SELECTORS;
-  
-  for (const selector of navSelectors) {
-    if (element.matches(selector)) {
-      return true;
-    }
-  }
-  
-  // Check if element is hidden
-  const style = window.getComputedStyle(element);
-  if (style.display === 'none' || style.visibility === 'hidden') {
+  if (!element || element.nodeType !== 1) return false;
+
+  if (typeof element.matches === 'function' && element.matches(READABLE_BOOK_EXCLUDE_SELECTOR)) {
     return true;
   }
-  
+
+  // Check if element is hidden via computed styles when available
+  const view = element.ownerDocument?.defaultView || (typeof window !== 'undefined' ? window : null);
+  if (view && typeof view.getComputedStyle === 'function') {
+    try {
+      const style = view.getComputedStyle(element);
+      if (
+        style?.display === 'none' ||
+        style?.visibility === 'hidden' ||
+        style?.visibility === 'collapse' ||
+        style?.contentVisibility === 'hidden' ||
+        style?.opacity === '0'
+      ) {
+        return true;
+      }
+    } catch {
+      // Ignore computed style errors in non-browser test environments
+    }
+  }
+
   // Check for common navigation attributes
-  const role = element.getAttribute('role');
+  const role = element.getAttribute?.('role');
   if (role && ['navigation', 'banner', 'contentinfo'].includes(role)) {
     return true;
   }
-  
+
   return false;
+}
+
+/**
+ * Extracts readable book text from a DOM subtree, preserving MathJax and KaTeX
+ * inline TeX ($...$) and filtering out navigation, widgets, and hidden chrome.
+ * @param {Element} rootElement - The root element to extract text from
+ * @param {Object} [options] - Optional extraction configuration
+ * @param {boolean} [options.includeClosedDetails=false] - Whether to traverse closed <details> bodies
+ * @returns {string} - Clean readable text
+ */
+export function extractReadableBookText(rootElement = typeof document !== 'undefined' ? document.body : null, options = {}) {
+  if (!rootElement) return '';
+  const { includeClosedDetails = false } = options;
+
+  const mathMap = new Map();
+  const win = rootElement.ownerDocument?.defaultView || (typeof window !== 'undefined' ? window : null);
+  try {
+    const mathItems = win?.MathJax?.startup?.document?.getMathItemsWithin?.(rootElement) || [];
+    for (const item of mathItems) {
+      const root = item?.typesetRoot?.nodeType === 1 ? item.typesetRoot : (item?.element?.nodeType === 1 ? item.element : null);
+      const tex = typeof item?.math === 'string' ? item.math.trim() : (typeof item?.tex === 'string' ? item.tex.trim() : '');
+      if (root && tex) {
+        mathMap.set(root, tex);
+      }
+    }
+  } catch {
+    // MathJax may not be initialized yet
+  }
+
+  const parts = [];
+
+  const visit = (node) => {
+    if (!node) return;
+    if (node.nodeType === 3) {
+      parts.push(node.nodeValue || node.data || '');
+      return;
+    }
+    if (node.nodeType !== 1) return;
+    if (shouldExcludeElement(node)) return;
+
+    if (mathMap.has(node)) {
+      const tex = mathMap.get(node);
+      if (tex) parts.push(` $${tex}$ `);
+      return;
+    }
+
+    if (typeof node.matches === 'function' && node.matches('.katex, mjx-container')) {
+      const annotation = node.querySelector?.('annotation[encoding="application/x-tex"]');
+      const tex = annotation?.textContent?.trim();
+      if (tex) {
+        parts.push(` $${tex}$ `);
+        return;
+      }
+      const assistive = node.querySelector?.('mjx-assistive-mml')?.textContent?.trim();
+      if (assistive) {
+        parts.push(` ${assistive} `);
+        return;
+      }
+    }
+
+    if (node.tagName === 'DETAILS' && !node.open && !includeClosedDetails) {
+      const summary = Array.from(node.children || node.childNodes || []).find(
+        child => child?.tagName === 'SUMMARY'
+      ) || node.querySelector?.('summary');
+      if (summary) visit(summary);
+      return;
+    }
+
+    for (const child of node.childNodes || []) {
+      visit(child);
+    }
+  };
+
+  visit(rootElement);
+  return parts.join('').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Extracts clean text content from an element using extractReadableBookText
+ * @param {Element} element - Element to extract from
+ * @param {Object} [options] - Optional extraction configuration
+ * @returns {string} - Clean text content
+ */
+export function extractCleanText(element = typeof document !== 'undefined' ? document.body : null, options = {}) {
+  if (!element) return '';
+  const readable = extractReadableBookText(element, options);
+  if (readable) return readable;
+  return '';
 }
 
 /**
@@ -49,39 +175,13 @@ function shouldExcludeElement(element) {
  * @param {Element} rootElement - The root element to extract text from (defaults to document.body)
  * @returns {string} - Extracted text content
  */
-function extractTextContent(rootElement = document.body) {
+export function extractTextContent(rootElement = document.body) {
   if (!rootElement) {
     console.warn('No root element provided for text extraction');
     return '';
   }
-  
-  // Clone the element to avoid modifying the original DOM
-  const clonedElement = rootElement.cloneNode(true);
-  
-  // Remove navigation elements from the clone
-  TEXT_EXTRACTION_CONFIG.NAV_SELECTORS.forEach(selector => {
-    const navElements = clonedElement.querySelectorAll(selector);
-    navElements.forEach(el => el.remove());
-  });
-  
-  // Remove elements with navigation roles
-  const navRoleElements = clonedElement.querySelectorAll('[role="navigation"], [role="banner"], [role="contentinfo"]');
-  navRoleElements.forEach(el => el.remove());
-  
-  // Remove script and style elements
-  const scriptElements = clonedElement.querySelectorAll('script, style');
-  scriptElements.forEach(el => el.remove());
-  
-  // Get text content
-  let textContent = clonedElement.textContent || '';
-  
-  // Clean up the text
-  textContent = textContent
-    .replace(/\s+/g, ' ') // Replace multiple whitespace with single space
-    .replace(/\n\s*\n/g, '\n') // Remove empty lines
-    .trim();
-  
-  return textContent;
+
+  return extractReadableBookText(rootElement);
 }
 
 /**
@@ -95,23 +195,6 @@ function extractTextContentWithSources(rootElement = document.body) {
     return { text: '', sources: [] };
   }
   
-  // Clone the element to avoid modifying the original DOM
-  const clonedElement = rootElement.cloneNode(true);
-  
-  // Remove navigation elements from the clone
-  TEXT_EXTRACTION_CONFIG.NAV_SELECTORS.forEach(selector => {
-    const navElements = clonedElement.querySelectorAll(selector);
-    navElements.forEach(el => el.remove());
-  });
-  
-  // Remove elements with navigation roles
-  const navRoleElements = clonedElement.querySelectorAll('[role="navigation"], [role="banner"], [role="contentinfo"]');
-  navRoleElements.forEach(el => el.remove());
-  
-  // Remove script and style elements
-  const scriptElements = clonedElement.querySelectorAll('script, style');
-  scriptElements.forEach(el => el.remove());
-  
   // Find content sections and extract with source mapping
   const sources = [];
   const contentSections = [];
@@ -121,16 +204,16 @@ function extractTextContentWithSources(rootElement = document.body) {
   let contentElements = [];
   
   for (const selector of mainContentSelectors) {
-    const elements = clonedElement.querySelectorAll(selector);
+    const elements = rootElement.querySelectorAll(selector);
     if (elements.length > 0) {
       contentElements = Array.from(elements);
       break;
     }
   }
   
-  // If no main content found, use the entire cloned element
+  // If no main content found, use the root element directly
   if (contentElements.length === 0) {
-    contentElements = [clonedElement];
+    contentElements = [rootElement];
   }
   
   // Process each content element
@@ -139,14 +222,8 @@ function extractTextContentWithSources(rootElement = document.body) {
     const elementClass = element.className || '';
     const elementTag = element.tagName.toLowerCase();
     
-    // Get text content from this element
-    let textContent = element.textContent || '';
-    
-    // Clean up the text
-    textContent = textContent
-      .replace(/\s+/g, ' ')
-      .replace(/\n\s*\n/g, '\n')
-      .trim();
+    // Get clean readable text content from this element
+    const textContent = extractReadableBookText(element);
     
     if (textContent.length > 50) { // Only include substantial content
       // Create source mapping

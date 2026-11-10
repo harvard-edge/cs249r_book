@@ -90,7 +90,6 @@ function addItem(shadowEle, entry) {
   const saveList = shadowEle.querySelector("#list-container");
   if (saveList) {
     const item = document.createElement("li");
-    item.id = "chat-item";
     item.className = "mb-3 transition-all duration-200 ease-in-out";
     item.innerHTML = `
     <div

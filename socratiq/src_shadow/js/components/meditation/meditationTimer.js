@@ -38,7 +38,13 @@ export function stopReminderInterval() {
 }
 
 export function closeMeditationTimer(shadowRoot) {
-  shadowRoot.querySelector('#' + MODAL_ID)?.remove();
+  const modal = shadowRoot.querySelector('#' + MODAL_ID);
+  if (modal) {
+    if (typeof modal._cleanup === 'function') {
+      modal._cleanup();
+    }
+    modal.remove();
+  }
 }
 
 // ─── HTML ─────────────────────────────────────────────────────────────────────
@@ -71,13 +77,13 @@ function _buildHTML() {
         display:flex;align-items:center;gap:5px;
       ">
         <span style="font-size:0.9rem;">✕</span>
-        <kbd style="font-size:0.65rem;background:var(--socratiq-border,#e5e7eb);padding:1px 4px;border-radius:4px;font-family:monospace;color:var(--socratiq-text-muted,#6b7280);">Esc</kbd>
+        <kbd style="font-size:0.65rem;background:var(--socratiq-border,#e5e7eb);padding:1px 4px;border-radius:4px;font-family:monospace;color:var(--socratiq-muted,#6b7280);">Esc</kbd>
       </button>
 
-      <div style="font-size:0.9rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--socratiq-text-muted,#6b7280);margin-bottom:4px;">
+      <div style="font-size:0.9rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--socratiq-muted,#6b7280);margin-bottom:4px;">
         🧘 Meditation Timer
       </div>
-      <div id="med-status" style="font-size:0.75rem;color:var(--socratiq-text-muted,#6b7280);min-height:1.2em;margin-bottom:18px;">
+      <div id="med-status" style="font-size:0.75rem;color:var(--socratiq-muted,#6b7280);min-height:1.2em;margin-bottom:18px;">
         Drag the dial to set duration
       </div>
 
@@ -86,34 +92,34 @@ function _buildHTML() {
         <svg id="med-svg" viewBox="0 0 220 220" width="210" height="210" style="position:absolute;inset:0;cursor:pointer;touch-action:none;">
           <circle cx="110" cy="110" r="90" fill="none" stroke="var(--socratiq-border,#e5e7eb)" stroke-width="18"/>
           <circle id="med-arc" cx="110" cy="110" r="90" fill="none"
-            stroke="#8e1537" stroke-width="18"
+            stroke="var(--socratiq-accent, #8e1537)" stroke-width="18"
             stroke-linecap="round"
             stroke-dasharray="565.48" stroke-dashoffset="565.48"
             transform="rotate(-90 110 110)"
             style="transition:stroke 0.3s;"/>
-          <circle id="med-thumb" cx="110" cy="20" r="10" fill="#8e1537"/>
+          <circle id="med-thumb" cx="110" cy="20" r="10" fill="var(--socratiq-accent, #8e1537)"/>
         </svg>
         <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none;">
           <div id="med-time-display" style="font-size:2.4rem;font-weight:700;font-variant-numeric:tabular-nums;line-height:1;">0:00</div>
-          <div style="font-size:0.65rem;color:var(--socratiq-text-muted,#6b7280);margin-top:4px;letter-spacing:.08em;text-transform:uppercase;">minutes</div>
+          <div style="font-size:0.65rem;color:var(--socratiq-muted,#6b7280);margin-top:4px;letter-spacing:.08em;text-transform:uppercase;">minutes</div>
         </div>
       </div>
 
       <!-- Play / Reset -->
       <div style="display:flex;gap:12px;justify-content:center;align-items:center;margin-bottom:20px;">
         <button id="med-play" style="
-          background:#8e1537;color:#fff;border:none;cursor:pointer;
+          background:var(--socratiq-accent, #8e1537);color:#fff;border:none;cursor:pointer;
           border-radius:50%;width:52px;height:52px;font-size:1.3rem;
           display:flex;align-items:center;justify-content:center;
           transition:background 0.2s;box-shadow:0 4px 14px rgba(142, 21, 55,0.4);
         ">▶</button>
         <button id="med-reset" style="
-          background:var(--socratiq-input-bg,#f3f4f6);color:var(--socratiq-text-muted,#6b7280);border:1px solid var(--socratiq-border,#e5e7eb);cursor:pointer;
+          background:var(--socratiq-input-bg,#f3f4f6);color:var(--socratiq-muted,#6b7280);border:1px solid var(--socratiq-border,#e5e7eb);cursor:pointer;
           border-radius:50%;width:38px;height:38px;font-size:0.95rem;
           display:flex;align-items:center;justify-content:center;
         ">↺</button>
         <button id="med-pulse-toggle" title="Toggle breathing pulse" style="
-          background:var(--socratiq-input-bg,#f3f4f6);color:var(--socratiq-text-muted,#6b7280);border:1px solid var(--socratiq-border,#e5e7eb);cursor:pointer;
+          background:var(--socratiq-input-bg,#f3f4f6);color:var(--socratiq-muted,#6b7280);border:1px solid var(--socratiq-border,#e5e7eb);cursor:pointer;
           border-radius:20px;padding:0 12px;height:38px;font-size:0.72rem;
           display:flex;align-items:center;gap:5px;white-space:nowrap;
           transition:all 0.2s;
@@ -122,17 +128,17 @@ function _buildHTML() {
 
       <!-- Sound picker -->
       <div style="border-top:1px solid var(--socratiq-border,#e5e7eb);padding-top:16px;margin-bottom:16px;">
-        <div style="font-size:0.68rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--socratiq-text-muted,#6b7280);margin-bottom:10px;">
+        <div style="font-size:0.68rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--socratiq-muted,#6b7280);margin-bottom:10px;">
           Completion Sound
         </div>
         <div style="display:flex;gap:6px;justify-content:center;flex-wrap:wrap;" id="med-sound-picker">
-          <button class="med-sound-opt active" data-sound="bell"    style="padding:5px 12px;border-radius:8px;font-size:0.75rem;cursor:pointer;border:1px solid var(--socratiq-border,#e5e7eb);background:var(--socratiq-input-bg,#f3f4f6);color:var(--socratiq-text-muted,#6b7280);">🔔 Bell</button>
-          <button class="med-sound-opt"        data-sound="bowl"    style="padding:5px 12px;border-radius:8px;font-size:0.75rem;cursor:pointer;border:1px solid var(--socratiq-border,#e5e7eb);background:var(--socratiq-input-bg,#f3f4f6);color:var(--socratiq-text-muted,#6b7280);">🎵 Bowl</button>
-          <button class="med-sound-opt"        data-sound="chime"   style="padding:5px 12px;border-radius:8px;font-size:0.75rem;cursor:pointer;border:1px solid var(--socratiq-border,#e5e7eb);background:var(--socratiq-input-bg,#f3f4f6);color:var(--socratiq-text-muted,#6b7280);">🎶 Chime</button>
-          <button class="med-sound-opt"        data-sound="silence" style="padding:5px 12px;border-radius:8px;font-size:0.75rem;cursor:pointer;border:1px solid var(--socratiq-border,#e5e7eb);background:var(--socratiq-input-bg,#f3f4f6);color:var(--socratiq-text-muted,#6b7280);">🔇 None</button>
+          <button class="med-sound-opt active" data-sound="bell"    style="padding:5px 12px;border-radius:8px;font-size:0.75rem;cursor:pointer;border:1px solid var(--socratiq-border,#e5e7eb);background:var(--socratiq-input-bg,#f3f4f6);color:var(--socratiq-muted,#6b7280);">🔔 Bell</button>
+          <button class="med-sound-opt"        data-sound="bowl"    style="padding:5px 12px;border-radius:8px;font-size:0.75rem;cursor:pointer;border:1px solid var(--socratiq-border,#e5e7eb);background:var(--socratiq-input-bg,#f3f4f6);color:var(--socratiq-muted,#6b7280);">🎵 Bowl</button>
+          <button class="med-sound-opt"        data-sound="chime"   style="padding:5px 12px;border-radius:8px;font-size:0.75rem;cursor:pointer;border:1px solid var(--socratiq-border,#e5e7eb);background:var(--socratiq-input-bg,#f3f4f6);color:var(--socratiq-muted,#6b7280);">🎶 Chime</button>
+          <button class="med-sound-opt"        data-sound="silence" style="padding:5px 12px;border-radius:8px;font-size:0.75rem;cursor:pointer;border:1px solid var(--socratiq-border,#e5e7eb);background:var(--socratiq-input-bg,#f3f4f6);color:var(--socratiq-muted,#6b7280);">🔇 None</button>
         </div>
         <button id="med-preview-sound" style="
-          margin-top:8px;background:none;border:none;color:#8e1537;
+          margin-top:8px;background:none;border:none;color:var(--socratiq-accent, #8e1537);
           font-size:0.72rem;cursor:pointer;text-decoration:underline;
         ">▶ Preview sound</button>
       </div>
@@ -140,23 +146,23 @@ function _buildHTML() {
       <!-- Interval reminder section -->
       <div style="border-top:1px solid var(--socratiq-border,#e5e7eb);padding-top:16px;display:flex;flex-direction:column;gap:10px;">
         <div style="display:flex;align-items:center;justify-content:center;gap:6px;">
-          <span style="font-size:0.68rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--socratiq-text-muted,#6b7280);">Break Reminders</span>
+          <span style="font-size:0.68rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--socratiq-muted,#6b7280);">Break Reminders</span>
         </div>
-        <div style="font-size:0.7rem;color:var(--socratiq-text-muted,#6b7280);padding:0 4px;line-height:1.5;">
+        <div style="font-size:0.7rem;color:var(--socratiq-muted,#6b7280);padding:0 4px;line-height:1.5;">
           Get a gentle nudge sound + notification to step away and meditate at a set interval — even when this modal is closed.
         </div>
         <div style="display:flex;align-items:center;gap:8px;justify-content:center;flex-wrap:wrap;">
-          <span style="font-size:0.78rem;color:var(--socratiq-text-muted,#6b7280);">Every</span>
+          <span style="font-size:0.78rem;color:var(--socratiq-muted,#6b7280);">Every</span>
           <input id="med-interval-input" type="number" min="1" max="120" value="30"
             style="width:58px;padding:4px 8px;border-radius:8px;background:var(--socratiq-input-bg,#f3f4f6);color:var(--socratiq-text,#1f2328);border:1px solid var(--socratiq-border,#e5e7eb);font-size:0.82rem;text-align:center;outline:none;"/>
-          <span style="font-size:0.78rem;color:var(--socratiq-text-muted,#6b7280);">min</span>
+          <span style="font-size:0.78rem;color:var(--socratiq-muted,#6b7280);">min</span>
           <button id="med-interval-toggle" style="
-            background:var(--socratiq-input-bg,#f3f4f6);color:var(--socratiq-text-muted,#6b7280);border:1px solid var(--socratiq-border,#e5e7eb);
+            background:var(--socratiq-input-bg,#f3f4f6);color:var(--socratiq-muted,#6b7280);border:1px solid var(--socratiq-border,#e5e7eb);
             border-radius:8px;padding:5px 12px;font-size:0.78rem;cursor:pointer;
             transition:all 0.2s;white-space:nowrap;
           ">Enable</button>
         </div>
-        <div id="med-interval-status" style="font-size:0.7rem;color:var(--socratiq-text-muted,#6b7280);min-height:1em;"></div>
+        <div id="med-interval-status" style="font-size:0.7rem;color:var(--socratiq-muted,#6b7280);min-height:1em;"></div>
       </div>
     </div>
   </div>
@@ -175,23 +181,23 @@ function _buildCSS() {
     animation: med-breathe 16s ease-in-out infinite;
   }
   #med-arc.breathing {
-    filter: drop-shadow(0 0 8px #8e1537);
+    filter: drop-shadow(0 0 8px var(--socratiq-accent, #8e1537));
   }
-  #med-play:hover { background: #74132f !important; }
+  #med-play:hover { background: var(--socratiq-accent-strong, #74132f) !important; }
   #med-reset:hover { opacity: 0.8; }
   #med-interval-toggle.active {
-    background: #8e1537 !important;
+    background: var(--socratiq-accent, #8e1537) !important;
     color: #fff !important;
-    border-color: #8e1537 !important;
+    border-color: var(--socratiq-accent, #8e1537) !important;
   }
-  #med-interval-toggle:hover { background: rgba(142, 21, 55,0.08) !important; color: #8e1537 !important; }
-  #med-interval-input:focus { border-color: #8e1537 !important; }
+  #med-interval-toggle:hover { background: var(--socratiq-accent-soft, rgba(142, 21, 55,0.08)) !important; color: var(--socratiq-accent, #8e1537) !important; }
+  #med-interval-input:focus { border-color: var(--socratiq-accent, #8e1537) !important; }
   .med-sound-opt.active {
-    background: #8e1537 !important;
+    background: var(--socratiq-accent, #8e1537) !important;
     color: #fff !important;
-    border-color: #8e1537 !important;
+    border-color: var(--socratiq-accent, #8e1537) !important;
   }
-  .med-sound-opt:hover { background: rgba(142, 21, 55,0.08) !important; color: #8e1537 !important; }
+  .med-sound-opt:hover { background: var(--socratiq-accent-soft, rgba(142, 21, 55,0.08)) !important; color: var(--socratiq-accent, #8e1537) !important; }
   #med-close:hover { opacity: 0.8; }
   #med-preview-sound:hover { color: #E85D75 !important; }
 
@@ -355,9 +361,9 @@ function _wire(shadowRoot, modal) {
 
   function _applyPulseState() {
     if (pulseEnabled) {
-      pulseToggle.style.color = '#8e1537';
-      pulseToggle.style.borderColor = '#8e1537';
-      pulseToggle.style.background = 'rgba(142, 21, 55,0.08)';
+      pulseToggle.style.color = 'var(--socratiq-accent, #8e1537)';
+      pulseToggle.style.borderColor = 'var(--socratiq-accent, #8e1537)';
+      pulseToggle.style.background = 'var(--socratiq-accent-soft, rgba(142, 21, 55,0.08))';
       pulseIcon.textContent = '◉';
       pulseLabel.textContent = 'Pulse: on';
       if (running) { card.classList.add('breathing'); arc.classList.add('breathing'); }
@@ -427,20 +433,27 @@ function _wire(shadowRoot, modal) {
 
   // ── Close ──
 
-  modal.querySelector('#med-close').addEventListener('click', () => {
+  const _escHandler = (e) => {
+    if (e.key === 'Escape') _close();
+  };
+  const _close = () => {
     _pause();
+    document.removeEventListener('keydown', _escHandler);
+    modal._cleanup = null;
     closeMeditationTimer(shadowRoot);
-  });
+  };
+  modal._cleanup = () => {
+    _pause();
+    document.removeEventListener('keydown', _escHandler);
+  };
+
+  modal.querySelector('#med-close').addEventListener('click', _close);
   modal.querySelector('#med-backdrop').addEventListener('click', (e) => {
     if (e.target === modal.querySelector('#med-backdrop')) {
-      _pause();
-      closeMeditationTimer(shadowRoot);
+      _close();
     }
   });
 
-  const _escHandler = (e) => {
-    if (e.key === 'Escape') { _pause(); closeMeditationTimer(shadowRoot); document.removeEventListener('keydown', _escHandler); }
-  };
   document.addEventListener('keydown', _escHandler);
 }
 
@@ -459,7 +472,7 @@ function _showNudge(shadowRoot, sound = 'bell') {
     background:#0f172a;color:#e2e8f0;
     border-radius:18px;padding:24px 22px 20px;
     box-shadow:0 16px 48px rgba(0,0,0,0.55);
-    border:1px solid #8e153755;
+    border:1px solid var(--socratiq-accent, #8e1537);
     display:flex;flex-direction:column;gap:14px;
   `;
   nudge.innerHTML = `
@@ -476,7 +489,7 @@ function _showNudge(shadowRoot, sound = 'bell') {
     </div>
     <div style="display:flex;gap:8px;">
       <button id="med-nudge-start" style="
-        flex:1;background:#8e1537;color:#fff;border:none;border-radius:10px;
+        flex:1;background:var(--socratiq-accent, #8e1537);color:#fff;border:none;border-radius:10px;
         padding:9px 14px;font-size:0.82rem;font-weight:600;cursor:pointer;
         transition:background 0.2s;
       ">Start Meditation</button>
@@ -499,7 +512,7 @@ function _showNudge(shadowRoot, sound = 'bell') {
       }
       #${NUDGE_ID} { animation: med-nudge-in 0.22s ease-out; }
       @media (prefers-reduced-motion: reduce) { #${NUDGE_ID} { animation: none; } }
-      #med-nudge-start:hover { background: #74132f !important; }
+      #med-nudge-start:hover { background: var(--socratiq-accent-strong, #74132f) !important; }
       #med-nudge-dismiss:hover { background: #334155 !important; color:#e2e8f0 !important; }
     `;
     document.head.appendChild(s);
@@ -536,11 +549,15 @@ function _playSound(type = 'bell') {
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
     const gain = ctx.createGain();
     gain.connect(ctx.destination);
+    const closeCtx = () => {
+      ctx.close().catch(() => {});
+    };
 
     if (type === 'bell') {
       // Soft layered bell — fundamental + 3 harmonics, gentle attack, long tail
       const t = ctx.currentTime;
-      [[440, 0.28], [880, 0.14], [1320, 0.07], [1760, 0.035]].forEach(([freq, vol]) => {
+      const freqs = [[440, 0.28], [880, 0.14], [1320, 0.07], [1760, 0.035]];
+      freqs.forEach(([freq, vol], idx) => {
         const o = ctx.createOscillator();
         const g = ctx.createGain();
         o.connect(g); g.connect(ctx.destination);
@@ -549,12 +566,14 @@ function _playSound(type = 'bell') {
         g.gain.setValueAtTime(0, t);
         g.gain.linearRampToValueAtTime(vol, t + 0.06);   // soft attack
         g.gain.exponentialRampToValueAtTime(0.001, t + 4.5);
+        if (idx === freqs.length - 1) o.onended = closeCtx;
         o.start(t); o.stop(t + 4.5);
       });
 
     } else if (type === 'bowl') {
       // Singing bowl: fundamental + overtone, slow attack
-      [220, 440, 660].forEach((freq, i) => {
+      const freqs = [220, 440, 660];
+      freqs.forEach((freq, i) => {
         const o = ctx.createOscillator();
         const g = ctx.createGain();
         o.connect(g); g.connect(ctx.destination);
@@ -563,13 +582,15 @@ function _playSound(type = 'bell') {
         g.gain.setValueAtTime(0, ctx.currentTime);
         g.gain.linearRampToValueAtTime(0.18 - i * 0.04, ctx.currentTime + 0.3);
         g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 4);
+        if (i === freqs.length - 1) o.onended = closeCtx;
         o.start(ctx.currentTime);
         o.stop(ctx.currentTime + 4);
       });
 
     } else if (type === 'chime') {
       // Three ascending chime notes
-      [523, 659, 784].forEach((freq, i) => {
+      const freqs = [523, 659, 784];
+      freqs.forEach((freq, i) => {
         const o = ctx.createOscillator();
         const g = ctx.createGain();
         o.connect(g); g.connect(ctx.destination);
@@ -578,9 +599,12 @@ function _playSound(type = 'bell') {
         g.gain.setValueAtTime(0, ctx.currentTime + i * 0.35);
         g.gain.linearRampToValueAtTime(0.3, ctx.currentTime + i * 0.35 + 0.05);
         g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + i * 0.35 + 1.8);
+        if (i === freqs.length - 1) o.onended = closeCtx;
         o.start(ctx.currentTime + i * 0.35);
         o.stop(ctx.currentTime + i * 0.35 + 1.8);
       });
+    } else {
+      closeCtx();
     }
   } catch (_) { /* AudioContext not available */ }
 }

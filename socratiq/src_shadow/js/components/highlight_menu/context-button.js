@@ -79,49 +79,82 @@ export function insertContextButton(shadowRoot) {
   dropUpMenu.appendChild(resultsContainer);
   inputWrapper.appendChild(dropUpMenu);
 
-  function populateResults(filter = null) {
-    resultsContainer.innerHTML = '';
+  function populateResults(filter = null, filterText = '') {
+    resultsContainer.replaceChildren();
     let visibleItems = [];
+    const normalizedFilter = String(filterText || '').trim().toLowerCase();
+
+    // Bridge active Focused Reader passage if available
+    const activeSource = typeof window !== 'undefined' ? window.__SOCRATIQ_ACTIVE_SOURCE__ : null;
+    const activeQuote = typeof activeSource?.quote === 'string' ? activeSource.quote.trim() : '';
+    if (activeQuote && (!filter || filter === 'section')) {
+      const activeSection = typeof activeSource.section === 'string' ? activeSource.section.trim() : '';
+      const activeLabel = `Current reader passage${activeSection ? ' (' + activeSection + ')' : ''}`;
+      const matchesFilter = !normalizedFilter
+        || 'current reader passage'.includes(normalizedFilter)
+        || activeLabel.toLowerCase().includes(normalizedFilter)
+        || (activeSection && activeSection.toLowerCase().includes(normalizedFilter))
+        || activeQuote.toLowerCase().includes(normalizedFilter);
+      if (matchesFilter) {
+        const resultItem = createResultItem(
+          '📖',
+          activeLabel,
+          () => {
+            const content = `Current reader passage${activeSection ? ' (' + activeSection + ')' : ''}\n\n${activeQuote}`;
+            addToCopyContainer(content, shadowRoot);
+            dropUpMenu.style.display = 'none';
+          }
+        );
+        resultsContainer.appendChild(resultItem);
+      }
+    }
     
     // Search subsections
     if (window.subsections && (!filter || filter === 'subsection')) {
       for (const [key, value] of Object.entries(window.subsections)) {
-        visibleItems.push({ 
-          type: 'subsection', 
-          key, 
-          value: {
-            title: key,
-            content: value.text
-          }
-        });
+        if (!normalizedFilter || key.toLowerCase().includes(normalizedFilter)) {
+          visibleItems.push({ 
+            type: 'subsection', 
+            key, 
+            value: {
+              title: key,
+              content: value.text
+            }
+          });
+        }
       }
     }
 
     // Search keywords
     if (window.keywords && (!filter || filter === 'keyword')) {
       for (const [key, value] of Object.entries(window.keywords)) {
-        visibleItems.push({ 
-          type: 'keyword', 
-          key, 
-          value: {
-            title: key,
-            content: value.text
-          }
-        });
+        if (!normalizedFilter || key.toLowerCase().includes(normalizedFilter)) {
+          visibleItems.push({ 
+            type: 'keyword', 
+            key, 
+            value: {
+              title: key,
+              content: value.text
+            }
+          });
+        }
       }
     }
 
     // Search section data
     if (window.sectionData && (!filter || filter === 'section')) {
       for (const [key, value] of Object.entries(window.sectionData)) {
-        visibleItems.push({ 
-          type: 'section', 
-          key, 
-          value: {
-            title: value.title,
-            content: value.content
-          }
-        });
+        const sectionTitle = value.title || key;
+        if (!normalizedFilter || sectionTitle.toLowerCase().includes(normalizedFilter)) {
+          visibleItems.push({ 
+            type: 'section', 
+            key, 
+            value: {
+              title: value.title,
+              content: value.content
+            }
+          });
+        }
       }
     }
 
@@ -148,12 +181,21 @@ export function insertContextButton(shadowRoot) {
     if (firstItem) firstItem.focus();
   }
 
-  // Helper function to create result items
+  function renderItems(filterText = '') {
+    populateResults(null, filterText);
+  }
+
+  // Helper function to create result items safely without innerHTML
   function createResultItem(icon, text, clickHandler) {
     const item = document.createElement('div');
     item.className = 'at-mention-item p-2 hover:bg-gray-100 cursor-pointer flex items-center';
     item.setAttribute('tabindex', '0');
-    item.innerHTML = `<span class="mr-2">${icon}</span><span>${text}</span>`;
+    const iconSpan = document.createElement('span');
+    iconSpan.className = 'mr-2';
+    iconSpan.textContent = icon;
+    const textSpan = document.createElement('span');
+    textSpan.textContent = text;
+    item.append(iconSpan, textSpan);
     item.addEventListener('click', (event) => {
       event.stopPropagation();
       clickHandler();

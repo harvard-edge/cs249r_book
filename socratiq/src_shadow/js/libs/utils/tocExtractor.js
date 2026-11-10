@@ -201,32 +201,6 @@ export async function extractPageTOC(options = {}) {
       }
     }
 
-    // Log the TOC to console
-    const extractionId = Math.random().toString(36).substr(2, 9);
-    console.group(`📚 [${extractionId}] Page Table of Contents (TOC)`);
-    console.log(`📊 [${extractionId}] Total headings found:`, tocData.length);
-    console.log(`📋 [${extractionId}] TOC Structure:`);
-    
-    if (tocData.length === 0) {
-      console.log(`❌ [${extractionId}] No headings found on this page`);
-      console.log(`🔍 [${extractionId}] Debug info:`);
-      console.log(`- Content selector:`, config.contentSelector);
-      console.log(`- Heading selector:`, config.headingSelector);
-      console.log(`- Content element found:`, !!document.querySelector(config.contentSelector));
-      console.log(`- All headings in document:`, document.querySelectorAll('h1, h2, h3, h4, h5, h6').length);
-    } else {
-      // Log the hierarchical structure
-      tocData.forEach((heading, index) => {
-        const indent = '  '.repeat(heading.level - 1);
-        console.log(`${indent}${heading.level}. ${heading.text} (ID: ${heading.id})`);
-      });
-      
-      // Log the full data structure
-      console.log(`\n📦 [${extractionId}] Full TOC Data:`, tocData);
-    }
-    
-    console.groupEnd();
-
     return tocData;
 
   } catch (error) {
@@ -851,12 +825,4 @@ export async function forceTOCExtractionAndSave() {
     console.error('❌ Manual TOC extraction failed:', error);
     console.error('❌ Error details:', error.message, error.stack);
   }
-}
-
-// Make test functions available globally for console access
-if (typeof window !== 'undefined') {
-  window.testTOCSaveFunction = testTOCSaveFunction;
-  window.forceTOCExtractionAndSave = forceTOCExtractionAndSave;
-  window.cleanupDuplicateChapterMapEntries = cleanupDuplicateChapterMapEntries;
-  window.normalizeUrl = normalizeUrl;
 }

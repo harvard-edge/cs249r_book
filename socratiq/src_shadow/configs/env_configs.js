@@ -26,6 +26,7 @@ export const SERVERLESSSCORE = "https://proxy-worker.mlsysbook.workers.dev/score
 export const SERVELESSURLDuckAI = URL_SERVER_QUIZ_STREAMING + "/ai/stream?url=https://api.groq.com/openai/v1/chat/completions&provider=groq";
 export const SIZE_LIMIT_LLM_CALL = 6000; // Adjust this value as needed
 export const STORAGE_KEY_CHAPTERS = 'chapter_progress_data';
+// Public client-side checksum salt used for PDF progress report verification (not a private server secret).
 export const APP_SECRET = 'MyS1SML_v!_' + new Date().getFullYear();
 
 // ─── Site Identity ────────────────────────────────────────────────────────────

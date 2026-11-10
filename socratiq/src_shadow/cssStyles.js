@@ -700,7 +700,7 @@ export const styles = `${utilities}\n${katex}\n${boardingStyles}
   
   /* Define the hover state for the button */
   .followup-button:hover {
-    color: purple; /* Change text color to purple on hover */
+    color: var(--socratiq-accent, #8e1537);
   }
   
   
@@ -1125,7 +1125,7 @@ export const styles = `${utilities}\n${katex}\n${boardingStyles}
     width: 16px;
     height: 16px;
     border: 2px solid #f3f3f3;
-    border-top: 2px solid #3498db;
+    border-top: 2px solid var(--socratiq-accent, #8e1537);
     border-radius: 50%;
     animation: spin 1s linear infinite;
 }
@@ -1155,7 +1155,7 @@ export const styles = `${utilities}\n${katex}\n${boardingStyles}
 
 .sr-notification.saving {
     background: #e6f3ff;
-    border-left: 4px solid #0066cc;
+    border-left: 4px solid var(--socratiq-accent, #8e1537);
 }
 
 .save-button-content {
