@@ -181,8 +181,8 @@ export const readerStyles = `
 
   .reader-icon-button {
     display: grid;
-    width: 34px;
-    height: 34px;
+    width: 38px;
+    height: 38px;
     flex: 0 0 auto;
     place-items: center;
     border: 0;
@@ -335,15 +335,19 @@ export const readerStyles = `
   .selection-action:hover { background: var(--reader-accent-strong); }
   .selection-action .reader-mark { width: 18px; height: 18px; font-size: 12px; }
 
-  @media (max-width: 600px) {
+  @media (max-width: 800px) {
     .reader-shell { --reader-edge: max(12px, env(safe-area-inset-left), env(safe-area-inset-right)); }
     .reader-launcher { bottom: calc(var(--reader-bottom-clearance) + max(12px, env(safe-area-inset-bottom))); min-height: 42px; padding-inline: 13px; }
-    .reader-panel { bottom: calc(var(--reader-bottom-clearance) + max(12px, env(safe-area-inset-bottom))); width: min(440px, calc(var(--reader-visible-width) - var(--reader-edge) - var(--reader-edge))); max-height: calc(var(--reader-visible-height) - 24px); border-radius: 15px; }
-    .reader-panel[data-launch-origin="launcher"] { bottom: calc(var(--reader-bottom-clearance) + max(64px, calc(env(safe-area-inset-bottom) + 60px))); max-height: calc(var(--reader-visible-height) - 80px); }
-    .reader-header { padding: 14px 14px 11px; }
+    .reader-panel { bottom: calc(var(--reader-bottom-clearance) + max(12px, env(safe-area-inset-bottom))); width: calc(var(--reader-visible-width) - var(--reader-edge) - var(--reader-edge)); max-height: min(560px, calc(var(--reader-visible-height) - 24px)); border-radius: 15px; }
+    .reader-panel[data-launch-origin="launcher"] { bottom: calc(var(--reader-bottom-clearance) + max(12px, env(safe-area-inset-bottom))); max-height: min(560px, calc(var(--reader-visible-height) - 24px)); }
+    .reader-header { padding: 12px 14px 10px; }
     .reader-privacy { padding-inline: 14px; }
-    .reader-source { padding-inline: 14px; }
+    .reader-source { position: static; padding-inline: 14px; }
     .reader-thread { padding-inline: 14px; }
+  }
+
+  .reader-shell[data-mobile="true"] .reader-source {
+    position: static;
   }
 
   /* Short windows and the mobile keyboard must leave the answer scrollable. */
@@ -351,12 +355,14 @@ export const readerStyles = `
     bottom: calc(var(--reader-bottom-clearance) + max(12px, env(safe-area-inset-bottom)));
     max-height: calc(var(--reader-visible-height) - 24px);
   }
-  .reader-shell[data-compact="true"] .reader-header { padding-block: 8px; }
+  .reader-shell[data-compact="true"] .reader-header { padding-block: 6px; }
   .reader-shell[data-compact="true"] .reader-header-note { display: none; }
-  .reader-shell[data-compact="true"] .reader-privacy { padding-block: 5px; }
-  .reader-shell[data-compact="true"] .reader-source { position: static; }
-  .reader-shell[data-compact="true"] .reader-composer { padding-block: 6px 3px; }
-  .reader-shell[data-compact="true"] .reader-footnote { padding-bottom: 5px; }
+  .reader-shell[data-compact="true"] .reader-sessions { padding-block: 4px; }
+  .reader-shell[data-compact="true"] .reader-privacy { display: none; }
+  .reader-shell[data-compact="true"] .reader-source { position: static; padding-block: 8px; }
+  .reader-shell[data-compact="true"] .reader-composer,
+  .reader-shell[data-compact="true"] .reader-form { padding-block: 5px 3px; }
+  .reader-shell[data-compact="true"] .reader-footnote { display: none; }
 
   @media (pointer: coarse) {
     .reader-panel button, .reader-launcher, .selection-action { min-height: 44px; min-width: 44px; }

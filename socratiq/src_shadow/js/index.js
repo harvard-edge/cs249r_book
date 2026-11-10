@@ -204,10 +204,14 @@ const studyAPI = {
     if (!host?.shadowRoot) throw new Error("SocratiQ Study did not initialize");
     host.hidden = false;
     menu_slide_on(shadowRoot, true);
-    if (!embeddedVisible) {
-      embeddedVisible = true;
-      window.dispatchEvent(new CustomEvent("socratiq:open"));
-    }
+    embeddedVisible = true;
+    window.dispatchEvent(new CustomEvent("socratiq:open"));
+    window.dispatchEvent(new CustomEvent("socratiq:study-open"));
+    const readerHost = document.getElementById("socratiq-reader");
+    const readerPanel = readerHost?.shadowRoot?.querySelector(".reader-panel:not([hidden])");
+    if (readerPanel) readerPanel.hidden = true;
+    const readerShell = readerHost?.shadowRoot?.querySelector(".reader-shell");
+    if (readerShell) readerShell.hidden = true;
     return studyAPI;
   },
   close() {
@@ -219,7 +223,10 @@ const studyAPI = {
     }
   },
 };
-if (embeddedMode) window.SocratiqStudy = studyAPI;
+if (embeddedMode) {
+  window.SocratiqStudy = studyAPI;
+  window.SocratiQStudyTools = studyAPI;
+}
 
 function showSocratiqLoader() {
   const loader = document.createElement("div");
@@ -507,10 +514,11 @@ async function inject() {
       const closeStudyButton = document.createElement("button");
       closeStudyButton.id = "socratiq-study-close";
       closeStudyButton.type = "button";
+      closeStudyButton.className = "w-9 h-9 min-w-[38px] min-h-[38px] inline-flex items-center justify-center";
       closeStudyButton.setAttribute("aria-label", "Close study tools");
       closeStudyButton.title = "Return to reading";
       closeStudyButton.textContent = "×";
-      closeStudyButton.style.cssText = "font-size:24px;line-height:24px;min-width:32px;min-height:32px;color:inherit;cursor:pointer;flex-shrink:0";
+      closeStudyButton.style.cssText = "font-size:24px;line-height:24px;width:38px;height:38px;min-width:38px;min-height:38px;color:inherit;cursor:pointer;flex-shrink:0";
       closeStudyButton.addEventListener("click", () => studyAPI.close());
       shadowRoot.querySelector("#text-selection-menu h2")?.parentElement.appendChild(closeStudyButton);
       document.addEventListener(

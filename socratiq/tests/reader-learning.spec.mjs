@@ -28,7 +28,7 @@ test('learning actions retain source and completed history, and launcher sends n
   expect(requests).toHaveLength(0);
   const input = page.getByRole('textbox', {name: 'Ask a follow-up question'});
   await input.fill('Keep my draft');
-  for (const label of ['Simplify', 'Show an example', 'Check my understanding']) {
+  for (const label of ['Simplify', 'Show an example', 'Check my understanding', 'Map to taxonomy']) {
     await page.getByRole('button', {name: label, exact: true}).click();
     await expect(page.getByText('Explanation ready.', {exact: true})).toBeVisible();
     await expect(input).toHaveValue('Keep my draft');
@@ -38,10 +38,11 @@ test('learning actions retain source and completed history, and launcher sends n
   expect(requests[2].source).toEqual(requests[0].source);
   expect(requests[2].question).toContain('one conceptual question at a time');
   expect(requests[2].question).toContain('Do not reveal the answer until I respond');
+  expect(requests[3].question).toContain('ML Systems Taxonomy');
   await input.fill('I think it measures data movement.');
   await page.getByRole('button', {name: 'Send question'}).click();
   await expect(page.getByText('Explanation ready.', {exact: true})).toBeVisible();
-  expect(requests[3].history.at(-2).content).toEqual(requests[2].question);
+  expect(requests[4].history.at(-2).content).toEqual(requests[3].question);
 });
 
 test('start over aborts pending work, clears draft and history, and retains passage', async ({page}) => {

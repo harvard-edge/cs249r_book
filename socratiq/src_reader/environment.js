@@ -1,3 +1,5 @@
+const MOBILE_QUERY = '(max-width: 800px)';
+
 /** Own page appearance and visual viewport listeners for one reader mount. */
 export function createReaderEnvironment({ host, shell }) {
   updateViewportVars();
@@ -35,11 +37,14 @@ export function createReaderEnvironment({ host, shell }) {
     const bottomClearance = Math.max(0, window.innerHeight - visibleBottom);
     const visibleWidth = viewport?.width ?? window.innerWidth;
     const visibleRight = (viewport?.offsetLeft ?? 0) + visibleWidth;
+    const mobile = (window.matchMedia?.(MOBILE_QUERY).matches ?? false) || visibleWidth <= 800;
+    const compact = (mobile && visibleHeight < 600) || visibleHeight < 540;
     host.style.setProperty('--reader-visible-height', `${visibleHeight}px`);
     host.style.setProperty('--reader-visible-width', `${visibleWidth}px`);
     host.style.setProperty('--reader-right-clearance', `${Math.max(0, window.innerWidth - visibleRight)}px`);
     host.style.setProperty('--reader-bottom-clearance', `${bottomClearance}px`);
-    shell.dataset.compact = String(visibleHeight < 540);
+    shell.dataset.mobile = String(mobile);
+    shell.dataset.compact = String(compact);
   }
 
   function detectTheme() {

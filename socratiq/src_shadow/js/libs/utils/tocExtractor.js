@@ -15,6 +15,7 @@
  */
 
 import { getDBInstance } from "./indexDb.js";
+import { resolveChapterTaxonomy } from "../../../../src_shared/taxonomy-map.js";
 
 // Guard to prevent duplicate TOC extractions
 let tocExtractionInProgress = false;
@@ -456,6 +457,7 @@ export async function saveTOCToChapterMap(tocData, url, title) {
 
     // Normalize the URL to prevent duplicates from query parameters
     const normalizedUrl = normalizeUrl(url);
+    const tax = resolveChapterTaxonomy(url);
     
     const chapterMapEntry = {
       url: normalizedUrl, // Use normalized URL as the key
@@ -466,7 +468,9 @@ export async function saveTOCToChapterMap(tocData, url, title) {
       headingCount: tocData.length,
       // Add some metadata
       pageType: url.includes('socratiq.html') ? 'socratiq' : 'external',
-      domain: new URL(url).hostname
+      domain: tax ? `${tax.primaryGroup} · ${tax.subjects.slice(0, 3).join(', ')}` : new URL(url).hostname,
+      taxonomyGroup: tax ? tax.primaryGroup : null,
+      taxonomySubjects: tax ? tax.subjects : []
     };
 
     console.log(`🔄 Attempting to save TOC to chapterMap:`, {

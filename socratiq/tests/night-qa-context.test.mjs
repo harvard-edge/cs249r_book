@@ -168,10 +168,37 @@ test('embedded context button and keyboard mentions select context before sendin
     await input.press('ArrowDown');
     await input.press('Enter');
     assert.match(await input.inputValue(), /@\[Current reader passage\]/);
+
+    // 5. Study Tools + Context and @ mentions expose Taxonomy filter and @taxonomy / subject items
+    await study.locator('#context-button').click();
+    await expect(contextMenu).toBeVisible();
+    const taxonomyFilter = contextMenu.locator('[data-filter="taxonomy"]');
+    await expect(taxonomyFilter).toBeVisible();
+    await taxonomyFilter.click();
+    await expect(contextMenu.locator('.at-mention-item').filter({hasText: 'Current chapter taxonomy overview'})).toBeVisible();
+    const f11Item = contextMenu.locator('.at-mention-item').filter({hasText: 'F1.1 Requirements & SLOs'});
+    await expect(f11Item).toBeVisible();
+    await f11Item.click();
+    await expect(study.locator('#copy-container')).toContainText('F1.1 Requirements & SLOs');
+
+    await input.fill('@taxonomy');
+    await expect(mentionMenu).toBeVisible();
+    await expect(mentionMenu.locator('[data-filter="taxonomy"]')).toBeVisible();
+    await expect(mentionMenu.locator('.at-mention-item').filter({hasText: 'Current chapter taxonomy overview'})).toBeVisible();
+    await input.fill('@F1.1');
+    await expect(mentionMenu.locator('.at-mention-item').filter({hasText: 'F1.1 Requirements & SLOs'})).toBeVisible();
+    await input.press('ArrowDown');
+    await input.press('Enter');
+    assert.match(await input.inputValue(), /@\[F1\.1 Requirements & SLOs\]/);
   } finally {
     await browser?.close();
     await server.close();
   }
+});
+
+test('Focused Reader .reader-learning includes Map to taxonomy button (data-learning="taxonomy")', async () => {
+  const uiSource = await readFile(new URL('../src_reader/ui.js', import.meta.url), 'utf8');
+  assert.match(uiSource, /data-learning="taxonomy">\s*Map to taxonomy\s*<\/button>/);
 });
 
 test('research agent preserves API helpers and handles array topics without ReferenceError', async () => {

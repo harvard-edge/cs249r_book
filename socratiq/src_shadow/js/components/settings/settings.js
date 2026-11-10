@@ -1,4 +1,5 @@
 import {readLearnerPreferences, saveLearnerPreferences, clearLearnerPreferences, hasSavedLearnerPreferences} from '../../../../src_reader/preferences.js';
+import { formatChapterTaxonomyPrompt } from '../../../../src_shared/taxonomy-map.js';
 import {  showPopover } from "../../libs/utils/utils";
 import { DIFFICULTY_LEVELS } from "../../../configs/client.config.js";
 import { DropdownHandler } from './dropdown-handler.js';
@@ -268,7 +269,9 @@ export class SettingsManager {
       vol4: 'Ground explanations in Volume IV (physical AI systems crossing a causal boundary and action irreversibility).',
     }[volumeMatch] || 'Ground explanations in the Machine Learning Systems textbook taxonomy (D·A·M for single machines, C³ for fleets, H·S·A for agentic systems, and causal boundaries for physical AI).';
 
-    return `Tailor your response for a: ${understanding}. ${volumeScope} ${answersDescription} ${useBlooms ? 'Apply Bloom\'s Taxonomy in your response structure.' : ''}`;
+    const taxonomyGrounding = formatChapterTaxonomyPrompt(typeof window !== 'undefined' ? (window.location?.href || '') : '');
+
+    return `Tailor your response for a: ${understanding}. ${volumeScope} ${taxonomyGrounding} ${answersDescription} ${useBlooms ? 'Apply Bloom\'s Taxonomy in your response structure.' : ''}`.replace(/\s+/g, ' ').trim();
   }
 
   generateSettings() {
@@ -492,8 +495,14 @@ export class SettingsManager {
     const isMenuOpen = menu && menu.classList.contains('translate-x-0');
     
     if (isMenuOpen) {
-      document.body.style.marginRight = isPushed ? '400px' : '0';
+      if (isPushed && window.innerWidth >= 1180) {
+        document.body.style.marginRight = '400px';
+      } else {
+        document.body.style.marginRight = '0';
+      }
       document.body.style.transition = 'margin-right 0.3s ease-in-out';
+    } else if (window.innerWidth < 1180) {
+      document.body.style.marginRight = '0';
     }
   }
 
