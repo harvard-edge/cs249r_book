@@ -219,15 +219,15 @@ export const htmlContent = `
         <div id="input-container" class="mt-4 relative">
           <!-- <div id="ai-prompt-label" style="font-size: 12px; color: rgb(85, 85, 85); margin-bottom: 8px; display: block;">Included context:</div> -->
 
-          <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 8px; flex-wrap: nowrap;">
-            <button id="context-button" title="Context" class="min-h-[38px] py-1.5 px-2.5 text-xs whitespace-nowrap inline-flex items-center justify-center" style="min-height: 38px; padding: 6px 10px; font-size: 12px; white-space: nowrap; display: inline-flex; align-items: center; justify-content: center;">
+          <div id="study-toolbar-row" style="display: flex; align-items: center; gap: 6px; margin-bottom: 8px; flex-wrap: nowrap;">
+            <button id="context-button" title="Context" class="socratiq-toolbar-btn min-h-[38px] py-1.5 px-2.5 text-xs whitespace-nowrap inline-flex items-center justify-center" style="min-height: 38px; padding: 6px 10px; font-size: 12px; white-space: nowrap; display: inline-flex; align-items: center; justify-content: center;">
               <div style="display: flex; align-items: center;"> 
                 <span style="font-size: 1.1rem; line-height: 1; font-weight: bold; color: #6b7280;">@</span>
                 <span style="font-size: 12px; margin-left: 4px;">Add Context</span>
               </div>
             </button>
 
-            <button id="quiz-button" title="Quiz" class="min-h-[38px] py-1.5 px-2.5 text-xs whitespace-nowrap inline-flex items-center justify-center" style="min-height: 38px; padding: 6px 10px; font-size: 12px; white-space: nowrap; display: inline-flex; align-items: center; justify-content: center;">
+            <button id="quiz-button" title="Quiz" class="socratiq-toolbar-btn min-h-[38px] py-1.5 px-2.5 text-xs whitespace-nowrap inline-flex items-center justify-center" style="min-height: 38px; padding: 6px 10px; font-size: 12px; white-space: nowrap; display: inline-flex; align-items: center; justify-content: center;">
               <div style="display: flex; align-items: center;"> 
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" style="width: 1.1rem; height: 1.1rem; flex-shrink: 0;">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M8.242 5.992h12m-12 6.003H20.24m-12 5.999h12M4.117 7.495v-3.75H2.99m1.125 3.75H2.99m1.125 0H5.24m-1.92 2.577a1.125 1.125 0 1 1 1.591 1.59l-1.83 1.83h2.16M2.99 15.745h1.125a1.125 1.125 0 0 1 0 2.25H3.74m0-.002h.375a1.125 1.125 0 0 1 0 2.25H2.99" />
@@ -236,7 +236,7 @@ export const htmlContent = `
               </div>
             </button>
 
-            <button id="flashcards-button" title="Flashcards" class="min-h-[38px] py-1.5 px-2.5 text-xs whitespace-nowrap inline-flex items-center justify-center" style="min-height: 38px; padding: 6px 10px; font-size: 12px; white-space: nowrap; display: inline-flex; align-items: center; justify-content: center;">
+            <button id="flashcards-button" title="Flashcards" class="socratiq-toolbar-btn min-h-[38px] py-1.5 px-2.5 text-xs whitespace-nowrap inline-flex items-center justify-center" style="min-height: 38px; padding: 6px 10px; font-size: 12px; white-space: nowrap; display: inline-flex; align-items: center; justify-content: center;">
               <div style="display: flex; align-items: center;"> 
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" style="width: 1.1rem; height: 1.1rem; flex-shrink: 0;">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0 1 11.186 0Z" />
@@ -246,7 +246,7 @@ export const htmlContent = `
             </button>
 
             <div class="relative flex items-center justify-center">
-              <button id="more-options-button" title="More Options">
+              <button id="more-options-button" class="socratiq-toolbar-btn" title="More Options">
                 <div style="display: flex; align-items: center;"> 
                   <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" style="width: 1.2rem; height: 1.2rem;">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M6.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM12.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM18.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Z" />

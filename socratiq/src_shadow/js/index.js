@@ -526,39 +526,84 @@ async function inject() {
         (e) => {
           if (e.key !== "Escape" || !embeddedMode || hostElement.hidden) return;
           const overlaySelectors = [
-            "#modal1",
-            "#helpModal",
-            "#helpModalContainer",
-            "#myModal",
-            "#quizModal",
-            ".image-modal-overlay",
-            "#socratiq-meditation-modal",
-            ".stats-modal",
-            "#socratiq-knowledge-graph-modal",
-            "#sr-modal",
-            "#spacedRepetitionModal",
             "#cardReviewModal",
             "#deckCreationModal",
             "#searchModal",
             "#editCardModal",
             ".format-dialog-overlay",
+            "#modal1",
+            "#helpModalContainer",
+            "#helpModal",
+            "#myModal",
+            "#quizModal",
+            "#conversationHistoryModal",
+            "#load_chats #popover-container",
+            ".image-modal-overlay",
+            "#socratiq-meditation-modal",
+            ".stats-modal",
+            "#socratiq-knowledge-graph-modal",
+            "#spacedRepetitionModal",
             "#context-menu",
             ".at-mentions-dropup",
           ];
-          const hasOpenOverlay = overlaySelectors.some((selector) =>
-            Array.from(shadowRoot.querySelectorAll(selector)).some((el) => {
-              if (!el || el.hidden || el.classList.contains("hidden")) return false;
-              const style = window.getComputedStyle(el);
-              if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") {
-                return false;
-              }
-              return el.getClientRects().length > 0;
-            })
-          );
-          if (!hasOpenOverlay) {
-            e.preventDefault();
-            studyAPI.close();
+          const isVisibleOverlay = (el) => {
+            if (!el || el.hidden || el.classList.contains("hidden")) return false;
+            const style = window.getComputedStyle(el);
+            if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") {
+              return false;
+            }
+            const rect = el.getBoundingClientRect();
+            return rect.width > 2 && rect.height > 2;
+          };
+          let openOverlay = null;
+          for (const selector of overlaySelectors) {
+            const match = Array.from(shadowRoot.querySelectorAll(selector)).find(isVisibleOverlay);
+            if (match) {
+              openOverlay = match;
+              break;
+            }
           }
+          if (openOverlay) {
+            e.preventDefault();
+            e.stopPropagation();
+            if (openOverlay.id === "context-menu") {
+              openOverlay.classList.remove("show", "open", "active", "hidden");
+              openOverlay.style.display = "none";
+              return;
+            }
+            if (openOverlay.classList.contains("at-mentions-dropup")) {
+              openOverlay.classList.remove("show", "open", "active");
+              openOverlay.classList.add("hidden");
+              openOverlay.style.display = "";
+              return;
+            }
+            if (openOverlay.id === "spacedRepetitionModal") {
+              openOverlay.classList.add("hidden");
+              openOverlay.classList.remove("open", "show", "active");
+              openOverlay.style.display = "none";
+              return;
+            }
+            const closeBtn =
+              openOverlay.id === "socratiq-knowledge-graph-modal"
+                ? openOverlay.querySelector(":scope > div > button")
+                : openOverlay.querySelector(
+                    "#close-btn, #close-btn2, #closeModal, #close-quiz-modal, #closeModal_sr, #closeButtonHelpModal, #closeHelpModal, #closeQuizModal, #closeReviewModal, #closeDeckModal, #closeSearchModal, #closeEditModal, .close-button, .close-modal, .modal-close, [data-close-modal], .close-modal-btn, .close"
+                  );
+            if (closeBtn && typeof closeBtn.click === "function") {
+              closeBtn.click();
+            }
+            openOverlay.classList.remove("show", "open", "active");
+            openOverlay.classList.add("hidden");
+            openOverlay.style.display = "none";
+            if (openOverlay.id === "modal1") {
+              const settingsOverlay = shadowRoot.querySelector(".settings-modal-overlay");
+              if (settingsOverlay) settingsOverlay.style.display = "none";
+            }
+            document.body.style.overflow = "";
+            return;
+          }
+          e.preventDefault();
+          studyAPI.close();
         },
         true
       );

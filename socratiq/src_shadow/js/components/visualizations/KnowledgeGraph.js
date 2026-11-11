@@ -207,6 +207,7 @@ export class KnowledgeGraph {
         */
         
         // Create root node
+        const defaultExpanded = Boolean(forListView && typeof window !== 'undefined' && !Boolean(window.matchMedia?.('(max-width: 640px)')?.matches));
         const root = {
             name: "Knowledge Graph",
             children: [],
@@ -216,7 +217,7 @@ export class KnowledgeGraph {
             pageTitle: "",
             domain: "",
             position: 0,
-            isExpanded: false,
+            isExpanded: defaultExpanded,
             content: '' // Root node doesn't have content
         };
         
@@ -241,7 +242,7 @@ export class KnowledgeGraph {
                 pageTitle: pageEntry.title,
                 domain: pageEntry.domain,
                 position: 0,
-                isExpanded: false,
+                isExpanded: defaultExpanded,
                 content: pageEntry.content || '' // Include page content if available
             };
             
@@ -275,6 +276,7 @@ export class KnowledgeGraph {
     }
 
     buildPageHierarchy(tocData, parentNode, forListView = false) {
+        const defaultExpanded = Boolean(forListView && typeof window !== 'undefined' && !Boolean(window.matchMedia?.('(max-width: 640px)')?.matches));
         const stack = [{ node: parentNode, level: 0 }];
         // For list view, show ALL levels; for radial graph, limit to 2 levels for performance
         const MAX_LEVEL = forListView ? 6 : 2; // Show H1-H6 for list view, H1-H2 for radial graph
@@ -303,7 +305,7 @@ export class KnowledgeGraph {
                 pageTitle: parentNode.pageTitle,
                 domain: parentNode.domain,
                 position: heading.position,
-                isExpanded: false,
+                isExpanded: defaultExpanded,
                 isTruncated: false,
                 content: heading.content || '' // Include content from tocData
             };
@@ -1392,16 +1394,25 @@ export class KnowledgeGraph {
         treeLabel.style.cssText = `
             color: #8e1537;
             font-weight: bold;
+            cursor: pointer;
         `;
+        treeLabel.addEventListener('click', () => {
+            if (this.currentView !== 'tree') this.switchToTreeView();
+        });
 
         const listLabel = document.createElement('span');
         listLabel.textContent = 'List';
         listLabel.style.cssText = `
             color: #718096;
+            cursor: pointer;
         `;
+        listLabel.addEventListener('click', () => {
+            if (this.currentView !== 'list') this.switchToListView();
+        });
 
         // Create toggle switch
         const toggleSwitch = document.createElement('button');
+        toggleSwitch.id = 'switch-view';
         toggleSwitch.type = 'button';
         toggleSwitch.className = 'knowledge-graph-view-toggle';
         toggleSwitch.setAttribute('role', 'switch');
@@ -1509,16 +1520,32 @@ export class KnowledgeGraph {
         this.listLabel.style.fontWeight = 'normal';
         
         // Hide list view
-        const listContainer = this.container.querySelector('#list-view');
+        const hostEl = this.graphContainer || this.container;
+        const listContainer = hostEl.querySelector('#list-view');
         if (listContainer) {
             listContainer.remove();
         }
         
         // Show tree view
-        const svg = this.container.querySelector('svg');
+        const svg = hostEl.querySelector('svg');
         if (svg) {
             svg.style.display = 'block';
         }
+        this.buildHierarchicalTreeData(false, false).then(treeData => {
+            this.treeData = treeData;
+            this.updateRadialTree();
+        }).catch(() => {
+            this.updateRadialTree();
+        });
+    }
+
+    isDarkModeActive() {
+        return Boolean(
+            document.documentElement.classList.contains('quarto-dark') ||
+            document.body?.classList.contains('quarto-dark') ||
+            this.container?.getRootNode?.()?.host?.classList?.contains('dark-mode') ||
+            this.container?.closest?.('.dark, .dark-mode')
+        );
     }
 
     createListView() {
@@ -1531,14 +1558,16 @@ export class KnowledgeGraph {
         }
         
         this.isCreatingListView = true;
+        const hostEl = this.graphContainer || this.container;
         
         // Remove existing list view if any
-        const existingList = this.container.querySelector('#list-view');
+        const existingList = hostEl.querySelector('#list-view');
         if (existingList) {
             console.log('Removing existing list view');
             existingList.remove();
         }
         
+        const isDark = this.isDarkModeActive();
         // Create list container
         const listContainer = document.createElement('div');
         listContainer.id = 'list-view';
@@ -1548,7 +1577,8 @@ export class KnowledgeGraph {
             left: 0;
             right: 0;
             bottom: 0;
-            background: white;
+            background: ${isDark ? '#1e293b' : 'white'};
+            color: ${isDark ? '#f8fafc' : '#2d3748'};
             overflow-y: auto;
             padding: 20px;
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -1734,30 +1764,49 @@ export class KnowledgeGraph {
             this.handleListItemClick(data, item);
         });
         
+        const isDark = this.isDarkModeActive();
         // Add hover effect
         item.addEventListener('mouseenter', () => {
-            item.style.backgroundColor = '#f7fafc';
+            item.style.backgroundColor = isDark ? '#334155' : '#f7fafc';
         });
         
         item.addEventListener('mouseleave', () => {
             item.style.backgroundColor = 'transparent';
         });
         
-        // Create left content with icon and title
+        // Create left content with checkbox (for selectable sections), icon, title, and taxonomy badge
         const leftContent = document.createElement('div');
         leftContent.style.cssText = `
             display: flex;
             align-items: center;
+            flex-wrap: wrap;
+            gap: 6px;
             flex: 1;
+            min-width: 0;
         `;
+
+        if (level >= 1 && !data.isTruncated) {
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.className = 'kg-list-checkbox';
+            checkbox.checked = this.selectedNodes.has(data.id);
+            checkbox.title = 'Select section for Custom Quiz';
+            checkbox.style.cssText = 'width: 15px; height: 15px; cursor: pointer; accent-color: #8e1537; flex-shrink: 0;';
+            checkbox.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.toggleNodeSelection(data);
+                checkbox.checked = this.selectedNodes.has(data.id);
+            });
+            leftContent.appendChild(checkbox);
+        }
         
         // Add icon based on level
         const icon = document.createElement('span');
         icon.style.cssText = `
-            margin-right: 8px;
             font-size: 14px;
             display: inline-flex;
             align-items: center;
+            flex-shrink: 0;
         `;
         icon.innerHTML = this.getLevelIcon(data.level, level);
         
@@ -1766,11 +1815,34 @@ export class KnowledgeGraph {
         title.style.cssText = `
             font-weight: ${level <= 1 ? 'bold' : 'normal'};
             font-size: ${level === 0 ? '16px' : level === 1 ? '14px' : '12px'};
-            color: #2d3748;
+            color: ${isDark ? '#f8fafc' : '#2d3748'};
         `;
         
         leftContent.appendChild(icon);
         leftContent.appendChild(title);
+
+        if (level >= 1 && !data.isTruncated) {
+            const tax = resolveChapterTaxonomy(data.pageUrl || (typeof window !== 'undefined' ? window.location?.href : ''));
+            if (tax) {
+                const badge = document.createElement('span');
+                badge.className = 'kg-taxonomy-badge';
+                const subjectsLabel = tax.subjects?.length ? ` · ${tax.subjects.slice(0, 2).join(', ')}` : '';
+                badge.textContent = `${tax.primaryGroup} — ${tax.groupTitle}${level <= 2 ? subjectsLabel : ''}`;
+                badge.style.cssText = `
+                    display: inline-flex;
+                    align-items: center;
+                    padding: 1px 7px;
+                    border-radius: 999px;
+                    font-size: 10px;
+                    font-weight: 600;
+                    background: ${isDark ? '#382830' : '#fbf1f4'};
+                    color: ${isDark ? '#E85D75' : '#8e1537'};
+                    border: 1px solid ${isDark ? '#60404b' : '#dfd2d8'};
+                    white-space: nowrap;
+                `;
+                leftContent.appendChild(badge);
+            }
+        }
         
         // Create right content with date and expand icon
         const rightContent = document.createElement('div');
@@ -1780,16 +1852,19 @@ export class KnowledgeGraph {
             gap: 8px;
         `;
         
-        // Add visit date if available
+        // Add visit date if available and known
         if (data.pageUrl && data.pageUrl !== '') {
-            const visitDate = document.createElement('span');
-            visitDate.style.cssText = `
-                font-size: 11px;
-                color: #718096;
-                font-family: 'Courier New', monospace;
-            `;
-            visitDate.textContent = `Last visited: ${this.getVisitDate(data.pageUrl)}`;
-            rightContent.appendChild(visitDate);
+            const visitStr = this.getVisitDate(data.pageUrl);
+            if (visitStr && visitStr !== 'Unknown') {
+                const visitDate = document.createElement('span');
+                visitDate.style.cssText = `
+                    font-size: 11px;
+                    color: #718096;
+                    font-family: 'Courier New', monospace;
+                `;
+                visitDate.textContent = `Last visited: ${visitStr}`;
+                rightContent.appendChild(visitDate);
+            }
         }
         
         // Add expand icon for items with children
@@ -1970,6 +2045,7 @@ export class KnowledgeGraph {
             .attr('style', 'display: block; width: 100%; height: 100%; font: 12px sans-serif;');
 
         // Top-left watermark title (kept out of radial center so it never collides behind the root node)
+        const isDark = this.isDarkModeActive();
         const watermarkGroup = svg.append('g')
             .attr('class', 'knowledge-graph-watermark')
             .attr('transform', `translate(${-cx}, ${-cy})`);
@@ -1979,7 +2055,7 @@ export class KnowledgeGraph {
             .attr('text-anchor', 'start')
             .style('font-size', '16px')
             .style('font-weight', '600')
-            .style('fill', '#4a5568')
+            .style('fill', isDark ? '#cbd5e1' : '#4a5568')
             .style('pointer-events', 'none')
             .text('Knowledge Graph');
 
@@ -2021,12 +2097,13 @@ export class KnowledgeGraph {
 
         // Clear existing content
         this.g.selectAll('*').remove();
+        const isDark = this.isDarkModeActive();
 
         // Append links
         this.g.append('g')
             .attr('fill', 'none')
-            .attr('stroke', '#555')
-            .attr('stroke-opacity', 0.4)
+            .attr('stroke', isDark ? '#94a3b8' : '#555')
+            .attr('stroke-opacity', isDark ? 0.55 : 0.4)
             .attr('stroke-width', 1.5)
             .selectAll('path')
             .data(root.links())
@@ -2082,11 +2159,12 @@ export class KnowledgeGraph {
                 this.handleRadialNodeClick(event, d);
             });
 
-        // Add labels: keep internal spine/branch nodes horizontal so vertical spine labels never collide
+        // Add labels: keep internal spine/branch nodes horizontal and alternate dy by depth so collinear parent-child spine nodes never overlap
         nodes.append('text')
             .attr('dy', d => {
                 if (d.children) {
-                    return d.depth === 0 ? '1.65em' : '-0.95em';
+                    if (d.depth === 0) return '1.65em';
+                    return d.depth % 2 === 1 ? '-1.15em' : '1.4em';
                 }
                 return '0.31em';
             })
@@ -2105,17 +2183,25 @@ export class KnowledgeGraph {
                 return d.x >= Math.PI ? 'rotate(180)' : null;
             })
             .attr('paint-order', 'stroke')
-            .attr('stroke', 'white')
+            .attr('stroke', isDark ? '#0f172a' : 'white')
             .attr('stroke-width', 3.5)
-            .attr('fill', 'currentColor')
+            .attr('fill', isDark ? '#f8fafc' : '#1e293b')
             .style('font-size', d => {
                 if (d.depth === 0) return '13px';
                 if (d.depth === 1) return '12px';
                 return '10.5px';
             })
             .style('font-weight', d => d.depth <= 2 ? 'bold' : 'normal')
+            .style('cursor', d => d.data.isTruncated ? 'not-allowed' : 'pointer')
+            .on('click', (event, d) => {
+                this.handleRadialNodeClick(event, d);
+            })
             .text(d => {
                 if (d.depth === 0) return '';
+                if (d.depth === 1 && d.children?.length === 1 && /^(Introduction to )?Machine Learning Systems/i.test(String(d.data.name || ''))) {
+                    const tax = resolveChapterTaxonomy(d.data.pageUrl || (typeof window !== 'undefined' ? window.location?.href : ''));
+                    return tax ? `Vol · ${tax.primaryGroup} (${tax.groupTitle})` : 'Current Volume';
+                }
                 const maxLength = d.depth === 1 ? 18 : 24;
                 return d.data.name.length > maxLength ? 
                     d.data.name.substring(0, maxLength) + '...' : 
@@ -2462,31 +2548,14 @@ export class KnowledgeGraph {
             // Deselect node
             this.selectedNodes.delete(node.id);
             
-            const listItem = sidebar.querySelector(`[data-id="${CSS.escape(String(node.id))}"]`);
-            if (listItem) {
+            const listItems = sidebar.querySelectorAll(`[data-id="${CSS.escape(String(node.id))}"], [data-quiz-id="${CSS.escape(String(node.id))}"]`);
+            listItems.forEach((listItem) => {
                 listItem.style.opacity = '0';
                 setTimeout(() => listItem.remove(), 300);
-            }
+            });
         } else {
-            // Select node
+            // Select node and add rich card to sidebar
             this.selectedNodes.add(node.id);
-            
-            // Add to sidebar
-            const listItem = document.createElement('div');
-            listItem.dataset.id = node.id;
-            listItem.textContent = node.name || node.label;
-            listItem.style.cssText = `
-                padding: 8px;
-                margin: 5px 0;
-                background: #edf2f7;
-                border-radius: 4px;
-                opacity: 0;
-                transition: opacity 0.3s ease;
-            `;
-            sidebar.appendChild(listItem);
-            setTimeout(() => listItem.style.opacity = '1', 10);
-            
-            // Show right panel with node details
             this.showNodeDetails(node);
         }
         
@@ -2575,7 +2644,8 @@ export class KnowledgeGraph {
         const subtitleDisplay = taxLabel
             ? `Taxonomy: ${escapeSidebarText(taxLabel)}`
             : (/^(127\.0\.0\.1|localhost)$/i.test(String(domain).trim()) ? '' : escapeSidebarText(domain));
-        const visitDate = this.getVisitDate(pageUrl);
+        const rawVisitDate = this.getVisitDate(pageUrl);
+        const visitDate = rawVisitDate && rawVisitDate !== 'Unknown' ? rawVisitDate : 'Chapter Section';
         
         // LOG: Verify content is being added to data attributes
         console.log('🔍 ADDING CONTENT TO SIDEBAR ITEM:');

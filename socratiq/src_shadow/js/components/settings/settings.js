@@ -1,6 +1,6 @@
 import {readLearnerPreferences, saveLearnerPreferences, clearLearnerPreferences, hasSavedLearnerPreferences} from '../../../../src_reader/preferences.js';
 import { formatChapterTaxonomyPrompt } from '../../../../src_shared/taxonomy-map.js';
-import { BYOK_PROVIDERS, readActiveByokConfig, saveByokConfig, clearByokConfig, startOpenRouterPKCE, completeOpenRouterPKCE } from '../../../../src_shared/byok-provider.js';
+import { BYOK_PROVIDERS, readActiveByokConfig, saveByokConfig, clearByokConfig, startOpenRouterPKCE, completeOpenRouterPKCE, validateByokKeyFormat } from '../../../../src_shared/byok-provider.js';
 import {  showPopover } from "../../libs/utils/utils";
 import { DIFFICULTY_LEVELS } from "../../../configs/client.config.js";
 import { DropdownHandler } from './dropdown-handler.js';
@@ -348,7 +348,7 @@ export class SettingsManager {
     if (this.settings.customAPI.saveLocally !== true || isGithubIo) this.settings.customAPI.apiKey = '';
     if (typeof readActiveByokConfig === "function") {
       const byok = readActiveByokConfig();
-      if (byok?.enabled && byok.apiKey) {
+      if (byok?.enabled && (byok.apiKey || byok.provider === "ollama")) {
         this.settings.customAPI = {
           provider: byok.provider === "openrouter" ? "open-router" : byok.provider,
           endpoint: byok.endpoint,
@@ -808,6 +808,13 @@ export class SettingsManager {
 
   // Update custom API configuration
   updateCustomAPI(provider, endpoint, model, apiKey, saveLocally, enabled) {
+    if (enabled && apiKey && typeof validateByokKeyFormat === "function") {
+      const check = validateByokKeyFormat(provider || "google-gemini", apiKey);
+      if (!check.valid) {
+        showPopover(this.shadowEle, check.reason, "error");
+        return;
+      }
+    }
     this.settings.customAPI = {
       provider: provider || "",
       endpoint: endpoint || "",

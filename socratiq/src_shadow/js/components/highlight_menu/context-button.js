@@ -326,7 +326,8 @@ export function insertContextButton(shadowRoot) {
 
   contextButton.addEventListener('click', (event) => {
     event.stopPropagation();
-    if (dropUpMenu.style.display === 'none' || !dropUpMenu.style.display) {
+    if (dropUpMenu.style.display === 'none' || !dropUpMenu.style.display || dropUpMenu.classList.contains('hidden')) {
+      dropUpMenu.classList.remove('hidden');
       dropUpMenu.style.display = 'flex';
       isFolderFocused = true;
       selectedFolderIndex = 0;
@@ -343,4 +344,29 @@ export function insertContextButton(shadowRoot) {
       dropUpMenu.style.display = 'none';
     }
   });
+
+  function attachActiveReaderPassage() {
+    const activeSource = typeof window !== 'undefined' ? window.__SOCRATIQ_ACTIVE_SOURCE__ : null;
+    const activeQuote = typeof activeSource?.quote === 'string' ? activeSource.quote.trim() : '';
+    if (!activeQuote) {
+      const copyContainer = shadowRoot.getElementById('copy-container');
+      if (copyContainer) {
+        copyContainer.querySelectorAll('.copy-item[data-active-reader-passage="true"]').forEach(el => el.remove());
+        if (copyContainer.children.length === 0) {
+          copyContainer.classList.add('hidden');
+        }
+      }
+      return;
+    }
+    const activeSection = typeof activeSource.section === 'string' ? activeSource.section.trim() : '';
+    const content = `Current reader passage${activeSection ? ' (' + activeSection + ')' : ''}\n\n${activeQuote}`;
+    addToCopyContainer(content, shadowRoot, { activeReaderPassage: true });
+  }
+
+  attachActiveReaderPassage();
+  if (typeof window !== 'undefined') {
+    window.addEventListener('socratiq:open', attachActiveReaderPassage);
+    window.addEventListener('socratiq:study-open', attachActiveReaderPassage);
+    window.addEventListener('socratiq:active-source-updated', attachActiveReaderPassage);
+  }
 }
