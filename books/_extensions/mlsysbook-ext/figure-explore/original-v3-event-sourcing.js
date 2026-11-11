@@ -5,7 +5,8 @@ const spec = {
   "viewBox": "0 0 760 370",
   "asset": "vol3-event-sourcing.svg",
   "question": "What survives a crash, and what must remain unknown?",
-  "scope": "The original recorded event tape for test_r18. Recovery folds preserved payloads in log order. There is no recorded ToolResult. Token movement represents logical event application, not measured storage transfer.",
+  "intro": "Trace how a replacement worker folds 5 durable log events through the deterministic reducer after a crash to reconstruct trajectory state without re-invoking the model or test tool.",
+  "scope": "Crash recovery worksheet for operation test_r18 against workspace ws_r18: volatile runtime memory (top panel) is lost on a crash, while the durable append-only trajectory log (bottom panel) retains 5 ordered events (e1 TaskStarted through ej ToolIntent test_r18) up to boundary j with no recorded ToolResult. Moving packets represent deterministic reducer fold steps R_k = apply(R_{k-1}, e_k), not network or tool calls.",
   "purpose": "Make the durable log survive while volatile state disappears, then rebuild admission, reservation, and unresolved intent without replaying external effects.",
   "guard": "The log is authoritative only within its declared durability and payload-retention contract. Missing outcomes remain unknown. Reducer replay is not a model call or a tool invocation; crash recovery does not release an unresolved reservation.",
   "slots": {
@@ -51,7 +52,7 @@ const spec = {
   "states": [
     {
       "label": "Retain the durable event tape",
-      "description": "The append-only tape ends at the recorded test_r18 intent. The live projection holds its admission and reservation, but no result was recorded.",
+      "description": "Before the crash, the durable append-only log (bottom tape) holds 5 committed events from e1 (TaskStarted) through ej (ToolIntent test_r18) at boundary j, while the dashed cell beyond boundary j shows that no ToolResult was recorded.",
       "text": {
         "header": "Live record before crash",
         "admit": "admission held",
@@ -60,11 +61,11 @@ const spec = {
         "reducer": "apply(R, e)"
       },
       "values": [
-        "Durable prefix unchanged",
-        "Live",
-        "Held in log and projection",
-        "No recorded ToolResult",
-        "No model/tool re-execution"
+        "5 events durable (e1..ej at boundary j)",
+        "Live R_j in runtime memory",
+        "Held in log and live projection",
+        "No recorded ToolResult past boundary j",
+        "0 model or tool calls during replay"
       ],
       "facts": {
         "crashed": false,
@@ -87,7 +88,7 @@ const spec = {
     },
     {
       "label": "Lose the volatile projection",
-      "description": "A crash removes the volatile projection. When recovery begins, it must reconstruct from the durable tape; this action does not execute the model or test again.",
+      "description": "A worker crash wipes the dashed top region (Runtime memory), erasing the in-memory trajectory projection. The replacement worker starts from initial base state R0 and prepares to fold the 5 surviving log events in sequence order.",
       "text": {
         "header": "Projection lost on crash",
         "admit": "volatile record lost",
@@ -96,11 +97,11 @@ const spec = {
         "reducer": "apply(R, e)"
       },
       "values": [
-        "Durable prefix unchanged",
-        "Lost",
-        "Held in log; projection not yet folded",
+        "5 events intact on durable tape (e1..ej)",
+        "Lost on crash; reset to base R0 (0 / 5 folded)",
+        "Durable in e4; not yet folded into R",
         "No recorded ToolResult",
-        "No model/tool re-execution"
+        "0 model or tool re-executions"
       ],
       "facts": {
         "crashed": true,
@@ -127,7 +128,7 @@ const spec = {
     },
     {
       "label": "Fold TaskStarted",
-      "description": "Feed the recorded TaskStarted event through the deterministic reducer. When the fold finishes, task identity, grants, and limits are reconstructed.",
+      "description": "Event e1 (TaskStarted) travels from the first log cell into the deterministic reducer R1 = apply(R0, e1), restoring the task identity, capability grants, and spending limits without re-initializing external resources.",
       "text": {
         "header": "Reconstructed record",
         "admit": "task reconstructed",
@@ -136,11 +137,11 @@ const spec = {
         "reducer": "apply(R, e1)"
       },
       "values": [
-        "Durable prefix unchanged",
-        "Recovered through e1",
-        "Held in log; projection not yet folded",
+        "Folding e1 (TaskStarted) — 1 / 5",
+        "R1 = apply(R0, e1): task, grants, limits",
+        "Durable in e4; not yet folded into R1",
         "No recorded ToolResult",
-        "No model/tool re-execution"
+        "Deterministic reducer only (no I/O)"
       ],
       "facts": {
         "crashed": true,
@@ -198,7 +199,7 @@ const spec = {
     },
     {
       "label": "Fold ContextBuilt",
-      "description": "Fold the recorded ContextBuilt payload. When this action finishes, the delivered context is part of the reconstructed history; it is not assembled by a new model call.",
+      "description": "Event e2 (ContextBuilt) folds through R2 = apply(R1, e2), reinstating the exact immutable prompt manifest delivered before the crash rather than re-running context assembly against live files.",
       "text": {
         "header": "Reconstructed record",
         "admit": "context reconstructed",
@@ -207,11 +208,11 @@ const spec = {
         "reducer": "apply(R, e2)"
       },
       "values": [
-        "Durable prefix unchanged",
-        "Recovered through e2",
-        "Held in log; projection not yet folded",
+        "Folding e2 (ContextBuilt) — 2 / 5",
+        "R2 = apply(R1, e2): delivered prompt restored",
+        "Durable in e4; not yet folded into R2",
         "No recorded ToolResult",
-        "No model/tool re-execution"
+        "Deterministic reducer only (no I/O)"
       ],
       "facts": {
         "crashed": true,
@@ -269,7 +270,7 @@ const spec = {
     },
     {
       "label": "Fold ModelReplied",
-      "description": "Fold the recorded ModelReplied event. When the action finishes, the old proposal is restored from its recorded payload, not sampled again.",
+      "description": "Event e3 (ModelReplied) folds through R3 = apply(R2, e3), restoring the recorded completion proposing test_r18 from the log payload without invoking the foundation model or spending fresh tokens.",
       "text": {
         "header": "Reconstructed record",
         "admit": "proposal recorded",
@@ -278,11 +279,11 @@ const spec = {
         "reducer": "apply(R, e3)"
       },
       "values": [
-        "Durable prefix unchanged",
-        "Recovered through e3",
-        "Held in log; projection not yet folded",
+        "Folding e3 (ModelReplied) — 3 / 5",
+        "R3 = apply(R2, e3): model proposal restored",
+        "Durable in e4; not yet folded into R3",
         "No recorded ToolResult",
-        "No model/tool re-execution"
+        "0 model calls (saved completion replayed)"
       ],
       "facts": {
         "crashed": true,
@@ -340,7 +341,7 @@ const spec = {
     },
     {
       "label": "Fold authorization and reservation",
-      "description": "Fold the recorded authorization and budget reservation. When this action finishes, both admission and its held reservation are represented; recovery does not return funds merely because the worker crashed.",
+      "description": "Event e4 (Authorized, BudgetReserved) folds through R4 = apply(R3, e4), populating the top two green rows of Reconstructed R_j (admission held, reservation held) so locked budget stays encumbered across the crash.",
       "text": {
         "header": "Reconstructed record",
         "admit": "admission held",
@@ -349,11 +350,11 @@ const spec = {
         "reducer": "apply(R, e4)"
       },
       "values": [
-        "Durable prefix unchanged",
-        "Recovered through e4",
-        "Held in log and projection",
+        "Folding e4 (Authorized + BudgetReserved) — 4 / 5",
+        "R4 = apply(R3, e4): admission + reservation",
+        "Held in both log and reconstructed R4",
         "No recorded ToolResult",
-        "No model/tool re-execution"
+        "Crash does not release locked budget"
       ],
       "facts": {
         "crashed": true,
@@ -411,7 +412,7 @@ const spec = {
     },
     {
       "label": "Fold the unresolved tool intent",
-      "description": "Fold ToolIntent test_r18. When this action finishes, the reconstructed operation remains unresolved because ToolResult is absent. Neither a success nor a failure is invented, and no tool is re-executed.",
+      "description": "Event ej (ToolIntent test_r18) folds through R_j = apply(R4, ej) at boundary j. Because the dashed ToolResult cell is empty, the red row marks test_r18 unresolved rather than inventing an outcome or re-dispatching the test.",
       "text": {
         "header": "Reconstructed record",
         "admit": "admission held",
@@ -420,11 +421,11 @@ const spec = {
         "reducer": "apply(R, ej)"
       },
       "values": [
-        "Durable prefix unchanged",
-        "Recovered through ej",
-        "Held in log and projection",
-        "No recorded ToolResult",
-        "No model/tool re-execution"
+        "Folded ej (ToolIntent test_r18) — 5 / 5",
+        "R_j = fold(R0, [e1..ej]) complete at boundary j",
+        "Held in log and reconstructed R_j",
+        "test_r18 unresolved (ToolResult absent)",
+        "0 tool calls; reconcile in-doubt test_r18"
       ],
       "facts": {
         "crashed": true,
@@ -492,8 +493,9 @@ window.MLSysFigureLessons[spec.name]=async(root,context)=>{
  root.classList.add(spec.name);svg.setAttribute('role','img');svg.setAttribute('aria-label',spec.question+' Original chapter diagram with synchronized state.');
  const node=(tag,a={},text)=>{const n=document.createElementNS(NS,tag);Object.entries(a).forEach(([k,v])=>n.setAttribute(k,String(v)));if(text!==undefined)n.textContent=text;return n;};
  const textNodes=[...svg.querySelectorAll('text')],bindings={};
- for(const [key,b]of Object.entries(spec.slots)){const matches=textNodes.filter(n=>Number(n.getAttribute('x'))===b.x&&Number(n.getAttribute('y'))===b.y);if(matches.length!==1)throw Error('Original slot changed: '+key);bindings[key]={node:matches[0],original:matches[0].innerHTML,font:matches[0].getAttribute('font-size')};}
+ for(const [key,b]of Object.entries(spec.slots)){const matches=textNodes.filter(n=>Number(n.getAttribute('x'))===b.x&&Number(n.getAttribute('y'))===b.y);if(matches.length!==1)throw Error('Original slot changed: '+key);bindings[key]={node:matches[0],original:matches[0].innerHTML,font:matches[0].getAttribute('font-size'),fill:matches[0].getAttribute('fill'),weight:matches[0].getAttribute('font-weight')};}
  const circles=[...svg.querySelectorAll('circle')].map(n=>({n,fill:n.getAttribute('fill'),stroke:n.getAttribute('stroke'),'stroke-width':n.getAttribute('stroke-width')}));
+ const baseRects=[...svg.querySelectorAll('rect')].filter(r=>+r.getAttribute('width')<500&&+r.getAttribute('height')<260);
  const overlay=node('g',{class:'v3-original-overlay'});svg.append(overlay);
  const markerLayer=node('g');overlay.append(markerLayer);
  const packet=node('g',{class:'v3-original-packet',visibility:'hidden'});packet.append(node('rect',{x:-24,y:-10,width:48,height:20,rx:3}),node('text',{'text-anchor':'middle',y:4}));overlay.append(packet);
@@ -508,12 +510,17 @@ window.MLSysFigureLessons[spec.name]=async(root,context)=>{
  if(spec.variants){choice=document.createElement('label');choice.className='v3-original-choice';choice.textContent=spec.variantLabel+' ';const select=document.createElement('select');select.setAttribute('aria-label',spec.variantLabel);spec.variants.forEach(v=>{const o=document.createElement('option');o.value=v.id;o.textContent=v.label;select.append(o);});select.addEventListener('change',()=>{variant=select.value;frames().forEach((s,i)=>Object.assign(steps[i],{label:s.label,description:s.description}));player.go(0);});choice.append(select);}
  function follow(x,y){active=[x,y];const scale=svg.getBoundingClientRect().width/vb.width;if(canvas.scrollWidth>canvas.clientWidth)canvas.scrollLeft=Math.max(0,x*scale-canvas.clientWidth/2);if(canvas.scrollHeight>canvas.clientHeight)canvas.scrollTop=Math.max(0,y*scale-canvas.clientHeight/2);}
  function render(i,{stage,details}){
-  if(!canvas.isConnected){if(choice)stage.append(choice);stage.append(cue,canvas);details.append(readout);}
+  if(!canvas.isConnected){stage.append(cue,canvas);details.append(readout);}
   const frame=frames()[i];packet.setAttribute('visibility','hidden');markerLayer.replaceChildren();
-  for(const [key,b]of Object.entries(bindings)){b.node.innerHTML=b.original;if(b.font)b.node.setAttribute('font-size',b.font);b.node.removeAttribute('opacity');const value=Object.assign({},spec.defaults,frame.text)[key];if(value!==undefined)b.node.textContent=value;if(spec.slots[key].font)b.node.setAttribute('font-size',spec.slots[key].font);b.node.removeAttribute('textLength');if(spec.slots[key].width&&b.node.getComputedTextLength()>spec.slots[key].width)b.node.setAttribute('textLength',spec.slots[key].width);b.node.setAttribute('lengthAdjust','spacingAndGlyphs');}
+  const prevText=i>0?Object.assign({},spec.defaults,frames()[i-1].text):null,currText=Object.assign({},spec.defaults,frame.text),drawnRects=new Set();
+  const frameBox=(px,py,color='#0284c7')=>{const hits=baseRects.filter(r=>{const x=+r.getAttribute('x'),y=+r.getAttribute('y'),w=+r.getAttribute('width'),h=+r.getAttribute('height');return px>=x-6&&px<=x+w+6&&py>=y-6&&py<=y+h+6;}).sort((a,b)=>(+a.getAttribute('width')*+a.getAttribute('height'))-(+b.getAttribute('width')*+b.getAttribute('height')));if(hits[0]&&!drawnRects.has(hits[0])){drawnRects.add(hits[0]);markerLayer.append(node('rect',{x:hits[0].getAttribute('x'),y:hits[0].getAttribute('y'),width:hits[0].getAttribute('width'),height:hits[0].getAttribute('height'),rx:hits[0].getAttribute('rx')||4,fill:'none',stroke:color,'stroke-width':2.5}));return true;}return false;};
+  for(const [key,b]of Object.entries(bindings)){b.node.innerHTML=b.original;if(b.font)b.node.setAttribute('font-size',b.font);if(b.fill)b.node.setAttribute('fill',b.fill);else b.node.removeAttribute('fill');if(b.weight)b.node.setAttribute('font-weight',b.weight);else b.node.removeAttribute('font-weight');b.node.removeAttribute('opacity');const value=currText[key];if(value!==undefined)b.node.textContent=value;if(spec.slots[key].font)b.node.setAttribute('font-size',spec.slots[key].font);b.node.removeAttribute('textLength');if(spec.slots[key].width&&b.node.getComputedTextLength()>spec.slots[key].width)b.node.setAttribute('textLength',spec.slots[key].width);b.node.setAttribute('lengthAdjust','spacingAndGlyphs');if(prevText&&currText[key]!==prevText[key]){b.node.setAttribute('fill','#0369a1');b.node.setAttribute('font-weight','700');frameBox(spec.slots[key].x,spec.slots[key].y,'#0284c7');}}
+  for(const key of frame.fade||[]){bindings[key]?.node.setAttribute('opacity','0.35');}
+  if(frame.facts?.folded>=1){markerLayer.append(node('rect',{x:40+(frame.facts.folded-1)*110,y:276,width:110,height:48,rx:3,fill:'none',stroke:'#0284c7','stroke-width':2.5}));}
   for(const c of circles)for(const k of ['fill','stroke','stroke-width']){if(c[k]!==null)c.n.setAttribute(k,c[k]);}
   for(const p of frame.circles||[]){const c=circles.find(c=>Number(c.n.getAttribute('cx'))===p.x&&Number(c.n.getAttribute('cy'))===p.y&&Number(c.n.getAttribute('r'))===(p.r||8));if(!c)throw Error('Original graph node changed');for(const k of ['fill','stroke','stroke-width'])if(p[k])c.n.setAttribute(k,p[k]);}
-  for(const m of frame.marks||[]){markerLayer.append(node('circle',{cx:m.x,cy:m.y,r:m.r||12,fill:'none',stroke:m.color||'#0284c7','stroke-width':2}));}
+  for(const m of frame.marks||[]){frameBox(m.x,m.y,m.color||'#0284c7');}
+  if(i>0&&drawnRects.size===0&&frame.motion){const end=frame.motion.route.at(-1);frameBox(end[0],end[1],'#0284c7');}
   values.forEach((v,j)=>v.textContent=frame.values[j]);root.dataset.originalStep=String(i);root.dataset.originalFacts=JSON.stringify(frame.facts);root.dataset.originalVariant=variant;
   follow(...frame.camera);
   if(!details.querySelector('.v3-original-guard')){const p=document.createElement('p');p.className='v3-original-guard';p.textContent=spec.guard;details.append(p);}
@@ -525,7 +532,7 @@ window.MLSysFigureLessons[spec.name]=async(root,context)=>{
   const width=Math.max(28,Math.min(112,motion.label.length*6+12));packet.querySelector('rect').setAttribute('x',-width/2);packet.querySelector('rect').setAttribute('width',width);packet.querySelector('text').textContent=motion.label;packet.dataset.role=motion.role||'state';packet.setAttribute('visibility','visible');
   onFrame(p=>{let d=total*p,j=0;while(j<lengths.length-1&&d>lengths[j]){d-=lengths[j];j++;}const t=lengths[j]?d/lengths[j]:0,a=route[j],b=route[j+1],x=a[0]+(b[0]-a[0])*t,y=a[1]+(b[1]-a[1])*t;packet.setAttribute('transform',`translate(${x} ${y})`);follow(...(motion.lock_camera?frame.camera:[x,y]));if(p>=1)packet.setAttribute('visibility','hidden');});
  }
- player=window.MLSysOriginalPlayer.create({root,outer:context.outer,title:spec.question,scope:spec.scope,steps,render,transition});
+ player=window.MLSysOriginalPlayer.create({root,outer:context.outer,title:spec.question,intro:spec.intro,layout:'compact',viewControls:choice,scope:spec.scope,steps,render,transition});
  const resize=new ResizeObserver(()=>follow(...active));resize.observe(canvas);const destroy=player.destroy;player.destroy=()=>{resize.disconnect();destroy();};return player;
 };
 })();

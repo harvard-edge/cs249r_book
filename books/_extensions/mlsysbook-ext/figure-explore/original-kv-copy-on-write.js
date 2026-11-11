@@ -36,23 +36,23 @@
     const copyLabel = at(texts, {x: 568, y: 479});
     const overlay = node('g', {class: 'okv-overlay'}); svg.append(overlay);
     const inlet = node('g', {class: 'okv-inlet'});
-    inlet.append(node('rect', {x: 638, y: 488, width: 70, height: 33, rx: 3, fill: '#dcfce7', stroke: '#16a34a'}), node('text', {x: 673, y: 501, 'text-anchor': 'middle'}, 'newly computed'), node('text', {x: 673, y: 514, 'text-anchor': 'middle'}, 'KV @ position 10'));
+    inlet.append(node('rect', {x: 630, y: 488, width: 84, height: 33, rx: 3, fill: '#dcfce7', stroke: '#16a34a'}), node('text', {x: 672, y: 501, 'text-anchor': 'middle'}, 'newly computed'), node('text', {x: 672, y: 514, 'text-anchor': 'middle'}, 'KV @ position 10'));
     overlay.append(inlet);
     overlay.append(node('text', {x: 625, y: 395, class: 'okv-local-label', 'text-anchor': 'middle'}, 'A table'), node('text', {x: 625, y: 569, class: 'okv-local-label', 'text-anchor': 'middle'}, 'B table'));
     const focus = node('rect', {class: 'okv-focus', fill: 'none', rx: 2, 'stroke-width': 2}); overlay.append(focus);
     const packet = node('g', {class: 'okv-packet', visibility: 'hidden'});
     packet.append(node('rect', {x: -19, y: -11, width: 38, height: 22, rx: 3}), node('text', {'text-anchor': 'middle', y: 4})); overlay.append(packet);
     const stages = [
-      ['A retains a ten-token prefix', 'Panel (a) locates entries for the same prefix used in panel (b). A references physical blocks 3, 7, and 9. Its tail holds initialized KV for positions 8 and 9; the remaining slots are allocated but unwritten. B does not exist yet.'],
-      ['Find logical block 2', 'Divide token position 9 by the four-position block size and take the floor. The result selects logical block 2 and its table entry. This is address metadata, not a copy of KV payload.'],
-      ['Read physical block ID 9', 'Entry 2 of the block table contains physical block ID 9. Follow the original elbow connector to that scattered block. A physical block ID is a pool index, not a byte address.'],
-      ['Select slot 1', 'The remainder of 9 divided by 4 is 1. The second slot in physical block 9 holds this position’s initialized KV. The matching numeral 9 in the table and in the cell has two different meanings: block ID and token position.'],
-      ['Fork B by sharing references', 'B receives its own block table [3, 7, 9]. The full blocks and the partial tail now have two candidate references each. No KV payload is copied. B cannot privately append into the shared tail.'],
-      ['Reserve private block 14', 'The allocator reserves block 14 for B. All four slots are still unwritten, and B’s active table continues to point to block 9. A reservation keeps this block unavailable to others even before a table references it.'],
-      ['Copy initialized position 8', 'Copy the KV record for position 8 from shared block 9, slot 0, to private block 14, slot 0. The source remains intact. B still references the shared tail and cannot append yet.'],
-      ['Copy initialized position 9', 'Copy the other initialized KV record, position 9, into private slot 1. Do not copy unwritten slots 2 and 3. Both candidate tables still reference block 9 until the replacement tail is ready.'],
-      ['Remap only B’s tail entry', 'After both initialized records have been copied, change B’s table entry 2 from 9 to 14. Block 9 keeps A’s reference; block 14 gains B’s reference. Full blocks 3 and 7 remain shared.'],
-      ['Append position 10 in B’s tail', 'B’s table entry 14 resolves the destination; the table stores only a block ID. Newly computed KV arrives from the separate inlet and is written to slot 2 of block 14. A’s table and block 9 are unchanged. Sharing avoids copying the full prefix; this private append requires one new tail block and copies only its initialized predecessors.']
+      ['A retains a 10-token prefix', 'Panel (a) shows a 10-token prefix (positions 0 through 9) partitioned into 4-token logical blocks. Candidate A maps logical blocks 0, 1, and 2 to physical blocks [3, 7, 9], where tail block 9 holds initialized KV at positions 8 and 9 and has 2 unwritten slots.'],
+      ['Find logical block 2', 'To look up token position 9 under a 4-token block size, compute floor(9 / 4) = 2. The purple focus box selects logical block 2 in the block table, which stores address metadata rather than KV payload bytes.'],
+      ['Read physical block ID 9', 'Block table entry 2 stores physical block ID 9. Following the elbow connector into the non-contiguous KV pool locates physical block 9 without requiring contiguous virtual memory.'],
+      ['Select slot 1', 'Compute the intra-block offset 9 mod 4 = 1 to select slot 1 (the second cell) inside physical block 9, which holds KV for token position 9. The numeral 9 in the table is the physical block ID, whereas 9 in the slot is the token position.'],
+      ['Fork B by sharing references', 'In panel (b), forking candidate B copies only the 3-entry block table [3, 7, 9], raising reference counts for physical blocks 3, 7, and 9 from 1 to 2. Zero KV payload bytes are copied, and the append gate for B stays closed while tail block 9 is shared.'],
+      ['Reserve private block 14', 'Before candidate B can append position 10, the allocator reserves free physical block 14 (4 unwritten slots) for B. While copy-on-write prepares the new tail, the active block table for B still points to shared block 9.'],
+      ['Copy initialized position 8', 'Copy-on-write copies the initialized KV record for token position 8 from shared block 9 (slot 0) into private block 14 (slot 0). Shared block 9 remains intact for candidate A.'],
+      ['Copy initialized position 9', 'Copy-on-write copies the second initialized KV record (token position 9) from block 9 (slot 1) into private block 14 (slot 1), skipping unwritten slots 2 and 3. Both tables still reference block 9 until the copy completes.'],
+      ['Remap only the tail entry of B', 'With slots 0 and 1 initialized in block 14, candidate B updates block table entry 2 from 9 to 14 ([3, 7, 14]). Reference counts become 2 / 2 / 1 / 1 for blocks 3 / 7 / 9 / 14, keeping full prefix blocks 3 and 7 shared.'],
+      ['Append position 10 in the tail of B', 'Candidate B resolves logical block 2 to private block 14 and writes newly computed KV for token position 10 into slot 2 (10 mod 4 = 2). Candidate A stays on [3, 7, 9] with slots 2 and 3 of block 9 untouched.']
     ].map(([label, description]) => ({label, description}));
     const model = index => ({
       a: [3, 7, 9], b: index >= 4 ? [3, 7, index >= 8 ? 14 : 9] : null,
@@ -78,7 +78,7 @@
       const m = model(i);
       overlay.querySelectorAll('.okv-reference-copy').forEach(n => n.remove());
       packet.setAttribute('visibility', 'hidden');
-      inlet.setAttribute('visibility', i >= 8 ? 'visible' : 'hidden');
+      inlet.setAttribute('visibility', i >= 9 ? 'visible' : 'hidden');
       bTable.forEach((n, j) => {n.textContent = m.b ? m.b[j] : '—';});
       bCaption.textContent = m.b ? 'block table' : 'not forked';
       bRefs.forEach(n => {n.setAttribute('opacity', m.b ? 1 : 0.25); n.setAttribute('stroke-dasharray', m.b ? '' : '3,2');});
@@ -122,13 +122,13 @@
       if (to === 5) {animate(privateOutline, [{stroke: '#94a3b8'}, {stroke: '#16a34a'}], {}); return;}
       if (to === 6 || to === 7) {const x = to === 6 ? 544 : 568; route = [[x, 445], [556, 458], [556, 492], [x, 505]]; label = `KV@${to === 6 ? 8 : 9}`; kind = 'payload';}
       if (to === 8) {route = [[580, 505], [580, 552], [580, 564]]; label = 'ID 14';}
-      if (to === 9) {route = [[673, 505], [628, 505], [592, 505]]; label = 'KV@10'; kind = 'payload';}
+      if (to === 9) {inlet.setAttribute('visibility', 'visible'); route = [[672, 505], [628, 505], [592, 505]]; label = 'KV@10'; kind = 'payload';}
       if (!route) return;
       packet.dataset.kind = kind; packet.querySelector('text').textContent = label; packet.setAttribute('visibility', 'visible');
       const lengths = route.slice(1).map((p, i) => Math.hypot(p[0] - route[i][0], p[1] - route[i][1])); const total = lengths.reduce((a, b) => a + b, 0);
       onFrame(p => {let distance = total * p, j = 0; while (j < lengths.length - 1 && distance > lengths[j]) {distance -= lengths[j]; j++;} const t = lengths[j] ? distance / lengths[j] : 0, a = route[j], b = route[j + 1], x = a[0] + (b[0] - a[0]) * t, y = a[1] + (b[1] - a[1]) * t; packet.setAttribute('transform', `translate(${x} ${y})`); follow(x, to >= 4 ? 477 : y); if (p >= 1) packet.setAttribute('visibility', 'hidden');});
     }
-    const player = window.MLSysOriginalPlayer.create({root, outer: context.outer, title: 'How can B append without changing A’s cached prefix?', scope: 'The original ten-position prefix, four-position blocks, and physical IDs [3, 7, 9]. Panel (a) explains the same prefix that panel (b) forks. B reserves block 14, copies initialized tail records, remaps its table, then appends. Pale B connectors are inactive before the fork.', steps: stages, render, transition});
+    const player = window.MLSysOriginalPlayer.create({root, outer: context.outer, layout: 'compact', title: 'How can B append without changing the cached prefix of A?', intro: 'Trace how a 4-token block table maps position 9 to physical block 9 slot 1 and copies slots 0 and 1 into block 14 before appending position 10.', scope: 'Two-panel PagedAttention model with 4-token blocks and a 10-token prefix (positions 0 through 9) mapped to physical blocks [3, 7, 9], tracing floor(9/4)=2, 9 mod 4=1, and partial-tail copy-on-write into block 14 for position 10.', steps: stages, render, transition});
     const resize = new ResizeObserver(() => follow(...active)); resize.observe(canvas);
     const destroy = player.destroy;
     player.destroy = () => {resize.disconnect(); destroy();};

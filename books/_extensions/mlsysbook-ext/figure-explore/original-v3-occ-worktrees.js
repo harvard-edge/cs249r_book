@@ -5,7 +5,8 @@ const spec = {
   "viewBox": "0 0 740 440",
   "asset": "fig-vol3-occ-worktrees.svg",
   "question": "Why can a checked private change still fail publication?",
-  "scope": "Illustrative identities h0/h1/h2 and c1/c2/c3 on the original worktree, dependency, candidate, and publication diagram. Each head is a revision identity, not an elapsed-time measurement. Candidate checks and captured target identity travel together.",
+  "intro": "Trace 12 guarded publication steps across private worktrees to see why stale dependencies and concurrent head updates require revalidation and fresh candidate checks.",
+  "scope": "Three-panel optimistic concurrency control (OCC) diagram: Panel (a) shows isolated interface and caller worktrees inside separate execution sandboxes sharing repository storage; Panel (b) shows the commit DAG where base revision h0 branches into interface head h1 and caller worker w1; Panel (c) shows the 4-step guarded publication gate (1 revalidate, 2 build candidate, 3 checks, 4 atomic update) across target heads h0, h1, and h2 and candidate commits c1, c2, and c3.",
   "purpose": "Make semantic staleness, exact-candidate evidence, and failed compare-and-swap visible before successful revalidation and publication.",
   "guard": "Textual merge success does not establish semantic correctness. Checks apply to the exact candidate they examined. Atomic publication must compare the captured target head; a moved head requires revalidation. Worktrees isolate files, not tool execution authority or external effects.",
   "slots": {
@@ -100,7 +101,7 @@ const spec = {
   "states": [
     {
       "label": "Isolate private edits from publication",
-      "description": "Workers edit private worktrees from h0. Worktree isolation does not authorize publication or provide execution sandboxing; the original sandbox boundaries remain separate.",
+      "description": "At step 1 of 12 in Panel (a), the interface worker and caller worker check out linked Git worktrees from base revision h0 over shared repository storage. Each worktree isolates working files, index, and HEAD, while the dashed amber sandbox around each worktree enforces execution and write boundaries.",
       "text": {
         "shared": "shared target: h0",
         "interface": "interface revision h0",
@@ -117,11 +118,11 @@ const spec = {
         "loop": "checks belong to an exact candidate"
       },
       "values": [
-        "none",
+        "none (editing in worktree)",
         "No evidence",
         "h0",
         "h0",
-        "No publication",
+        "Unpublished (private worktrees at h0)",
         "Private worktree; separate sandbox"
       ],
       "facts": {
@@ -143,7 +144,7 @@ const spec = {
     },
     {
       "label": "Advance the shared interface",
-      "description": "The shared target advances to h1 and changes an interface. When that advance completes, the private caller can be semantically stale even if its text still merges cleanly.",
+      "description": "In Panel (b), the interface worker publishes commit h1 along the top arrow (interface change), advancing the shared target head from h0 to h1 while the caller worker w1 continues editing against the older interface contract at h_base = h0.",
       "text": {
         "shared": "shared target: h1",
         "interface": "interface revision h1",
@@ -162,9 +163,9 @@ const spec = {
       "values": [
         "none",
         "No evidence",
-        "h0",
-        "h1",
-        "No publication",
+        "h0 (caller base)",
+        "h1 (interface changed)",
+        "Unpublished (caller dependency stale vs h1)",
         "Private worktree; separate sandbox"
       ],
       "facts": {
@@ -205,7 +206,7 @@ const spec = {
     },
     {
       "label": "Build a textually clean but stale candidate",
-      "description": "Build illustrative candidate c1 without a textual conflict. When the build finishes, the stale dependency still prevents publication; clean text is not semantic validation.",
+      "description": "In Panel (b), because caller worker w1 edited files disjoint from the interface commit h1, staging a merge into candidate c1 succeeds without textual conflict. However, Gate 1 (revalidate h_base vs. h_head) in Panel (c) detects the red dashed stale dependency on h0 and exits via request revision.",
       "text": {
         "shared": "shared target: h1",
         "interface": "interface revision h1",
@@ -222,11 +223,11 @@ const spec = {
         "loop": "checks belong to an exact candidate"
       },
       "values": [
-        "c1",
+        "c1 (textually clean, semantically stale)",
         "No evidence",
         "h0",
         "h1",
-        "No publication",
+        "Blocked at Gate 1 (request revision)",
         "Private worktree; separate sandbox"
       ],
       "facts": {
@@ -263,7 +264,7 @@ const spec = {
     },
     {
       "label": "Revalidate the changed dependency",
-      "description": "Revalidate dependencies against captured h1 and repair the caller. When this action finishes, the build must use that revised state; old checks cannot validate a new candidate.",
+      "description": "In Panel (c) Gate 1 (1 revalidate), the integration service captures current target head h1, revalidates the caller's read dependencies against h1, and updates the caller patch to match the new interface signature.",
       "text": {
         "shared": "shared target: h1",
         "interface": "interface revision h1",
@@ -280,11 +281,11 @@ const spec = {
         "loop": "checks belong to an exact candidate"
       },
       "values": [
-        "c1",
+        "c1 (superseded)",
         "No evidence",
+        "h1 (captured for attempt 2)",
         "h1",
-        "h1",
-        "No publication",
+        "Gate 1 passed at h1; ready to build c2",
         "Private worktree; separate sandbox"
       ],
       "facts": {
@@ -325,7 +326,7 @@ const spec = {
     },
     {
       "label": "Build candidate c2 against captured h1",
-      "description": "Build c2 against captured h1. When construction finishes, c2 has its own identity and still requires its own checks.",
+      "description": "At Panel (c) Gate 2 (2 build candidate), the service stages a new immutable integration commit c2 combining captured head h1 with the revised caller changes. Candidate c2 has a new commit hash and no verification evidence yet.",
       "text": {
         "shared": "shared target: h1",
         "interface": "interface revision h1",
@@ -342,11 +343,11 @@ const spec = {
         "loop": "checks belong to an exact candidate"
       },
       "values": [
-        "c2",
-        "No evidence",
+        "c2 (built on captured h1)",
+        "No evidence (c2 unchecked)",
         "h1",
         "h1",
-        "No publication",
+        "Gate 2 complete; awaiting Gate 3 checks",
         "Private worktree; separate sandbox"
       ],
       "facts": {
@@ -387,7 +388,7 @@ const spec = {
     },
     {
       "label": "Check that exact candidate c2",
-      "description": "Run checks on the exact c2 candidate. When they finish, evidence belongs to c2 at captured h1, not any later build.",
+      "description": "At Panel (c) Gate 3 (3 checks), the protected assessment sandbox runs acceptance tests directly on commit hash c2. The resulting verification receipt is cryptographically bound to exact candidate c2 at captured head h1.",
       "text": {
         "shared": "shared target: h1",
         "interface": "interface revision h1",
@@ -405,10 +406,10 @@ const spec = {
       },
       "values": [
         "c2",
-        "c2",
+        "c2 (verified at captured h1)",
         "h1",
         "h1",
-        "No publication",
+        "Gate 3 passed for c2; ready for Gate 4 CAS",
         "Private worktree; separate sandbox"
       ],
       "facts": {
@@ -445,7 +446,7 @@ const spec = {
     },
     {
       "label": "Move the target head during review",
-      "description": "The shared target advances to h2 while c2 checks remain retained. When this advance finishes, the expected h1 no longer matches the target.",
+      "description": "While Gate 3 checks on c2 are finishing, a concurrent writer advances the shared target branch from h1 to h2 in Panel (b). Captured head h1 no longer matches the live target head h2.",
       "text": {
         "shared": "shared target: h2",
         "interface": "interface revision h2",
@@ -463,10 +464,10 @@ const spec = {
       },
       "values": [
         "c2",
-        "c2",
-        "h1",
-        "h2",
-        "No publication",
+        "c2 (bound to old head h1)",
+        "h1 (stale expected head)",
+        "h2 (advanced concurrently)",
+        "Target moved to h2 before CAS",
         "Private worktree; separate sandbox"
       ],
       "facts": {
@@ -503,7 +504,7 @@ const spec = {
     },
     {
       "label": "Reject compare-and-swap at h1",
-      "description": "Attempt atomic publication with expected head h1. When compare-and-swap observes h2, it rejects publication; checked c2 remains unpublished.",
+      "description": "At Panel (c) Gate 4 (4 atomic update), update-ref compares expected head h1 against current target head h2, sees h1 != h2, and aborts publication so c2 cannot overwrite h2.",
       "text": {
         "shared": "shared target: h2",
         "interface": "interface revision h2",
@@ -520,11 +521,11 @@ const spec = {
         "loop": "head moved: revalidate"
       },
       "values": [
-        "c2",
+        "c2 (unpublished)",
         "c2",
         "h1",
         "h2",
-        "No publication",
+        "Rejected at Gate 4 (CAS h1 != h2); loop to step 1",
         "Private worktree; separate sandbox"
       ],
       "facts": {
@@ -561,7 +562,7 @@ const spec = {
     },
     {
       "label": "Revalidate against the new target h2",
-      "description": "Return to revalidation at captured h2. Earlier checks(c2) remain history; they cannot validate a new candidate against this changed target.",
+      "description": "Following the dashed purple arrow (head moved: return to step 1) back to Gate 1, the service captures new target head h2 and revalidates the caller's dependencies against h2 rather than blindly re-running update-ref.",
       "text": {
         "shared": "shared target: h2",
         "interface": "interface revision h2",
@@ -578,11 +579,11 @@ const spec = {
         "loop": "head moved: revalidate"
       },
       "values": [
-        "c2",
-        "c2",
+        "c2 (superseded)",
+        "c2 (historical only)",
+        "h2 (captured for attempt 3)",
         "h2",
-        "h2",
-        "No publication",
+        "Gate 1 revalidated at h2",
         "Private worktree; separate sandbox"
       ],
       "facts": {
@@ -627,7 +628,7 @@ const spec = {
     },
     {
       "label": "Build a fresh candidate c3",
-      "description": "Build fresh c3 against captured h2. When construction finishes, c3 still has no checks of its own; retained c2 evidence cannot validate it.",
+      "description": "At Gate 2 (2 build candidate), the service stages fresh merge commit c3 combining captured head h2 with the worker branch. Because c3 is a new tree, prior checks bound to c2 cannot validate c3.",
       "text": {
         "shared": "shared target: h2",
         "interface": "interface revision h2",
@@ -644,11 +645,11 @@ const spec = {
         "loop": "checks belong to an exact candidate"
       },
       "values": [
-        "c3",
-        "c2",
+        "c3 (built on captured h2)",
+        "c2 (does not cover c3)",
         "h2",
         "h2",
-        "No publication",
+        "Gate 2 built c3; requires fresh Gate 3 checks",
         "Private worktree; separate sandbox"
       ],
       "facts": {
@@ -685,7 +686,7 @@ const spec = {
     },
     {
       "label": "Check that exact fresh candidate c3",
-      "description": "Run checks on exact c3 against captured h2. Only when this action finishes do checks(c3) exist; c2 evidence is not transferred to c3.",
+      "description": "At Gate 3 (3 checks), the assessment sandbox evaluates exact candidate c3, producing fresh verification evidence checks(c3) bound to commit c3 and captured head h2.",
       "text": {
         "shared": "shared target: h2",
         "interface": "interface revision h2",
@@ -696,17 +697,17 @@ const spec = {
         "candidate": "candidate c3",
         "revalidate": "revalidated h2",
         "build": "c3 on h2",
-        "checks": "checks(c3) retained",
+        "checks": "checks(c3) bound · pass",
         "cas": "CAS expects h2",
         "published": "not published",
         "loop": "checks belong to an exact candidate"
       },
       "values": [
         "c3",
-        "c3",
+        "c3 (verified at captured h2)",
         "h2",
         "h2",
-        "No publication",
+        "Gate 3 passed for c3; ready for Gate 4 CAS",
         "Private worktree; separate sandbox"
       ],
       "facts": {
@@ -743,7 +744,7 @@ const spec = {
     },
     {
       "label": "Publish only the checked candidate at the captured head",
-      "description": "Compare-and-swap requires the target still equal captured h2 and checks bound to exact c3. Only when the guard succeeds may c3 become the shared published state.",
+      "description": "At Gate 4 (4 atomic update), update-ref verifies that the target head still equals expected h2 while the publication guard confirms active authority and checks(c3), atomically advancing the shared target to c3 (published with evidence).",
       "text": {
         "shared": "shared target: c3",
         "interface": "interface revision h2",
@@ -754,7 +755,7 @@ const spec = {
         "candidate": "candidate c3",
         "revalidate": "revalidated h2",
         "build": "c3 on h2",
-        "checks": "checks(c3) retained",
+        "checks": "checks(c3) bound · pass",
         "cas": "CAS h2 → c3: passed",
         "published": "published c3",
         "loop": "checks belong to an exact candidate"
@@ -763,8 +764,8 @@ const spec = {
         "c3",
         "c3",
         "h2",
-        "c3",
-        "c3 published",
+        "c3 (atomic ref update succeeded)",
+        "c3 published with evidence",
         "Private worktree; separate sandbox"
       ],
       "facts": {
@@ -815,8 +816,9 @@ window.MLSysFigureLessons[spec.name]=async(root,context)=>{
  root.classList.add(spec.name);svg.setAttribute('role','img');svg.setAttribute('aria-label',spec.question+' Original chapter diagram with synchronized state.');
  const node=(tag,a={},text)=>{const n=document.createElementNS(NS,tag);Object.entries(a).forEach(([k,v])=>n.setAttribute(k,String(v)));if(text!==undefined)n.textContent=text;return n;};
  const textNodes=[...svg.querySelectorAll('text')],bindings={};
- for(const [key,b]of Object.entries(spec.slots)){const matches=textNodes.filter(n=>Number(n.getAttribute('x'))===b.x&&Number(n.getAttribute('y'))===b.y);if(matches.length!==1)throw Error('Original slot changed: '+key);bindings[key]={node:matches[0],original:matches[0].innerHTML,font:matches[0].getAttribute('font-size')};}
+ for(const [key,b]of Object.entries(spec.slots)){const matches=textNodes.filter(n=>Number(n.getAttribute('x'))===b.x&&Number(n.getAttribute('y'))===b.y);if(matches.length!==1)throw Error('Original slot changed: '+key);bindings[key]={node:matches[0],original:matches[0].innerHTML,font:matches[0].getAttribute('font-size'),fill:matches[0].getAttribute('fill'),weight:matches[0].getAttribute('font-weight')};}
  const circles=[...svg.querySelectorAll('circle')].map(n=>({n,fill:n.getAttribute('fill'),stroke:n.getAttribute('stroke'),'stroke-width':n.getAttribute('stroke-width')}));
+ const baseRects=[...svg.querySelectorAll('rect')].filter(r=>+r.getAttribute('width')<=300&&+r.getAttribute('height')<=90&&+r.getAttribute('height')>=30);
  const overlay=node('g',{class:'v3-original-overlay'});svg.append(overlay);
  const markerLayer=node('g');overlay.append(markerLayer);
  const packet=node('g',{class:'v3-original-packet',visibility:'hidden'});packet.append(node('rect',{x:-24,y:-10,width:48,height:20,rx:3}),node('text',{'text-anchor':'middle',y:4}));overlay.append(packet);
@@ -831,12 +833,15 @@ window.MLSysFigureLessons[spec.name]=async(root,context)=>{
  if(spec.variants){choice=document.createElement('label');choice.className='v3-original-choice';choice.textContent=spec.variantLabel+' ';const select=document.createElement('select');select.setAttribute('aria-label',spec.variantLabel);spec.variants.forEach(v=>{const o=document.createElement('option');o.value=v.id;o.textContent=v.label;select.append(o);});select.addEventListener('change',()=>{variant=select.value;frames().forEach((s,i)=>Object.assign(steps[i],{label:s.label,description:s.description}));player.go(0);});choice.append(select);}
  function follow(x,y){active=[x,y];const scale=svg.getBoundingClientRect().width/vb.width;if(canvas.scrollWidth>canvas.clientWidth)canvas.scrollLeft=Math.max(0,x*scale-canvas.clientWidth/2);if(canvas.scrollHeight>canvas.clientHeight)canvas.scrollTop=Math.max(0,y*scale-canvas.clientHeight/2);}
  function render(i,{stage,details}){
-  if(!canvas.isConnected){if(choice)stage.append(choice);stage.append(cue,canvas);details.append(readout);}
+  if(!canvas.isConnected){stage.append(cue,canvas);details.append(readout);}
   const frame=frames()[i];packet.setAttribute('visibility','hidden');markerLayer.replaceChildren();
-  for(const [key,b]of Object.entries(bindings)){b.node.innerHTML=b.original;if(b.font)b.node.setAttribute('font-size',b.font);b.node.removeAttribute('opacity');const value=Object.assign({},spec.defaults,frame.text)[key];if(value!==undefined)b.node.textContent=value;if(spec.slots[key].font)b.node.setAttribute('font-size',spec.slots[key].font);b.node.removeAttribute('textLength');if(spec.slots[key].width&&b.node.getComputedTextLength()>spec.slots[key].width)b.node.setAttribute('textLength',spec.slots[key].width);b.node.setAttribute('lengthAdjust','spacingAndGlyphs');}
+  const prevText=i>0?Object.assign({},spec.defaults,frames()[i-1].text):null,currText=Object.assign({},spec.defaults,frame.text),drawnRects=new Set();
+  const frameBox=(px,py,color='#0284c7')=>{const hits=baseRects.filter(r=>{const x=+r.getAttribute('x'),y=+r.getAttribute('y'),w=+r.getAttribute('width'),h=+r.getAttribute('height');return px>=x-6&&px<=x+w+6&&py>=y-6&&py<=y+h+6;}).sort((a,b)=>(+a.getAttribute('width')*+a.getAttribute('height'))-(+b.getAttribute('width')*+b.getAttribute('height')));if(hits[0]&&!drawnRects.has(hits[0])){drawnRects.add(hits[0]);const tr=hits[0].closest('g[transform]')?.getAttribute('transform');markerLayer.append(node('rect',Object.assign({x:hits[0].getAttribute('x'),y:hits[0].getAttribute('y'),width:hits[0].getAttribute('width'),height:hits[0].getAttribute('height'),rx:hits[0].getAttribute('rx')||4,fill:'none',stroke:color,'stroke-width':2.5},tr?{transform:tr}:{})));return true;}return false;};
+  for(const [key,b]of Object.entries(bindings)){b.node.innerHTML=b.original;if(b.font)b.node.setAttribute('font-size',b.font);if(b.fill)b.node.setAttribute('fill',b.fill);else b.node.removeAttribute('fill');if(b.weight)b.node.setAttribute('font-weight',b.weight);else b.node.removeAttribute('font-weight');b.node.removeAttribute('opacity');const value=currText[key];if(value!==undefined)b.node.textContent=value;if(spec.slots[key].font)b.node.setAttribute('font-size',spec.slots[key].font);b.node.removeAttribute('textLength');if(spec.slots[key].width&&b.node.getComputedTextLength()>spec.slots[key].width)b.node.setAttribute('textLength',spec.slots[key].width);b.node.setAttribute('lengthAdjust','spacingAndGlyphs');if(prevText&&currText[key]!==prevText[key]){b.node.setAttribute('fill','#0369a1');b.node.setAttribute('font-weight','700');frameBox(spec.slots[key].x,spec.slots[key].y,'#0284c7');}}
   for(const c of circles)for(const k of ['fill','stroke','stroke-width']){if(c[k]!==null)c.n.setAttribute(k,c[k]);}
   for(const p of frame.circles||[]){const c=circles.find(c=>Number(c.n.getAttribute('cx'))===p.x&&Number(c.n.getAttribute('cy'))===p.y&&Number(c.n.getAttribute('r'))===(p.r||8));if(!c)throw Error('Original graph node changed');for(const k of ['fill','stroke','stroke-width'])if(p[k])c.n.setAttribute(k,p[k]);}
-  for(const m of frame.marks||[]){markerLayer.append(node('circle',{cx:m.x,cy:m.y,r:m.r||12,fill:'none',stroke:m.color||'#0284c7','stroke-width':2}));}
+  for(const m of frame.marks||[]){frameBox(m.x,m.y,m.color||'#0284c7');}
+  if(i>0&&drawnRects.size===0&&frame.motion){const end=frame.motion.route.at(-1);frameBox(end[0],end[1],'#0284c7');}
   values.forEach((v,j)=>v.textContent=frame.values[j]);root.dataset.originalStep=String(i);root.dataset.originalFacts=JSON.stringify(frame.facts);root.dataset.originalVariant=variant;
   follow(...frame.camera);
   if(!details.querySelector('.v3-original-guard')){const p=document.createElement('p');p.className='v3-original-guard';p.textContent=spec.guard;details.append(p);}
@@ -848,7 +853,7 @@ window.MLSysFigureLessons[spec.name]=async(root,context)=>{
   const width=Math.max(28,Math.min(112,motion.label.length*6+12));packet.querySelector('rect').setAttribute('x',-width/2);packet.querySelector('rect').setAttribute('width',width);packet.querySelector('text').textContent=motion.label;packet.dataset.role=motion.role||'state';packet.setAttribute('visibility','visible');
   onFrame(p=>{let d=total*p,j=0;while(j<lengths.length-1&&d>lengths[j]){d-=lengths[j];j++;}const t=lengths[j]?d/lengths[j]:0,a=route[j],b=route[j+1],x=a[0]+(b[0]-a[0])*t,y=a[1]+(b[1]-a[1])*t;packet.setAttribute('transform',`translate(${x} ${y})`);follow(...(motion.lock_camera?frame.camera:[x,y]));if(p>=1)packet.setAttribute('visibility','hidden');});
  }
- player=window.MLSysOriginalPlayer.create({root,outer:context.outer,title:spec.question,scope:spec.scope,steps,render,transition});
+ player=window.MLSysOriginalPlayer.create({root,outer:context.outer,title:spec.question,intro:spec.intro,layout:'compact',viewControls:choice,scope:spec.scope,steps,render,transition});
  const resize=new ResizeObserver(()=>follow(...active));resize.observe(canvas);const destroy=player.destroy;player.destroy=()=>{resize.disconnect();destroy();};return player;
 };
 })();

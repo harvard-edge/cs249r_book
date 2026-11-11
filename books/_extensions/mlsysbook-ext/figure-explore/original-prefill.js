@@ -4,23 +4,23 @@
   const NS='http://www.w3.org/2000/svg';
   const make=(tag,attrs={},text)=>{const el=document.createElementNS(NS,tag);Object.entries(attrs).forEach(([k,v])=>el.setAttribute(k,v));if(text!==undefined)el.textContent=text;return el;};
   const lesson=[
-    ['Start with the prompt','The four blue tokens are known. The cache is empty; future generated tokens have not appeared.','ready',0],
-    ['Process the whole prompt','All four prompt tokens enter the same prefill pass. The same model weights serve every prompt position.','prefill',0],
-    ['Save the prompt keys and values','Prefill writes one key/value entry for each prompt token. These entries remain available to later decode steps.','write-prompt',4],
-    ['Predict the first token: the','The last prompt position predicts “the.” That prediction becomes the first decode input; its keys and values are not in the cache yet.','first',4],
-    ['Decode the: read earlier entries','The input “the” enters the first narrow pass. Its attention reads the four prompt entries rather than recomputing them.','read',4,0],
-    ['Append the consumed token: the','The pass saves the keys and values of its input, “the.” The cache now retains five consumed tokens.','append',5,0],
-    ['Predict the next token: mat','The pass predicts “mat.” The cache ends at “the”; the newly predicted “mat” has not been processed yet.','emit',5,0],
-    ['Feed mat into the next pass','The same “mat” prediction follows the dashed arrow into the next input position. No cache entry is added by this handoff.','handoff',5,1],
-    ['Decode mat: read earlier entries','The input “mat” reads all five earlier key/value entries. One new input is processed while the stored context is reused.','read',5,1],
-    ['Append the consumed token: mat','The pass saves the keys and values of “mat.” Earlier cache entries remain unchanged.','append',6,1],
-    ['Predict the next token: today','The pass predicts “today.” It remains a prediction until the next decode pass consumes it.','emit',6,1],
-    ['Feed today into the next pass','The same “today” prediction becomes the next input. The cache still ends at “mat.”','handoff',6,2],
-    ['Decode today: read earlier entries','The input “today” reads all six earlier entries. The context read grows even though each pass receives only one new token.','read',6,2],
-    ['Append the consumed token: today','The pass saves the keys and values of “today,” leaving seven retained entries.','append',7,2],
-    ['Predict the end token','The pass emits [end], so generation stops. [end] is an output; no further pass consumes it and no [end] cache entry is written.','emit',7,2],
-    ['Compare the two phases','Prefill shares the weight reads across the prompt. Decode repeats weight reads and reads a growing cache for each new input. This drawing illustrates the dependency, not measured latency.','complete',7,2],
-    ['Release the request cache','Generation is complete and no attention step needs these entries. This request’s private cache is eligible for reclamation. Clearing the drawing does not imply physical zeroization or immediate deallocation, and does not describe shared-prefix eviction.','release',0,2]
+    ['Start with the prompt','The 4 blue prompt tokens (“The”, “cat”, “sat”, “on”) are known at the start. The KV cache has 0 entries, and the 3 future decoded words have not appeared yet.','ready',0],
+    ['Process the whole prompt','All 4 prompt tokens enter the wide prefill pass together. One weight read across the model layers serves all 4 prompt positions in parallel.','prefill',0],
+    ['Save the prompt keys and values','Prefill writes 4 key/value entries (“The · cat · sat · on”) into the KV cache so later decode passes can attend to the prompt without recomputing it.','write-prompt',4],
+    ['Predict the first token: the','The final prompt position (“on”) predicts the first output token, “the.” That prediction will become the input to decode pass 1; the KV cache still holds 4 entries.','first',4],
+    ['Decode the: read earlier entries','Input token “the” enters decode pass 1 (1 token wide). Its attention reads all 4 cached prompt entries from memory while computing Q, K, and V for “the.”','read',4,0],
+    ['Append the consumed token: the','Decode pass 1 appends the keys and values of its consumed input “the” to the KV cache, which now retains 5 entries (“The · cat · sat · on · the”).','append',5,0],
+    ['Predict the next token: mat','Decode pass 1 emits the next prediction, “mat.” The KV cache still has 5 entries ending at “the” because “mat” has not been consumed by a pass yet.','emit',5,0],
+    ['Feed mat into the next pass','Predicted token “mat” follows the dashed autoregressive handoff arrow to become the single input token for decode pass 2. The KV cache remains at 5 entries.','handoff',5,1],
+    ['Decode mat: read earlier entries','Input token “mat” enters decode pass 2 and reads all 5 earlier KV cache entries (“The · cat · sat · on · the”) while processing only 1 new token.','read',5,1],
+    ['Append the consumed token: mat','Decode pass 2 saves the keys and values of “mat,” growing the KV cache to 6 entries (“The · cat · sat · on · the · mat”).','append',6,1],
+    ['Predict the next token: today','Decode pass 2 predicts “today.” It remains an unconsumed output prediction while the KV cache holds 6 entries.','emit',6,1],
+    ['Feed today into the next pass','Predicted token “today” is fed back along the dashed arrow as the input to decode pass 3. The KV cache still holds 6 entries ending at “mat.”','handoff',6,2],
+    ['Decode today: read earlier entries','Input token “today” enters decode pass 3 and reads all 6 earlier KV cache entries. Every decode step reads a longer cached history for just 1 new token.','read',6,2],
+    ['Append the consumed token: today','Decode pass 3 appends the keys and values of “today,” bringing the KV cache to 7 retained entries (4 prompt tokens plus 3 consumed decode tokens).','append',7,2],
+    ['Predict the end token','Decode pass 3 emits “[end],” stopping generation. Because no further pass consumes “[end],” the KV cache stops at 7 entries.','emit',7,2],
+    ['Compare the two phases','Prefill amortized weight reads across 4 prompt tokens at once; decode repeated full weight reads across 3 sequential passes while reading a KV cache that grew from 4 to 7 entries.','complete',7,2],
+    ['Release the request cache','Generation is complete and no further attention step needs the 7 entries. This request’s private KV cache is eligible for reclamation.','release',0,2]
   ];
   window.MLSysFigureLessons=window.MLSysFigureLessons||{};
   window.MLSysFigureLessons['original-prefill']=async(root,{outer,verifiedArtwork})=>{
@@ -45,8 +45,11 @@
     const layer=make('g',{'data-prefill-overlay':''}),motion=make('g',{'aria-hidden':'true'});svg.append(layer,motion);
     const tokens=['the','mat','mat','today','today','[end]'],retained=['The','cat','sat','on','the','mat','today'];
     const tokenLabels=gb.map((b,i)=>{const g=make('g',{'data-token':tokens[i]});g.append(make('rect',{x:b.x+.5,y:b.y+.5,width:b.w-1,height:b.h-1,fill:'#dcfda6'}));const label=make('text',{x:center(b).x,y:center(b).y,'dominant-baseline':'middle','text-anchor':'middle',fill:'#151515','font-size':6.5,'font-family':'sans-serif'},tokens[i]);g.append(label);layer.append(g);return{g,label};});
-    const cacheLabels=cb.map((b,i)=>{const label=make('text',{x:center(b).x,y:center(b).y,'dominant-baseline':'middle','text-anchor':'middle',fill:'#5c2b00','font-size':i===6?3.1:3.6,'font-family':'sans-serif','data-cache-token':retained[i]},retained[i]);layer.append(label);return label;});
-    const focus=make('rect',{fill:'none',stroke:'#005f8e','stroke-width':1.3,rx:1,'data-active-pass':''});layer.append(focus);
+    const cacheLabels=cb.map((b,i)=>{const label=make('text',{x:center(b).x,y:center(b).y,'dominant-baseline':'middle','text-anchor':'middle',fill:'#5c2b00','font-size':i===6?4.1:4.6,'font-weight':'600','font-family':'sans-serif','data-cache-token':retained[i]},retained[i]);layer.append(label);return label;});
+    const focus=make('rect',{fill:'none',stroke:'#005f8e','stroke-width':1.3,rx:1,'data-active-pass':''});
+    const dMinX=Math.min(...pb.slice(1).map(b=>b.x)),dMinY=Math.min(...pb.slice(1).map(b=>b.y)),dMaxX=Math.max(...pb.slice(1).map(b=>b.x+b.w)),dMaxY=Math.max(...pb.slice(1).map(b=>b.y+b.h));
+    const compareDecodeFocus=make('rect',{x:dMinX-1,y:dMinY-1,width:dMaxX-dMinX+2,height:dMaxY-dMinY+2,fill:'none',stroke:'#b45100','stroke-width':1.5,'stroke-dasharray':'3 1.5',rx:1});
+    layer.append(focus,compareDecodeFocus);
     const viewControl=document.createElement('label');viewControl.className='prefill-view-control';viewControl.textContent='Diagram view ';const view=document.createElement('select');view.setAttribute('aria-label','Diagram view');for(const [v,t]of [['follow','Follow the current phase'],['whole','Whole diagram']]){const o=document.createElement('option');o.value=v;o.textContent=t;view.append(o);}view.value=matchMedia('(max-width: 600px)').matches?'follow':'whole';viewControl.append(view);
     const inset=document.createElement('section');inset.className='prefill-cache-inset';inset.setAttribute('aria-label','Detail of the same retained KV cache');
     const insetTitle=document.createElement('strong');insetTitle.textContent='Cache detail — the same retained entries';
@@ -59,14 +62,16 @@
     view.addEventListener('change',updateView);
     function render(index,context){
       current=index;stage=context.stage;
-      if(!stage.contains(svg)){stage.append(viewControl,svg,inset,cacheStatus);}
+      if(!stage.contains(svg)){stage.append(svg);}
+      if(context.details&&!context.details.contains(cacheStatus)){context.details.append(cacheStatus,inset);}
       const [,,kind,count,k=0]=lesson[index];
       tokenLabels.forEach(({g,label},i)=>{let visible=false;if(i===0)visible=index>=3;else if(i===1)visible=index>=6;else if(i===2)visible=index>=7;else if(i===3)visible=index>=10;else if(i===4)visible=index>=11;else if(i===5)visible=index>=14;label.style.visibility=visible?'visible':'hidden';g.firstChild.setAttribute('fill',visible?'#dcfda6':'#fff');});
       cache.forEach((cell,i)=>{cell.style.fill=i<count?'rgb(98.039246%, 83.137512%, 68.624878%)':'white';cacheLabels[i].style.visibility=i<count?'visible':'hidden';cacheLabels[i].style.opacity='1';cell.style.strokeWidth=(kind==='read'&&i<count)?'1.4':'.59776';});
       insetNodes.forEach((n,i)=>{n.dataset.retained=String(i<count);n.classList.toggle('is-read',kind==='read'&&i<count);n.textContent=i<count?retained[i]:'·';});
       insetOperation.textContent=kind==='release'?'The request has finished. Its private cache can be reclaimed; generated tokens remain visible.':kind==='read'?`Read all ${count} earlier entries into the highlighted pass. These entries remain stored.`:kind==='append'?`Append the consumed input “${retained[count-1]}.” Earlier entries stay unchanged.`:'The newly predicted output is not a cache entry until a later pass consumes it.';
-      const active=index>0&&index<15?(index<4?pb[0]:pb[k+1]):null;
+      const active=index===15?pb[0]:index>0&&index<15?(index<4?pb[0]:pb[k+1]):null;
       focus.style.visibility=active?'visible':'hidden';if(active)for(const [key,value]of Object.entries({x:active.x-1,y:active.y-1,width:active.w+2,height:active.h+2}))focus.setAttribute(key,value);
+      compareDecodeFocus.style.visibility=index===15?'visible':'hidden';
       cacheStatus.textContent=kind==='release'?'Request complete: no retained entries are needed by this request. Its private cache is eligible for reclamation.':count?`Retained KV entries (${count}): ${retained.slice(0,count).join(' · ')}. Each labeled cell stands for that token’s keys and values across the model.`:'Retained KV entries: none. Orange cells mark available places in this illustrative request cache.';
       root.dataset.prefillState=String(index);root.dataset.cacheCount=String(count);updateView();motion.replaceChildren();
     }
@@ -81,7 +86,7 @@
       if(kind==='handoff')return[trajectory({x:center(gb[k*2-1]).x,y:gb[k*2-1].y},{x:center(gb[k*2]).x,y:gb[k*2].y},8)];
       return[];
     }
-    const controller=window.MLSysOriginalPlayer.create({root,outer,title:'How does a prompt become a growing KV cache?',scope:'One request. Words stand for tokens; cache cells stand for their keys and values. Attention includes the current input’s newly computed keys and values; arrows emphasize earlier entries. Append marks retention for later passes. Motion is illustrative.',steps:lesson.map(([label,description],i)=>({label,get description(){return current===i?description:'On completion: '+description;}})),render,transition:async({to,onFrame,signal})=>{
+    const controller=window.MLSysOriginalPlayer.create({root,outer,layout:'compact',intro:'Process 4 prompt tokens in one prefill pass, then decode 3 tokens one by one as the KV cache grows to 7 entries.',viewControls:viewControl,title:'How does a prompt become a growing KV cache?',scope:'One request. Words stand for tokens; cache cells stand for their keys and values. Attention includes the current input’s newly computed keys and values; arrows emphasize earlier entries. Append marks retention for later passes. Motion is illustrative.',steps:lesson.map(([label,description],i)=>({label,get description(){return current===i?description:'On completion: '+description;}})),render,transition:async({to,onFrame,signal})=>{
       const tracks=pathsFor(to);
       if(lesson[to][2]==='release'){
         onFrame(t=>cacheLabels.forEach(el=>el.style.opacity=String(1-t)));
