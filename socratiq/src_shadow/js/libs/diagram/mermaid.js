@@ -2,6 +2,7 @@
 
 // import { elements } from "chart.js";
 import mermaid from "mermaid";
+import DOMPurify from "dompurify";
 
 // Initialize mermaid with default config
 mermaid.initialize({
@@ -214,7 +215,11 @@ export const renderMermaidDiagram = async (text) => {
 
     const diagramContainer = document.createElement("div");
     diagramContainer.className = "mermaid-diagram zoomable-image";
-    diagramContainer.innerHTML = svg;
+    const safeSvg = DOMPurify.sanitize(svg, {
+      USE_PROFILES: { svg: true, svgFilters: true },
+      ADD_TAGS: ["foreignObject"],
+    });
+    diagramContainer.innerHTML = safeSvg;
     figure.appendChild(diagramContainer);
 
     if (caption) {
@@ -232,7 +237,7 @@ export const renderMermaidDiagram = async (text) => {
     return { 
       success: true, 
       element: figure, 
-      svg,
+      svg: safeSvg,
       code,
       caption 
     };
@@ -244,6 +249,8 @@ export const renderMermaidDiagram = async (text) => {
     };
   }
 };
+
+export const renderMermaidFlow = renderMermaidDiagram;
 
 // Helper function to apply fixes
 function applyFixes(code, patterns) {

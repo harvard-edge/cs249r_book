@@ -79,7 +79,7 @@ window.MLSysFigureLessons[NAME]=async(root,{outer,verifiedArtwork})=>{
  const shades=[[top,mid],[mid,bot]].map(([y0,y1])=>svg('rect',{y:y0,height:y1-y0,fill:APPROVE,'fill-opacity':.11}));
  // Two segments that coincide while the boundary is shared, so a split is visibly the same object separating.
  const lines=[[top,mid],[mid,bot]].map(([y1,y2],g)=>svg('line',{y1,y2,stroke:INK,'stroke-width':1.6,'stroke-linecap':'butt','data-ft-boundary':String(g),'data-motion-object':'true'}));
- const tagStyle={'font-size':5.6,'font-family':'sans-serif',fill:INK,y:61.6};
+ const tagStyle={'font-size':4.9,'font-weight':'600','font-family':'sans-serif',fill:INK,stroke:'#fff','stroke-width':2.0,'paint-order':'stroke','stroke-linejoin':'round',y:60.8};
  const approveTag=svg('text',{...tagStyle,'text-anchor':'end',class:'ft-desktop'}),denyTag=svg('text',{...tagStyle,'text-anchor':'start',class:'ft-desktop'});
  overlay.append(...shades,...lines,approveTag,denyTag);
  const rings=svg('g',{'data-ft-rings':'true'});
@@ -130,7 +130,7 @@ window.MLSysFigureLessons[NAME]=async(root,{outer,verifiedArtwork})=>{
   // The band under row B holds no markers, only the two dashed candidate lines, so each tag
   // takes the longest wording whose measured extent clears both lines, else a bare arrow, else none.
   approveTag.setAttribute('x',xs[1]-2.2);denyTag.setAttribute('x',xs[1]+2.2);
-  fit(approveTag,split?['◀ B approves','◀ B','◀']:['◀ approve','◀'],-1);fit(denyTag,split?['B denies ▶','B ▶','▶']:['deny ▶','▶'],1);
+  fit(approveTag,split?['◀ B approves','◀ B']:['◀ approve','◀'],-1);fit(denyTag,split?['B denies ▶','B ▶']:['deny ▶','▶'],1);
  }
  const DASH_X=D.bounds.map(sx),GAP=0.8;
  function fit(tag,words,side){
@@ -140,14 +140,14 @@ window.MLSysFigureLessons[NAME]=async(root,{outer,verifiedArtwork})=>{
    if(!(len>0))return;
    const lo=side<0?x-len:x,hi=side<0?x:x+len;
    if(!DASH_X.some(d=>d>lo-GAP&&d<hi+GAP))return;}
-  tag.textContent='';
+  tag.textContent=words[0];
  }
  // Committed values: rings, in-figure counts, ledger tables, and data attributes.
  function commit(i){
   const L=ledgers[i],scored='errors' in L,RING=narrow.matches?{r:7,w:1.5,dash:'2.4 1.5',dy:9.6,f:8.6}:{r:6.6,w:.9,dash:'2 1.4',dy:8.4,f:6.4};committedOnce=true;
   rings.replaceChildren(...(L.wrong||[]).map(j=>{const m=D.markers[j],g=svg('g',{'data-ft-wrong':String(j)});
    // The cross sits above its ring so it never lands between adjacent markers; phone draws both heavier.
-   g.append(svg('circle',{cx:m.x,cy:m.cy,r:RING.r,fill:'none',stroke:INK,'stroke-width':RING.w,'stroke-dasharray':RING.dash}),svg('text',{x:m.x,y:m.cy-RING.dy,'font-size':RING.f,'font-weight':'700',fill:INK,'font-family':'sans-serif','text-anchor':'middle'},'✗'));return g;}));
+   g.append(svg('circle',{cx:m.x,cy:m.cy,r:RING.r,fill:'none',stroke:INK,'stroke-width':RING.w,'stroke-dasharray':RING.dash}),svg('text',{x:m.x,y:m.cy-RING.dy,'font-size':RING.f,'font-weight':'700',fill:INK,stroke:'#fff','stroke-width':2.0,'paint-order':'stroke','stroke-linejoin':'round','font-family':'sans-serif','text-anchor':'middle'},'✗'));return g;}));
   accuracy.textContent=L.phase==='none'?'':L.phase==='decide'?'Accuracy: not yet checked':L.phase==='compare'?`Accuracy ${L.before.accuracyPct}% → ${L.accuracyPct}%`:`Accuracy ${L.correct}/16 = ${L.accuracyPct}%`;
   counts.forEach((t,g)=>{t.textContent=L.phase==='none'?'':L.phase==='decide'?`${L.approved[g]} of 8 approved`:L.phase==='compare'?`${L.before.errors[g]} → ${n(L.errors[g],'error')}`:n(L.errors[g],'error');});
   const where=L.phase==='split'?` Boundaries: Subgroup A on the ${LINE.name}, Subgroup B on its own cutoff (${L.name}).`:L.name?` Shared boundary: ${L.name}.`:'';
@@ -165,7 +165,7 @@ window.MLSysFigureLessons[NAME]=async(root,{outer,verifiedArtwork})=>{
  }
  let committed=0,mounted=false;
  const steps=states.map(([label,describe],i)=>({label,get description(){return committed===i?describe(ledgers[i]):'In progress: '+label+'. The rings and counts still describe the last completed step.';}}));
- return window.MLSysOriginalPlayer.create({root,outer,title:'Where do the errors go when the boundary moves?',
+ return window.MLSysOriginalPlayer.create({root,outer,layout:'compact',intro:'Sweep the shared decision boundary from the 75% line to the 81.25% line across 16 applicants, then adjust Subgroup B to compare error rates.',title:'Where do the errors go when the boundary moves?',
   scope:'Illustrative toy: the original drawing\'s 16 applicants, 8 per subgroup, each with 4 repayers (circles) and 4 defaulters (plus markers). Horizontal position is score order only: markers further left have higher scores, so a boundary approves the markers to its left and moving it right is more lenient. The dashed labels are the accuracy each candidate boundary achieves, not score cutoffs. Steps 2 to 9 use one shared boundary for both rows; steps 10 to 12 keep Subgroup A on the 81.25% line and give Subgroup B its own cutoff, the threshold adjustment discussed after the figure, which is legally restricted and shown here only to expose its trade-off. Every number is a count of drawn markers or a ratio of those counts, not the credit-service metrics in the chapter\'s table. Intermediate stops sit between drawn markers so each move crosses one marker (the first B-only move crosses two repayers). Animation speed represents nothing.',steps,
   render(i,{stage,details}){committed=i;if(!mounted){stage.append(source);details.append(ledgerBox);mounted=true;}paint(D.stops[i]);commit(i);delete root.dataset.pending;},
   transition({from,to,onFrame}){root.dataset.pending=String(to);const a=D.stops[from],b=D.stops[to];

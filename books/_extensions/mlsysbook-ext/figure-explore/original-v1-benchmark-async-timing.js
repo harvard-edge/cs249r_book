@@ -35,12 +35,12 @@ window.MLSysFigureLessons[NAME]=async(root,{outer,verifiedArtwork})=>{
  source.append(mobile);
  const readout=document.createElement('p');readout.className='async-readout';readout.setAttribute('aria-live','off');
  const states=[
- ['Set the timing boundaries','Both host timers are ready to start at the enqueue boundary. The device-event timer has not started.'],
- ['The host call returns','Enqueueing is complete. The call timer stops, but the accelerator has not reached the start event. The synchronized host timer keeps running while the host waits.'],
- ['The stream reaches the start event','The device-event interval starts here, after the host call returned. The host is still waiting at the completion barrier.'],
- ['The accelerator executes the work','Work advances inside the same accelerator block. The device-event and synchronized host intervals grow together; the short call interval remains frozen.'],
- ['The stream reaches the stop event','The bracketed device work is complete, so the device-event interval stops. The synchronized host timer continues until completion reaches the host.'],
- ['The host observes completion','The completion barrier returns and the synchronized host timer stops. The three traces have different endpoints because they answer different timing questions.']
+ ['Set the timing boundaries','At the left enqueue boundary, both host timers (green Call timer and blue Synchronized host timer) are ready to start, while the orange Device-event timer waits for the accelerator stream to reach the start event.'],
+ ['The host call returns','Once the host finishes enqueueing the kernel into the launch queue, the host call returns and the green Call timer stops—measuring only host-side launch overhead before the accelerator has started executing.'],
+ ['The stream reaches the start event','After earlier queued stream work finishes, the accelerator stream reaches the recorded start event and the orange Device-event timer begins, while the host thread remains blocked at the completion barrier.'],
+ ['The accelerator executes the work','Inside the orange device-work block, the orange Device-event timer and blue Synchronized host timer advance together, whereas the green Call timer stayed frozen when the asynchronous launch returned.'],
+ ['The stream reaches the stop event','When the bracketed accelerator kernel finishes, the stream records the stop event and the orange Device-event timer stops—capturing pure device execution without launch queueing or host wakeup delay.'],
+ ['The host observes completion','Once the completion signal crosses back to unblock the host barrier, the blue Synchronized host timer stops—measuring full end-to-end host-visible latency (enqueue + stream wait + device work + synchronization).']
  ];
  const positions=[G.start,G.call,G.deviceStart,G.deviceMid,G.deviceStop,G.hostStop];let committed=0,mounted=false;
  const steps=states.map(([label,description],i)=>({label,get description(){return committed===i?description:'In progress: '+label.toLowerCase()+'. The endpoint is not committed until this action finishes.';}}));
@@ -54,10 +54,10 @@ window.MLSysFigureLessons[NAME]=async(root,{outer,verifiedArtwork})=>{
   mobileRails.forEach((n,i)=>{const a=[G.start,G.deviceStart,G.start][i],b=[G.call,G.deviceStop,G.hostStop][i];n.setAttribute('x2',Math.max(a,Math.min(x,b)));});
   readout.textContent=`Call timer: ${call} · Device events: ${device} · Synchronized host: ${host}`;
   root.dataset.timingState=JSON.stringify({committed,call,device,host,x});
-  source.scrollLeft=Math.max(0,x*art.getBoundingClientRect().width/358.388-source.clientWidth/2);
+  source.scrollLeft=0;
  }
- const player=window.MLSysOriginalPlayer.create({root,outer,title:'Why can a host call finish before the accelerator?',scope:'The original schematic timeline, not measured milliseconds. One cursor shows time in both lanes. Strong traces grow only inside their declared timing boundaries; animation speed does not represent hardware speed. Earlier device work has completed before the host timer starts.',steps,
- render(i,{stage}){committed=i;if(!mounted){stage.append(source,readout);mounted=true;}paint(positions[i],i===0);root.dataset.lessonState=String(i);delete root.dataset.pending;},
+ const player=window.MLSysOriginalPlayer.create({root,outer,layout:'compact',intro:'Trace the moving time cursor across the host and accelerator lanes to compare the call timer, device-event timer, and synchronized host timer.',title:'Why can a host call finish before the accelerator?',scope:'The original schematic timeline, not measured milliseconds. One cursor shows time in both lanes. Strong traces grow only inside their declared timing boundaries; animation speed does not represent hardware speed. Earlier device work has completed before the host timer starts.',steps,
+ render(i,{stage,details}){committed=i;if(!mounted){stage.append(source);(details||stage).append(readout);mounted=true;}paint(positions[i],i===0);root.dataset.lessonState=String(i);delete root.dataset.pending;},
  transition({from,to,onFrame}){root.dataset.pending=String(to);onFrame(p=>{paint(positions[from]+(positions[to]-positions[from])*p,from===0&&p===0);root.dataset.animationProgress=String(p);});}
  });return player;
 };})();

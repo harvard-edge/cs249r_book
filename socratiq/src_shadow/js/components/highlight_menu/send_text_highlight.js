@@ -374,14 +374,14 @@ export function clearCopyContainer(shadowRoot) {
     document.addEventListener('mouseup', (e) => {
       setTimeout(() => {
         const selection = window.getSelection();
-        selectedText = selection.toString().trim(); // Update the shared selectedText variable
+        selectedText = selection ? selection.toString().trim() : ''; // Update the shared selectedText variable
   
-        if (selectedText) {
+        if (selectedText && selection && selection.rangeCount > 0) {
           const range = selection.getRangeAt(0);
           const rect = range.getBoundingClientRect();
           updateButtonPosition(button, rect);
           button.style.display = 'flex'; // Show the button
-        } else if (!e.target.closest('.copy-item')) {
+        } else if (!(e.target instanceof Element) || !e.target.closest('.copy-item')) {
           button.style.display = 'none';
         }
       }, 10);

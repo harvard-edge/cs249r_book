@@ -1,6 +1,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createExplanationRequest, DEFAULT_ENDPOINT, MAX_TOKENS, INPUT_CHARACTER_BUDGET } from '../src_reader/transport.mjs';
+import { createExplanationRequest, buildSystemPrompt, DEFAULT_ENDPOINT, MAX_TOKENS, INPUT_CHARACTER_BUDGET } from '../src_reader/transport.mjs';
+import { resolveChapterTaxonomy, formatChapterTaxonomyPrompt, TAXONOMY_GROUPS, TAXONOMY_SUBJECTS } from '../src_shared/taxonomy-map.js';
+import {
+  BYOK_SESSION_KEY,
+  BYOK_PERSISTED_KEY,
+  BYOK_PKCE_STATE_KEY,
+  redactSecrets,
+  validateByokEndpoint,
+  saveByokConfig,
+  readActiveByokConfig,
+  clearByokConfig,
+  createPkcePair,
+  startOpenRouterPKCE,
+  completeOpenRouterPKCE,
+} from '../src_shared/byok-provider.js';
+import { CustomAPIAdapter } from '../src_shadow/js/libs/agents/custom-api-adapter.js';
 
 const encoder = new TextEncoder();
 
@@ -308,4 +323,183 @@ test('rejects oversized answers and unterminated events without rendering unboun
     }), expected);
     assert.equal(chunks.length, 0);
   }
+});
+
+test('resolveChapterTaxonomy and formatChapterTaxonomyPrompt resolve vol1-vol4 and inject F/S/P/Q/T into buildSystemPrompt', async () => {
+  assert.deepEqual(Object.keys(TAXONOMY_GROUPS), ['F', 'S', 'P', 'Q', 'T']);
+  assert.ok(Object.keys(TAXONOMY_SUBJECTS).length >= 50);
+
+  const chapterSamples = [
+    ['vol1', 'https://mlsysbook.ai/vol1/01_introduction/', 'vol1/01_introduction', 'F1.1'],
+    ['vol2', 'https://mlsysbook.ai/vol2/01_introduction/', 'vol2/01_introduction', 'F1.2'],
+    ['vol3', 'https://mlsysbook.ai/vol3/01_introduction/', 'vol3/01_introduction', 'T1.3'],
+    ['vol4', 'https://mlsysbook.ai/vol4/01_boundary/', 'vol4/01_boundary', 'Q4.1'],
+  ];
+
+  for (const [vol, url, expectedSlug, expectedSubject] of chapterSamples) {
+    const resolved = resolveChapterTaxonomy(url);
+    assert.ok(resolved, `resolves chapter taxonomy for ${vol}`);
+    assert.equal(resolved.slug, expectedSlug);
+    assert.equal(resolved.volume, vol);
+    assert.ok(resolved.subjects.includes(expectedSubject), `${vol} includes ${expectedSubject}`);
+
+    const promptLine = formatChapterTaxonomyPrompt(url);
+    assert.match(promptLine, /Foundations \(F\), Stack \(S\), Lifecycle \(P\), Qualities \(Q\), and System Types \(T\)/);
+    assert.ok(promptLine.includes(expectedSubject), `formatChapterTaxonomyPrompt includes ${expectedSubject}`);
+
+    const systemPrompt = buildSystemPrompt(url);
+    assert.ok(systemPrompt.includes(promptLine), `buildSystemPrompt injects chapter taxonomy for ${vol}`);
+  }
+});
+
+test('BYOK security controls: allowlist validation, secret redaction, session-only storage, PKCE exchange, and direct Gemini/Claude routing', async () => {
+  // 1. Strict HTTPS allowlist & gateway protection
+  assert.throws(() => validateByokEndpoint('https://mlsysbook.ai/api/socratiq/ai/stream', 'openai'), /Refusing to send a personal API key/);
+  assert.throws(() => validateByokEndpoint('https://harvard-edge.github.io/cs249r_book/', 'openai'), /Refusing to send a personal API key/);
+  assert.throws(() => validateByokEndpoint('http://api.openai.com/v1/chat/completions', 'openai'), /must use HTTPS/);
+  assert.throws(() => validateByokEndpoint('https://evil.example.com/v1/chat/completions', 'openai'), /not in the approved HTTPS provider allowlist/);
+  assert.equal(validateByokEndpoint('https://generativelanguage.googleapis.com/v1beta/openai/chat/completions?key=leak', 'google-gemini').url, 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions');
+  assert.equal(validateByokEndpoint('https://api.anthropic.com/v1/messages', 'anthropic').host, 'api.anthropic.com');
+  assert.equal(validateByokEndpoint('http://127.0.0.1:11434/api/generate', 'ollama').isLocal, true);
+
+  // 2. Secret redaction
+  const dirty = 'Failed with AIzaSyAbCdEfGhIjKlMnOpQrStUvWxYz123456, sk-ant-api03-1234567890abcdef, sk-or-v1-abcdef0123456789, gsk_1234567890abcdefghij, and ?key=secret123';
+  const clean = redactSecrets(dirty);
+  assert.ok(!clean.includes('AIzaSy'));
+  assert.ok(!clean.includes('sk-ant-'));
+  assert.ok(!clean.includes('sk-or-v1-'));
+  assert.ok(!clean.includes('gsk_123'));
+  assert.ok(!clean.includes('secret123'));
+  assert.match(clean, /\[REDACTED_API_KEY\]/);
+
+  // 3. Session-only storage by default + shared *.github.io localStorage protection
+  const makeStore = () => {
+    const map = new Map();
+    return {
+      getItem: k => map.get(k) ?? null,
+      setItem: (k, v) => map.set(k, String(v)),
+      removeItem: k => map.delete(k),
+      map,
+    };
+  };
+  const sessionStore = makeStore();
+  const localStore = makeStore();
+
+  saveByokConfig({
+    enabled: true,
+    provider: 'google-gemini',
+    model: 'gemini-2.5-flash',
+    apiKey: 'constructed-session-gemini-key',
+    saveLocally: false,
+  }, { sessionStore, localStore });
+  assert.ok(sessionStore.getItem(BYOK_SESSION_KEY).includes('constructed-session-gemini-key'));
+  assert.equal(localStore.getItem(BYOK_PERSISTED_KEY), null);
+
+  // On *.github.io shared origin, even saveLocally: true must not persist to localStorage
+  const prevWin = globalThis.window;
+  globalThis.window = { location: { hostname: 'harvard-edge.github.io' } };
+  try {
+    saveByokConfig({
+      enabled: true,
+      provider: 'anthropic',
+      model: 'claude-sonnet-4-20250514',
+      apiKey: 'constructed-github-io-key',
+      saveLocally: true,
+    }, { sessionStore, localStore });
+    assert.equal(localStore.getItem(BYOK_PERSISTED_KEY), null);
+  } finally {
+    globalThis.window = prevWin;
+    clearByokConfig({ sessionStore, localStore });
+  }
+
+  // 4. OpenRouter OAuth PKCE code_verifier / code_challenge + URL cleanup before fetch
+  const pkce = await createPkcePair();
+  assert.ok(pkce.verifier.length >= 43);
+  assert.ok(pkce.challenge.length >= 40);
+  assert.notEqual(pkce.verifier, pkce.challenge);
+
+  let redirectedTo = '';
+  const mockLocation = {
+    href: 'https://mlsysbook.ai/vol1/01_introduction/?chapter=1#sec1',
+    search: '',
+    assign(url) { redirectedTo = url; },
+  };
+  const mockHistory = {
+    replacedUrl: null,
+    replaceState(_state, _title, url) { this.replacedUrl = url; },
+  };
+  await startOpenRouterPKCE({ model: 'anthropic/claude-sonnet-4', sessionStore, locationObj: mockLocation });
+  assert.match(redirectedTo, /^https:\/\/openrouter\.ai\/auth\?/);
+  assert.match(redirectedTo, /code_challenge_method=S256/);
+
+  mockLocation.href = 'https://mlsysbook.ai/vol1/01_introduction/?chapter=1&code=pkce_auth_code_123#sec1';
+  mockLocation.search = '?chapter=1&code=pkce_auth_code_123';
+  let urlCleanedBeforeFetch = false;
+  const pkceResult = await completeOpenRouterPKCE({
+    sessionStore,
+    localStore,
+    locationObj: mockLocation,
+    historyObj: mockHistory,
+    fetchImpl: async (url, init) => {
+      urlCleanedBeforeFetch = mockHistory.replacedUrl === '/vol1/01_introduction/?chapter=1#sec1';
+      assert.equal(url, 'https://openrouter.ai/api/v1/auth/keys');
+      const body = JSON.parse(init.body);
+      assert.equal(body.code, 'pkce_auth_code_123');
+      assert.equal(body.code_challenge_method, 'S256');
+      return Response.json({ key: 'constructed-openrouter-oauth-key' });
+    },
+  });
+  assert.equal(urlCleanedBeforeFetch, true, 'scrubs ?code= from URL before network exchange');
+  assert.equal(pkceResult.enabled, true);
+  assert.equal(readActiveByokConfig({ sessionStore, localStore }).provider, 'openrouter');
+  assert.equal(readActiveByokConfig({ sessionStore, localStore }).model, 'anthropic/claude-sonnet-4');
+  assert.equal(localStore.getItem(BYOK_PERSISTED_KEY), null, 'PKCE key stored in sessionStorage only');
+
+  // 5. Direct Anthropic Claude & Google Gemini routing via createExplanationRequest
+  saveByokConfig({
+    enabled: true,
+    provider: 'anthropic',
+    model: 'claude-sonnet-4-20250514',
+    apiKey: 'constructed-claude-key',
+    saveLocally: false,
+  }, { sessionStore, localStore });
+
+  let anthropicCall = null;
+  const requestClaude = createExplanationRequest({
+    fetchImpl: async (url, init) => {
+      anthropicCall = { url, headers: init.headers, body: JSON.parse(init.body) };
+      return responseFromChunks([
+        sseEvent({ type: 'content_block_delta', delta: { text: 'Claude ' } }),
+        sseEvent({ type: 'content_block_delta', delta: { text: 'explanation.' } }),
+        sseEvent({ type: 'message_stop' }),
+      ]);
+    },
+  });
+  const claudeAnswer = await requestClaude({
+    source: { quote: 'Operational intensity', title: 'Roofline', url: 'https://mlsysbook.ai/vol1/01_introduction/' },
+    question: 'Explain this passage.',
+  });
+  assert.equal(claudeAnswer, 'Claude explanation.');
+  assert.equal(anthropicCall.url, 'https://api.anthropic.com/v1/messages');
+  assert.equal(anthropicCall.headers['x-api-key'], 'constructed-claude-key');
+  assert.equal(anthropicCall.headers['anthropic-dangerous-direct-browser-access'], 'true');
+
+  // 6. CustomAPIAdapter never puts Gemini API key in URL query string
+  const geminiNativeUrl = CustomAPIAdapter._getEndpointForProvider({
+    provider: 'google-gemini',
+    endpoint: 'https://generativelanguage.googleapis.com/v1beta',
+    model: 'gemini-2.5-flash',
+    apiKey: 'constructed-gemini-secret',
+  }, true);
+  assert.ok(!geminiNativeUrl.includes('constructed-gemini-secret'), 'never puts Gemini key in URL');
+  assert.equal(
+    CustomAPIAdapter._getHeadersForProvider('google-gemini', 'constructed-gemini-secret', 'https://generativelanguage.googleapis.com/v1beta')['x-goog-api-key'],
+    'constructed-gemini-secret'
+  );
+  assert.equal(
+    CustomAPIAdapter._getHeadersForProvider('google-gemini', 'constructed-gemini-secret', 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions')['Authorization'],
+    'Bearer constructed-gemini-secret'
+  );
+
+  clearByokConfig({ sessionStore, localStore });
 });

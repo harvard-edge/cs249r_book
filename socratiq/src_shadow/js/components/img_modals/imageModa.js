@@ -76,7 +76,12 @@ export function renderModal(shadowRoot, imageElement) {
     });
   
     // Add event listeners
+    const handleKeydown = (e) => {
+      if (e.key === 'Escape') closeModal();
+    };
+
     const closeModal = () => {
+      document.removeEventListener('keydown', handleKeydown);
       overlay.style.opacity = '0';
       modalImage.style.transform = 'scale(0.9)';
       setTimeout(() => overlay.remove(), 300);
@@ -88,15 +93,14 @@ export function renderModal(shadowRoot, imageElement) {
     });
     
     // Close on escape key
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') closeModal();
-    }, { once: true });
+    document.addEventListener('keydown', handleKeydown);
   }
 
 // Add near other initialization code in the inject() function
 export function initializeImageZoom(shadowRoot) {
   shadowRoot.addEventListener('click', (e) => {
     const target = e.target;
+    if (!(target instanceof Element)) return;
     
     // Skip if target is within an ink-mde editor
     if (target.closest('.ink-mde')) return;

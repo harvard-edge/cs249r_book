@@ -231,7 +231,7 @@ this.createModal().then(async () => {
 
             <div 
                 id="sr-modal-content_inner"
-                class="relative top-10 mx-auto mb-6 p-5 w-[90%] max-w-4xl shadow-lg rounded-md ${themeClasses.modalBg}"
+                class="relative top-10 mx-auto mb-6 p-3 sm:p-6 w-[90%] max-w-4xl shadow-lg rounded-md ${themeClasses.modalBg}"
                style="max-height: calc(100vh - 80px); background-color: var(--socratiq-bg) !important; color: var(--socratiq-text) !important; display: flex; flex-direction: column;"
                 >
                     <!-- Close button -->
@@ -242,7 +242,7 @@ this.createModal().then(async () => {
 </button>
                     <div class="grid grid-cols-4 mt-8 gap-4" style="flex: 1; min-height: 0; overflow: hidden;">
                         <!-- Sidebar -->
-                        <div id="sr-sidebar" class="col-span-1 border-r overflow-y-auto ${themeClasses.border} pr-4" style="max-height: 100%; overflow-y: auto;">
+                        <div id="sr-sidebar" class="col-span-1 border-r max-h-[180px] overflow-y-auto sm:max-h-none ${themeClasses.border} pr-4" style="max-height: 100%; overflow-y: auto;">
                         <!-- Search input -->
                         <div class="relative mb-4">
                             <input type="text" 
@@ -278,14 +278,14 @@ this.createModal().then(async () => {
                         <div>
                             <button class="w-full flex items-center justify-between px-3 py-2 text-sm text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-zinc-800/50 rounded-md">
                                 <div class="flex items-center gap-2">
-                                    <svg class="w-4 h-4 transform transition-transform" data-dropdown="tags" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="transform: rotate(180deg);">
+                                    <svg class="w-4 h-4 transform transition-transform" data-dropdown="tags" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="transform: rotate(${typeof window !== 'undefined' && window.innerWidth <= 640 ? '0deg' : '180deg'});">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
                                     </svg>
                                     <span>Tags</span>
                                 </div>
                                 <span id="totalTagCount" class="text-xs">${this.getInitialTagCount()}</span>
                             </button>
-                            <div id="tagList" class="mt-1 space-y-1" style="max-height: 200px; overflow-y: auto;">
+                            <div id="tagList" class="mt-1 space-y-1 ${typeof window !== 'undefined' && window.innerWidth <= 640 ? 'hidden' : ''}" style="max-height: 200px; overflow-y: auto;">
                                 <!-- Tags will be rendered here -->
                             </div>
                         </div>
@@ -911,14 +911,14 @@ this.createModal().then(async () => {
     }
 
     newTags.forEach((tag) => {
-      if (!tagList.querySelector(`[data-tag="${tag}"]`)) {
+      if (!tagList.querySelector(`[data-tag="${CSS.escape(String(tag))}"]`)) {
         const tagButton = document.createElement("button");
         tagButton.className =
           "w-full text-left px-3 py-2 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-zinc-700 flex items-center gap-2";
         tagButton.setAttribute("data-tag", tag);
         tagButton.innerHTML = `
                     <span class="text-gray-400">#</span>
-                    <span>${tag}</span>
+                    <span>${escapeSidebarText(tag)}</span>
                 `;
         tagList.appendChild(tagButton);
       }
@@ -937,8 +937,8 @@ this.createModal().then(async () => {
           .map(
             (tag) => `
                     <span class="tag inline-flex items-center px-2 py-1 rounded-full text-xs bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
-                        #${tag.trim()}
-                        <button class="ml-1 text-blue-500 hover:text-blue-700" data-tag="${tag.trim()}">×</button>
+                        #${escapeSidebarText(tag.trim())}
+                        <button class="ml-1 text-blue-500 hover:text-blue-700" data-tag="${escapeSidebarText(tag.trim())}">×</button>
                     </span>
                 `
           )
@@ -1387,29 +1387,29 @@ this.createModal().then(async () => {
     cardList.innerHTML = this.flashcards
       .map(
         (card) => `
-            <div class="rounded-lg p-4 shadow-sm" style="box-shadow: 0 10px 20px rgba(0, 0, 255, 0.5); background-color: ${isDark ? '#0d1117' : '#ffffff'} !important; color: ${isDark ? '#e6edf3' : '#1f2328'} !important;">
+            <div class="rounded-lg p-4 shadow-sm" style="box-shadow: 0 10px 20px var(--socratiq-accent-soft, rgba(142, 21, 55, 0.15)); background-color: ${isDark ? '#0d1117' : '#ffffff'} !important; color: ${isDark ? '#e6edf3' : '#1f2328'} !important;">
                 <div class="flex justify-between items-start mb-2">
-                    <h3 class="text-gray-900 dark:text-white">${
+                    <h3 class="text-gray-900 dark:text-white">${escapeSidebarText(
                       card.question
-                    }</h3>
+                    )}</h3>
                     <div class="flex space-x-2">
-                        <button class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300" data-card-id="${
+                        <button class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300" data-card-id="${escapeSidebarText(
                           card.id
-                        }" data-action="edit">
+                        )}" data-action="edit">
                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
                             </svg>
                         </button>
-                        <button class="text-gray-400 hover:text-red-600" data-card-id="${
+                        <button class="text-gray-400 hover:text-red-600" data-card-id="${escapeSidebarText(
                           card.id
-                        }" data-action="delete">
+                        )}" data-action="delete">
                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
                             </svg>
                         </button>
                     </div>
                 </div>
-                <p class="text-gray-600 dark:text-gray-300">${card.answer}</p>
+                <p class="text-gray-600 dark:text-gray-300">${escapeSidebarText(card.answer)}</p>
                 ${
                   card.tags
                     ? `
@@ -1418,7 +1418,7 @@ this.createModal().then(async () => {
                           .map(
                             (tag) => `
                             <span class="inline-flex items-center px-2 py-1 rounded text-xs bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
-                                #${tag}
+                                #${escapeSidebarText(tag)}
                             </span>
                         `
                           )
@@ -1448,203 +1448,6 @@ this.createModal().then(async () => {
 
     // Add after cards are rendered
     // this.dragHandler.initialize();
-  }
-
-  editCard(cardId) {
-    const card = this.flashcards.find((c) => c.id === cardId);
-    if (!card) return;
-
-    // Show form with existing values
-    const addCardForm = this.shadowRoot.querySelector("#addCardForm");
-    const questionInput = this.shadowRoot.querySelector("#questionInput");
-    const answerInput = this.shadowRoot.querySelector("#answerInput");
-    const tagContainer = this.shadowRoot.querySelector("#tagInputContainer");
-
-    if (addCardForm && questionInput && answerInput) {
-      questionInput.value = card.question;
-      answerInput.value = card.answer;
-      addCardForm.classList.remove("hidden");
-
-      // Add tags
-      if (card.tags) {
-        tagContainer.innerHTML = card.tags
-          .map(
-            (tag) => `
-                    <span class="tag inline-flex items-center px-2 py-1 rounded bg-blue-100 text-blue-700 text-sm">
-                        #${tag}
-                        <button class="ml-1 text-blue-500 hover:text-blue-700">×</button>
-                    </span>
-                `
-          )
-          .join("");
-      }
-
-      // Update save button to handle edit
-      const saveBtn = this.shadowRoot.querySelector("#saveCard");
-      if (saveBtn) {
-        saveBtn.dataset.editId = cardId;
-      }
-    }
-  }
-
-  deleteCard(cardId) {
-    if (!cardId) {
-      console.error("deleteCard called with undefined/null cardId");
-      return;
-    }
-    
-    try {
-      console.log("🗑️ deleteCard called with cardId:", cardId);
-      
-      // Check if we're in review mode and this is the current card
-      // SAFE: Use optional chaining and check for existence
-      let isCurrentCard = false;
-      let currentReviewIndex = -1;
-      
-      if (this.currentReview && this.currentReview.cards && Array.isArray(this.currentReview.cards)) {
-        currentReviewIndex = this.currentReview.currentIndex || 0;
-        const currentCard = this.currentReview.cards[currentReviewIndex];
-        if (currentCard && currentCard.id) {
-          isCurrentCard = currentCard.id === cardId;
-        }
-      }
-    
-    // PROBLEMATIC CODE FIXED: Filter undefined/null BEFORE accessing .id property
-    // This prevents "Cannot read properties of undefined (reading 'id')" errors
-    const safeFlashcards = (this.flashcards || []).filter(c => c != null && c.id != null);
-    const safeCurrentDeck = (this.storageHandler?.inMemoryData?.currentDeck || []).filter(c => c != null && c.id != null);
-    
-    // Find the original index in currentDeck (before filtering) for proper index adjustment
-    let originalIndexInCurrentDeck = -1;
-    if (this.storageHandler?.inMemoryData?.currentDeck) {
-      // SAFE: Check c != null FIRST before accessing c.id
-      originalIndexInCurrentDeck = this.storageHandler.inMemoryData.currentDeck.findIndex(c => {
-        if (c == null) return false; // Skip null/undefined
-        if (c.id == null) return false; // Skip elements without id
-        return c.id === cardId; // Match the cardId
-      });
-    }
-    
-    // Search in flashcards first, then currentDeck
-    let foundIn = null;
-    let index = safeFlashcards.findIndex((c) => c.id === cardId);
-    if (index !== -1) {
-      foundIn = 'flashcards';
-    } else if (originalIndexInCurrentDeck !== -1) {
-      foundIn = 'currentDeck';
-      index = originalIndexInCurrentDeck;
-    }
-    
-    if (index === -1) {
-      console.warn(`Card with id ${cardId} not found in any array`);
-      // Try to delete from storage anyway
-      this.storageHandler?.purgeCardFromMemory(cardId);
-      this.storageHandler?.saveToLocalStorage();
-      return;
-    }
-
-    // Update the original arrays by filtering - safely check for null BEFORE accessing id
-    if (foundIn === 'flashcards' && this.flashcards) {
-      // FIXED: Check c != null FIRST, then safely access c.id
-      this.flashcards = this.flashcards.filter(c => {
-        if (c == null) return false; // Remove undefined/null elements
-        if (c.id == null) return false; // Remove elements without id
-        return c.id !== cardId; // Remove the card we're deleting
-      });
-    }
-    
-    // currentDeck and currentReview.cards are the same reference, so update both
-    if ((foundIn === 'currentDeck' || foundIn === 'currentReview') && this.storageHandler?.inMemoryData?.currentDeck) {
-      // FIXED: Check c != null FIRST, then safely access c.id
-      const filteredDeck = this.storageHandler.inMemoryData.currentDeck.filter(c => {
-        if (c == null) return false; // Remove undefined/null elements
-        if (c.id == null) return false; // Remove elements without id
-        return c.id !== cardId; // Remove the card we're deleting
-      });
-      
-      // CRITICAL: Reassign to update the reference
-      this.storageHandler.inMemoryData.currentDeck = filteredDeck;
-      
-      // CRITICAL: Update currentReview.cards to point to the new filtered array
-      // (The old reference is broken after reassignment, so we need to update it)
-      if (this.currentReview) {
-        this.currentReview.cards = filteredDeck;
-      }
-      
-      // Adjust the currentIndex if we deleted the current card or one before it
-      if (this.currentReview && this.currentReview.cards) {
-        // originalIndexInCurrentDeck is the index before deletion
-        if (isCurrentCard || originalIndexInCurrentDeck < currentReviewIndex) {
-          // If we deleted the current card, go to previous card or stay at 0
-          if (isCurrentCard) {
-            if (this.currentReview.currentIndex > 0) {
-              this.currentReview.currentIndex--;
-            } else if (this.currentReview.cards.length > 0) {
-              // Stay at index 0, the card array already shifted
-              this.currentReview.currentIndex = 0;
-            } else {
-              // No cards left, close modal
-              const modal = this.shadowRoot.querySelector("#cardReviewModal");
-              if (modal) modal.classList.add("hidden");
-              this.currentReview = null;
-            }
-          } else {
-            // Deleted a card before current, adjust index down by 1
-            this.currentReview.currentIndex--;
-          }
-        }
-      }
-    }
-    
-    this.storageHandler.purgeCardFromMemory(cardId);
-    this.storageHandler.saveToLocalStorage();
-    this.uiHandler.updateProgress();
-    this.renderCards();
-
-    // Update visualization if visible
-    const vizContainer = this.shadowRoot.querySelector("#flashcardViz");
-    if (vizContainer && !vizContainer.classList.contains("hidden")) {
-      const safeCards = (this.flashcards || []).filter(c => c != null && c.id != null);
-      this.visualization.update(safeCards);
-    }
-    
-    // If we're in review mode and deleted a card, update the review modal
-    if (this.currentReview && isCurrentCard) {
-      const modal = this.shadowRoot.querySelector("#cardReviewModal");
-      if (modal && this.currentReview.cards && this.currentReview.cards.length > 0) {
-        // Ensure currentIndex is valid
-        if (this.currentReview.currentIndex >= this.currentReview.cards.length) {
-          this.currentReview.currentIndex = Math.max(0, this.currentReview.cards.length - 1);
-        }
-        
-        // Update the displayed card - safely check for undefined
-        const card = this.currentReview.cards[this.currentReview.currentIndex];
-        if (card && card.id && this.reviewEditor) {
-          this.reviewEditor.update(card.question);
-          this.updateNavigationButtons?.();
-        } else if (this.currentReview.cards.length === 0) {
-          // No cards left, close modal
-          modal.classList.add("hidden");
-          this.currentReview = null;
-        }
-      } else if (modal && (!this.currentReview.cards || this.currentReview.cards.length === 0)) {
-        // No cards left, close modal
-        modal.classList.add("hidden");
-        this.currentReview = null;
-      }
-    }
-    } catch (error) {
-      console.error("❌ Error in deleteCard:", error);
-      console.error("Error details:", {
-        cardId,
-        hasCurrentReview: !!this.currentReview,
-        currentReviewCards: this.currentReview?.cards,
-        currentReviewIndex: this.currentReview?.currentIndex,
-        flashcardsLength: this.flashcards?.length,
-        currentDeckLength: this.storageHandler?.inMemoryData?.currentDeck?.length
-      });
-      throw error; // Re-throw to see the full stack trace
-    }
   }
 
   clearInputs() {
@@ -1782,8 +1585,8 @@ this.createModal().then(async () => {
         overflow-x: hidden;
     `;
 
-    // Add click handler for chapter selection
-    chapterList?.addEventListener("click", (e) => {
+    // Add click handler for chapter selection (use .onclick to avoid stacking on re-render)
+    chapterList.onclick = (e) => {
       const chapterBtn = e.target.closest("button[data-chapter]");
       if (chapterBtn) {
         const chapterNum = parseInt(chapterBtn.dataset.chapter);
@@ -1806,7 +1609,7 @@ this.createModal().then(async () => {
           this.chapterSets.set(chapterNum, cards);
         }
       }
-    });
+    };
 
     const chapterCountElement = this.shadowRoot.querySelector("#chapterCount");
 
@@ -1864,7 +1667,7 @@ this.createModal().then(async () => {
           
           chaptersContent += `
             <div class="chapter-container group">
-                <button class="w-full flex justify-between px-3 py-2 text-sm text-gray-600 dark:text-gray-300 ${hoverClasses} rounded-md ${activeClasses} min-h-[2.5rem]" data-chapter="${escapeSidebarText(chapter.chapter)}">
+                <button class="w-full flex justify-between gap-2 px-3 py-2 text-sm text-gray-600 dark:text-gray-300 ${hoverClasses} rounded-md ${activeClasses} min-h-[2.5rem]" style="gap: 8px;" data-chapter="${escapeSidebarText(chapter.chapter)}">
                     <div class="flex gap-2">
                         <svg class="w-4 h-4 transform transition-transform duration-200" 
                              data-dropdown="chapter-${escapeSidebarText(chapter.chapter)}"
@@ -1893,7 +1696,7 @@ this.createModal().then(async () => {
                     </div>
                 </button>
                 <div class="chapter-cards ml-6 mt-1 space-y-0 ${
-                  isCurrentChapter ? "" : "hidden"
+                  isCurrentChapter && (typeof window === "undefined" || window.innerWidth > 640) ? "" : "hidden"
                 }">
                     ${cards
                       .map(
@@ -2047,7 +1850,7 @@ this.createModal().then(async () => {
       styles.id = "ink-mde-styles";
       styles.textContent = `
 
-      #cardList, flashcardList# {
+      #cardList, #flashcardList {
     height: calc(100vh - 180px);
     overflow-x: hidden;
 }
@@ -2265,7 +2068,7 @@ this.createModal().then(async () => {
                                   .map(
                                     (tag) => `
                                     <span class="inline-flex items-center px-2 py-1 rounded-full text-xs bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
-                                        #${tag}
+                                        #${escapeSidebarText(tag)}
                                     </span>
                                 `
                                   )
@@ -2342,10 +2145,17 @@ this.createModal().then(async () => {
     this.dragHandler.initialize();
   }
 
-  editCard(index) {
-    const card = this.chapterSets.get(parseInt(this.currentChapter.chapter))[
-      index
-    ];
+  editCard(indexOrId) {
+    const cards =
+      this.chapterSets.get(parseInt(this.currentChapter?.chapter)) ||
+      this.flashcards ||
+      [];
+    const index =
+      typeof indexOrId === "number"
+        ? indexOrId
+        : cards.findIndex((c) => String(c.id) === String(indexOrId));
+    const card = cards[index];
+    if (!card) return;
     const modal = this.shadowRoot.querySelector("#editCardModal");
 
     // Ensure editors are initialized
@@ -2514,11 +2324,17 @@ this.createModal().then(async () => {
 
 
 
-  deleteCard(index) {
+  deleteCard(indexOrId) {
     try {
       // Get current chapter's cards
-      const cards = this.chapterSets.get(parseInt(this.currentChapter.chapter));
+      const cards = this.chapterSets.get(parseInt(this.currentChapter?.chapter));
       if (!cards) return;
+
+      const index =
+        typeof indexOrId === "number"
+          ? indexOrId
+          : cards.findIndex((c) => String(c.id) === String(indexOrId));
+      if (index === -1 || !cards[index]) return;
 
       const cardId = cards[index].id;
 
@@ -2721,40 +2537,6 @@ this.createModal().then(async () => {
     requestAnimationFrame(() => {
       updateButtonStates();
     });
-
-    // Add to existing navigation handlers
-    this.shadowRoot
-      .querySelector("#prevCardBtn")
-      ?.addEventListener("click", () => {
-        if (this.currentReview && this.currentReview.currentIndex > 0) {
-          this.currentReview.currentIndex--;
-          this.currentReview.showingQuestion = true;
-          const card =
-            this.currentReview.cards[this.currentReview.currentIndex];
-          this.reviewEditor?.update(card.question);
-          this.updateNavigationButtons();
-          updateButtonStates(); // Update button states for new card
-        }
-      });
-
-    this.shadowRoot
-      .querySelector("#nextCardBtn")
-      ?.addEventListener("click", () => {
-        if (
-          this.currentReview &&
-          this.currentReview.currentIndex < this.currentReview.cards.length - 1
-        ) {
-          this.currentReview.currentIndex++;
-          this.currentReview.showingQuestion = true;
-          const card =
-            this.currentReview.cards[this.currentReview.currentIndex];
-          this.reviewEditor?.update(card.question);
-          this.updateNavigationButtons();
-          updateButtonStates(); // Update button states for new card
-        }
-      });
-
-    // Rest of your existing code...
 
     // Create the modal if it doesn't exist
     if (!modal) {
@@ -3052,10 +2834,10 @@ this.createModal().then(async () => {
 
     }
 
-    // Update navigation handlers
-    this.shadowRoot
-      .querySelector("#prevCardBtn")
-      ?.addEventListener("click", () => {
+    // Update navigation handlers (assign onclick to prevent listener stacking across card views)
+    const prevBtn = this.shadowRoot.querySelector("#prevCardBtn");
+    if (prevBtn) {
+      prevBtn.onclick = () => {
         if (this.currentReview && this.currentReview.currentIndex > 0) {
           this.currentReview.currentIndex--;
           this.currentReview.showingQuestion = true;
@@ -3063,12 +2845,14 @@ this.createModal().then(async () => {
             this.currentReview.cards[this.currentReview.currentIndex];
           this.reviewEditor?.update(card.question);
           this.updateNavigationButtons();
+          updateButtonStates();
         }
-      });
+      };
+    }
 
-    this.shadowRoot
-      .querySelector("#nextCardBtn")
-      ?.addEventListener("click", () => {
+    const nextBtn = this.shadowRoot.querySelector("#nextCardBtn");
+    if (nextBtn) {
+      nextBtn.onclick = () => {
         if (
           this.currentReview &&
           this.currentReview.currentIndex < this.currentReview.cards.length - 1
@@ -3079,8 +2863,10 @@ this.createModal().then(async () => {
             this.currentReview.cards[this.currentReview.currentIndex];
           this.reviewEditor?.update(card.question);
           this.updateNavigationButtons();
+          updateButtonStates();
         }
-      });
+      };
+    }
 
     // Add updateNavigationButtons method
     this.updateNavigationButtons = () => {
@@ -3397,13 +3183,9 @@ this.createModal().then(async () => {
         throw new Error('Storage handler not available');
       }
 
-      // Delete from SQLite
-      const { sql } = this.storageHandler.db;
-      
-      // Delete cards and tags first (foreign key constraints)
-      await sql`DELETE FROM card_tags WHERE card_id IN (SELECT id FROM cards WHERE chapter = ${chapterNum})`;
-      await sql`DELETE FROM cards WHERE chapter = ${chapterNum}`;
-      await sql`DELETE FROM chapters WHERE chapter = ${chapterNum}`;
+      if (typeof this.storageHandler.deleteChapter === 'function') {
+        await this.storageHandler.deleteChapter(chapterNum);
+      }
 
       // Update in-memory data
       this.chapterSets.delete(chapterNum);

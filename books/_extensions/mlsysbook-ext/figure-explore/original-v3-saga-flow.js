@@ -5,7 +5,8 @@ const spec = {
   "viewBox": "0 0 760 480",
   "asset": "vol3-saga-flow.svg",
   "question": "Who owns cleanup when an external result is unknown?",
-  "scope": "The original env_r18_01 provisioning and release saga. Illustrative evidence arrives after a lost reply, then cleanup waits for consumer shutdown and artifact preservation. The independent scratch-removal box remains a separate local action, not a release prerequisite or substitute.",
+  "intro": "Trace 10 saga lifecycle steps from pre-dispatch obligation registration through lost provisioning replies and DAG preconditions to confirmed environment release.",
+  "scope": "Provisioning and semantic compensation saga for temporary integration-test environment env_r18_01 across the Forward operation panel (top) and Registered cleanup DAG panel (bottom). The provisioning reply for provision_test_env_r18 is lost, correlated evidence later binds target env_r18_01, and release_test_env_r18 waits for two DAG predecessors (test consumer shutdown and external artifact preservation) while local scratch removal remains independent.",
   "purpose": "Keep one cleanup obligation alive through registration, unknown provisioning, target binding, gated release, and confirmed closure.",
   "guard": "Register cleanup before external provisioning. Unknown outcomes retain ownership. Binding requires correlated evidence; closing requires confirmed release. Cancellation or test completion and artifact preservation are separate conditions. Saga compensation does not atomically undo the world.",
   "slots": {
@@ -93,7 +94,7 @@ const spec = {
   "states": [
     {
       "label": "Keep cleanup ownership explicit",
-      "description": "The original saga separates an owned cleanup obligation from knowledge of a resource identity. No provisioning has been dispatched yet.",
+      "description": "At the start of the 10-step saga, the Forward operation lane (top) and Registered cleanup lane (bottom) separate cleanup obligation ownership from the concrete resource identifier, which is unknown until provisioning completes.",
       "text": {
         "closedhead": "Closure gate",
         "retainedhead": "Retained, owned",
@@ -110,10 +111,10 @@ const spec = {
       },
       "values": [
         "Not registered",
-        "Unbound",
+        "Unbound (no resource ID yet)",
         "Not confirmed stopped",
         "Not established",
-        "Not owned"
+        "Not owned (pre-registration)"
       ],
       "facts": {
         "registered": false,
@@ -134,7 +135,7 @@ const spec = {
     },
     {
       "label": "Register the cleanup obligation",
-      "description": "Durably register release_env before provisioning. When registration finishes, cleanup is owned even though its target is still unbound.",
+      "description": "In the top-left purple box (Register obligation), durably record the compensating template release_test_env_r18 before sending any network request. The solid purple link registers the obligation in the bottom cleanup lane with target unbound.",
       "text": {
         "closedhead": "Closure gate",
         "retainedhead": "Retained, owned",
@@ -150,11 +151,11 @@ const spec = {
         "retained": "owned; target unbound"
       },
       "values": [
-        "Registered",
-        "Unbound",
+        "Registered before dispatch",
+        "Unbound (awaiting creation evidence)",
         "Not confirmed stopped",
         "Not established",
-        "Owned"
+        "Owned (pre-dispatch obligation active)"
       ],
       "facts": {
         "registered": true,
@@ -202,7 +203,7 @@ const spec = {
     },
     {
       "label": "Dispatch provisioning",
-      "description": "Only after registration may provisioning be sent. When dispatch finishes, the resource may have been created; a request is not proof of its outcome.",
+      "description": "Once the cleanup obligation is durably registered, the runtime dispatches provision_test_env_r18 (top-center amber box). Because a remote environment may now be allocating and accruing charges, cleanup ownership remains active.",
       "text": {
         "closedhead": "Closure gate",
         "retainedhead": "Retained, owned",
@@ -219,10 +220,10 @@ const spec = {
       },
       "values": [
         "Registered",
-        "Unbound",
+        "Unbound (provisioning in flight)",
         "Not confirmed stopped",
         "Not established",
-        "Owned"
+        "Owned (provisioning in flight)"
       ],
       "facts": {
         "registered": true,
@@ -262,7 +263,7 @@ const spec = {
     },
     {
       "label": "Lose the provisioning reply",
-      "description": "The provisioning reply is lost. When the timeout is observed, retain the unbound cleanup obligation; unknown is neither absent nor released.",
+      "description": "The provisioning call times out along the red reply lost arrow into the dotted red box (Outcome unknown). Because the remote environment may still exist, the runtime keeps the unbound obligation open and owned rather than assuming creation failed.",
       "text": {
         "closedhead": "Closure gate",
         "retainedhead": "Retained, owned",
@@ -279,10 +280,10 @@ const spec = {
       },
       "values": [
         "Registered",
-        "Unbound",
+        "Unbound (reply lost; outcome unknown)",
         "Not confirmed stopped",
         "Not established",
-        "Owned"
+        "Owned (open in-doubt obligation)"
       ],
       "facts": {
         "registered": true,
@@ -318,7 +319,7 @@ const spec = {
     },
     {
       "label": "Bind correlated resource evidence",
-      "description": "Use correlated authenticated evidence to bind env_r18_01 to the existing obligation. When binding finishes, it identifies the target without pretending the lost reply proved success.",
+      "description": "Authenticated reconciliation evidence arrives at the top-right purple box (Bind on evidence), identifying resource handle env_r18_01. The dashed purple link binds env_r18_01 as the concrete target of release_test_env_r18 in the cleanup lane.",
       "text": {
         "closedhead": "Closure gate",
         "retainedhead": "Retained, owned",
@@ -335,10 +336,10 @@ const spec = {
       },
       "values": [
         "Registered",
-        "env_r18_01",
-        "Not confirmed stopped",
-        "Not established",
-        "Owned"
+        "env_r18_01 (bound via correlated evidence)",
+        "Not confirmed stopped (1 / 2 DAG edges)",
+        "Not established (0 / 2 DAG edges)",
+        "Owned (awaiting cleanup DAG predecessors)"
       ],
       "facts": {
         "registered": true,
@@ -382,7 +383,7 @@ const spec = {
     },
     {
       "label": "Stop the test consumers",
-      "description": "Stop or confirm cancellation of test consumers. When this confirmation finishes, consumers no longer block cleanup; artifact preservation is still required.",
+      "description": "In the bottom-left cleanup DAG, satisfy the first predecessor node (Test ended or cancel confirmed) so no active integration test still depends on env_r18_01. Release remains blocked until the second predecessor (Artifacts preserved) also settles.",
       "text": {
         "closedhead": "Closure gate",
         "retainedhead": "Retained, owned",
@@ -400,9 +401,9 @@ const spec = {
       "values": [
         "Registered",
         "env_r18_01",
-        "Stopped",
-        "Not established",
-        "Owned"
+        "Stopped (predecessor 1 / 2 satisfied)",
+        "Not established (blocks release)",
+        "Owned (waiting for artifact export)"
       ],
       "facts": {
         "registered": true,
@@ -450,7 +451,7 @@ const spec = {
     },
     {
       "label": "Preserve external test artifacts",
-      "description": "Export and preserve required external artifacts. When this action finishes, both independent release preconditions are satisfied. Removing local scratch alone would not satisfy them.",
+      "description": "Export diagnostic logs to durable storage outside the sandbox, satisfying the second DAG predecessor (Artifacts preserved). Notice that Scratch removal below has no dependency edge into Release and cannot substitute for either precondition.",
       "text": {
         "closedhead": "Closure gate",
         "retainedhead": "Retained, owned",
@@ -468,9 +469,9 @@ const spec = {
       "values": [
         "Registered",
         "env_r18_01",
-        "Stopped",
-        "Preserved",
-        "Owned"
+        "Stopped (predecessor 1 / 2 satisfied)",
+        "Preserved (predecessor 2 / 2 satisfied)",
+        "Owned (both DAG predecessors met)"
       ],
       "facts": {
         "registered": true,
@@ -518,7 +519,7 @@ const spec = {
     },
     {
       "label": "Admit resource release",
-      "description": "Admit release only after the target is bound, tests are stopped, and artifacts are preserved. When dispatch finishes, the obligation remains owned until release is established.",
+      "description": "With target env_r18_01 bound and both DAG predecessors settled, the coordinator admits and dispatches release_test_env_r18 (bottom-center amber box). Dispatching the compensating step does not close the obligation until postcondition proof arrives.",
       "text": {
         "closedhead": "Closure gate",
         "retainedhead": "Retained, owned",
@@ -538,7 +539,7 @@ const spec = {
         "env_r18_01",
         "Stopped",
         "Preserved",
-        "Owned"
+        "Owned (release_test_env_r18 in flight)"
       ],
       "facts": {
         "registered": true,
@@ -578,7 +579,7 @@ const spec = {
     },
     {
       "label": "Retain an unconfirmed release",
-      "description": "The release result is unconfirmed. Keep ownership and the bound target so recovery can reconcile the outcome; sending release does not close the obligation.",
+      "description": "If the release call times out or returns only transport acceptance, execution follows the lower red arrow into the dotted red box (Retained, owned · release unconfirmed), keeping env_r18_01 on record for retry or escalation.",
       "text": {
         "closedhead": "Closure gate",
         "retainedhead": "Retained, owned",
@@ -589,16 +590,16 @@ const spec = {
         "unknown": "correlated evidence received",
         "test": "stopped; no remaining consumer",
         "artifact": "external artifacts preserved",
-        "release": "release sent; awaiting proof",
+        "release": "timeout / unconfirmed",
         "closed": "not closed",
-        "retained": "owned; env_r18_01"
+        "retained": "release unconfirmed; retry"
       },
       "values": [
         "Registered",
         "env_r18_01",
         "Stopped",
         "Preserved",
-        "Owned"
+        "Owned (release unconfirmed; retained)"
       ],
       "facts": {
         "registered": true,
@@ -642,7 +643,7 @@ const spec = {
     },
     {
       "label": "Close only after confirmed release",
-      "description": "Use authenticated release postcondition evidence. Only when release is confirmed may the obligation be closed. Compensation does not rewind unrelated external history.",
+      "description": "When authenticated endpoint evidence confirms that env_r18_01 is deallocated, execution follows the upper green arrow to Obligation closed (postcondition shown), establishing semantic equivalence on the declared resource predicates while leaving billing settlement separate.",
       "text": {
         "closedhead": "Obligation closed",
         "retainedhead": "Ownership record",
@@ -662,7 +663,7 @@ const spec = {
         "env_r18_01",
         "Stopped",
         "Preserved",
-        "Closed on confirmation"
+        "Closed on postcondition confirmation"
       ],
       "facts": {
         "registered": true,
@@ -716,8 +717,9 @@ window.MLSysFigureLessons[spec.name]=async(root,context)=>{
  root.classList.add(spec.name);svg.setAttribute('role','img');svg.setAttribute('aria-label',spec.question+' Original chapter diagram with synchronized state.');
  const node=(tag,a={},text)=>{const n=document.createElementNS(NS,tag);Object.entries(a).forEach(([k,v])=>n.setAttribute(k,String(v)));if(text!==undefined)n.textContent=text;return n;};
  const textNodes=[...svg.querySelectorAll('text')],bindings={};
- for(const [key,b]of Object.entries(spec.slots)){const matches=textNodes.filter(n=>Number(n.getAttribute('x'))===b.x&&Number(n.getAttribute('y'))===b.y);if(matches.length!==1)throw Error('Original slot changed: '+key);bindings[key]={node:matches[0],original:matches[0].innerHTML,font:matches[0].getAttribute('font-size')};}
+ for(const [key,b]of Object.entries(spec.slots)){const matches=textNodes.filter(n=>Number(n.getAttribute('x'))===b.x&&Number(n.getAttribute('y'))===b.y);if(matches.length!==1)throw Error('Original slot changed: '+key);bindings[key]={node:matches[0],original:matches[0].innerHTML,font:matches[0].getAttribute('font-size'),fill:matches[0].getAttribute('fill'),weight:matches[0].getAttribute('font-weight')};}
  const circles=[...svg.querySelectorAll('circle')].map(n=>({n,fill:n.getAttribute('fill'),stroke:n.getAttribute('stroke'),'stroke-width':n.getAttribute('stroke-width')}));
+ const baseRects=[...svg.querySelectorAll('rect')].filter(r=>+r.getAttribute('width')<500&&+r.getAttribute('height')<260);
  const overlay=node('g',{class:'v3-original-overlay'});svg.append(overlay);
  const markerLayer=node('g');overlay.append(markerLayer);
  const packet=node('g',{class:'v3-original-packet',visibility:'hidden'});packet.append(node('rect',{x:-24,y:-10,width:48,height:20,rx:3}),node('text',{'text-anchor':'middle',y:4}));overlay.append(packet);
@@ -732,12 +734,15 @@ window.MLSysFigureLessons[spec.name]=async(root,context)=>{
  if(spec.variants){choice=document.createElement('label');choice.className='v3-original-choice';choice.textContent=spec.variantLabel+' ';const select=document.createElement('select');select.setAttribute('aria-label',spec.variantLabel);spec.variants.forEach(v=>{const o=document.createElement('option');o.value=v.id;o.textContent=v.label;select.append(o);});select.addEventListener('change',()=>{variant=select.value;frames().forEach((s,i)=>Object.assign(steps[i],{label:s.label,description:s.description}));player.go(0);});choice.append(select);}
  function follow(x,y){active=[x,y];const scale=svg.getBoundingClientRect().width/vb.width;if(canvas.scrollWidth>canvas.clientWidth)canvas.scrollLeft=Math.max(0,x*scale-canvas.clientWidth/2);if(canvas.scrollHeight>canvas.clientHeight)canvas.scrollTop=Math.max(0,y*scale-canvas.clientHeight/2);}
  function render(i,{stage,details}){
-  if(!canvas.isConnected){if(choice)stage.append(choice);stage.append(cue,canvas);details.append(readout);}
+  if(!canvas.isConnected){stage.append(cue,canvas);details.append(readout);}
   const frame=frames()[i];packet.setAttribute('visibility','hidden');markerLayer.replaceChildren();
-  for(const [key,b]of Object.entries(bindings)){b.node.innerHTML=b.original;if(b.font)b.node.setAttribute('font-size',b.font);b.node.removeAttribute('opacity');const value=Object.assign({},spec.defaults,frame.text)[key];if(value!==undefined)b.node.textContent=value;if(spec.slots[key].font)b.node.setAttribute('font-size',spec.slots[key].font);b.node.removeAttribute('textLength');if(spec.slots[key].width&&b.node.getComputedTextLength()>spec.slots[key].width)b.node.setAttribute('textLength',spec.slots[key].width);b.node.setAttribute('lengthAdjust','spacingAndGlyphs');}
+  const prevText=i>0?Object.assign({},spec.defaults,frames()[i-1].text):null,currText=Object.assign({},spec.defaults,frame.text),drawnRects=new Set();
+  const frameBox=(px,py,color='#0284c7')=>{const hits=baseRects.filter(r=>{const x=+r.getAttribute('x'),y=+r.getAttribute('y'),w=+r.getAttribute('width'),h=+r.getAttribute('height');return px>=x-6&&px<=x+w+6&&py>=y-6&&py<=y+h+6;}).sort((a,b)=>(+a.getAttribute('width')*+a.getAttribute('height'))-(+b.getAttribute('width')*+b.getAttribute('height')));if(hits[0]&&!drawnRects.has(hits[0])){drawnRects.add(hits[0]);markerLayer.append(node('rect',{x:hits[0].getAttribute('x'),y:hits[0].getAttribute('y'),width:hits[0].getAttribute('width'),height:hits[0].getAttribute('height'),rx:hits[0].getAttribute('rx')||4,fill:'none',stroke:color,'stroke-width':2.5}));return true;}return false;};
+  for(const [key,b]of Object.entries(bindings)){b.node.innerHTML=b.original;if(b.font)b.node.setAttribute('font-size',b.font);if(b.fill)b.node.setAttribute('fill',b.fill);else b.node.removeAttribute('fill');if(b.weight)b.node.setAttribute('font-weight',b.weight);else b.node.removeAttribute('font-weight');b.node.removeAttribute('opacity');const value=currText[key];if(value!==undefined)b.node.textContent=value;if(spec.slots[key].font)b.node.setAttribute('font-size',spec.slots[key].font);b.node.removeAttribute('textLength');if(spec.slots[key].width&&b.node.getComputedTextLength()>spec.slots[key].width)b.node.setAttribute('textLength',spec.slots[key].width);b.node.setAttribute('lengthAdjust','spacingAndGlyphs');if(prevText&&currText[key]!==prevText[key]){b.node.setAttribute('fill','#0369a1');b.node.setAttribute('font-weight','700');frameBox(spec.slots[key].x,spec.slots[key].y,'#0284c7');}}
   for(const c of circles)for(const k of ['fill','stroke','stroke-width']){if(c[k]!==null)c.n.setAttribute(k,c[k]);}
   for(const p of frame.circles||[]){const c=circles.find(c=>Number(c.n.getAttribute('cx'))===p.x&&Number(c.n.getAttribute('cy'))===p.y&&Number(c.n.getAttribute('r'))===(p.r||8));if(!c)throw Error('Original graph node changed');for(const k of ['fill','stroke','stroke-width'])if(p[k])c.n.setAttribute(k,p[k]);}
-  for(const m of frame.marks||[]){markerLayer.append(node('circle',{cx:m.x,cy:m.y,r:m.r||12,fill:'none',stroke:m.color||'#0284c7','stroke-width':2}));}
+  for(const m of frame.marks||[]){frameBox(m.x,m.y,m.color||'#0284c7');}
+  if(i>0&&drawnRects.size===0&&frame.motion){const end=frame.motion.route.at(-1);frameBox(end[0],end[1],'#0284c7');}
   values.forEach((v,j)=>v.textContent=frame.values[j]);root.dataset.originalStep=String(i);root.dataset.originalFacts=JSON.stringify(frame.facts);root.dataset.originalVariant=variant;
   follow(...frame.camera);
   if(!details.querySelector('.v3-original-guard')){const p=document.createElement('p');p.className='v3-original-guard';p.textContent=spec.guard;details.append(p);}
@@ -749,7 +754,7 @@ window.MLSysFigureLessons[spec.name]=async(root,context)=>{
   const width=Math.max(28,Math.min(112,motion.label.length*6+12));packet.querySelector('rect').setAttribute('x',-width/2);packet.querySelector('rect').setAttribute('width',width);packet.querySelector('text').textContent=motion.label;packet.dataset.role=motion.role||'state';packet.setAttribute('visibility','visible');
   onFrame(p=>{let d=total*p,j=0;while(j<lengths.length-1&&d>lengths[j]){d-=lengths[j];j++;}const t=lengths[j]?d/lengths[j]:0,a=route[j],b=route[j+1],x=a[0]+(b[0]-a[0])*t,y=a[1]+(b[1]-a[1])*t;packet.setAttribute('transform',`translate(${x} ${y})`);follow(...(motion.lock_camera?frame.camera:[x,y]));if(p>=1)packet.setAttribute('visibility','hidden');});
  }
- player=window.MLSysOriginalPlayer.create({root,outer:context.outer,title:spec.question,scope:spec.scope,steps,render,transition});
+ player=window.MLSysOriginalPlayer.create({root,outer:context.outer,title:spec.question,intro:spec.intro,layout:'compact',viewControls:choice,scope:spec.scope,steps,render,transition});
  const resize=new ResizeObserver(()=>follow(...active));resize.observe(canvas);const destroy=player.destroy;player.destroy=()=>{resize.disconnect();destroy();};return player;
 };
 })();

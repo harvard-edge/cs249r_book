@@ -2,6 +2,7 @@
 import { DEFAULT_PROVIDER } from "../configs/env_configs.js";
 import { htmlContent } from "../indexHtml.js";
 import { styles } from "../cssStyles.js";
+import { escapeSidebarText } from "./utils/sanitize.js";
 
 // import { updateMarkdownPreview } from "./components/markdown/markdown";
 import { updateMarkdownPreview } from "./components/markdown/streamdown_markdown";
@@ -131,8 +132,7 @@ import { MessageObserver } from "./libs/utils/observers/message_observer.js";
 import { initKnowledgeGraph } from "./components/visualizations/KnowledgeGraph.js";
 import { fillPromptTemplate } from "./libs/utils/prompt_templater.js";
 import { tryMultipleProvidersStream, tryMultipleProvidersSingle, callCloudflareAgent } from "./libs/agents/cloudflareAgent.js";
-import { renderMermaidDiagram } from "./libs/diagram/mermaid.js";
-import { renderMermaidFlow } from "./libs/diagram/mermaid_flow.js";
+import { renderMermaidDiagram, renderMermaidFlow } from "./libs/diagram/mermaid.js";
 import {
   initializeSocratiqDB,
   setDBInstance,
@@ -204,10 +204,14 @@ const studyAPI = {
     if (!host?.shadowRoot) throw new Error("SocratiQ Study did not initialize");
     host.hidden = false;
     menu_slide_on(shadowRoot, true);
-    if (!embeddedVisible) {
-      embeddedVisible = true;
-      window.dispatchEvent(new CustomEvent("socratiq:open"));
-    }
+    embeddedVisible = true;
+    window.dispatchEvent(new CustomEvent("socratiq:open"));
+    window.dispatchEvent(new CustomEvent("socratiq:study-open"));
+    const readerHost = document.getElementById("socratiq-reader");
+    const readerPanel = readerHost?.shadowRoot?.querySelector(".reader-panel:not([hidden])");
+    if (readerPanel) readerPanel.hidden = true;
+    const readerShell = readerHost?.shadowRoot?.querySelector(".reader-shell");
+    if (readerShell) readerShell.hidden = true;
     return studyAPI;
   },
   close() {
@@ -219,7 +223,10 @@ const studyAPI = {
     }
   },
 };
-if (embeddedMode) window.SocratiqStudy = studyAPI;
+if (embeddedMode) {
+  window.SocratiqStudy = studyAPI;
+  window.SocratiQStudyTools = studyAPI;
+}
 
 function showSocratiqLoader() {
   const loader = document.createElement("div");
@@ -244,7 +251,7 @@ function showSocratiqLoader() {
     width: 50px;
     height: 50px;
     border: 5px solid #f3f3f3;
-    border-top: 5px solid #A51C30;
+    border-top: 5px solid var(--socratiq-accent, #8e1537);
     border-radius: 50%;
     animation: socratiq-spin 1s linear infinite;
     margin-bottom: 20px;
@@ -507,12 +514,54 @@ async function inject() {
       const closeStudyButton = document.createElement("button");
       closeStudyButton.id = "socratiq-study-close";
       closeStudyButton.type = "button";
+      closeStudyButton.className = "w-9 h-9 min-w-[38px] min-h-[38px] inline-flex items-center justify-center";
       closeStudyButton.setAttribute("aria-label", "Close study tools");
       closeStudyButton.title = "Return to reading";
       closeStudyButton.textContent = "×";
-      closeStudyButton.style.cssText = "font-size:24px;line-height:24px;min-width:32px;min-height:32px;color:inherit;cursor:pointer;flex-shrink:0";
+      closeStudyButton.style.cssText = "font-size:24px;line-height:24px;width:38px;height:38px;min-width:38px;min-height:38px;color:inherit;cursor:pointer;flex-shrink:0";
       closeStudyButton.addEventListener("click", () => studyAPI.close());
       shadowRoot.querySelector("#text-selection-menu h2")?.parentElement.appendChild(closeStudyButton);
+      document.addEventListener(
+        "keydown",
+        (e) => {
+          if (e.key !== "Escape" || !embeddedMode || hostElement.hidden) return;
+          const overlaySelectors = [
+            "#modal1",
+            "#helpModal",
+            "#helpModalContainer",
+            "#myModal",
+            "#quizModal",
+            ".image-modal-overlay",
+            "#socratiq-meditation-modal",
+            ".stats-modal",
+            "#socratiq-knowledge-graph-modal",
+            "#sr-modal",
+            "#spacedRepetitionModal",
+            "#cardReviewModal",
+            "#deckCreationModal",
+            "#searchModal",
+            "#editCardModal",
+            ".format-dialog-overlay",
+            "#context-menu",
+            ".at-mentions-dropup",
+          ];
+          const hasOpenOverlay = overlaySelectors.some((selector) =>
+            Array.from(shadowRoot.querySelectorAll(selector)).some((el) => {
+              if (!el || el.hidden || el.classList.contains("hidden")) return false;
+              const style = window.getComputedStyle(el);
+              if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") {
+                return false;
+              }
+              return el.getClientRects().length > 0;
+            })
+          );
+          if (!hasOpenOverlay) {
+            e.preventDefault();
+            studyAPI.close();
+          }
+        },
+        true
+      );
     } else {
       initializeMenuSlide(shadowRoot);
     }
@@ -644,7 +693,8 @@ function handleScrollToElement() {
     // Function to attempt scrolling with retry mechanism
     const attemptScroll = (attempts = 0, maxAttempts = 15) => {
       const startTime = performance.now();
-      const targetElement = document.querySelector(`[data-fuzzy-id="${scrollTo}"]`);
+      const escapedScrollTo = typeof CSS !== "undefined" && CSS.escape ? CSS.escape(String(scrollTo)) : String(scrollTo);
+      const targetElement = document.querySelector(`[data-fuzzy-id="${escapedScrollTo}"]`);
       const searchTime = performance.now() - startTime;
       
       if (targetElement) {
@@ -663,27 +713,22 @@ function handleScrollToElement() {
         setTimeout(() => attemptScroll(attempts + 1, maxAttempts), 10);
       } else {
         console.warn(`🔍 Could not find element with ID: ${scrollTo} after ${maxAttempts} attempts`);
-        // Try alternative selectors as fallback
-        const fallbackSelectors = [
-          `#${scrollTo}`,
-          `[id="${scrollTo}"]`,
-          `[name="${scrollTo}"]`,
-          `.${scrollTo}`
-        ];
-        
-        for (const selector of fallbackSelectors) {
-          const fallbackElement = document.querySelector(selector);
-          if (fallbackElement) {
-            fallbackElement.scrollIntoView({
-              behavior: 'smooth',
-              block: 'center'
-            });
-            
-            // Clean up URL by removing query parameters after successful scroll
-            normalizeUrlAfterScroll();
-            
-            return;
-          }
+        // Try alternative lookups safely
+        const byId = document.getElementById(scrollTo);
+        const fallbackElement =
+          byId ||
+          document.querySelector(`[name="${escapedScrollTo}"]`) ||
+          document.querySelector(`.${escapedScrollTo}`);
+        if (fallbackElement) {
+          fallbackElement.scrollIntoView({
+            behavior: 'smooth',
+            block: 'center'
+          });
+          
+          // Clean up URL by removing query parameters after successful scroll
+          normalizeUrlAfterScroll();
+          
+          return;
         }
         
         console.warn(`🔍 No element found with any selector for: ${scrollTo}`);
@@ -820,7 +865,7 @@ async function handleGeneralAction(
   showProgressItem(progress, progressCount);
 
   let new_ans = `<details class="user-input-resubmit" style="
-background-color: rgba(142, 21, 55, 0.05);
+background-color: var(--socratiq-accent-soft, rgba(142, 21, 55, 0.12));
 border: 1px solid rgba(142, 21, 55, 0.2);
 border-radius: 4px;
 padding: 0.5rem;
@@ -838,7 +883,7 @@ margin-bottom: 1.5rem;
     padding: 0.25rem;
     border-radius: 3px;
     transition: background-color 0.2s;
-  ">${extractQuestion(text)}</div>
+  ">${escapeSidebarText(extractQuestion(text))}</div>
   <div style="
     display: flex;
     align-items: center;
@@ -1000,6 +1045,7 @@ async function handleResearchAction(
     currentUrl = newUrl;
     getNew = true;
   }
+  const clone = get_message_element(shadowRoot, "ai");
   // showProgress
   const progress = injectProgress(clone);
   addProgress(RESEARCHAGENTPROCESS, progress);
@@ -1166,7 +1212,7 @@ async function handleQueryActionStream(
 
 
   let new_ans = `<details class="user-input-resubmit" style="
-  background-color: rgba(142, 21, 55, 0.05);
+  background-color: var(--socratiq-accent-soft, rgba(142, 21, 55, 0.12));
   border: 1px solid rgba(142, 21, 55, 0.2);
   border-radius: 4px;
   padding: 0.5rem;
@@ -1184,7 +1230,7 @@ async function handleQueryActionStream(
       padding: 0.25rem;
       border-radius: 3px;
       transition: background-color 0.2s;
-    ">${text}</div>
+    ">${escapeSidebarText(text)}</div>
     <div style="
       display: flex;
       align-items: center;
@@ -1554,6 +1600,7 @@ async function handleSummativeAction(
 
   progressCount += 1;
   showProgressItem(progress, progressCount);
+  let isOffline = false;
   
   try {
     quizRespnse = await query_agent_groq_serverless(params);
@@ -2691,7 +2738,7 @@ We are currently unable to connect to our servers. Showing relevant content from
 
     // Add the user's input section
     offlineResponse += `<details class="user-input-resubmit" style="
-      background-color: rgba(142, 21, 55, 0.05);
+      background-color: var(--socratiq-accent-soft, rgba(142, 21, 55, 0.12));
       border: 1px solid rgba(142, 21, 55, 0.2);
       border-radius: 4px;
       padding: 0.5rem;
@@ -2706,7 +2753,7 @@ We are currently unable to connect to our servers. Showing relevant content from
           padding: 0.25rem;
           border-radius: 3px;
           transition: background-color 0.2s;
-        ">${text}</div>
+        ">${escapeSidebarText(text)}</div>
         <div style="display: flex; align-items: center; gap: 0.5rem; margin-top: 0.5rem; font-size: 0.875rem; color: #6c757d;">
           <button class="enter-button" style="
             padding: 0.25rem 0.5rem;

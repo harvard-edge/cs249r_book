@@ -10,7 +10,6 @@ import { htmlLoader } from './loader';
 import { findClosestAIMessage } from '../../libs/utils/utils.js';
 import { containsWordReference } from '../../libs/diagram/mermaid';
 import { generateUniqueId } from '../../libs/utils/utils.js';
-import { initializeReferenceRenderer } from './reference_renderer.js';
 
 let shadowEle;
 let mermaidInitialized = false;
@@ -152,7 +151,7 @@ function renderMath(text) {
       try {
         return katex.renderToString(math.trim(), { displayMode: true });
       } catch (error) {
-        return `<span class="math-error">Math Error: ${error.message}</span>`;
+        return `<span class="math-error" title="${escapeHtml(math)}">Math Error: ${escapeHtml(error.message)}</span>`;
       }
     });
 
@@ -161,7 +160,7 @@ function renderMath(text) {
       try {
         return katex.renderToString(math.trim(), { displayMode: false });
       } catch (error) {
-        return `<span class="math-error">Math Error: ${error.message}</span>`;
+        return `<span class="math-error" title="${escapeHtml(math)}">Math Error: ${escapeHtml(error.message)}</span>`;
       }
     });
 
@@ -258,7 +257,7 @@ md.use(markdownItContainer, 'info', {
       return `<div class="info-box" style="
         background-color: #f8f9fa;
         border: 1px solid #e9ecef;
-        border-left: 4px solid #8e1537;
+        border-left: 4px solid var(--socratiq-accent, #8e1537);
         border-radius: 4px;
         padding: 1rem;
         margin: 1rem 0;
@@ -687,7 +686,7 @@ function showCustomReferenceTooltip(targetId, event, displayText) {
   }
   const link = document.createElement('a');
   link.href = '#';
-  link.style.color = '#8e1537';
+  link.style.color = 'var(--socratiq-accent, #8e1537)';
   link.style.textDecoration = 'none';
   link.style.fontSize = '0.75rem';
   link.style.fontWeight = '500';
@@ -767,8 +766,6 @@ export function initiateMarkdown(shadowElement) {
   shadowEle = shadowElement;
   // Initialize STREAMDOWN libraries
   initializeStreamdown();
-  // Initialize reference renderer
-  initializeReferenceRenderer(shadowElement);
   initializeCustomReferenceInteractions(shadowElement);
   
   // Make custom reference functions globally available
@@ -963,6 +960,10 @@ async function processMarkdownWithStreamdown(text, parseIncomplete = true) {
   // Custom references are already processed by the markdown-it plugin above
   // No need to call processReferences from reference_renderer.js as it handles footnote references
   // and would interfere with our custom reference system
+
+  for (const anchor of tempDiv.querySelectorAll('a')) {
+    anchor.setAttribute('rel', 'noopener noreferrer');
+  }
 
   return tempDiv.innerHTML;
 }
@@ -1159,8 +1160,8 @@ export async function updateMarkdownPreview(text, clone, isResearch = 0, markdow
         
         /* Cross-page custom reference styles */
         .custom-reference-pill[data-source-url]:not([data-source-url=""]) {
-          background: #f7e6ea;
-          color: #5c0e24;
+          background: var(--socratiq-accent-soft, rgba(142, 21, 55, 0.12));
+          color: var(--socratiq-accent, #8e1537);
           border: 1px solid #e0b0be;
         }
         
@@ -1178,7 +1179,7 @@ export async function updateMarkdownPreview(text, clone, isResearch = 0, markdow
         }
         
         .custom-reference-highlight {
-          background-color: rgba(142, 21, 55, 0.1);
+          background-color: var(--socratiq-accent-soft, rgba(142, 21, 55, 0.12));
           scroll-margin-top: 100px;
         }
         .custom-reference-highlight.animate {
@@ -1377,6 +1378,10 @@ export class StreamdownMarkdownRenderer {
     this.streamingQueue = [];
   }
 
+  escapeHtml(value) {
+    return escapeHtml(value);
+  }
+
   // Start streaming with STREAMDOWN
   async startStream(markdownPreviewId = '') {
     this.isStreaming = true;
@@ -1386,7 +1391,7 @@ export class StreamdownMarkdownRenderer {
     // Initialize STREAMDOWN libraries
     await initializeStreamdown();
     
-    const preview = this.shadowElement.querySelector('#' + markdownPreviewId || '#markdown-preview');
+    const preview = this.shadowElement.querySelector('#' + (markdownPreviewId || 'markdown-preview'));
     if (preview) {
       preview.innerHTML = '<div class="streaming-loader">Streaming content...</div>';
     }
@@ -1408,7 +1413,7 @@ export class StreamdownMarkdownRenderer {
 
   // Render with STREAMDOWN features
   async renderWithStreamdown(content, markdownPreviewId = '') {
-    const preview = this.shadowElement.querySelector('#' + markdownPreviewId || '#markdown-preview');
+    const preview = this.shadowElement.querySelector('#' + (markdownPreviewId || 'markdown-preview'));
     if (!preview) return;
 
     try {
@@ -1579,7 +1584,7 @@ export class StreamdownMarkdownRenderer {
               transform: scale(1.1);
             }
             .custom-reference-highlight {
-              background-color: rgba(142, 21, 55, 0.1);
+              background-color: var(--socratiq-accent-soft, rgba(142, 21, 55, 0.12));
               scroll-margin-top: 100px;
             }
             .custom-reference-highlight.animate {
@@ -1595,14 +1600,14 @@ export class StreamdownMarkdownRenderer {
         </div>
       `;
 
-      preview.innerHTML = finalHtml;
+      preview.innerHTML = DOMPurify.sanitize(finalHtml, { FORCE_BODY: true, ADD_TAGS: ['style'] });
       
       // Reinitialize custom features
       this.reinitializeCustomFeatures(preview);
       
     } catch (error) {
       console.warn('Error rendering streaming content:', error);
-      preview.innerHTML = `<pre>${this.partialContent}</pre>`;
+      preview.innerHTML = DOMPurify.sanitize(`<pre>${this.escapeHtml(this.partialContent)}</pre>`);
     }
   }
 
@@ -1649,9 +1654,9 @@ export class StreamdownMarkdownRenderer {
   handleStreamingError(error, markdownPreviewId = '') {
     this.isStreaming = false;
     
-    const preview = this.shadowElement.querySelector('#' + markdownPreviewId || '#markdown-preview');
+    const preview = this.shadowElement.querySelector('#' + (markdownPreviewId || 'markdown-preview'));
     if (preview) {
-      preview.innerHTML = `
+      preview.innerHTML = DOMPurify.sanitize(`
         <div class="streaming-error" style="
           background-color: #f8d7da;
           border: 1px solid #f5c6cb;
@@ -1660,12 +1665,12 @@ export class StreamdownMarkdownRenderer {
           border-radius: 4px;
           margin: 1rem 0;
         ">
-          <strong>Streaming Error:</strong> ${error.message}
+          <strong>Streaming Error:</strong> ${this.escapeHtml(error.message)}
           <br><br>
           <strong>Partial Content:</strong>
-          <pre style="background: white; padding: 0.5rem; border-radius: 3px; margin-top: 0.5rem;">${this.partialContent}</pre>
+          <pre style="background: white; padding: 0.5rem; border-radius: 3px; margin-top: 0.5rem;">${this.escapeHtml(this.partialContent)}</pre>
         </div>
-      `;
+      `);
     }
   }
 }

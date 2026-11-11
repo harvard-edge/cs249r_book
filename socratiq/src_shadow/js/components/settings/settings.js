@@ -1,4 +1,6 @@
 import {readLearnerPreferences, saveLearnerPreferences, clearLearnerPreferences, hasSavedLearnerPreferences} from '../../../../src_reader/preferences.js';
+import { formatChapterTaxonomyPrompt } from '../../../../src_shared/taxonomy-map.js';
+import { BYOK_PROVIDERS, readActiveByokConfig, saveByokConfig, clearByokConfig, startOpenRouterPKCE, completeOpenRouterPKCE } from '../../../../src_shared/byok-provider.js';
 import {  showPopover } from "../../libs/utils/utils";
 import { DIFFICULTY_LEVELS } from "../../../configs/client.config.js";
 import { DropdownHandler } from './dropdown-handler.js';
@@ -268,7 +270,9 @@ export class SettingsManager {
       vol4: 'Ground explanations in Volume IV (physical AI systems crossing a causal boundary and action irreversibility).',
     }[volumeMatch] || 'Ground explanations in the Machine Learning Systems textbook taxonomy (D·A·M for single machines, C³ for fleets, H·S·A for agentic systems, and causal boundaries for physical AI).';
 
-    return `Tailor your response for a: ${understanding}. ${volumeScope} ${answersDescription} ${useBlooms ? 'Apply Bloom\'s Taxonomy in your response structure.' : ''}`;
+    const taxonomyGrounding = formatChapterTaxonomyPrompt(typeof window !== 'undefined' ? (window.location?.href || '') : '');
+
+    return `Tailor your response for a: ${understanding}. ${volumeScope} ${taxonomyGrounding} ${answersDescription} ${useBlooms ? 'Apply Bloom\'s Taxonomy in your response structure.' : ''}`.replace(/\s+/g, ' ').trim();
   }
 
   generateSettings() {
@@ -291,7 +295,8 @@ export class SettingsManager {
     if (this.isInitializing) return;
     try {
       const snapshot = {...this.settings, customAPI: {...this.settings.customAPI}};
-      if (snapshot.customAPI.saveLocally !== true) snapshot.customAPI.apiKey = '';
+      const isGithubIo = typeof window !== "undefined" && String(window.location?.hostname || "").toLowerCase().endsWith(".github.io");
+      if (snapshot.customAPI.saveLocally !== true || isGithubIo) snapshot.customAPI.apiKey = '';
       localStorage.setItem("userSettings", JSON.stringify(snapshot));
     } catch (error) {
       console.warn("Unable to persist settings:", error);
@@ -339,7 +344,21 @@ export class SettingsManager {
       console.warn("Using default settings; saved settings were left unchanged:", error);
     }
 
-    if (this.settings.customAPI.saveLocally !== true) this.settings.customAPI.apiKey = '';
+    const isGithubIo = typeof window !== "undefined" && String(window.location?.hostname || "").toLowerCase().endsWith(".github.io");
+    if (this.settings.customAPI.saveLocally !== true || isGithubIo) this.settings.customAPI.apiKey = '';
+    if (typeof readActiveByokConfig === "function") {
+      const byok = readActiveByokConfig();
+      if (byok?.enabled && byok.apiKey) {
+        this.settings.customAPI = {
+          provider: byok.provider === "openrouter" ? "open-router" : byok.provider,
+          endpoint: byok.endpoint,
+          model: byok.model,
+          apiKey: byok.apiKey,
+          saveLocally: Boolean(byok.saveLocally && !isGithubIo),
+          enabled: true,
+        };
+      }
+    }
     const preferenceLevel = readLearnerPreferences().level;
     // A valid shared preference takes precedence after reader edits.
     if (hasSavedLearnerPreferences() && !(this.settings.sliderValue === 3 && preferenceLevel === 'advanced')) this.settings.sliderValue = ['beginner', 'intermediate', 'advanced'].indexOf(preferenceLevel);
@@ -492,8 +511,14 @@ export class SettingsManager {
     const isMenuOpen = menu && menu.classList.contains('translate-x-0');
     
     if (isMenuOpen) {
-      document.body.style.marginRight = isPushed ? '400px' : '0';
+      if (isPushed && window.innerWidth >= 1180) {
+        document.body.style.marginRight = '400px';
+      } else {
+        document.body.style.marginRight = '0';
+      }
       document.body.style.transition = 'margin-right 0.3s ease-in-out';
+    } else if (window.innerWidth < 1180) {
+      document.body.style.marginRight = '0';
     }
   }
 
@@ -581,11 +606,39 @@ export class SettingsManager {
     const apiKeyInput = this.shadowEle.querySelector("#api-key");
     const saveLocallyCheckbox = this.shadowEle.querySelector("#save-locally");
     const resetButton = this.shadowEle.querySelector("#reset-custom-api");
+    const openRouterSsoButton = this.shadowEle.querySelector("#study-openrouter-sso");
+    const portalLink = this.shadowEle.querySelector("#study-api-key-portal");
     
     if (!customApiToggle || !customApiConfig || !defaultApiInfo || !providerSelect || !modelInput || !endpointInput || !apiKeyInput || !saveLocallyCheckbox || !resetButton) {
       console.warn('Custom API elements not found in settings modal');
       return;
     }
+
+    const updatePortalAndFooter = (providerVal, enabledVal, modelVal) => {
+      const normalized = providerVal === "open-router" ? "openrouter" : (providerVal || "google-gemini");
+      const spec = typeof BYOK_PROVIDERS === "object" ? (BYOK_PROVIDERS[normalized] || BYOK_PROVIDERS["google-gemini"]) : null;
+      if (portalLink && spec) {
+        if (spec.portalUrl) {
+          portalLink.href = spec.portalUrl;
+          portalLink.textContent = spec.portalLabel || "Get API key ↗";
+          portalLink.style.display = "";
+        } else {
+          portalLink.style.display = "none";
+        }
+      }
+      const statusNode = this.allShadow?.querySelector?.("#study-model-status");
+      const connectBtn = this.allShadow?.querySelector?.("#open-byok-settings");
+      if (statusNode) {
+        statusNode.textContent = enabledVal && providerVal
+          ? `Connected: ${spec?.shortLabel || providerVal}${modelVal ? ` (${modelVal})` : ""}`
+          : "Free shared model";
+      }
+      if (connectBtn) {
+        connectBtn.textContent = enabledVal && providerVal
+          ? "Manage model"
+          : "Connect your own Gemini / Claude";
+      }
+    };
     
     // Load existing values
     if (this.settings.customAPI) {
@@ -595,6 +648,7 @@ export class SettingsManager {
       endpointInput.value = this.settings.customAPI.endpoint || "";
       apiKeyInput.value = this.settings.customAPI.apiKey || "";
       saveLocallyCheckbox.checked = this.settings.customAPI.saveLocally || false;
+      updatePortalAndFooter(providerSelect.value, customApiToggle.checked, modelInput.value);
     }
     
     // Update UI based on toggle state
@@ -603,15 +657,22 @@ export class SettingsManager {
     // Add change listeners
     customApiToggle.addEventListener("change", (e) => {
       this.updateCustomAPIUI(e.target.checked, customApiConfig, defaultApiInfo);
+      if (e.target.checked && !providerSelect.value) {
+        providerSelect.value = "google-gemini";
+        this.handleProviderChange("google-gemini", modelInput, endpointInput);
+      }
+      updatePortalAndFooter(providerSelect.value, e.target.checked, modelInput.value);
       this.updateCustomAPI(providerSelect.value, endpointInput.value, modelInput.value, apiKeyInput.value, saveLocallyCheckbox.checked, e.target.checked);
     });
     
     providerSelect.addEventListener("change", (e) => {
       this.handleProviderChange(e.target.value, modelInput, endpointInput);
+      updatePortalAndFooter(e.target.value, customApiToggle.checked, modelInput.value);
       this.updateCustomAPI(e.target.value, endpointInput.value, modelInput.value, apiKeyInput.value, saveLocallyCheckbox.checked, customApiToggle.checked);
     });
     
     modelInput.addEventListener("input", (e) => {
+      updatePortalAndFooter(providerSelect.value, customApiToggle.checked, e.target.value);
       this.updateCustomAPI(providerSelect.value, endpointInput.value, e.target.value, apiKeyInput.value, saveLocallyCheckbox.checked, customApiToggle.checked);
     });
     
@@ -629,14 +690,39 @@ export class SettingsManager {
     
     resetButton.addEventListener("click", (e) => {
       this.resetCustomAPISettings(providerSelect, modelInput, endpointInput, apiKeyInput, saveLocallyCheckbox, customApiToggle);
+      updatePortalAndFooter("", false, "");
     });
+
+    openRouterSsoButton?.addEventListener("click", () => {
+      if (typeof startOpenRouterPKCE === "function") {
+        void startOpenRouterPKCE().catch((err) => {
+          showPopover(this.shadowEle, err?.message || "Could not start OpenRouter SSO", "error");
+        });
+      }
+    });
+
+    if (typeof window !== "undefined") {
+      window.addEventListener("socratiq:byok-changed", () => {
+        if (this.isSyncingByok || typeof readActiveByokConfig !== "function") return;
+        const cfg = readActiveByokConfig();
+        const mappedProvider = cfg.provider === "openrouter" ? "open-router" : cfg.provider;
+        customApiToggle.checked = Boolean(cfg.enabled);
+        providerSelect.value = cfg.enabled ? mappedProvider : "";
+        modelInput.value = cfg.enabled ? cfg.model : "";
+        endpointInput.value = cfg.enabled ? cfg.endpoint : "";
+        apiKeyInput.value = cfg.enabled ? cfg.apiKey : "";
+        saveLocallyCheckbox.checked = Boolean(cfg.saveLocally);
+        this.updateCustomAPIUI(customApiToggle.checked, customApiConfig, defaultApiInfo);
+        updatePortalAndFooter(providerSelect.value, customApiToggle.checked, modelInput.value);
+      });
+    }
   }
 
   // Handle provider change and auto-fill endpoint and model
   handleProviderChange(provider, modelInput, endpointInput) {
     const providerDefaults = {
       'google-gemini': {
-        endpoint: 'https://generativelanguage.googleapis.com/v1beta',
+        endpoint: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
         model: 'gemini-2.5-flash'
       },
       'ollama': {
@@ -645,19 +731,19 @@ export class SettingsManager {
       },
       'openai': {
         endpoint: 'https://api.openai.com/v1/chat/completions',
-        model: 'gpt-3.5-turbo'
+        model: 'gpt-4.1-mini'
       },
       'open-router': {
         endpoint: 'https://openrouter.ai/api/v1/chat/completions',
-        model: 'meta-llama/llama-4-scout:free'
+        model: 'google/gemini-2.5-flash'
       },
       'groq': {
         endpoint: 'https://api.groq.com/openai/v1/chat/completions',
-        model: 'openai/gpt-oss-20b'
+        model: 'openai/gpt-oss-120b'
       },
       'anthropic': {
         endpoint: 'https://api.anthropic.com/v1/messages',
-        model: 'claude-3-sonnet-20240229'
+        model: 'claude-sonnet-4-20250514'
       }
     };
 
@@ -708,6 +794,10 @@ export class SettingsManager {
     };
     
     this.saveSettings();
+    if (typeof clearByokConfig === "function") {
+      this.isSyncingByok = true;
+      try { clearByokConfig(); } finally { this.isSyncingByok = false; }
+    }
     this.dispatchAndUpdate_settings("customAPI", this.settings.customAPI);
     
     // Update UI
@@ -728,6 +818,21 @@ export class SettingsManager {
     };
     
     this.saveSettings();
+    if (typeof saveByokConfig === "function") {
+      this.isSyncingByok = true;
+      try {
+        saveByokConfig({
+          enabled: Boolean(enabled),
+          provider: provider || "google-gemini",
+          endpoint: endpoint || "",
+          model: model || "",
+          apiKey: apiKey || "",
+          saveLocally: Boolean(saveLocally),
+        });
+      } finally {
+        this.isSyncingByok = false;
+      }
+    }
     this.dispatchAndUpdate_settings("customAPI", this.settings.customAPI);
     
     // Show success message
@@ -805,6 +910,17 @@ export function setupModal(shadowEle) {
 
   // Event listeners
   settingsBtn.addEventListener("click", toggleModal);
+  const openByokBtn = shadowEle.querySelector("#open-byok-settings");
+  openByokBtn?.addEventListener("click", () => {
+    if (modal.style.display !== "block") toggleModal();
+    const toggle = modal.querySelector("#custom-api-toggle");
+    if (toggle && !toggle.checked) {
+      toggle.checked = true;
+      toggle.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+    const keyField = modal.querySelector("#api-key");
+    keyField?.focus();
+  });
   closeBtn.addEventListener("click", closeModal);
   overlay.addEventListener("click", closeModal);
   

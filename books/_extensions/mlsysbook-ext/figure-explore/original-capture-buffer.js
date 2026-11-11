@@ -27,25 +27,25 @@
     inspect.onclick=()=>{inspectingB=!inspectingB;inspect.textContent=inspectingB?'Return to requeue':'Inspect retained B';follow(...(inspectingB?[310,365]:[595,460]));};
     const invariant=document.createElement('p');invariant.className='ocb-invariant';invariant.textContent='Mappings refer to A; conversion writes separate pages B for the same frame F. Completing B does not release other consumers of A. The driver requeues A only after its final consumer releases it.';
     const steps=[
-      ['Compare two alternatives','Panel a copies one frame through distinct payload buffers. Panel b is an alternative shared-page design; it does not run after panel a. Panel c expands the lifetime of capture pages A.'],
-      ['Capture F in the copy alternative','Frame F first occupies the kernel DMA buffer. The other payload buffers have not received it.'],
-      ['Copy F into the user buffer','The payload is duplicated into a distinct user buffer. The kernel buffer still contains frame F; this is a copy, not a move.'],
-      ['Copy F into pinned host storage','Another payload copy creates a pinned-host representation of F. Shared frame identity does not mean shared physical storage.'],
-      ['Copy F into device storage','The final copy writes F into the device buffer. All four boxes represent distinct payload storage in this alternative.'],
-      ['Switch to the shared-page alternative','Start a separate illustration of the same frame F. Capture DMA writes physical pages A directly. No consumer may read A before write completion and the required synchronization.'],
-      ['Complete the DMA write','The completion fence is satisfied. Device ordering and the required cache maintenance still precede the admitted reads; completion alone does not authorize reuse.'],
-      ['Admit three mapped readers','After the required handoffs, CPU, ISP, and GPU each hold a consumer reference to physical pages A. These mappings alias A; they do not allocate three new payload copies.'],
-      ['Convert into separate pages B','In this declared conversion case, the ISP reads A and writes a new representation into B. Both are frame F, but B is separate physical storage. This transformation is not a zero-copy operation.'],
-      ['Release the CPU reference','The CPU is finished with A and releases its reference. ISP and GPU still hold A, so capture reuse remains blocked.'],
-      ['Release the ISP reference','The ISP releases A after conversion. GPU still holds the source pages; the completed output B does not remove that obligation.'],
-      ['Release the last reference','The GPU releases the last consumer reference to A. DMA completion and handoff requirements are already satisfied, so A is now eligible for requeue. Eligibility is not a new DMA write.'],
-      ['Requeue A for a later capture','The driver returns A to capture. No consumer from F still holds A. Converted pages B keep F independently; requeuing A does not overwrite B. A later frame has not been captured in this illustration.']
+      ['Compare two alternatives','Panel a chains 4 separate payload buffers across 3 copy stages, whereas panels b and c share one physical capture allocation A across 3 mapped readers and gate reuse on reference release.'],
+      ['Capture F in the copy alternative','In panel a, sensor ingress DMA writes frame F into the first box (Kernel DMA ring buffer); the 3 downstream buffers remain empty.'],
+      ['Copy F into the user buffer','Copy 1 duplicates the frame F payload from the kernel DMA buffer into a separate user-space buffer, so 2 distinct memory allocations now hold F.'],
+      ['Copy F into pinned host storage','Copy 2 duplicates frame F again into pinned host staging memory, occupying 3 separate payload buffers in DRAM.'],
+      ['Copy F into device storage','Copy 3 transfers frame F into the accelerator device buffer; all 4 boxes in panel a hold separate physical copies of the same frame F.'],
+      ['Switch to the shared-page alternative','In panel b, the MIPI CSI-2 scatter-gather DMA engine writes frame F directly into physical DRAM pages A while the completion fence remains pending.'],
+      ['Complete the DMA write','Capture DMA satisfies the completion fence on physical pages A; platform cache maintenance and IOMMU ordering must complete before any consumer reads A.'],
+      ['Admit three mapped readers','In panels b and c, the CPU, ISP, and GPU mappings each acquire a reference to physical pages A (3 active references), aliasing A without copying its payload.'],
+      ['Convert into separate pages B','When format conversion is required, the ISP reads physical pages A and writes converted pages B; B shares frame identity F but occupies separate physical storage.'],
+      ['Release the CPU reference','The CPU finishes reading frame F and drops its reference to physical pages A, leaving 2 active references (ISP and GPU) that keep capture reuse blocked in panel c.'],
+      ['Release the ISP reference','After writing converted pages B, the ISP releases its reference to source pages A; 1 active GPU reference still blocks the driver from requeuing A.'],
+      ['Release the last reference','The GPU drops the final consumer reference to physical pages A (0 references remaining), turning the panel c guard green so A becomes eligible for requeue.'],
+      ['Requeue A for a later capture','In panel c, the capture driver returns physical pages A to the DMA ring for a future frame while separate pages B still retain converted frame F.']
     ].map(([label,description])=>({label,description}));
     steps.forEach((step,i)=>{const description=step.description;Object.defineProperty(step,'description',{get(){return root.dataset.lessonCommittedIndex===String(i)?description:'On completion: '+description;}});});
     const initialFills=new Map([...copy,dma,pages,...mappings,converted,...owners].map(n=>[n,n.getAttribute('fill')]));
     const focusPoints=[[340,75],[92.5,72],[257.5,72],[422.5,72],[587.5,72],[200,215],[200,215],[310,310],[310,365],[110,310],[310,310],[435,460],[595,460]];
     function render(index,{stage,details}){root.dataset.lessonCommittedIndex=String(index);
-      if(!canvas.isConnected)stage.append(canvas,summary,inspect);inspect.hidden=index!==12;inspectingB=false;inspect.textContent='Inspect retained B';if(!invariant.isConnected)details.append(invariant);
+      if(!canvas.isConnected)stage.append(canvas);inspect.hidden=index!==12;inspectingB=false;inspect.textContent='Inspect retained B';if(!summary.isConnected)details.append(summary,invariant);
       const shared=index>=5, admitted=index>=7, holds=mappings.map((_,i)=>admitted&&index<9+i), refs=holds.filter(Boolean).length, bExists=index>=8, eligible=index>=11;
       [...copy,dma,pages,...mappings,converted,...owners].forEach(n=>{n.classList.remove('ocb-active');n.setAttribute('fill',initialFills.get(n));});
       copy.forEach((n,i)=>{const present=index>=i+1;n.dataset.frame=present?'F':'';copyValues[i].textContent=present?'F · distinct buffer':'empty';n.style.opacity=shared?'0.55':'1';copyValues[i].style.opacity=shared?'0.55':'1';});
@@ -53,12 +53,13 @@
       pageStatus.textContent=shared?`F · A references: ${refs}`:'frame identity F';fence.textContent=shared?(index>=6?'write complete':'write pending'):'completion fence';
       mappings.forEach((n,i)=>{n.dataset.references=holds[i]?'1':'0';n.dataset.storage='A';mapValues[i].textContent=!admitted?'not admitted':holds[i]?'A · F · holds 1':'A · released';});
       converted.dataset.frame=bExists?'F':'';converted.dataset.storage='B';converted.dataset.allocated=String(bExists);converted.style.opacity=bExists?'1':'0.6';convertedStatus.textContent=bExists?'F · separate storage':'same frame F (not yet written)';convertedStatus.setAttribute('font-size',bExists?'11':'9.5');
-      ownerValues[0].textContent=!shared?'pending':index===5?'writing F → A':'completed';ownerValues[1].textContent=!admitted?'not admitted':`${refs} references to A`;ownerValues[2].textContent=eligible?'0 refs · released':'not complete';ownerValues[3].textContent=index===12?'A returned':eligible?'eligible':'blocked';
+      ownerValues[0].textContent=!shared?'pending':index===5?'writing F → A':'completed';ownerValues[1].textContent=!admitted?'not admitted':`${refs} reference${refs===1?'':'s'} to A`;ownerValues[2].textContent=eligible?'0 refs · released':'not complete';ownerValues[3].textContent=index===12?'A returned':eligible?'eligible':'blocked';
       const active=index===0?null:index<=4?copy[index-1]:index===5?dma:index===6?pages:index===7?pages:index===8?converted:index<=11?mappings[index-9]:owners[3];
-      if(active)active.classList.add('ocb-active');if(index>=7&&index<=10)owners[1].classList.add('ocb-active');if(index===11)owners[2].classList.add('ocb-active');
+      if(active)active.classList.add('ocb-active');if(index===5||index===6)owners[0].classList.add('ocb-active');if(index===7)mappings.forEach(m=>m.classList.add('ocb-active'));if(index>=7&&index<=10)owners[1].classList.add('ocb-active');if(index===11)owners[2].classList.add('ocb-active');
       guard.textContent=eligible?(index===12?'A requeued; B retains frame F':'Last consumer released: A may now be requeued'):'Reuse blocked while any consumer holds A';guard.setAttribute('fill',eligible?'#1A4D3E':'#A51C30');reuseBracket.setAttribute('stroke',eligible?'#1A4D3E':'#A51C30');
       root.dataset.captureStep=String(index);root.dataset.references=String(refs);root.dataset.requeueEligible=String(eligible);root.dataset.requeued=String(index===12);root.dataset.dmaComplete=String(index>=6);root.dataset.converted=String(bExists);
-      summary.textContent=!shared?'Alternative a: payload copies into distinct storage.':`Alternative b: F in capture A · ${refs} consumer references · ${eligible?(index===12?'A requeued':'A eligible for requeue'):'reuse blocked'}${bExists?' · F also in separate B':''}`;
+      const copyCount=Math.min(4,index);
+      summary.textContent=!shared?`Alternative a (staged copies): ${copyCount} of 4 distinct payload buffers populated (${Math.max(0,copyCount-1)} of 3 copies completed).`:`Alternative b/c (shared pages A): DMA write ${index>=6?'complete':'in progress'} · active consumer references on A: ${refs} (${['CPU','ISP','GPU'].filter((_,i)=>holds[i]).join(', ')||'none'}) · converted pages B: ${bExists?'allocated (retains F)':'not written'} · A reuse: ${index===12?'requeued to driver':eligible?'eligible for requeue':'blocked'}.`;
       follow(...focusPoints[index]);
     }
     function transition({from,to,onFrame}){
@@ -75,6 +76,6 @@
       token.classList.add('ocb-transient');
     }
     const commit=(i,context)=>{overlay.querySelectorAll('.ocb-transient').forEach(n=>n.remove());render(i,context);};
-    return window.MLSysOriginalPlayer.create({root,outer:context.outer,title:'When can capture pages be reused?',scope:'Two alternative designs for one schematic frame F. Logical ownership order, not latency or simultaneous device execution. Conversion into B is an explicit separate-storage case.',steps,render:commit,transition});
+    return window.MLSysOriginalPlayer.create({root,outer:context.outer,layout:'compact',intro:'Compare 4 staged payload buffers against zero-copy shared pages A and trace how 3 consumer references gate capture buffer reuse.',viewControls:inspect,title:'When can capture pages be reused?',scope:'Two alternative ingestion designs for one camera frame F on an Application SoC: panel a stages 4 separate payload buffers across 3 memory copies, whereas panels b and c trace zero-copy dma_buf/IOMMU page sharing for physical pages A across 3 mapped consumers (CPU, ISP, GPU) plus separate converted output pages B.',steps,render:commit,transition});
   };
 })();

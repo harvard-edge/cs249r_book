@@ -39,19 +39,21 @@
     const details = document.createElement('p');details.className = 'ore-invariant';
     details.textContent = 'The map may be published again without renewing untouched cells. Hatched cells behind the return remain at t₀; blank off-ray cells retain their own prior evidence.';
     const steps = [
-      {label:'Inspect the old map',description:'The dashed phantom is an old occupied claim. No cell has received this return yet. Blank cells retain their own earlier evidence, which the figure does not specify.'},
-      {label:'Receive one qualified return',description:'A range return captured at t₁ reaches the occupied cell. Follow the cells on this line; no evidence is supplied behind the hit.'},
-      ...row.slice(0,9).map((_,i) => ({label:i===5?'Retire the phantom':`Update crossed cell ${i+1}`,description:i===5?'The qualified ray crosses the old phantom. Its cell becomes free with evidence epoch t₁; the dashed outline remains as a reminder of the retired claim.':`Crossed cell ${i+1} becomes free with evidence epoch t₁. Other cells keep their previous evidence until this return actually updates them.`})),
-      {label:'Record the occupied return',description:'The hit cell becomes occupied with evidence epoch t₁. The update stops here: cells behind it are occluded, not newly observed free space.'},
-      {label:'Publish without renewing untouched cells',description:'The updated map can now be published. Only the crossed cells and hit carry t₁; publication does not refresh the old t₀ evidence behind the return or any off-ray cell.'}
+      {label:'Inspect the old map',description:'Before the new range return arrives, all 14 cells in the active row sit at prior epoch t₀, including cell 6 with a dashed phantom obstacle and 4 hatched cells on the right.'},
+      {label:'Receive one qualified return',description:'The sensor captures a range return at epoch t₁ that terminates at cell 10 of the 14-cell row; Amanatides-Woo voxel traversal begins marching from the sensor toward the hit.'},
+      ...row.slice(0,9).map((_,i) => ({label:i===5?'Retire the phantom':`Update crossed cell ${i+1}`,description:i===5?'Crossing cell 6 with negative (free-space) evidence clears the old phantom obstacle and stamps cell 6 with epoch t₁ (6 of 9 crossed cells renewed); the dashed outline marks the retired claim.':`Voxel traversal crosses cell ${i+1} of 9 before the hit, applying negative evidence to mark it free at capture epoch t₁ while unvisited cells downstream remain at t₀.`})),
+      {label:'Record the occupied return',description:'At cell 10, the range return deposits positive (occupied) evidence at epoch t₁ and halts ray marching; the 4 occluded cells behind the hit receive no line-of-sight evidence and remain at t₀.'},
+      {label:'Publish without renewing untouched cells',description:'Publishing the map at t₁ leaves 9 crossed free cells and 1 occupied hit cell at t₁, while the 4 occluded cells behind the hit stay at t₀ and the 56 off-ray cells keep their own prior epochs.'}
     ];
     steps.forEach((step,i)=>{const description=step.description;Object.defineProperty(step,'description',{get(){return root.dataset.lessonCommittedIndex===String(i)?description:'On completion: '+description;}});});
     function epoch(label,value,color) {
       label.replaceChildren(document.createTextNode('t'));
-      const sub=document.createElementNS(ns,'tspan');sub.setAttribute('baseline-shift','sub');sub.setAttribute('font-size','7');sub.textContent=String(value);label.append(sub);label.setAttribute('fill',color);
+      const sub=document.createElementNS(ns,'tspan');sub.setAttribute('baseline-shift','sub');sub.setAttribute('font-size','8.5');sub.textContent=String(value);label.append(sub);label.setAttribute('fill',color);
     }
+    const stepOverlay=document.createElementNS(ns,'g');svg.append(stepOverlay);
+    const sensorRect=[...svg.querySelectorAll('rect')].find(n=>+n.getAttribute('x')<74&&+n.getAttribute('y')>=95&&+n.getAttribute('y')<=140);
     function render(index,{stage,details:drawer}) {root.dataset.lessonCommittedIndex=String(index);
-      if(!canvas.isConnected)stage.append(canvas,note);if(!details.isConnected)drawer.append(details);
+      if(!canvas.isConnected)stage.append(canvas);if(!note.isConnected)drawer.append(note,details);
       const updated=Math.max(0,Math.min(9,index-1)), hit=index>=11;
       cells.forEach(c=>{c.dataset.evidenceEpoch=c.getAttribute('y')==='102'?'0':'unchanged';c.dataset.occupancy='unchanged';c.classList.remove('ore-current');});
       row.forEach((c,i)=>{
@@ -65,10 +67,17 @@
       phantom.dataset.retired=String(updated>5);phantom.setAttribute('opacity',updated>5?'0.45':'1');phantomLeader.textContent=updated>5?'phantom retired':'old phantom';
       returnLeader.replaceChildren(...(hit?[...returnFinal.childNodes].map(n=>n.cloneNode(true)):[document.createTextNode('return not yet recorded')]));
       header.replaceChildren(...(index>=11?[...headerFinal.childNodes].map(n=>n.cloneNode(true)):[document.createTextNode(index===0?'Old evidence: no cell renewed yet':'One qualified return captured at t₁')]));
-      const end=index<=1?rayStart:updated<9?+row[updated-1].getAttribute('x')+34:hitEdge-1;
-      ray.setAttribute('x2',String(end));ray.setAttribute('visibility',index<2?'hidden':'visible');
+      const end=index===0?rayStart:index===1?+row[0].getAttribute('x'):updated<9?+row[updated-1].getAttribute('x')+34:hitEdge-1;
+      ray.setAttribute('x2',String(end));ray.setAttribute('visibility',index===0?'hidden':'visible');
+      stepOverlay.replaceChildren();
+      if(sensorRect){sensorRect.setAttribute('stroke',index===1?'#007A87':'#4A5568');sensorRect.setAttribute('stroke-width',index===1?'2.5':'1.2');}
+      if(index===1){
+        const r9=document.createElementNS(ns,'rect');r9.setAttribute('x',String(+row[9].getAttribute('x')-2));r9.setAttribute('y','100');r9.setAttribute('width','38');r9.setAttribute('height','38');r9.setAttribute('fill','none');r9.setAttribute('stroke','#B87333');r9.setAttribute('stroke-width','2.2');r9.setAttribute('stroke-dasharray','4 3');stepOverlay.append(r9);
+      } else if(index===12){
+        const ox=+row[10].getAttribute('x')-3,ow=+row[13].getAttribute('x')-+row[10].getAttribute('x')+40,oc=document.createElementNS(ns,'rect');oc.setAttribute('x',String(ox));oc.setAttribute('y','99');oc.setAttribute('width',String(ow));oc.setAttribute('height','40');oc.setAttribute('rx','3');oc.setAttribute('fill','none');oc.setAttribute('stroke','#B87333');oc.setAttribute('stroke-width','2.2');oc.setAttribute('stroke-dasharray','5 3');stepOverlay.append(oc);
+      }
       root.dataset.rayStep=String(index);root.dataset.updatedFree=String(updated);root.dataset.hitRecorded=String(hit);root.dataset.mapPublished=String(index===12);
-      note.textContent=index===0?'Before this return: old evidence is retained.':`${updated} crossed cells renewed · hit ${hit?'recorded at t₁':'pending'} · 4 cells behind the hit remain t₀`;
+      note.textContent=index===0?'Active row (14 cells): 0 free at t₁ · phantom active at t₀ · hit pending · 4 occluded cells behind hit at t₀.':`Active row (14 cells): ${updated} / 9 crossed cells free at t₁ · phantom ${updated>5?'retired at t₁':'still active at t₀'} · hit cell 10 ${hit?'occupied at t₁':'pending (t₀)'} · 4 occluded cells behind hit remain at t₀${index===12?' (map published)':''}.`;
       if(canvas.scrollWidth>canvas.clientWidth){const focus=index===0?297:index<=1?rayStart:index===12?501:index===11?433:+row[Math.max(0,updated-1)].getAttribute('x')+17;canvas.scrollLeft=Math.max(0,focus/680*svg.getBoundingClientRect().width-canvas.clientWidth/2);}
     }
     function transition({from,to,onFrame}) {
@@ -77,6 +86,6 @@
       ray.setAttribute('visibility','visible');
       onFrame(progress=>ray.setAttribute('x2',String(source+(target-source)*progress))); 
     }
-    return window.MLSysOriginalPlayer.create({root,outer:context.outer,title:'Which cells does one range return actually renew?',scope:'The original grid and qualified-return assumptions. Logical update order, not sensor flight time or measured processing speed. Blank off-ray cells keep their own unspecified prior evidence.',steps,render,transition});
+    return window.MLSysOriginalPlayer.create({root,outer:context.outer,layout:'compact',intro:'Trace one range ray across 14 row cells as it renews 9 free cells and 1 occupied hit to epoch t₁ while leaving 4 occluded cells at t₀.',title:'Which cells does one range return actually renew?',scope:'Single-ray occupancy and evidence-epoch update across a 14-cell row in a 70-cell grid under qualified beam coverage and geometric error bounds. Amanatides-Woo traversal applies negative (free) evidence to 9 crossed cells and positive (occupied) evidence to 1 hit cell at capture epoch t₁, leaving 4 occluded cells behind the hit at t₀.',steps,render,transition});
   };
 })();

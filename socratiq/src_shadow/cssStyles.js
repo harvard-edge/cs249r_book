@@ -700,7 +700,7 @@ export const styles = `${utilities}\n${katex}\n${boardingStyles}
   
   /* Define the hover state for the button */
   .followup-button:hover {
-    color: purple; /* Change text color to purple on hover */
+    color: var(--socratiq-accent, #8e1537);
   }
   
   
@@ -767,51 +767,29 @@ export const styles = `${utilities}\n${katex}\n${boardingStyles}
   }
   
   
-  #context-button {
-    margin-left: 8px;
-    /* context button */
+  #context-button,
+  #quiz-button,
+  #flashcards-button {
     position: relative;
     background: transparent;
     border: none;
     cursor: pointer;
-    padding: 0;
-    display: flex;
+    display: inline-flex;
     align-items: center;
     justify-content: center;
-    margin-top: 8px; 
-    margin-bottom: 8px;
-    /* background-color: white; */
-    padding: 4px;
-    /* border: 1px solid #ddd;  */
-    /* box-shadow: 0 0 10px rgba(0, 0, 0, 0.2);  */
-  }
-  
-  #context-button:hover {
-    background-color: #f5f5f5; /* Change background color on hover */
-    border-color: #ccc; /* Change border color on hover */
+    min-height: 38px;
+    margin-top: 2px;
+    margin-bottom: 2px;
+    padding: 6px 10px;
+    border-radius: 6px;
+    white-space: nowrap;
   }
 
-  #quiz-button {
-    /* quiz button */
-    position: relative;
-    background: transparent;
-    border: none;
-    cursor: pointer;
-    padding: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    margin-top: 8px; 
-    margin-bottom: 8px;
-    /* background-color: white; */
-    padding: 4px;
-    /* border: 1px solid #ddd;  */
-    /* box-shadow: 0 0 10px rgba(0, 0, 0, 0.2);  */
-  }
-  
-  #quiz-button:hover {
-    background-color: #f5f5f5; /* Change background color on hover */
-    border-color: #ccc; /* Change border color on hover */
+  #context-button:hover,
+  #quiz-button:hover,
+  #flashcards-button:hover {
+    background-color: var(--socratiq-hover, #f5f5f5);
+    border-color: var(--socratiq-border, #ccc);
   }
   
   .big-quiz-btn-disabled {
@@ -1125,7 +1103,7 @@ export const styles = `${utilities}\n${katex}\n${boardingStyles}
     width: 16px;
     height: 16px;
     border: 2px solid #f3f3f3;
-    border-top: 2px solid #3498db;
+    border-top: 2px solid var(--socratiq-accent, #8e1537);
     border-radius: 50%;
     animation: spin 1s linear infinite;
 }
@@ -1155,7 +1133,7 @@ export const styles = `${utilities}\n${katex}\n${boardingStyles}
 
 .sr-notification.saving {
     background: #e6f3ff;
-    border-left: 4px solid #0066cc;
+    border-left: 4px solid var(--socratiq-accent, #8e1537);
 }
 
 .save-button-content {
@@ -1362,7 +1340,77 @@ export const styles = `${utilities}\n${katex}\n${boardingStyles}
 :host([data-socratiq-theme="dark"]) .stats-body .text-gray-700 { color: var(--socratiq-muted); }
 :host([data-socratiq-theme="dark"]) .stats-body .text-gray-800,
 :host([data-socratiq-theme="dark"]) .stats-body .text-gray-900 { color: var(--socratiq-text); }
-:host([data-socratiq-theme="dark"]) #socratiq-knowledge-graph-modal { color: #1f2328; }
+:host([data-socratiq-theme="dark"]) #context-menu,
+:host([data-theme="dark"]) #context-menu,
+:host([data-socratiq-theme="dark"]) .at-mentions-dropup,
+:host([data-theme="dark"]) .at-mentions-dropup,
+:host([data-socratiq-theme="dark"]) .folder-filters,
+:host([data-theme="dark"]) .folder-filters,
+:host([data-socratiq-theme="dark"]) .folder-btn,
+:host([data-theme="dark"]) .folder-btn,
+:host([data-socratiq-theme="dark"]) .folder-filter,
+:host([data-theme="dark"]) .folder-filter,
+:host([data-socratiq-theme="dark"]) #context-search,
+:host([data-theme="dark"]) #context-search,
+:host([data-socratiq-theme="dark"]) #context-results > div,
+:host([data-theme="dark"]) #context-results > div,
+:host([data-socratiq-theme="dark"]) .results-container,
+:host([data-theme="dark"]) .results-container,
+:host([data-socratiq-theme="dark"]) .at-mention-item,
+:host([data-theme="dark"]) .at-mention-item,
+:host([data-socratiq-theme="dark"]) .mention-item,
+:host([data-theme="dark"]) .mention-item {
+  background: var(--socratiq-study-surface-elevated, #161b22) !important;
+  background-color: var(--socratiq-study-surface-elevated, #161b22) !important;
+  color: var(--socratiq-study-text, #e6edf3) !important;
+  border-color: var(--socratiq-study-border, #30363d) !important;
+}
+:host([data-socratiq-theme="dark"]) .folder-filter.bg-blue-100,
+:host([data-theme="dark"]) .folder-filter.bg-blue-100,
+:host([data-socratiq-theme="dark"]) .folder-filter.bg-blue-200,
+:host([data-theme="dark"]) .folder-filter.bg-blue-200,
+:host([data-socratiq-theme="dark"]) .at-mention-item.bg-blue-100,
+:host([data-theme="dark"]) .at-mention-item.bg-blue-100,
+:host([data-socratiq-theme="dark"]) .folder-filter:hover,
+:host([data-theme="dark"]) .folder-filter:hover,
+:host([data-socratiq-theme="dark"]) .at-mention-item:hover,
+:host([data-theme="dark"]) .at-mention-item:hover {
+  background: var(--socratiq-hover, #21262d) !important;
+  background-color: var(--socratiq-hover, #21262d) !important;
+  color: var(--socratiq-study-text, #e6edf3) !important;
+}
+:host([data-socratiq-theme="dark"]) #newDeckBtn,
+:host([data-theme="dark"]) #newDeckBtn,
+:host([data-socratiq-theme="dark"]) #createDeckBtn,
+:host([data-theme="dark"]) #createDeckBtn {
+  color: var(--socratiq-accent, #E85D75) !important;
+}
+:host([data-socratiq-theme="dark"]) #socratiq-knowledge-graph-modal > div,
+:host([data-theme="dark"]) #socratiq-knowledge-graph-modal > div,
+:host([data-socratiq-theme="dark"]) #knowledge-graph-modal > div,
+:host([data-theme="dark"]) #knowledge-graph-modal > div,
+:host([data-socratiq-theme="dark"]) .knowledge-graph-sidebar,
+:host([data-theme="dark"]) .knowledge-graph-sidebar,
+:host([data-socratiq-theme="dark"]) .knowledge-graph-actions,
+:host([data-theme="dark"]) .knowledge-graph-actions,
+:host([data-socratiq-theme="dark"]) #list-view,
+:host([data-theme="dark"]) #list-view {
+  background: var(--socratiq-study-surface, #0f1419) !important;
+  background-color: var(--socratiq-study-surface, #0f1419) !important;
+  color: var(--socratiq-study-text, #e6edf3) !important;
+  border-color: var(--socratiq-study-border, #30363d) !important;
+}
+:host([data-socratiq-theme="dark"]) #socratiq-knowledge-graph-modal .sidebar-header,
+:host([data-theme="dark"]) #socratiq-knowledge-graph-modal .sidebar-header,
+:host([data-socratiq-theme="dark"]) #socratiq-knowledge-graph-modal .sidebar-header div,
+:host([data-theme="dark"]) #socratiq-knowledge-graph-modal .sidebar-header div,
+:host([data-socratiq-theme="dark"]) #socratiq-knowledge-graph-modal #list-view .list-item,
+:host([data-theme="dark"]) #socratiq-knowledge-graph-modal #list-view .list-item,
+:host([data-socratiq-theme="dark"]) #socratiq-knowledge-graph-modal #list-view .list-item span,
+:host([data-theme="dark"]) #socratiq-knowledge-graph-modal #list-view .list-item span {
+  color: var(--socratiq-study-text, #e6edf3) !important;
+  border-color: var(--socratiq-study-border, #30363d) !important;
+}
 :host([data-socratiq-theme="dark"]) .stats-body .bg-blue-50 { background-color: var(--socratiq-accent-bg); }
 :host([data-socratiq-theme="dark"]) .stats-body .text-blue-600,
 :host([data-socratiq-theme="dark"]) .stats-body .text-blue-700 { color: var(--socratiq-accent); }
@@ -1372,10 +1420,37 @@ export const styles = `${utilities}\n${katex}\n${boardingStyles}
 .stats-modal, .verification-modal, #socratiq-knowledge-graph-modal, #helpModal {
   z-index: 100001 !important;
 }
+#chapterList button[data-chapter] { gap: 8px; }
+#socratiq-knowledge-graph-modal .quiz-items-container { flex: 1 1 auto; min-height: 0; margin-bottom: 8px !important; max-height: none !important; }
+#socratiq-knowledge-graph-modal .knowledge-graph-actions { position: static !important; flex: 0 0 auto; margin-top: auto; padding-top: 10px !important; }
 #sr-modal-content-container-controls { gap: 8px; flex-wrap: wrap; }
 #sr-controls-container { display: flex; flex-wrap: wrap; gap: 8px; }
 #sr-controls-container > button { margin-left: 0 !important; }
 #showAddCard { align-self: flex-start; flex-shrink: 0; white-space: nowrap; }
+@media (min-width: 641px) and (max-width: 820px) {
+  #sr-modal-content_inner {
+    top: 16px;
+    width: calc(100% - 32px);
+    max-height: calc(100dvh - 32px) !important;
+    padding: 16px;
+  }
+  #sr-modal-content_inner > .grid {
+    grid-template-columns: 200px minmax(0, 1fr) !important;
+  }
+  #sr-sidebar {
+    grid-column: 1 / 2 !important;
+    min-width: 200px;
+  }
+  #sr-modal-content-container {
+    grid-column: 2 / 3 !important;
+    min-width: 0;
+  }
+  #socratiq-knowledge-graph-modal > div {
+    width: calc(100% - 24px) !important;
+    height: calc(100dvh - 24px) !important;
+    padding: 16px !important;
+  }
+}
 @media (max-width: 640px) {
   /* The stacked deck keeps its original actions; duplicate floating actions
      would cover its search and import/export controls. */
@@ -1404,7 +1479,7 @@ export const styles = `${utilities}\n${katex}\n${boardingStyles}
   #socratiq-knowledge-graph-modal .knowledge-graph-layout { flex-direction: column; gap: 12px; min-height: 0; overflow-y: auto; }
   #socratiq-knowledge-graph-modal .knowledge-graph-viewport { flex: 0 0 400px !important; width: 100%; height: 400px !important; }
   #socratiq-knowledge-graph-modal .knowledge-graph-sidebar { flex: 0 0 auto; width: 100% !important; height: auto !important; padding: 16px !important; border-left: 0 !important; border-top: 1px solid #e2e8f0; }
-  #socratiq-knowledge-graph-modal .quiz-items-container { flex: 0 0 auto; max-height: 180px; margin-bottom: 0 !important; }
+  #socratiq-knowledge-graph-modal .quiz-items-container { flex: 0 0 auto; max-height: 180px !important; margin-bottom: 0 !important; }
   #socratiq-knowledge-graph-modal .knowledge-graph-actions { position: static !important; margin-top: 12px; padding-top: 12px !important; }
   #closeModal_sr, #sr-import-btn, #sr-download-btn, #copyButton, #sr-share-btn {
     min-width: 44px;
@@ -1413,30 +1488,35 @@ export const styles = `${utilities}\n${katex}\n${boardingStyles}
     justify-content: center;
   }
   #sr-modal-content_inner {
-    top: 12px;
-    width: calc(100% - 24px);
-    max-height: calc(100dvh - 24px) !important;
-    padding: 16px;
-    margin-bottom: 12px;
+    top: 8px;
+    width: calc(100% - 20px);
+    max-height: calc(100dvh - 16px) !important;
+    padding: 10px 12px;
+    margin-bottom: 8px;
   }
   #sr-modal-content_inner > .grid {
     display: flex;
     flex-direction: column;
-    margin-top: 48px;
+    margin-top: 28px;
+    gap: 8px;
     overflow-y: auto !important;
   }
   #sr-sidebar {
     position: static !important;
     flex: 0 0 auto;
-    max-height: none !important;
-    overflow: visible !important;
+    max-height: 185px !important;
+    overflow-y: auto !important;
     border-right: 0;
     border-bottom: 1px solid var(--socratiq-border);
     padding-right: 0;
-    padding-bottom: 12px;
+    padding-bottom: 8px;
   }
+  #sr-sidebar > .mb-4,
+  #sr-sidebar > .mb-6 { margin-bottom: 6px !important; }
   #sr-modal-content-container { flex: 0 0 auto; min-width: 0; max-height: none !important; padding-left: 0; overflow: visible; }
-  #sr-modal-content-container > .flex.items-center.justify-between.w-full { flex-wrap: wrap; gap: 8px; }
+  #sr-modal-content-container > .mb-4,
+  #sr-modal-content-container > .mb-6 { margin-bottom: 8px !important; }
+  #sr-modal-content-container > .flex.items-center.justify-between.w-full { flex-wrap: wrap; gap: 6px; margin-bottom: 8px !important; }
   #sr-modal-content-container > .flex.items-center.justify-between.w-full > div:first-child { flex-basis: 100%; min-width: 0; }
   #sr-modal-content-container > .flex.items-center.justify-between.w-full > div:last-child { margin-left: 0; }
 }

@@ -6,12 +6,13 @@ function createModal() {
 
     // Create a container for the entire modal content
     const modalContainer = document.createElement('div');
-    modalContainer.className = 'bg-white shadow-lg rounded-lg relative max-w-lg mx-auto';
+    modalContainer.className = 'bg-white shadow-lg rounded-lg relative max-w-lg mx-auto min-h-[180px] gap-5';
     modalContainer.style.backgroundColor = 'var(--socratiq-bg, #ffffff)';
     modalContainer.style.color = 'var(--socratiq-text, #1f2328)';
-    modalContainer.style.maxWidth = '400px'; // Limit the width of the modal
+    modalContainer.style.maxWidth = '460px'; // Limit the width of the modal
     modalContainer.id="helpModalContainer";
-    modalContainer.style.width = '100%'; // Ensures it fills the modal area but respects maxWidth
+    modalContainer.style.width = 'min(460px, calc(100vw - 24px))'; // Ensures it fills the modal area but keeps 12px margin on mobile
+    modalContainer.style.margin = '0 auto';
     modalContainer.onclick = event => event.stopPropagation(); // Prevent clicks from closing modal
 
     // Create scrollable content area
@@ -24,8 +25,10 @@ function createModal() {
     markdownContent.className = 'markdown-body space-y-4';
     // markdownContent.innerHTML =  `<iframe id="youtubeVideo" width="100%" height="315" src="https://www.youtube.com/embed/mIT9nIsxCe0?enablejsapi=1" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>`
     //convertMarkdownToHTML(helpMarkdown);
-    const volMatch = typeof window !== 'undefined' ? window.location?.pathname?.match(/(?:^|\/)(vol[1-4])(?:\/|$)/)?.[1] : '';
-    const guideHref = `/${volMatch || 'vol1'}/shared/frontmatter/socratiq/socratiq.html`;
+    const pathname = typeof window !== 'undefined' ? (window.location?.pathname || '') : '';
+    const guideHref = /\/(vol[1-4])(\/|$)/.test(pathname)
+        ? pathname.replace(/\/(vol[1-4])\/.*$/, '/$1/shared/frontmatter/socratiq/socratiq.html').replace(/\/(vol[1-4])$/, '/$1/shared/frontmatter/socratiq/socratiq.html')
+        : '/vol1/shared/frontmatter/socratiq/socratiq.html';
     markdownContent.innerHTML = `<p class="text-sm mb-3">Read the <a href="${guideHref}" target="_blank" rel="noopener noreferrer" class="text-blue-600 dark:text-blue-300 underline font-medium">SocratiQ User Guide</a> or our paper in the <a href="https://doi.org/10.1145/3743646.3750010" target="_blank" rel="noopener noreferrer" class="text-blue-600 dark:text-blue-300 underline font-medium">WCAE '25 proceedings</a> (<a href="https://arxiv.org/abs/2502.00341" target="_blank" rel="noopener noreferrer" class="text-blue-600 dark:text-blue-300 underline font-medium">arXiv:2502.00341</a>).</p><div id="youtubeVideo-container"></div>`;
 
     content.appendChild(markdownContent);
@@ -72,7 +75,7 @@ function toggleHelpModal(shadowEle) {
 
     if (isHidden) {
         modal.classList.remove('hidden');
-        youtubeVid.innerHTML = `<iframe id="youtubeVideo" width="100%" height="315" src="https://www.youtube.com/embed/mIT9nIsxCe0?enablejsapi=1" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>`;
+        youtubeVid.innerHTML = `<iframe id="youtubeVideo" width="100%" height="200" style="width: 100%; aspect-ratio: 16 / 9; height: auto; min-height: 180px; max-height: 240px; border: 0; border-radius: 8px; display: block;" src="https://www.youtube.com/embed/mIT9nIsxCe0?enablejsapi=1" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>`;
     } else {
         modal.classList.add('hidden');
         stopYouTubeVideo(modal);
@@ -125,6 +128,6 @@ function stopYouTubeVideo(modal) {
         iframe.contentWindow.postMessage(JSON.stringify({
             'event': 'command',
             'func': 'pauseVideo'
-        }), '*');
+        }), 'https://www.youtube.com');
     }
 }

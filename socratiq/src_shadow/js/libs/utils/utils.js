@@ -3,39 +3,34 @@ import { copy_download } from "../../components/settings/copy_download.js";
 
 const copy_buttons = `
           
-<div id="utility-btn-container"  class="text-blue-400 flex space-x-2 p-2">
+<div id="utility-btn-container" class="flex space-x-2 p-2" style="color: var(--socratiq-accent, #8e1537);">
 <!-- <button id="reference-btn" class="bg-blue-100 text-zinc-900 px-4 py-0.5 rounded-md">1</button> -->
     <!-- Buttons with icons -->
 
-         <button id='highlight-btn' class="w-4 h-4  flex items-center justify-center hover:text-blue-700"
+         <button id='highlight-btn' class="w-4 h-4 flex items-center justify-center hover:text-blue-700"
               title="Highlight">
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="icons">
                 <path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
               </svg>
-            </button>   
-    </button>
+            </button>
 
-                <button id='sr-send-btn' class="w-4 h-4  mr-2  flex items-center justify-center hover:text-blue-700 st-send-btn"
-               >
-                
-
+                <button id='sr-send-btn' class="w-4 h-4 mr-2 flex items-center justify-center hover:text-blue-700 st-send-btn">
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="icons">
   <path stroke-linecap="round" stroke-linejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0 1 11.186 0Z" />
 </svg>
-
               </button>
-<button  id='share-btn' class="w-4 h-4 flex items-center justify-center hover:text-blue-700"  title="Share"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="icons">
+<button id='share-btn' class="w-4 h-4 flex items-center justify-center hover:text-blue-700" title="Share"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="icons">
 <path stroke-linecap="round" stroke-linejoin="round" d="M7.217 10.907a2.25 2.25 0 1 0 0 2.186m0-2.186c.18.324.283.696.283 1.093s-.103.77-.283 1.093m0-2.186 9.566-5.314m-9.566 7.5 9.566 5.314m0 0a2.25 2.25 0 1 0 3.935 2.186 2.25 2.25 0 0 0-3.935-2.186Zm0-12.814a2.25 2.25 0 1 0 3.933-2.185 2.25 2.25 0 0 0-3.933 2.185Z" />
 </svg>
 </button>
-<button id='copy-btn' class="w-4 h-4  mr-2  flex items-center justify-center hover:text-blue-700"  title="Copy"><svg id="copy-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="icons">
+<button id='copy-btn' class="w-4 h-4 mr-2 flex items-center justify-center hover:text-blue-700" title="Copy"><svg id="copy-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="icons">
 <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.75a1.125 1.125 0 0 1-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H6.75a9.06 9.06 0 0 1 1.5.124m7.5 10.376h3.375c.621 0 1.125-.504 1.125-1.125V11.25c0-4.46-3.243-8.161-7.5-8.876a9.06 9.06 0 0 0-1.5-.124H9.375c-.621 0-1.125.504-1.125 1.125v3.5m7.5 10.375H9.375a1.125 1.125 0 0 1-1.125-1.125v-9.25m12 6.625v-1.875a3.375 3.375 0 0 0-3.375-3.375h-1.5a1.125 1.125 0 0 1-1.125-1.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H9.75" />
 </svg>
 </button>
-<button id='download-btn'class="w-4 h-4  mr-2  flex items-center justify-center hover:text-blue-700" title="Download"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="icons">
+<button id='download-btn' class="w-4 h-4 mr-2 flex items-center justify-center hover:text-blue-700" title="Download"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="icons">
 <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" />
 </svg>
-
+</button>
 </div>`;
 
 // const button_util_container = `
@@ -339,12 +334,10 @@ export function assignAndTrackUniqueIds(element, idsToTrack = []) {
   // Initialize array to store new IDs in same order as idsToTrack
   const trackedNewIds = new Array(idsToTrack.length).fill(null);
   
-  // Assign unique ID to root element
+  // Check if root element's original ID was in tracking list before overwriting
+  const rootIndex = idsToTrack.indexOf(element.id);
   const rootId = generateHighPrecisionUniqueId();
   element.id = rootId;
-  
-  // Check if root element's original ID was in tracking list
-  const rootIndex = idsToTrack.indexOf(element.id);
   if (rootIndex !== -1) {
     trackedNewIds[rootIndex] = rootId;
   }
@@ -540,24 +533,24 @@ export function insertDiagramElements(messageContent, clone) {
   const relatedElement = Array.from(strongElements).find(el => 
     el.textContent.toLowerCase().includes('related')
   );
+
+  // Create new div for diagram
+  const diagramDiv = document.createElement('div');
+  diagramDiv.className = 'generated-diagram';
+  diagramDiv.style.cssText = `
+    margin: 1.5rem 0;
+    padding: 1rem;
+    border-radius: 8px;
+    background-color: #f8f9fa;
+    border: 1px solid #e9ecef;
+  `;
+  
+  diagramDiv.innerHTML = `
+    <h3 style="margin-bottom: 1rem; font-weight: 600; color: #1f2937;">Generated Diagram</h3>
+    ${messageContent}
+  `;
           
   if (relatedElement) {
-    // Create new div for diagram
-    const diagramDiv = document.createElement('div');
-    diagramDiv.className = 'generated-diagram';
-    diagramDiv.style.cssText = `
-      margin: 1.5rem 0;
-      padding: 1rem;
-      border-radius: 8px;
-      background-color: #f8f9fa;
-      border: 1px solid #e9ecef;
-    `;
-    
-    diagramDiv.innerHTML = `
-      <h3 style="margin-bottom: 1rem; font-weight: 600; color: #1f2937;">Generated Diagram</h3>
-      ${messageContent}
-    `;
-    
     // Insert before the parent element containing "related"
     relatedElement.parentElement.parentElement.insertBefore(
       diagramDiv, 

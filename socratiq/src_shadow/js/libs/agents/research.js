@@ -105,7 +105,7 @@ function formatSinglePaper(result, index) {
   paperString += `|  Title  |Link |\n`;
   paperString += `|---------|-----|\n`;
 
-  paperString += `| ${removeNewlines(result.title)} | <a href="${result.link}" style="color:blue; hover:purple;" target="_blank">↗Link</a> |\n\n`;
+  paperString += `| ${removeNewlines(result.title)} | <a href="${result.link}" style="color:var(--socratiq-accent, #8e1537);" target="_blank" rel="noopener noreferrer">↗Link</a> |\n\n`;
   
   if (result.year) {
     paperString += `⭈ Year: ${result.year}\n\n`;
@@ -203,7 +203,7 @@ export async function initiateResearch(query, token, randomID, searchTerms, num_
 ////////////////////////////////////////////////////////////////////////////////////////
 
 
-const PLOS_API_URL = 'http://api.plos.org/search';
+const PLOS_API_URL = 'https://api.plos.org/search';
 const ELSEVIER_API_URL = 'https://api.elsevier.com/content/search/scopus';
 const ELSEVIER_API_KEY = 'a9d938cf9d721824035e1c7ddc26d362';
 const LOC_API_URL = 'https://www.loc.gov/search/';
@@ -484,10 +484,11 @@ function extractFirstTwoSentences(abstract) {
 
 export async function fetchPapers(topics, num_papers=5) {
   const results = [];
+  const searchTerms = Array.isArray(topics) ? topics : [topics];
 
   try {
     // const semanticScholarPapers = await fetchPapersFromSemanticScholar(topics.join(', '));
-    const semanticScholarPapers = await fetchPapersFromSemanticScholar_sort_by_citation(topics);
+    const semanticScholarPapers = await fetchPapersFromSemanticScholar_sort_by_citation(searchTerms.join(', '));
     results.push(...semanticScholarPapers);
   } catch (error) {
     console.error(`Taking a little longer than expected`);
@@ -497,7 +498,7 @@ export async function fetchPapers(topics, num_papers=5) {
       // const [plosPapers, elsevierPapers, locPapers, pubmedPapers, arxivPapers] = await Promise.all([
       const [arxivPapers] = await Promise.all([
 
-        fetchArxivDataForTerms([topics], num_papers),
+        fetchArxivDataForTerms(searchTerms, num_papers),
         // fetchPapersFromPLOS(topic),
         // fetchPapersFromLOC(topic),
         // fetchPapersFromPubMed(topic),
@@ -510,7 +511,7 @@ export async function fetchPapers(topics, num_papers=5) {
 
       // results.push(...plosPapers, ...elsevierPapers, ...locPapers, ...pubmedPapers, ...arxivPapers);
     } catch (error) {
-      console.error(`Error fetching papers for topic "${topic}":`, error);
+      console.error(`Error fetching papers for topic "${JSON.stringify(topics)}":`, error);
     }
   // }
 }
