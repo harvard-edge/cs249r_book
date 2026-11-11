@@ -38,7 +38,7 @@ window.MLSysFigureLessons["original-v3-vol3-first-token-accounting"]=async(root,
  if(i>=5)items.push(chip('B',i>=7?580:492.5,i>=7?185:137,'B','compute'));
  if(i>=6)items.push(chip('C',i>=7?620:605,i>=7?185:137,'C','compute'));
  items.push(chip('request',i===0?175:i<3?285:395,35,i===0?'request':i<2?'prefill':i<3?'logits':'sampled','neutral',60,16));
- const ttft=make('text',{x:280,y:281,'text-anchor':'middle',class:'v3b-live-text','data-object':'ttft-status'},i>=4?'closed after A delivery':'open: first delivery pending');overlay.append(ttft);
+ const ttft=make('text',{x:280,y:281,'text-anchor':'middle',class:'v3b-live-text','data-object':'ttft-status',style:'font-size:11px;font-weight:700;fill:'+(i>=4?'#15803d':'#6d28d9')},i>=4?'closed after A delivery':'open: first delivery pending');overlay.append(ttft);
  return{items,focus:i>=5?(i>=6?'C':'B'):i>=3?'A':'request',cue:i>=4?'Client has A; later passes and delivery remain separate.':'Service progress does not close client TTFT.'};
 }
  function route(from,to,id){if(id==='A'&&to===4)return[[395,137],[430,137],[430,185],[475,185]];if(id==='B'&&to===7)return[[492.5,137],[535,137],[535,155],[620,155],[620,185],[580,185]];if(id==='C'&&to===7)return[[605,137],[655,137],[655,155],[620,155],[620,185]];return null;}

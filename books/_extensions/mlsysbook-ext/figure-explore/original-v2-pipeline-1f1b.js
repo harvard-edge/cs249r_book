@@ -57,10 +57,13 @@
       }
       states.push(snapshot());
     }
+    const peakLabels = [], peakBars = [];
     for (let rank = 0; rank < stages; rank++) {
       const printedPeak = texts.find(n => +n.getAttribute('x') === 978 && +n.getAttribute('y') === 78 + rank * 56);
-      const filledBars = rectangles.filter(n => +n.getAttribute('y') === 65 + rank * 56 && +n.getAttribute('width') === 12 && n.getAttribute('fill') === '#C7D7EB').length;
+      const rowBars = rectangles.filter(n => +n.getAttribute('y') === 65 + rank * 56 && +n.getAttribute('width') === 12).sort((a, b) => +a.getAttribute('x') - +b.getAttribute('x'));
+      const filledBars = rowBars.filter(n => n.getAttribute('fill') === '#C7D7EB').length;
       if (!printedPeak || +printedPeak.textContent !== peaks[rank] || filledBars !== peaks[rank] || live[rank].size || forwards[rank].size !== microbatches || backwards[rank].size !== microbatches) throw Error('1F1B endpoints disagree with source peak bars');
+      peakLabels.push(printedPeak); peakBars.push(rowBars);
     }
     const focus = element('rect', {x: 92, y: 44, width: 40, height: 226, rx: 3, fill: 'none', stroke: '#b45309', 'stroke-width': 2, 'data-mlsys-focus': '', 'aria-hidden': 'true'});
     art.append(focus);
@@ -111,6 +114,15 @@
           c.group.style.opacity = c.slot < index ? '1' : '.2';
           c.group.dataset.executed = String(c.slot < index);
           c.retained.setAttribute('visibility', c.kind === 'F' && c.slot < index && state.live[c.rank].includes(c.micro) ? 'visible' : 'hidden');
+        }
+        for (let rank = 0; rank < stages; rank++) {
+          const liveCount = state.live[rank].length, peakCount = state.peaks[rank];
+          peakBars[rank].forEach((bar, b) => {
+            bar.setAttribute('fill', b < liveCount ? '#1F407A' : b < peakCount ? '#C7D7EB' : '#f1f5f9');
+            bar.setAttribute('stroke', b < peakCount ? '#1F407A' : '#94a3b8');
+          });
+          peakLabels[rank].textContent = index === slots ? String(peakCount) : `${liveCount}/${peakCount}`;
+          peakLabels[rank].setAttribute('font-size', index === slots ? '16' : '13');
         }
         focus.setAttribute('x', String(92 + 34 * Math.max(0, index - 1)));
         cards.forEach((item, rank) => {

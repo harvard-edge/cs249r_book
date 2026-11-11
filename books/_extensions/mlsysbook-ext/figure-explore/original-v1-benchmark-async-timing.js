@@ -54,7 +54,7 @@ window.MLSysFigureLessons[NAME]=async(root,{outer,verifiedArtwork})=>{
   mobileRails.forEach((n,i)=>{const a=[G.start,G.deviceStart,G.start][i],b=[G.call,G.deviceStop,G.hostStop][i];n.setAttribute('x2',Math.max(a,Math.min(x,b)));});
   readout.textContent=`Call timer: ${call} · Device events: ${device} · Synchronized host: ${host}`;
   root.dataset.timingState=JSON.stringify({committed,call,device,host,x});
-  source.scrollLeft=Math.max(0,x*art.getBoundingClientRect().width/358.388-source.clientWidth/2);
+  source.scrollLeft=0;
  }
  const player=window.MLSysOriginalPlayer.create({root,outer,layout:'compact',intro:'Trace the moving time cursor across the host and accelerator lanes to compare the call timer, device-event timer, and synchronized host timer.',title:'Why can a host call finish before the accelerator?',scope:'The original schematic timeline, not measured milliseconds. One cursor shows time in both lanes. Strong traces grow only inside their declared timing boundaries; animation speed does not represent hardware speed. Earlier device work has completed before the host timer starts.',steps,
  render(i,{stage,details}){committed=i;if(!mounted){stage.append(source);(details||stage).append(readout);mounted=true;}paint(positions[i],i===0);root.dataset.lessonState=String(i);delete root.dataset.pending;},

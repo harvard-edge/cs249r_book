@@ -17,7 +17,7 @@ window.MLSysFigureLessons["original-v4-05-action-taps"]=async(root,context)=>{
  // Keep the endpoint in view when Expand or rotation changes the artwork scale.
  // Scrolling alone does not trigger this observer, so manual inspection persists.
  let focus=null,resizeFrame=0,disposed=false;
- function recenter(){if(!focus||disposed)return;const scale=svg.getBoundingClientRect().width/width;canvas.scrollLeft=Math.max(0,focus[0]*scale-canvas.clientWidth/2);canvas.scrollTop=Math.max(0,focus[1]*scale-canvas.clientHeight/2);}
+ function recenter(){if(!focus||disposed)return;if(canvas.clientWidth>=520){canvas.scrollLeft=0;canvas.scrollTop=0;return;}const scale=svg.getBoundingClientRect().width/width;canvas.scrollLeft=Math.max(0,focus[0]*scale-canvas.clientWidth/2);canvas.scrollTop=Math.max(0,focus[1]*scale-canvas.clientHeight/2);}
  function follow(x,y){focus=[x,y];recenter();}
  const cameraResize=typeof ResizeObserver==='function'?new ResizeObserver(()=>{if(!disposed&&!resizeFrame)resizeFrame=requestAnimationFrame(()=>{resizeFrame=0;recenter();});}):null;
  cameraResize?.observe(canvas);cameraResize?.observe(svg);
@@ -26,12 +26,12 @@ window.MLSysFigureLessons["original-v4-05-action-taps"]=async(root,context)=>{
  function route(token,points,p){const lens=points.slice(1).map((b,i)=>Math.hypot(b[0]-points[i][0],b[1]-points[i][1]));let rem=p*lens.reduce((a,b)=>a+b,0),j=0;while(j<lens.length-1&&rem>lens[j]){rem-=lens[j];j++;}const q=lens[j]?rem/lens[j]:1,a=points[j],b=points[j+1];token.setAttribute('cx',a[0]+(b[0]-a[0])*q);token.setAttribute('cy',a[1]+(b[1]-a[1])*q);}
  
  const boxes=[...svg.querySelectorAll('rect')];const by=(x,y)=>boxes.find(e=>+e.getAttribute('x')===x&&+e.getAttribute('y')===y);
- const blocks=[by(28,72),by(152,72),by(364,72),by(528,160),by(528,222)];
+ const blocks=[by(28,72),by(152,72),by(364,72),by(528,160),by(528,222)],logBox=by(28,298);
  if(blocks.some(x=>!x))throw Error('Action-tap objects changed');
  const taps=[[131,95],[272,95],[506,95],[594,262]];
  const values=['request +1.0','mapped +0.8','allowed +0.4','measured 0.0'];
- const log=svg.querySelector('text[x="338"][y="318"]');if(!log)throw Error('Log geometry changed');log.setAttribute('y','309');log.setAttribute('font-size','7');
- const cells=[98,255,414,574].map(x=>add('text',{x,y:322,'text-anchor':'middle','font-size':8,fill:'#1A202C'},'—'));
+ const log=svg.querySelector('text[x="338"][y="318"]');if(!log)throw Error('Log geometry changed');log.setAttribute('y','309');log.setAttribute('font-size','8.5');
+ const cells=[98,255,414,574].map(x=>add('text',{x,y:323,'text-anchor':'middle','font-size':10,'font-weight':'700',fill:'#1A202C'},'—'));
  const moving=dot(131,95,'#B87333',5),copy=dot(131,95,'#007A87',4);
  const steps=[
  ['One admitted command, four distinct taps','On the application processor, the policy or operator block prepares a command before any of the 4 taps are written to the hardware-synchronized telemetry log.'],
@@ -54,8 +54,9 @@ window.MLSysFigureLessons["original-v4-05-action-taps"]=async(root,context)=>{
   'Log tuple [a_req, a_cmd, a_enf, a_meas] = [+1.0, +0.8, +0.4, 0.0] · Complete PTP-synchronized record preserves intervention and stall attribution.'
  ];
  function frame(i,p=1){
-  const known=[i>=1,i>=2,i>=3,i>=5];cells.forEach((el,j)=>el.textContent=known[j]?values[j]:'—');
+  const known=[i>=1,i>=2,i>=3,i>=5];cells.forEach((el,j)=>{el.textContent=known[j]?values[j]:'—';el.setAttribute('fill',i===6?'#007A87':'#1A202C');});
   blocks.forEach(el=>el.classList.remove('v4b-active'));const b=[0,0,1,2,3,4,4][i];blocks[b].classList.add('v4b-active');
+  if(logBox){logBox.classList.toggle('v4b-active',i===6);logBox.setAttribute('stroke',i===6?'#007A87':'#4A5568');}
   moving.setAttribute('cx',endpoints[i][0]);moving.setAttribute('cy',endpoints[i][1]);copy.style.display='none';
   root.dataset.tapStep=String(i);root.dataset.logged=known.map((v,j)=>v?j+1:null).filter(Boolean).join(',');root.dataset.request='1';root.dataset.mapped='0.8';root.dataset.enforced='0.4';root.dataset.measured=i>=5?'0':'pending';
   readout.textContent=stepReadouts[i];

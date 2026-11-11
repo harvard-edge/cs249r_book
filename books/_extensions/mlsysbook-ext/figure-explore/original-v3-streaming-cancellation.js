@@ -96,20 +96,20 @@ const spec = {
     "remote1": {
       "x": 500,
       "y": 298,
-      "width": 190,
-      "font": 10
+      "width": 205,
+      "font": 11
     },
     "remote2": {
       "x": 500,
       "y": 318,
-      "width": 190,
-      "font": 10
+      "width": 205,
+      "font": 11
     },
     "remote3": {
       "x": 500,
       "y": 338,
-      "width": 190,
-      "font": 10
+      "width": 205,
+      "font": 11
     }
   },
   "defaults": {},
@@ -356,7 +356,7 @@ const spec = {
             "p1": "held",
             "p2": "key not in schema",
             "cancel": "cancel sent",
-            "cancel2": "unconfirmed",
+            "cancel2": "request in flight",
             "local1": "partial proposal never dispatched",
             "local2": "rejection recorded",
             "local3": "error offered next turn",
@@ -383,6 +383,14 @@ const spec = {
           "camera": [
             565,
             220
+          ],
+          "marks": [
+            {
+              "x": 350,
+              "y": 158,
+              "r": 18,
+              "color": "#d97706"
+            }
           ],
           "motion": {
             "label": "cancel",
@@ -445,6 +453,14 @@ const spec = {
           "camera": [
             565,
             220
+          ],
+          "marks": [
+            {
+              "x": 560,
+              "y": 158,
+              "r": 22,
+              "color": "#d97706"
+            }
           ]
         },
         {
@@ -488,6 +504,14 @@ const spec = {
           "camera": [
             600,
             300
+          ],
+          "marks": [
+            {
+              "x": 560,
+              "y": 300,
+              "r": 22,
+              "color": "#0284c7"
+            }
           ],
           "motion": {
             "label": "stopped",
@@ -554,6 +578,14 @@ const spec = {
           "camera": [
             600,
             300
+          ],
+          "marks": [
+            {
+              "x": 560,
+              "y": 336,
+              "r": 22,
+              "color": "#16a34a"
+            }
           ],
           "motion": {
             "label": "release",
@@ -808,7 +840,7 @@ const spec = {
             "p1": "held",
             "p2": "key not in schema",
             "cancel": "cancel sent",
-            "cancel2": "unconfirmed",
+            "cancel2": "request in flight",
             "local1": "partial proposal never dispatched",
             "local2": "rejection recorded",
             "local3": "error offered next turn",
@@ -835,6 +867,14 @@ const spec = {
           "camera": [
             565,
             220
+          ],
+          "marks": [
+            {
+              "x": 350,
+              "y": 158,
+              "r": 18,
+              "color": "#d97706"
+            }
           ],
           "motion": {
             "label": "cancel",
@@ -897,6 +937,14 @@ const spec = {
           "camera": [
             565,
             220
+          ],
+          "marks": [
+            {
+              "x": 560,
+              "y": 158,
+              "r": 22,
+              "color": "#d97706"
+            }
           ]
         },
         {
@@ -940,6 +988,14 @@ const spec = {
           "camera": [
             600,
             300
+          ],
+          "marks": [
+            {
+              "x": 560,
+              "y": 300,
+              "r": 22,
+              "color": "#0284c7"
+            }
           ],
           "motion": {
             "label": "unconfirmed",
@@ -985,7 +1041,7 @@ const spec = {
             "local3": "error offered next turn",
             "remote1": "decode may continue",
             "remote2": "batch departure not established",
-            "remote3": "KV held until consumers stop"
+            "remote3": "KV still pinned by active batch"
           },
           "values": [
             "Rejected; never dispatched",
@@ -1006,6 +1062,14 @@ const spec = {
           "camera": [
             600,
             300
+          ],
+          "marks": [
+            {
+              "x": 560,
+              "y": 336,
+              "r": 22,
+              "color": "#dc2626"
+            }
           ],
           "motion": {
             "label": "held",
@@ -1038,8 +1102,9 @@ window.MLSysFigureLessons[spec.name]=async(root,context)=>{
  root.classList.add(spec.name);svg.setAttribute('role','img');svg.setAttribute('aria-label',spec.question+' Original chapter diagram with synchronized state.');
  const node=(tag,a={},text)=>{const n=document.createElementNS(NS,tag);Object.entries(a).forEach(([k,v])=>n.setAttribute(k,String(v)));if(text!==undefined)n.textContent=text;return n;};
  const textNodes=[...svg.querySelectorAll('text')],bindings={};
- for(const [key,b]of Object.entries(spec.slots)){const matches=textNodes.filter(n=>Number(n.getAttribute('x'))===b.x&&Number(n.getAttribute('y'))===b.y);if(matches.length!==1)throw Error('Original slot changed: '+key);bindings[key]={node:matches[0],original:matches[0].innerHTML,font:matches[0].getAttribute('font-size')};}
+ for(const [key,b]of Object.entries(spec.slots)){const matches=textNodes.filter(n=>Number(n.getAttribute('x'))===b.x&&Number(n.getAttribute('y'))===b.y);if(matches.length!==1)throw Error('Original slot changed: '+key);bindings[key]={node:matches[0],original:matches[0].innerHTML,font:matches[0].getAttribute('font-size'),fill:matches[0].getAttribute('fill'),weight:matches[0].getAttribute('font-weight')};}
  const circles=[...svg.querySelectorAll('circle')].map(n=>({n,fill:n.getAttribute('fill'),stroke:n.getAttribute('stroke'),'stroke-width':n.getAttribute('stroke-width')}));
+ const baseRects=[...svg.querySelectorAll('rect')].filter(r=>+r.getAttribute('width')<500&&+r.getAttribute('height')<260);
  const overlay=node('g',{class:'v3-original-overlay'});svg.append(overlay);
  const markerLayer=node('g');overlay.append(markerLayer);
  const packet=node('g',{class:'v3-original-packet',visibility:'hidden'});packet.append(node('rect',{x:-24,y:-10,width:48,height:20,rx:3}),node('text',{'text-anchor':'middle',y:4}));overlay.append(packet);
@@ -1056,10 +1121,13 @@ window.MLSysFigureLessons[spec.name]=async(root,context)=>{
  function render(i,{stage,details}){
   if(!canvas.isConnected){stage.append(cue,canvas);details.append(readout);}
   const frame=frames()[i];packet.setAttribute('visibility','hidden');markerLayer.replaceChildren();
-  for(const [key,b]of Object.entries(bindings)){b.node.innerHTML=b.original;if(b.font)b.node.setAttribute('font-size',b.font);b.node.removeAttribute('opacity');const value=Object.assign({},spec.defaults,frame.text)[key];if(value!==undefined)b.node.textContent=value;if(spec.slots[key].font)b.node.setAttribute('font-size',spec.slots[key].font);b.node.removeAttribute('textLength');if(spec.slots[key].width&&b.node.getComputedTextLength()>spec.slots[key].width)b.node.setAttribute('textLength',spec.slots[key].width);b.node.setAttribute('lengthAdjust','spacingAndGlyphs');}
+  const prevText=i>0?Object.assign({},spec.defaults,frames()[i-1].text):null,currText=Object.assign({},spec.defaults,frame.text),drawnRects=new Set();
+  const frameBox=(px,py,color='#0284c7')=>{const hits=baseRects.filter(r=>{const x=+r.getAttribute('x'),y=+r.getAttribute('y'),w=+r.getAttribute('width'),h=+r.getAttribute('height');return px>=x-6&&px<=x+w+6&&py>=y-6&&py<=y+h+6;}).sort((a,b)=>(+a.getAttribute('width')*+a.getAttribute('height'))-(+b.getAttribute('width')*+b.getAttribute('height')));if(hits[0]&&!drawnRects.has(hits[0])){drawnRects.add(hits[0]);markerLayer.append(node('rect',{x:hits[0].getAttribute('x'),y:hits[0].getAttribute('y'),width:hits[0].getAttribute('width'),height:hits[0].getAttribute('height'),rx:hits[0].getAttribute('rx')||4,fill:'none',stroke:color,'stroke-width':2.5}));return true;}return false;};
+  for(const [key,b]of Object.entries(bindings)){b.node.innerHTML=b.original;if(b.font)b.node.setAttribute('font-size',b.font);if(b.fill)b.node.setAttribute('fill',b.fill);else b.node.removeAttribute('fill');if(b.weight)b.node.setAttribute('font-weight',b.weight);else b.node.removeAttribute('font-weight');b.node.removeAttribute('opacity');const value=currText[key];if(value!==undefined)b.node.textContent=value;if(spec.slots[key].font)b.node.setAttribute('font-size',spec.slots[key].font);b.node.removeAttribute('textLength');if(spec.slots[key].width&&b.node.getComputedTextLength()>spec.slots[key].width)b.node.setAttribute('textLength',spec.slots[key].width);b.node.setAttribute('lengthAdjust','spacingAndGlyphs');if(prevText&&currText[key]!==prevText[key]){b.node.setAttribute('fill','#0369a1');b.node.setAttribute('font-weight','700');frameBox(spec.slots[key].x,spec.slots[key].y,'#0284c7');}}
   for(const c of circles)for(const k of ['fill','stroke','stroke-width']){if(c[k]!==null)c.n.setAttribute(k,c[k]);}
   for(const p of frame.circles||[]){const c=circles.find(c=>Number(c.n.getAttribute('cx'))===p.x&&Number(c.n.getAttribute('cy'))===p.y&&Number(c.n.getAttribute('r'))===(p.r||8));if(!c)throw Error('Original graph node changed');for(const k of ['fill','stroke','stroke-width'])if(p[k])c.n.setAttribute(k,p[k]);}
-  for(const m of frame.marks||[]){markerLayer.append(node('circle',{cx:m.x,cy:m.y,r:m.r||12,fill:'none',stroke:m.color||'#0284c7','stroke-width':2}));}
+  for(const m of frame.marks||[]){frameBox(m.x,m.y,m.color||'#0284c7');}
+  if(i>0&&drawnRects.size===0&&frame.motion){const end=frame.motion.route.at(-1);frameBox(end[0],end[1],'#0284c7');}
   values.forEach((v,j)=>v.textContent=frame.values[j]);root.dataset.originalStep=String(i);root.dataset.originalFacts=JSON.stringify(frame.facts);root.dataset.originalVariant=variant;
   follow(...frame.camera);
   if(!details.querySelector('.v3-original-guard')){const p=document.createElement('p');p.className='v3-original-guard';p.textContent=spec.guard;details.append(p);}

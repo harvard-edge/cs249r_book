@@ -16,8 +16,8 @@
     const make = (tag, attrs, text) => { const n = document.createElementNS(ns, tag); for (const [k,v] of Object.entries(attrs)) n.setAttribute(k, String(v)); if(text !== undefined) n.textContent = text; if(tag==='text'&&attrs.fill)n.style.setProperty('fill',attrs.fill,'important'); return n; };
     const token = (id,x,y,color='#007A87',deleted=false) => {
       const g = make('g', {'data-record':id, 'data-deleted':String(deleted), transform:`translate(${x} ${y})`});
-      g.append(make('circle',{r:9,fill:'#fff',stroke:color,'stroke-width':1.5}),make('text',{x:0,y:3,'text-anchor':'middle','font-size':9,fill:color,'font-weight':700},id));
-      if(deleted)g.append(make('path',{d:'M-8 -8 L8 8',stroke:'#A51C30','stroke-width':2}));
+      g.append(make('circle',{r:12,fill:'#fff',stroke:color,'stroke-width':1.8}),make('text',{x:0,y:4,'text-anchor':'middle','font-size':12,fill:color,'font-weight':700},id));
+      if(deleted)g.append(make('path',{d:'M-10 -10 L10 10',stroke:'#A51C30','stroke-width':2.2}));
       overlay.append(g); return g;
     };
     const viewLabel = document.createElement('label'); viewLabel.className='incident-view';viewLabel.textContent='Diagram view ';
@@ -36,7 +36,7 @@
       ['Expire the training copy separately','Stage 9 of 9: the right-branch training copy of E reaches its own declared expiration and is deleted (red slash), showing that approval never grants indefinite retention or unspecified downstream uses.']
     ].map(([label,description])=>({label,description}));
     const crops = ['0 35 360 145','15 35 350 145','155 40 365 240','15 305 290 205','15 305 290 205','375 305 290 205','375 305 290 205','15 305 290 205','375 305 290 205'];
-    const focus = [[45,92,200,20],[315,52,30,80],[190,225,300,44],[30,320,260,80],[30,320,260,80],[390,320,260,80],[390,435,260,65],[30,435,260,65],[390,435,260,65]];
+    const focus = [[45,62,270,58],[158,62,157,58],[190,225,300,44],[30,320,260,80],[30,320,260,80],[390,320,260,80],[390,435,260,65],[30,435,260,65],[390,435,260,65]];
     let current=0;
     function camera(){svg.setAttribute('viewBox',view.value==='whole'?'0 0 680 525':crops[current]);svg.querySelectorAll('text').forEach(n=>{if(n.textContent==='b  Purpose limits each retained copy')n.style.visibility=view.value==='follow'&&current===2?'hidden':'';});const b=svg.getAttribute('viewBox').split(' ');svg.setAttribute('width',b[2]);svg.setAttribute('height',b[3]);}
     view.addEventListener('change',camera);
