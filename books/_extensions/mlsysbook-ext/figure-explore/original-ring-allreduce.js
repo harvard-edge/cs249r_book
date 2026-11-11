@@ -75,7 +75,7 @@
       return {x, y, text, rects: rects.filter(node => +node.getAttribute('height') === 28), bar};
     })));
     const headings = [originalTexts.find(t => t.textContent.startsWith('(a)')), originalTexts.find(t => t.textContent.startsWith('(b)'))];
-    const carriers = originalRects.filter(node => +node.getAttribute('width') === 22).concat(originalTexts.filter(node => [80.375,142.375,240.375,302.375].some(y => Math.abs(+node.getAttribute('y') - y) < .01)));
+    const carriers = originalRects.filter(node => +node.getAttribute('width') === 22).concat(originalTexts.filter(node => [58,80.375,142.375,240.375,302.375].some(y => Math.abs(+node.getAttribute('y') - y) < .01)));
     const moving = make('g', {'aria-hidden': 'true', class: 'original-ring-moving'}); base.append(moving);
     const cue = document.createElement('p'); cue.className = 'original-ring-provenance'; cue.setAttribute('aria-live', 'polite');
     const reading = document.createElement('p'); reading.className = 'original-ring-reading';

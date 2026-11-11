@@ -16,7 +16,7 @@ window.MLSysFigureLessons["original-v4-11-nonholonomic-base"]=async(root,context
  if(svg.dataset.mlsysArtworkKind!=='png')throw Error('Reviewed nonholonomic PNG required');overlay.setAttribute('data-motion-object','current-base');
 const body=node('g'),cx=W*.6845,y0=H*.7083,yg=H*.2364,bw=W*.159,bh=H*.168;
 body.append(node('rect',{x:-bw/2,y:-bh/2,width:bw,height:bh,fill:'#EEF3F1',stroke:'#1A4D3E','stroke-width':W*.003}));for(const s of[-1,1])body.append(node('rect',{x:-bw*.15,y:s*bh/2-bh*.07,width:bw*.3,height:bh*.14,fill:'#1A4D3E'}));body.append(node('path',{d:`M ${bw*.3} ${-bh*.13} L ${bw*.46} 0 L ${bw*.3} ${bh*.13} Z`,fill:'#1A4D3E'}));overlay.append(body);
-const active=node('text',{x:cx,y:y0+bh*.8,'text-anchor':'middle','font-size':W*.016,fill:'#1A4D3E'},'current');overlay.append(active);
+const active=node('text',{x:cx,y:y0+bh*.8,'text-anchor':'middle','font-size':W*.022,'font-weight':'700',fill:'#1A4D3E'},'current');overlay.append(active);
 const cross=node('path',{d:`M ${W*.496} ${H*.43} l ${W*.025} ${H*.04} m 0 ${-H*.04} l ${-W*.025} ${H*.04}`,stroke:'#A51C30','stroke-width':W*.006});overlay.append(cross);
  const key=document.createElement('p');key.className='v4life-key';key.textContent="Mobile shows the maneuver panel. Expand includes the original admissible-velocity panel.";
  let lastState=null;

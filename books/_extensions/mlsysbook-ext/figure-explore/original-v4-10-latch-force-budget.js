@@ -17,7 +17,7 @@ window.MLSysFigureLessons["original-v4-10-latch-force-budget"]=async(root,contex
  // Keep the endpoint in view when Expand or rotation changes the artwork scale.
  // Scrolling alone does not trigger this observer, so manual inspection persists.
  let focus=null,resizeFrame=0,disposed=false;
- function recenter(){if(!focus||disposed)return;const scale=svg.getBoundingClientRect().width/width;canvas.scrollLeft=Math.max(0,focus[0]*scale-canvas.clientWidth/2);canvas.scrollTop=Math.max(0,focus[1]*scale-canvas.clientHeight/2);}
+ function recenter(){if(!focus||disposed)return;if(canvas.clientWidth>=520){canvas.scrollLeft=0;canvas.scrollTop=0;return;}const scale=svg.getBoundingClientRect().width/width;canvas.scrollLeft=Math.max(0,focus[0]*scale-canvas.clientWidth/2);canvas.scrollTop=Math.max(0,focus[1]*scale-canvas.clientHeight/2);}
  function follow(x,y){focus=[x,y];recenter();}
  const cameraResize=typeof ResizeObserver==='function'?new ResizeObserver(()=>{if(!disposed&&!resizeFrame)resizeFrame=requestAnimationFrame(()=>{resizeFrame=0;recenter();});}):null;
  cameraResize?.observe(canvas);cameraResize?.observe(svg);
@@ -32,7 +32,7 @@ window.MLSysFigureLessons["original-v4-10-latch-force-budget"]=async(root,contex
  const plate=add('line',{x1:3250,x2:3250,y1:1200,y2:1450,stroke:'#4A5568','stroke-width':12});
  const arm=add('rect',{x:2250,y:1270,width:180,height:95,rx:0,fill:'#E8F0EC',stroke:'#1A4D3E','stroke-width':8,'data-motion-object':'true'});
  const spring=add('path',{d:'',fill:'none',stroke:'#B87333','stroke-width':9,'data-motion-object':'true'});
- add('text',{x:2700,y:1430,'text-anchor':'middle','font-size':38,fill:'#4A5568'},'spring compression (amplified)');
+ add('text',{x:2700,y:1445,'text-anchor':'middle','font-size':56,fill:'#4A5568'},'spring compression (amplified)');
 
  const physicalScene=document.createElementNS(ns,'svg');physicalScene.setAttribute('viewBox','0 0 500 100');physicalScene.classList.add('v4b-physical');physicalScene.setAttribute('role','img');physicalScene.setAttribute('aria-label','Same arm and spring state as the force plot; compression amplified');
  const pg=add('g');physicalScene.append(pg);

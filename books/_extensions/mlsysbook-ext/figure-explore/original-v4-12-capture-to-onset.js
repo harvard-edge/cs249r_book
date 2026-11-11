@@ -17,7 +17,7 @@ window.MLSysFigureLessons["original-v4-12-capture-to-onset"]=async(root,context)
  // Keep the endpoint in view when Expand or rotation changes the artwork scale.
  // Scrolling alone does not trigger this observer, so manual inspection persists.
  let focus=null,resizeFrame=0,disposed=false;
- function recenter(){if(!focus||disposed)return;const scale=svg.getBoundingClientRect().width/width;canvas.scrollLeft=Math.max(0,focus[0]*scale-canvas.clientWidth/2);canvas.scrollTop=Math.max(0,focus[1]*scale-canvas.clientHeight/2);}
+ function recenter(){if(!focus||disposed)return;if(canvas.clientWidth>=520){canvas.scrollLeft=0;canvas.scrollTop=0;return;}const scale=svg.getBoundingClientRect().width/width;canvas.scrollLeft=Math.max(0,focus[0]*scale-canvas.clientWidth/2);canvas.scrollTop=Math.max(0,focus[1]*scale-canvas.clientHeight/2);}
  function follow(x,y){focus=[x,y];recenter();}
  const cameraResize=typeof ResizeObserver==='function'?new ResizeObserver(()=>{if(!disposed&&!resizeFrame)resizeFrame=requestAnimationFrame(()=>{resizeFrame=0;recenter();});}):null;
  cameraResize?.observe(canvas);cameraResize?.observe(svg);
@@ -28,7 +28,7 @@ window.MLSysFigureLessons["original-v4-12-capture-to-onset"]=async(root,context)
 
  const X=t=>968+(3665-968)*t/250;
  const cursor=add('line',{x1:X(0),x2:X(0),y1:500,y2:2000,stroke:'#007A87','stroke-width':9,'stroke-dasharray':'20 14','data-motion-object':'true'});
- const travel=add('line',{x1:X(0),x2:X(0),y1:2300,y2:2300,stroke:'#007A87','stroke-width':22,'data-motion-object':'true'});
+ const travel=add('line',{x1:X(0),x2:X(0),y1:2112,y2:2112,stroke:'#007A87','stroke-width':16,'data-motion-object':'true'});
  const base=add('g',{'data-motion-object':'true'});const chassis=add('rect',{x:-55,y:-45,width:110,height:55,fill:'#fff',stroke:'#007A87','stroke-width':8});base.append(chassis);for(const x of [-33,33]){const wheel=add('circle',{cx:x,cy:15,r:15,fill:'#007A87'});base.append(wheel);}
  const spans=[[0,D.dispatch,1035,'#007A87'],[D.dispatch,D.admission,1330,'#B87333'],[D.admission,D.expiry,1630,'#1A4D3E'],[D.expiry,D.tick_end,1630,'#1A4D3E'],[D.tick_end,D.onset,1920,'#A51C30']].map(([a,b,y,c])=>({a,b,line:add('line',{x1:X(a),x2:X(a),y1:y,y2:y,stroke:c,'stroke-width':14,'data-motion-object':'true'})}));
 
@@ -49,7 +49,7 @@ window.MLSysFigureLessons["original-v4-12-capture-to-onset"]=async(root,context)
  ].map(([label,description],i)=>({label,get description(){return root.dataset.lessonCommittedIndex===String(i)?description:'Next endpoint, not yet completed: '+description;}}));
  function frame(t){const x=X(t),distance=D.v*t,leaseAge=Math.max(0,t-D.admission);
   cursor.setAttribute('x1',x);cursor.setAttribute('x2',x);travel.setAttribute('x2',x);spans.forEach(s=>s.line.setAttribute('x2',X(Math.min(s.b,Math.max(s.a,t)))));
-  base.setAttribute('transform',`translate(${x} 2290)`);miniBase.setAttribute('transform',`translate(${35+distance*400/300} 0)`);physicalScene.setAttribute('aria-label',`Same pre-onset travel ${distance.toFixed(2)} mm; base size schematic`);root.dataset.baseTravelMm=String(distance);root.dataset.time=String(t);root.dataset.travel=String(distance);root.dataset.leaseStarted=String(t>=D.admission);root.dataset.leaseExpired=String(t>=D.expiry);
+  base.setAttribute('transform',`translate(${x} 2102)`);miniBase.setAttribute('transform',`translate(${35+distance*400/300} 0)`);physicalScene.setAttribute('aria-label',`Same pre-onset travel ${distance.toFixed(2)} mm; base size schematic`);root.dataset.baseTravelMm=String(distance);root.dataset.time=String(t);root.dataset.travel=String(distance);root.dataset.leaseStarted=String(t>=D.admission);root.dataset.leaseExpired=String(t>=D.expiry);
   readout.textContent=`Capture clock ${t.toFixed(2)} ms · pre-onset travel reservation ${distance.toFixed(2)} mm · ${t<D.admission?'lease not started':t<D.expiry?`lease age ${leaseAge.toFixed(2)} ms of ${D.lease.toFixed(0)} ms`:'lease expired; fallback response'}`;
   equation.textContent=`d = v t = ${D.v.toFixed(1)} m/s × ${t.toFixed(2)} ms = ${distance.toFixed(2)} mm. Latest admission ${D.latest_admission.toFixed(2)} ms; latest onset ${D.latest_onset.toFixed(2)} ms. Allocation leaves ${D.reserve_ms.toFixed(2)} ms = ${D.reserve_mm.toFixed(2)} mm reserve.`;
  }

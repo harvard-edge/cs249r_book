@@ -35,6 +35,7 @@
     const countLabel = exactText('+ bytes');
     const headRects = [...svg.querySelectorAll('rect')].filter(n => n.getAttribute('y') === '160' && n.getAttribute('width') === '17.5');
     if (headRects.length !== 4) throw Error('Stream artwork head capacity changed');
+    const pipeRects = ['20', '100'].map(x => [...svg.querySelectorAll('rect')].find(n => n.getAttribute('x') === x && n.getAttribute('y') === '124'));
     const stageFields = ['status', 'head', 'notice: bytes omitted', 'tail', 'handle'].map(label => originalText.find(n => n.getAttribute('x') === '720' && n.textContent === label));
     if (stageFields.some(n => !n)) throw Error('Stream observation fields changed');
     const overlay = node('g', {class: 'osi-overlay'}); svg.append(overlay);
@@ -92,14 +93,17 @@
       const s = snapshots[i], current = i > 0 && !s.staged ? BYTES[i - 1] : null;
       packet.setAttribute('visibility', 'hidden');
       headValues.forEach((n, j) => {n.textContent = s.head[j] || '·'; n.dataset.byte = s.head[j] || '';});
+      headRects.forEach((r, j) => r.setAttribute('fill', !s.staged && i >= 1 && i <= HEAD && j === i - 1 ? '#bbf7d0' : j < s.head.length ? '#dcfce7' : '#ffffff'));
+      pipeRects.forEach((r, idx) => {if (!r) return; const active = i >= 1 && !s.staged && (i % 2 === (idx === 0 ? 1 : 0)); r.setAttribute('fill', active ? '#fef3c7' : '#ffffff'); r.setAttribute('stroke', active ? '#d97706' : '#0f172a'); r.setAttribute('stroke-width', active ? '2.5' : '1.5');});
       ringValues.forEach((n, j) => {n.textContent = s.ring[j] || '·'; n.dataset.byte = s.ring[j] || '';});
       const pointer = ringValues[s.write];
       ringPointer.setAttribute('cx', pointer.getAttribute('x')); ringPointer.setAttribute('cy', Number(pointer.getAttribute('y')) - 3.3);
       ringPointer.setAttribute('visibility', s.seen.length >= HEAD && !s.staged ? 'visible' : 'hidden');
       countLabel.textContent = byteCount(s.omitted);
-      const fieldText = s.staged ? ['status: exited 0', s.head.join(' '), `${byteCount(s.omitted)} omitted`, s.tail.join(' '), 'handle: none'] : ['status', 'head', 'notice: bytes omitted', 'tail', 'handle'];
-      stageFields.forEach((n, j) => {n.textContent = fieldText[j]; n.setAttribute('font-size', j === 3 && s.staged ? '12' : '14');});
-      const box = s.staged ? [673, 88, 162, 90] : i === 0 ? [215, 137, 432, 134] : i <= HEAD ? [225, 159, 72, 26] : [560, 146, 52, 52];
+      const fieldText = s.staged ? ['status: exited 0', s.head.join(' '), `${byteCount(s.omitted)} omitted`, s.tail.join(''), 'handle: none'] : ['status', 'head', 'notice: bytes omitted', 'tail', 'handle'];
+      stageFields.forEach((n, j) => {n.textContent = fieldText[j]; n.setAttribute('font-size', j === 3 && s.staged ? '11' : '14');});
+      const rv = i > HEAD && !s.staged ? ringValues[(i - HEAD - 1) % TAIL] : null;
+      const box = s.staged ? [673, 88, 162, 90] : i === 0 ? [215, 137, 432, 134] : i <= HEAD ? [Number(headRects[i - 1].getAttribute('x')) + 25, 159, 19.5, 26] : [Number(rv.getAttribute('x')) - 10, Number(rv.getAttribute('y')) - 3.3 - 10, 20, 20];
       ['x', 'y', 'width', 'height'].forEach((a, j) => focus.setAttribute(a, box[j]));
       values[0].textContent = current ? `${i % 2 ? 'stdout' : 'stderr'}: ${current}` : s.staged ? 'Capture complete' : 'Waiting';
       values[1].textContent = s.head.join(' ') || 'Empty'; values[2].textContent = s.tail.join(' ') || 'Empty';

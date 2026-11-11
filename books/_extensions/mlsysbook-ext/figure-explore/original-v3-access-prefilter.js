@@ -12,7 +12,7 @@ const spec = {
     "stall": {
       "x": 104,
       "y": 158,
-      "width": 90,
+      "width": 74,
       "font": 10
     },
     "reach": {
@@ -527,7 +527,7 @@ const spec = {
           "text": {
             "stall": "frontier stalled",
             "reach": "A: original reachability failure retained",
-            "extra": "extra eligible entry",
+            "extra": "3 / 3 eligible returned",
             "score": "score all"
           },
           "values": [
@@ -612,6 +612,24 @@ const spec = {
               "x": 664,
               "y": 226,
               "color": "#0284c7",
+              "r": 12
+            },
+            {
+              "x": 426,
+              "y": 128,
+              "color": "#16a34a",
+              "r": 12
+            },
+            {
+              "x": 462,
+              "y": 114,
+              "color": "#16a34a",
+              "r": 12
+            },
+            {
+              "x": 498,
+              "y": 130,
+              "color": "#16a34a",
               "r": 12
             }
           ]
@@ -1145,7 +1163,7 @@ const spec = {
             "stall": "frontier stalled",
             "reach": "A: original reachability failure retained",
             "extra": "extra entry",
-            "score": "all scored"
+            "score": "5 / 5 eligible returned"
           },
           "values": [
             "Unchanged caller scope",
@@ -1250,6 +1268,24 @@ const spec = {
               "y": 330,
               "color": "#0284c7",
               "r": 12
+            },
+            {
+              "x": 426,
+              "y": 128,
+              "color": "#16a34a",
+              "r": 12
+            },
+            {
+              "x": 462,
+              "y": 114,
+              "color": "#16a34a",
+              "r": 12
+            },
+            {
+              "x": 498,
+              "y": 130,
+              "color": "#16a34a",
+              "r": 12
             }
           ]
         }
@@ -1287,7 +1323,7 @@ window.MLSysFigureLessons[spec.name]=async(root,context)=>{
  function render(i,{stage,details}){
   if(!canvas.isConnected){stage.append(cue,canvas);details.append(readout);}
   const frame=frames()[i];packet.setAttribute('visibility','hidden');markerLayer.replaceChildren();
-  for(const [key,b]of Object.entries(bindings)){b.node.innerHTML=b.original;if(b.font)b.node.setAttribute('font-size',b.font);b.node.removeAttribute('opacity');const value=Object.assign({},spec.defaults,frame.text)[key];if(value!==undefined)b.node.textContent=value;if(spec.slots[key].font)b.node.setAttribute('font-size',spec.slots[key].font);b.node.removeAttribute('textLength');if(spec.slots[key].width&&b.node.getComputedTextLength()>spec.slots[key].width)b.node.setAttribute('textLength',spec.slots[key].width);b.node.setAttribute('lengthAdjust','spacingAndGlyphs');}
+  for(const [key,b]of Object.entries(bindings)){b.node.innerHTML=b.original;if(b.font)b.node.setAttribute('font-size',b.font);if(key==='stall')b.node.setAttribute('x','106');b.node.removeAttribute('opacity');const value=Object.assign({},spec.defaults,frame.text)[key];if(value!==undefined)b.node.textContent=value;if(spec.slots[key].font)b.node.setAttribute('font-size',spec.slots[key].font);b.node.removeAttribute('textLength');if(spec.slots[key].width&&b.node.getComputedTextLength()>spec.slots[key].width)b.node.setAttribute('textLength',spec.slots[key].width);b.node.setAttribute('lengthAdjust','spacingAndGlyphs');}
   for(const c of circles)for(const k of ['fill','stroke','stroke-width']){if(c[k]!==null)c.n.setAttribute(k,c[k]);}
   for(const p of frame.circles||[]){const c=circles.find(c=>Number(c.n.getAttribute('cx'))===p.x&&Number(c.n.getAttribute('cy'))===p.y&&Number(c.n.getAttribute('r'))===(p.r||8));if(!c)throw Error('Original graph node changed');for(const k of ['fill','stroke','stroke-width'])if(p[k])c.n.setAttribute(k,p[k]);}
   for(const m of frame.marks||[]){markerLayer.append(node('circle',{cx:m.x,cy:m.y,r:m.r||12,fill:'none',stroke:m.color||'#0284c7','stroke-width':2}));}

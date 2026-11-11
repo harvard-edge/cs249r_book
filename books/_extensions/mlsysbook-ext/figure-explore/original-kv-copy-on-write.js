@@ -36,7 +36,7 @@
     const copyLabel = at(texts, {x: 568, y: 479});
     const overlay = node('g', {class: 'okv-overlay'}); svg.append(overlay);
     const inlet = node('g', {class: 'okv-inlet'});
-    inlet.append(node('rect', {x: 638, y: 488, width: 70, height: 33, rx: 3, fill: '#dcfce7', stroke: '#16a34a'}), node('text', {x: 673, y: 501, 'text-anchor': 'middle'}, 'newly computed'), node('text', {x: 673, y: 514, 'text-anchor': 'middle'}, 'KV @ position 10'));
+    inlet.append(node('rect', {x: 630, y: 488, width: 84, height: 33, rx: 3, fill: '#dcfce7', stroke: '#16a34a'}), node('text', {x: 672, y: 501, 'text-anchor': 'middle'}, 'newly computed'), node('text', {x: 672, y: 514, 'text-anchor': 'middle'}, 'KV @ position 10'));
     overlay.append(inlet);
     overlay.append(node('text', {x: 625, y: 395, class: 'okv-local-label', 'text-anchor': 'middle'}, 'A table'), node('text', {x: 625, y: 569, class: 'okv-local-label', 'text-anchor': 'middle'}, 'B table'));
     const focus = node('rect', {class: 'okv-focus', fill: 'none', rx: 2, 'stroke-width': 2}); overlay.append(focus);
@@ -78,7 +78,7 @@
       const m = model(i);
       overlay.querySelectorAll('.okv-reference-copy').forEach(n => n.remove());
       packet.setAttribute('visibility', 'hidden');
-      inlet.setAttribute('visibility', i >= 8 ? 'visible' : 'hidden');
+      inlet.setAttribute('visibility', i >= 9 ? 'visible' : 'hidden');
       bTable.forEach((n, j) => {n.textContent = m.b ? m.b[j] : '—';});
       bCaption.textContent = m.b ? 'block table' : 'not forked';
       bRefs.forEach(n => {n.setAttribute('opacity', m.b ? 1 : 0.25); n.setAttribute('stroke-dasharray', m.b ? '' : '3,2');});
@@ -122,7 +122,7 @@
       if (to === 5) {animate(privateOutline, [{stroke: '#94a3b8'}, {stroke: '#16a34a'}], {}); return;}
       if (to === 6 || to === 7) {const x = to === 6 ? 544 : 568; route = [[x, 445], [556, 458], [556, 492], [x, 505]]; label = `KV@${to === 6 ? 8 : 9}`; kind = 'payload';}
       if (to === 8) {route = [[580, 505], [580, 552], [580, 564]]; label = 'ID 14';}
-      if (to === 9) {route = [[673, 505], [628, 505], [592, 505]]; label = 'KV@10'; kind = 'payload';}
+      if (to === 9) {inlet.setAttribute('visibility', 'visible'); route = [[672, 505], [628, 505], [592, 505]]; label = 'KV@10'; kind = 'payload';}
       if (!route) return;
       packet.dataset.kind = kind; packet.querySelector('text').textContent = label; packet.setAttribute('visibility', 'visible');
       const lengths = route.slice(1).map((p, i) => Math.hypot(p[0] - route[i][0], p[1] - route[i][1])); const total = lengths.reduce((a, b) => a + b, 0);

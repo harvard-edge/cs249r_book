@@ -48,8 +48,10 @@
     steps.forEach((step,i)=>{const description=step.description;Object.defineProperty(step,'description',{get(){return root.dataset.lessonCommittedIndex===String(i)?description:'On completion: '+description;}});});
     function epoch(label,value,color) {
       label.replaceChildren(document.createTextNode('t'));
-      const sub=document.createElementNS(ns,'tspan');sub.setAttribute('baseline-shift','sub');sub.setAttribute('font-size','7');sub.textContent=String(value);label.append(sub);label.setAttribute('fill',color);
+      const sub=document.createElementNS(ns,'tspan');sub.setAttribute('baseline-shift','sub');sub.setAttribute('font-size','8.5');sub.textContent=String(value);label.append(sub);label.setAttribute('fill',color);
     }
+    const stepOverlay=document.createElementNS(ns,'g');svg.append(stepOverlay);
+    const sensorRect=[...svg.querySelectorAll('rect')].find(n=>+n.getAttribute('x')<74&&+n.getAttribute('y')>=95&&+n.getAttribute('y')<=140);
     function render(index,{stage,details:drawer}) {root.dataset.lessonCommittedIndex=String(index);
       if(!canvas.isConnected)stage.append(canvas);if(!note.isConnected)drawer.append(note,details);
       const updated=Math.max(0,Math.min(9,index-1)), hit=index>=11;
@@ -65,8 +67,15 @@
       phantom.dataset.retired=String(updated>5);phantom.setAttribute('opacity',updated>5?'0.45':'1');phantomLeader.textContent=updated>5?'phantom retired':'old phantom';
       returnLeader.replaceChildren(...(hit?[...returnFinal.childNodes].map(n=>n.cloneNode(true)):[document.createTextNode('return not yet recorded')]));
       header.replaceChildren(...(index>=11?[...headerFinal.childNodes].map(n=>n.cloneNode(true)):[document.createTextNode(index===0?'Old evidence: no cell renewed yet':'One qualified return captured at t₁')]));
-      const end=index<=1?rayStart:updated<9?+row[updated-1].getAttribute('x')+34:hitEdge-1;
-      ray.setAttribute('x2',String(end));ray.setAttribute('visibility',index<2?'hidden':'visible');
+      const end=index===0?rayStart:index===1?+row[0].getAttribute('x'):updated<9?+row[updated-1].getAttribute('x')+34:hitEdge-1;
+      ray.setAttribute('x2',String(end));ray.setAttribute('visibility',index===0?'hidden':'visible');
+      stepOverlay.replaceChildren();
+      if(sensorRect){sensorRect.setAttribute('stroke',index===1?'#007A87':'#4A5568');sensorRect.setAttribute('stroke-width',index===1?'2.5':'1.2');}
+      if(index===1){
+        const r9=document.createElementNS(ns,'rect');r9.setAttribute('x',String(+row[9].getAttribute('x')-2));r9.setAttribute('y','100');r9.setAttribute('width','38');r9.setAttribute('height','38');r9.setAttribute('fill','none');r9.setAttribute('stroke','#B87333');r9.setAttribute('stroke-width','2.2');r9.setAttribute('stroke-dasharray','4 3');stepOverlay.append(r9);
+      } else if(index===12){
+        const ox=+row[10].getAttribute('x')-3,ow=+row[13].getAttribute('x')-+row[10].getAttribute('x')+40,oc=document.createElementNS(ns,'rect');oc.setAttribute('x',String(ox));oc.setAttribute('y','99');oc.setAttribute('width',String(ow));oc.setAttribute('height','40');oc.setAttribute('rx','3');oc.setAttribute('fill','none');oc.setAttribute('stroke','#B87333');oc.setAttribute('stroke-width','2.2');oc.setAttribute('stroke-dasharray','5 3');stepOverlay.append(oc);
+      }
       root.dataset.rayStep=String(index);root.dataset.updatedFree=String(updated);root.dataset.hitRecorded=String(hit);root.dataset.mapPublished=String(index===12);
       note.textContent=index===0?'Active row (14 cells): 0 free at t₁ · phantom active at t₀ · hit pending · 4 occluded cells behind hit at t₀.':`Active row (14 cells): ${updated} / 9 crossed cells free at t₁ · phantom ${updated>5?'retired at t₁':'still active at t₀'} · hit cell 10 ${hit?'occupied at t₁':'pending (t₀)'} · 4 occluded cells behind hit remain at t₀${index===12?' (map published)':''}.`;
       if(canvas.scrollWidth>canvas.clientWidth){const focus=index===0?297:index<=1?rayStart:index===12?501:index===11?433:+row[Math.max(0,updated-1)].getAttribute('x')+17;canvas.scrollLeft=Math.max(0,focus/680*svg.getBoundingClientRect().width-canvas.clientWidth/2);}

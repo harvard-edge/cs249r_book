@@ -21,12 +21,16 @@
    });
   });resizeObserver.observe(root);
   const tiles=[...art.querySelectorAll('rect')].filter(n=>+n.getAttribute('width')===25);const panels=[...art.querySelectorAll('rect')].filter(n=>+n.getAttribute('width')===180);
+  const upperNodes=[...art.querySelectorAll('rect,text,line,path')].filter(n=>!tiles.includes(n)&&!n.closest('defs')&&((n.hasAttribute('y')&&+n.getAttribute('y')<400)||(n.hasAttribute('y1')&&+n.getAttribute('y1')<400)||(n.getAttribute('d')&&/^M\s*[\d.]+\s+([\d.]+)/.test(n.getAttribute('d'))&&+RegExp.$1<400)));
   function draw(from,to,p){
    lastFrame=[from,to,p];
    layer.replaceChildren();root.dataset.animationProgress=String(p);
    const phase=p<1?from:to;const live=phase<4;
    tiles.forEach(n=>{const x=+n.getAttribute('x'),col=x<240?0:x<460?1:2;const count=col+3,pos=Math.round((x-(45+220*col))/30);n.style.opacity=live&&phase>=col+1?'1':'.12';n.setAttribute('fill',pos>=3?'#F7EDE3':'#E3F3F5');});
    panels.forEach(n=>n.style.opacity=phase===4&&+n.getAttribute('y')<380?'.22':'1');
+   upperNodes.forEach(n=>n.style.opacity=phase===4?'.22':'1');
+   const [fx,fy,fw,fh]=phase<=1?[30,28,180,177]:phase===2?[250,28,180,177]:phase===3?[470,28,180,177]:[30,420,620,44];
+   layer.append(el('rect',{x:fx/680*1000,y:fy/500*1000,width:fw/680*1000,height:fh/500*1000,rx:6,fill:'#007A87','fill-opacity':phase===0?.05:.1,stroke:phase>=2&&phase<=3?'#B87333':'#007A87','stroke-width':4,'stroke-dasharray':phase===0?'8 5':'none','data-active-column':String(phase)}));
    if(from!==to&&p<1&&to<4){const cx=120+220*(to-1),cy=to===1?150:50;const g=el('g',{'data-motion-object':'true',transform:`translate(${cx/680*1000},${(cy+(272-cy)*p)/500*1000})`});g.append(el('rect',{x:-17,y:-25,width:34,height:50,fill:'#F7EDE3',stroke:'#B87333','stroke-width':3}));layer.append(g);}
    proof.textContent=['Request state: 0 cached KV tiles · 0 decode passes completed · prefill pending for current observation.','Request state: 3 prefix KV tiles cached (snapshot 0) · sampled token 1 emitted · 0 action tokens cached in KV.','Request state: 4 KV tiles cached in snapshot 1 (3 prefix + 1 consumed token) · sampled token 2 emitted without KV.','Request state: 5 KV tiles cached in snapshot 2 (3 prefix + 2 consumed tokens) · sampled token 3 emitted without KV.','Request state: 0 KV tiles retained across evaluations · prior 5-tile cache released · next observation starts fresh prefill.'][phase];root.dataset.kvConsumed=String(phase===4?0:Math.max(0,phase-1));root.dataset.kvReleased=String(phase===4);
    if(stageNode)stageNode.scrollLeft=Math.max(0,art.getBoundingClientRect().width*([120,120,340,560,560][to]/680)-stageNode.clientWidth/2);

@@ -45,8 +45,11 @@
     const layer=make('g',{'data-prefill-overlay':''}),motion=make('g',{'aria-hidden':'true'});svg.append(layer,motion);
     const tokens=['the','mat','mat','today','today','[end]'],retained=['The','cat','sat','on','the','mat','today'];
     const tokenLabels=gb.map((b,i)=>{const g=make('g',{'data-token':tokens[i]});g.append(make('rect',{x:b.x+.5,y:b.y+.5,width:b.w-1,height:b.h-1,fill:'#dcfda6'}));const label=make('text',{x:center(b).x,y:center(b).y,'dominant-baseline':'middle','text-anchor':'middle',fill:'#151515','font-size':6.5,'font-family':'sans-serif'},tokens[i]);g.append(label);layer.append(g);return{g,label};});
-    const cacheLabels=cb.map((b,i)=>{const label=make('text',{x:center(b).x,y:center(b).y,'dominant-baseline':'middle','text-anchor':'middle',fill:'#5c2b00','font-size':i===6?3.1:3.6,'font-family':'sans-serif','data-cache-token':retained[i]},retained[i]);layer.append(label);return label;});
-    const focus=make('rect',{fill:'none',stroke:'#005f8e','stroke-width':1.3,rx:1,'data-active-pass':''});layer.append(focus);
+    const cacheLabels=cb.map((b,i)=>{const label=make('text',{x:center(b).x,y:center(b).y,'dominant-baseline':'middle','text-anchor':'middle',fill:'#5c2b00','font-size':i===6?4.1:4.6,'font-weight':'600','font-family':'sans-serif','data-cache-token':retained[i]},retained[i]);layer.append(label);return label;});
+    const focus=make('rect',{fill:'none',stroke:'#005f8e','stroke-width':1.3,rx:1,'data-active-pass':''});
+    const dMinX=Math.min(...pb.slice(1).map(b=>b.x)),dMinY=Math.min(...pb.slice(1).map(b=>b.y)),dMaxX=Math.max(...pb.slice(1).map(b=>b.x+b.w)),dMaxY=Math.max(...pb.slice(1).map(b=>b.y+b.h));
+    const compareDecodeFocus=make('rect',{x:dMinX-1,y:dMinY-1,width:dMaxX-dMinX+2,height:dMaxY-dMinY+2,fill:'none',stroke:'#b45100','stroke-width':1.5,'stroke-dasharray':'3 1.5',rx:1});
+    layer.append(focus,compareDecodeFocus);
     const viewControl=document.createElement('label');viewControl.className='prefill-view-control';viewControl.textContent='Diagram view ';const view=document.createElement('select');view.setAttribute('aria-label','Diagram view');for(const [v,t]of [['follow','Follow the current phase'],['whole','Whole diagram']]){const o=document.createElement('option');o.value=v;o.textContent=t;view.append(o);}view.value=matchMedia('(max-width: 600px)').matches?'follow':'whole';viewControl.append(view);
     const inset=document.createElement('section');inset.className='prefill-cache-inset';inset.setAttribute('aria-label','Detail of the same retained KV cache');
     const insetTitle=document.createElement('strong');insetTitle.textContent='Cache detail — the same retained entries';
@@ -66,8 +69,9 @@
       cache.forEach((cell,i)=>{cell.style.fill=i<count?'rgb(98.039246%, 83.137512%, 68.624878%)':'white';cacheLabels[i].style.visibility=i<count?'visible':'hidden';cacheLabels[i].style.opacity='1';cell.style.strokeWidth=(kind==='read'&&i<count)?'1.4':'.59776';});
       insetNodes.forEach((n,i)=>{n.dataset.retained=String(i<count);n.classList.toggle('is-read',kind==='read'&&i<count);n.textContent=i<count?retained[i]:'·';});
       insetOperation.textContent=kind==='release'?'The request has finished. Its private cache can be reclaimed; generated tokens remain visible.':kind==='read'?`Read all ${count} earlier entries into the highlighted pass. These entries remain stored.`:kind==='append'?`Append the consumed input “${retained[count-1]}.” Earlier entries stay unchanged.`:'The newly predicted output is not a cache entry until a later pass consumes it.';
-      const active=index>0&&index<15?(index<4?pb[0]:pb[k+1]):null;
+      const active=index===15?pb[0]:index>0&&index<15?(index<4?pb[0]:pb[k+1]):null;
       focus.style.visibility=active?'visible':'hidden';if(active)for(const [key,value]of Object.entries({x:active.x-1,y:active.y-1,width:active.w+2,height:active.h+2}))focus.setAttribute(key,value);
+      compareDecodeFocus.style.visibility=index===15?'visible':'hidden';
       cacheStatus.textContent=kind==='release'?'Request complete: no retained entries are needed by this request. Its private cache is eligible for reclamation.':count?`Retained KV entries (${count}): ${retained.slice(0,count).join(' · ')}. Each labeled cell stands for that token’s keys and values across the model.`:'Retained KV entries: none. Orange cells mark available places in this illustrative request cache.';
       root.dataset.prefillState=String(index);root.dataset.cacheCount=String(count);updateView();motion.replaceChildren();
     }

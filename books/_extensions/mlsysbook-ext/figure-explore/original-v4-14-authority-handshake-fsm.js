@@ -17,7 +17,7 @@ window.MLSysFigureLessons["original-v4-14-authority-handshake-fsm"]=async(root,c
  // Keep the endpoint in view when Expand or rotation changes the artwork scale.
  // Scrolling alone does not trigger this observer, so manual inspection persists.
  let focus=null,resizeFrame=0,disposed=false;
- function recenter(){if(!focus||disposed)return;const scale=svg.getBoundingClientRect().width/width;canvas.scrollLeft=Math.max(0,focus[0]*scale-canvas.clientWidth/2);canvas.scrollTop=Math.max(0,focus[1]*scale-canvas.clientHeight/2);}
+ function recenter(){if(!focus||disposed)return;if(canvas.clientWidth>=520){canvas.scrollLeft=0;canvas.scrollTop=0;return;}const scale=svg.getBoundingClientRect().width/width;canvas.scrollLeft=Math.max(0,focus[0]*scale-canvas.clientWidth/2);canvas.scrollTop=Math.max(0,focus[1]*scale-canvas.clientHeight/2);}
  function follow(x,y){focus=[x,y];recenter();}
  const cameraResize=typeof ResizeObserver==='function'?new ResizeObserver(()=>{if(!disposed&&!resizeFrame)resizeFrame=requestAnimationFrame(()=>{resizeFrame=0;recenter();});}):null;
  cameraResize?.observe(canvas);cameraResize?.observe(svg);
@@ -46,8 +46,19 @@ window.MLSysFigureLessons["original-v4-14-authority-handshake-fsm"]=async(root,c
  ].map(([label,description],i)=>({label,get description(){return root.dataset.lessonCommittedIndex===String(i)?description:'Next endpoint, not yet completed: '+description;}}));
  const paths={1:[[190,90],[263,90]],3:[[415,90],[488,90]],5:[[610,128],[610,188]],6:[[490,222],[417,222]],8:[[265,238],[80,238],[80,130]],9:[[340,282],[340,316]]};
  const bar=add('rect',{x:500,y:122,width:0,height:3,fill:'#1A4D3E','data-motion-object':'true'});
+ const badgeGroup=add('g',{'data-step-callout':'true'});
  function frame(i){const state=states[i];for(const[k,b]of Object.entries(stateBoxes)){b.classList.toggle('v4b-active',k===state);b.style.opacity=k===state?'1':'.65';}
   token.setAttribute('cx',coords[state][0]);token.setAttribute('cy',coords[state][1]);bar.setAttribute('width',i>=5&&i<9?130:i===4?65:0);
+  badgeGroup.replaceChildren();
+  if(i===2){
+   const r=document.createElementNS(ns,'rect');for(const[k,v]of Object.entries({x:382,y:42,width:135,height:24,rx:4,fill:'#e6f6f8',stroke:'#007A87','stroke-width':1.8}))r.setAttribute(k,String(v));
+   const t=document.createElementNS(ns,'text');for(const[k,v]of Object.entries({x:449.5,y:58,'text-anchor':'middle','font-size':9.5,'font-weight':700,fill:'#007A87'}))t.setAttribute(k,String(v));t.textContent='ACK verified · awaiting tick';
+   badgeGroup.append(r,t);
+  } else if(i===7){
+   const r=document.createElementNS(ns,'rect');for(const[k,v]of Object.entries({x:92,y:218,width:176,height:24,rx:4,fill:'#fff5f5',stroke:'#A51C30','stroke-width':1.8}))r.setAttribute(k,String(v));
+   const t=document.createElementNS(ns,'text');for(const[k,v]of Object.entries({x:180,y:234,'text-anchor':'middle','font-size':9.5,'font-weight':700,fill:'#A51C30'}))t.setAttribute(k,String(v));t.textContent='✕ Reset blocked while moving';
+   badgeGroup.append(r,t);
+  }
   root.dataset.authority=state;root.dataset.proposalOwner=owners[i];root.dataset.acknowledged=String(i>=2&&i<=7);root.dataset.committed=String(i>=3&&i<=7);root.dataset.policyToken=String(i<=2||i===8);root.dataset.blend=i<3?'pending':i===3?'0':i===4?'0.5':'1';
   readout.textContent=`Channel state ${state} · ${owners[i]} · policy proposal token ${i<=2||i===8?'active':'revoked'}`;
   equation.textContent=i===2?'ACK received ≠ commit. Before the commit tick: policy token active.':i===3||i===4?'Commit → enforcer owns fixed-endpoint profile; normalized progress '+(i===3?'0.00':'0.50')+'.':i===7?'Reset guard false while moving: remain in FALLBACK.':i===8?'Reset guard: standstill ∧ faults cleared ∧ authenticated re-admission.':'One per-channel authority state; all proposals remain subject to permission checks.';
