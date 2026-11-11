@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: mobile-202611-2872
+track: mobile
+level: L5
+zone: analyze
+topic: mixture-of-experts
+competency_area: latency
+bloom_level: analyze
+phase: inference
+taxonomy_subject: llm-inference
+taxonomy_concepts:
+  - mlsys.expert-routing
+  - mlsys.expert-offloading
+title: Why Prefill Touches Every Expert in an Offloaded MoE
+scenario: The flash-offloaded Mixtral-8x7B from the previous design (88 MB per 4-bit expert per layer, 32 layers, 8 experts with top-2 routing, UFS 4.0 at about 4 GB/s) decodes at 0.7 tokens/s with a cold expert cache. A teammate estimates time to first token for a 512-token prompt as 512 times the per-token decode cost.
+question: How many experts does prefill touch per layer, what is the right time-to-first-token estimate, and how should prefill be scheduled?
+details:
+  realistic_solution: |
+    Decode touches 2 of 8 experts per layer, but a prompt routes each of its tokens independently, so prefill touches the union. With roughly uniform top-2 routing, an expert is skipped by one token with probability 21/28 = 0.75, and by all 32 tokens of even a short prompt with probability 0.75^32, about 1e-4; for 512 tokens every expert in every layer is needed. The right schedule is layer by layer: stream each layer's 8 experts once (22.5 GB in total, about 5.6 s from flash) and apply them to all prompt tokens, instead of reloading experts token by token (512 x 1.41 s, about 12 minutes). The router choices of the last prompt tokens then tell which experts to keep warm for decode.
+  common_mistake: |
+    **The Pitfall:** Estimating prefill as the prompt length times the per-token decode cost, or assuming prefill touches the same 2 experts per layer as decode.
+    **The Rationale:** Prefill is a batch over prompt tokens: their routing union covers all experts, and each expert's weights can be loaded once and shared by every token routed to it.
+    **The Consequence:** Either a 12-minute time-to-first-token estimate that kills a viable design, or an expert cache sized for decode that thrashes on every new prompt.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Mixtral-8x7B, 4-bit: 88.1 MB per expert per layer, 32 layers, 8 experts, top-2 routing.
+    - Routing treated as uniform for the coverage estimate; UFS 4.0 at about 4 GB/s; cold expert cache.
+
+    **Calculations:**
+    - Probability one token skips a given expert: C(7,2) / C(8,2) = 21/28 = 0.75.
+    - Probability a 32-token prompt never routes to it: 0.75^32 = 1.0e-4, so prefill needs all 8 experts per layer.
+    - All experts once: 8 * 32 * 88.1 MB = 22.5 GB, or 22.5 GB / 4 GB/s = 5.6 s of flash reads.
+    - Token-by-token reloading for 512 tokens: 512 * 1.41 s = 722 s, about 12 minutes.
+
+    **Conclusion & Interpretation:**
+    - **Result: Flash-bound, about 5.6 s to first token.** Streaming each layer's experts once and batching all prompt tokens through them makes prefill cost the size of the model, not the prompt length times the decode cost.
+status: draft
+provenance: llm-draft
+created_at: '2026-11-11T01:15:21+00:00'
+last_modified: '2026-11-11T01:15:21+00:00'
+authors:
+- Nishitha-Rajesh
+requires_explanation: true
+expected_time_minutes: 15
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
