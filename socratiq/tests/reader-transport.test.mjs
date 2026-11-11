@@ -7,6 +7,7 @@ import {
   BYOK_PERSISTED_KEY,
   BYOK_PKCE_STATE_KEY,
   redactSecrets,
+  validateByokKeyFormat,
   validateByokEndpoint,
   saveByokConfig,
   readActiveByokConfig,
@@ -500,6 +501,12 @@ test('BYOK security controls: allowlist validation, secret redaction, session-on
     CustomAPIAdapter._getHeadersForProvider('google-gemini', 'constructed-gemini-secret', 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions')['Authorization'],
     'Bearer constructed-gemini-secret'
   );
+
+  // 7. validateByokKeyFormat rejects invalid prefixes (no test-prefix bypass) and accepts valid provider prefixes
+  assert.equal(validateByokKeyFormat('anthropic', 'constructed-invalid-prefix').valid, false);
+  assert.equal(validateByokKeyFormat('google-gemini', 'constructed-invalid-prefix').valid, false);
+  assert.equal(validateByokKeyFormat('anthropic', 'sk-ant-constructed-session-only-key').valid, true);
+  assert.equal(validateByokKeyFormat('google-gemini', 'AIzaSyConstructedKey1234567890').valid, true);
 
   clearByokConfig({ sessionStore, localStore });
 });

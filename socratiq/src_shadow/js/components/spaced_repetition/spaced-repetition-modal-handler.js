@@ -17,6 +17,7 @@ import { SpacedRepetitionInitializationHandler } from "./handlers/initialization
 import { DeckCreationHandler } from "./handlers/deck-creation-handler.js";
 // import { checkStorageSupport } from "./utils/sqlite-checker.js";
 import { getThemeManager } from "../../libs/utils/theme-manager.js";
+import { resolveChapterTaxonomy, TAXONOMY_SUBJECTS } from "../../../../src_shared/taxonomy-map.js";
 
 export class SpacedRepetitionModal {
   static instance = null;
@@ -68,59 +69,59 @@ export class SpacedRepetitionModal {
     this.fallbackStorage = false;
     this.themeManager = getThemeManager(shadowRoot);
     // Create modal first
-this.createModal().then(async () => {
-  this.eventHandler = new SpacedRepetitionEventHandler(this);
+    this.readyPromise = this.createModal().then(async () => {
+      this.eventHandler = new SpacedRepetitionEventHandler(this);
 
-  try {
-    console.log('[DEBUG] 1. Attempting to initialize storage...');
-    await this.initializeStorage();
-    
-    console.log('[DEBUG] 2. Storage handler assigned. Type:', this.storageHandler?.constructor.name);
-    await this.storageHandler.initializeDatabase();
-    
-    console.log('[DEBUG] 3. Database initialized. Setting up interaction handler...');
-    this.interactionHandler = new SpacedRepetitionInteractionHandler(
-      this,
-      this.storageHandler,
-      this.shadowRoot
-    );
+      try {
+        console.log('[DEBUG] 1. Attempting to initialize storage...');
+        await this.initializeStorage();
+        
+        console.log('[DEBUG] 2. Storage handler assigned. Type:', this.storageHandler?.constructor.name);
+        await this.storageHandler.initializeDatabase();
+        
+        console.log('[DEBUG] 3. Database initialized. Setting up interaction handler...');
+        this.interactionHandler = new SpacedRepetitionInteractionHandler(
+          this,
+          this.storageHandler,
+          this.shadowRoot
+        );
 
-    console.log('[DEBUG] 4. Core handlers initialized. Setting up UI handlers...');
-    this.uiHandler = new SpacedRepetitionUIHandler(this);
-    this.searchHandler = new SpacedRepetitionInnerSearchModal(this);
-    this.deckCreationHandler = new DeckCreationHandler(this);
+        console.log('[DEBUG] 4. Core handlers initialized. Setting up UI handlers...');
+        this.uiHandler = new SpacedRepetitionUIHandler(this);
+        this.searchHandler = new SpacedRepetitionInnerSearchModal(this);
+        this.deckCreationHandler = new DeckCreationHandler(this);
 
-    console.log('[DEBUG] 5. UI handlers set up. Initializing editors...');
-    this.initializeEditors();
+        console.log('[DEBUG] 5. UI handlers set up. Initializing editors...');
+        this.initializeEditors();
 
-    console.log('[DEBUG] 6. Loading data from storage...');
-    let loadedData = await this.storageHandler.loadFromLocalStorage(true);
+        console.log('[DEBUG] 6. Loading data from storage...');
+        let loadedData = await this.storageHandler.loadFromLocalStorage(true);
 
-    console.log('[DEBUG] 7. Initial data loaded. Setting up first-time user...');
-    await this.setupInitialization();
+        console.log('[DEBUG] 7. Initial data loaded. Setting up first-time user...');
+        await this.setupInitialization();
 
-    console.log('[DEBUG] 8. Re-loading data after setup...');
-    loadedData = await this.storageHandler.loadFromLocalStorage(true);
+        console.log('[DEBUG] 8. Re-loading data after setup...');
+        loadedData = await this.storageHandler.loadFromLocalStorage(true);
 
-    this.currentChapter = loadedData.currentChapter;
-    this.chapterSets = loadedData.chapterSets;
-    this.flashcards = loadedData.flashcards;
+        this.currentChapter = loadedData.currentChapter;
+        this.chapterSets = loadedData.chapterSets;
+        this.flashcards = loadedData.flashcards;
 
-    console.log('[DEBUG] 9. Data loaded into component state. Rendering UI...');
-    this.renderChapters(true);
-    this.showAllCards();
-    this.uiHandler.updateProgress();
-    this.renderTags();
-    this.floatingControlsHandler = new FloatingControlsHandler(this);
-    this.setupEventListeners();
-    console.log('[DEBUG] 10. Initialization complete.');
+        console.log('[DEBUG] 9. Data loaded into component state. Rendering UI...');
+        this.seedStarterChapterCardsIfNeeded();
+        this.renderChapters(true);
+        this.showAllCards();
+        this.uiHandler.updateProgress();
+        this.renderTags();
+        this.floatingControlsHandler = new FloatingControlsHandler(this);
+        this.setupEventListeners();
+        console.log('[DEBUG] 10. Initialization complete.');
 
-  } catch (error) {
-    console.error("❌ FATAL INITIALIZATION FAILURE:", error);
-    // Optionally display an error message in the UI here
-    return;
-  }
-});
+      } catch (error) {
+        console.error("❌ FATAL INITIALIZATION FAILURE:", error);
+        return;
+      }
+    });
 
     // Rest of constructor code...
     this.debouncedUpdate = this.debounce(() => {
@@ -1196,6 +1197,7 @@ this.createModal().then(async () => {
     const modal = this.shadowRoot.querySelector("#spacedRepetitionModal");
     if (modal) {
       modal.classList.remove("hidden");
+      modal.style.display = "";
 
       if(this.storageHandler) {
       // Add this line to track modal opens
@@ -1225,10 +1227,15 @@ this.createModal().then(async () => {
       } else {
       }
       
-      // Ensure chapters are rendered when modal is shown
-      if (this.storageHandler) {
-        this.renderChapters();
-      }
+      // Ensure chapters are rendered after storage load completes
+      Promise.resolve(this.readyPromise)
+        .then(() => {
+          if (this.storageHandler) {
+            this.seedStarterChapterCardsIfNeeded();
+            this.renderChapters();
+          }
+        })
+        .catch(() => {});
     }
 
     // Ensure modal is fully initialized before potentially starting onboarding
@@ -1238,6 +1245,133 @@ this.createModal().then(async () => {
         // this.onboardingHandler.startOnboarding();
       }
     });
+  }
+
+  seedStarterChapterCardsIfNeeded() {
+    if (!this.currentChapter || !this.storageHandler) return;
+    const currentUrl = typeof window !== "undefined" ? (window.location?.href || "") : "";
+    const tax = resolveChapterTaxonomy(currentUrl);
+    if (!tax) return;
+    const chapterKey = this.currentChapter.chapter;
+    const seedKey = `${tax.volume || "vol1"}:${String(chapterKey)}`;
+    let seededMap = {};
+    try {
+      const rawSeeded = typeof localStorage !== "undefined" ? localStorage.getItem("socratiq_starter_cards_seeded_v1") : null;
+      if (rawSeeded) seededMap = JSON.parse(rawSeeded) || {};
+    } catch {}
+
+    const existing = this.chapterSets.get(chapterKey) || [];
+    if (existing.length > 0) {
+      try {
+        seededMap[seedKey] = true;
+        localStorage.setItem("socratiq_starter_cards_seeded_v1", JSON.stringify(seededMap));
+      } catch {}
+      return;
+    }
+    if (seededMap[seedKey]) return;
+
+    const chapterTitle = this.currentChapter.title || tax.chapterTitle || "Chapter 1: Introduction";
+    const subjectsList = Array.isArray(tax.subjects) && tax.subjects.length ? tax.subjects.join(", ") : tax.primaryGroup;
+    const isVol1Intro = (tax.volume === "vol1" || !tax.volume) && (tax.slug === "01_introduction" || /\bIntroduction\b/i.test(chapterTitle));
+
+    const firstSentenceAfter = (el) => {
+      let node = el ? el.nextElementSibling : null;
+      while (node && !/^H[1-3]$/.test(node.tagName)) {
+        const p = node.tagName === "P" ? node : node.querySelector?.("p");
+        const text = (p?.textContent || "").replace(/\s+/g, " ").trim();
+        if (text.length >= 24) {
+          const match = text.match(/^[^.!?]+[.!?]/);
+          return match ? match[0].trim() : text.slice(0, 220);
+        }
+        node = node.nextElementSibling;
+      }
+      return "";
+    };
+
+    let starterPairs;
+    if (isVol1Intro) {
+      starterPairs = [
+        {
+          q: `What are the three dimensions of the D·A·M taxonomy in ${chapterTitle}, and how do they interact?`,
+          a: `Data (D: samples per task and bytes moved), Algorithm (A: operations per sample), and Machine (M: execution time and energy per operation). Every ML systems decision couples all three dimensions.`,
+          tags: ["taxonomy", "DAM"],
+        },
+        {
+          q: `State the Iron Law of ML Systems performance and explain its three terms.`,
+          a: `End-to-end execution time is the sum of data movement time (D_vol / BW_eff), effective compute time (O_alg / (R_peak × η)), and coordination/synchronization overhead (T_sync).`,
+          tags: ["iron-law", "performance"],
+        },
+        {
+          q: `Where does ${chapterTitle} sit in the ML Systems Taxonomy (F/S/P/Q/T)?`,
+          a: `Primary group: ${tax.primaryGroup} — ${tax.groupTitle} (subject areas: ${subjectsList}). It defines the foundational system invariants that constrain downstream stack (S), lifecycle (P), and quality (Q) design choices.`,
+          tags: ["taxonomy", tax.primaryGroup],
+        },
+      ];
+    } else {
+      const h2Nodes = typeof document !== "undefined" ? Array.from(document.querySelectorAll("main h2, article h2")) : [];
+      const calloutDef = typeof document !== "undefined" ? document.querySelector("main .callout-definition, article .callout-definition") : null;
+      const calloutTitle = (calloutDef?.querySelector(".callout-title-container, .callout-header, strong")?.textContent || "").replace(/\s+/g, " ").trim();
+      const calloutBody = (calloutDef?.querySelector(".callout-body-container p, p")?.textContent || "").replace(/\s+/g, " ").trim();
+      const sec1Node = h2Nodes[0] || null;
+      const sec2Node = h2Nodes[1] || h2Nodes[0] || null;
+      const sec1Title = (sec1Node?.textContent || "").replace(/\s+/g, " ").trim() || chapterTitle;
+      const sec2Title = (sec2Node?.textContent || "").replace(/\s+/g, " ").trim() || chapterTitle;
+      const sec1Summary = (calloutTitle && calloutBody)
+        ? `${calloutTitle}: ${calloutBody}`
+        : (firstSentenceAfter(sec1Node) || `${sec1Title} establishes the core concepts for ${chapterTitle} (${tax.primaryGroup} · ${tax.groupTitle}).`);
+      const sec2Summary = firstSentenceAfter(sec2Node) || `${sec2Title} analyzes the concrete systems mechanisms and constraints in ${chapterTitle}.`;
+      const subjectDetails = (Array.isArray(tax.subjects) ? tax.subjects : [])
+        .map((code) => {
+          const info = TAXONOMY_SUBJECTS?.[code];
+          return info ? `${code} (${info.title}: ${info.focus})` : code;
+        })
+        .join("; ");
+
+      starterPairs = [
+        {
+          q: calloutTitle
+            ? `How does ${chapterTitle} define "${calloutTitle}" in section "${sec1Title}"?`
+            : `What core concept does section "${sec1Title}" introduce in ${chapterTitle}?`,
+          a: sec1Summary,
+          tags: ["section", tax.primaryGroup],
+        },
+        {
+          q: `What key mechanism is examined in section "${sec2Title}" of ${chapterTitle}?`,
+          a: sec2Summary,
+          tags: ["section", tax.primaryGroup],
+        },
+        {
+          q: `Which ML Systems Taxonomy (F/S/P/Q/T) subject areas does ${chapterTitle} cover?`,
+          a: `Primary group: ${tax.primaryGroup} — ${tax.groupTitle}. Subject coverage: ${subjectDetails || subjectsList}.`,
+          tags: ["taxonomy", tax.primaryGroup],
+        },
+      ];
+    }
+
+    const seededCards = starterPairs.map(({ q, a, tags }) => {
+      const card = new FlashCard(q, a);
+      card.chapter = chapterKey;
+      card.tags = tags;
+      return card;
+    });
+
+    this.chapterSets.set(chapterKey, seededCards);
+    this.flashcards = seededCards;
+    if (this.storageHandler.inMemoryData) {
+      this.storageHandler.inMemoryData.currentChapter = this.currentChapter;
+      this.storageHandler.inMemoryData.currentDeck = [...seededCards];
+    }
+    void Promise.resolve(this.storageHandler.saveToLocalStorage?.())
+      .then(() => {
+        try {
+          seededMap[seedKey] = true;
+          localStorage.setItem("socratiq_starter_cards_seeded_v1", JSON.stringify(seededMap));
+        } catch {}
+      })
+      .catch(() => {});
+    this.uiHandler?.updateProgress?.();
+    this.immediateUpdate(true);
+    this.visualization?.update?.(this.chapterSets);
   }
 
 
@@ -3286,7 +3420,7 @@ this.createModal().then(async () => {
     if (
       mainModal &&
       !cardReviewModal &&
-      !addCardForm?.classList.contains("hidden")
+      (!addCardForm || addCardForm.classList.contains("hidden"))
     ) {
       mainModal.classList.add("hidden");
       if (this._escapeHandler) {

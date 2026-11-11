@@ -66,7 +66,7 @@ export const BYOK_PROVIDERS = Object.freeze({
     id: 'ollama',
     label: 'Ollama (Local)',
     shortLabel: 'Ollama',
-    endpoint: 'http://localhost:11434/api/generate',
+    endpoint: 'http://localhost:11434/v1/chat/completions',
     defaultModel: 'gemma3:270m',
     presetModels: Object.freeze(['gemma3:270m']),
     portalUrl: '',
@@ -88,7 +88,13 @@ const FORBIDDEN_GATEWAY_HOSTS = new Set([
   'harvard-edge.github.io',
 ]);
 
-let memoryByokConfig = null;
+function getMemoryByokConfig() {
+  try { return globalThis.__SOCRATIQ_BYOK_MEMORY__ || null; } catch { return null; }
+}
+
+function setMemoryByokConfig(val) {
+  try { globalThis.__SOCRATIQ_BYOK_MEMORY__ = val || null; } catch {}
+}
 
 function getSessionStorage() {
   try { return globalThis.sessionStorage || null; } catch { return null; }
@@ -111,19 +117,56 @@ export function normalizeProviderId(provider) {
   const raw = String(provider || '').trim().toLowerCase();
   if (raw === 'open-router') return 'openrouter';
   if (raw === 'gemini') return 'google-gemini';
-  if (raw === 'claude') return 'anthropic';
+  if (raw === 'claude' || raw === 'anthropic-claude') return 'anthropic';
   return BYOK_PROVIDERS[raw] ? raw : '';
+}
+
+export function validateByokKeyFormat(provider, apiKey) {
+  const rawProvider = String(provider || '').trim().toLowerCase();
+  const normalized = normalizeProviderId(rawProvider) || rawProvider;
+  const key = String(apiKey || '').trim();
+  if (normalized === 'ollama' || normalized === 'custom' || normalized === '') {
+    return { valid: true, reason: '' };
+  }
+  if (!key) {
+    return { valid: false, reason: 'Please enter an API key before connecting.' };
+  }
+  if (normalized === 'google-gemini') {
+    if (!key.startsWith('AIza') || key.length < 20) {
+      return { valid: false, reason: 'Google Gemini API keys begin with "AIza".' };
+    }
+    return { valid: true, reason: '' };
+  }
+  if (normalized === 'anthropic') {
+    if (!key.startsWith('sk-ant-') || key.length < 16) {
+      return { valid: false, reason: 'Anthropic Claude API keys begin with "sk-ant-".' };
+    }
+    return { valid: true, reason: '' };
+  }
+  if (normalized === 'openrouter' || normalized === 'openai') {
+    if (!key.startsWith('sk-') || key.length < 12) {
+      return { valid: false, reason: 'API keys for this provider begin with "sk-".' };
+    }
+    return { valid: true, reason: '' };
+  }
+  if (normalized === 'groq') {
+    if (!key.startsWith('gsk_') || key.length < 12) {
+      return { valid: false, reason: 'Groq API keys begin with "gsk_".' };
+    }
+    return { valid: true, reason: '' };
+  }
+  return { valid: true, reason: '' };
 }
 
 export function redactSecrets(input) {
   if (typeof input !== 'string' || !input) return '';
   return input
-    .replace(/AIza[0-9A-Za-z_-]{20,}/g, '[REDACTED_API_KEY]')
-    .replace(/sk-ant-[0-9A-Za-z_-]{10,}/g, '[REDACTED_API_KEY]')
-    .replace(/sk-or-v1-[0-9A-Za-z_-]{10,}/g, '[REDACTED_API_KEY]')
-    .replace(/sk-or-[0-9A-Za-z_-]{10,}/g, '[REDACTED_API_KEY]')
-    .replace(/sk-[0-9A-Za-z_-]{15,}/g, '[REDACTED_API_KEY]')
-    .replace(/gsk_[0-9A-Za-z_-]{15,}/g, '[REDACTED_API_KEY]')
+    .replace(/AIza[0-9A-Za-z_-]{16,}/g, '[REDACTED_API_KEY]')
+    .replace(/sk-ant-[0-9A-Za-z_-]{8,}/g, '[REDACTED_API_KEY]')
+    .replace(/sk-or-v1-[0-9A-Za-z_-]{8,}/g, '[REDACTED_API_KEY]')
+    .replace(/sk-or-[0-9A-Za-z_-]{8,}/g, '[REDACTED_API_KEY]')
+    .replace(/sk-[0-9A-Za-z_-]{8,}/g, '[REDACTED_API_KEY]')
+    .replace(/gsk_[0-9A-Za-z_-]{8,}/g, '[REDACTED_API_KEY]')
     .replace(/Bearer\s+[0-9A-Za-z._-]{12,}/gi, 'Bearer [REDACTED_API_KEY]')
     .replace(/([?&]key=)[^&\s]+/gi, '$1[REDACTED_API_KEY]');
 }
@@ -134,7 +177,8 @@ export function redactSecrets(input) {
  * and NEVER sent to the textbook's shared gateway (mlsysbook.ai).
  */
 export function validateByokEndpoint(endpoint, provider = '') {
-  const normalizedProvider = normalizeProviderId(provider);
+  const rawProvider = String(provider || '').trim().toLowerCase();
+  const normalizedProvider = normalizeProviderId(rawProvider);
   const spec = BYOK_PROVIDERS[normalizedProvider];
   const candidate = String(endpoint || spec?.endpoint || '').trim();
   let parsed;
@@ -147,9 +191,14 @@ export function validateByokEndpoint(endpoint, provider = '') {
   if (FORBIDDEN_GATEWAY_HOSTS.has(host) || parsed.pathname.includes('/api/socratiq')) {
     throw new Error('Refusing to send a personal API key to the shared SocratiQ gateway.');
   }
-  if (normalizedProvider === 'ollama' || host === 'localhost' || host === '127.0.0.1') {
+  parsed.username = '';
+  parsed.password = '';
+  parsed.searchParams.delete('key');
+  parsed.searchParams.delete('api_key');
+  const allowsLocalLoopback = !rawProvider || normalizedProvider === 'ollama' || rawProvider === 'custom';
+  if (normalizedProvider === 'ollama' || (allowsLocalLoopback && (host === 'localhost' || host === '127.0.0.1'))) {
     if ((host === 'localhost' || host === '127.0.0.1') && (parsed.protocol === 'http:' || parsed.protocol === 'https:')) {
-      return { url: parsed.toString(), host, isLocal: true };
+      return { valid: true, url: parsed.toString(), host, isLocal: true };
     }
     throw new Error('Local Ollama endpoint must target localhost or 127.0.0.1.');
   }
@@ -159,11 +208,7 @@ export function validateByokEndpoint(endpoint, provider = '') {
   if (!ALLOWED_HTTPS_KEY_HOSTS.has(host)) {
     throw new Error(`Endpoint host "${host}" is not in the approved HTTPS provider allowlist.`);
   }
-  parsed.username = '';
-  parsed.password = '';
-  parsed.searchParams.delete('key');
-  parsed.searchParams.delete('api_key');
-  return { url: parsed.toString(), host, isLocal: false };
+  return { valid: true, url: parsed.toString(), host, isLocal: false };
 }
 
 export function normalizeByokConfig(raw = {}) {
@@ -186,8 +231,10 @@ export function normalizeByokConfig(raw = {}) {
   let endpoint = typeof raw.endpoint === 'string' && raw.endpoint.trim()
     ? raw.endpoint.trim().slice(0, 500)
     : spec.endpoint;
-  // Upgrade legacy Gemini base URL to OpenAI-compatible endpoint if needed
+  // Upgrade legacy Gemini base URL or legacy Ollama /api/generate URL to OpenAI-compatible endpoint
   if (provider === 'google-gemini' && endpoint === 'https://generativelanguage.googleapis.com/v1beta') {
+    endpoint = spec.endpoint;
+  } else if (provider === 'ollama' && endpoint === 'http://localhost:11434/api/generate') {
     endpoint = spec.endpoint;
   }
   const apiKey = typeof raw.apiKey === 'string' ? raw.apiKey.trim().slice(0, 512) : '';
@@ -197,40 +244,74 @@ export function normalizeByokConfig(raw = {}) {
   return { enabled, provider, model, endpoint, apiKey, saveLocally, authMethod };
 }
 
-export function readActiveByokConfig({
-  sessionStore = getSessionStorage(),
-  localStore = getLocalStorage(),
-} = {}) {
-  if (memoryByokConfig) return { ...memoryByokConfig };
+export function readActiveByokConfig(options = {}) {
+  const isWinArg = options && typeof options === 'object' && 'location' in options && !('sessionStore' in options) && !('localStore' in options);
+  const win = isWinArg ? options : (options?.win || globalThis.window);
+  const defaultSessionStore = globalThis.__SOCRATIQ_BYOK_SESSION_STORE__ || getSessionStorage();
+  const defaultLocalStore = globalThis.__SOCRATIQ_BYOK_LOCAL_STORE__ || getLocalStorage();
+  const sessionStore = isWinArg ? (options.sessionStorage ?? defaultSessionStore) : (options?.sessionStore !== undefined ? options.sessionStore : defaultSessionStore);
+  const localStore = isWinArg ? (options.localStorage ?? defaultLocalStore) : (options?.localStore !== undefined ? options.localStore : defaultLocalStore);
+  const sharedOrigin = isSharedPublicOrigin(win);
+  let sessionAccessSucceeded = false;
+
   try {
-    const sessionRaw = sessionStore?.getItem(BYOK_SESSION_KEY);
-    if (sessionRaw && sessionRaw.length <= 8192) {
-      const parsed = JSON.parse(sessionRaw);
-      if (parsed?.version === 1) return normalizeByokConfig(parsed);
+    if (sessionStore && typeof sessionStore.getItem === 'function') {
+      const sessionRaw = sessionStore.getItem(BYOK_SESSION_KEY);
+      sessionAccessSucceeded = true;
+      if (sessionRaw && sessionRaw.length <= 8192) {
+        const parsed = JSON.parse(sessionRaw);
+        if (parsed?.version === 1) {
+          const cfg = normalizeByokConfig(parsed);
+          setMemoryByokConfig(cfg);
+          return cfg;
+        }
+      }
     }
   } catch { /* Ignore blocked sessionStorage */ }
 
-  try {
-    const persistedRaw = localStore?.getItem(BYOK_PERSISTED_KEY);
-    if (persistedRaw && persistedRaw.length <= 8192) {
-      const parsed = JSON.parse(persistedRaw);
-      if (parsed?.version === 1 && parsed.saveLocally === true) {
-        return normalizeByokConfig(parsed);
+  if (!sharedOrigin) {
+    try {
+      if (localStore && typeof localStore.getItem === 'function') {
+        const persistedRaw = localStore.getItem(BYOK_PERSISTED_KEY);
+        if (persistedRaw && persistedRaw.length <= 8192) {
+          const parsed = JSON.parse(persistedRaw);
+          if (parsed?.version === 1 && parsed.saveLocally === true) {
+            const cfg = normalizeByokConfig(parsed);
+            setMemoryByokConfig(cfg);
+            return cfg;
+          }
+        }
       }
-    }
-  } catch { /* Ignore blocked localStorage */ }
+    } catch { /* Ignore blocked localStorage */ }
 
-  // Also check legacy Study Tools userSettings if opted in
-  try {
-    const legacyRaw = localStore?.getItem('userSettings');
-    if (legacyRaw && legacyRaw.length <= 65536) {
-      const legacy = JSON.parse(legacyRaw);
-      if (legacy?.customAPI?.enabled && legacy?.customAPI?.saveLocally === true && legacy?.customAPI?.apiKey) {
-        return normalizeByokConfig(legacy.customAPI);
+    // Also check legacy Study Tools userSettings if opted in on non-shared origin
+    try {
+      if (localStore && typeof localStore.getItem === 'function') {
+        const legacyRaw = localStore.getItem('userSettings');
+        if (legacyRaw && legacyRaw.length <= 65536) {
+          const legacy = JSON.parse(legacyRaw);
+          if (legacy?.customAPI?.enabled && legacy?.customAPI?.saveLocally === true && legacy?.customAPI?.apiKey) {
+            const cfg = normalizeByokConfig(legacy.customAPI);
+            setMemoryByokConfig(cfg);
+            return cfg;
+          }
+        }
       }
-    }
-  } catch { /* Ignore damaged legacy settings */ }
+    } catch { /* Ignore damaged legacy settings */ }
+  }
 
+  if (globalThis.__SOCRATIQ_BYOK_SESSION_FALLBACK_ONLY__ === true) {
+    const mem = getMemoryByokConfig();
+    if (mem && mem.enabled && mem.apiKey) return { ...mem };
+  }
+
+  if (sessionAccessSucceeded) {
+    setMemoryByokConfig(null);
+    return { ...normalizeByokConfig({}), enabled: false };
+  }
+
+  const mem = getMemoryByokConfig();
+  if (mem) return { ...mem };
   return normalizeByokConfig({});
 }
 
@@ -244,12 +325,23 @@ export function saveByokConfig(input, {
     // Never persist API keys to localStorage on shared *.github.io origins
     saveLocally: sharedOrigin ? false : input?.saveLocally === true,
   });
-  memoryByokConfig = config;
+  setMemoryByokConfig(config);
+  try {
+    globalThis.__SOCRATIQ_BYOK_SESSION_STORE__ = sessionStore || null;
+    globalThis.__SOCRATIQ_BYOK_LOCAL_STORE__ = localStore || null;
+  } catch {}
   const payload = JSON.stringify({ version: 1, ...config });
 
+  let sessionWriteSucceeded = false;
   try {
-    sessionStore?.setItem(BYOK_SESSION_KEY, payload);
+    if (sessionStore && typeof sessionStore.setItem === 'function') {
+      sessionStore.setItem(BYOK_SESSION_KEY, payload);
+      sessionWriteSucceeded = true;
+    }
   } catch { /* Keep in-memory fallback */ }
+  try {
+    globalThis.__SOCRATIQ_BYOK_SESSION_FALLBACK_ONLY__ = !sessionWriteSucceeded;
+  } catch {}
 
   try {
     if (config.saveLocally && config.enabled && !sharedOrigin) {
@@ -294,7 +386,17 @@ export function clearByokConfig({
   sessionStore = getSessionStorage(),
   localStore = getLocalStorage(),
 } = {}) {
-  memoryByokConfig = null;
+  setMemoryByokConfig(null);
+  try {
+    globalThis.__SOCRATIQ_BYOK_SESSION_FALLBACK_ONLY__ = false;
+    const activeSession = globalThis.__SOCRATIQ_BYOK_SESSION_STORE__;
+    const activeLocal = globalThis.__SOCRATIQ_BYOK_LOCAL_STORE__;
+    globalThis.__SOCRATIQ_BYOK_SESSION_STORE__ = null;
+    globalThis.__SOCRATIQ_BYOK_LOCAL_STORE__ = null;
+    activeSession?.removeItem?.(BYOK_SESSION_KEY);
+    activeSession?.removeItem?.(BYOK_PKCE_STATE_KEY);
+    activeLocal?.removeItem?.(BYOK_PERSISTED_KEY);
+  } catch {}
   try { sessionStore?.removeItem(BYOK_SESSION_KEY); } catch {}
   try { sessionStore?.removeItem(BYOK_PKCE_STATE_KEY); } catch {}
   try { localStore?.removeItem(BYOK_PERSISTED_KEY); } catch {}
@@ -389,17 +491,23 @@ export async function completeOpenRouterPKCE({
   const code = currentUrl.searchParams.get('code');
   if (!code) return null;
 
-  const rawState = sessionStore?.getItem(BYOK_PKCE_STATE_KEY);
-  if (!rawState) return null;
-
-  // Immediately scrub ?code= from the address bar and remove PKCE state from sessionStorage
-  // BEFORE any network call so the authorization code can never leak via Referer or history.
-  sessionStore?.removeItem(BYOK_PKCE_STATE_KEY);
+  // Immediately scrub ?code= and ?state= from the address bar BEFORE checking rawState
+  // or making any network call so authorization codes never remain in the URL bar.
   currentUrl.searchParams.delete('code');
   currentUrl.searchParams.delete('state');
+  const cleanUrl = currentUrl.pathname + currentUrl.search + currentUrl.hash;
   try {
-    historyObj?.replaceState?.(historyObj.state ?? null, '', currentUrl.pathname + currentUrl.search + currentUrl.hash);
+    historyObj?.replaceState?.(historyObj.state ?? {}, '', cleanUrl);
   } catch { /* Ignore history errors in test stubs */ }
+
+  let rawState = null;
+  try {
+    rawState = sessionStore?.getItem?.(BYOK_PKCE_STATE_KEY) ?? null;
+  } catch {}
+  try {
+    sessionStore?.removeItem?.(BYOK_PKCE_STATE_KEY);
+  } catch {}
+  if (!rawState) return null;
 
   let state;
   try {
@@ -408,8 +516,9 @@ export async function completeOpenRouterPKCE({
     return null;
   }
   if (!state?.verifier || typeof state.verifier !== 'string') return null;
-  // Expire PKCE state after 15 minutes
-  if (typeof state.createdAt === 'number' && Date.now() - state.createdAt > 15 * 60 * 1000) {
+  // Require a valid non-future createdAt timestamp within the 15-minute PKCE window
+  const now = Date.now();
+  if (typeof state.createdAt !== 'number' || !Number.isFinite(state.createdAt) || state.createdAt > now || now - state.createdAt > 15 * 60 * 1000) {
     return null;
   }
 
@@ -452,7 +561,9 @@ export function buildByokRequest({ config, messages, maxTokens = 2048, stream = 
   if (!normalized.enabled) {
     throw new Error('Custom AI provider is not enabled.');
   }
-  const { url, isLocal } = validateByokEndpoint(normalized.endpoint, normalized.provider);
+  const check = validateByokEndpoint(normalized.endpoint, normalized.provider);
+  const url = check.url;
+  const isLocal = Boolean(check.isLocal || url.startsWith('http://localhost') || url.startsWith('http://127.0.0.1'));
   const provider = normalized.provider;
   const headers = {
     'Content-Type': 'application/json',
@@ -466,7 +577,9 @@ export function buildByokRequest({ config, messages, maxTokens = 2048, stream = 
   const conversation = messages.filter(m => m.role !== 'system');
 
   if (provider === 'anthropic') {
-    headers['x-api-key'] = normalized.apiKey;
+    if (!isLocal && normalized.apiKey) {
+      headers['x-api-key'] = normalized.apiKey;
+    }
     headers['anthropic-version'] = '2023-06-01';
     headers['anthropic-dangerous-direct-browser-access'] = 'true';
     return {
@@ -489,7 +602,9 @@ export function buildByokRequest({ config, messages, maxTokens = 2048, stream = 
 
   if (provider === 'google-gemini' && !url.includes('/openai/')) {
     // Native Gemini REST endpoint using x-goog-api-key header (never URL query param)
-    headers['x-goog-api-key'] = normalized.apiKey;
+    if (!isLocal && normalized.apiKey) {
+      headers['x-goog-api-key'] = normalized.apiKey;
+    }
     const baseUrl = url.replace(/\/$/, '');
     const model = normalized.model || BYOK_PROVIDERS['google-gemini'].defaultModel;
     const action = stream ? 'streamGenerateContent?alt=sse' : 'generateContent';

@@ -222,12 +222,14 @@ export function resolveChapterTaxonomy(urlOrPath = '') {
 
 function enrichChapterEntry(entry) {
   if (!entry) return null;
+  const primaryGroupInfo = TAXONOMY_GROUPS[entry.primaryGroup] || null;
   const subjectDetails = (entry.subjects || [])
     .map((code) => TAXONOMY_SUBJECTS[code])
     .filter(Boolean);
   return {
     ...entry,
-    primaryGroupInfo: TAXONOMY_GROUPS[entry.primaryGroup] || null,
+    groupTitle: primaryGroupInfo?.name || entry.primaryGroup,
+    primaryGroupInfo,
     subjectDetails,
   };
 }

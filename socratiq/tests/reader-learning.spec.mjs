@@ -221,7 +221,7 @@ test('Focused Reader footer displays Free shared model status and connects/disco
 
   await byokBox.locator('.reader-byok-provider').selectOption('anthropic');
   await expect(byokBox.locator('.reader-byok-model')).toHaveValue('claude-sonnet-4-20250514');
-  await byokBox.locator('.reader-byok-key').fill('constructed-session-only-key');
+  await byokBox.locator('.reader-byok-key').fill('sk-ant-constructed-session-only-key');
   await byokBox.getByRole('button', {name: 'Connect model', exact: true}).click();
 
   await expect(page.locator('#socratiq-reader .reader-model-status')).toContainText('Connected: Anthropic Claude');
@@ -230,7 +230,7 @@ test('Focused Reader footer displays Free shared model status and connects/disco
     persisted: localStorage.getItem('socratiq_byok_persisted_v1'),
     legacyKey: JSON.parse(localStorage.getItem('userSettings') || '{}')?.customAPI?.apiKey || '',
   }));
-  expect(storageCheck.session).toContain('constructed-session-only-key');
+  expect(storageCheck.session).toContain('sk-ant-constructed-session-only-key');
   expect(storageCheck.persisted).toBeNull();
   expect(storageCheck.legacyKey).toBe('');
 

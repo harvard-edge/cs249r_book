@@ -16,8 +16,9 @@ export function createReaderEnvironment({ host, shell }) {
     const width = viewport?.width ?? window.innerWidth;
     const height = viewport?.height ?? window.innerHeight;
     selectionButton.style.left = `${leftEdge + 8}px`;
-    const buttonWidth = selectionButton.offsetWidth || 220;
-    const buttonHeight = selectionButton.offsetHeight || 44;
+    const barEl = selectionButton.querySelector?.('.selection-clip-bar') || selectionButton;
+    const buttonWidth = barEl.offsetWidth || selectionButton.offsetWidth || 220;
+    const buttonHeight = barEl.offsetHeight || selectionButton.offsetHeight || 44;
     const selectionLeft = Number(rect.left ?? rect.x ?? 0);
     const selectionTop = Number(rect.top ?? rect.y ?? 0);
     const selectionWidth = Number(rect.width ?? Math.max(0, Number(rect.right) - selectionLeft));
@@ -39,6 +40,9 @@ export function createReaderEnvironment({ host, shell }) {
     top = Math.min(Math.max(top, topEdge + 8), Math.max(topEdge + 8, maxTop));
     selectionButton.style.left = `${left}px`;
     selectionButton.style.top = `${top}px`;
+    if (selectionButton.dataset) {
+      selectionButton.dataset.menuPlacement = (top + buttonHeight + 250 > topEdge + height - 8) ? 'above' : 'below';
+    }
   }
 
   function updateViewportVars() {

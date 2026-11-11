@@ -716,12 +716,17 @@ export const styles = `${utilities}\n${katex}\n${boardingStyles}
   }
   
   #copy-container {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    display: flex;
+    flex-wrap: wrap;
     gap: 8px;
     margin-bottom: 8px;
-    padding: 8px;
+    padding: 6px 8px;
     border-radius: 4px;
+  }
+
+  .copy-item {
+    max-width: 260px;
+    text-overflow: ellipsis;
   }
   
   .input-wrapper {
@@ -790,6 +795,32 @@ export const styles = `${utilities}\n${katex}\n${boardingStyles}
   #flashcards-button:hover {
     background-color: var(--socratiq-hover, #f5f5f5);
     border-color: var(--socratiq-border, #ccc);
+  }
+
+  @media (max-width: 420px) {
+    #input-container > div:first-child,
+    #study-toolbar-row {
+      gap: 3px !important;
+      padding: 2px 0 !important;
+      flex-wrap: nowrap !important;
+      max-width: 100% !important;
+    }
+    #context-button,
+    #quiz-button,
+    #flashcards-button,
+    #more-options-button,
+    .socratiq-toolbar-btn {
+      padding: 4px 5px !important;
+      font-size: 11px !important;
+      gap: 2px !important;
+      min-width: 0 !important;
+    }
+    #context-button span,
+    #quiz-button span,
+    #flashcards-button span {
+      font-size: 11px !important;
+      margin-left: 2px !important;
+    }
   }
   
   .big-quiz-btn-disabled {
