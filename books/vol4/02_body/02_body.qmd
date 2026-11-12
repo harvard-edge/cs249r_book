@@ -51,7 +51,7 @@ A mobile manipulator can recognize an obstacle correctly and still strike it if 
 
 ::: {.callout-learning-objectives}
 
-- Calculate observation freshness limits from measurement age and the machine's allowable motion
+- Calculate the maximum tolerable observation age from task position tolerance and target speed, and compare it against worst-case capture-to-onset pipeline age
 - Calculate stopping distance and the admissible speed ceiling from pre-brake delay, credible deceleration, and clearance overheads
 - Evaluate actuator and transmission choices against response limits, reflected inertia, and mechanical impedance
 - Estimate sustainable motor duty cycles from heat generation, cooling, and operating conditions
@@ -70,7 +70,7 @@ The proposal boundary in @sec-boundary-machine-model assigns the permission path
 1. **Measurement freshness** ($\ObservationAge$)\index{Measurement freshness!definition}: The observation must remain valid until the mechanical plant responds. Latency accumulated across sensor exposure, data transport, neural inference, and low-level drive dispatch consumes allowable tracking margins as the physical world continues to move.
 2. **Kinetic momentum** ($\KineticEnergy, \LinearMomentum$)\index{Kinetic momentum!definition}: A moving machine carries kinetic energy ($\KineticEnergy = \frac{1}{2} \Mass \BodySpeed^2$) and linear or angular momentum ($\LinearMomentum = \Mass \BodySpeed$). Bringing the plant to rest demands applying retarding force over finite distance and time; safe operating velocity must therefore preserve a stopping envelope well within available physical clearance.
 3. **Actuator bandwidth and reflected inertia** ($\GearReductionRatio^2 \RotorInertia$)\index{Actuator bandwidth!definition}\index{Reflected inertia|see{Reflected rotor inertia}}: Winding inductance and supply voltage limit the rate at which torque can change. A gearhead with reduction ratio $\GearReductionRatio$ multiplies delivered torque by $\GearReductionRatio$, but it also scales the motor rotor's inertia $\RotorInertia$ by $\GearReductionRatio^2$ as seen at the joint output (@sec-body-reflected-rotor-inertia), which constrains instantaneous acceleration.
-4. **Thermal capacity** ($\EstimatedWindingTemperature$)\index{Thermal capacity!definition}: Resistive losses ($\WindingLossPower = \TorqueProducingCurrent^2 \EffectiveLossResistance$, with $\EffectiveLossResistance$ the winding's effective loss resistance) deposit thermal energy directly into the stator windings and inverter switching stages. Heat dissipation limits sustained continuous torque, while the thermal mass of the coils constrains the magnitude, duration, and repetition rate of transient torque bursts.
+4. **Thermal capacity** ($\EstimatedWindingTemperature$)\index{Thermal capacity!definition}: Resistive losses ($\WindingLossPower = \TorqueProducingCurrent^2 \EffectiveLossResistance$, with $\TorqueProducingCurrent$ the torque-producing stator current and $\EffectiveLossResistance$ the winding's effective loss resistance) deposit thermal energy directly into the stator windings and inverter switching stages. Heat dissipation limits sustained continuous torque, while the thermal mass of the coils constrains the magnitude, duration, and repetition rate of transient torque bursts.
 5. **Electrical power integrity** ($\DcRailVoltage$)\index{Electrical power integrity!definition}: Onboard compute clusters and motor inverters draw from a shared DC power rail. Peak motor accelerations must not drag the bus voltage below digital logic thresholds, while regenerative braking must provide an electrical sink so returned kinetic energy does not overvoltage the bus.
 
 Under the **simultaneous admission invariant**\index{Simultaneous admission invariant!definition}, motion permission requires a non-negative margin in every budget before the permission path commits torque to hardware registers. Each margin must be checked in its own units; time, distance, torque, temperature, and voltage are separate constraints, not interchangeable quantities:
@@ -127,7 +127,7 @@ class MachineMomentum:
     e_k_str = fmt_energy(e_k, unit=joule, precision=0)
 ```
 
-The warehouse mobile manipulator that this book follows draws on all five. Loaded to at most `{python} MachineMomentum.m_loaded_str` and moving at its `{python} MachineMomentum.v_drive_str` drive limit (illustrative; see the Reader Guide), it carries `{python} MachineMomentum.e_k_str` of kinetic energy through aisles it shares with people. Each budget establishes an empirical operating boundary on the assembled machine under declared thermal and electrical stress. Each ends the chapter as a limit record, the six-element record that @sec-boundary-book-architecture sketched from the stopping notebook: a value, the conditions under which it holds, its uncertainty, the margin defended, a runtime detector, and the provenance of its evidence. The first budget is the age of the measurement on which every command rests, which runs from physical transduction, well before any software process receives the raw sensor data.
+The warehouse mobile manipulator that this book follows draws on all five. Loaded to at most `{python} MachineMomentum.m_loaded_str` and moving at its `{python} MachineMomentum.v_drive_str` drive limit (illustrative; see the Reader Guide), it carries `{python} MachineMomentum.e_k_str` of kinetic energy through aisles it shares with people. Each budget establishes an empirical operating boundary on the assembled machine under declared thermal and electrical stress. Three of the five—credible deceleration, the drive torque ceiling that supports it, and the shared bus's converter lockout—end this chapter as populated six-element limit records (@sec-boundary-book-architecture): a value, the conditions under which it holds, its uncertainty, the margin defended, a runtime detector, and the provenance of its evidence, while observation-freshness and wrist thermal limits remain open for the perception and enforcement budgets of later chapters. The first budget is the age of the measurement on which every command rests, which runs from physical transduction, well before any software process receives the raw sensor data.
 
 ## Measurement Freshness {#sec-body-measurement-freshness}
 
@@ -271,7 +271,7 @@ The running machine meets this bound at its pick station, where the arm grasps a
 
 ### Transduction physics, quantization noise, and Nyquist limits {#sec-body-sensor-transduction}
 
-Meeting that freshness deadline begins inside the sensors themselves; if a 12-bit magnetic encoder jumps by a single count between two 1 ms servo ticks, backward differencing reports a sudden 88°/s velocity spike. If an unshielded cooling fan vibrates an inertial unit above half its sampling rate, the vibration folds into the low-frequency band and looks like chassis acceleration. Every sensor trades error tolerance against time: it must resolve the physical state of interest, and the analog filtering, sampling, or serial scanning needed to extract a clean signal must fit inside the freshness deadline. Four physical mechanisms set this trade:
+Meeting that freshness deadline begins inside the sensors themselves; if a 12-bit magnetic encoder jumps by a single count between two 1 ms servo ticks, backward differencing reports a sudden $88^\circ/\text{s}$ velocity spike. If an unshielded cooling fan vibrates an inertial unit above half its sampling rate, the vibration folds into the low-frequency band and looks like chassis acceleration. Every sensor trades error tolerance against time: it must resolve the physical state of interest, and the analog filtering, sampling, or serial scanning needed to extract a clean signal must fit inside the freshness deadline. Four physical mechanisms set this trade:
 
 1. **Optical Encoders and Velocity Quantization Noise:**
    An encoder measures joint position in discrete angular increments. An $\EncoderBitCount$-bit encoder discretizes the continuous $2\pi\text{ rad}$ circle into an angular resolution of $\QuantizationStep \EncoderAngle = \frac{2\pi}{2^\EncoderBitCount}$. For an 18-bit absolute optical encoder, $\QuantizationStep \EncoderAngle \approx 2.4 \times 10^{-5}\text{ rad}$ ($0.0014^\circ$); for a 12-bit magnetic encoder, $\QuantizationStep \EncoderAngle \approx 1.53 \times 10^{-3}\text{ rad}$ ($0.088^\circ$). Feedback controllers, which compute each command from the measured difference between the desired and the actual state, estimate joint velocity from successive position samples across a discrete control cycle $\FiniteChange \TimeInstant$:
@@ -1184,7 +1184,7 @@ A tooth broken off at its root (@fig-02-real-broken-gear-tooth) is the end state
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import *
-from mlsysim.fmt import fmt_force, fmt_force_rate, fmt_sci_qty, fmt_velocity, check
+from mlsysim.fmt import fmt_force, fmt_force_rate, fmt_length, fmt_sci_qty, fmt_velocity, check
 
 AISLE = Embodied.Scenario.WarehouseAisle
 
@@ -1192,22 +1192,29 @@ class LatchContactRate:
     """Contact-force rise rate F = k v t at the cage-door latch."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    k_rigid = 1.0e5 * newton / meter  # category: illustrative (rigid surface stiffness floor)
+    dx_rigid = 1.0 * millimeter  # category: illustrative (setpoint tracking error)
     k_latch = AISLE.k_latch  # category: illustrative (strike-plate stiffness)
     v_guarded = AISLE.v_latch_approach  # category: illustrative (guarded approach)
     v_high = AISLE.v_latch_high  # category: illustrative (unsupported approach)
     f_limit = AISLE.f_latch_limit  # category: illustrative (latch force limit)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    f_rigid = (k_rigid * dx_rigid).to(newton)
     rate_guarded = calc_contact_force_rate(k_latch, v_guarded)
     rate_high = calc_contact_force_rate(k_latch, v_high)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(f_rigid.magnitude - 100.0) < 1e-9, f"Unexpected rigid contact force: {f_rigid}")
     check(abs(k_latch.to(newton / meter).magnitude - 4.0e5) < 1e-6, f"Unexpected plate stiffness: {k_latch}")
     check(abs(rate_guarded.magnitude - 12.0) < 1e-9, f"Guarded force rate must be 12 N/ms: {rate_guarded}")
     check(abs(rate_high.magnitude - 40.0) < 1e-9, f"High-speed force rate must be 40 N/ms: {rate_high}")
     check(abs(f_limit.to(newton).magnitude - 100.0) < 1e-9, f"Unexpected latch limit: {f_limit}")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    k_rigid_str = fmt_sci_qty(k_rigid, newton / meter, precision=0)
+    dx_rigid_str = fmt_length(dx_rigid, unit=millimeter, precision=0)
+    f_rigid_str = fmt_force(f_rigid, precision=0)
     k_latch_str = fmt_sci_qty(k_latch, newton / meter, precision=1)
     v_guarded_str = fmt_velocity(v_guarded, unit=meter / second, precision=2)
     v_high_str = fmt_velocity(v_high, unit=meter / second, precision=2)
@@ -1217,7 +1224,7 @@ class LatchContactRate:
 ```
 
 ::: {#psp-body-impedance-control .callout-perspective title="Impedance control for contact safety"}
-When a position-controlled robot encounters a rigid surface (contact stiffness $\ContactStiffness \ge 10^5\text{ N/m}$), a minor setpoint tracking error of $\FiniteChange \ContactPointPosition = 1\text{ mm}$ escalates the contact force to $\ContactForce = \ContactStiffness \FiniteChange \ContactPointPosition = 100\text{ N}$ within milliseconds as the inverter commands maximum current against the obstacle. On the mobile manipulator, the gripper contacting the spring-latched door strikes a steel plate with stiffness `{python} LatchContactRate.k_latch_str`. Once impact occurs, contact force ramps at $\ContactForce = \ContactStiffness \ContactApproachSpeed \TimeInstant$: `{python} LatchContactRate.rate_guarded_str` under a guarded approach velocity of `{python} LatchContactRate.v_guarded_str`, and `{python} LatchContactRate.rate_high_str` at an unconstrained `{python} LatchContactRate.v_high_str`, rapidly exceeding the latch's `{python} LatchContactRate.f_limit_str` structural limit.
+When a position-controlled robot encounters a rigid surface (contact stiffness $\ContactStiffness \ge$ `{python} LatchContactRate.k_rigid_str`), a minor setpoint tracking error of $\FiniteChange \ContactPointPosition =$ `{python} LatchContactRate.dx_rigid_str` escalates the contact force to $\ContactForce = \ContactStiffness \FiniteChange \ContactPointPosition =$ `{python} LatchContactRate.f_rigid_str` within milliseconds as the inverter commands maximum current against the obstacle. On the mobile manipulator, the gripper contacting the spring-latched door strikes a steel plate with stiffness `{python} LatchContactRate.k_latch_str`. Once impact occurs, contact force ramps at $\ContactForce = \ContactStiffness \ContactApproachSpeed \TimeInstant$: `{python} LatchContactRate.rate_guarded_str` under a guarded approach velocity of `{python} LatchContactRate.v_guarded_str`, and `{python} LatchContactRate.rate_high_str` at an unconstrained `{python} LatchContactRate.v_high_str`, rapidly exceeding the latch's `{python} LatchContactRate.f_limit_str` structural limit.
 
 Impedance control [@hogan1985impedance] reformulates contact interactions away from pure position or force control. An impedance takes motion in and returns force; an admittance takes force in and returns motion. Because a rigid environment behaves as an admittance, yielding motion only when pushed, the manipulator is made to behave as an impedance, which answers a deviation in position and velocity with a restoring force ($\ContactForce = \MechanicalImpedanceMap(\ContactDirectionVelocity)$, force as a function of the imposed motion). The joint drive controller realizes this relationship by emulating a **virtual spring-damper system**\index{Virtual spring-damper system!definition}:
 $$\ContactForce = \PidProportionalGain (\DesiredContactPosition - \ContactPointPosition) + \PidDerivativeGain (\DesiredContactVelocity - \ContactDirectionVelocity)$$
@@ -1228,11 +1235,11 @@ The stiffness $\PidProportionalGain$ multiplies the position error and the dampi
 
 The scaling disparity underlying inertia matching, in which output torque scales linearly with ratio ($\JointOutputTorque = \GearboxTransmissionEfficiency \GearReductionRatio \MotorTorque$) while reflected inertia scales quadratically ($\GearReductionRatio^2$), divides robotic actuation into three primary regimes. These regimes trade continuous torque density against mechanical backdrivability, distinguished by gear design, stage count, and reduction ratio (@tbl-02-mechanical-drives): at the lowest ratios, **quasi-direct drive (QDD)**\index{Quasi-direct drive!definition} pairs a high-torque motor with a single compact planetary stage; at intermediate ratios, multistage planetary gearboxes reduce motor size at the cost of moderate reflected inertia and backlash; and at the highest ratios, strain-wave gears pack large torque multiplication into a compact joint at the cost of extreme reflected inertia and torsional compliance.
 
-| Transmission                                    | Gear Ratio ($\GearReductionRatio$)                     | Reflected Inertia ($\GearReductionRatio^2$)                    | Implication for Learned Policies                                                                                                 |
-|:------------------------------------------------|:-------------------------------------------------------|:---------------------------------------------------------------|:---------------------------------------------------------------------------------------------------------------------------------|
-| **Quasi-Direct Drive (single-stage planetary)** | $3:1\text{--}10:1$ ($\GearReductionRatio \le 10$)      | $\GearReductionRatio^2 \le 100$ (Low)                          | Lower reflected inertia supports backdriving and current-based torque estimation; contact response still requires qualification. |
-| **Multistage Planetary**                        | $15:1\text{--}50:1$ ($\GearReductionRatio \approx 30$) | $\GearReductionRatio^2 \approx 225\text{--}2{,}500$ (Moderate) | Semi-backdrivable; a smaller motor than QDD for the same output torque; gear backlash requires load-side joint sensing.          |
-| **Strain Wave (Harmonic Drive)**                | $50:1\text{--}160:1$ ($\GearReductionRatio \ge 50$)    | $\GearReductionRatio^2 \ge 2{,}500\text{--}25{,}600$ (Extreme) | High reflected inertia; zero initial backlash; torsional compliance and impact loading require qualification.                    |
+| Transmission                                    | Gear Ratio ($\GearReductionRatio$)                     | Reflected Inertia ($\GearReductionRatio^2$)                               | Implication for Learned Policies                                                                                                 |
+|:------------------------------------------------|:-------------------------------------------------------|:--------------------------------------------------------------------------|:---------------------------------------------------------------------------------------------------------------------------------|
+| **Quasi-Direct Drive (single-stage planetary)** | $3:1\text{--}10:1$ ($\GearReductionRatio \le 10$)      | $\GearReductionRatio^2 \le 100$ (Low)                                     | Lower reflected inertia supports backdriving and current-based torque estimation; contact response still requires qualification. |
+| **Multistage Planetary**                        | $15:1\text{--}50:1$ ($\GearReductionRatio \approx 30$) | $\GearReductionRatio^2 \approx 225\text{--}2{,}500$ (Moderate)            | Semi-backdrivable; a smaller motor than QDD for the same output torque; gear backlash requires load-side joint sensing.          |
+| **Strain Wave (Harmonic Drive)**                | $50:1\text{--}160:1$ ($\GearReductionRatio \ge 50$)    | $2{,}500\text{--}25{,}600$ ($\GearReductionRatio^2 \ge 2{,}500$, Extreme) | High reflected inertia; zero initial backlash; torsional compliance and impact loading require qualification.                    |
 
 : **Actuator transmission trade-off**: Reduction ratio ($\GearReductionRatio$), reflected rotor inertia scaling ($\GearReductionRatio^2$), and the consequence for learned control policies across quasi-direct-drive (a single low-ratio planetary stage), multistage planetary, and strain wave transmissions. The strain wave range is that of one catalog series [@harmonicdrive2014csg2uh]. {#tbl-02-mechanical-drives tbl-colwidths="[22,18,20,40]"}
 
@@ -2311,6 +2318,8 @@ The mobile manipulator's lithium-ion pack feeds a `{python} DriveBusIntegrity.v_
 *The bus must stay between the `{python} DriveBusIntegrity.v_uvlo_str` lockout and the clamp; an unclamped stop reaches `{python} DriveBusIntegrity.v_final_str`.*
 :::
 
+With the DC bus bounded at both undervoltage lockout and regenerative surge, all five analytical physical budgets are now in place. Checkpoint \ref{chk-body-bus-droop-regen} consolidates the freshness, stopping, thermal, and electrical relations before @sec-body-measuring-limits turns to measuring them on assembled hardware.
+
 ::: {#chk-body-bus-droop-regen .callout-checkpoint title="Freshness, stopping, heat, and supply"}
 
 The actuator budget was checked in checkpoint \ref{chk-body-actuator-limits}. Before measuring these limits on an assembled machine, verify your understanding of the other four:
@@ -2552,6 +2561,8 @@ The detector element matters most once the machine leaves the test stand, becaus
 **Systems lesson**: A physical body cannot transcend the saturation ranges of its sensory transducers. When a sensor's physical limit (a gyroscope's rate ceiling or an accelerometer's dynamic range) is exceeded, a state estimator that integrates the saturated measurement as if it were valid drifts away from the physical state. The saturation duration against which the IMU had been accepted was a limit with conditions, and once descent exceeded them, no detector checked the estimate before it commanded an irreversible action.
 :::
 
+Schiaparelli's loss underscores why every populated row in @tbl-02-limit-record pairs its physical value and conditions with an online detector and an explicit provenance grade. Checkpoint \ref{chk-body-limit-records} tests how those six record elements work together before the chapter examines how concurrent maneuvers draw on all five budgets at once.
+
 ::: {#chk-body-limit-records .callout-checkpoint title="Limit records"}
 
 A limit governs a decision only together with the conditions, evidence, and detector that travel with it.
@@ -2563,7 +2574,7 @@ A limit governs a decision only together with the conditions, evidence, and dete
 
 :::
 
-Measured and recorded one at a time, the five limits describe the body budget by budget, each under its own conditions. In operation, however, a single maneuver draws on all five budgets at once, and a change in one budget's state can erode the margin of another. Which limit binds first therefore depends on both the machine's physical class and the specific command under evaluation.
+With three limit records populated and the remaining freshness and wrist-thermal slots carried forward, the five budgets describe the body one mechanism at a time, each under its own conditions. In operation, however, a single maneuver draws on all five budgets at once, and a change in one budget's state can erode the margin of another. Which limit binds first therefore depends on both the machine's physical class and the specific command under evaluation.
 
 ## Which Physical Budget Binds First {#sec-body-archetype-matrix}
 
@@ -2667,21 +2678,7 @@ Physical limits rarely respect subsystem boundaries. In embodied machine learnin
 
 **Fallacy**: *Model inference time defines the measurement freshness latency.*
 
-Consider an engineering team that compresses its vision backbone, cutting neural network inference time from $30\text{ ms}$ to $10\text{ ms}$. While this optimization provides a threefold compute speedup, the physical robot still executes actions based on visual state that traversed camera exposure, sensor readout, DMA transfers, and kernel queuing delays. Once the model outputs an action, that command must traverse a real-time network fieldbus before motor drive inverters can slew coil currents and produce physical force. A $45\text{ ms}$ scheduling or transport jitter spike elsewhere along this pipeline eclipses the $20\text{ ms}$ compute gain, consuming safety margins before the robot can react. Real-time control requires budgeting and bounding the worst-case tail of the entire capture-to-onset pipeline across synchronized hardware clocks, rather than certifying loop safety from isolated model benchmarks.
-
-**Architect's countermeasure**: Measure the true capture-to-onset latency tail on synchronized hardware clocks; never certify real-time safety from neural network inference benchmarks alone.
-
-:::
-
-::: {.fallacy-pitfall}
-
-**Fallacy**: *Software step commands deliver instantaneous physical torque.*
-
-Reinforcement learning policies trained in simulation routinely issue piecewise-constant torque or position setpoints at $50\text{ Hz}$, implicitly assuming the physical actuator behaves as an ideal, memoryless force source. In physical reality, an electric drive is an electromechanical dynamic system governed by electromagnetic and inertial limits. Developing torque requires inner Field-Oriented Control (FOC) loops whose current rise rate is strictly bounded by stator winding electrical time constants ($\ElectricalTimeConstant = \PhaseInductance/\PhaseResistance$) and DC bus voltage headroom ($\frac{\DerivativeOperator\MotorTorque}{d\TimeInstant} \le \frac{\MotorTorqueConstant(\DcBusVoltage - \BackEmfVoltage)}{\PhaseInductance}$). Mechanically, a high-ratio gearhead amplifies rotor inertia quadratically ($\ReflectedRotorInertia = \GearReductionRatio^2 \RotorInertia$), imposing a steep low-pass filter on achievable link acceleration.
-
-When a discrete tensor update demands an abrupt torque step, substantial electromagnetic effort is diverted into accelerating the spinning rotor rather than moving the external link. Transmission compliance and joint elasticity convert these high-frequency torque transients into structural vibration and limit-cycle oscillations. Simultaneously, repeated high-current corrections waste energy as resistive heat dissipation ($\WindingLossPower = \frac{\MotorTorque^2}{\MotorTorqueConstant^2} \EffectiveLossResistance$), rapidly burning through the actuator's thermal margin. Systems architects must filter and shape setpoints against actual plant dynamics, validating commanded trajectories against delivered physical response rather than assuming numerical smoothness in software guarantees smooth physical execution.
-
-**Architect's countermeasure**: Bound acceleration and torque slew using measured actuator response, include electrical current rise and reflected inertia in the model, and qualify the chosen transmission and controller for the intended contact task.
+Consider an engineering team that compresses its vision backbone, cutting neural network inference time from $30\text{ ms}$ to $10\text{ ms}$. While this optimization provides a threefold compute speedup, the physical robot still executes actions based on visual state that traversed camera exposure, sensor readout, DMA transfers, and kernel queuing delays. Once the model outputs an action, that command must traverse a real-time network fieldbus before motor drive inverters can slew coil currents and produce physical force. A $45\text{ ms}$ scheduling or transport jitter spike elsewhere along this pipeline eclipses the $20\text{ ms}$ compute gain, consuming safety margins before the robot can react. Real-time control requires measuring and bounding the worst-case tail of the entire capture-to-onset pipeline across synchronized hardware clocks rather than certifying loop safety from neural network inference benchmarks alone.
 
 :::
 
@@ -2743,9 +2740,17 @@ In physical deployment, an actuator's continuous torque is strictly constrained 
 $$\ContinuousTorque = \MotorTorqueConstant \sqrt{\frac{\EngineeringTemperatureCeiling - \AmbientTemperature}{\ElectricalResistance(\EngineeringTemperatureCeiling) \ThermalResistance}}$$
 Given a `{python} CatalogDerating.t_max_str` engineering ceiling, shifting the motor from the vendor's `{python} CatalogDerating.t_amb_catalog_str` bench into the `{python} CatalogDerating.t_amb_installed_str` interior of an enclosed chassis strips away `{python} CatalogDerating.ambient_loss_pct_str` of continuous torque. Because thermal dissipation scales inversely with the square root of thermal resistance ($1/\sqrt{\ThermalResistance}$), eliminating forced convection and heatsink mass degrades capacity even further: doubling $\ThermalResistance$ inside the arm housing cuts total usable continuous torque by `{python} CatalogDerating.both_loss_pct_str` relative to the catalog rating. If trajectory planners treat catalog continuous torque as achievable duty, persistent copper losses ($\WindingLossPower = \frac{\MotorTorque^2}{\MotorTorqueConstant^2} \EffectiveLossResistance$) will exceed heat dissipation rates, triggering thermal cutouts or permanently degrading winding insulation.
 
-Sensors suffer the same systemic degradation: inertial measurement units and optical encoders calibrated on quiet granite surface plates suffer severe vibration rectification, thermal drift, and mechanical aliasing once bolted near high-frequency switching inverters and planetary gearsets. System limits must reflect empirical measurements collected on the fully assembled machine under peak operational stress rather than pristine standalone datasheets.
+Sensors suffer the same systemic degradation: inertial measurement units and optical encoders calibrated on quiet granite surface plates suffer severe vibration rectification, thermal drift, and mechanical aliasing once bolted near high-frequency switching inverters and planetary gearsets. Engineering teams must therefore calibrate actuator continuous torque ceilings and sensor noise profiles on fully assembled, enclosed hardware across the operational temperature envelope rather than copying open-bench catalog numbers into planner configuration files.
 
-**Architect's countermeasure**: Calibrate actuator continuous torque ceilings and sensor noise profiles on fully assembled, enclosed hardware across the entire operational temperature envelope rather than copying open-bench catalog numbers into planner configuration files.
+:::
+
+::: {.fallacy-pitfall}
+
+**Fallacy**: *Software step commands deliver instantaneous physical torque.*
+
+Reinforcement learning policies trained in simulation routinely issue piecewise-constant torque or position setpoints at $50\text{ Hz}$, implicitly assuming the physical actuator behaves as an ideal, memoryless force source. In physical reality, an electric drive is an electromechanical dynamic system governed by electromagnetic and inertial limits. Developing torque requires inner Field-Oriented Control (FOC) loops whose current rise rate is strictly bounded by stator winding electrical time constants ($\ElectricalTimeConstant = \PhaseInductance/\PhaseResistance$) and DC bus voltage headroom ($\frac{\DerivativeOperator\MotorTorque}{d\TimeInstant} \le \frac{\MotorTorqueConstant(\DcBusVoltage - \BackEmfVoltage)}{\PhaseInductance}$). Mechanically, a high-ratio gearhead amplifies rotor inertia quadratically ($\ReflectedRotorInertia = \GearReductionRatio^2 \RotorInertia$), imposing a steep low-pass filter on achievable link acceleration.
+
+When a discrete tensor update demands an abrupt torque step, substantial electromagnetic effort is diverted into accelerating the spinning rotor rather than moving the external link. Transmission compliance and joint elasticity convert these high-frequency torque transients into structural vibration and limit-cycle oscillations. Simultaneously, repeated high-current corrections waste energy as resistive heat dissipation ($\WindingLossPower = \frac{\MotorTorque^2}{\MotorTorqueConstant^2} \EffectiveLossResistance$), rapidly burning through the actuator's thermal margin. Systems architects must filter and shape setpoints using measured actuator response—modeling electrical current rise and reflected inertia explicitly and qualifying the transmission and controller for the intended contact task—rather than assuming numerical smoothness in software guarantees smooth physical execution.
 
 :::
 
@@ -2755,21 +2760,7 @@ Sensors suffer the same systemic degradation: inertial measurement units and opt
 
 In server computing, DVFS operates as an invisible operating-system service that reduces clock frequency and core voltages to prevent silicon junction overtemperature. In an embodied system, however, DVFS directly degrades the real-time control contract. Consider a mobile manipulator whose high-current drive motors heat a shared structural chassis during intense maneuvering. As heat conducts into the compute bay, the application processor throttles its clock frequency to avoid thermal shutdown.
 
-The system kernel treats clock throttling as an isolated power-management decision. However, a downclocked vision backbone adds observation age, and observation age at speed is unmodeled blind travel before the safety monitor can command braking. @Sec-body-permission-rail-isolation prices that travel on the running machine. Although thermal throttling successfully shields the processor silicon, the vehicle's dynamic stopping envelope silently expands beyond calibrated safety margins.
-
-**Architect's countermeasure**: Feed SoC thermal and clock-frequency telemetry directly into the motion safety monitor, dynamically derating maximum travel speed whenever compute throttling inflates perception age.
-
-:::
-
-::: {.fallacy-pitfall}
-
-**Pitfall**: *Scaling operational velocity without recalculating quadratic braking distances and thermal dissipation.*
-
-Facility operators frequently seek to increase robot throughput by raising maximum cruise velocity in software configurations. This operational change couples two punishing physical nonlinearities. First, the braking term grows with the square of speed, which is why Case 3 of @fig-02-stopping-distance breaches the clear distance at `{python} BodyStoppingBudget.v_fast_str`.
-
-Second, absorbing the kinetic energy of the faster machine demands large dynamic braking currents that dump heat directly into motor stator windings and drive electronics via Joule heating ($\WindingLossPower = \TorqueProducingCurrent^2 \EffectiveLossResistance$). An isolated emergency stop performed during commissioning may pass thermal checks when the machine starts cold. However, when an autonomous vehicle repeats that higher-speed duty cycle across an eight-hour shift, winding temperatures compound across successive maneuvers, rapidly outstripping the chassis thermal dissipation budget. System planners must treat operating velocity as a gated admission parameter: any commanded speed increase requires re-evaluating both the expanded quadratic stopping envelope and the cumulative multi-cycle thermal duty budget.
-
-**Architect's countermeasure**: Treat operating speed as an admission parameter that re-evaluates both quadratic stopping envelopes and multi-cycle thermal accumulation before granting velocity increases.
+The system kernel treats clock throttling as an isolated power-management decision. However, a downclocked vision backbone adds observation age, and observation age at speed is unmodeled blind travel before the safety monitor can command braking. @Sec-body-permission-rail-isolation prices that travel on the running machine. Although thermal throttling successfully shields the processor silicon, the vehicle's dynamic stopping envelope silently expands beyond calibrated safety margins unless SoC thermal and clock-frequency telemetry feed directly into the motion safety monitor to derate maximum travel speed whenever compute throttling inflates perception age.
 
 :::
 
@@ -2781,9 +2772,17 @@ Software architectures typically treat accelerator power consumption and motor d
 
 Consider a scenario where a heavy neural network vision burst coincides precisely with the drive motors accelerating to push the mobile base over an uneven threshold. On the shared `{python} DriveBusIntegrity.v_bus_nom_str` electrical bus, this coincident current surge demands a combined `{python} DriveBusIntegrity.di_str` step. Drawn through the `{python} DriveBusIntegrity.r_bus_str` source resistance of cell, harness, and switch, this sudden draw induces a sustained `{python} DriveBusIntegrity.dv_str` voltage sag. That sag consumes nearly half of the `{python} DriveBusIntegrity.headroom_low_str` voltage margin separating a depleted battery pack from the `{python} DriveBusIntegrity.v_uvlo_str` UVLO threshold of the application processor's DC-DC converter, even before harness inductance and bulk capacitor discharge deepen the dynamic transient. A step of `{python} DriveBusIntegrity.i_cross_str`, or the identical current demand drawn from an aging or cold battery with sufficiently elevated internal impedance, reaches the UVLO threshold and can interrupt the primary processor's supply.
 
-If safety microcontrollers and brake solenoids share that unbuffered power rail, the resulting brownout crashes the safety supervisor simultaneously. The machine is plunged into the uncontrolled, unpowered fail states described in @sec-body-power-integrity while carrying significant physical momentum, rather than executing an orderly, controlled deceleration. Software power budgets must acknowledge electrical coupling at the physical bus. System qualification demands testing coincident worst-case compute and motor loads at minimum battery state of charge, while ensuring safety permission logic and electro-mechanical brakes operate on an isolated, held-up power rail (@sec-body-archetype-matrix).
+If safety microcontrollers and brake solenoids share that unbuffered power rail, the resulting brownout crashes the safety supervisor simultaneously. The machine is plunged into the uncontrolled, unpowered fail states described in @sec-body-power-integrity while carrying significant physical momentum, rather than executing an orderly, controlled deceleration. Software power budgets must acknowledge electrical coupling at the physical bus. System qualification demands isolating the permission logic and brake releases on a held-up power rail (@sec-body-archetype-matrix) and qualifying both their hold-up and the physical stopping response under coincident motor and compute load at minimum battery state of charge, recognizing that a powered stop also requires the drive rail and energy-absorption path to remain usable.
 
-**Architect's countermeasure**: Isolate the permission logic and brake releases, then qualify both their hold-up and the physical stopping response under coincident motor and compute load at minimum battery state of charge. A powered stop also requires the drive rail and energy-absorption path to remain usable.
+:::
+
+::: {.fallacy-pitfall}
+
+**Pitfall**: *Scaling operational velocity without recalculating quadratic braking distances and thermal dissipation.*
+
+Facility operators frequently seek to increase robot throughput by raising maximum cruise velocity in software configurations. This operational change couples two punishing physical nonlinearities. First, the braking term grows with the square of speed, which is why Case 3 of @fig-02-stopping-distance breaches the clear distance at `{python} BodyStoppingBudget.v_fast_str`.
+
+Second, absorbing the kinetic energy of the faster machine demands large dynamic braking currents that dump heat directly into motor stator windings and drive electronics via Joule heating ($\WindingLossPower = \TorqueProducingCurrent^2 \EffectiveLossResistance$). An isolated emergency stop performed during commissioning may pass thermal checks when the machine starts cold. However, when an autonomous vehicle repeats that higher-speed duty cycle across an eight-hour shift, winding temperatures compound across successive maneuvers, rapidly outstripping the chassis thermal dissipation budget. System planners must treat operating velocity as an admission parameter, re-evaluating both the expanded quadratic stopping envelope and multi-cycle thermal accumulation before granting any speed increase.
 
 :::
 
@@ -2793,9 +2792,7 @@ If safety microcontrollers and brake solenoids share that unbuffered power rail,
 
 Development teams often qualify physical AI systems through single-variable stress testing: a robotic manipulator verifies maximum payload capacity inside a $20^\circ\text{C}$ air-conditioned laboratory, then undergoes thermal validation inside a $45^\circ\text{C}$ environmental chamber with an unloaded gripper. Neither benchmark, however, validates whether the manipulator can lift maximum payload in high ambient heat while operating from a depleted battery pack.
 
-Physical failure modes couple nonlinearly across subsystem domains. Under simultaneous operational stress, manipulating maximum payload demands sustained high motor currents that dramatically increase resistive winding losses ($\WindingLossPower = \TorqueProducingCurrent^2 \EffectiveLossResistance$). An ambient temperature of $45^\circ\text{C}$ severely compresses the thermal gradient required to reject that heat to the environment, accelerating stator insulation degradation. Concurrently, a low battery state of charge depresses DC bus voltage, stripping away the voltage headroom required to overcome motor back-EMF ($\BackEmfVoltage$) and severely degrading current slew rates ($\frac{d\TorqueProducingCurrent}{d\TimeInstant}$). An arm that moves smoothly in isolated tests may experience joint stall, severe tracking errors, or premature thermal shutdown under their compound interaction. Hardware and software qualification cannot rely on orthogonal single-variable test sweeps. Engineering teams must validate boundary envelopes on fully integrated machines subjected to simultaneous peak stresses across payload, thermal ambient, battery state of charge, and control frequency.
-
-**Architect's countermeasure**: Test boundary envelopes under worst-case simultaneous physical stress (maximum payload, elevated ambient temperature, depleted battery, and high-frequency actuation) to catch multi-budget coupling failures.
+Physical failure modes couple nonlinearly across subsystem domains. Under simultaneous operational stress, manipulating maximum payload demands sustained high motor currents that dramatically increase resistive winding losses ($\WindingLossPower = \TorqueProducingCurrent^2 \EffectiveLossResistance$). An ambient temperature of $45^\circ\text{C}$ severely compresses the thermal gradient required to reject that heat to the environment, accelerating stator insulation degradation. Concurrently, a low battery state of charge depresses DC bus voltage, stripping away the voltage headroom required to overcome motor back-EMF ($\BackEmfVoltage$) and severely degrading current slew rates ($\frac{d\TorqueProducingCurrent}{d\TimeInstant}$). An arm that moves smoothly in isolated tests may experience joint stall, severe tracking errors, or premature thermal shutdown under their compound interaction. Hardware and software qualification cannot rely on orthogonal single-variable test sweeps; engineering teams must test boundary envelopes on fully integrated machines under simultaneous peak stresses across payload, elevated ambient temperature, depleted battery state of charge, and high-frequency actuation to catch multi-budget coupling failures.
 
 :::
 
@@ -2847,5 +2844,5 @@ Thermal and electrical budgets descend from classical electrical machine design 
 - **Learned actuator models** [@hwangbo2019learning]. Demonstrates that compact neural networks trained on minutes of empirical hardware data close the reality gap between idealized simulator torques and nonlinear physical actuators.
 
 ::: {.callout-chapter-connection title="From body limits to brain proposals"}
-Every budget in this chapter now ends as a limit record, and all five can hold while the machine still does nothing useful. At the pick station the observation can be fresh, the stop inside its clearance, the windings cool, and the bus above lockout, yet nothing in the body says which object on the conveyor is the mug or where its handle is. That judgment comes from a learned proposer, and @sec-brain opens with the cost of supplying it in time. A model large enough to recognize unfamiliar objects streams its weights through the same onboard processor that sensing and control depend on, so it renews its proposal far more slowly than the servo loops run. The chapter derives the two-speed brain that the machine card commits to, a slow intent model above a fast chunk policy, and shows why an action chunk keeps the arm supplied without keeping its evidence fresh. The freshness deadline and stopping budget derived here are the windows those proposals must arrive within, and @sec-nervous joins the two, admitting each chunk only under a bounded lease that the body's limit records define.
+Every budget in this chapter now carries explicit physical bounds—three already structured into limit records and two awaiting upstream perception and enforcement budgets—yet all five can hold while the machine still does nothing useful. At the pick station the observation can be fresh, the stop inside its clearance, the windings cool, and the bus above lockout, yet nothing in the body says which object on the conveyor is the mug or where its handle is. That judgment comes from a learned proposer, and @sec-brain opens with the cost of supplying it in time. A model large enough to recognize unfamiliar objects streams its weights through the same onboard processor that sensing and control depend on, so it renews its proposal far more slowly than the servo loops run. The chapter derives the two-speed brain that the machine card commits to, a slow intent model above a fast chunk policy, and shows why an action chunk keeps the arm supplied without keeping its evidence fresh. The freshness deadline and stopping budget derived here are the windows those proposals must arrive within, and @sec-nervous joins the two, admitting each chunk only under a bounded lease that the body's limit records define.
 :::
