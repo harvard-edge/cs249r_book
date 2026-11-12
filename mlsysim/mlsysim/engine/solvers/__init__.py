@@ -514,6 +514,7 @@ from .sustainability import (
     DemandReboundModel,
     DevelopmentSweepModel,
     CarbonPricedPlacementModel,
+    TemporalShiftModel,
 )
 
 __all__ += [
@@ -532,6 +533,7 @@ __all__ += [
     "DemandReboundModel",
     "DevelopmentSweepModel",
     "CarbonPricedPlacementModel",
+    "TemporalShiftModel",
 ]
 
 # --- Agent evaluation: verdicts, graders, intervals, paired comparison (added 2026-10-20) ---

@@ -743,6 +743,11 @@ class Scenarios(Registry):
     CandidateSweep50 = _sustainability_sustainability.CandidateSweep50
     ReferenceItLoadAnnualWater = _sustainability_sustainability.ReferenceItLoadAnnualWater
     CarbonPricedRegionPlacement = _sustainability_sustainability.CarbonPricedRegionPlacement
+    EveningReleaseTimeShift = _sustainability_sustainability.EveningReleaseTimeShift
+    EveningReleaseNoSlack = _sustainability_sustainability.EveningReleaseNoSlack
+    EveningReleaseShortSlack = _sustainability_sustainability.EveningReleaseShortSlack
+    EveningReleaseCapacityLimited = _sustainability_sustainability.EveningReleaseCapacityLimited
+    EveningReleaseCostlyStandby = _sustainability_sustainability.EveningReleaseCostlyStandby
     KaplanTenPercentLowerLoss = _sustainability_sustainability.KaplanTenPercentLowerLoss
     Lab64A100TrainingFootprint = _sustainability_sustainability.Lab64A100TrainingFootprint
     TenMillionQueriesAgainstLab64Training = _sustainability_sustainability.TenMillionQueriesAgainstLab64Training
