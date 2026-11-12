@@ -502,7 +502,7 @@ Each parallelism strategy fixes the data it must move, the collective primitive 
 
 : **Parallelism-to-Collective Mapping**: How each parallelism strategy becomes a traffic pattern. Pipeline parallelism alone relies on point-to-point transfers rather than a collective. {#tbl-parallelism-communication-mapping tbl-colwidths="[21,33,20,26]"}
 
-In this table, expert parallelism refers to the mixture-of-experts\index{MoE!communication} architecture pattern, in which each token activates only a few experts. Data parallelism and fully sharded data parallel (FSDP), which divides each replica's parameters, gradients, and optimizer state across the data-parallel ranks, generate large reductions and gathers that reward byte-efficient rings and hierarchical schedules. Tensor parallelism, by contrast, generates smaller, more frequent messages directly on the critical path, so low software overhead and fast node-local links dominate its cost. Pipeline parallelism also sits on the critical path, because each stage waits for the previous stage's microbatch, but its stages often exchange activations across nodes, so the size of those activations sets its transfer regime. Expert parallelism and sharded embedding tables produce destination-specific traffic whose bottleneck shifts among message granularity, endpoint injection and reception, fabric bisection, oversubscription, routing, and skew.
+In this table, expert parallelism refers to the mixture-of-experts\index{MoE!communication} architecture pattern, in which each token activates only a few experts. Data parallelism and fully sharded data parallel (FSDP), corresponding to stage 3 of the Zero Redundancy Optimizer (ZeRO-3) and dividing each replica's parameters, gradients, and optimizer state across the data-parallel ranks, generate large reductions and gathers that reward byte-efficient rings and hierarchical schedules. Tensor parallelism, by contrast, generates smaller, more frequent messages directly on the critical path, so low software overhead and fast node-local links dominate its cost. Pipeline parallelism also sits on the critical path, because each stage waits for the previous stage's microbatch, but its stages often exchange activations across nodes, so the size of those activations sets its transfer regime. Expert parallelism and sharded embedding tables produce destination-specific traffic whose bottleneck shifts among message granularity, endpoint injection and reception, fabric bisection, oversubscription, routing, and skew.
 
 The table's rows describe data center parallelism, so they leave out the federated Archetype C. Across all three lighthouse archetypes, the dominant exchange and its bottleneck differ.
 
@@ -842,7 +842,7 @@ The cost column previews the algorithms derived in @sec-communication-collective
 
 : **The Six Collective Primitives**: What each primitive computes, its primary use, and its communication cost, ordered from root-centered patterns (Broadcast, Reduce) to the fully destination-specific AllToAll. The order describes routing, not cost. {#tbl-collective-primitives tbl-colwidths="[14,30,27,29]"}
 
-Ring achieves AllReduce's bandwidth-optimal cost while the simple full-message Tree model\index{Broadcast!tree topology} trades bandwidth for logarithmic latency [@patarasuk2009; @thakur2005]. AllReduce itself also decomposes into ReduceScatter\index{ReduceScatter!decomposition} followed by AllGather\index{AllGather!decomposition}. The decomposition is operational as well as mathematical, since Ring AllReduce's first phase is a ReduceScatter and its second phase is an AllGather. ReduceScatter performs arithmetic, so it does not undo an AllGather even though it shrinks buffers where AllGather expands them. Full Zero Redundancy Optimizer (ZeRO) sharding\index{ZeRO!parameter sharding} and PyTorch FSDP use the pair the same way, gathering parameter shards with AllGather before a module needs them and reducing gradients with ReduceScatter after backward so each rank retains only its shard for the optimizer step [@rajbhandari2020]. Sharding parameters, gradients, and optimizer state across workers reduces persistent model-state memory roughly by $\DeviceCount\times$, while temporary full-parameter buffers and prefetching determine peak memory. That memory saving is developed in @sec-distributed-training-systems-systems-memoryefficient-data-parallelism-zero-fsdp-0e69; the communication it adds is priced in @sec-communication-fsdp-patterns.
+Ring achieves AllReduce's bandwidth-optimal cost while the simple full-message Tree model\index{Broadcast!tree topology} trades bandwidth for logarithmic latency [@patarasuk2009; @thakur2005]. AllReduce itself also decomposes into ReduceScatter\index{ReduceScatter!decomposition} followed by AllGather\index{AllGather!decomposition}. The decomposition is operational as well as mathematical, since Ring AllReduce's first phase is a ReduceScatter and its second phase is an AllGather. ReduceScatter performs arithmetic, so it does not undo an AllGather even though it shrinks buffers where AllGather expands them. Full ZeRO sharding\index{ZeRO!parameter sharding} and PyTorch FSDP use the pair the same way, gathering parameter shards with AllGather before a module needs them and reducing gradients with ReduceScatter after backward so each rank retains only its shard for the optimizer step [@rajbhandari2020]. Sharding parameters, gradients, and optimizer state across workers reduces persistent model-state memory roughly by $\DeviceCount\times$, while temporary full-parameter buffers and prefetching determine peak memory. That memory saving is developed in @sec-distributed-training-systems-systems-memoryefficient-data-parallelism-zero-fsdp-0e69; the communication it adds is priced in @sec-communication-fsdp-patterns.
 
 The same AllGather/ReduceScatter pair also appears in sequence parallelism, which splits activations along the sequence dimension. There an AllGather reconstructs the activation view needed for a local operation, and a later ReduceScatter redistributes the result along that dimension. A primitive's semantics stay fixed even when the tensor dimension being sharded changes, so every schedule developed for the pair applies to both uses.
 
@@ -878,11 +878,11 @@ The $\MessageStartupLatency$-$\LinkBandwidth$ model\index{Hockney model!latency 
 ↩ The $\MessageStartupLatency$-$\LinkBandwidth$ model for a single link and its latency-dominated and bandwidth-dominated regimes are established in @sec-network-fabrics-performance-model.
 :::
 
+For collectives, the parameters must describe the effective path. Latency ($\MessageStartupLatency$) is the startup cost paid at every step of a schedule, so it includes recurring software overhead, PCIe\index{PCIe}\index{Peripheral component interconnect express|see{PCIe}} traversal, and network switching time; one-time communicator initialization is a separate setup cost. Because the ranks in a step send concurrently, elapsed time counts one startup per step rather than one per rank. Bandwidth ($\LinkBandwidth$) is the sustained per-direction transfer rate. The critical message size\index{Critical message size} $\LatencyBandwidthCrossoverSize = \MessageStartupLatency\cdot \LinkBandwidth$, where the two terms are equal, carries over unchanged. That threshold must, however, be compared against each step's chunk ($\CollectivePayloadSize/\DeviceCount$ in an $\DeviceCount$-rank ring) rather than the whole tensor $\CollectivePayloadSize$. This per-step division explains why a large bucket can still fall below the inter-node crossovers in @tbl-interconnect-parameters. Below $\LatencyBandwidthCrossoverSize$, a step is latency-bound\index{Latency!bound}; above it, bandwidth-bound\index{Bandwidth!bound}.
+
 ::: {.column-margin .margin-pointer}
 ↪ Worked message-size regimes and crossover calculations for this model are developed in @sec-appdx-comm-foundations-alpha-beta.
 :::
-
-For collectives, the parameters must describe the effective path. Latency ($\MessageStartupLatency$) is the startup cost paid at every step of a schedule, so it includes recurring software overhead, PCIe\index{PCIe}\index{Peripheral component interconnect express|see{PCIe}} traversal, and network switching time; one-time communicator initialization is a separate setup cost. Because the ranks in a step send concurrently, elapsed time counts one startup per step rather than one per rank. Bandwidth ($\LinkBandwidth$) is the sustained per-direction transfer rate. The critical message size\index{Critical message size} $\LatencyBandwidthCrossoverSize = \MessageStartupLatency\cdot \LinkBandwidth$, where the two terms are equal, carries over unchanged. That threshold must, however, be compared against each step's chunk ($\CollectivePayloadSize/\DeviceCount$ in an $\DeviceCount$-rank ring) rather than the whole tensor $\CollectivePayloadSize$. This per-step division explains why a large bucket can still fall below the inter-node crossovers in @tbl-interconnect-parameters. Below $\LatencyBandwidthCrossoverSize$, a step is latency-bound\index{Latency!bound}; above it, bandwidth-bound\index{Bandwidth!bound}.
 
 ```{python}
 #| echo: false
@@ -1538,18 +1538,7 @@ Every cell in every row is filled, so every GPU receives (and, symmetrically, se
 
 :::
 
-::: {#chk-collective-communication-ring-allreduce-mechanics .callout-checkpoint title="Ring AllReduce mechanics"}
-
-Verify your understanding of bandwidth-optimal reduction:
-
-- [ ] **Step count**: calculate the number of sequential steps\index{Ring AllReduce!sequential steps} required for a ring of $\DeviceCount$ GPUs to complete the full AllReduce.
-- [ ] **Bandwidth optimality**: explain why Ring AllReduce is bandwidth-optimal, including how many times each byte of the total message $\CollectivePayloadSize$ traverses the network per GPU.
-- [ ] **Straggler impact**: determine the impact on total collective completion time when one GPU in the ring is 50 percent slower than the others.
-- [ ] **Send/receive duality**: assess the True or False claim that every GPU is both a sender and a receiver in every step of Ring AllReduce.
-
-:::
-
-Generalizing the six-step trace of example \ref{exmp-collective-communication-ring-allreduce-step-by-step-trace-4-gpus} to $\DeviceCount$ ranks yields the closed-form cost model for those checkpoint questions. Each node sends and receives $\frac{\CollectivePayloadSize}{\DeviceCount}$ bytes in each of the $2(\DeviceCount-1)$ steps.
+Generalizing the six-step trace of example \ref{exmp-collective-communication-ring-allreduce-step-by-step-trace-4-gpus} to $\DeviceCount$ ranks yields the closed-form cost model. Each node sends and receives $\frac{\CollectivePayloadSize}{\DeviceCount}$ bytes in each of the $2(\DeviceCount-1)$ steps.
 $$
 \RingAllReduceCompletionTime = \underbrace{2(\DeviceCount-1)\MessageStartupLatency}_{\text{Latency Term}} + \underbrace{2\frac{\DeviceCount-1}{\DeviceCount} \frac{\CollectivePayloadSize}{\LinkBandwidth}}_{\text{Bandwidth Term}}
 $$
@@ -1584,7 +1573,20 @@ class RingRoundScale:
     steps_str = fmt(steps, precision=0, commas=True)
 ```
 
-The bandwidth term approaches $2\CollectivePayloadSize/\LinkBandwidth$ as $\DeviceCount\to \infty$, reaching the full-duplex lower bound. Each rank sends nearly $2\CollectivePayloadSize$ bytes across the two phases and receives the same amount concurrently. In contrast, the latency term scales linearly with $\DeviceCount$. Across `{python} RingRoundScale.n_ranks_str` nodes, `{python} RingRoundScale.steps_str` sequential startup rounds accumulate substantial latency, which explains why Ring AllReduce becomes uncompetitive for small payloads. For a multi-gigabyte gradient buffer at moderate rank count, however, the bandwidth term dominates completely, as the 70B calculation in notebook \ref{nbk-collective-communication-allreduce-cost-70b-model} confirms.
+The bandwidth term approaches $2\CollectivePayloadSize/\LinkBandwidth$ as $\DeviceCount\to \infty$, reaching the full-duplex lower bound. Each rank sends nearly $2\CollectivePayloadSize$ bytes across the two phases and receives the same amount concurrently. In contrast, the latency term scales linearly with $\DeviceCount$. Across `{python} RingRoundScale.n_ranks_str` nodes, `{python} RingRoundScale.steps_str` sequential startup rounds accumulate substantial latency, which explains why Ring AllReduce becomes uncompetitive for small payloads.
+
+::: {#chk-collective-communication-ring-allreduce-mechanics .callout-checkpoint title="Ring AllReduce mechanics"}
+
+Verify your understanding of bandwidth-optimal reduction:
+
+- [ ] **Step count**: calculate the number of sequential steps\index{Ring AllReduce!sequential steps} required for a ring of $\DeviceCount$ GPUs to complete the full AllReduce.
+- [ ] **Bandwidth optimality**: explain why Ring AllReduce is bandwidth-optimal, including how many times each byte of the total message $\CollectivePayloadSize$ traverses the network per GPU.
+- [ ] **Straggler impact**: determine the impact on total collective completion time when one GPU in the ring is 50 percent slower than the others.
+- [ ] **Send/receive duality**: assess the True or False claim that every GPU is both a sender and a receiver in every step of Ring AllReduce.
+
+:::
+
+For a multi-gigabyte gradient buffer at moderate rank count, however, the bandwidth term dominates completely, as the 70B calculation in notebook \ref{nbk-collective-communication-allreduce-cost-70b-model} confirms.
 
 ::: {#nbk-collective-communication-allreduce-cost-70b-model .callout-notebook title="AllReduce cost for a 70B model"}
 
@@ -2061,9 +2063,9 @@ Tree wins, but only by `{python} RingVsTree.tree_win_margin_pct_str`. For this `
 
 **Systems insight**: Ring's latency term (`{python} RingVsTree.lat_ratio_mult_str` Tree's) nearly balances Tree's bandwidth term (`{python} RingVsTree.bw_ratio_mult_str` Ring's). The log-aware crossover estimate predicts $\RingTreeCrossoverPayload \approx \DeviceCount\MessageStartupLatency\LinkBandwidth/ \log_2 \DeviceCount=$ `{python} RingVsTree.crossover_sub_math` $\approx$ `{python} RingVsTree.crossover_mb_str`. At `{python} RingVsTree.M_mb_str`, the payload is just below crossover, so Tree wins. At `{python} RingVsTree.ddp_bucket_mb_str`, Ring would dominate.
 
-The crossover point sits inside the range that gradient reductions can traverse as bucket sizes change. In this example, the `{python} RingVsTree.M_mb_str` AllReduce lies near crossover, whereas a `{python} RingVsTree.ddp_bucket_mb_str` DDP bucket is already above it. A fused bucket of `{python} RingVsTree.fused_bucket_range_str` or the full `{python} RingVsTree.full_bf16_gradient_gb_str` BF16 gradient of a `{python} RingVsTree.llama_70b_param_str` model favors Ring over the simple Tree model even more strongly. These conclusions apply to the stated AllReduce configuration. An MoE token-routing payload of the same size still requires an AllToAll schedule, and optimized tree or hierarchical implementations require their own cost comparison.
-
 :::
+
+The crossover point sits inside the range that gradient reductions can traverse as bucket sizes change. In this example, the `{python} RingVsTree.M_mb_str` AllReduce lies near crossover, whereas a `{python} RingVsTree.ddp_bucket_mb_str` DDP bucket is already above it. A fused bucket of `{python} RingVsTree.fused_bucket_range_str` or the full `{python} RingVsTree.full_bf16_gradient_gb_str` BF16 gradient of a `{python} RingVsTree.llama_70b_param_str` model favors Ring over the simple Tree model even more strongly. These conclusions apply to the stated AllReduce configuration. An MoE token-routing payload of the same size still requires an AllToAll schedule, and optimized tree or hierarchical implementations require their own cost comparison.
 
 ::: {#chk-collective-communication-allreduce-algorithm-selection .callout-checkpoint title="AllReduce algorithm selection"}
 
@@ -4049,9 +4051,9 @@ AllReduce computes one reduction over compatible element counts and datatypes; i
 
 ::: {.fallacy-pitfall}
 
-**Fallacy**: *Pipeline parallelism eliminates communication overhead.*
+**Fallacy**: *Flat Ring AllReduce is good enough for multi-node training.*
 
-Pipeline parallelism exchanges activations and their backward gradients between adjacent stages. It can coexist with data-parallel AllReduce, and transfer cost still depends on tensor size and placement. Each stage boundary is a point-to-point dependency on the critical path, so a stage cannot start a microbatch until its activations arrive. The pipeline bubble\index{Pipeline parallelism!bubble overhead}, the time stages sit idle while the pipeline fills and drains, adds to whatever transfer time remains exposed. The bubble analysis of @sec-distributed-training-systems-systems-pipeline-parallelism-8748 shows that shrinking it requires many more microbatches than stages, a constraint on batch size and activation memory that no faster link removes. Parallelism choices must therefore account for both communication dependencies and schedule-induced idleness.
+A single flat Ring AllReduce\index{Hierarchical AllReduce!bandwidth hierarchy} runs at the rate of its slowest edge. On a multi-node cluster, that edge is one cross-node port at `{python} CommInfraRecap.ib_ndr_bw_gb_per_s_str` over InfiniBand rather than the `{python} CommInfraRecap.nvlink_bw_beta_gb_per_s_str` per direction available within the node, however carefully the ranks are ordered. For an 8-node cluster with 8 GPUs per node, the worked hierarchical schedule assigns one-eighth of the payload to each inter-node shard group and runs the eight groups on eight ports at once. Each port's payload falls 8$\times$, but the aggregate cross-node bytes do not. The modeled gain of about `{python} CommInfraRecap.speedup_mult_str` in @sec-communication-collective-operations-collective-operations-hierarchical-allreduce-1338 therefore depends on independent port capacity. A multichannel flat schedule that also occupies several ports at once requires its own traffic accounting.
 
 :::
 
@@ -4084,22 +4086,6 @@ Even a 100$\times$ communication speedup must be evaluated against the complete 
 **Fallacy**: *Async collectives always hide latency.*
 
 Python's `dist.all_reduce(..., async_op=True)` only returns control to the CPU. The LogP model distinguishes network latency $\LogpNetworkLatency$ (overlappable) from processor overhead $\SymmetricMessageOverhead$ (nonoverlappable\index{Asynchronous collective!overlap limits}). The condition $\IronLawComputeTime > \SymmetricMessageOverhead$ alone does not guarantee that a transfer is hidden. The remaining independent work must cover the transfer interval, the runtime must make progress, and dependent consumers must wait for completion.
-
-:::
-
-::: {.fallacy-pitfall}
-
-**Pitfall**: *Assuming network corruption always surfaces as an error.*
-
-Networks are not perfect. A bad cable, faulty NIC, or firmware bug can corrupt data below the level where the training framework sees an explicit error. At 10,000 nodes running 24/7, even rare bit errors can appear often enough to matter. The communication-specific lesson is that bandwidth tuning is incomplete without end-to-end validation: checksums, collective result checks, gradient-norm sanity tests, and the fault-tolerance mechanisms of @sec-fault-tolerance-reliability must catch silent data corruption\index{Silent data corruption!network validation} before corrupted gradients become model updates.
-
-:::
-
-::: {.fallacy-pitfall}
-
-**Fallacy**: *Flat Ring AllReduce is good enough for multi-node training.*
-
-A single flat Ring AllReduce\index{Hierarchical AllReduce!bandwidth hierarchy} runs at the rate of its slowest edge. On a multi-node cluster, that edge is one cross-node port at `{python} CommInfraRecap.ib_ndr_bw_gb_per_s_str` over InfiniBand rather than the `{python} CommInfraRecap.nvlink_bw_beta_gb_per_s_str` per direction available within the node, however carefully the ranks are ordered. For an 8-node cluster with 8 GPUs per node, the worked hierarchical schedule assigns one-eighth of the payload to each inter-node shard group and runs the eight groups on eight ports at once. Each port's payload falls 8$\times$, but the aggregate cross-node bytes do not. The modeled gain of about `{python} CommInfraRecap.speedup_mult_str` in @sec-communication-collective-operations-collective-operations-hierarchical-allreduce-1338 therefore depends on independent port capacity. A multichannel flat schedule that also occupies several ports at once requires its own traffic accounting.
 
 :::
 

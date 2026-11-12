@@ -612,7 +612,7 @@ The no-unqualified-admissions rule fixes each group's false positive rate at zer
 
 The admissions case is one instance of a general condition. With unequal base rates, demographic parity and equalized odds hold together only if each group's true positive rate equals its false positive rate, so a positive decision is equally likely among actual positives and actual negatives and carries no information about the outcome. A constant classifier satisfies both; any informative classifier must give one up. Which constraint to give up is a value judgment about the decision, not a property the model can settle.
 
-The fairness impossibility theorem (principle \ref{pri-fairness-impossibility}) is the canonical result, and it concerns scores rather than decisions. It joins the groupwise calibration of @sec-responsible-ai-calibration-8b73 to score balance, which requires equal average scores across groups among people with positive outcomes and, separately, among people with negative outcomes. With unequal base rates and imperfect prediction, all three requirements cannot hold together [@kleinberg2016inherent] (@fig-fairness-impossibility). The admissions conflict concerns decisions and this result concerns scores, so they constrain different criteria. The score result also does not decide whether a calibrated score meets equalized odds at a particular threshold; that narrower question is answered by computing the decision-level error rates at that threshold, as the loan example did.
+The fairness impossibility theorem (principle \ref{pri-fairness-impossibility}) is the canonical result, and it concerns scores rather than decisions. It joins the groupwise calibration of @sec-responsible-ai-calibration-8b73 to score balance, which requires equal average scores across groups among people with positive outcomes and, separately, among people with negative outcomes. Under groupwise calibration, each group's average predicted score equals its positive base rate ($\FirstGroupQualifiedFraction$ for Group A and $\SecondGroupQualifiedFraction$ for Group B), while by total expectation that same average also equals a base-rate-weighted combination of the group's mean score on positives and its mean score on negatives. When score balance forces both groups to share one positive-class mean $\mathbb{E}[\ModelScore(\ModelInput) \mid \TrueOutcome=1]$ and one negative-class mean $\mathbb{E}[\ModelScore(\ModelInput) \mid \TrueOutcome=0]$, subtracting the two group identities yields $(\FirstGroupQualifiedFraction - \SecondGroupQualifiedFraction)\bigl(1 - \mathbb{E}[\ModelScore(\ModelInput) \mid \TrueOutcome=1] + \mathbb{E}[\ModelScore(\ModelInput) \mid \TrueOutcome=0]\bigr) = 0$. All three conditions can therefore hold simultaneously only in two exceptional regimes: **equal base rates** ($\FirstGroupQualifiedFraction = \SecondGroupQualifiedFraction$) or **perfect prediction** ($\mathbb{E}[\ModelScore(\ModelInput) \mid \TrueOutcome=1] = 1$ and $\mathbb{E}[\ModelScore(\ModelInput) \mid \TrueOutcome=0] = 0$); whenever base rates differ and predictions are imperfect, at least one condition must fail [@kleinberg2016inherent] (@fig-fairness-impossibility). The admissions conflict concerns decisions and this result concerns scores, so they constrain different criteria. The score result also does not decide whether a calibrated score meets equalized odds at a particular threshold; that narrower question is answered by computing the decision-level error rates at that threshold, as the loan example did.
 
 Satisfying one criterion may preclude another, so engineers must treat fairness metrics like latency budgets, explicit trade-offs chosen by stakeholders, enforced by the system, and monitored for violation. Determining which metric to prioritize requires careful consideration of the application context, potential harms, and stakeholder values as detailed in @sec-responsible-ai-normative-pluralism-value-conflicts-d61f [@barocas-hardt-narayanan].
 
@@ -1328,16 +1328,53 @@ This scenario holds Group A's approval rate fixed and raises Group B's rate to m
 
 The `{python} FairnessTaxAnalysis.fairness_tax_pp_str` cost belongs to one parity policy on one prediction target. A different criterion moves the thresholds for a different reason, and the next scenario, which returns to the repayment-score convention, targets equal opportunity by comparing the score distributions among qualified applicants. Differential thresholds require access to sensitive attributes at inference time and raise concerns about explicit group-based treatment, which may itself be considered unfair or illegal in certain jurisdictions. The required thresholds depend on those distributions and the chosen criterion; a lower threshold for the minority group is not a universal fairness rule.
 
+```{python}
+#| echo: false
+#| label: equal-opportunity-threshold-notebook
+import math
+from mlsysim.fmt import check, fmt
+
+class EqualOpportunityThreshold:
+    mu_a = 0.72
+    sd_a = 0.15
+    mu_b = 0.65
+    sd_b = 0.16
+    tau_single = 0.60
+
+    z_a = (tau_single - mu_a) / sd_a
+    z_b = (tau_single - mu_b) / sd_b
+    tpr_a = 1.0 - 0.5 * math.erfc(-z_a / math.sqrt(2.0))
+    tpr_b = 1.0 - 0.5 * math.erfc(-z_b / math.sqrt(2.0))
+    tau_b_target = mu_b + z_a * sd_b
+
+    check(abs(z_a - (-0.8)) < 1e-9, f"Unexpected z_a: {z_a}")
+    check(abs(z_b - (-0.3125)) < 1e-9, f"Unexpected z_b: {z_b}")
+    check(abs(round(tpr_a, 3) - 0.788) < 1e-9, f"Unexpected tpr_a: {tpr_a}")
+    check(abs(round(tpr_b, 3) - 0.623) < 1e-9, f"Unexpected tpr_b: {tpr_b}")
+    check(abs(round(tau_b_target, 3) - 0.522) < 1e-9, f"Unexpected tau_b_target: {tau_b_target}")
+
+    mu_a_str = fmt(mu_a, precision=2, commas=False)
+    sd_a_str = fmt(sd_a, precision=2, commas=False)
+    mu_b_str = fmt(mu_b, precision=2, commas=False)
+    sd_b_str = fmt(sd_b, precision=2, commas=False)
+    tau_single_str = fmt(tau_single, precision=2, commas=False)
+    z_a_str = fmt(z_a, precision=1, commas=False)
+    z_b_str = fmt(z_b, precision=4, commas=False)
+    tpr_a_str = fmt(tpr_a, precision=3, commas=False)
+    tpr_b_str = fmt(tpr_b, precision=3, commas=False)
+    tau_b_target_str = fmt(tau_b_target, precision=3, commas=False)
+```
+
 ::: {#nbk-responsible-ai-threshold-equal-opportunity .callout-notebook title="Threshold for equal opportunity"}
 
 **Problem**: Calculate group-specific thresholds required to equalize true positive rates (equal opportunity) across Group A and Group B in a credit scoring model.
 
-**Variables**: Let the score $\DecisionScore(\ModelInput)$ be an unbounded decision score, not a calibrated probability, and write Group A as $\ProtectedGroupMembership=\FirstComparedGroupLabel$ and Group B as $\ProtectedGroupMembership=\SecondComparedGroupLabel$. Assume $\DecisionScore(\ModelInput)\mid(\TrueOutcome=1,\ProtectedGroupMembership=\FirstComparedGroupLabel)\sim\GaussianDistribution(0.72,0.15^2)$ and $\DecisionScore(\ModelInput)\mid(\TrueOutcome=1,\ProtectedGroupMembership=\SecondComparedGroupLabel)\sim\GaussianDistribution(0.65,0.16^2)$. These are hypothetical positive-class distributions; no negative-class distribution or prevalence is specified.
+**Variables**: Let the score $\DecisionScore(\ModelInput)$ be an unbounded decision score, not a calibrated probability, and write Group A as $\ProtectedGroupMembership=\FirstComparedGroupLabel$ and Group B as $\ProtectedGroupMembership=\SecondComparedGroupLabel$. Assume $\DecisionScore(\ModelInput)\mid(\TrueOutcome=1,\ProtectedGroupMembership=\FirstComparedGroupLabel)\sim\GaussianDistribution($`{python} EqualOpportunityThreshold.mu_a_str`$,$`{python} EqualOpportunityThreshold.sd_a_str`$^2)$ and $\DecisionScore(\ModelInput)\mid(\TrueOutcome=1,\ProtectedGroupMembership=\SecondComparedGroupLabel)\sim\GaussianDistribution($`{python} EqualOpportunityThreshold.mu_b_str`$,$`{python} EqualOpportunityThreshold.sd_b_str`$^2)$. These are hypothetical positive-class distributions; no negative-class distribution or prevalence is specified.
 
 **Math**:
 
-1. **Single threshold**: At $\FirstGroupClassificationThreshold=\SecondGroupClassificationThreshold=0.60$, $\text{TPR}_\FirstComparedGroupLabel=1-\StandardNormalCumulativeDistribution(-0.8)\approx0.788$ and $\text{TPR}_\SecondComparedGroupLabel=1-\StandardNormalCumulativeDistribution(-0.3125)\approx0.623$, where $\StandardNormalCumulativeDistribution$ is the standard normal cumulative distribution function.
-2. **Equalizing thresholds**: Preserve Group A's threshold and match its standardized cutoff, $(\SecondGroupClassificationThreshold-0.65)/0.16=-0.8$. Thus $\SecondGroupClassificationThreshold=0.522$ yields the same true positive rate.
+1. **Single threshold**: At $\FirstGroupClassificationThreshold=\SecondGroupClassificationThreshold=$`{python} EqualOpportunityThreshold.tau_single_str`, $\text{TPR}_\FirstComparedGroupLabel=1-\StandardNormalCumulativeDistribution($`{python} EqualOpportunityThreshold.z_a_str`$)\approx$`{python} EqualOpportunityThreshold.tpr_a_str` and $\text{TPR}_\SecondComparedGroupLabel=1-\StandardNormalCumulativeDistribution($`{python} EqualOpportunityThreshold.z_b_str`$)\approx$`{python} EqualOpportunityThreshold.tpr_b_str`, where $\StandardNormalCumulativeDistribution$ is the standard normal cumulative distribution function.
+2. **Equalizing thresholds**: Preserve Group A's threshold and match its standardized cutoff, $(\SecondGroupClassificationThreshold-$`{python} EqualOpportunityThreshold.mu_b_str`$)/$`{python} EqualOpportunityThreshold.sd_b_str`$=$`{python} EqualOpportunityThreshold.z_a_str`. Thus $\SecondGroupClassificationThreshold=$`{python} EqualOpportunityThreshold.tau_b_target_str` yields the same true positive rate.
 3. **Unspecified costs**: Lowering Group B's threshold cannot decrease its false positive rate, but its magnitude requires $\DecisionScore(\ModelInput)\mid(\TrueOutcome=0,\ProtectedGroupMembership=\SecondComparedGroupLabel)$. Precision also requires Group B's prevalence. Neither quantity follows from the positive-class distributions alone.
 
 **Systems insight**: Equal opportunity determines a threshold only relative to the stated score distributions and target rate. Before deployment, evaluate the resulting false positives, precision, and review workload on representative data. Threshold policies change decisions, not the underlying score calibration.
@@ -2496,7 +2533,11 @@ Compression and optimization techniques also affect explainability. Pruning, qua
 
 Showing a rejected loan applicant a feature-attribution chart accomplishes nothing if the app offers no button to dispute an error in the credit file, no human reviewer with authority to overturn the rejection, and no immutable snapshot of the inputs that produced the score. Explanations serve accountability only when stakeholders can both understand and challenge system decisions. Transparency allows users, developers, auditors, and regulators to inspect how a system functions, assess its limitations, and identify sources of harm, but disclosure alone is not enough. In high-stakes domains, individuals and institutions need contestability\index{Contestability!system accountability}: the operational ability to interrogate, appeal, and reverse an automated decision.
 
-Documentation tools such as model cards, standardized reports published with a trained model, and datasheets for datasets, their counterpart for a dataset, formalize system-level disclosure by recording how models are trained, what data they rely on, what assumptions are embedded in their design, and what known limitations affect their use. Those artifacts improve governance, support compliance, and inform user expectations, yet static documentation still leaves affected individuals without interface tools, procedural access, or institutional support when a specific decision harms them.
+Documentation tools such as model cards\index{Model card!reporting standards}[^fn-model-cards-documentation] [@mitchell2019], standardized reports published with a trained model, and datasheets for datasets\index{Datasheets for datasets!training data documentation}[^fn-datasheets-for-datasets] [@gebru2021], their counterpart for a dataset, formalize system-level disclosure by recording how models are trained, what data they rely on, what assumptions are embedded in their design, and what known limitations affect their use. Those artifacts improve governance, support compliance, and inform user expectations, yet static documentation still leaves affected individuals without interface tools, procedural access, or institutional support when a specific decision harms them.
+
+[^fn-model-cards-documentation]: **Model cards**\index{Model card!documentation}: Proposed by @mitchell2019 as standardized documentation accompanying trained ML models. Cards report evaluation across relevant groups, intended uses, and known limitations. Production systems must link this documentation to the actual deployed model and its provenance; a card alone neither establishes that linkage nor supplies every record required for an audit.
+
+[^fn-datasheets-for-datasets]: **Datasheets for datasets**\index{Datasheets for datasets!operating envelope}: Proposed by @gebru2021, modeled after electronics component datasheets that specify operating conditions and tolerances. Each datasheet documents a dataset's motivation, composition, collection process, and recommended uses. For ML pipelines, this provenance and coverage information helps engineers identify assumptions and design evaluations. A datasheet does not itself validate a model's operating envelope or predict all deployment failures.
 
 To move from transparency to contestability, machine learning systems must integrate mechanisms for explanation, recourse, and feedback. Explanation provides understandable reasons for system outputs, tailored to the operational context and needs of the person receiving them. Recourse\index{Recourse!counterfactual actionability} identifies feasible changes through which individuals could receive a different outcome under the stated decision policy. A proposed change needs to be actionable for that person; a counterfactual prediction alone does not guarantee an outcome after the model or policy changes. Feedback enables users and domain experts to dispute outcomes, report errors, or signal concerns, routing those signals into oversight processes and model updates.
 
@@ -3210,11 +3251,7 @@ Accountability already spans vendors and operators in distributed software. Mach
 
 Inadequate governance can prevent institutions from recognizing or correcting harmful model behavior. The Google Flu Trends analysis identified persistent overestimation despite model updates and examined how changes in search behavior and the search service could undermine a predictor trained on earlier correlations [@lazer2014]. Its comparison with CDC surveillance data supports a concrete governance requirement, namely an owner responsible for ongoing validation and recalibration against an independent measurement process. Legal frameworks reinforce that requirement, because some of the obligations mapped onto the assurance lifecycle (@sec-responsible-ai-governance-assurance-lifecycle) assign these owners and records by law.
 
-Designing for accountability entails supporting traceability at every stage of the system lifecycle by documenting data provenance, recording model versioning, enabling human overrides, and retaining sufficient logs for retrospective analysis. Tools such as model cards\index{Model card!reporting standards}[^fn-model-cards-documentation] [@mitchell2019] and datasheets for datasets\index{Datasheets for datasets!training data documentation}[^fn-datasheets-for-datasets] [@gebru2021] exemplify practices that make system behavior interpretable and reviewable. However, accountability is not reducible to documentation alone; it also requires mechanisms for feedback, contestation, and redress.
-
-[^fn-model-cards-documentation]: **Model cards**\index{Model card!documentation}: Proposed by @mitchell2019 as standardized documentation accompanying trained ML models. Cards report evaluation across relevant groups, intended uses, and known limitations. Production systems must link this documentation to the actual deployed model and its provenance; a card alone neither establishes that linkage nor supplies every record required for an audit.
-
-[^fn-datasheets-for-datasets]: **Datasheets for datasets**\index{Datasheets for datasets!operating envelope}: Proposed by @gebru2021, modeled after electronics component datasheets that specify operating conditions and tolerances. Each datasheet documents a dataset's motivation, composition, collection process, and recommended uses. For ML pipelines, this provenance and coverage information helps engineers identify assumptions and design evaluations. A datasheet does not itself validate a model's operating envelope or predict all deployment failures.
+Designing for accountability entails supporting traceability at every stage of the system lifecycle by linking model cards and dataset datasheets (@sec-responsible-ai-transparency-contestability-2f2c) to versioned registry artifacts, enabling human overrides, and retaining sufficient logs for retrospective analysis and redress.
 
 Within organizations, governance structures help formalize this responsibility. Ethics review processes, cross-functional audits, and model risk committees provide forums for anticipating downstream impact and responding to new concerns. These structures must be supported by infrastructure that allows users to contest decisions and developers to respond with corrections. For instance, systems that allow explanations or user-initiated reviews help bridge the gap between model logic and user experience, especially in domains where the impact of error is significant.
 

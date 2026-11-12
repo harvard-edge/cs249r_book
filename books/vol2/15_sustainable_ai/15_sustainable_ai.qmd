@@ -783,11 +783,7 @@ Training at the scale of Archetype A (GPT-4/Llama-3) exposes the power problem m
 
 :::
 
-That accelerator draw alone, before server, network, and cooling overhead, makes grid capacity a condition of deployment. Even when the grid can supply that sustained average power, the synchronized execution of a training job swings the load up and down across the cluster in unison.
-
-### Data center grid dynamics {#sec-sustainable-ai-grid-dynamics}
-
-When thousands of accelerators enter a collective communication barrier simultaneously and then resume matrix multiplication together, their power draw steps down and up in lockstep across the data hall. Unlike conventional cloud workloads whose independent requests smooth out across racks, synchronized training phases correlate power swings and push those transients toward the electrical grid interface.
+That accelerator draw alone, before server, network, and cooling overhead, makes grid capacity a condition of deployment.
 
 ::: {#ws-sustainable-ai-ireland-grid-constraint .callout-war-story title="When the grid became the bottleneck (2022)"}
 
@@ -802,6 +798,12 @@ When thousands of accelerators enter a collective communication barrier simultan
 **Systems lesson**: Sustainable AI is constrained by interconnection, geography, and power-system adequacy. Efficient accelerators help, but the fleet cannot scale faster than the grid that feeds it, moving the binding constraint from the chip to the substation.
 
 :::
+
+Even when the grid can supply that sustained average power, the synchronized execution of a training job swings the load up and down across the cluster in unison.
+
+### Data center grid dynamics {#sec-sustainable-ai-grid-dynamics}
+
+When thousands of accelerators enter a collective communication barrier simultaneously and then resume matrix multiplication together, their power draw steps down and up in lockstep across the data hall. Unlike conventional cloud workloads whose independent requests smooth out across racks, synchronized training phases correlate power swings and push those transients toward the electrical grid interface.
 
 Training phases can change accelerator demand rapidly, but a device-side load step does not propagate unchanged to the utility connection. Its amplitude depends on per-device power, the number of coordinated workers, and computation-communication overlap. Local regulators, decoupling capacitors, power converters, and uninterruptible power supply (UPS) controls shape the upstream response. **Energy buffering**\index{Energy buffering!definition} supplies or absorbs energy during a load change. A buffer discharges when the cluster steps up into computation and recharges when it falls back into communication, so the utility connection sees a smaller swing than the accelerators draw. Its location, capacity, and control response must match the electrical boundary being protected.
 
@@ -2043,6 +2045,10 @@ plt.close()
 2. Arithmetic intensity: $\ArithmeticIntensity= \frac{\SquareGemmDimension}{6}$ FLOP/byte, so the matrix sits exactly at the energy crossover when $\SquareGemmDimension$ = `{python} MatMulEnergyAnalysis.n_small_str` (`{python} MatMulEnergyAnalysis.ai_small_eq_math`), the small-matrix row below.
 3. Regime comparison: small dense work sits at the crossover, large dense work is dominated by arithmetic, and element-wise work by memory movement (@tbl-matmul-energy-bottleneck-comparison).
 
+**Systems insight**: Energy optimization follows the same bottleneck logic as latency optimization. Dense matrix multiply rewards efficient arithmetic; element-wise work rewards reducing memory movement.
+
+:::
+
 | **Workload**                                                                       | **Arithmetic intensity**                                   | **Compute energy**                                 | **Memory energy**                                 | **Optimization priority**           |
 |:-----------------------------------------------------------------------------------|:-----------------------------------------------------------|:---------------------------------------------------|:--------------------------------------------------|:------------------------------------|
 | Small matrix ($\SquareGemmDimension=$ `{python} MatMulEnergyAnalysis.n_small_str`) | `{python} MatMulEnergyAnalysis.ai_small_eq_math` FLOP/byte | `{python} MatMulEnergyAnalysis.comp_small_eq_math` | `{python} MatMulEnergyAnalysis.mem_small_eq_math` | Balanced at the crossover           |
@@ -2050,10 +2056,6 @@ plt.close()
 | Vector addition ($\VectorElementCount= 1000$)                                      | `{python} MatMulEnergyAnalysis.ai_vec_eq_math` FLOP/byte   | `{python} MatMulEnergyAnalysis.comp_vec_eq_math`   | `{python} MatMulEnergyAnalysis.mem_vec_eq_math`   | Reduce data movement through fusion |
 
 : **Energy Bottleneck Comparison**: The same energy model classifies small dense work, large dense work, and element-wise work by their dominant energy term. {#tbl-matmul-energy-bottleneck-comparison}
-
-**Systems insight**: Energy optimization follows the same bottleneck logic as latency optimization. Dense matrix multiply rewards efficient arithmetic; element-wise work rewards reducing memory movement.
-
-:::
 
 The energy roofline model reveals why different optimization strategies suit different workloads. When arithmetic dominates the energy account, large dense matrix operations benefit from lower energy per executed operation. When data movement dominates, element-wise kernels benefit from data layout optimization, kernel fusion to reduce memory round-trips, and on-chip memory utilization. Faster execution alone does not establish either saving; average power and execution time must be measured together. This framework guides architectural and algorithmic choices for sustainable AI system design.
 
@@ -3700,7 +3702,7 @@ class H100TdpCoolingRecap:
     pue_air = Infrastructure.FacilityCooling.Typical.pue
     # Air case uses the Uptime 2022 industry-average PUE directly, so the
     # printed label and the multiplier are the same two-decimal value.
-    pue_liquid = (Infrastructure.FacilityCooling.LiquidCooled.pue + Infrastructure.FacilityCooling.StateOfArt.pue) / 2
+    pue_liquid = Infrastructure.FacilityCooling.LiquidCooled.pue
     electricity_rate = Infrastructure.Pricing.OnPremises.ElectricityPerKwh.rate
     hours_per_year = HOURS_PER_YEAR * hour
 
@@ -3729,12 +3731,15 @@ The cooling class of @sec-compute-cooling settles thermodynamic feasibility, tha
 
 ::: {#nbk-sustainable-ai-cooling-tax .callout-notebook title="The cooling overhead"}
 
-Consider a `{python} H100TdpCoolingRecap.n_gpus_str`-GPU cluster of H100s at `{python} H100TdpCoolingRecap.tdp_w_str` each. To isolate the cooling choice, this simplified calculation treats accelerator power as the entire IT load and assigns all non-IT overhead to cooling; a procurement estimate must restore host, memory, network, and storage support before applying PUE.
+**Problem**: Estimate the facility power and electricity-cost reduction when a `{python} H100TdpCoolingRecap.n_gpus_str`-GPU cluster of H100s at `{python} H100TdpCoolingRecap.tdp_w_str` each moves from typical air cooling to direct liquid cooling. To isolate the cooling choice, this simplified calculation treats accelerator power as the entire IT load and assigns all non-IT overhead to cooling; a procurement estimate must restore host, memory, network, and storage support before applying PUE.
+
+**Math**:
 
 - IT power\index{IT power!cluster cooling calculation}: `{python} H100TdpCoolingRecap.n_gpus_str` $\times$ `{python} H100TdpCoolingRecap.tdp_w_str` = `{python} H100TdpCoolingRecap.it_power_kw_str`
 - Overhead removed: with the $(\text{PUE}-1)$ overhead arithmetic of notebook \ref{nbk-sustainable-ai-pue-cost-cooling}, moving from air cooling (PUE `{python} H100TdpCoolingRecap.pue_air_str`) to liquid cooling (PUE `{python} H100TdpCoolingRecap.pue_liquid_str`) removes `{python} H100TdpCoolingRecap.it_power_kw_str` $\times$ `{python} H100TdpCoolingRecap.pue_diff_str` = `{python} H100TdpCoolingRecap.savings_kw_str` of continuous power.
+- Electricity savings: at `{python} H100TdpCoolingRecap.electricity_rate_str`, the annual savings are approximately `{python} H100TdpCoolingRecap.annual_savings_str`, totaling `{python} H100TdpCoolingRecap.three_year_savings_str` over a `{python} H100TdpCoolingRecap.lifecycle_years_attr_str` hardware lifecycle.
 
-**Savings**: At `{python} H100TdpCoolingRecap.electricity_rate_str`, the annual savings are approximately `{python} H100TdpCoolingRecap.annual_savings_str`. Over a `{python} H100TdpCoolingRecap.lifecycle_years_attr_str` hardware lifecycle, the cooling savings alone total `{python} H100TdpCoolingRecap.three_year_savings_str`, which is the figure to set against the installed capital cost of the liquid-cooling system when computing its payback period.
+**Systems insight**: That `{python} H100TdpCoolingRecap.three_year_savings_str` operating reduction is the budget available to amortize the higher installed capital cost of manifolds, coolant distribution units, and facility plumbing when evaluating payback period.
 :::
 
 ```{python}

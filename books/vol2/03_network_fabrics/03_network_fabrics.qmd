@@ -57,10 +57,10 @@ A single accelerator can perform trillions of operations per second, but distrib
 - Explain how synchronized collective traffic inverts data-center assumptions about flows, loss, and oversubscription
 - Model network communication cost using the $\MessageStartupLatency$-$\LinkBandwidth$ framework and identify bandwidth-dominated vs. latency-dominated regimes
 - Compare high-performance transport protocols by latency, loss-recovery behavior, and operational complexity
-- Compare network topologies using $\BisectionBandwidth$, hop count, and the workload's collective communication pattern
+- Compare network topologies using bisection bandwidth, hop count, and the workload's collective communication pattern
 - Evaluate congestion-control mechanisms and lossless-fabric hazards by their impact on tail latency during distributed training
 - Compare network partitioning and traffic-isolation mechanisms for checkpoint and multi-tenant traffic
-- Diagnose network performance bottlenecks using RDMA counters, link-level telemetry, and bandwidth testing tools
+- Diagnose network performance bottlenecks using transport and congestion counters, link-level telemetry, and bandwidth testing tools
 
 :::
 
@@ -1126,7 +1126,7 @@ class MeasuredAllReduce:
 
 A measured collective shows both regimes and where the two-parameter model needs care. NVIDIA publishes the full output of the standard NCCL AllReduce benchmark on one node of eight H100 GPUs connected by NVLink, sweeping message sizes from 8 bytes to 16 GB [@nvidia2026exemplarnccl]. The run crosses no external network, so it tests the two-parameter form itself, free of external switch paths and fabric congestion. The two-parameter model can be built from two summary values of that sweep, the median time of the small messages as $\MessageStartupLatency$ and the delivered rate of the largest message as $\LinkBandwidth$, and set beside the measured time (@fig-nccl-allreduce-measured). The small messages sit on a floor of about `{python} MeasuredAllReduce.floor_us_str` µs regardless of size, and the largest messages approach `{python} MeasuredAllReduce.bw_str` of algorithm bandwidth, defined as the tensor size divided by completion time.
 
-The benchmark multiplies that algorithm bandwidth by $2(8-1)/8 = 1.75$, the bytes a ring AllReduce sends across each GPU's links per tensor byte reduced, to report `{python} MeasuredAllReduce.peak_busbw_str` of bus bandwidth. The benchmark applies this factor whichever schedule ran, so the figure is a normalization rather than a link measurement, and it can exceed NVLink's `{python} NetworkFabricsContextScenario.nvlink_h100_perdir_gb_per_s_str` per direction.
+The benchmark multiplies that algorithm bandwidth by $2(8-1)/8 = 1.75$, the bytes a ring AllReduce sends across each GPU's links per tensor byte reduced, to report `{python} MeasuredAllReduce.peak_busbw_str` of bus bandwidth. The benchmark applies this factor whichever schedule ran, including when switches combine values in the network and move fewer bytes per GPU than a ring, so the figure is a normalization rather than a link measurement and can exceed NVLink's `{python} NetworkFabricsContextScenario.nvlink_h100_perdir_gb_per_s_str` per direction.
 
 ::: {.column-margin .margin-pointer}
 ↪ In-network reduction, in which switches rather than GPUs combine contributions and which NVLink SHARP brings to the node's NVLink switches, is developed in @sec-communication-sharp.
@@ -2136,9 +2136,9 @@ class TransceiverDegradationRisk:
 **Problem**: A `{python} TransceiverDegradationRisk.n_gpus_str`-GPU RoCE cluster, larger than the reference cluster, is in operation. If the probability that a given transceiver begins degrading on a given day is `{python} TransceiverDegradationRisk.p_degrade_pct_str`, what is the chance that at least one transceiver degrades on a given day?
 
 **Math**:
-Assume independent transceiver-degradation events with the same per-device probability.
+Assume an all-optical three-tier non-blocking fat-tree (three optical link tiers per GPU, with two transceivers per link) and independent transceiver-degradation events with the same per-device probability.
 
-1. **Total exposure**: `{python} TransceiverDegradationRisk.n_gpus_str` $\times$ `{python} TransceiverDegradationRisk.links_per_gpu_str` = `{python} TransceiverDegradationRisk.total_links_str` links, or `{python} TransceiverDegradationRisk.total_transceivers_str` transceivers.
+1. **Total exposure**: `{python} TransceiverDegradationRisk.n_gpus_str` $\times$ `{python} TransceiverDegradationRisk.links_per_gpu_str` = `{python} TransceiverDegradationRisk.total_links_str` links $\times$ 2 transceivers per link = `{python} TransceiverDegradationRisk.total_transceivers_str` transceivers.
 2. **Probability of zero transceiver degradations**: `{python} TransceiverDegradationRisk.no_degradation_prob_math`.
 3. **Probability of at least one degradation**: `{python} TransceiverDegradationRisk.any_degradation_prob_math` (about `{python} TransceiverDegradationRisk.any_degradation_prob_str`).
 
@@ -2893,12 +2893,6 @@ Consider a `{python} BandwidthFallacy.msg_kb_str` message (typical for control s
 
 :::
 
-::: {.fallacy-pitfall}
-
-**Fallacy**: *Lossless Ethernet is as reliable as InfiniBand.*
-
-RoCE over Ethernet can achieve throughput comparable to InfiniBand for large transfers, but lossless operation depends on the configuration and interaction of PFC, ECN, routing, buffers, and NIC behavior (@sec-network-fabrics-pfc). A slow drainer or firmware defect can trigger a PFC storm\index{PFC storm!cascading pause}, where PAUSE frames spread beyond the original queue, and a forwarding loop or cyclic buffer dependency can freeze the lossless class outright. InfiniBand's per-hop credit mechanism avoids this specific reactive PAUSE-frame cascade, but the fabric still requires deadlock-free routing, sound virtual-lane configuration, and congestion management [@infiniband2000spec]. Both fabrics require validation and telemetry; RoCE adds particular sensitivity to the configuration of Ethernet losslessness. Procurement should therefore compare complete transport stacks rather than link rates, because the stack determines where flow-control state and operational risk reside even when nominal rates match.
-
 ```{python}
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
@@ -2921,13 +2915,19 @@ class BisectionWasteRecap:
     waste_m_str = fmt_usd(waste_val, precision=1, commas=False, scale="M")
 ```
 
-:::
-
 ::: {.fallacy-pitfall}
 
 **Pitfall**: *Accepting data-center oversubscription ratios for synchronous training.*
 
 Oversubscription relies on the traffic crossing a shared boundary fitting its available capacity. Bulk-synchronous training can violate that assumption with coordinated bursts. In the cut-saturating scenario of @sec-network-fabrics-fat-tree, `{python} BisectionWasteRecap.oversub_ratio_b_value_str`:1 oversubscription increases the modeled communication bound by `{python} BisectionWasteRecap.oversub_ratio_b_mult_str`. Applied to a `{python} BisectionWasteRecap.cluster_cost_m_str` cluster with the assumed `{python} BisectionWasteRecap.comm_fraction_pct_str` communication fraction, the resulting idle-capacity estimate exceeds `{python} BisectionWasteRecap.waste_m_str`. This is an equivalent-capacity comparison under the stated schedule, not an equipment loss or a universal penalty for every collective.
+
+:::
+
+::: {.fallacy-pitfall}
+
+**Fallacy**: *Lossless Ethernet is as reliable as InfiniBand.*
+
+RoCE over Ethernet can achieve throughput comparable to InfiniBand for large transfers, but lossless operation depends on the configuration and interaction of PFC, ECN, routing, buffers, and NIC behavior (@sec-network-fabrics-pfc). A slow drainer or firmware defect can trigger a PFC storm\index{PFC storm!cascading pause}, where PAUSE frames spread beyond the original queue, and a forwarding loop or cyclic buffer dependency can freeze the lossless class outright. InfiniBand's per-hop credit mechanism avoids this specific reactive PAUSE-frame cascade, but the fabric still requires deadlock-free routing, sound virtual-lane configuration, and congestion management [@infiniband2000spec]. Both fabrics require validation and telemetry; RoCE adds particular sensitivity to the configuration of Ethernet losslessness. Procurement should therefore compare complete transport stacks rather than link rates, because the stack determines where flow-control state and operational risk reside even when nominal rates match.
 
 :::
 
