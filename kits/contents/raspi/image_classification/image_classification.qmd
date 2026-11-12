@@ -50,62 +50,202 @@ First, ensure your Raspberry Pi is up to date:
 ```bash
 sudo apt update
 sudo apt upgrade -y
+sudo reboot # Reboot to ensure all updates take effect
 ```
 
-### Installing Required Libraries {#sec-image-classification-installing-required-libraries-a0de}
+### Installing Required System-Level Libraries {#sec-image-classification-installing-required-libraries-a0de}
 
-Install the necessary libraries for image processing and machine learning:
+Install the Python tools and camera libraries:
 
 ```bash
-sudo apt install python3-pip
-sudo rm /usr/lib/python3.11/EXTERNALLY-MANAGED
-pip3 install --upgrade pip
+sudo apt install -y python3-pip python3-venv python3-picamera2
+sudo apt install -y libcamera-dev libcamera-tools libcamera-apps
 ```
 
-### Setting up a Virtual Environment (Optional but Recommended) {#sec-image-classification-setting-virtual-environment-optional-recommended-e585}
+[Picamera2](https://github.com/raspberrypi/picamera2), a Python library for interacting with the Raspberry Pi's camera, is based on the *libcamera* camera stack and is maintained by the Raspberry Pi Foundation. It is supported on all Raspberry Pi models, from the Pi Zero to the Pi 5.
 
-Create a virtual environment to manage dependencies:
+To test the Picamera2 installation, import it in Python and print its version:
+
+\noindent
+![](images/png/picamera2-test.png){width=85% fig-align="center"}
+
+### Setting up a Virtual Environment {#sec-image-classification-setting-virtual-environment-optional-recommended-e585}
+
+Create a virtual environment with access to the system packages to manage dependencies:
 
 ```bash
-python3 -m venv ~/tflite
-source ~/tflite/bin/activate
+python3 -m venv ~/tflite_env --system-site-packages
 ```
 
-### Installing TensorFlow Lite {#sec-image-classification-installing-tensorflow-lite-c6ee}
-
-We are interested in performing **inference**, which refers to executing a TensorFlow Lite model on a device to make predictions based on input data. To perform an inference with a TensorFlow Lite model, we must run it through an **interpreter**. The TensorFlow Lite interpreter is designed to be lean and fast. It uses a static graph ordering and a custom (less dynamic) memory allocator to keep load, initialization, and execution latency low.
-
-We use the [TensorFlow Lite runtime](https://pypi.org/project/tflite-runtime/) for Raspberry Pi, a simplified library for running machine learning models on mobile and embedded devices, without including all TensorFlow packages.
+Activate the environment:
 
 ```bash
-pip install tflite_runtime --no-deps
+source ~/tflite_env/bin/activate
 ```
 
-> The wheel installed: `tflite_runtime-2.14.0-cp311-cp311-manylinux_2_34_aarch64.whl`
-
-### Installing Additional Python Libraries {#sec-image-classification-installing-additional-python-libraries-7fbd}
-
-Install required Python libraries for use with Image Classification:
-
-If you have another version of Numpy installed, first uninstall it.
+To exit the virtual environment, use:
 
 ```bash
-pip3 uninstall numpy
+deactivate
 ```
 
-Install `version 1.23.2`, which is compatible with the tflite_runtime.
+### Installing Python Packages {#sec-image-classification-installing-additional-python-libraries-7fbd}
+
+Inside the virtual environment, install the Python packages:
 
 ```bash
- pip3 install numpy==1.23.2
+pip install numpy pillow  # Image processing
+pip install matplotlib  # For displaying images
+pip install opencv-python  # Computer vision
 ```
+
+Verify the installation:
 
 ```bash
-pip3 install Pillow matplotlib
+pip list | grep -E "(numpy|pillow|opencv|picamera)"
 ```
 
-### Creating a working directory: {#sec-image-classification-creating-working-directory-9584}
+\noindent
+![](images/png/verify_insta.png){width=70% fig-align="center"}
 
-If you are working on the Raspi-Zero with the minimum OS (No Desktop), you may not have a user-pre-defined directory tree (you can check it with `ls`). Create one:
+#### System vs. pip Package Installation {#sec-image-classification-system-vs-pip-package-installation-0c58}
+
+**Use `sudo apt install` (outside of the venv) for:**
+
+- System-level dependencies and libraries
+- Hardware interface libraries (such as the camera)
+- Development headers and build tools
+- Anything that needs to interface directly with hardware
+
+**Use `pip install` (inside the venv) for:**
+
+- Pure Python packages
+- Application-specific libraries
+- Packages that do not need system-level access
+
+> **Rule of thumb:** Use `sudo apt install` only for system dependencies and hardware interfaces. Use `pip install` (without `sudo`) inside an activated virtual environment for everything else. Inside the venv, `pip` and `pip3` are the same.
+>
+> Thanks to the `--system-site-packages` flag, the virtual environment includes both the system packages (such as Picamera2) and the packages installed with pip.
+
+### Setting up Jupyter Notebook {#sec-image-classification-setting-jupyter-notebook-optional-7d66}
+
+Set up Jupyter Notebook for headless camera work and development on the Raspberry Pi:
+
+```bash
+pip install jupyter jupyterlab notebook
+jupyter notebook --generate-config
+```
+
+To run Jupyter Notebook, use the following command (with your own IP address):
+
+```bash
+jupyter notebook --ip=192.168.4.210 --no-browser
+```
+
+The terminal shows the local URL address to open the notebook:
+
+\noindent
+![](images/png/notebook_token.png){width=85% fig-align="center"}
+
+To access it from another device, enter the Raspberry Pi's IP address and the provided token in a web browser (the token can be copied from the terminal).
+
+\noindent
+![](images/png/image-20240823145059675.png){width=85% fig-align="center"}
+
+Define the working directory on the Raspi and create a new Python 3 notebook. For example:
+
+```bash
+cd Documents
+mkdir Python
+```
+
+> Folders can also be created directly in Jupyter Notebook.
+
+In a new notebook, test the code below. First, import the libraries:
+
+```python
+import time
+import numpy as np
+from PIL import Image
+import matplotlib.pyplot as plt
+from picamera2 import Picamera2
+```
+
+Download an image from the internet. A command line can be run from the notebook by prefixing it with `!`:
+
+```python
+!wget https://upload.wikimedia.org/wikipedia/commons/3/3a/Cat03.jpg
+```
+
+The image (`Cat03.jpg`) is downloaded to the current directory. Load and show it:
+
+```python
+img_path = "Cat03.jpg"
+img = Image.open(img_path)
+
+# Display the image
+plt.figure(figsize=(6, 6))
+plt.imshow(img)
+plt.title("Original Image")
+plt.show()
+```
+
+The image is displayed in the notebook:
+
+\noindent
+![](images/png/cat.jpg){width=60% fig-align="center"}
+
+Next, use the camera to capture a local image:
+
+```python
+from picamera2 import Picamera2
+import time
+
+# Initialize camera
+picam2 = Picamera2()
+picam2.start()
+
+# Wait for camera to warm up
+time.sleep(2)
+
+# Capture image
+picam2.capture_file("class3_test.jpg")
+print("Image captured: class3_test.jpg")
+
+# Stop camera
+picam2.stop()
+picam2.close()
+```
+
+Code similar to the previous cell (with a different `img_path` and `title`) shows the captured image:
+
+\noindent
+![](images/png/local_image_camera.jpg){width=60% fig-align="center"}
+
+## Installing LiteRT {#sec-image-classification-installing-tensorflow-lite-c6ee}
+
+This lab focuses on inference: running a trained model on a device to make predictions from input data. To perform inference, the model runs through an **interpreter**. The interpreter used here is [LiteRT](https://github.com/google-ai-edge/LiteRT), Google's on-device framework for high-performance ML and GenAI deployment on edge platforms.
+
+> LiteRT is the successor of TensorFlow Lite. The standalone `tflite_runtime` package used in earlier versions of this lab is no longer maintained and does not install on the Python version shipped with current Raspberry Pi OS.
+
+Install it on the Raspi with:
+
+```bash
+pip install ai-edge-litert
+```
+
+Verify the installation:
+
+```bash
+pip show ai-edge-litert
+```
+
+\noindent
+![](images/png/litert_instal.png){width=85% fig-align="center"}
+
+### Creating a Working Directory {#sec-image-classification-creating-working-directory-9584}
+
+On the Raspi-Zero with the minimal OS (no desktop), there is no predefined user directory tree (check it with `ls`). Create one:
 
 ```bash
 mkdir Documents
@@ -118,14 +258,13 @@ mkdir models
 cd models
 ```
 
-> On the Raspi-5, the /Documents should be there.
+> On the Raspi-5, the `/Documents` folder should already exist.
 
-**Get a pre-trained Image Classification model**:
+**Get a pre-trained image classification model**:
 
-Image classification on resource-constrained devices like the Raspberry Pi needs an appropriate pre-trained model. **MobileNet** is designed for mobile and embedded vision applications and balances accuracy and speed. Versions: MobileNetV1, MobileNetV2, MobileNetV3. Download the V2:
+An appropriate pre-trained model is crucial for image classification on resource-constrained devices like the Raspberry Pi. **MobileNet** is designed for mobile and embedded vision applications and balances accuracy and speed. It exists in several versions (MobileNetV1, MobileNetV2, and MobileNetV3). Download the V2:
 
 ```bash
-# One long line, split with backslash \
 wget https://storage.googleapis.com/download.tensorflow.org/\
 models/tflite_11_05_08/mobilenet_v2_1.0_224_quant.tgz
 
@@ -135,86 +274,63 @@ tar xzf mobilenet_v2_1.0_224_quant.tgz
 Get its [labels](https://github.com/Mjrovai/EdgeML-with-Raspberry-Pi/blob/main/IMG_CLASS/models/labels.txt):
 
 ```bash
-wget https://raw.githubusercontent.com/Mjrovai/EdgeML-with-Raspberry-Pi/refs/heads/\
-main/IMG_CLASS/models/labels.txt
+wget https://raw.githubusercontent.com/Mjrovai/EdgeML-with-Raspberry-Pi/\
+refs/heads/main/IMG_CLASS/models/labels.txt
 ```
 
-In the end, the models should be in their directory:
+The `models` directory should now contain:
 
 \noindent
-![](images/png/models_dir.png){width=105% fig-align="center"}
+![](images/png/models_dir.png){width=85% fig-align="center"}
 
-> We will only need the `mobilenet_v2_1.0_224_quant.tflite` model and the `labels.txt`. You can delete the other files.
-
-### Setting up Jupyter Notebook (Optional) {#sec-image-classification-setting-jupyter-notebook-optional-7d66}
-
-If you prefer using Jupyter Notebook for development:
-
-```bash
-pip3 install jupyter
-jupyter notebook --generate-config
-```
-
-To run Jupyter Notebook, run the command (change the IP address for yours):
-
-```bash
-jupyter notebook --ip=192.168.4.210 --no-browser
-```
-
-On the terminal, you can see the local URL address to open the notebook:
-
-\noindent
-![](images/png/notebook_token.png){width=105% fig-align="center"}
-
-You can access it from another device by entering the Raspberry Pi's IP address and the provided token in a web browser (you can copy the token from the terminal).
-
-\noindent
-![](images/png/image-20240823145059675.png){width=70% fig-align="center"}
-
-Define your working directory in the Raspi and create a new Python 3 notebook.
+> Only the `mobilenet_v2_1.0_224_quant.tflite` model and `labels.txt` are needed. The other files can be deleted.
 
 ### Verifying the Setup {#sec-image-classification-verifying-setup-9103}
 
-Test your setup by running a simple Python script:
+Test the setup by running a simple Python script in the `TFLITE/IMG_CLASS` folder:
 
 ```python
-import tflite_runtime.interpreter as tflite
+from ai_edge_litert.interpreter import Interpreter
 import numpy as np
 from PIL import Image
 
 print("NumPy:", np.__version__)
 print("Pillow:", Image.__version__)
 
-# Try to create a TFLite Interpreter
+# Try to create a LiteRT Interpreter
 model_path = "./models/mobilenet_v2_1.0_224_quant.tflite"
-interpreter = tflite.Interpreter(model_path=model_path)
+interpreter = Interpreter(model_path=model_path)
 interpreter.allocate_tensors()
-print("TFLite Interpreter created successfully!")
+print("LiteRT Interpreter created successfully!")
 ```
 
-You can create the Python script using nano on the terminal, saving it with `CTRL+0` + `ENTER` + `CTRL+X`
+Create the script with nano in the terminal and save it with `CTRL+O` + `ENTER` + `CTRL+X`:
 
 \noindent
-![](images/png/nano.png){width=70% fig-align="center"}
+![](images/png/nano.png){width=80% fig-align="center"}
 
-And run it with the command:
+Run it with:
+
+```bash
+python setup_test.py
+```
 
 \noindent
-![](images/png/test_result.png)
+![](images/png/test_result.png){width=85% fig-align="center"}
 
-Or you can run it directly on the [Notebook](https://github.com/Mjrovai/EdgeML-with-Raspberry-Pi/blob/main/IMG_CLASS/notebooks/setup_test.ipynb):
+Or run it directly in the [notebook](https://github.com/Mjrovai/EdgeML-with-Raspberry-Pi/blob/main/IMG_CLASS/notebooks/setup_test.ipynb):
 
 \noindent
-![](images/png/notebook_test.png)
+![](images/png/notebook_test.png){width=85% fig-align="center"}
 
 ## Making inferences with Mobilenet V2 {#sec-image-classification-making-inferences-mobilenet-v2-d635}
 
-In the last section, we set up the environment, including downloading a popular pre-trained model, Mobilenet V2, trained on ImageNet's $224\times 224$ images (1.2 million) for 1,001 classes (1,000 object categories plus 1 background). The model was converted to a compact 3.5 MB TensorFlow Lite format, making it suitable for the limited storage and memory of a Raspberry Pi.
+The previous section set up the environment, including a popular pre-trained model, MobileNet V2, trained on ImageNet's 1.2 million $224{\times}224$ images for 1,001 classes (1,000 object categories plus 1 background). The model was converted to a compact 3.5 MB tflite format, which suits the limited storage and memory of a Raspberry Pi.
 
 \noindent
-![](images/png/mobilinet_zero.png)
+![](images/png/mobilinet_zero.png){width=85% fig-align="center"}
 
-Start a new [notebook](https://github.com/Mjrovai/EdgeML-with-Raspberry-Pi/blob/main/IMG_CLASS/notebooks/10_Image_Classification.ipynb) to follow all the steps to classify one image:
+In the `IMG_CLASS` working directory, start a new [notebook](https://github.com/Mjrovai/EdgeML-with-Raspberry-Pi/blob/main/IMG_CLASS/notebooks/10_Image_Classification.ipynb) and follow the steps to classify one image.
 
 Import the needed libraries:
 
@@ -223,38 +339,49 @@ import time
 import numpy as np
 import matplotlib.pyplot as plt
 from PIL import Image
-import tflite_runtime.interpreter as tflite
+from ai_edge_litert.interpreter import Interpreter
 ```
 
-Load the TFLite model and allocate tensors:
+Load the model and allocate tensors:
 
 ```python
 model_path = "./models/mobilenet_v2_1.0_224_quant.tflite"
-interpreter = tflite.Interpreter(model_path=model_path)
+interpreter = Interpreter(model_path=model_path)
 interpreter.allocate_tensors()
 ```
 
-Get input and output tensors.
+> ```bash
+> INFO: Created TensorFlow Lite XNNPACK delegate for CPU.
+> ```
+
+This message means that LiteRT enabled an optimized CPU backend (XNNPACK) for the model, which is expected:
+
+- XNNPACK is a library of highly optimized operators (convolution, fully connected, and others) for running neural networks on CPUs, especially ARM and x86.
+- LiteRT *delegates* the supported operations to XNNPACK, so they run with these faster kernels instead of the default reference CPU implementation.
+- On devices like the Raspberry Pi, this usually lowers inference latency, at the cost of a slightly longer initialization and a bit more RAM for packed weights.
+- The model runs on the CPU, not the GPU, which is the standard path for TFLite/LiteRT models on Pi-class hardware.
+
+Get the input and output tensors:
 
 ```python
 input_details = interpreter.get_input_details()
 output_details = interpreter.get_output_details()
 ```
 
-**Input details** will give us information about how the model should be fed with an image. The shape of (1, 224, 224, 3) informs us that an image with dimensions $(224\times 224\times 3)$ should be input one by one (Batch Dimension: 1).
+The **input details** describe how the model should be fed an image. The shape (1, 224, 224, 3) indicates that an image with dimensions $224{\times}224{\times}3$ should be input one at a time (batch dimension: 1).
 
 \noindent
-![](images/png/input_details.png)
+![](images/png/input_details.png){width=85% fig-align="center"}
 
-The **output details** show that the inference will result in an array of 1,001 integer values. Those values result from the image classification, where each value is the probability of that specific label being related to the image.
+The **output details** indicate that inference produces an array of 1,001 integer values. Each value is the score for the corresponding label.
 
 \noindent
-![](images/png/output_details.png)
+![](images/png/output_details.png){width=85% fig-align="center"}
 
-Also inspect the dtype of the model's input details:
+Inspect the dtype of the model's input:
 
 ```python
-input_dtype = input_details[0]["dtype"]
+input_dtype = input_details[0]['dtype']
 input_dtype
 ```
 
@@ -262,9 +389,9 @@ input_dtype
 dtype('uint8')
 ```
 
-This shows that the input image should be raw pixels (0 - 255).
+This shows that the input image should be represented as raw pixels (0–255).
 
-Get a test image. You can transfer it from your computer or download one for testing. First, create a folder under the working directory:
+Get a test image, either by transferring it from your computer or by downloading one as before. First, create a folder in the working directory:
 
 ```bash
 mkdir images
@@ -275,7 +402,7 @@ wget https://upload.wikimedia.org/wikipedia/commons/3/3a/Cat03.jpg
 Load and display the image:
 
 ```python
-# Load he image
+# Load the image
 img_path = "./images/Cat03.jpg"
 img = Image.open(img_path)
 
@@ -287,30 +414,30 @@ plt.show()
 ```
 
 \noindent
-![](images/png/cat_original.png){width=85% fig-align="center"}
+![](images/png/cat_original.png){width=70% fig-align="center"}
 
-We can see the image size running the command:
+Check the image size:
 
 ```python
 width, height = img.size
 ```
 
-That shows us that the image is an RGB image with a width of 1600 and a height of 1600 pixels. To use the model, reshape it to (224, 224, 3) and add a batch dimension of 1, as defined in input details: (1, 224, 224, 3). The inference result, as shown in output details, will be an array with a 1001 size, as shown below:
+The image is RGB, with a width and height of 1,600 pixels each. To use the model, reshape it to (224, 224, 3) and add a batch dimension of 1, as defined in the input details: (1, 224, 224, 3). As the output details show, the inference result is an array of size 1,001:
 
 \noindent
-![](images/png/process_img.png)
+![](images/png/process_img.png){width=90% fig-align="center"}
 
-Reshape the image, add the batch dimension, and check the result:
+Reshape the image and add the batch dimension:
 
 ```python
 img = img.resize(
-    (input_details[0]["shape"][1], input_details[0]["shape"][2])
+    (input_details[0]['shape'][1], input_details[0]['shape'][2])
 )
 input_data = np.expand_dims(img, axis=0)
 input_data.shape
 ```
 
-The input_data shape is as expected: (1, 224, 224, 3)
+The `input_data` shape is as expected: (1, 224, 224, 3).
 
 Confirm the dtype of the input data:
 
@@ -318,21 +445,19 @@ Confirm the dtype of the input data:
 input_data.dtype
 ```
 
-```
-dtype('uint8')
-```
+`dtype('uint8')`
 
-The input data dtype is 'uint8', which is compatible with the dtype expected for the model.
+The input data dtype is `uint8`, which matches the dtype expected by the model.
 
-Using input_data, run the interpreter and get the predictions (output):
+Run the interpreter on `input_data` and get the predictions (output):
 
 ```python
-interpreter.set_tensor(input_details[0]["index"], input_data)
+interpreter.set_tensor(input_details[0]['index'], input_data)
 interpreter.invoke()
-predictions = interpreter.get_tensor(output_details[0]["index"])[0]
+predictions = interpreter.get_tensor(output_details[0]['index'])[0]
 ```
 
-The prediction is an array with 1001 elements. Get the top-5 indices, where the elements have the highest values:
+The prediction is an array with 1,001 elements. Get the top-5 indices with the highest values:
 
 ```python
 top_k_results = 5
@@ -340,17 +465,17 @@ top_k_indices = np.argsort(predictions)[::-1][:top_k_results]
 top_k_indices
 ```
 
-The top_k_indices is an array with 5 elements: `array([283, 286, 282])`
+`top_k_indices` is an array with 5 elements: `array([283, 286, 282, 288, 479])`
 
-So, 283, 286, 282, 288, and 479 are the image's most probable classes. Given an index, we must find which class it identifies (such as car, cat, or dog). The text file downloaded with the model has a label associated with each index from 0 to 1,000. A function loads the .txt file as a list:
+So 283, 286, 282, 288, and 479 are the image's most probable classes. The next step is to find which class each index belongs to (such as car, cat, or dog). The text file downloaded with the model has a label for each index from 0 to 1,000. A function loads the .txt file as a list:
 
 ```python
 def load_labels(filename):
-    with open(filename, "r") as f:
+    with open(filename, 'r') as f:
         return [line.strip() for line in f.readlines()]
 ```
 
-And get the list, printing the labels associated with the indexes:
+Get the list and print the labels associated with the indexes:
 
 ```python
 labels_path = "./models/labels.txt"
@@ -363,7 +488,7 @@ print(labels[288])
 print(labels[479])
 ```
 
-As a result, we have:
+The result is:
 
 ```bash
 Egyptian cat
@@ -373,13 +498,25 @@ lynx
 carton
 ```
 
-At least the four top indices are related to felines. The **prediction** content is the probability associated with each one of the labels. As we saw on output details, those values are quantized and should be dequantized and apply softmax.
+At least four of the top indices are felines. The **prediction** content is the score associated with each label. As the `output details` showed, those values are quantized and must be dequantized:
 
 ```python
-scale, zero_point = output_details[0]["quantization"]
+scale, zero_point = output_details[0]['quantization']
 dequantized_output = (
     predictions.astype(np.float32) - zero_point
 ) * scale
+dequantized_output
+```
+
+```bash
+array([1.8662813e-06, 3.0599874e-06, 1.8146475e-05, ...,
+       6.9421253e-07, 2.0032754e-05, 4.2967865e-04],
+      shape=(1001,), dtype=float32)
+```
+
+The [model documentation](https://arxiv.org/abs/1801.04381v4) shows that MobileNet V2 typically does not include a softmax layer at the output: it usually ends with a $1{\times}1$ convolution followed by average pooling and a fully connected layer. To get probabilities (0 to 1), apply softmax:
+
+```python
 exp_output = np.exp(dequantized_output - np.max(dequantized_output))
 probabilities = exp_output / np.sum(exp_output)
 ```
@@ -387,57 +524,53 @@ probabilities = exp_output / np.sum(exp_output)
 Print the top-5 probabilities:
 
 ```python
-print(probabilities[286])
-print(probabilities[283])
-print(probabilities[282])
-print(probabilities[288])
-print(probabilities[479])
+print (probabilities[286])
+print (probabilities[283])
+print (probabilities[282])
+print (probabilities[288])
+print (probabilities[479])
 ```
 
 ```bash
-0.27741462
-0.3732285
-0.16919471
-0.10319158
-0.023410844
+0.265947
+0.39499295
+0.17906114
+0.08961108
+0.022443123
 ```
 
-For clarity, create a function that relates the labels to the probabilities:
+For clarity, print the labels next to their probabilities:
 
 ```python
 for i in range(top_k_results):
-    print(
-        "\t{:20}: {}%".format(
-            labels[top_k_indices[i]],
-            (int(probabilities[top_k_indices[i]] * 100)),
-        )
-    )
+    print("\t{:20}: {}%".format(
+        labels[top_k_indices[i]],
+        (int(probabilities[top_k_indices[i]]*100))))
 ```
 
 ```bash
-tiger cat           : 37%
-Egyptian cat        : 27%
-tabby               : 16%
-lynx                : 10%
+tiger cat           : 39%
+Egyptian cat        : 26%
+tabby               : 17%
+lynx                : 8%
 carton              : 2%
 ```
 
 ### Define a general Image Classification function {#sec-image-classification-define-general-image-classification-function-6af6}
 
-Create a general function that takes an image as input and returns the top-5 possible classes:
+A general function takes an image as input and returns the top-5 possible classes:
 
 ```python
-def image_classification(
-    img_path, model_path, labels, top_k_results=5
-):
+def image_classification(img_path, model_path, labels,
+                         top_k_results=5):
     # load the image
     img = Image.open(img_path)
     plt.figure(figsize=(4, 4))
     plt.imshow(img)
-    plt.axis("off")
+    plt.axis('off')
 
-    # Load the TFLite model
-    interpreter = tflite.Interpreter(model_path=model_path)
+    # Load the LiteRT model
+    interpreter = Interpreter(model_path=model_path)
     interpreter.allocate_tensors()
 
     # Get input and output tensors
@@ -445,155 +578,111 @@ def image_classification(
     output_details = interpreter.get_output_details()
 
     # Preprocess
-    img = img.resize(
-        (input_details[0]["shape"][1], input_details[0]["shape"][2])
-    )
+    img = img.resize((input_details[0]['shape'][1],
+                      input_details[0]['shape'][2]))
     input_data = np.expand_dims(img, axis=0)
 
-    # Inference on Raspi-Zero
-    interpreter.set_tensor(input_details[0]["index"], input_data)
+    # Inference on Raspi
+    interpreter.set_tensor(input_details[0]['index'], input_data)
     interpreter.invoke()
 
     # Obtain results and map them to the classes
-    predictions = interpreter.get_tensor(output_details[0]["index"])[
-        0
-    ]
+    predictions = interpreter.get_tensor(
+        output_details[0]['index'])[0]
 
     # Get indices of the top k results
     top_k_indices = np.argsort(predictions)[::-1][:top_k_results]
 
     # Get quantization parameters
-    scale, zero_point = output_details[0]["quantization"]
+    scale, zero_point = output_details[0]['quantization']
 
     # Dequantize the output and apply softmax
     dequantized_output = (
         predictions.astype(np.float32) - zero_point
     ) * scale
     exp_output = np.exp(
-        dequantized_output - np.max(dequantized_output)
-    )
+        dequantized_output - np.max(dequantized_output))
     probabilities = exp_output / np.sum(exp_output)
 
     print("\n\t[PREDICTION]        [Prob]\n")
     for i in range(top_k_results):
-        print(
-            "\t{:20}: {}%".format(
-                labels[top_k_indices[i]],
-                (int(probabilities[top_k_indices[i]] * 100)),
-            )
-        )
+        print("\t{:20}: {}%".format(
+            labels[top_k_indices[i]],
+            (int(probabilities[top_k_indices[i]]*100))))
 ```
 
-And loading some images for testing, we have:
+Loading some images for testing gives:
 
 \noindent
 ![](images/jpeg/img_class_func.jpg)
 
-### Testing with a model trained from scratch {#sec-image-classification-testing-model-trained-scratch-4cb8}
+### Testing the Classification with the Camera {#sec-image-classification-installing-picamera2-4ac5}
 
-Get a TFLite model trained from scratch. For that, you can follow the Notebook:
-
-[CNN to classify Cifar-10 dataset](https://colab.research.google.com/github/Mjrovai/UNIFEI-IESTI01-TinyML-2022.1/blob/main/00_Curse_Folder/2_Applications_Deploy/Class_16/cifar_10/CNN_Cifar_10_TFLite.ipynb#scrollTo=iiVBUpuHXEtw)
-
- In the notebook, we trained a model using the CIFAR10 dataset, which contains 60,000 images from 10 classes of CIFAR (*airplane, automobile, bird, cat, deer, dog, frog, horse, ship, and truck*). CIFAR has $32\times 32$ color images (3 color channels) where the objects are not centered and can have the object with a background, such as airplanes that might have a cloudy sky behind them. In short, the images are small but realistic.
-
-The CNN trained model (*cifar10_model.keras*) had a size of 2.0 MB. Using the *TFLite Converter*, the model *cifar10.tflite* became 674 KB (around 1/3 of the original size).
-
-\noindent
-![](images/png/cifar10_model.png)
-
-On the notebook [Cifar 10 - Image Classification on a Raspi with TFLite](https://github.com/Mjrovai/EdgeML-with-Raspberry-Pi/blob/main/IMG_CLASS/notebooks/20_Cifar_10_Image_Classification.ipynb) (which can be run over the Raspi), we can follow the same steps we did with the `mobilenet_v2_1.0_224_quant.tflite`. Below are examples of images using the *General Function for Image Classification* on a Raspi-Zero, as shown in the last section.
-
-\noindent
-![](images/png/infer-cifar10.png)
-
-### Installing Picamera2 {#sec-image-classification-installing-picamera2-4ac5}
-
-[Picamera2](https://github.com/raspberrypi/picamera2), a Python library for interacting with Raspberry Pi's camera, is based on the *libcamera* camera stack, and the Raspberry Pi foundation maintains it. The Picamera2 library is supported on all Raspberry Pi models, from the Pi Zero to the RPi 5. It is already installed system-wide on the Raspi, but we should make it accessible within the virtual environment.
-
-1. First, activate the virtual environment if it is not already activated:
-
-    ```bash
-    source ~/tflite/bin/activate
-```
-
-2. Now create a .pth file in your virtual environment to add the system site-packages path:
-
-    ```bash
-    echo "/usr/lib/python3/dist-packages" > \
-      $VIRTUAL_ENV/lib/python3.11/site-packages/system_site_packages.pth
-    ```
-
-    > Note: If your Python version differs, replace  `python3.11` with the appropriate version.
-
-3. After creating this file, try importing picamera2 in Python:
-
-    ```bash
-    python3
-    >>> import picamera2
-    >>> print(picamera2.__file__)
-    ```
-
-The above code will show the file location of the `picamera2` module itself, proving that the library can be accessed from the environment.
-
-```python
-/home/mjrovai/tflite/lib/python3.11/site-packages/\
-picamera2/__init__.py
-```
-
-You can also list the available cameras in the system:
-
-```python
->>> print(Picamera2.global_camera_info())
-```
-
-In my case, with a USB installed, I got:
-
-\noindent
-![](images/png/cam_installed.png)
-
-Now that picamera2 works in the environment with an `index 0`, try a simple Python script to capture an image from your USB camera:
+Adapt the earlier camera code into a function that captures a $224{\times}224$ image and saves it in the `images` folder:
 
 ```python
 from picamera2 import Picamera2
 import time
 
-# Initialize the camera
-picam2 = Picamera2()  # default is index 0
+def capture_image(image_path):
+    # Initialize camera
+    picam2 = Picamera2() # default is index 0
 
-# Configure the camera
-config = picam2.create_still_configuration(main={"size": (640, 480)})
-picam2.configure(config)
+    # Configure the camera
+    config = picam2.create_still_configuration(
+        main={"size": (224, 224)})
+    picam2.configure(config)
+    picam2.start()
 
-# Start the camera
-picam2.start()
+    # Wait for camera to warm up
+    time.sleep(2)
 
-# Wait for the camera to warm up
-time.sleep(2)
+    # Capture image
+    picam2.capture_file(image_path)
+    print("Image captured: " + image_path)
 
-# Capture an image
-picam2.capture_file("usb_camera_image.jpg")
-print("Image captured and saved as 'usb_camera_image.jpg'")
-
-# Stop the camera
-picam2.stop()
+    # Stop camera
+    picam2.stop()
+    picam2.close()
 ```
 
-Use the Nano text editor, the Jupyter Notebook, or any other editor. Save this as a Python script (e.g., `capture_image.py`) and run it. This should capture an image from your camera and save it as "usb_camera_image.jpg" in the same directory as your script.
+Capture an image and send it for inference:
+
+```python
+img_path = './images/cam_img_test.jpg'
+model_path = "./models/mobilenet_v2_1.0_224_quant.tflite"
+labels = load_labels("./models/labels.txt")
+capture_image(img_path)
+image_classification(img_path, model_path, labels, top_k_results=5)
+```
 
 \noindent
-![](images/png/capture_test.png){width=90% fig-align="center"}
+![](images/png/can_test-infer-cup.jpg){width=85% fig-align="center"}
 
-If the Jupyter is open, you can see the captured image on your computer. Otherwise, transfer the file from the Raspi to your computer.
+### Exploring a Model Trained from Scratch {#sec-image-classification-testing-model-trained-scratch-4cb8}
+
+A TFLite model trained from scratch can be obtained with the notebook [CNN to classify Cifar-10 dataset](https://colab.research.google.com/github/Mjrovai/UNIFEI-IESTI01-TinyML-2022.1/blob/main/00_Curse_Folder/2_Applications_Deploy/Class_16/cifar_10/CNN_Cifar_10_TFLite.ipynb#scrollTo=iiVBUpuHXEtw).
+
+The notebook trains a model on the CIFAR-10 dataset, which contains 60,000 images from 10 classes (*airplane, automobile, bird, cat, deer, dog, frog, horse, ship, and truck*). CIFAR images are $32{\times}32$ color images (3 channels) in which the objects are not centered and may have a background, such as airplanes against a cloudy sky. In short, they are small but real images.
+
+The trained CNN model (*cifar10_model.keras*) has a size of 2.0 MB. The *TFLite Converter* shrinks it to 674 KB (*cifar10.tflite*), around one-third of the original size.
 
 \noindent
-![](images/png/img_test_result.png){width=65% fig-align="center"}
+![](images/png/cifar10_model.png){width=85% fig-align="center"}
 
-> If you are working with a Raspi-5 with a whole desktop, you can open the file directly on the device.
+Running the notebook [20_Cifar_10_Image_Classification.ipynb](https://github.com/Mjrovai/EdgeML-with-Raspberry-Pi/blob/main/IMG_CLASS/notebooks/20_Cifar_10_Image_Classification.ipynb) with `cifar10.tflite`, following the same steps as with MobileNet, shows that the inference probabilities are lower than those of MobileNet V2.
+
+The images below were classified with the general image classification function on a Raspberry Pi Zero:
+
+\noindent
+![](images/png/infer-cifar10.png){width=90% fig-align="center"}
 
 ## Image Classification Project {#sec-image-classification-image-classification-project-2617}
 
-Now, we will develop a complete Image Classification project using the Edge Impulse Studio. As we did with the Movilinet V2, the trained and converted TFLite model will be used for inference.
+Now, we will develop a complete Image Classification project using the Edge Impulse Studio. As with MobileNet V2, the trained and converted TFLite model is used for inference with a Python script. The project follows a typical ML workflow:
+
+\noindent
+![](images/png/pipeline-sensecraft.png){width=85% fig-align="center"}
 
 ### The Goal {#sec-image-classification-goal-dd93}
 
@@ -1081,16 +1170,28 @@ On the `Dashboard` tab, go to Transfer learning model (int8 quantized) and click
 
 > Also download the float32 version for comparison.
 
-Transfer the model from your computer to the Raspi (./models), for example, using FileZilla. Also, capture some images for inference (./images).
+Transfer the model from your computer to the Raspi (./models), for example, using FileZilla. Also, capture some images for inference (./images), or use the images in the `./dataset` folder.
 
-Import the needed libraries:
+As in the first part of this lab, activate the environment:
+
+```bash
+source ~/tflite_env/bin/activate
+```
+
+Run Jupyter Notebook (with your own IP address):
+
+```bash
+jupyter notebook --ip=192.168.4.210 --no-browser
+```
+
+Open a new [notebook](https://github.com/Mjrovai/EdgeML-with-Raspberry-Pi/blob/main/IMG_CLASS/notebooks/30_Image_Classification_edge_impulse.ipynb) and import the needed libraries:
 
 ```python
 import time
 import numpy as np
 import matplotlib.pyplot as plt
 from PIL import Image
-import tflite_runtime.interpreter as tflite
+from ai_edge_litert.interpreter import Interpreter
 ```
 
 Define the paths and labels:
@@ -1107,8 +1208,8 @@ labels = ["background", "periquito", "robot"]
 Load the model, allocate the tensors, and get the input and output tensor details:
 
 ```python
-# Load the TFLite model
-interpreter = tflite.Interpreter(model_path=model_path)
+# Load the LiteRT model
+interpreter = Interpreter(model_path=model_path)
 interpreter.allocate_tensors()
 
 # Get input and output tensors
@@ -1224,8 +1325,8 @@ def image_classification(
     plt.imshow(img)
     plt.axis("off")
 
-    # Load the TFLite model
-    interpreter = tflite.Interpreter(model_path=model_path)
+    # Load the LiteRT model
+    interpreter = Interpreter(model_path=model_path)
     interpreter.allocate_tensors()
 
     # Get input and output tensors
@@ -1313,6 +1414,8 @@ Download a smaller model, such as the one trained for the [Nicla Vision Lab](htt
 
 The model lost some accuracy, but it is still acceptable because the task does not require many details. Regarding latency, we are around **ten times faster** on the Raspi-Zero.
 
+> With the Raspberry Pi 5, the latencies are 8 ms and 0.8 ms, respectively.
+
 ## Live Image Classification {#sec-image-classification-live-image-classification-aa5d}
 
 Next, build an app that captures images with the USB camera in real time and shows their classification.
@@ -1329,7 +1432,7 @@ import threading
 import time
 import numpy as np
 from PIL import Image
-import tflite_runtime.interpreter as tflite
+from ai_edge_litert.interpreter import Interpreter
 from queue import Queue
 
 app = Flask(__name__)
@@ -1379,7 +1482,7 @@ def generate_frames():
 def load_model():
     global interpreter
     if interpreter is None:
-        interpreter = tflite.Interpreter(model_path=model_path)
+        interpreter = Interpreter(model_path=model_path)
         interpreter.allocate_tensors()
     return interpreter
 
@@ -1567,13 +1670,13 @@ Here, you can see the app running on the YouTube:
 
 {{< video https://www.youtube.com/watch?v=o1QsQrpCMw4 >}}
 
-The code creates a web application for real-time image classification using a Raspberry Pi, its camera module, and a TensorFlow Lite model. The application uses Flask to serve a web interface where you can view the camera feed and see live classification results.
+The code creates a web application for real-time image classification using a Raspberry Pi, its camera module, and a LiteRT model. The application uses Flask to serve a web interface where you can view the camera feed and see live classification results.
 
 #### Key Components: {#sec-image-classification-key-components-5c7f}
 
 1. **Flask Web Application**: Serves the user interface and handles requests.
 2. **PiCamera2**: Captures images from the Raspberry Pi camera module.
-3. **TensorFlow Lite**: Runs the image classification model.
+3. **LiteRT**: Runs the image classification model.
 4. **Threading**: Manages concurrent operations to keep performance smooth.
 
 #### Main Features: {#sec-image-classification-main-features-d78f}
@@ -1588,7 +1691,7 @@ The code creates a web application for real-time image classification using a Ra
 1. **Imports and Setup**:
     - Flask for web application
     - PiCamera2 for camera control
-    - TensorFlow Lite for inference
+    - LiteRT for inference
     - Threading and Queue for concurrent operations
 
 2. **Global Variables**:
