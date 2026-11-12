@@ -709,13 +709,11 @@ fit=(GRAPH1),yshift=0mm](BB1){};
 %Graph2
 \begin{scope}[local bounding box=GRAPH2,shift={($(GRAPH1)+(5.5,-1.0)$)},scale=1, every node/.append style={transform shape}]
 \begin{axis}[ axis x line=bottom,  axis y line=left,  axis line style={-latex},
-ticklabel style={font=\tiny\sffamily},axis background/.style={fill=gray!10},
-%clip=false,
-width=4cm, height=2cm,ymax=0.99,xmax=16,
-enlarge x limits=0.1,
- scale only axis, %enlargelimits=false,
+ticklabel style={font=\tiny\sffamily},axis background/.style={fill=GrayLine!10},
+width=4cm, height=2cm,ymin=-0.99,ymax=0.99,xmin=0,xmax=10.8,xtick={5,10},
+ scale only axis,
  samples=600]
-\addplot[smooth, color=cyan,  domain=2:14.9] (\x,{sin((3*(147*deg(x))) )*cos(((1*deg(x))) )}) ;
+\addplot[smooth, color=BlueLine, domain=0.4:10.0] (\x,{sin((3*(210*deg(x))) )*cos(((1.5*deg(x))) )}) ;
 \end{axis}
 \end{scope}
 %Graph3
@@ -810,9 +808,47 @@ fit=(GRAPH2)(DIAGRAM1),yshift=0mm](BB2){};
 
 :::
 
-Its problem definition fixes the same three specifications that the ResNet-50 claim needed. The input is single-channel audio streamed at 16 kHz in fixed one-second windows, which sets a rigid ingestion rate and memory buffer requirement before feature extraction begins. The model is an autoencoder, a network trained to reproduce normal machine sounds at its output, so a sound it reconstructs poorly (a large reconstruction error) signals an anomaly. The output is a binary "Normal" or "Anomaly" flag, including any thresholding that turns a reconstruction error into that decision. The performance specification couples a quality metric with execution limits. The quality metric is the area under the ROC curve (AUC), which scores the detector across every setting of that threshold rather than at one. The execution limits are a per-inference latency that keeps pace with the one-second input windows, sustained throughput matching the arrival rate, and a resident footprint that avoids out-of-memory faults on the microcontroller.
+```{python}
+#| echo: false
+#| label: anomaly-input-window-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ ANOMALY DETECTION INPUT WINDOW DIMENSIONS
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Problem-definition walkthrough paragraph immediately below
+# │          @fig-benchmark-components.
+# │
+# │ Goal:    Compute the per-inference feature vector dimension from the
+# │          MLPerf Tiny spectrogram frame and mel-band counts.
+# │ Show:    10-second clip duration, 128 mel bands, 5-frame window, and
+# │          640 input features per autoencoder inference.
+# │ How:     Multiply window_frames by mel_bands (Banbury et al. 2021, Sec. 4.4).
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt
 
-At the dataset selection stage (the second chevron), the benchmark pipeline ingests representative audio waveform samples of normal machine operation alongside anomalous conditions before spectrogram feature extraction. Domain-specific collections cover different audio tasks: ToyADMOS[^fn-toyadmos-anomaly-benchmark] [@koizumi2019] supports controlled anomaly-detection research, while Google Speech Commands [@warden2018speech] supports keyword recognition. Simplified datasets like ToyADMOS are valuable for methodological development but may not capture the full complexity of production environments.
+class AnomalyInputWindow:
+    """MLPerf Tiny Anomaly Detection ToyADMOS log-mel input window geometry."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    clip_seconds = 10
+    mel_bands = 128
+    window_frames = 5
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    window_features = window_frames * mel_bands
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(window_features == 640, f"Expected 640 features (5 x 128), got {window_features}")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────────────────────────────
+    clip_seconds_str = fmt(clip_seconds, precision=0, commas=False)
+    mel_bands_str = fmt(mel_bands, precision=0, commas=False)
+    window_frames_str = fmt(window_frames, precision=0, commas=False)
+    window_features_str = fmt(window_features, precision=0, commas=False)
+```
+
+Its problem definition fixes the same three specifications that the ResNet-50 claim needed. The input starts from `{python} AnomalyInputWindow.clip_seconds_str`-second single-channel machine-operating audio clips from ToyADMOS[^fn-toyadmos-anomaly-benchmark] [@koizumi2019; @banbury2021mlperftiny], converted into `{python} AnomalyInputWindow.mel_bands_str`-band log-mel spectrograms and fed to the model in `{python} AnomalyInputWindow.window_frames_str`-frame (`{python} AnomalyInputWindow.window_features_str`-feature) sliding windows, which fixes the feature-extraction buffer and per-inference input shape. The model is a fully connected deep autoencoder, a network trained to reproduce normal machine-sound spectrogram windows at its output, so a sequence of windows it reconstructs poorly (yielding a large clip-level reconstruction error) signals an anomaly. The output is a clip-level anomaly score that thresholding turns into a binary "Normal" or "Anomaly" flag. The performance specification couples a quality metric with execution limits. The quality metric is the area under the ROC curve (AUC), which scores clip-level reconstruction error across every setting of that threshold rather than at one. The execution limits are a per-inference latency that keeps pace with the sliding spectrogram windows, sustained throughput matching the frame arrival rate, and a resident footprint that avoids out-of-memory faults on the microcontroller.
+
+At the dataset selection stage (the second chevron), the benchmark pipeline ingests representative audio waveform clips of normal machine operation alongside anomalous conditions before spectrogram feature extraction. Domain-specific collections cover different audio tasks: ToyADMOS [@koizumi2019] supports controlled anomaly-detection research, while Google Speech Commands [@warden2018speech] supports keyword recognition on one-second spoken-word clips. Simplified datasets like ToyADMOS are valuable for methodological development but may not capture the full complexity of production environments.
 
 [^fn-toyadmos-anomaly-benchmark]: **ToyADMOS**\index{ToyADMOS!domain gap}: Developed by NTT Communications in 2019 for acoustic anomaly detection, containing audio recordings from toy car, toy conveyor, and related miniature-machine operating sounds [@koizumi2019]. The "toy" prefix is intentional: the controlled environment enables reproducible benchmarking but can create a domain gap when models are moved to noisier industrial environments with different machines, sensors, vibration, and background sound.
 
@@ -1587,12 +1623,53 @@ System benchmarks serve two functions. For practitioners, they enable informed h
 
 :::
 
-The ImageNet challenge shows why separating the hardware's contribution from the model's is hard to do after the fact. Between 2010 and 2014, top-5 error (the blue line in @fig-imagenet-gpus) fell from 28.2 percent to 7.3 percent, with the steepest single drop at AlexNet's arrival in 2012. Over the same years, GPU-accelerated entries (the green bars) rose from zero to over 100 [@krizhevsky2012imagenet; @russakovsky2015; @gray2015ilsvrcgpu]. These paired series plot contemporaneous empirical trends, not a causal attribution of how much accuracy gain stemmed from hardware throughput versus algorithmic design, training schedules, or dataset expansion. A system benchmark avoids that ambiguity by construction. It fixes the model and quality target so that any change in the result belongs to the hardware-software stack.
+```{python}
+#| echo: false
+#| label: imagenet-gpu-trend-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ IMAGENET TOP-5 ERROR AND GPU ENTRY PROGRESSION (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-imagenet-gpus lead-in paragraph immediately below.
+# │
+# │ Goal:    Verify and format ILSVRC 2010-2014 winning top-5 classification
+# │          error rates and GPU-accelerated entry counts from the chapter CSV.
+# │ Show:    28.2 percent (2010) to 6.7 percent (2014, GoogLeNet) and 110 GPU
+# │          entries in 2014.
+# │ How:     Load vol1/12_benchmarking/data/ilsvrc_error_and_gpu_entries.csv.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import viz
+from mlsysim.fmt import check, fmt_percent
 
-::: {#fig-imagenet-gpus fig-env="figure" fig-pos="htb" fig-cap="**ImageNet Error and GPU Adoption**: Sourced top-5 error rates are shown beside GPU use among challenge entries. The temporal association does not isolate hardware's causal contribution. Error-rate sources: [@russakovsky2015; @krizhevsky2012imagenet]. @gray2015ilsvrcgpu charts the per-year GPU entry counts." fig-alt="Dual-axis chart with a blue line showing top-5 error rate declining and green bars showing increased GPU use among ImageNet challenge entries from 2010 to 2014."}
+class ImagenetGpuTrend:
+    """ILSVRC 2010-2014 winning top-5 classification error and GPU adoption."""
+
+    # ┌── 1. LOAD ──────────────────────────────────────────────────────────
+    _rows = viz.load_series("vol1/12_benchmarking/data/ilsvrc_error_and_gpu_entries.csv").entries
+
+    # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
+    _by_year = {int(r["year"]): r for r in _rows}
+    err_2010 = float(_by_year[2010]["winning_top5_error_pct"])
+    err_2014 = float(_by_year[2014]["winning_top5_error_pct"])
+    gpu_2010 = int(_by_year[2010]["gpu_entries"])
+    gpu_2014 = int(_by_year[2014]["gpu_entries"])
+
+    # ┌── 3. GUARD ─────────────────────────────────────────────────────────
+    check(abs(err_2010 - 28.2) < 1e-9, f"Expected 2010 ILSVRC error 28.2, got {err_2010}")
+    check(abs(err_2014 - 6.7) < 1e-9, f"Expected 2014 GoogLeNet error 6.7, got {err_2014}")
+    check(gpu_2010 == 0 and gpu_2014 == 110, f"Expected GPU entries 0 -> 110, got {gpu_2010} -> {gpu_2014}")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
+    err_2010_pct_str = fmt_percent(err_2010 / 100, precision=1, commas=False, style="prose")
+    err_2014_pct_str = fmt_percent(err_2014 / 100, precision=1, commas=False, style="prose")
+```
+
+The ImageNet challenge shows why separating the hardware's contribution from the model's is hard to do after the fact. Between 2010 and 2014, winning top-5 classification error (the blue line in @fig-imagenet-gpus) fell from `{python} ImagenetGpuTrend.err_2010_pct_str` to `{python} ImagenetGpuTrend.err_2014_pct_str`, with the steepest single drop at AlexNet's arrival in 2012. Over the same years, GPU-accelerated entries (the green bars) rose from zero to over 100 [@krizhevsky2012imagenet; @russakovsky2015; @gray2015ilsvrcgpu]. These paired series plot contemporaneous empirical trends, not a causal attribution of how much accuracy gain stemmed from hardware throughput versus algorithmic design, training schedules, or dataset expansion. A system benchmark avoids that ambiguity by construction. It fixes the model and quality target so that any change in the result belongs to the hardware-software stack.
+
+::: {#fig-imagenet-gpus fig-env="figure" fig-pos="htb" fig-cap="**ImageNet Error and GPU Adoption**: Winning ILSVRC top-5 classification error rates are shown beside GPU-backed entry counts from 2010 to 2014. The temporal association does not isolate hardware's causal contribution. Error-rate sources: [@russakovsky2015; @krizhevsky2012imagenet]; per-year GPU entry counts: [@gray2015ilsvrcgpu]." fig-alt="Dual-axis chart from 2010 to 2014 with a blue line showing winning ImageNet top-5 classification error declining from 28.2 percent to 6.7 percent and green bars showing challenge entries using GPUs rising from 0 to 110."}
 
 ```{.tikz}
 \begin{tikzpicture}[font=\small\sffamily]
+% Source: books/vol1/12_benchmarking/data/ilsvrc_error_and_gpu_entries.csv
 
 \pgfplotsset{myaxis/.style={
   axis line style={draw=none},
@@ -1619,7 +1696,7 @@ The ImageNet challenge shows why separating the hardware's contribution from the
   %grid
 \begin{axis}[myaxis,
     grid=both,
-    major grid style={thin,black!60},
+    major grid style={thin,GrayLine!60},
     minor tick num=1,
     ymin=0,    ymax=33,
     ytick={0,10,...,30},
@@ -1630,7 +1707,8 @@ The ImageNet challenge shows why separating the hardware's contribution from the
 \begin{axis}[myaxis,
     axis y line*=right,
     axis x line=none,
-    ylabel={\color{green!60!black}\# of Entries Using GPUs},
+    yticklabels={0,25,50,75,100,125},
+    ylabel={\color{GreenLine}\# of Entries Using GPUs},
     xlabel={Year},
     ymin=0,    ymax=133,
     ytick={0,25,...,125},
@@ -1642,14 +1720,14 @@ The ImageNet challenge shows why separating the hardware's contribution from the
         }]
       \addplot[draw=none]coordinates {(2010,0)};
       \addplot[draw=none]coordinates {(2011,0)};
-      \addplot[green!60!black]coordinates {(2012,4)};
-      \addplot[green!60!black]coordinates{(2013,60)};
-      \addplot[green!60!black]coordinates{(2014,110)};
+      \addplot[GreenLine]coordinates {(2012,4)};
+      \addplot[GreenLine]coordinates{(2013,60)};
+      \addplot[GreenLine]coordinates{(2014,110)};
       %
 \end{axis}
   %line
 \begin{axis}[myaxis,
-    ylabel={\color{blue!50!black}Top-5 Error Rate (\%)},
+    ylabel={\color{BlueLine}Top-5 Error Rate (\%)},
     xlabel={Year},
     ymin=0,    ymax=33,
     ytick={0,10,...,30},
@@ -1659,8 +1737,8 @@ The ImageNet challenge shows why separating the hardware's contribution from the
   mark=*,
   mark size=2pt,
   line width=1.5pt,
-  draw=blue!50!black, %
-  mark options={fill=red, draw=red} %
+  draw=BlueLine,
+  mark options={fill=RedLine, draw=RedLine}
 ]
 table[x=Year,y=Y, col sep=comma] {
 Year,Y
@@ -1668,7 +1746,7 @@ Year,Y
   2011,25.8
   2012,16.4
   2013,11.7
-  2014,7.3
+  2014,6.7
 };
 \end{axis}
 \end{tikzpicture}
@@ -1757,12 +1835,67 @@ Because training represents the largest capital expenditure in many ML organizat
 
 ### Training benchmark motivation {#sec-benchmarking-training-benchmark-motivation-f365}
 
-MLPerf Training\index{MLPerf Training!standardized framework} [@mattson2020mlperf; @mlperf_training_website] provides the standardized framework for this time-to-quality measurement. The longitudinal scaling curves in @fig-mlperf-training-improve track cumulative relative performance gains across nine model workloads between 2018 and 2024 against the orange Moore's Law baseline. Every workload curve outpaces cumulative transistor scaling (which reaches 6.6$\times$ by mid-2024), led by Mask R-CNN climbing to 48.8$\times$ and ResNet reaching 34$\times$ as distributed scaling and compiler optimizations compound hardware improvements [@tschand2025]. This trajectory documents improvements in the full hardware-software system beyond transistor scaling alone.
+```{python}
+#| echo: false
+#| label: mlperf-training-progress-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MLPERF TRAINING RELATIVE PERFORMANCE PROGRESSION (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-mlperf-training-improve lead-in, caption, and payoff prose.
+# │
+# │ Goal:    Verify MLPerf Training v0.5-v4.0 relative performance series and
+# │          debut-anchor ratios from the chapter CSV.
+# │ Show:    Moore's Law endpoint (6.6x), Mask R-CNN (48.8x), ResNet (34x),
+# │          monotonic 3D-U-Net endpoint (9.45), and GPT-3 speedup from debut
+# │          (15.39 / 4.80 = 3.2x).
+# │ How:     Load vol1/12_benchmarking/data/mlperf_training_relative_speedup.csv.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import viz
+from mlsysim.fmt import check, fmt, fmt_multiple
 
-::: {#fig-mlperf-training-improve fig-env="figure" fig-pos="htb" fig-cap="**MLPerf Training Progress**: Workload lines report cumulative relative performance across benchmark versions against the plotted cumulative Moore's Law baseline. Every workload's latest point exceeds the baseline at the same date, and Mask R-CNN reaches the largest plotted gain at 48.8$\times$; the comparison captures combined hardware and software progress, not hardware scaling alone. Source: [@tschand2025]." fig-alt="Line chart with nine model benchmarks from 2018 to 2024 showing relative performance gains. Every benchmark's latest point sits above the Moore's law baseline of 6.6×, and Mask R-CNN reaches the highest value at 48.8×."}
+class MlperfTrainingProgress:
+    """MLPerf Training v0.5-v4.0 relative performance and debut-anchor ratios."""
+
+    # ┌── 1. LOAD ──────────────────────────────────────────────────────────
+    _rows = viz.load_series("vol1/12_benchmarking/data/mlperf_training_relative_speedup.csv").entries
+
+    # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
+    _by_workload: dict[str, list[dict[str, object]]] = {}
+    for _r in _rows:
+        _by_workload.setdefault(str(_r["workload"]), []).append(_r)
+
+    moore_end = float(_by_workload["Moore's Law Cumulative"][-1]["relative_perf"])
+    mask_rcnn_end = float(_by_workload["Mask R-CNN"][-1]["relative_perf"])
+    resnet_end = float(_by_workload["ResNet"][-1]["relative_perf"])
+    unet_vals = [float(r["relative_perf"]) for r in _by_workload["3D-U-Net"]]
+    gpt3_anchor = float(_by_workload["GPT-3"][0]["debut_anchor"])
+    gpt3_end = float(_by_workload["GPT-3"][-1]["relative_perf"])
+    gpt3_speedup = gpt3_end / gpt3_anchor
+
+    # ┌── 3. GUARD ─────────────────────────────────────────────────────────
+    check(abs(moore_end - 6.6) < 1e-9, f"Expected Moore's Law 6.6, got {moore_end}")
+    check(abs(mask_rcnn_end - 48.8) < 1e-9, f"Expected Mask R-CNN 48.8, got {mask_rcnn_end}")
+    check(abs(resnet_end - 33.8) < 1e-9, f"Expected ResNet 33.8, got {resnet_end}")
+    check(all(a <= b for a, b in zip(unet_vals, unet_vals[1:])), f"3D-U-Net must be monotonic: {unet_vals}")
+    check(abs(unet_vals[-1] - 9.45) < 1e-9, f"Expected 3D-U-Net endpoint 9.45, got {unet_vals[-1]}")
+    check(abs(round(gpt3_speedup, 2) - 3.21) < 1e-9, f"Expected GPT-3 debut speedup 3.21x, got {gpt3_speedup:.2f}")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
+    moore_end_mult_str = fmt_multiple(moore_end, precision=1, commas=False)
+    mask_rcnn_end_mult_str = fmt_multiple(mask_rcnn_end, precision=1, commas=False)
+    resnet_end_round_mult_str = fmt_multiple(round(resnet_end), precision=0, commas=False)
+    gpt3_anchor_str = fmt(gpt3_anchor, precision=1, commas=False)
+    gpt3_end_str = fmt(gpt3_end, precision=2, commas=False)
+    gpt3_speedup_mult_str = fmt_multiple(gpt3_speedup, precision=1, commas=False)
+```
+
+MLPerf Training\index{MLPerf Training!standardized framework} [@mattson2020mlperf; @mlperf_training_website] provides the standardized framework for this time-to-quality measurement. The longitudinal scaling curves in @fig-mlperf-training-improve track Closed-division relative performance gains across nine model workloads from v0.5 (December 2018) to v4.0 (June 2024) against the orange Moore's Law baseline. Every workload curve outpaces cumulative transistor scaling (which reaches `{python} MlperfTrainingProgress.moore_end_mult_str` by mid-2024), led among the inaugural v0.5 benchmarks by Mask R-CNN climbing to `{python} MlperfTrainingProgress.mask_rcnn_end_mult_str` and ResNet reaching about `{python} MlperfTrainingProgress.resnet_end_round_mult_str` as distributed scaling and compiler optimizations compound hardware improvements [@tschand2025]. This trajectory documents improvements in the full hardware-software system beyond transistor scaling alone.
+
+::: {#fig-mlperf-training-improve fig-env="figure" fig-pos="htb" fig-cap="**MLPerf Training Progress**: Closed-division on-premises relative training performance across MLPerf Training v0.5 (December 2018) through v4.0 (June 2024) against a $2\times$-per-two-year cumulative Moore's Law reference line [@tschand2025; @mattson2020mlperf]. ResNet and Mask R-CNN are indexed to $1.0\times$ at their v0.5 debut alongside the Moore's Law baseline, whereas workloads introduced in later rounds (BERT-Large and DLRM in v0.7, 3D-U-Net in v1.0, RetinaNet in v2.0, GPT-3 and DLRM-DCNv2 in v3.0, and Stable Diffusion v2 in v3.1) start on the cumulative Moore's Law curve at their debut round, so a later workload's speedup from debut equals its plotted value divided by its debut anchor (for example, `{python} MlperfTrainingProgress.gpt3_speedup_mult_str` for GPT-3 from `{python} MlperfTrainingProgress.gpt3_anchor_str` to `{python} MlperfTrainingProgress.gpt3_end_str`). Mask R-CNN reaches `{python} MlperfTrainingProgress.mask_rcnn_end_mult_str`, capturing combined hardware and software progress." fig-alt="Logarithmic base-2 line chart of relative training performance across nine MLPerf Training benchmarks from December 2018 to June 2024 compared against a cumulative Moore's law reference line rising from 1 to 6.6. ResNet and Mask R-CNN start at 1 in December 2018 and rise to 33.8 and 48.8, while benchmarks introduced in later rounds start on the Moore's law curve at their debut dates and rise above it."}
 
 ```{.tikz}
 \begin{tikzpicture}[font=\small\sffamily]
+% Source: books/vol1/12_benchmarking/data/mlperf_training_relative_speedup.csv
 \makeatletter
 \newcommand*\short[1]{\expandafter\@gobbletwo\number\numexpr#1\relax}
 \makeatother
@@ -1794,13 +1927,13 @@ MLPerf Training\index{MLPerf Training!standardized framework} [@mattson2020mlper
   ylabel={},
   title={Relative performance -- Best results -- Closed, available, on premises},
   grid=both,
-  major grid style={black!60},
+  major grid style={GrayLine!60},
         tick label style={/pgf/number format/assume math mode=true},
         ticklabel style={font=\footnotesize\sffamily},
         xticklabel style={yshift=-3pt},
 ]
-%green-ResNet
-\addplot[green!70!black,mark=Mercedes star,
+%ResNet
+\addplot[GreenLine,mark=Mercedes star,
 mark options={line width=1pt},
 mark size=3pt,line width=1.15pt,
 ] table[x=Date, y=Y,  col sep=comma] {
@@ -1817,8 +1950,8 @@ Y,Date
 33.8, 2024-06-15
 };
 \addlegendentry{ResNet}
-%diamond-Mask R-CNN
-\addplot[cyan!90!black,mark=diamond*,
+%Mask R-CNN
+\addplot[BlueLine!75!GreenLine,mark=diamond*,
 mark size=2pt,line width=1.15pt,
 ] table[x=Date, y=Y,  col sep=comma] {
 Y,Date
@@ -1833,8 +1966,8 @@ Y,Date
 48.8, 2023-11-15
 };
 \addlegendentry{Mask R-CNN}
-%triangle RetinaNet
-\addplot[OliveLine,
+%RetinaNet
+\addplot[GreenLine!70!BrownLine,
 line width=1.15pt,
 mark size=2pt,mark=triangle*,
 mark options={line width=1pt}
@@ -1847,8 +1980,8 @@ Y,Date
 10.3, 2024-06-15
 };
 \addlegendentry{RetinaNet}
-%red 3D-U-Net
-\addplot[red,line width=1.15pt,
+%3D-U-Net
+\addplot[RedLine,line width=1.15pt,
 mark=square*,mark size=1.5pt,
 ] table[x=Date, y=Y,  col sep=comma] {
 Y,Date
@@ -1858,10 +1991,10 @@ Y,Date
 6.05, 2022-11-15
 8.94, 2023-06-15
 9.45, 2023-11-15
-9.4, 2024-06-15
+9.45, 2024-06-15
 };
 \addlegendentry{3D-U-Net}
-%pentagon-Bert-large
+%BERT-Large
 \addplot[BlueLine,line width=1.15pt,
   mark=pentagon*,
   mark size=2pt,
@@ -1877,11 +2010,11 @@ Y,Date
 11.99, 2024-06-15
 };
 \addlegendentry{BERT-Large}
-%violet GPT3
-\addplot[pink!59!orange,line width=1.15pt,
+%GPT-3
+\addplot[OrangeLine!65!RedLine,densely dashed,line width=1.15pt,
 mark=|,
-  mark options={line width=1pt},
-  mark size=2pt,
+  mark options={solid,line width=1pt},
+  mark size=2.2pt,
 ] table[x=Date, y=Y,  col sep=comma] {
 Y,Date
 4.8, 2023-06-15
@@ -1889,10 +2022,10 @@ Y,Date
 15.39, 2024-06-15
 };
 \addlegendentry{GPT-3}
-%red-DLRM
-\addplot[RedLine,line width=1.15pt,
+%DLRM
+\addplot[RedLine!65!VioletLine,densely dashed,line width=1.15pt,
   mark=star,
-  mark size=3pt,mark options={line width=1pt}
+  mark size=3pt,mark options={solid,line width=1pt}
 ] table[x=Date, y=Y,  col sep=comma] {
 Y,Date
 1.78, 2020-07-15
@@ -1902,7 +2035,7 @@ Y,Date
 10, 2022-11-15
 };
 \addlegendentry{DLRM}
-%plus DLRM-dcnv2
+%DLRM-DCNv2
 \addplot[BrownLine,
 line width=1.15pt,
 mark size=2pt,mark=+,
@@ -1914,7 +2047,7 @@ Y,Date
 7.9, 2024-06-15
 };
 \addlegendentry{DLRM-DCNv2}
-%violet-Stable diffusion v2
+%Stable Diffusion v2
 \addplot[VioletLine,
 line width=1.25pt,
 mark size=2pt,mark=x,
@@ -1925,8 +2058,8 @@ Y,Date
 9.8, 2024-06-15
 };
 \addlegendentry{Stable Diffusion v2}
-%orange-Moore's Law Cumulative
-\addplot[orange,line width=1.25pt,
+%Moore's Law Cumulative
+\addplot[OrangeLine,line width=1.35pt,
 mark size=2pt,mark=*,
 ] table[x=Date, y=Y,  col sep=comma] {
 Y,Date
@@ -1948,7 +2081,7 @@ Y,Date
 
 :::
 
-The gap between the 6.6$\times$ transistor baseline and the 34$\times$ to 48.8$\times$ workload curves in @fig-mlperf-training-improve came from exposing and removing bottlenecks that raw silicon TFLOP/s never show, including slow data loading, underutilized accelerators, excessive memory overhead, and communication stalls that erode scaling efficiency. Advertised hardware capability becomes a training speedup only to the extent that an end-to-end training benchmark verifies it under realistic conditions.
+The gap between the `{python} MlperfTrainingProgress.moore_end_mult_str` transistor baseline and the `{python} MlperfTrainingProgress.resnet_end_round_mult_str` to `{python} MlperfTrainingProgress.mask_rcnn_end_mult_str` inaugural-workload curves in @fig-mlperf-training-improve came from exposing and removing bottlenecks that raw silicon TFLOP/s never show, including slow data loading, underutilized accelerators, excessive memory overhead, and communication stalls that erode scaling efficiency. Advertised hardware capability becomes a training speedup only to the extent that an end-to-end training benchmark verifies it under realistic conditions.
 
 Training benchmarks therefore serve four functions. They compare accelerators and frameworks on standardized tasks, which guides hardware selection and quantifies software optimizations such as mixed-precision training\index{Mixed-precision training!FP16 and FP32}[^fn-bench-mixed-precision] and memory-efficient data loading. They test scalability, because added accelerators should reduce training time proportionally and communication, synchronization, and memory bottlenecks keep them from doing so. They account for cost and energy, because a single large-scale training run can consume megawatt-hours of electricity (@sec-benchmarking-energy-efficiency-cost-15ca gives the estimate for GPT-3). Their standardized evaluation criteria, controlled randomness, submission rules, and audits also make comparisons more reproducible and constrain implementation-specific shortcuts.
 
@@ -2690,6 +2823,11 @@ Matching the MLPerf scenario to the deployment matters because SingleStream scor
 # │ How:  Values from MobileNetTradeoffCalc and EdgeAccelSpeedupCalc; the
 # │       hatched segments are end-to-end minus isolated latency;
 # │       book_style.set_book_style().
+# │ Provenance: Inputs from mlsysim Scenarios.MobileNetV2CameraTrapBoard via
+# │             MobileNetTradeoffCalc and EdgeAccelSpeedupCalc; overhead bars
+# │             equal e2e_latency - isolated_latency, and active energy equals
+# │             active_power * isolated_latency; epistemic: assumed (illustrative
+# │             SingleStream edge-board scenario).
 # └─────────────────────────────────────────────────────────────────────────────
 # ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
 import matplotlib.pyplot as plt
@@ -2953,7 +3091,13 @@ Measuring power differs from measuring execution time because power is not a sin
 # │
 # │ Goal: Visualize the massive spread in power consumption across system types.
 # │ Show: The eight-order-of-magnitude span from TinyML to Training systems.
-# │ How: Plot power ranges (mW to kW) on a logarithmic dumbbell chart.
+# │ How: Load vol1/12_benchmarking/data/mlperf_power_differentials.csv and plot
+# │      power ranges (mW to kW) on a logarithmic dumbbell chart.
+# │ Provenance: Loads vol1/12_benchmarking/data/mlperf_power_differentials.csv
+# │             (Tschand et al. 2025, Fig. 2 official MLPerf Power division
+# │             minima and maxima converted to watts); plots [min_power_w,
+# │             max_power_w] intervals on a log10 watts axis; epistemic:
+# │             measured (metered MLPerf Power submissions).
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 # ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
@@ -2963,15 +3107,12 @@ from binder.tools.figures import style as book_style
 fig, ax, COLORS, plt = book_style.setup_plot(figsize=(6.2, 4.15))
 
 # ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
-# All values in watts so the log axis is physically meaningful.
-# Minimum and maximum measured power per MLPerf division, from Tschand et al.
-# (2025), Fig. 2. Tiny spans milliwatts; Edge and Datacenter watts to kilowatts;
-# Training kilowatts to hundreds of kilowatts. The full span is roughly eight
-# orders of magnitude, which is the point of the figure. (2026-10-12: the Tiny
-# minimum was 5.6 uW, a unit error; the paper reports 5.6 mW.)
-system_types = ["Tiny", "Edge", "Data center", "Training"]
-min_power = [5.6e-3, 3.9, 266.9, 5500.0]  # 5.6 mW, 3.9 W, 267 W, 5.5 kW
-max_power = [0.1666, 1100.0, 6300.0, 498000.0]  # 167 mW, 1.1 kW, 6.3 kW, 498 kW
+# Minimum and maximum measured power per MLPerf division in watts, loaded from
+# the verified chapter dataset (Tschand et al. 2025, Fig. 2).
+_power_rows = book_style.load_series("vol1/12_benchmarking/data/mlperf_power_differentials.csv").entries
+system_types = [str(r["system_type"]) for r in _power_rows]
+min_power = [float(r["min_power_w"]) for r in _power_rows]
+max_power = [float(r["max_power_w"]) for r in _power_rows]
 
 # ┌── 3. RENDER ────────────────────────────────────────────────────────────────
 for i, (minp, maxp) in enumerate(zip(min_power, max_power)):
@@ -3475,15 +3616,69 @@ MLPerf Power [@tschand2025] translates raw electrical measurements into standard
 
 Standardizing the boundary prevents misleading comparisons across architectural families. By specifying instrumentation, measurement boundaries, matched logging windows, and the applicable workload constraints, MLPerf Power makes efficiency results interpretable within the tested scenario.
 
-Over successive benchmark submission rounds from 2021 to 2024, standardized measurements capture how architectural improvements, compiler optimizations, and lower-precision arithmetic translate into production efficiency gains. Tracking normalized energy efficiency (samples per joule) across eight submission cycles from v1.0 to v4.1, @fig-power-trends charts diverging efficiency trajectories across seven distinct MLPerf Inference workloads.
+```{python}
+#| echo: false
+#| label: mlperf-power-trends-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MLPERF INFERENCE POWER EFFICIENCY TRENDS (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-power-trends caption and surrounding case-study prose.
+# │
+# │ Goal:    Verify normalized Offline energy-efficiency endpoints from the
+# │          logarithmic [1x, 5x] axis of mlperf_power_datacenter.png.
+# │ Show:    Mature vision workloads (ResNet 3.02x, RetinaNet 3.00x) vs.
+# │          BERT-99.0 (1.68x), GPTJ-99.0 (1.66x), DLRM-v2-99.0 (1.48x),
+# │          Llama2-70b-99.9 (1.30x), and RNN-T (1.20x).
+# │ How:     Load vol1/12_benchmarking/data/mlperf_power_datacenter.csv.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import viz
+from mlsysim.fmt import check, fmt_multiple
 
-::: {#fig-power-trends fig-env="figure" fig-pos="htb" fig-cap="**Data-Center Energy Efficiency Gains**: Each series is normalized to its own first plotted version, so compare improvement within a workload rather than absolute efficiency across workloads. Source: [@tschand2025]." fig-alt="Line chart of normalized energy efficiency across MLPerf Inference versions from 2021 to 2024. RetinaNet and ResNet rise to 3 times their initial values; BERT and GPT-J reach about 1.9 times, DLRM-v2 about 1.7 times, Llama 2 about 1.5 times, and RNN-T about 1.3 times."}
+class MlperfPowerTrends:
+    """Normalized data-center Offline efficiency across MLPerf Inference v1.0-v4.1."""
+
+    # ┌── 1. LOAD ──────────────────────────────────────────────────────────
+    _rows = viz.load_series("vol1/12_benchmarking/data/mlperf_power_datacenter.csv").entries
+
+    # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
+    _by_bench: dict[str, list[dict[str, object]]] = {}
+    for _r in _rows:
+        _by_bench.setdefault(str(_r["benchmark"]), []).append(_r)
+
+    resnet_v40 = float([r for r in _by_bench["ResNet"] if r["version"] == "v4.0"][0]["normalized_efficiency"])
+    resnet_end = float(_by_bench["ResNet"][-1]["normalized_efficiency"])
+    retinanet_end = float(_by_bench["RetinaNet"][-1]["normalized_efficiency"])
+    bert_end = float(_by_bench["BERT-99.0"][-1]["normalized_efficiency"])
+    gptj_end = float(_by_bench["GPTJ-99.0"][-1]["normalized_efficiency"])
+    dlrm_end = float(_by_bench["DLRM-v2-99.0"][-1]["normalized_efficiency"])
+    llama_end = float(_by_bench["Llama2-70b-99.9"][-1]["normalized_efficiency"])
+    rnnt_end = float(_by_bench["RNN-T"][-1]["normalized_efficiency"])
+
+    # ┌── 3. GUARD ─────────────────────────────────────────────────────────
+    check(3.0 <= resnet_end <= 3.1 and abs(retinanet_end - 3.0) < 0.05, "Vision workloads reach ~3.0x by v4.1.")
+    check(resnet_end > bert_end > dlrm_end > llama_end > rnnt_end, "Endpoint ordering must match plotted curves.")
+    check(1.6 <= gptj_end <= 1.75 and 1.25 <= llama_end <= 1.35, f"LLM endpoints drifted: GPT-J={gptj_end}, Llama2={llama_end}")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
+    resnet_v40_mult_str = fmt_multiple(resnet_v40, precision=1, commas=False)
+    resnet_end_mult_str = fmt_multiple(resnet_end, precision=2, commas=False)
+    retinanet_end_mult_str = fmt_multiple(retinanet_end, precision=0, commas=False)
+    bert_end_mult_str = fmt_multiple(bert_end, precision=1, commas=False)
+    gptj_end_mult_str = fmt_multiple(gptj_end, precision=1, commas=False)
+    dlrm_end_mult_str = fmt_multiple(dlrm_end, precision=1, commas=False)
+    llama_end_mult_str = fmt_multiple(llama_end, precision=1, commas=False)
+    rnnt_end_mult_str = fmt_multiple(rnnt_end, precision=1, commas=False)
+```
+
+Over successive benchmark submission rounds from 2021 to 2024, standardized measurements capture how architectural improvements, compiler optimizations, and lower-precision arithmetic translate into production efficiency gains. Tracking normalized Offline energy efficiency (samples per joule on a logarithmic $1\times$ to $5\times$ vertical scale) across eight submission cycles from v1.0 to v4.1, @fig-power-trends contrasts cumulative gains across mature vision benchmarks and newer generative and recommendation workloads.
+
+::: {#fig-power-trends fig-env="figure" fig-pos="htb" fig-cap="**Data-Center Energy Efficiency Gains**: Normalized data-center Offline energy efficiency (samples per joule on a logarithmic $1\times$ to $5\times$ vertical axis) across MLPerf Inference v1.0 to v4.1 [@tschand2025]. Each series is indexed to $1\times$ at its own debut round, so compare relative improvement within a workload rather than absolute efficiency across workloads: mature vision benchmarks accumulate the largest multiples over longer histories (ResNet reaching about `{python} MlperfPowerTrends.resnet_end_mult_str` and RetinaNet reaching `{python} MlperfPowerTrends.retinanet_end_mult_str` by v4.1), whereas newer generative and recommendation entries start in v3.1 or v4.0 and show smaller cumulative multiples over fewer rounds (GPT-J reaching about `{python} MlperfPowerTrends.gptj_end_mult_str` and Llama 2 70B about `{python} MlperfPowerTrends.llama_end_mult_str`)." fig-alt="Logarithmic line chart from 1x to 5x showing normalized data-center energy efficiency in samples per joule across MLPerf Inference versions v1.0 to v4.1 from April 2021 to August 2024. ResNet rises to about 3.02 times its v1.0 baseline and RetinaNet rises to 3.0 times its v2.1 baseline; BERT-99.0 and GPTJ-99.0 reach about 1.7 times, DLRM-v2-99.0 reaches about 1.5 times, Llama2-70b-99.9 reaches about 1.3 times from v4.0 to v4.1, and RNN-T reaches about 1.2 times through v4.0."}
 
 ![](images/png/mlperf_power_datacenter.png){width="88%"}
 
 :::
 
-RetinaNet and ResNet show the largest plotted gains, each reaching 3$\times$ its initial normalized efficiency. BERT and GPT-J reach about 1.9$\times$, while DLRM-v2 reaches about 1.7$\times$, Llama 2 about 1.5$\times$, and RNN-T about 1.3$\times$. These trajectories combine changes in hardware, software, numerical formats, and submitted configurations. Static convolutional shapes can benefit from supported low-precision kernels and fusion; low-batch decoding and sparse embedding lookups often give memory improvements greater importance. The plotted ratios alone do not isolate how much each mechanism contributed.
+Mature vision workloads achieve the largest cumulative efficiency multiples over their longer benchmark histories: ResNet reaches about `{python} MlperfPowerTrends.resnet_end_mult_str` from v1.0 to v4.1 (jumping sharply from `{python} MlperfPowerTrends.resnet_v40_mult_str` in v4.0), and RetinaNet reaches `{python} MlperfPowerTrends.retinanet_end_mult_str` from v2.1 to v4.1. Over the full v1.0-to-v4.1 span, BERT-99.0 rises to about `{python} MlperfPowerTrends.bert_end_mult_str`, while RNN-T reaches `{python} MlperfPowerTrends.rnnt_end_mult_str` through v4.0. Newer generative and recommendation entries debut in later rounds and span fewer cycles, with GPT-J reaching about `{python} MlperfPowerTrends.gptj_end_mult_str` and DLRM-v2 reaching `{python} MlperfPowerTrends.dlrm_end_mult_str` from v3.1 to v4.1, and Llama 2 70B reaching `{python} MlperfPowerTrends.llama_end_mult_str` across its initial two rounds from v4.0 to v4.1. These trajectories combine changes in hardware, software, numerical formats, and submitted configurations. Static convolutional shapes benefit from mature low-precision kernels and operator fusion; autoregressive decoding and sparse embedding lookups give memory bandwidth and capacity greater importance. The normalized ratios alone do not isolate how much each mechanism contributed.
 
 Timing protocols and power instrumentation provide the raw data for benchmarking. Raw data alone, however, does not guarantee sound conclusions. Converting measurements into meaningful comparisons requires understanding the systematic sources of error, bias, and misalignment that can make even carefully collected benchmark numbers misleading.
 
@@ -3664,12 +3859,71 @@ The hardware lottery is how the bitter lesson shows up on a leaderboard. General
 
 [^fn-hardware-lottery-hooker]: **Hardware lottery**\index{Hardware lottery!benchmark bias}: Coined by @hooker2021 to describe how algorithmic success depends on alignment with available hardware and software. Transformer workloads benefit from dense matrix operations that map efficiently to modern accelerators, while graph neural networks and sparse mixture-of-experts models can be harder to evaluate when available silicon and software stacks favor dense kernels. Hardware-specific leaderboards therefore favor architectures aligned with the measured platform and may obscure alternatives that would fare differently under other hardware assumptions.
 
-Hardware compatibility dependence introduces systematic biases when evaluating models across heterogeneous execution targets. An architecture optimized for GPU execution may underperform on an embedded CPU, DSP, or custom edge accelerator with differing vector widths, cache hierarchies, and quantization support. Across five hardware targets on a Google Pixel 4, @fig-hw-lottery charts how the latency–accuracy Pareto frontier reshuffles between CPU float, CPU uint8, GPU, EdgeTPU, and DSP execution. The diagonal purple arrow links MobileNetV3 Large at roughly 75 percent top-1 accuracy, from approximately 20 ms on CPU float to 4.5 ms on the DSP. Multi-MAX, a mobile model family found by architecture search to run well across several hardware targets, reaches roughly 75 percent accuracy at 2.2 ms on EdgeTPU and 3.4 ms on DSP; its points at higher accuracy carry higher latency. Comparisons must therefore match both the model variant and the accuracy operating point. The shifted frontiers show why model selection requires measurements on the target execution path rather than a latency ranking inherited from another processor.
+```{python}
+#| echo: false
+#| label: hw-lottery-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ PIXEL 4 MULTI-TARGET LATENCY-ACCURACY FRONTIER (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-hw-lottery lead-in paragraph immediately below.
+# │
+# │ Goal:    Verify Pixel 4 latency and accuracy operating points from the
+# │          chapter CSV and confirm MobileNet V3 Large is absent on EdgeTPU.
+# │ Show:    MobileNet V3 Large latency shift at ~75 percent accuracy (20.3 ms
+# │          on CPU float vs. 4.5 ms on DSP) and Multi-MAX (~75 percent at
+# │          2.2 ms on EdgeTPU and 3.4 ms on DSP).
+# │ How:     Load vol1/12_benchmarking/data/ai_benchmark_hw_lottery.csv.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import viz
+from mlsysim.core.units import ms
+from mlsysim.fmt import check, fmt_time
 
-::: {#fig-hw-lottery fig-env="figure" fig-pos="htb" fig-cap="**Hardware-Dependent Latency–Accuracy Trade-offs**: Each panel holds top-1 ImageNet accuracy on the vertical axis while using a target-specific latency scale horizontally. The arrow links MobileNetV3 Large at roughly equal accuracy on CPU float and DSP, exposing the hardware-dependent latency shift. Source: [@chu2021]." fig-alt="Five scatter plots compare top-1 ImageNet accuracy with latency on Pixel 4 CPU float, CPU uint8, GPU, EdgeTPU, and DSP targets for eight model families. An arrow links approximately equal-accuracy points on the CPU-float and DSP panels."}
+class HwLotterySummary:
+    """Pixel 4 cross-hardware latency-accuracy comparisons (Chu et al. 2021)."""
+
+    # ┌── 1. LOAD ──────────────────────────────────────────────────────────
+    _rows = viz.load_series("vol1/12_benchmarking/data/ai_benchmark_hw_lottery.csv").entries
+
+    # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
+    _edgetpu_mnv3 = [r for r in _rows if r["target"] == "Pixel 4 EdgeTPU" and r["model_family"] == "MobileNet V3 Large"]
+    _mnv3_cpu = [r for r in _rows if r["target"] == "Pixel 4 CPU float" and r["model_family"] == "MobileNet V3 Large" and int(r["point_idx"]) == 2][0]
+    _mnv3_dsp = [
+        r for r in _rows if r["target"] == "Pixel 4 DSP Snapdragon 855" and r["model_family"] == "MobileNet V3 Large" and int(r["point_idx"]) == 2
+    ][0]
+    _mmax_tpu = [r for r in _rows if r["target"] == "Pixel 4 EdgeTPU" and r["model_family"] == "Multi-MAX" and int(r["point_idx"]) == 2][0]
+    _mmax_dsp = [r for r in _rows if r["target"] == "Pixel 4 DSP Snapdragon 855" and r["model_family"] == "Multi-MAX" and int(r["point_idx"]) == 2][0]
+
+    # ┌── 3. GUARD ─────────────────────────────────────────────────────────
+    check(len(_edgetpu_mnv3) == 0, "MobileNet V3 Large is unsupported on EdgeTPU and must be omitted.")
+    check(
+        abs(float(_mnv3_cpu["latency_ms"]) - 20.3) < 1e-6 and abs(float(_mnv3_dsp["latency_ms"]) - 4.5) < 1e-6, "MobileNet V3 Large latency drifted."
+    )
+    check(abs(float(_mmax_tpu["latency_ms"]) - 2.21) < 1e-6 and abs(float(_mmax_dsp["latency_ms"]) - 3.377) < 1e-6, "Multi-MAX latency drifted.")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
+    mnv3_cpu_ms_str = fmt_time(round(float(_mnv3_cpu["latency_ms"])) * ms, ms, precision=0, commas=False)
+    mnv3_dsp_ms_str = fmt_time(float(_mnv3_dsp["latency_ms"]) * ms, ms, precision=1, commas=False)
+    mmax_tpu_ms_str = fmt_time(float(_mmax_tpu["latency_ms"]) * ms, ms, precision=1, commas=False)
+    mmax_dsp_ms_str = fmt_time(float(_mmax_dsp["latency_ms"]) * ms, ms, precision=1, commas=False)
+```
+
+Hardware compatibility dependence introduces systematic biases when evaluating models across heterogeneous execution targets. An architecture optimized for GPU execution may underperform on an embedded CPU, DSP, or custom edge accelerator with differing vector widths, cache hierarchies, and quantization support. Across five hardware targets on a Google Pixel 4, @fig-hw-lottery charts how the latency–accuracy Pareto frontier reshuffles between CPU float, CPU uint8, GPU, EdgeTPU, and DSP execution [@chu2021; @ignatov2019aibenchmark]. The diagonal purple arrow links MobileNetV3 Large at roughly 75 percent top-1 accuracy, from approximately `{python} HwLotterySummary.mnv3_cpu_ms_str` on CPU float to `{python} HwLotterySummary.mnv3_dsp_ms_str` on the DSP, while that full MobileNetV3 Large variant is absent from the EdgeTPU panel altogether because its operators are unsupported on that target. Multi-MAX, a mobile model family found by architecture search to run well across several hardware targets, reaches roughly 75 percent accuracy at `{python} HwLotterySummary.mmax_tpu_ms_str` on EdgeTPU and `{python} HwLotterySummary.mmax_dsp_ms_str` on DSP; its points at higher accuracy carry higher latency. Comparisons must therefore match both the model variant and the accuracy operating point. The shifted frontiers show why model selection requires measurements on the target execution path rather than a latency ranking inherited from another processor.
+
+::: {#fig-hw-lottery fig-env="figure" fig-pos="htb" fig-cap="**Hardware-Dependent Latency–Accuracy Trade-offs**: Each panel holds top-1 ImageNet accuracy on the vertical axis while using a target-specific latency scale in milliseconds horizontally across five Google Pixel 4 execution targets. MobileNetV3 Large is omitted on EdgeTPU because its operators are unsupported on that accelerator, and the arrow links MobileNetV3 Large at roughly equal accuracy on CPU float and DSP to expose the hardware-dependent latency shift. Sources: [@chu2021; @ignatov2019aibenchmark]." fig-alt="Five scatter plots compare top-1 ImageNet accuracy with latency in milliseconds on Pixel 4 CPU float, CPU uint8, GPU Adreno 640, EdgeTPU, and DSP Snapdragon 855 targets across eight mobile model families, with seven families plotted on EdgeTPU where MobileNet V3 Large is unsupported. An arrow links approximately equal-accuracy MobileNet V3 Large points on the CPU-float and DSP panels."}
 
 ```{.tikz}
 \begin{tikzpicture}[font=\small\sffamily]
+% Source: books/vol1/12_benchmarking/data/ai_benchmark_hw_lottery.csv
+\tikzset{
+  mnv1/.style={BlueLine,mark=*,mark size=1.5pt,line width=1pt},
+  mnv2/.style={GreenLine!65!OrangeLine,mark=square*,mark size=1.35pt,line width=1pt},
+  mnv3l/.style={GreenLine,mark=diamond*,mark size=1.8pt,line width=1pt},
+  mnv3lmin/.style={RedLine,mark=*,mark size=1.5pt,line width=1pt},
+  mnedgetpu/.style={VioletLine,mark=pentagon*,mark size=1.65pt,line width=1pt},
+  proxyless/.style={OrangeLine,mark=*,mark size=1.5pt,line width=1pt},
+  multimax/.style={GrayLine!30!black,mark=triangle*,mark size=2.3pt,line width=1pt},
+  multiavg/.style={BrownLine,mark=triangle*,mark size=2.3pt,line width=1pt}
+}
 \pgfplotsset{myaxis/.style={
   /pgf/number format/.cd,
   1000 sep={},
@@ -3686,25 +3940,15 @@ Hardware compatibility dependence introduces systematic biases when evaluating m
    xticklabel style={font=\fontsize{7pt}{7}\selectfont\sffamily},
    ylabel style={font=\fontsize{7pt}{7}\selectfont\sffamily,align=center,yshift=-1mm},
    xlabel style={font=\fontsize{7pt}{7}\selectfont\sffamily},
-   tick style={draw=black!60,thin},
+   tick style={draw=GrayLine,thin},
    tick align=outside,
    tick pos=bottom,
    major tick length=1mm,
    title style={yshift=-4pt},
    grid=none,
-   major grid style={black!60},
+   major grid style={GrayLine!60},
    x tick label style={rotate=0, anchor=north,yshift=2pt},
-   ylabel={Top-1 ImageNet Acc},
-   cycle list={
-     {myblue,mark=*,mark size=1.5pt,line width=1pt},
-     {myolive,mark=*,mark size=1.5pt,line width=1pt},
-     {mygreen,mark=*,mark size=1.5pt,line width=1pt},
-     {myred,mark=*,mark size=1.5pt,line width=1pt},
-     {mypurple,mark=*,mark size=1.5pt,line width=1pt},
-     {myorange,mark=*,mark size=1.5pt,line width=1pt},
-     {black,mark=triangle*,mark size=2.5pt,line width=1pt},
-     {mybrown,mark=triangle*,mark size=2.5pt,line width=1pt}
-  }
+   ylabel={Top-1 ImageNet Acc}
     }}
 
 %LEFT
@@ -3715,24 +3959,16 @@ Hardware compatibility dependence introduces systematic biases when evaluating m
   xtick={25,50,75,100},
   ymin=0.6912, ymax=0.783,
   ytick={0.70,0.72,...,0.78},
-  xlabel={Pixel 4 CPU float latency},
+  xlabel={Pixel 4 CPU float latency (ms)},
 ]
-%blue
-\addplot+[] coordinates {(24.2,0.711)(37.1,0.736)(55,0.752)};
-%olive
-\addplot+[] coordinates {(18,0.703)(25.3,0.733)(39,0.753)};
-%green
-\addplot+[] coordinates {(14,0.731)(20.3,0.754)(30.5,0.766)};
-%red
-\addplot+[] coordinates {(12,0.695)(17.3,0.725)(27,0.748)};
-%purple
-\addplot+[] coordinates {(48,0.743)(60,0.762)(109.5,0.779)};
-%orange
-\addplot+[] coordinates {(20.5,0.7245)(28,0.75)(41.5,0.765)};
-%black
-\addplot+[] coordinates {(20.5,0.7345)(25,0.748)(35.5,0.758)};
-%brown
-\addplot+[] coordinates {(26,0.748)(31,0.759)(45.5,0.769)};
+\addplot[mnv1] coordinates {(24.2,0.711)(37.1,0.736)(55,0.752)};
+\addplot[mnv2] coordinates {(18,0.703)(25.3,0.733)(39,0.753)};
+\addplot[mnv3l] coordinates {(14,0.731)(20.3,0.754)(30.5,0.766)};
+\addplot[mnv3lmin] coordinates {(12,0.695)(17.3,0.725)(27,0.748)};
+\addplot[mnedgetpu] coordinates {(48,0.743)(60,0.762)(109.5,0.779)};
+\addplot[proxyless] coordinates {(20.5,0.7245)(28,0.75)(41.5,0.765)};
+\addplot[multimax] coordinates {(20.5,0.7345)(25,0.748)(35.5,0.758)};
+\addplot[multiavg] coordinates {(26,0.748)(31,0.759)(45.5,0.769)};
 \coordinate(X)at(axis cs: 20.3,0.754);
 \end{axis}
 \end{scope}
@@ -3744,24 +3980,16 @@ Hardware compatibility dependence introduces systematic biases when evaluating m
   xtick={10,20,30},
   ymin=0.691, ymax=0.782,
   ytick={0.70,0.72,...,0.78},
-  xlabel={Pixel 4 CPU uint8 latency}
+  xlabel={Pixel 4 CPU uint8 latency (ms)}
 ]
-%blue
-\addplot+[] coordinates {(9.0,0.711)(12.8,0.736)(18.2,0.751)};
-%olive
-\addplot+[] coordinates {(8.5,0.703)(11.5,0.733)(16.6,0.753)};
-%green
-\addplot+[] coordinates {(9.5,0.731)(13.3,0.753)(17.9,0.7655)};
-%red
-\addplot+[] coordinates {(6.8,0.695)(8.7,0.726)(12.6,0.749)};
-%purple
-\addplot+[] coordinates {(16.1,0.743)(19.5,0.762)(33.0,0.7785)};
-%orange
-\addplot+[] coordinates {(11.3,0.7245)(14.8,0.749)(20.2,0.765)};
-%black
-\addplot+[] coordinates {(10.2,0.7345)(11.5,0.749)(14.8,0.758)};
-%brown
-\addplot+[] coordinates {(12.3,0.748)(13.9,0.758)(18.4,0.769)};
+\addplot[mnv1] coordinates {(9.0,0.711)(12.8,0.736)(18.2,0.751)};
+\addplot[mnv2] coordinates {(8.5,0.703)(11.5,0.733)(16.6,0.753)};
+\addplot[mnv3l] coordinates {(9.5,0.731)(13.3,0.753)(17.9,0.7655)};
+\addplot[mnv3lmin] coordinates {(6.8,0.695)(8.7,0.726)(12.6,0.749)};
+\addplot[mnedgetpu] coordinates {(16.1,0.743)(19.5,0.762)(33.0,0.7785)};
+\addplot[proxyless] coordinates {(11.3,0.7245)(14.8,0.749)(20.2,0.765)};
+\addplot[multimax] coordinates {(10.2,0.7345)(11.5,0.749)(14.8,0.758)};
+\addplot[multiavg] coordinates {(12.3,0.748)(13.9,0.758)(18.4,0.769)};
 \end{axis}
 \end{scope}
 
@@ -3775,24 +4003,16 @@ Hardware compatibility dependence introduces systematic biases when evaluating m
   xtick={2.5,5.0,7.5,10.0,12.5},
   ymin=0.691, ymax=0.782,
   ytick={0.70,0.72,...,0.78},
-  xlabel={Pixel 4 GPU Adreno 640 latency}
+  xlabel={Pixel 4 GPU Adreno 640 latency (ms)}
 ]
-%blue
-\addplot+[] coordinates {(3.7,0.711)(4.8,0.7355)(7.1,0.751)};
-%olive
-\addplot+[] coordinates {(3.4,0.703)(4.4,0.7323)(5.7,0.7525)};
-%green
-\addplot+[] coordinates {(4.75,0.731)(5.62,0.753)(7.29,0.7655)};
-%red
-\addplot+[] coordinates {(2.7,0.695)(3.37,0.725)(4.6,0.748)};
-%purple
-\addplot+[] coordinates {(6.1,0.7427)(7.5,0.7615)(12.4,0.7781)};
-%orange
-\addplot+[] coordinates {(4.86,0.7245)(5.9,0.749)(7.82,0.764)};
-%black
-\addplot+[] coordinates {(3.92,0.7345)(4.4,0.748)(5.58,0.758)};
-%brown
-\addplot+[] coordinates {(4.73,0.747)(5.39,0.758)(6.64,0.768)};
+\addplot[mnv1] coordinates {(3.7,0.711)(4.8,0.7355)(7.1,0.751)};
+\addplot[mnv2] coordinates {(3.4,0.703)(4.4,0.7323)(5.7,0.7525)};
+\addplot[mnv3l] coordinates {(4.75,0.731)(5.62,0.753)(7.29,0.7655)};
+\addplot[mnv3lmin] coordinates {(2.7,0.695)(3.37,0.725)(4.6,0.748)};
+\addplot[mnedgetpu] coordinates {(6.1,0.7427)(7.5,0.7615)(12.4,0.7781)};
+\addplot[proxyless] coordinates {(4.86,0.7245)(5.9,0.749)(7.82,0.764)};
+\addplot[multimax] coordinates {(3.92,0.7345)(4.4,0.748)(5.58,0.758)};
+\addplot[multiavg] coordinates {(4.73,0.747)(5.39,0.758)(6.64,0.768)};
 \end{axis}
 \end{scope}
 %below left
@@ -3805,24 +4025,16 @@ Hardware compatibility dependence introduces systematic biases when evaluating m
   xtick={2.0,2.5,3.0,3.5},
   ymin=0.691, ymax=0.782,
   ytick={0.70,0.72,...,0.78},
-  xlabel={Pixel 4 EdgeTPU latency}
+  xlabel={Pixel 4 EdgeTPU latency (ms)}
 ]
-%blue
-\addplot+[] coordinates {(1.92,0.711)(2.38,0.7359)(2.845,0.7514)};
-%olive
-\addplot+[] coordinates {(2.03,0.703)(2.3,0.7325)(2.93,0.7525)};
-%green
-\addplot+[] coordinates {(1.942,0.6947)(2.105,0.7253)(2.58,0.749)};
-%red
-\addplot+[] coordinates {(1.942,0.6947)(2.105,0.7253)(2.58,0.749)};
-%purple
-\addplot+[] coordinates {(2.34,0.7425)(2.67,0.7615)(3.495,0.77844)};
-%orange
-\addplot+[] coordinates {(2.6,0.7245)(3.09,0.7484)(3.42,0.764)};
-%black
-\addplot+[] coordinates {(2.08,0.734)(2.21,0.748)(2.44,0.7577)};
-%brown
-\addplot+[] coordinates {(2.315,0.747)(2.4,0.7575)(2.9,0.7676)};
+\addplot[mnv1] coordinates {(1.92,0.711)(2.38,0.7359)(2.845,0.7514)};
+\addplot[mnv2] coordinates {(2.03,0.703)(2.3,0.7325)(2.93,0.7525)};
+% MobileNet V3 Large is unsupported on EdgeTPU (omitted; see ai_benchmark_hw_lottery.csv)
+\addplot[mnv3lmin] coordinates {(1.942,0.6947)(2.105,0.7253)(2.58,0.749)};
+\addplot[mnedgetpu] coordinates {(2.34,0.7425)(2.67,0.7615)(3.495,0.77844)};
+\addplot[proxyless] coordinates {(2.6,0.7245)(3.09,0.7484)(3.42,0.764)};
+\addplot[multimax] coordinates {(2.08,0.734)(2.21,0.748)(2.44,0.7577)};
+\addplot[multiavg] coordinates {(2.315,0.747)(2.4,0.7575)(2.9,0.7676)};
 \end{axis}
 \end{scope}
 %below right
@@ -3833,31 +4045,23 @@ Hardware compatibility dependence introduces systematic biases when evaluating m
   xtick={3,4,5,6},
   ymin=0.691, ymax=0.782,
   ytick={0.70,0.72,...,0.78},
-  xlabel={Pixel 4 DSP Qualcomm Snapdragon 855 latency}
+  xlabel={Pixel 4 DSP Snapdragon 855 latency (ms)}
 ]
-%blue
-\addplot+[] coordinates {(2.52,0.711)(3.05,0.736)(3.72,0.751)};
+\addplot[mnv1] coordinates {(2.52,0.711)(3.05,0.736)(3.72,0.751)};
 \addlegendentry{MobileNet V1}
-%olive
-\addplot+[] coordinates {(3.3,0.703)(3.84,0.733)(4.97,0.7525)};
+\addplot[mnv2] coordinates {(3.3,0.703)(3.84,0.733)(4.97,0.7525)};
 \addlegendentry{MobileNet V2}
-%green
-\addplot+[] coordinates {(3.95,0.731)(4.5,0.753)(5.15,0.7652)};
+\addplot[mnv3l] coordinates {(3.95,0.731)(4.5,0.753)(5.15,0.7652)};
 \addlegendentry{MobileNet V3 Large}
-%red
-\addplot+[] coordinates {(2.92,0.6945)(3.29,0.725)(3.81,0.7488)};
+\addplot[mnv3lmin] coordinates {(2.92,0.6945)(3.29,0.725)(3.81,0.7488)};
 \addlegendentry{MobileNet V3 Large min}
-%purple
-\addplot+[] coordinates {(3.82,0.7425)(4.29,0.7615)(6.14,0.7781)};
+\addplot[mnedgetpu] coordinates {(3.82,0.7425)(4.29,0.7615)(6.14,0.7781)};
 \addlegendentry{MobileNet-EdgeTPU}
-%orange
-\addplot+[] coordinates {(3.54,0.7245)(3.885,0.7485)(5.06,0.764)};
+\addplot[proxyless] coordinates {(3.54,0.7245)(3.885,0.7485)(5.06,0.764)};
 \addlegendentry{ProxylessNAS-Mobile}
-%black
-\addplot+[] coordinates {(3.08,0.7341)(3.377,0.748)(4.05,0.762)};
+\addplot[multimax] coordinates {(3.08,0.7341)(3.377,0.748)(4.05,0.762)};
 \addlegendentry{Multi-MAX}
-%brown
-\addplot+[] coordinates {(3.6,0.747)(3.84,0.759)(4.52,0.7675)};
+\addplot[multiavg] coordinates {(3.6,0.747)(3.84,0.759)(4.52,0.7675)};
 \addlegendentry{Multi-AVG}
 \coordinate(Y)at(axis cs: 4.5,0.753);
 \end{axis}
@@ -4534,21 +4738,20 @@ Data-centric AI\index{Data-centric AI!dataset enhancement paradigm} reflects an 
 
 #### Dataset saturation and dynamic benchmarks {.unnumbered}
 
-Even when coverage, quality, and distribution alignment protocols are satisfied, static benchmarks encounter the problem of dataset saturation\index{Dataset saturation!performance capability illusion}. As models approach empirical upper bounds on fixed test suites, leaderboard deltas compress, making it difficult to distinguish genuine capability advances from over-optimization to benchmark-specific artifacts. The capability trajectories in @fig-dataset-saturation plot this exhaustion over two decades, showing AI scores rising from a normalized starting point of -100, each benchmark's first reported AI result, to cross the zero line marking human performance [@perrault2024artificial]. While handwriting and speech recognition required over a decade to reach human parity (the green shaded region), reading comprehension and language understanding surged across the threshold in under two years between 2016 and 2020, rapidly exhausting the discriminating headroom of static suites.
+Even when coverage, quality, and distribution alignment protocols are satisfied, static benchmarks encounter the problem of dataset saturation\index{Dataset saturation!performance capability illusion}. As models approach empirical upper bounds on fixed test suites, leaderboard deltas compress, making it difficult to distinguish capability advances from over-optimization to benchmark-specific artifacts. The capability trajectories in @fig-dataset-saturation plot this exhaustion over two decades, showing AI scores rising from a normalized starting point of -100, each benchmark's first reported AI result, to cross the zero line marking human performance [@kiela2021; @owid2023aicapabilities; @perrault2024artificial]. While handwriting and speech recognition required over a decade to reach human parity (the green shaded region), reading comprehension and language understanding surged across the threshold in under two years between 2016 and 2020, rapidly exhausting the discriminating headroom of static suites.
 
-::: {#fig-dataset-saturation fig-env="figure" fig-pos="htb" fig-cap="**Dataset Saturation**: The zero line denotes reported human performance; each curve's crossing marks a capability for which the static benchmark has less remaining discriminating headroom. The crossings do not distinguish genuine capability gains from optimization to the evaluation set. Sources: [@perrault2024artificial; @kiela2021]." fig-alt="Line chart showing five AI capabilities crossing human performance baseline from 1998 to 2020: handwriting, speech, image recognition, reading comprehension, and language understanding."}
+::: {#fig-dataset-saturation fig-env="figure" fig-pos="htb" fig-cap="**Dataset Saturation**: The zero line denotes reported human performance; each curve's crossing marks a capability for which the static benchmark has less remaining discriminating headroom. The crossings do not separate broader capability gains from optimization to the evaluation set. Sources: [@kiela2021; @owid2023aicapabilities; @perrault2024artificial]." fig-alt="Line chart showing five AI capabilities crossing human performance baseline from 1998 to 2020: handwriting, speech, image recognition, reading comprehension, and language understanding."}
 
 ```{.tikz}
 \begin{tikzpicture}[font=\small\sffamily]
-%\node[anchor=south west]at(-0.93,-0.76){%
-%\includegraphics[scale=0.7]{1}};
+% Source: books/vol1/12_benchmarking/data/benchmark_saturation_trends.csv
 
 \begin{axis}[clip=false,
    axis line style={draw=none},
   /pgf/number format/.cd,
  1000 sep={},
-  width=155mm,%155.9mm,
-  height=80mm,%58.0mm,
+  width=155mm,
+  height=80mm,
   axis x line*=bottom,
   legend style={at={(0.16,0.98)}, anchor=north},
   legend cell align=left,
@@ -4564,10 +4767,10 @@ Even when coverage, quality, and distribution alignment protocols are satisfied,
   ylabel={Test score of the AI relative\\ to human performance},
   title={Language and image recognition capabilities of AI systems have improved rapidly},
   grid=both,
-  major grid style={black!60},
+  major grid style={GrayLine!60},
   minor grid style={draw=none},
   minor x tick num=4,
-  minor x tick  style={thin,black!60},
+  minor x tick  style={thin,GrayLine!60},
   tick label style={/pgf/number format/assume math mode=true},
   ticklabel style={font=\footnotesize\sffamily},
   xticklabel style={yshift=-3pt},
@@ -4586,19 +4789,19 @@ mark size=2.0pt,line width=1.5pt,
 (1998,-100)(2011,-66)(2013,-53)(2014,-28)(2015,-26)(2015,-9)(2016,-5)(2016,-1.2)(2017,0.5)(2018,2)
 }node[pos=0.17,above=3mm]{Speech recognition};
 %Image recognition
-\addplot[GreenD,mark=*,
+\addplot[GreenLine,mark=*,
 mark size=2.0pt,line width=1.5pt,
 ] coordinates{
 (2009,-100)(2012,-44)(2014,-11.5)(2014,-7)(2015,1)(2016,6)(2018,11.5)(2019,9)(2020,16)
 }node[pos=0.13,left=2mm,anchor=north east]{Image recognition};
 %Reading comprehension
-\addplot[cyan!90!black,mark=*,
+\addplot[BlueLine,mark=*,
 mark size=2.0pt,line width=1.5pt,
 ] coordinates{
 (2016,-100)(2016,-34)(2017,-30)(2017,-9)(2018,6)(2019,18)(2020,19)
 }node[pos=0.23,left=2mm,anchor=north east,align=right]{Reading\\ comprehension};
 %Language understanding
-\addplot[red,mark=*,
+\addplot[VioletLine,mark=*,
 mark size=2.0pt,line width=1.5pt,
 ] coordinates{
 (2018,-100)(2018,-68)(2019,-64)(2019,-25)(2019,0)(2019,4)(2020,8)(2020,12)
@@ -4610,10 +4813,10 @@ to an initial performance $-$100};
 \draw[font=\fontsize{7pt}{9}\selectfont\sffamily,latex-](axis cs:1996.8,2)to[bend left=25]++(30:6mm)
 node[align=left, right=1mm,anchor=west]{Human performance, as the benchmark, is set to zero};
 %
-\draw[red,line width=2pt,{Triangle[width=6pt,length=5pt]}-{Triangle[width=5pt,length=6pt]}](axis cs:2021,-1)--
+\draw[RedLine,line width=2pt,{Triangle[width=6pt,length=5pt]}-{Triangle[width=5pt,length=6pt]}](axis cs:2021,-1)--
 node[font=\fontsize{7pt}{9}\selectfont\sffamily,right,text=black]{AI systems perform worse}
 (axis cs:2021,-19);
-\draw[red,line width=2pt,{Triangle[width=6pt,length=5pt]}-{Triangle[width=5pt,length=6pt]}](axis cs:2021,1)--
+\draw[GreenLine,line width=2pt,{Triangle[width=6pt,length=5pt]}-{Triangle[width=5pt,length=6pt]}](axis cs:2021,1)--
 node[align=left,font=\fontsize{7pt}{9}\selectfont\sffamily,right,text=black]{AI systems perform better than\\
 the humans who did these tests}
 (axis cs:2021,19);
@@ -4624,9 +4827,9 @@ the humans who did these tests}
 \coordinate(D)at(axis cs:1994,0);
 \coordinate(D1)at(axis cs:1994,25);
 \scoped[on background layer]
-\fill[fill=magenta!5](A)--(B)--(C)--(D)--cycle;
+\fill[fill=RedL!15](A)--(B)--(C)--(D)--cycle;
 \scoped[on background layer]
-\fill[fill=green!5](D)--(C)--(C1)--(D1)--cycle;
+\fill[fill=GreenL!15](D)--(C)--(C1)--(D1)--cycle;
 \end{axis}
 \end{tikzpicture}
 ```

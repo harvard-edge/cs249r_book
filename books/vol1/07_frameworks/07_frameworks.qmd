@@ -1357,7 +1357,7 @@ Compiler-facing representations work from far smaller sets, which grew by tens o
 
 Decomposition closes this gap, a reduction of `{python} OperatorSurface.gap_range_mult_str` in vocabulary (PyTorch's full operator table against Core ATen, and TensorFlow's registry against XLA's HLO operations). A new accelerator backend that implements a small core set can run models written against the full eager surface, which is why operator coverage, not peak throughput, often decides whether a model runs on a new device at all.
 
-::: {#fig-operator-surface fig-env="figure" fig-pos="htb" fig-cap="**Eager Operator Surfaces versus Compiler Cores**: Operators defined by the eager frameworks (PyTorch native-function schemas with overloads, and TensorFlow's registered operators) against the compiler-facing sets they lower to (PyTorch's Core ATen IR, XLA's HLO operations, the ONNX standard, and JAX's `lax` primitives) at each release, on a logarithmic axis. The eager surfaces grew past 1,500 and 2,600 entries while every compiler-facing set stayed between about 80 and 200. Counts mined from each project's repository at its release tags [@pytorch2025nativefunctions; @tensorflow2025opsregistry; @openxla2025hloopcodes; @onnx2026operators; @jax2025laxprimitives]." fig-alt="Line chart on a logarithmic axis of operator counts against release date from 2017 to 2026. Two upper lines rise: PyTorch ATen schemas from about 1,064 in late 2018 to 2,658 in 2025, and TensorFlow operators from 594 in early 2017 to 1,563 in 2025. Four lower lines stay between about 80 and 200: XLA HLO operations from 84 to 123, ONNX operators from 95 to 203, Core ATen IR from 129 to 192, and JAX lax primitives from 111 to 135."}
+::: {#fig-operator-surface fig-env="figure" fig-pos="htb" fig-cap="**Eager Operator Surfaces versus Compiler Cores**: Operators defined by the eager frameworks (PyTorch native-function schemas with overloads, and TensorFlow's registered operators) against the compiler-facing sets they lower to (PyTorch's Core ATen IR, XLA's HLO operations, the ONNX standard, and JAX's `lax` primitives) at each release, on a logarithmic axis. The eager surfaces grew past 1,500 and 2,600 entries while every compiler-facing set stayed between about 80 and 203. Counts mined from each project's repository at its release tags [@pytorch2025nativefunctions; @tensorflow2025opsregistry; @openxla2025hloopcodes; @onnx2026operators; @jax2025laxprimitives]." fig-alt="Line chart on a logarithmic axis of operator counts against release date from 2017 to 2026. Two upper lines rise: PyTorch ATen schemas from about 1,064 in late 2018 to 2,658 in 2025, and TensorFlow operators from 594 in early 2017 to 1,563 in 2025. Four lower lines stay between about 80 and 203: XLA HLO operations from 84 to 123, ONNX operators from 95 to 203, Core ATen IR from 129 to 192, and JAX lax primitives from 157 to 180."}
 
 ```{python}
 #| echo: false
@@ -1369,6 +1369,9 @@ Decomposition closes this gap, a reduction of `{python} OperatorSurface.gap_rang
 # │ Goal: Plot eager operator surfaces against compiler-facing operator sets.
 # │ Show: PyTorch and TensorFlow surfaces; Core ATen, XLA HLO, ONNX, JAX lax.
 # │ How: OperatorSurface (above); book_style.setup_plot().
+# │ Provenance: Measured operator and primitive counts mined from official
+# │   release tags across data/{pytorch_operator_schemas,tensorflow_operators,
+# │   xla_hlo_opcodes,onnx_opset_operators,jax_lax_primitives}.csv.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 import datetime as dt
@@ -1541,7 +1544,7 @@ class PythonTaxTimeline:
 
 Scaling this arithmetic to a sequence of `{python} PythonTaxTimeline.n_ops_str` small operations exposes the idle gaps on the accelerator timeline (@fig-python-tax). In eager execution, each `{python} PythonTaxTimeline.kernel_us_str` kernel waits on `{python} FusionSpeedup.python_dispatch_us_str` of Python dispatch, leaving the accelerator idle for about `{python} PythonTaxTimeline.eager_idle_pct_str` of the sequence, and that count includes only the Python share; each kernel's launch cost would widen every gap further. Compiling the sequence removes both costs that eager execution pays per operation, the dispatch gaps and the intermediate memory traffic. The framework submits the work in a single launch of `{python} FusionSpeedup.kernel_launch_only_us_str`, which eliminates the intermediate host dispatch gaps. Operator fusion keeps intermediate activations in registers or cache, so the entire sequence completes in `{python} PythonTaxTimeline.fused_compute_us_str` instead of the uncompiled `{python} PythonTaxTimeline.eager_compute_us_str`. A compiled region entered from Python, as in the notebook above, still pays one Python dispatch per call, once for the whole sequence rather than once per operation, a single entry cost the figure omits.
 
-::: {#fig-python-tax data-explore="original-v1-python-tax" data-explore-key="vol1:fig-python-tax" fig-env="figure" fig-pos="htb" fig-cap="**Python Dispatch Overhead**: Execution timelines illustrate how host dispatch latency ($\Latency$) starves the accelerator during fine-grained operations. Eager execution incurs per-operation host overhead for each kernel, whereas compilation and fusion collapse the sequence into a single launch (drawn in the overhead color as one direct device submission), eliminating intermediate dispatch gaps and intermediate global memory round-trips." fig-alt="Gantt chart of execution timeline. Eager mode shows alternating red Python dispatch and blue GPU kernel blocks. Compiled mode shows one red dispatch block followed by one fused blue compute block."}
+::: {#fig-python-tax data-explore="original-v1-python-tax" data-explore-key="vol1:fig-python-tax" fig-env="figure" fig-pos="htb" fig-cap="**Python Dispatch Overhead**: Execution timelines illustrate how host dispatch latency ($\Latency$) starves the accelerator during fine-grained operations. Eager execution incurs per-operation Python dispatch overhead for each kernel, whereas compilation and fusion collapse the sequence into a single device kernel launch (orange) followed by one fused compute block (blue), eliminating intermediate dispatch gaps and intermediate global memory round-trips." fig-alt="Gantt chart of execution timeline. Eager mode shows alternating red Python dispatch and blue GPU kernel blocks. Compiled mode shows one orange kernel-launch block followed by one fused blue compute block."}
 
 ```{python}
 #| echo: false
@@ -1553,6 +1556,8 @@ Scaling this arithmetic to a sequence of `{python} PythonTaxTimeline.n_ops_str` 
 # │ Goal: Visualize the dispatch overhead of eager execution.
 # │ Show: How Python dispatch overhead creates idle gaps between GPU kernels.
 # │ How: Plot a Gantt chart comparing alternating dispatch/compute vs. fused kernels.
+# │ Provenance: Modeled timeline from mlsysim.Ops.RuntimeOverheads (PythonDispatch,
+# │   KernelLaunch) and PythonTaxTimeline scenario parameters.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 # ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
@@ -1577,15 +1582,17 @@ bar_height = 0.18
 # ┌── 3. RENDER ────────────────────────────────────────────────────────────────
 for i in range(n_ops):
     start = i * (t_dispatch + t_compute)
-    ax.barh(y_eager, t_dispatch, left=start, height=bar_height, color=COLORS['RedLine'], alpha=0.6, label='Python Overhead' if i == 0 else "")
-    ax.barh(y_eager, t_compute, left=start + t_dispatch, height=bar_height, color=COLORS['BlueLine'], alpha=0.8, label='GPU Kernel' if i == 0 else "")
+    ax.barh(y_eager, t_dispatch, left=start, height=bar_height, color=COLORS['RedLine'], alpha=0.65, label='Python Dispatch' if i == 0 else "")
+    ax.barh(
+        y_eager, t_compute, left=start + t_dispatch, height=bar_height, color=COLORS['BlueLine'], alpha=0.85, label='GPU Kernel' if i == 0 else ""
+    )
 
-# Compiled execution: one dispatch, one fused kernel
+# Compiled execution: one kernel launch, one fused kernel
 y_compiled = 0
 t_fused_compute = PythonTaxTimeline.fused_compute.to('microsecond').magnitude
 t_compiled_dispatch = PythonTaxTimeline.kernel_launch.to('microsecond').magnitude
-ax.barh(y_compiled, t_compiled_dispatch, left=0, height=bar_height, color=COLORS['RedLine'], alpha=0.6)
-ax.barh(y_compiled, t_fused_compute, left=t_compiled_dispatch, height=bar_height, color=COLORS['BlueLine'], alpha=0.8)
+ax.barh(y_compiled, t_compiled_dispatch, left=0, height=bar_height, color=COLORS['OrangeLine'], alpha=0.75, label='Kernel Launch')
+ax.barh(y_compiled, t_fused_compute, left=t_compiled_dispatch, height=bar_height, color=COLORS['BlueLine'], alpha=0.85)
 
 # ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
 ax.set_yticks([y_compiled, y_eager])
@@ -1864,6 +1871,8 @@ The cases form a continuum of increasing reuse (@fig-compilation-continuum). Eac
 # │ Goal: Visualize the total cost of ownership for different compilation strategies.
 # │ Show: The crossover points where JIT and AOT beat eager execution.
 # │ How: Plot total time (compile + execute) vs. production volume on a log scale.
+# │ Provenance: Assumed linear cost curves C_compile + c_exec * N in arbitrary
+# │   units from CompilationContinuumModel illustrating eager, JIT, and AOT break-even order.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 # ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
