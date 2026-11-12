@@ -517,6 +517,30 @@ def section_anchors(V: Values) -> None:
     for key, engine in [("Vllm", "vLLM"), ("Trt", "TensorRT-LLM")]:
         V.num(f"AnchorTwo{key}RequestAverageMs", a2["request_average_ms"][engine],
               f"paper/data/argonne-llama2-70b-h100.csv: {engine}, 128 input/output tokens, Latency * 1000 / 128; NOT decode ITL", nd=2)
+    a2i = ps.anchor_two_itl()
+    nim = "paper/data/nim-llama-70b-concurrency1.csv"
+    pri, later, earlier = a2i["primary"], a2i["later"], a2i["earlier"]
+    V.num("AnchorTwoItlWeightsGB", gb(a2i["weights"]), "Models.Language.Llama3_70B.size_in_bytes(FP16)", nd=1)
+    V.text("AnchorTwoItlNimVersion", pri["version"], "paper_scenarios.A2_ITL_PRIMARY['version']")
+    V.text("AnchorTwoItlLaterVersion", later["version"], "paper_scenarios.A2_ITL_LATER_VERSION")
+    V.num("AnchorTwoItlTpDegree", pri["tp"], "paper_scenarios.A2_ITL_PRIMARY['tp']")
+    V.num("AnchorTwoItlPromptTokens", pri["isl"], "paper_scenarios.A2_ITL_PRIMARY['isl']")
+    V.num("AnchorTwoItlOutputTokens", pri["osl"], "paper_scenarios.A2_ITL_PRIMARY['osl']")
+    V.num("AnchorTwoItlSweepTokens", ps.A2_ITL_SWEEP_TOKENS[0], "paper_scenarios.A2_ITL_SWEEP_TOKENS (input = output)")
+    V.num("AnchorTwoItlMeasuredMs", pri["itl_ms"], f"{nim}: NIM {pri['version']}, 4x H100, fp16 TP4, 200/200, concurrency 1, ITL", nd=2)
+    V.num("AnchorTwoItlFloorMs", pri["floor_ms"], a2i["source"] + " with TP=4 on H100", nd=2)
+    V.pct("AnchorTwoItlFloorBelowPct", pri["gap_frac"], "1 - AnchorTwoItlFloorMs / AnchorTwoItlMeasuredMs")
+    V.num("AnchorTwoItlMinMs", a2i["release_min_ms"], f"{nim}: min ITL over NIM {pri['version']} 4x H100 fp16 TP4 rows", nd=2)
+    V.num("AnchorTwoItlMaxMs", a2i["release_max_ms"], f"{nim}: max ITL over NIM {pri['version']} 4x H100 fp16 TP4 rows", nd=2)
+    V.num("AnchorTwoItlEarlierMs", earlier["itl_ms"], f"{nim}: NIM {earlier['version']}, 4x H100, fp16 TP4, 1000/1000, ITL", nd=2)
+    V.num("AnchorTwoItlLaterMs", later["itl_ms"], f"{nim}: NIM {later['version']}, 4x H100, bf16 TP4, 1000/1000, ITL", nd=2)
+    V.pct("AnchorTwoItlRuntimeShiftPct", a2i["runtime_shift_frac"], "1 - AnchorTwoItlLaterMs / AnchorTwoItlEarlierMs")
+    for key, name in [("h200_tp2", "TpTwo"), ("h100_tp4", "TpFour"), ("h100_tp8", "TpEight"), ("a100_tp8", "Ahundred")]:
+        q = a2i["sweep"][key]
+        where = f"{nim}: NIM {q['version']}, {q['tp']}x {q['gpu']}, {q['precision']} TP{q['tp']}, 1000/1000"
+        V.pct(f"AnchorTwoItlGap{name}Pct", q["gap_frac"], f"1 - floor / ITL ({where})")
+        if q["gpu"] == "H100":
+            V.num(f"AnchorTwoItlResidual{name}Ms", q["residual_ms"], f"ITL - floor ({where})", nd=1)
     from mlsysim.engine.calibration import FRAMEWORK_LAYER_TAX_MS
     V.num("DefaultDispatchUs", H100.dispatch_tax.m_as("us"), "Hardware.Cloud.H100.dispatch_tax")
     V.num("DefaultLayerTaxUs", FRAMEWORK_LAYER_TAX_MS * 1000, "FRAMEWORK_LAYER_TAX_MS converted to microseconds")
