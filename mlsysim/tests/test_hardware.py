@@ -181,6 +181,40 @@ def test_h100_h200_fp32_resolves_to_cuda_core_rate_not_fp16_peak():
         assert pf[key].m_as("TFLOP/s") != node.compute.peak_flops.m_as("TFLOP/s"), dev
 
 
+def test_t4_fp32_and_int4_resolve_to_datasheet_rates_not_fp16_peak():
+    """The T4 stored only int8, so precision='fp32' fell through to peak_flops
+    (65 TFLOP/s, the FP16 tensor-core rate): FP32 modelled 8x too fast on the
+    GPU students get on Colab and Kaggle. The datasheet gives FP32 8.1 TFLOPS
+    and INT4 260 TOPS."""
+    from mlsysim.core.units import resolve_precision
+    t4 = Hardware.Cloud.T4
+    pf = t4.compute.precision_flops
+    fp32, _ = resolve_precision("fp32")
+    int4, _ = resolve_precision("int4")
+    assert pf[fp32].m_as("TFLOP/s") == pytest.approx(8.1)
+    assert pf[int4].m_as("TOPS") == pytest.approx(260)
+    assert pf["int8"].m_as("TOPS") == pytest.approx(130)
+    assert t4.compute.peak_flops.m_as("TFLOP/s") == pytest.approx(65.0)
+
+
+def test_t4_fp32_roofline_uses_cuda_core_rate():
+    """A compute-bound FP32 workload on the T4 must be limited by 8.1 TFLOP/s,
+    not by the 65 TFLOP/s FP16 peak, and the solve must not warn about a
+    missing precision."""
+    import warnings
+    from mlsysim.engine.engine import Engine
+    from mlsysim.models.registry import Models
+    t4 = Hardware.Cloud.T4
+    model = Models.Vision.ResNet50
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        fp32 = Engine.solve(model, t4, batch_size=256, precision="fp32")
+    assert not [w for w in caught if "precision_flops" in str(w.message)]
+    fp16 = Engine.solve(model, t4, batch_size=256, precision="fp16")
+    ratio = fp32.latency.m_as("ms") / fp16.latency.m_as("ms")
+    assert ratio > 2.0, ratio
+
+
 def test_orin_fp16_roofline_is_not_aggregate_sparse_int8():
     """2026-09-28: an FP16 roofline must not use the 275 sparse INT8 TOPS rating."""
     orin = Hardware.Edge.JetsonAGXOrin
