@@ -424,15 +424,16 @@ Subsequent landmarks pushed cluster scale still further. PaLM\index{PaLM!TPU sca
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ WHERE TRAINING-COMPUTE GROWTH COMES FROM (LEGO)
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Paragraph after @tbl-training-compute-evolution and
-# │          @fig-training-compute-trend.
+# │ Context: Paragraph after @tbl-training-compute-evolution,
+# │          @fig-training-compute-trend, and @sec-vol2-intro-empirical-evidence-scaling-laws-0105.
 # │
 # │ Goal: Split training-compute growth into accelerator count, duration, and
-# │       per-accelerator delivered rate, using measured run records.
-# │ Show: ~3.9× per year = ~1.6× accelerators × ~1.3× duration × ~2× rate
-# │       (2012-2024); about half of the growth is more accelerators for longer.
-# │ How: Log-linear fits on data/notable_model_training_runs.csv rows that
-# │      carry all three factors; compute = count × hours × 3600 × rate.
+# │       per-accelerator delivered rate across standalone pretraining runs.
+# │ Show: ~4.0× per year = ~1.7× accelerators × ~1.3× duration × ~1.8× rate
+# │       (2012-2024); 58 percent of growth is more accelerators for longer.
+# │ How: Log-linear fits on data/notable_model_training_runs.csv standalone rows
+# │      (standalone_hw_valid == 1) carrying all three factors;
+# │      compute = count × hours × 3600 × rate.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 import datetime as dt
@@ -455,7 +456,7 @@ class TrainingComputeGrowth:
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
     first_year, last_year = "2012", "2024"  # Epoch AI notable models, 2012-2024
     all_rows = _in_window(viz.load_series("vol2/01_introduction/data/notable_model_training_runs.csv").entries, first_year, last_year)  # figure rows
-    _runs = [r for r in all_rows if r["hardware_quantity"] and r["training_time_hours"]]
+    _runs = [r for r in all_rows if r["hardware_quantity"] and r["training_time_hours"] and r["standalone_hw_valid"] == 1]
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     @staticmethod
@@ -467,27 +468,29 @@ class TrainingComputeGrowth:
     count_g = _annual_factor(_runs, lambda r: r["hardware_quantity"])
     duration_g = _annual_factor(_runs, lambda r: r["training_time_hours"])
     rate_g = _annual_factor(_runs, lambda r: r["training_compute_flop"] / (r["hardware_quantity"] * r["training_time_hours"] * 3600))
+    rate_share = math.log(rate_g) / math.log(compute_g)
     fleet_share = (math.log(count_g) + math.log(duration_g)) / math.log(compute_g)
     _origin = next(r for r in all_rows if r["model"] == "AlexNet")["training_compute_flop"]
     span_orders = math.log10(max(r["training_compute_flop"] for r in all_rows) / _origin)
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(count_g * duration_g * rate_g / compute_g - 1) < 1e-6, "The three factors must multiply to the compute trend.")
-    check(0.4 <= fleet_share <= 0.6, f"Prose says about half of the growth is count and duration, got {fleet_share:.2f}.")
+    check(0.55 <= fleet_share <= 0.62, f"Prose states 58 percent of growth is count and duration, got {fleet_share:.3f}.")
     check(7 <= span_orders <= 8.5, f"Caption and @sec-sustainable-ai say seven to eight orders from AlexNet, got {span_orders:.1f}.")
-    check(run_count >= 100, "Decomposition rests on at least 100 complete runs.")
+    check(run_count == 125, f"Decomposition rests on 125 standalone runs in 2012-2024, got {run_count}.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     run_count_str = fmt_int(run_count)
-    compute_mult_str = fmt_multiple(round(compute_g, 1))
-    count_mult_str = fmt_multiple(round(count_g, 1))
-    duration_mult_str = fmt_multiple(round(duration_g, 1))
-    rate_mult_str = fmt_multiple(round(rate_g, 1))
+    compute_mult_str = fmt_multiple(compute_g, precision=1)
+    count_mult_str = fmt_multiple(count_g, precision=1)
+    duration_mult_str = fmt_multiple(duration_g, precision=1)
+    rate_mult_str = fmt_multiple(rate_g, precision=1)
+    rate_share_pct_str = fmt_percent(round(rate_share, 2), precision=0, style="prose")
     fleet_share_pct_str = fmt_percent(round(fleet_share, 2), precision=0, style="prose")
 ```
 
-Epoch AI's database of notable models records, for each training run it can document, the compute the run consumed together with how many accelerators it used and for how long [@epochai2026notable]. Plotted run by run, training compute climbs steadily on a logarithmic scale, and it separates early single-node vision models from multi-node transformer training (@fig-training-compute-trend, panel a). Because training compute is the product of the accelerator count, the training duration, and the rate each accelerator delivers, the same records also show where the growth came from. Across the `{python} TrainingComputeGrowth.run_count_str` runs from 2012 through 2024 that report all three, compute grew about `{python} TrainingComputeGrowth.compute_mult_str` per year. The accelerator count grew `{python} TrainingComputeGrowth.count_mult_str` per year, the duration `{python} TrainingComputeGrowth.duration_mult_str`, and the delivered rate per accelerator, which folds in both faster hardware and better utilization, `{python} TrainingComputeGrowth.rate_mult_str` (@fig-training-compute-trend, panel b). A higher delivered rate per accelerator supplied roughly half of that growth. More accelerators running for longer supplied the other `{python} TrainingComputeGrowth.fleet_share_pct_str`, and that share must come from the fleet rather than from any single accelerator.
+Epoch AI's database of notable models records, for each training run it can document, the compute the run consumed together with how many accelerators it used and for how long [@epochai2026notable]. Plotted run by run, training compute climbs steadily on a logarithmic scale, and it separates early single-node vision models from multi-node transformer training (@fig-training-compute-trend, panel a). Because training compute for a standalone run is the product of the accelerator count, the training duration, and the rate each accelerator delivers, the same records also show where the growth came from once fine-tunes and actor-learner runs with uncounted compute are excluded. Across the `{python} TrainingComputeGrowth.run_count_str` standalone runs from 2012 through 2024 that report all three, compute grew about `{python} TrainingComputeGrowth.compute_mult_str` per year. The accelerator count grew `{python} TrainingComputeGrowth.count_mult_str` per year, the duration `{python} TrainingComputeGrowth.duration_mult_str`, and the delivered rate per accelerator, which folds in both faster hardware and better utilization, `{python} TrainingComputeGrowth.rate_mult_str` (@fig-training-compute-trend, panel b). A higher delivered rate per accelerator supplied `{python} TrainingComputeGrowth.rate_share_pct_str` of that growth. More accelerators running for longer supplied the remaining `{python} TrainingComputeGrowth.fleet_share_pct_str`, and that majority share must come from the fleet rather than from any single accelerator.
 
-::: {#fig-training-compute-trend fig-env="figure" fig-pos="htb" fig-cap="**Where Training-Compute Growth Comes From**: (a) Training compute of notable models published from 2012 through 2024 on a logarithmic axis, colored by domain, spanning about eight orders of magnitude from AlexNet to the largest runs; the dashed line is a least-squares fit. (b) Annual growth factors fitted to the runs that report accelerator count and training duration. Compute growth is the product of the other three bars, and the bar lengths are drawn on a logarithmic scale so each factor's share of the growth reads directly as its length. The delivered rate per accelerator includes both hardware speed and utilization. Data from @epochai2026notable; many values are Epoch AI estimates." fig-alt="Two stacked panels. Top: log-scale scatter of training compute from about 10 to the 14 to 10 to the 26 FLOPs against publication dates from 2012 to 2024, with language models in blue, vision models in green, and other domains in gray, and a dashed fitted line rising through them. AlexNet and Gemini 1.0 Ultra are labeled. Bottom: four horizontal bars of annual growth factor on a logarithmic axis. Training compute grows about 3.9 times per year; accelerator count about 1.6 times, training duration about 1.3 times, and delivered rate per accelerator about 2 times."}
+::: {#fig-training-compute-trend fig-env="figure" fig-pos="htb" fig-cap="**Where Training-Compute Growth Comes From**: (a) Training compute of notable models published from 2012 through 2024 on a logarithmic axis, colored by domain, spanning about eight orders of magnitude from AlexNet to the largest runs; the dashed line is a least-squares fit. (b) Annual growth factors fitted to the `{python} TrainingComputeGrowth.run_count_str` standalone runs that report accelerator count and training duration, excluding fine-tunes that inherit parent pretraining FLOPs and distributed RL runs whose hardware counts omit actor CPUs. Compute growth is the product of the other three bars, and the bar lengths are drawn on a logarithmic scale so each factor's share of the growth reads directly as its length. The delivered rate per accelerator includes both hardware speed and utilization. Data from @epochai2026notable; many values are Epoch AI estimates." fig-alt="Two stacked panels. Top: log-scale scatter of training compute from about 10 to the 14 to 10 to the 26 FLOPs against publication dates from 2012 to 2024, with language models in blue, vision models in green, and other domains in gray, and a dashed fitted line rising through them. AlexNet and Gemini 1.0 Ultra are labeled. Bottom: four horizontal bars of annual growth factor on a logarithmic axis across 125 standalone runs. Training compute grows about 4.0 times per year; accelerator count about 1.7 times, training duration about 1.3 times, and delivered rate per accelerator about 1.8 times."}
 
 ```{python}
 #| echo: false
@@ -499,6 +502,14 @@ Epoch AI's database of notable models records, for each training run it can docu
 # │ Goal: Show the training-compute trend and its three growth factors.
 # │ Show: (a) compute by date colored by domain with fit; (b) annual factors.
 # │ How: TrainingComputeGrowth (above); book_style.setup_plot().
+# │ Provenance:
+# │   - Dataset (modeled): vol2/01_introduction/data/notable_model_training_runs.csv
+# │     (@epochai2026notable; @sevilla2022; snapshot 2026-10-12).
+# │   - Computation: panel (a) plots all N=407 rows in [2012, 2024] with positive
+# │     training_compute_flop and fits OLS on log10(FLOP) vs. decimal year;
+# │     panel (b) fits log10 OLS slopes across n=125 standalone runs
+# │     (standalone_hw_valid == 1) carrying FLOP, hardware_quantity, and
+# │     training_time_hours so compute_g = count_g * duration_g * rate_g.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from binder.tools.figures import style as book_style
@@ -550,7 +561,7 @@ _bars = [
 ]
 for _i, (_lab, _g, _col) in enumerate(_bars):
     a2.barh(len(_bars) - 1 - _i, math.log10(_g), color=_col, height=0.6)
-    a2.text(math.log10(_g) + 0.01, len(_bars) - 1 - _i, f"{round(_g, 1):g}× per year", va="center", fontsize=9)
+    a2.text(math.log10(_g) + 0.01, len(_bars) - 1 - _i, f"{_g:.1f}× per year", va="center", fontsize=9)
 a2.set_yticks(range(len(_bars)))
 a2.set_yticklabels([b[0] for b in reversed(_bars)])
 _ticks = [1, 1.5, 2, 3, 4]
@@ -558,7 +569,7 @@ a2.set_xticks([math.log10(t) for t in _ticks])
 a2.set_xticklabels([f"{t:g}×" for t in _ticks])
 a2.set_xlim(0, math.log10(9))
 a2.set_xlabel("Annual growth factor (logarithmic length)")
-a2.set_title(f"(b) Growth factors, {_C.run_count_str} runs", fontsize=10, loc="left")
+a2.set_title(f"(b) Growth factors, {_C.run_count_str} standalone runs", fontsize=10, loc="left")
 plt.show()
 plt.close()
 ```
@@ -630,6 +641,13 @@ class ClusterSizeLandmarks:
 # │ Show: Log-scale y; scatter; trend line; model annotations.
 # │ How: ClusterSizeLandmarks.rows (MLSysIM); polyfit log-linear;
 # │      book_style.setup_plot().
+# │ Provenance:
+# │   - Inputs (measured + modeled estimate): mlsysim Literature.TrainingRuns
+# │     and Models.Language.{*} training_accelerators_ref via ClusterSizeLandmarks
+# │     (6 published paper counts as filled markers + 1 Microsoft/OpenAI 2020
+# │     cluster-size estimate for GPT-3 as a hollow marker).
+# │   - Computation: OLS fit on log10(accelerators) vs. release year across the
+# │     6 published landmark counts (~1.93x/yr, rounded to ~2x/yr).
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 # ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
@@ -1125,6 +1143,10 @@ Communication's share of the step grows as a fixed workload spreads across more 
 # │       comm growing 25%→65%; NVLink vs InfiniBand domains.
 # │ Show: Four horizontal stacks; percentage labels; annotations.
 # │ How: compute_pct, comm_pct, sync_pct; barh; book_style.setup_plot().
+# │ Provenance:
+# │   - Inputs (assumed): illustrative step-time percentage splits across
+# │     [8, 64, 512, 4096] GPUs ([75/25/0, 45/50/5, 32/58/10, 20/65/15]);
+# │     assumed teaching scenarios rather than measurements of a specific job.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 # ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
@@ -1448,7 +1470,7 @@ class ComputeTrendEras:
     deep_mult_str = fmt_multiple(round(deep_g, 1))
 ```
 
-The historical record of notable training runs shows when that power-law appetite outgrew single-machine progress. Over the longer history of AI, the growth rate of training compute broke sharply upward around 2010 [@sevilla2022]. A fit to Epoch AI's records of notable models gives growth of about `{python} ComputeTrendEras.early_mult_str` per year before 2010, close to Moore's law, and of about `{python} ComputeTrendEras.deep_mult_str` per year in the deep learning era (@fig-compute-trends). The scale moment already decomposed that post-2012 climb into accelerator count, run duration, and delivered rate per accelerator (@fig-training-compute-trend, panel b); that decomposition's lower rate of about `{python} TrainingComputeGrowth.compute_mult_str` per year comes from fitting only the runs from 2012 through 2024 that report all three factors. When compute demand outpaces Moore's law by that much, misallocating a training budget becomes prohibitively expensive, turning empirical scaling laws from a research curiosity into an engineering necessity.
+The historical record of notable training runs shows when that power-law appetite outgrew single-machine progress. Over the longer history of AI, the growth rate of training compute broke sharply upward around 2010 [@sevilla2022]. A fit to Epoch AI's records of notable models gives growth of about `{python} ComputeTrendEras.early_mult_str` per year before 2010, close to Moore's law, and of about `{python} ComputeTrendEras.deep_mult_str` per year in the deep learning era (@fig-compute-trends). The scale moment already decomposed that post-2012 climb into accelerator count, run duration, and delivered rate per accelerator (@fig-training-compute-trend, panel b); that decomposition's lower rate of about `{python} TrainingComputeGrowth.compute_mult_str` per year comes from fitting only the standalone runs from 2012 through 2024 that report all three factors. When compute demand outpaces Moore's law by that much, misallocating a training budget becomes prohibitively expensive, turning empirical scaling laws from a research curiosity into an engineering necessity.
 
 ::: {#fig-compute-trends fig-env="figure" fig-pos="htb" fig-cap="**Model Training Compute Trends**: Training compute of notable models published from 1950 through 2025, on a logarithmic axis, with one least-squares trend fitted to each era. Before 2010 the fitted rate is about `{python} ComputeTrendEras.early_mult_str` per year, close to Moore's law (a doubling about every 2 years); in the deep learning era it is about `{python} ComputeTrendEras.deep_mult_str` per year, far steeper. The fastest stretch was steeper still. Within the 2012--2019 frontier subset measured by an earlier study [@amodei2018ai], compute doubled approximately every 3.4 months. This trajectory explains why efficiency has become a strategic imperative rather than an optional optimization. Data from @epochai2026notable, licensed under CC BY 4.0; many values are Epoch AI estimates, and the era break at 2010 follows @sevilla2022." fig-alt="Log-scale scatter of training compute in FLOPs against publication date from 1950 to 2025, with language models in blue, vision models in green, and other domains in gray. A dashed fitted line rises slowly through the sparse early points and is labeled 1.5 times per year. After 2010, inside a shaded band labeled deep learning era, a much steeper dashed line runs through a dense cloud of points and is labeled 4.3 times per year. Perceptron Mark I, AlexNet, and Grok 4 are labeled."}
 
@@ -1463,6 +1485,13 @@ The historical record of notable training runs shows when that power-law appetit
 # │       per era.
 # │ Show: Scatter by domain; dashed fits; shaded deep learning era.
 # │ How: ComputeTrendEras (above); book_style.setup_plot().
+# │ Provenance:
+# │   - Datasets (modeled): vol2/01_introduction/data/notable_model_compute_pre2012.csv
+# │     (1950-2011) joined with vol2/01_introduction/data/notable_model_training_runs.csv
+# │     (2012-2025) (@epochai2026notable; @sevilla2022; N=519 total runs).
+# │   - Computation: separate OLS fits on log10(training_compute_flop) vs.
+# │     decimal publication year for [1950, 2010) (n=62, ~1.5x/yr) and
+# │     [2010, 2026) (n=457, ~4.3x/yr).
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from binder.tools.figures import style as book_style
@@ -1576,11 +1605,12 @@ plt.close()
 # │
 # │ Goal: Rebuild Kaplan et al.'s loss curves from their published fit so the
 # │       figure carries no reproduced artwork.
-# │ Show: Plateaus from ~6.8 nats (10^3 params) to ~2.4 (10^9); each model
+# │ Show: Plateaus from ~6.8 nats (10^3 params) to ~2.5 (10^9); each model
 # │       meets the compute envelope early in its run.
 # │ How: Literature.KaplanScalingLaws.loss_vs_params_and_steps (Eq. 1.6,
-# │      Table 3); C = 6 N B S with B = 2^19 tokens; PF-day = 10^15 FLOP/s
-# │      for one day; envelope = min over N at each C.
+# │      Table 3) coupled with S_min(S) = S / (1 + B_crit(L)/B) (Eqs. 5.3-5.4,
+# │      Table 5) at default batch B = 2^19 tokens; C = 6 N B S; PF-day =
+# │      10^15 FLOP/s for one day; envelope = min over N at each C.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 import numpy as np
@@ -1588,14 +1618,30 @@ from mlsysim import Literature, load_series
 from mlsysim.core.units import day, flop, second
 from mlsysim.fmt import check
 
-def _kaplan_loss(fit, n, s):
-    """Kaplan Eq. 1.6: L(N, S) = (N_c/N)^a_N + (S_c/S)^a_S, in nats per token."""
-    return (fit["n_c"] / n) ** fit["alpha_n"] + (fit["s_c"] / s) ** fit["alpha_s"]
+def _kaplan_loss(fit, b_fit, batch_tokens, n, s):
+    """Kaplan Eq. 1.6 + Eqs. 5.3-5.4: solve L = (N_c/N)^a_N + (S_c/S_min(S, L))^a_S at batch B."""
+    n_arr = np.asarray(n, dtype=float)
+    s_arr = np.asarray(s, dtype=float)
+    base_n = (fit["n_c"] / n_arr) ** fit["alpha_n"]
+    lo = base_n + (fit["s_c"] / s_arr) ** fit["alpha_s"]
+    b_crit_hi = b_fit["scale"] / (lo ** (1.0 / b_fit["alpha"]))
+    s_min_lo = s_arr / (1.0 + b_crit_hi / batch_tokens)
+    hi = base_n + (fit["s_c"] / s_min_lo) ** fit["alpha_s"]
+    for _ in range(45):
+        mid = 0.5 * (lo + hi)
+        b_crit = b_fit["scale"] / (mid ** (1.0 / b_fit["alpha"]))
+        s_min = s_arr / (1.0 + b_crit / batch_tokens)
+        rhs = base_n + (fit["s_c"] / s_min) ** fit["alpha_s"]
+        lo = np.where(mid < rhs, mid, lo)
+        hi = np.where(mid >= rhs, mid, hi)
+    return 0.5 * (lo + hi)
 
-def _kaplan_envelope(fit, c_grid, n_grid, s_lo, s_hi, c_per_ns):
+def _kaplan_envelope(fit, b_fit, batch_tokens, c_grid, n_grid, s_lo, s_hi, c_per_ns):
     """Lowest loss over model size at each compute budget (C = c_per_ns * N * S)."""
     s = c_grid[None, :] / (c_per_ns * n_grid[:, None])
-    loss = np.where((s >= s_lo) & (s <= s_hi), _kaplan_loss(fit, n_grid[:, None], s), np.inf)
+    valid = (s >= s_lo) & (s <= s_hi)
+    s_safe = np.where(valid, s, s_hi)
+    loss = np.where(valid, _kaplan_loss(fit, b_fit, batch_tokens, n_grid[:, None], s_safe), np.inf)
     return loss.min(axis=0)
 
 def _kaplan_touch(losses, computes, fractions, env_c, env_loss):
@@ -1609,30 +1655,30 @@ class KaplanFits:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     K = Literature.KaplanScalingLaws
     fit = K.loss_vs_params_and_steps
+    b_fit = K.single_variable_fits["critical_batch"]
     batch_tokens = K.default_batch_sequences * K.default_context_tokens  # 2^19 tokens per step
+    min_steps = 1000.0  # start at 10^3 steps after early transient warmup
     max_steps = K.default_steps
     flops_per_param_token = float(Literature.Chinchilla.ComputeConstant)  # C = 6 N B S
     pf_day = (1e15 * flop / second * day).to(flop).magnitude
     params_grid = np.logspace(3, 9, 7)  # one curve per decade, 10^3 to 10^9 parameters
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    # Steps start where the transient term falls to 5 nats, the region in
-    # which the fit describes the measured curves.
-    min_steps = fit["s_c"] / 5 ** (1 / fit["alpha_s"])
     steps = np.logspace(np.log10(min_steps), np.log10(max_steps), 200)
     tokens = steps * batch_tokens
     c_per_ns = flops_per_param_token * batch_tokens / pf_day  # PF-days per parameter-step
-    losses = _kaplan_loss(fit, params_grid[:, None], steps[None, :])  # one row per model size
+    losses = _kaplan_loss(fit, b_fit, batch_tokens, params_grid[:, None], steps[None, :])  # one row per model size
     compute_pf_days = c_per_ns * params_grid[:, None] * steps[None, :]
-    env_c = np.logspace(-6.5, 1.2, 160)
-    env_loss = _kaplan_envelope(fit, env_c, np.logspace(3, 9, 600), min_steps, max_steps, c_per_ns)
-    env_ok = np.isfinite(env_loss)
+    env_c = np.logspace(-5.4, 1.2, 160)
+    env_loss = _kaplan_envelope(fit, b_fit, batch_tokens, env_c, np.logspace(2.5, 11, 800), min_steps, max_steps, c_per_ns)
+    env_ok = np.isfinite(env_loss) & (env_loss <= 8.8)
     # Fraction of its full run at which each model reaches the envelope.
     touch_fraction = _kaplan_touch(losses, compute_pf_days, steps / max_steps, env_c[env_ok], env_loss[env_ok])
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(batch_tokens == 2**19, "Kaplan's default batch is 2^19 tokens")
-    check(6.0 < losses[0][-1] < 7.5 and 2.2 < losses[-1][-1] < 2.6, "Plateaus run from about 6.8 nats (10^3) to about 2.4 (10^9)")
+    check(6.0 < losses[0][-1] < 7.5 and 2.2 < losses[-1][-1] < 2.6, "Plateaus run from about 6.8 nats (10^3) to about 2.5 (10^9)")
+    check(losses.max() < 9.0 and losses.min() > 2.0, f"All curve points must fit inside ylim(2.0, 9.0), got [{losses.min():.2f}, {losses.max():.2f}]")
     check(max(touch_fraction[3:]) < 0.5, f"Larger models reach the envelope well before the end of training, got {touch_fraction}")
 
     # ┌── 4. OUTPUT (Figure data) ─────────────────────────────────────────
@@ -1642,7 +1688,7 @@ class KaplanFits:
 
 Across parameter scales from $10^3$ to $10^9$, larger models are more sample-efficient, reaching any target loss with substantially fewer training tokens (@fig-kaplan-scaling, panel a). Each token costs a larger model more compute, yet an early-stopped larger model still attains the target loss with less total compute than a smaller model trained to its plateau (panel b). Compute-efficient training therefore stops far short of full convergence.
 
-::: {#fig-kaplan-scaling fig-env="figure" fig-pos="htb" fig-cap="**Scaling Laws and Compute Optimality**: Test loss predicted by the fitted law of Kaplan et al. for models from $10^3$ to $10^9$ parameters. (a) Larger models reach any given loss with fewer training tokens and settle at a lower plateau. (b) The same curves against training compute; the dashed line is their lower envelope, the lowest loss any model size reaches at each budget. Each model leaves the envelope long before it converges, so compute-efficient training stops far short of convergence. The curves are drawn from the published fit of loss against parameter count and training steps at the paper's default batch size, not from training logs, and begin where the fit's early-training term falls to 5 nats. After @kaplan2020scaling." fig-alt="Two stacked panels. Top: test loss against tokens processed on a log axis from about 10 to the 8 to 10 to the 11, with seven curves for models from 10 to the 3 to 10 to the 9 parameters, shaded light to dark blue by size; each curve falls and flattens, and larger models sit lower. Bottom: the same curves against compute in PF-days, shifted right with model size, with an orange dashed lower envelope labeled compute-efficient frontier and a note that each model leaves the frontier long before it converges."}
+::: {#fig-kaplan-scaling fig-env="figure" fig-pos="htb" fig-cap="**Scaling Laws and Compute Optimality**: Test loss predicted by the fitted law of Kaplan et al. for models from $10^3$ to $10^9$ parameters. (a) Larger models reach any given loss with fewer training tokens and settle at a lower plateau. (b) The same curves against training compute; the dashed line is their lower envelope, the lowest loss any model size reaches at each budget. Each model leaves the envelope long before it converges, so compute-efficient training stops far short of convergence. The curves are drawn from the published fit of loss against parameter count and minimum steps converted to actual steps at the paper's default batch size ($2^{19}$ tokens) via its critical-batch relation, not from training logs, and begin at $10^3$ steps. After @kaplan2020scaling." fig-alt="Two stacked panels. Top: test loss against tokens processed on a log axis from about 5 times 10 to the 8 to 10 to the 11, with seven curves for models from 10 to the 3 to 10 to the 9 parameters, shaded light to dark blue by size; each curve falls and flattens, and larger models sit lower. Bottom: the same curves against compute in PF-days, shifted right with model size, with an orange dashed lower envelope labeled compute-efficient frontier and a note that each model leaves the frontier long before it converges."}
 
 ```{python}
 #| echo: false
@@ -1655,6 +1701,12 @@ Across parameter scales from $10^3$ to $10^9$, larger models are more sample-eff
 # │       sizes, with the compute-efficient envelope.
 # │ Show: (a) loss vs tokens; (b) loss vs PF-days with dashed envelope.
 # │ How: KaplanFits (above); book_style.setup_plot().
+# │ Provenance:
+# │   - Inputs (modeled): mlsysim Literature.KaplanScalingLaws
+# │     (@kaplan2020scaling Table 3 Eq. 1.6 and Table 5 critical-batch Eq. 5.3).
+# │   - Computation: solve L = (N_c/N)^alpha_N + (S_c/S_min(S, L))^alpha_S with
+# │     S_min(S, L) = S / (1 + B_crit(L)/B) at B = 2^19 tokens across S in
+# │     [10^3, 2.5e5] steps and N in 10^3..10^9, plus lower envelope over N.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from matplotlib.colors import to_rgb
@@ -1674,16 +1726,16 @@ _shades = [_ramp(t) for t in np.linspace(-0.6, 0.55, len(_K.params_grid))]
 for _i, (_n, _sh) in enumerate(zip(_K.params_grid, _shades)):
     a1.plot(_K.tokens, _K.losses[_i], color=_sh, lw=1.8)
     a2.plot(_K.compute_pf_days[_i], _K.losses[_i], color=_sh, lw=1.8)
-    a1.text(_K.tokens[-1] * 1.25, _K.losses[_i][-1], f"$10^{{{round(np.log10(_n))}}}$", va="center", ha="left", fontsize=9, color=COLORS["primary"])
-a1.text(_K.tokens[-1] * 1.25, 7.55, "Parameters", va="center", ha="left", fontsize=9, color=COLORS["primary"])
+    a1.text(_K.tokens[-1] * 1.22, _K.losses[_i][-1], f"$10^{{{round(np.log10(_n))}}}$", va="center", ha="left", fontsize=9, color=COLORS["primary"])
+a1.text(_K.tokens[-1] * 1.22, 7.65, "Parameters", va="center", ha="left", fontsize=9, color=COLORS["primary"])
 
 # Lower envelope of the curves: the best loss any model size reaches at each budget.
 _ok = _K.env_ok
 a2.plot(_K.env_c[_ok], _K.env_loss[_ok], "--", color=COLORS["OrangeLine"], lw=1.8, zorder=5)
 a2.annotate(
     "compute-efficient frontier\n(lowest loss at each budget)",
-    xy=(1e-4, np.interp(-4, np.log10(_K.env_c[_ok]), _K.env_loss[_ok])),
-    xytext=(1.2e-6, 2.45),
+    xy=(1e-3, np.interp(-3, np.log10(_K.env_c[_ok]), _K.env_loss[_ok])),
+    xytext=(1.5e-5, 2.55),
     ha="left",
     va="center",
     fontsize=9,
@@ -1691,8 +1743,8 @@ a2.annotate(
     arrowprops=dict(arrowstyle="-", color=COLORS["OrangeLine"], lw=0.8),
 )
 a2.text(
-    1.3e-8,
-    4.4,
+    4.5e-8,
+    4.3,
     "each model leaves the\nfrontier long before\nit converges",
     ha="left",
     va="center",
@@ -1703,8 +1755,9 @@ a2.text(
 
 for _a in (a1, a2):
     _a.set_xscale("log")
-    _a.set_ylim(2.0, 7.9)
+    _a.set_ylim(2.0, 9.0)
     _a.set_ylabel("Test loss (nats per token)")
+a1.set_xlim(3.5e8, 5.4e11)
 a1.set_xlabel("Tokens processed")
 a2.set_xlabel("Compute (PF-days)")
 a1.set_title("(a) Loss vs. training tokens, by model size", fontsize=10, loc="left")
@@ -1808,6 +1861,13 @@ Holding the budget fixed and varying model size, so that a larger model receives
 # │       lines.
 # │ Show: (a) nine IsoFLOP curves with minima; (b) optimal N and D vs C.
 # │ How: ChinchillaFits (above); book_style.setup_plot().
+# │ Provenance:
+# │   - Inputs (modeled): mlsysim Literature.Chinchilla (@hoffmann2022chinchilla
+# │     Approach 3 parametric loss Eq. 10 and Approach 2 IsoFLOP power-law
+# │     exponents anchored at the Gopher budget).
+# │   - Computation: evaluate L(N, C/(6N)) across 9 geometric budgets in
+# │     [6e18, 3e21] FLOPs for panel (a); extrapolate N_opt(C) and D_opt(C)
+# │     across C in [1e18, 1e25] FLOPs for panel (b).
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from matplotlib.colors import to_rgb
@@ -1994,95 +2054,42 @@ In a compute-limited regime\index{Compute-limited regime!resource allocation}, c
 
 ```{python}
 #| echo: false
-from binder.tools.figures import style as book_style
-
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ LOSS VS. DATASET SIZE ACROSS MODEL SCALES (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-loss-vs-n-d.
+# │
+# │ Goal: Show empirical learning-curve descent and small-model capacity
+# │       plateaus across dataset token counts.
+# │ Show: Six model sizes (393.2K to 708M parameters) with scatter points and
+# │       monotone PCHIP-interpolated trend curves.
+# │ How: Load vol2/01_introduction/data/kaplan_fig4_loss_vs_tokens.csv via
+# │      viz.load_series; book_style.setup_plot().
+# │ Provenance:
+# │   - Dataset (measured): vol2/01_introduction/data/kaplan_fig4_loss_vs_tokens.csv
+# │     (digitized from Figure 4 left of @kaplan2020scaling; 44 scatter points
+# │     and 56 Eq. 1.5 trend knots across six non-embedding parameter scales).
+# │   - Computation: group rows by model_label and series_kind; plot empirical
+# │     scatter markers and monotone PCHIP interpolants in log10(dataset_tokens).
+# │
+# └─────────────────────────────────────────────────────────────────────────────
 import numpy as np
+from matplotlib.colors import to_rgb
+from scipy.interpolate import PchipInterpolator
+from mlsysim import viz
+from binder.tools.figures import style as book_style
 
 fig, ax, COLORS, plt = book_style.setup_plot(figsize=(6.2, 4.1))
 
+_kaplan_rows = viz.load_series("vol2/01_introduction/data/kaplan_fig4_loss_vs_tokens.csv").entries
+_model_order = ["393.2K", "3M", "25M", "85M", "302M", "708M"]
 models = [
     {
-        "name": "393.2K",
-        "color": COLORS["BlueLine"],
-        "scatter": [(3.05e7, 4.645), (3.05e7, 4.48), (5.9e7, 4.415), (1.14e8, 4.34), (8.3e8, 4.29), (2.3e10, 4.28)],
-        "trend": [(1.5e7, 4.595), (3.05e7, 4.47), (5.9e7, 4.395), (1.14e8, 4.35), (8.3e8, 4.3), (3e10, 4.290)],
-    },
-    {
-        "name": "3M",
-        "color": COLORS["secondary"],
-        "scatter": [(3.05e7, 4.25), (5.9e7, 4.1), (1.14e8, 3.93), (2.2e8, 3.867), (4.3e8, 3.837), (8.3e8, 3.8), (2.3e10, 3.77)],
-        "trend": [(1.5e7, 4.46), (3.05e7, 4.25), (5.9e7, 4.08), (1.14e8, 3.96), (2.2e8, 3.867), (4.3e8, 3.814), (8.3e8, 3.789), (3e10, 3.756)],
-    },
-    {
-        "name": "25M",
-        "color": COLORS["BrownLine"],
-        "scatter": [(3.05e7, 4.25), (5.9e7, 3.941), (1.14e8, 3.735), (2.2e8, 3.567), (4.3e8, 3.415), (8.3e8, 3.325), (2.3e10, 3.27)],
-        "trend": [
-            (1.5e7, 4.42),
-            (3.05e7, 4.17),
-            (5.9e7, 3.95),
-            (1.14e8, 3.75),
-            (2.2e8, 3.58),
-            (4.3e8, 3.444),
-            (8.3e8, 3.345),
-            (3e9, 3.253),
-            (3e10, 3.213),
-        ],
-    },
-    {
-        "name": "85M",
-        "color": COLORS["GreenLine"],
-        "scatter": [(3.05e7, 4.21), (5.9e7, 3.941), (1.14e8, 3.69), (2.2e8, 3.472), (4.3e8, 3.31), (8.3e8, 3.12), (1.61e9, 3.04), (2.3e10, 2.97)],
-        "trend": [
-            (1.5e7, 4.42),
-            (3.05e7, 4.17),
-            (5.9e7, 3.93),
-            (1.14e8, 3.7),
-            (2.2e8, 3.499),
-            (4.3e8, 3.32),
-            (8.3e8, 3.17),
-            (1.61e9, 3.064),
-            (5e9, 2.955),
-            (1e10, 2.92),
-            (3e10, 2.913),
-        ],
-    },
-    {
-        "name": "302M",
-        "color": COLORS["VioletLine"],
-        "scatter": [(3.05e7, 4.21), (5.9e7, 3.941), (1.14e8, 3.69), (2.2e8, 3.46), (4.3e8, 3.28), (8.3e8, 3.01), (1.61e9, 2.84), (2.3e10, 2.62)],
-        "trend": [
-            (1.5e7, 4.42),
-            (3.05e7, 4.17),
-            (5.9e7, 3.93),
-            (1.14e8, 3.7),
-            (2.2e8, 3.467),
-            (4.3e8, 3.25),
-            (8.3e8, 3.054),
-            (1.61e9, 2.89),
-            (4e9, 2.73),
-            (1e10, 2.64),
-            (3e10, 2.59),
-        ],
-    },
-    {
-        "name": "708M",
-        "color": COLORS["OrangeLine"],
-        "scatter": [(3.05e7, 4.31), (5.9e7, 3.941), (1.14e8, 3.69), (2.2e8, 3.46), (4.3e8, 3.28), (8.3e8, 3.05), (1.61e9, 2.80), (2.3e10, 2.42)],
-        "trend": [
-            (1.5e7, 4.42),
-            (3.05e7, 4.17),
-            (5.9e7, 3.93),
-            (1.14e8, 3.7),
-            (2.2e8, 3.456),
-            (4.3e8, 3.223),
-            (8.3e8, 3.013),
-            (1.61e9, 2.82),
-            (4e9, 2.61),
-            (1e10, 2.47),
-            (3e10, 2.39),
-        ],
-    },
+        "name": _lbl,
+        "scatter": [(r["dataset_tokens"], r["test_loss"]) for r in _kaplan_rows if r["model_label"] == _lbl and r["series_kind"] == "scatter"],
+        "trend": [(r["dataset_tokens"], r["test_loss"]) for r in _kaplan_rows if r["model_label"] == _lbl and r["series_kind"] == "trend"],
+    }
+    for _lbl in _model_order
 ]
 
 # One sequential ramp encodes model size (light = small, dark = large),
@@ -2091,13 +2098,9 @@ models = [
 # whose curves run together, also get distinct marker shapes so they stay
 # separable in grayscale. Curves are labeled at their right ends, just
 # outside the axes, in dark text so the lightest label stays legible.
-from matplotlib.colors import to_rgb
-
 def _shade(t):
     end = "white" if t < 0 else "black"
     return tuple((1 - abs(t)) * x + abs(t) * y for x, y in zip(to_rgb(COLORS["BlueLine"]), to_rgb(end)))
-
-from scipy.interpolate import PchipInterpolator
 
 _shades = [_shade(t) for t in (-0.55, -0.34, -0.12, 0.12, 0.38, 0.60)]
 _markers = ["o", "o", "o", "s", "D", "^"]
@@ -2163,6 +2166,22 @@ An observed plateau does not by itself establish that the irreducible floor has 
 
 ```{python}
 #| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ DATA SCALING REGIMES SCHEMATIC (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-data-scaling-regimes.
+# │
+# │ Goal: Illustrate the three qualitative phases of generalization error as
+# │       dataset size grows.
+# │ Show: Tickless log-log schematic joining a best-guess ceiling, constant
+# │       power-law slope, and irreducible-error floor (adapted from Hestness
+# │       et al. 2017).
+# │ How: Smooth soft-min / soft-max analytical curve; book_style.setup_plot().
+# │ Provenance:
+# │   - Inputs (constructed): tickless conceptual curve adapted from
+# │     @hestness2017deep; carries no empirical coordinates.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
 import numpy as np
 from binder.tools.figures import style as book_style
 
@@ -2247,6 +2266,22 @@ The third cut follows lifecycle stage, because additional compute can be spent o
 
 ```{python}
 #| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ THREE SCALING PHASES SCHEMATIC (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-scaling-regimes.
+# │
+# │ Goal: Illustrate pretraining, posttraining, and test-time scaling along the
+# │       model lifecycle.
+# │ Show: Tickless schematic joining three analytical curves end to end with
+# │       dashed trend continuations and stage brackets.
+# │ How: Piecewise analytical log/power-law curves; book_style.setup_plot().
+# │ Provenance:
+# │   - Inputs (constructed): tickless conceptual curves illustrating
+# │     pretraining (@kaplan2020scaling), posttraining (@ouyang2022instructgpt),
+# │     and test-time compute (@snell2025scaling); carries no measured values.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
 import numpy as np
 from binder.tools.figures import style as book_style
 
@@ -2510,6 +2545,23 @@ For a single component, `{python} ReliabilityGap.four_nines_pct_str` availabilit
 
 ```{python}
 #| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ RELIABILITY COLLAPSE CURVES (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-reliability-gap-collapse.
+# │
+# │ Goal: Show how independent per-node unavailability compounds exponentially
+# │       with synchronous job size N.
+# │ Show: Simultaneous all-node availability A^N for 99.9% and 99.99% per-node
+# │       availability from N = 1 to 10,000 nodes.
+# │ How: Evaluate A^N from ReliabilityGap LEGO inputs; book_style.setup_plot().
+# │ Provenance:
+# │   - Inputs (assumed): Scenarios.NodeAvailability1K (A = 0.999, N = 1,000),
+# │     Scenarios.NodeAvailability10K (N = 10,000), and
+# │     Scenarios.FourNinesAvailability10K (A = 0.9999) via ReliabilityGap.
+# │   - Model (modeled): analytical independent-component availability A^N.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
 import numpy as np
 from binder.tools.figures import style as book_style
 
