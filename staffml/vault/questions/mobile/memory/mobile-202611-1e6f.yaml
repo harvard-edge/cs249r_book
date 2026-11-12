@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: mobile-202611-1e6f
+track: mobile
+level: L5
+zone: optimization
+topic: mixture-of-experts
+competency_area: memory
+bloom_level: evaluate
+phase: inference
+taxonomy_subject: llm-inference
+taxonomy_concepts:
+  - mlsys.expert-offloading
+  - mlsys.memory-bandwidth
+title: Expert Offloading to UFS 4.0 for Mixtral-8x7B
+scenario: To fit Mixtral-8x7B (32 layers, 8 experts per layer, top-2 routing, hidden size 4096, expert FFN size 14336) on a phone, a team keeps the attention and router weights in LPDDR5X (76.8 GB/s), caches some 4-bit experts in DRAM, and streams the rest from UFS 4.0 storage (about 4 GB/s sequential read) when the router selects them.
+question: What decode throughput does flash offloading give at a 0% and a 90% expert-cache hit rate, and what dominates the 90% case?
+details:
+  realistic_solution: |
+    One expert in one layer has three 4096 x 14336 matrices, about 176M parameters or 88 MB at 4-bit, and each token touches 2 experts in each of 32 layers, 5.6 GB of expert weights. With every expert streamed from flash that is about 1.4 s per token, 0.7 tokens/s. At a 90% hit rate the 10% of misses still take 0.14 s, against 0.08 s for everything read from DRAM, so decode reaches only about 4.6 tokens/s and flash reads are about two thirds of the time. The lever is the miss rate: cache experts by measured routing frequency, prefetch the next layer's likely experts while the current layer computes, and shrink the experts (lower bits) so more of them fit in the cache.
+  common_mistake: |
+    **The Pitfall:** Treating flash as slightly slower RAM and assuming a 90% cache hit rate gives close to in-memory speed.
+    **The Rationale:** UFS read bandwidth is about 20x below LPDDR5X, so even a small miss fraction carries most of the per-token time.
+    **The Consequence:** The design promises interactive decode and delivers under 5 tokens/s, with the storage controller busy and power draw up on every token.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Mixtral-8x7B: 32 layers, 8 experts, top-2 routing, d_model 4096, expert FFN 14336 (three matrices per expert), 46.7B total parameters.
+    - 4-bit weights: 0.5 bytes per parameter. LPDDR5X: 76.8 GB/s. UFS 4.0: about 4 GB/s sequential read (spec peak 4.2 GB/s).
+    - Batch 1 decode; misses are read from flash, hits and the non-expert weights from DRAM, with no overlap.
+
+    **Calculations:**
+    - One expert in one layer: 3 * 4096 * 14336 = 176.2M parameters = 88.1 MB at 4-bit.
+    - Expert weights per token: 2 experts * 32 layers * 88.1 MB = 5.64 GB.
+    - Non-expert weights: 46.7B - 8 * 32 * 176.2M = 1.6B parameters = 0.8 GB at 4-bit.
+    - 0% hits: 5.64 GB / 4 GB/s = 1.41 s per token, or 0.71 tokens/s.
+    - 90% hits: flash 0.564 GB / 4 GB/s = 0.141 s; DRAM (5.07 + 0.80) GB / 76.8 GB/s = 0.076 s; total 0.217 s, or 4.6 tokens/s.
+    - Flash share of the 90% case: 0.141 / 0.217 = 65%.
+
+    **Conclusion & Interpretation:**
+    - **Result: Flash-bandwidth-bound.** Even with 90% of expert reads served from DRAM, the 10% of misses take about two thirds of each token's time, so decode stays near 4.6 tokens/s.
+status: draft
+provenance: llm-draft
+created_at: '2026-11-11T01:15:21+00:00'
+last_modified: '2026-11-11T01:15:21+00:00'
+authors:
+- Nishitha-Rajesh
+requires_explanation: true
+expected_time_minutes: 15
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
