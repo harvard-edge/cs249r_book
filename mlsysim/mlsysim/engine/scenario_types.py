@@ -266,6 +266,7 @@ from .scenario_definitions.sustainability import (
     DemandReboundScenario as DemandReboundScenario,
     DevelopmentSweepScenario as DevelopmentSweepScenario,
     CarbonPricedPlacementScenario as CarbonPricedPlacementScenario,
+    TemporalShiftScenario as TemporalShiftScenario,
     PeriodicInferencePowerScenario as PeriodicInferencePowerScenario,
     TokenEnergyScenario as TokenEnergyScenario,
     OperationalCarbonScenario as OperationalCarbonScenario,

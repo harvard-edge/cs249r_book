@@ -281,6 +281,7 @@ from .result_types.sustainability import (
     DemandReboundResult as DemandReboundResult,
     DevelopmentSweepResult as DevelopmentSweepResult,
     CarbonPricedPlacementResult as CarbonPricedPlacementResult,
+    TemporalShiftResult as TemporalShiftResult,
 )
 from .result_types.training import (
     DistributedResult as DistributedResult,
@@ -466,6 +467,7 @@ __all__ = [
     "DemandReboundResult",
     "DevelopmentSweepResult",
     "CarbonPricedPlacementResult",
+    "TemporalShiftResult",
     "BinomialIntervalsResult",
     "ProportionPlanningResult",
     "PairedComparisonResult",

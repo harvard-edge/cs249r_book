@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Dict
+from typing import Dict, List, Optional
 from ...core.types import Quantity
 from .base import SolverResult
 
@@ -26,6 +26,7 @@ __all__ = [
     "DemandReboundResult",
     "DevelopmentSweepResult",
     "CarbonPricedPlacementResult",
+    "TemporalShiftResult",
 ]
 
 
@@ -424,3 +425,23 @@ class CarbonPricedPlacementResult(SolverResult):
     objective_value: float
     objective: Dict[str, float]
     objective_untaxed: Dict[str, float]
+
+
+class TemporalShiftResult(SolverResult):
+    """Result from TemporalShiftModel: best deadline-feasible start and the carbon it avoids."""
+
+    __module__ = "mlsysim.engine.results"
+
+    immediate_emissions: Quantity  # starting at release; hypothetical if immediate_feasible is False
+    immediate_feasible: bool  # start-now has capacity for the whole run
+    best_start: Quantity  # wait from release to the chosen start
+    expected_completion: Quantity  # best_start + duration
+    best_run_emissions: Quantity  # run emissions at the chosen start
+    shift_overhead_emissions: Quantity  # carbon caused by waiting
+    best_net_emissions: Quantity  # run plus overhead at the chosen start
+    net_saving: Quantity  # immediate minus best net; negative only if capacity forces it
+    saving_fraction: Optional[float]  # net_saving / immediate_emissions; None if immediate is zero
+    shifted: bool  # best_start > 0
+    candidate_starts: int  # starts that meet the deadline and have capacity
+    net_emissions_by_start: List[Optional[Quantity]]  # indexed by wait in steps; None if infeasible
+    min_beneficial_wait: Optional[Quantity]  # shortest wait that saves carbon
