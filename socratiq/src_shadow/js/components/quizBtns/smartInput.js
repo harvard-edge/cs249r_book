@@ -1,5 +1,6 @@
 // import { generateUniqueId } from '../../libs/utils/utils.js';
 import {addToCopyContainer} from '../highlight_menu/send_text_highlight.js';
+import {searchTaxonomyItems} from '../../../../src_shared/taxonomy-map.js';
 let currentFilter = null;
 
 export function setupAtMentions(shadowRoot) {
@@ -14,8 +15,9 @@ export function setupAtMentions(shadowRoot) {
     left: 0;
     width: 100%;
     max-height: 250px;
-    background: white;
-    border: 1px solid #e2e8f0;
+    background: var(--socratiq-study-surface-elevated, #ffffff);
+    color: var(--socratiq-study-text, #0f172a);
+    border: 1px solid var(--socratiq-study-border, #e2e8f0);
     border-radius: 0.5rem;
     box-shadow: 0 -4px 6px -1px rgba(0, 0, 0, 0.1);
     z-index: 50;
@@ -66,18 +68,44 @@ export function setupAtMentions(shadowRoot) {
         return '🔑';
       case 'section':
         return '📚';
+      case 'taxonomy':
+        return '🧭';
       default:
         return '📎';
     }
   }
 
-  function searchAllSources(search) {
+  function getFilteredData(search) {
     const results = [];
+    const normalizedSearch = String(search || '').toLowerCase();
+
+    // Include active Focused Reader passage if available
+    const activeSource = typeof window !== 'undefined' ? window.__SOCRATIQ_ACTIVE_SOURCE__ : null;
+    const activeQuote = typeof activeSource?.quote === 'string' ? activeSource.quote.trim() : '';
+    if (activeQuote) {
+      const activeSection = typeof activeSource.section === 'string' ? activeSource.section.trim() : '';
+      const matchesActive = !normalizedSearch
+        || 'current reader passage'.includes(normalizedSearch)
+        || 'reader'.includes(normalizedSearch)
+        || 'passage'.includes(normalizedSearch)
+        || (activeSection && activeSection.toLowerCase().includes(normalizedSearch));
+      if (matchesActive) {
+        results.push({
+          type: 'section',
+          key: 'Current reader passage',
+          text: activeQuote,
+          value: {
+            title: 'Current reader passage',
+            content: activeQuote,
+          },
+        });
+      }
+    }
     
     // Search subsections
     if (window.subsections) {
       for (const [key, value] of Object.entries(window.subsections)) {
-        if (key.toLowerCase().includes(search)) {
+        if (key.toLowerCase().includes(normalizedSearch)) {
           results.push({ type: 'subsection', key, value });
         }
       }
@@ -86,7 +114,7 @@ export function setupAtMentions(shadowRoot) {
     // Search keywords
     if (window.keywords) {
       for (const [key, value] of Object.entries(window.keywords)) {
-        if (key.toLowerCase().includes(search)) {
+        if (key.toLowerCase().includes(normalizedSearch)) {
           results.push({ type: 'keyword', key, value });
         }
       }
@@ -95,18 +123,40 @@ export function setupAtMentions(shadowRoot) {
     // Search section data
     if (window.sectionData) {
       for (const [key, value] of Object.entries(window.sectionData)) {
-        if (value.title.toLowerCase().includes(search)) {
+        if (value.title.toLowerCase().includes(normalizedSearch)) {
           results.push({ type: 'section', key, value });
         }
       }
     }
 
+    // Search ML Systems Taxonomy items (kept after sections, subsections, and keywords in 'all')
+    const currentUrl = typeof window !== 'undefined' ? (window.location?.href || '') : '';
+    const taxonomyItems = searchTaxonomyItems(normalizedSearch, currentUrl);
+    for (const taxItem of taxonomyItems) {
+      results.push({
+        type: 'taxonomy',
+        key: taxItem.key,
+        value: taxItem.value,
+      });
+    }
+
     return results;
+  }
+
+  function searchAllSources(search) {
+    return getFilteredData(search);
   }
 
   function getContentForMention(type, key) {
     let textToAdd = '';
     let prefix = '';
+
+    if (key === 'Current reader passage' && window.__SOCRATIQ_ACTIVE_SOURCE__?.quote) {
+      const section = window.__SOCRATIQ_ACTIVE_SOURCE__.section;
+      prefix = `[Section: Current reader passage${section ? ` (${section})` : ''}]\n`;
+      textToAdd = window.__SOCRATIQ_ACTIVE_SOURCE__.quote;
+      return prefix + textToAdd.trim();
+    }
     
     switch (type) {
       case 'subsection':
@@ -127,6 +177,17 @@ export function setupAtMentions(shadowRoot) {
           textToAdd = window.sectionData[key].content;
         }
         break;
+      case 'taxonomy': {
+        const currentUrl = typeof window !== 'undefined' ? (window.location?.href || '') : '';
+        const taxMatch = searchTaxonomyItems('', currentUrl).find(
+          item => item.key === key || item.title === key || item.code === key
+        );
+        if (taxMatch) {
+          prefix = `[Taxonomy: ${taxMatch.title}]\n`;
+          textToAdd = taxMatch.content;
+        }
+        break;
+      }
     }
     
     return prefix + textToAdd.trim();
@@ -193,7 +254,7 @@ export function setupAtMentions(shadowRoot) {
   }
 
   function handleFolderNavigation(direction) {
-    const filters = ['all', 'section', 'subsection', 'keyword'];
+    const filters = ['all', 'section', 'subsection', 'keyword', 'taxonomy'];
     const currentIndex = selectedFolderIndex;
     
     if (direction === 'right') {
@@ -215,7 +276,7 @@ export function setupAtMentions(shadowRoot) {
     }
 
     const folderHtml = `
-      <div class="folder-filters flex space-x-2 p-2 border-b border-gray-200">
+      <div class="folder-filters flex flex-wrap gap-1.5 p-2 border-b border-gray-200">
         <div class="folder-filter p-1.5 rounded-md cursor-pointer flex items-center hover:bg-gray-100 ${!currentFilter ? 'bg-blue-100' : ''}" 
              data-filter="all">
           <span class="mr-1">📁</span>
@@ -236,6 +297,11 @@ export function setupAtMentions(shadowRoot) {
           <span class="mr-1">🔑</span>
           <span>Keywords</span>
         </div>
+        <div class="folder-filter p-1.5 rounded-md cursor-pointer flex items-center hover:bg-gray-100 ${currentFilter === 'taxonomy' ? 'bg-blue-100' : ''}" 
+             data-filter="taxonomy">
+          <span class="mr-1">🧭</span>
+          <span>Taxonomy</span>
+        </div>
       </div>
     `;
 
@@ -243,18 +309,29 @@ export function setupAtMentions(shadowRoot) {
       results.filter(result => result.type === currentFilter) : 
       results;
     
-    dropupContainer.innerHTML = folderHtml + `
-      <div class="results-container max-h-[160px] overflow-y-auto">
-        ${filteredResults.map(result => `
-          <div class="at-mention-item p-2 hover:bg-gray-100 cursor-pointer flex items-center" 
-               data-type="${result.type}" 
-               data-key="${result.key}">
-            <span class="mr-2">${getIconForType(result.type)}</span>
-            <span>${result.key}</span>
-          </div>
-        `).join('')}
-      </div>
-    `;
+    dropupContainer.innerHTML = folderHtml;
+    const resultsContainer = document.createElement('div');
+    resultsContainer.className = 'results-container max-h-[160px] overflow-y-auto';
+    filteredResults.forEach(result => {
+      const item = document.createElement('div');
+      item.className = 'at-mention-item p-2 hover:bg-gray-100 cursor-pointer flex items-center';
+      item.dataset.type = result.type;
+      item.dataset.key = result.key;
+
+      const iconSpan = document.createElement('span');
+      iconSpan.className = 'mr-2';
+      iconSpan.textContent = result.key === 'Current reader passage' ? '📖' : getIconForType(result.type);
+
+      const textSpan = document.createElement('span');
+      textSpan.textContent = result.key;
+
+      item.append(iconSpan, textSpan);
+      item.addEventListener('click', () => {
+        insertMention(item.dataset.type, item.dataset.key);
+      });
+      resultsContainer.appendChild(item);
+    });
+    dropupContainer.appendChild(resultsContainer);
     
     dropupContainer.classList.remove('hidden');
 
@@ -265,13 +342,6 @@ export function setupAtMentions(shadowRoot) {
         const filterType = filter.dataset.filter;
         currentFilter = filterType === 'all' ? null : filterType;
         showDropup(search);
-      });
-    });
-
-    // Add click handlers for items
-    dropupContainer.querySelectorAll('.at-mention-item').forEach(item => {
-      item.addEventListener('click', () => {
-        insertMention(item.dataset.type, item.dataset.key);
       });
     });
 
@@ -309,7 +379,7 @@ export function setupAtMentions(shadowRoot) {
         case 'Enter':
           e.preventDefault(); // Prevent enter from triggering send
           if (isFolderFocused && selectedFolderIndex >= 0) {
-            const filters = ['all', 'section', 'subsection', 'keyword'];
+            const filters = ['all', 'section', 'subsection', 'keyword', 'taxonomy'];
             currentFilter = filters[selectedFolderIndex] === 'all' ? null : filters[selectedFolderIndex];
             showDropup(searchTerm);
           } else if (selectedIndex >= 0 && selectedIndex < visibleItems.length) {
@@ -364,11 +434,7 @@ export function setupAtMentions(shadowRoot) {
           e.preventDefault();
           isFolderFocused = true;
           selectedIndex = -1;
-          if (e.shiftKey) {
-            selectedFolderIndex = (selectedFolderIndex - 1 + 4) % 4;
-          } else {
-            selectedFolderIndex = (selectedFolderIndex + 1) % 4;
-          }
+          if (selectedFolderIndex === -1) selectedFolderIndex = 0;
           handleFolderNavigation(e.shiftKey ? 'left' : 'right');
           return;
       }

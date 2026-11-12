@@ -7,16 +7,98 @@ export const styles = `${utilities}\n${katex}\n${boardingStyles}
 /* SIMPLE THEME SYSTEM - NO !important */
 :host,
 .socratiq-widget-root {
-    --socratiq-text: #1f2328; /* Light theme default: dark text */
+    --socratiq-brand-50: 250 241 244;
+    --socratiq-brand-100: 247 230 234;
+    --socratiq-brand-200: 238 208 215;
+    --socratiq-brand-300: 223 170 184;
+    --socratiq-brand-400: 201 116 139;
+    --socratiq-brand-500: 142 21 55;
+    --socratiq-brand-600: 116 19 47;
+    --socratiq-brand-700: 95 14 37;
+    --socratiq-brand-800: 76 11 30;
+    --socratiq-brand-900: 58 9 23;
+    --socratiq-brand-950: 36 5 14;
+    --socratiq-text: #272329; /* Light theme default: warm dark text */
     --socratiq-bg: #ffffff;
-    --socratiq-muted: #4c566a;
-    --socratiq-border: #d0d7de;
-    --socratiq-hover: #f6f8fa;
-    --socratiq-accent: #0969da;
-    --socratiq-accent-bg: #dbeafe;
-    --socratiq-accent-hover: #bfdbfe;
+    --socratiq-muted: #5e5157;
+    --socratiq-border: #d8c5cb;
+    --socratiq-hover: #fcf8f9;
+    --socratiq-accent: #8e1537;
+    --socratiq-accent-strong: #74132f;
+    --socratiq-accent-rgb: 142, 21, 55;
+    --socratiq-accent-bg: #f7e6ea;
+    --socratiq-accent-hover: #eed0d7;
     color: var(--socratiq-text);
     background: var(--socratiq-bg);
+}
+
+:host([data-socratiq-volume="vol2"]),
+.socratiq-widget-root[data-socratiq-volume="vol2"] {
+    --socratiq-brand-50: 241 245 251;
+    --socratiq-brand-100: 227 236 248;
+    --socratiq-brand-200: 198 216 240;
+    --socratiq-brand-300: 155 187 228;
+    --socratiq-brand-400: 107 159 212;
+    --socratiq-brand-500: 31 64 122;
+    --socratiq-brand-600: 22 47 89;
+    --socratiq-brand-700: 18 38 73;
+    --socratiq-brand-800: 14 29 56;
+    --socratiq-brand-900: 10 21 41;
+    --socratiq-brand-950: 6 13 26;
+    --socratiq-muted: #4e5968;
+    --socratiq-border: #c5d1e0;
+    --socratiq-hover: #f7f9fc;
+    --socratiq-accent: #1f407a;
+    --socratiq-accent-strong: #162f59;
+    --socratiq-accent-rgb: 31, 64, 122;
+    --socratiq-accent-bg: #e3ecf8;
+    --socratiq-accent-hover: #c6d8f0;
+}
+
+:host([data-socratiq-volume="vol3"]),
+.socratiq-widget-root[data-socratiq-volume="vol3"] {
+    --socratiq-brand-50: 248 243 252;
+    --socratiq-brand-100: 240 230 250;
+    --socratiq-brand-200: 223 201 244;
+    --socratiq-brand-300: 200 162 236;
+    --socratiq-brand-400: 176 124 226;
+    --socratiq-brand-500: 88 28 135;
+    --socratiq-brand-600: 67 20 102;
+    --socratiq-brand-700: 54 16 82;
+    --socratiq-brand-800: 41 12 63;
+    --socratiq-brand-900: 29 8 45;
+    --socratiq-brand-950: 18 5 28;
+    --socratiq-muted: #585063;
+    --socratiq-border: #d2c5e0;
+    --socratiq-hover: #faf8fc;
+    --socratiq-accent: #581c87;
+    --socratiq-accent-strong: #431466;
+    --socratiq-accent-rgb: 88, 28, 135;
+    --socratiq-accent-bg: #f0e6fa;
+    --socratiq-accent-hover: #dfc9f4;
+}
+
+:host([data-socratiq-volume="vol4"]),
+.socratiq-widget-root[data-socratiq-volume="vol4"] {
+    --socratiq-brand-50: 238 250 246;
+    --socratiq-brand-100: 219 242 234;
+    --socratiq-brand-200: 184 228 213;
+    --socratiq-brand-300: 134 208 184;
+    --socratiq-brand-400: 78 184 152;
+    --socratiq-brand-500: 6 95 70;
+    --socratiq-brand-600: 4 70 52;
+    --socratiq-brand-700: 3 56 41;
+    --socratiq-brand-800: 2 42 31;
+    --socratiq-brand-900: 2 29 22;
+    --socratiq-brand-950: 1 17 13;
+    --socratiq-muted: #4b5d57;
+    --socratiq-border: #bfd6ce;
+    --socratiq-hover: #f6fbf9;
+    --socratiq-accent: #065f46;
+    --socratiq-accent-strong: #044634;
+    --socratiq-accent-rgb: 6, 95, 70;
+    --socratiq-accent-bg: #dbf2ea;
+    --socratiq-accent-hover: #b8e4d5;
 }
 
 :host([data-socratiq-theme="dark"]),
@@ -26,9 +108,38 @@ export const styles = `${utilities}\n${katex}\n${boardingStyles}
     --socratiq-muted: #9ca3af;
     --socratiq-border: #30363d;
     --socratiq-hover: #21262d;
-    --socratiq-accent: #58a6ff;
-    --socratiq-accent-bg: #1f2937;
-    --socratiq-accent-hover: #374151;
+    --socratiq-accent: #E85D75;
+    --socratiq-accent-strong: #f07b8e;
+    --socratiq-accent-rgb: 232, 93, 117;
+    --socratiq-accent-bg: #2d161e;
+    --socratiq-accent-hover: #3d1d28;
+}
+
+:host([data-socratiq-theme="dark"][data-socratiq-volume="vol2"]),
+.socratiq-widget-root[data-socratiq-theme="dark"][data-socratiq-volume="vol2"] {
+    --socratiq-accent: #6B9FD4;
+    --socratiq-accent-strong: #8ab6e3;
+    --socratiq-accent-rgb: 107, 159, 212;
+    --socratiq-accent-bg: #152238;
+    --socratiq-accent-hover: #1e304d;
+}
+
+:host([data-socratiq-theme="dark"][data-socratiq-volume="vol3"]),
+.socratiq-widget-root[data-socratiq-theme="dark"][data-socratiq-volume="vol3"] {
+    --socratiq-accent: #C084FC;
+    --socratiq-accent-strong: #d2a4fd;
+    --socratiq-accent-rgb: 192, 132, 252;
+    --socratiq-accent-bg: #241436;
+    --socratiq-accent-hover: #321c4a;
+}
+
+:host([data-socratiq-theme="dark"][data-socratiq-volume="vol4"]),
+.socratiq-widget-root[data-socratiq-theme="dark"][data-socratiq-volume="vol4"] {
+    --socratiq-accent: #34D399;
+    --socratiq-accent-strong: #5eead4;
+    --socratiq-accent-rgb: 52, 211, 153;
+    --socratiq-accent-bg: #0d2922;
+    --socratiq-accent-hover: #133b31;
 }
 
 #text-selection-menu{
@@ -67,7 +178,7 @@ export const styles = `${utilities}\n${katex}\n${boardingStyles}
   
   /* Table headers */
   th {
-    background-color: #009879; /* A nice green background */
+    background-color: var(--socratiq-accent, #8e1537); /* Volume brand header background */
     color: #ffffff; /* White text color */
     text-align: left; /* Align text to the left */
     padding: 12px 15px; /* Add some padding */
@@ -197,7 +308,7 @@ export const styles = `${utilities}\n${katex}\n${boardingStyles}
     #submit-quiz-btn {
       margin-top: 1rem; /* Tailwind class mt-4 */
       width: 100%; /* Tailwind class w-full */
-      background-color: black; /* Tailwind class bg-blue-500 */
+      background-color: var(--socratiq-accent, #8e1537); /* Tailwind class bg-blue-500 */
       color: white; /* Tailwind class text-white */
       padding: 0.5rem 1rem; /* Tailwind classes px-4 py-2 */
       border-radius: 0.25rem; /* Tailwind class rounded */
@@ -206,13 +317,13 @@ export const styles = `${utilities}\n${katex}\n${boardingStyles}
     }
     
     #submit-quiz-btn:hover {
-      background-color: #2779bd; /* Tailwind class hover:bg-blue-600 */
+      background-color: var(--socratiq-accent-strong, #74132f); /* Tailwind class hover:bg-blue-600 */
     }
     
     .submit-quiz-btn {
       margin-top: 1rem; /* Tailwind class mt-4 */
       width: 100%; /* Tailwind class w-full */
-      background-color: black; /* Tailwind class bg-blue-500 */
+      background-color: var(--socratiq-accent, #8e1537); /* Tailwind class bg-blue-500 */
       color: white; /* Tailwind class text-white */
       padding: 0.5rem 1rem; /* Tailwind classes px-4 py-2 */
       border-radius: 0.25rem; /* Tailwind class rounded */
@@ -221,7 +332,7 @@ export const styles = `${utilities}\n${katex}\n${boardingStyles}
     }
     
     .submit-quiz-btn:hover {
-      background-color: #2779bd; /* Tailwind class hover:bg-blue-600 */
+      background-color: var(--socratiq-accent-strong, #74132f); /* Tailwind class hover:bg-blue-600 */
     }
     
   
@@ -247,7 +358,7 @@ export const styles = `${utilities}\n${katex}\n${boardingStyles}
     details > .spoiler-content,
     details > p,
     details > em {
-      color: black;
+      color: var(--socratiq-text, #1f2328);
       font-style: normal !important; /* This will override other styles unless they also use !important */
     }
   /*   
@@ -279,10 +390,11 @@ export const styles = `${utilities}\n${katex}\n${boardingStyles}
       -webkit-appearance: none; /* Override default CSS styles */
       appearance: none;
       width: 100%; /* Full-width */
-      height: 5px; /* Specified height */
-      background: black; /* Black track */
+      height: 6px; /* Specified height */
+      background: var(--socratiq-border, #d8c5cb);
+      border-radius: 9999px;
       outline: none; /* Remove outline */
-      opacity: 0.7; /* Partial transparency */
+      opacity: 0.9;
       transition: opacity .2s; /* Transition for the slider */
     }
     
@@ -299,17 +411,23 @@ export const styles = `${utilities}\n${katex}\n${boardingStyles}
     input[type=range]::-webkit-slider-thumb {
       -webkit-appearance: none; /* Override default CSS styles */
       appearance: none;
-      width: 25px; /* Width of the thumb */
-      height: 25px; /* Height of the thumb */
-      background: black; /* Black thumb */
+      width: 18px; /* Width of the thumb */
+      height: 18px; /* Height of the thumb */
+      border-radius: 50%;
+      background: var(--socratiq-accent, #8e1537);
+      border: 2px solid var(--socratiq-bg, #ffffff);
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
       cursor: pointer; /* Cursor on hover */
     }
   
     /* Style for Mozilla Firefox */
     input[type=range]::-moz-range-thumb {
-      width: 25px; /* Width of the thumb */
-      height: 25px; /* Height of the thumb */
-      background: black; /* Black thumb */
+      width: 18px; /* Width of the thumb */
+      height: 18px; /* Height of the thumb */
+      border-radius: 50%;
+      background: var(--socratiq-accent, #8e1537);
+      border: 2px solid var(--socratiq-bg, #ffffff);
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
       cursor: pointer; /* Cursor on hover */
     }
   
@@ -320,12 +438,12 @@ export const styles = `${utilities}\n${katex}\n${boardingStyles}
     
     /* Additional style for the focus state on Webkit browsers */
     input[type=range]:focus::-webkit-slider-thumb {
-      background: #333; /* Darker shade when focused */
+      background: var(--socratiq-accent, #74132f);
     }
   
     /* Additional style for the focus state on Mozilla Firefox */
     input[type=range]:focus::-moz-range-thumb {
-      background: #333; /* Darker shade when focused */
+      background: var(--socratiq-accent, #74132f);
     }
   
     /* Show the popup div on hover */
@@ -382,8 +500,8 @@ export const styles = `${utilities}\n${katex}\n${boardingStyles}
     z-index: 100;
     left: 50%;
     top: 50%;
-    padding: 10px;
-    width: 400px;
+    padding: 6px;
+    width: min(480px, 94vw);
     height: fit-content;
     transform: translate(-50%, -50%); /* Center the modal */
     /* overflow: auto; */
@@ -407,7 +525,8 @@ export const styles = `${utilities}\n${katex}\n${boardingStyles}
   
   /* Modal Content */
   .modal-content {
-    background-color: #fefefe;
+    background-color: var(--socratiq-bg, #ffffff);
+    color: var(--socratiq-text, #1f2328);
     margin: 15% auto;
     padding: 20px;
     /* border: 1px solid #888; */
@@ -462,7 +581,7 @@ export const styles = `${utilities}\n${katex}\n${boardingStyles}
   
 #enter-btn:hover {
   transform: translateY(-50%) scale(1.1);
-  color: #3b82f6; /* Tailwind's blue-500 */
+  color: var(--socratiq-accent, #8e1537); /* Tailwind's blue-500 */
 }
 
 #enter-btn svg {
@@ -520,7 +639,7 @@ export const styles = `${utilities}\n${katex}\n${boardingStyles}
       /* --background-color: #1e1e1e; */
       --text-color: black;
       /* --border-color: #333; */
-      --link-color: #4ea0f6;
+      --link-color: var(--socratiq-accent, #E85D75);
       /* --secondary-background-color: #2a2a2a; */
   }
   
@@ -546,7 +665,7 @@ export const styles = `${utilities}\n${katex}\n${boardingStyles}
     --background-color: #ffffff;
     --text-color: #333333;
     --border-color: #ddd;
-    --link-color: #007bff;
+    --link-color: var(--socratiq-accent, #8e1537);
     --secondary-background-color: #f9f9f9;
   }
   
@@ -581,12 +700,12 @@ export const styles = `${utilities}\n${katex}\n${boardingStyles}
   
   /* Define the hover state for the button */
   .followup-button:hover {
-    color: purple; /* Change text color to purple on hover */
+    color: var(--socratiq-accent, #8e1537);
   }
   
   
   #menu-toggle:checked~label {
-    background-color: #2563eb;
+    background-color: var(--socratiq-accent-strong, #74132f);
     /* Darker shade for active state */
   }
   
@@ -597,12 +716,17 @@ export const styles = `${utilities}\n${katex}\n${boardingStyles}
   }
   
   #copy-container {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    display: flex;
+    flex-wrap: wrap;
     gap: 8px;
     margin-bottom: 8px;
-    padding: 8px;
+    padding: 6px 8px;
     border-radius: 4px;
+  }
+
+  .copy-item {
+    max-width: 260px;
+    text-overflow: ellipsis;
   }
   
   .input-wrapper {
@@ -632,13 +756,13 @@ export const styles = `${utilities}\n${katex}\n${boardingStyles}
   
   @keyframes inner-pulse {
     0% {
-      box-shadow: inset 0 0 10px rgba(0, 123, 255, 0.7), inset 0 0 20px rgba(0, 123, 255, 0.5);
+      box-shadow: inset 0 0 10px rgba(var(--socratiq-accent-rgb, 142, 21, 55), 0.7), inset 0 0 20px rgba(var(--socratiq-accent-rgb, 142, 21, 55), 0.5);
     }
     50% {
-      box-shadow: inset 0 0 15px rgba(0, 123, 255, 1), inset 0 0 30px rgba(0, 123, 255, 0.8);
+      box-shadow: inset 0 0 15px rgba(var(--socratiq-accent-rgb, 142, 21, 55), 1), inset 0 0 30px rgba(var(--socratiq-accent-rgb, 142, 21, 55), 0.8);
     }
     100% {
-      box-shadow: inset 0 0 10px rgba(0, 123, 255, 0.7), inset 0 0 20px rgba(0, 123, 255, 0.5);
+      box-shadow: inset 0 0 10px rgba(var(--socratiq-accent-rgb, 142, 21, 55), 0.7), inset 0 0 20px rgba(var(--socratiq-accent-rgb, 142, 21, 55), 0.5);
     }
   }
   
@@ -648,51 +772,55 @@ export const styles = `${utilities}\n${katex}\n${boardingStyles}
   }
   
   
-  #context-button {
-    margin-left: 8px;
-    /* context button */
+  #context-button,
+  #quiz-button,
+  #flashcards-button {
     position: relative;
     background: transparent;
     border: none;
     cursor: pointer;
-    padding: 0;
-    display: flex;
+    display: inline-flex;
     align-items: center;
     justify-content: center;
-    margin-top: 8px; 
-    margin-bottom: 8px;
-    /* background-color: white; */
-    padding: 4px;
-    /* border: 1px solid #ddd;  */
-    /* box-shadow: 0 0 10px rgba(0, 0, 0, 0.2);  */
-  }
-  
-  #context-button:hover {
-    background-color: #f5f5f5; /* Change background color on hover */
-    border-color: #ccc; /* Change border color on hover */
+    min-height: 38px;
+    margin-top: 2px;
+    margin-bottom: 2px;
+    padding: 6px 10px;
+    border-radius: 6px;
+    white-space: nowrap;
   }
 
-  #quiz-button {
-    /* quiz button */
-    position: relative;
-    background: transparent;
-    border: none;
-    cursor: pointer;
-    padding: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    margin-top: 8px; 
-    margin-bottom: 8px;
-    /* background-color: white; */
-    padding: 4px;
-    /* border: 1px solid #ddd;  */
-    /* box-shadow: 0 0 10px rgba(0, 0, 0, 0.2);  */
+  #context-button:hover,
+  #quiz-button:hover,
+  #flashcards-button:hover {
+    background-color: var(--socratiq-hover, #f5f5f5);
+    border-color: var(--socratiq-border, #ccc);
   }
-  
-  #quiz-button:hover {
-    background-color: #f5f5f5; /* Change background color on hover */
-    border-color: #ccc; /* Change border color on hover */
+
+  @media (max-width: 420px) {
+    #input-container > div:first-child,
+    #study-toolbar-row {
+      gap: 3px !important;
+      padding: 2px 0 !important;
+      flex-wrap: nowrap !important;
+      max-width: 100% !important;
+    }
+    #context-button,
+    #quiz-button,
+    #flashcards-button,
+    #more-options-button,
+    .socratiq-toolbar-btn {
+      padding: 4px 5px !important;
+      font-size: 11px !important;
+      gap: 2px !important;
+      min-width: 0 !important;
+    }
+    #context-button span,
+    #quiz-button span,
+    #flashcards-button span {
+      font-size: 11px !important;
+      margin-left: 2px !important;
+    }
   }
   
   .big-quiz-btn-disabled {
@@ -803,17 +931,17 @@ export const styles = `${utilities}\n${katex}\n${boardingStyles}
     text-align: left;
     transition: background 0.12s;
   }
-  .dropdown-item:hover { background: rgba(99,102,241,0.08); color: #6366f1; }
+  .dropdown-item:hover { background: rgba(var(--socratiq-accent-rgb, 142, 21, 55), 0.08); color: var(--socratiq-accent, #8e1537); }
   .dropdown-item.active {
-    background: rgba(99,102,241,0.12);
-    color: #6366f1;
+    background: rgba(var(--socratiq-accent-rgb, 142, 21, 55), 0.12);
+    color: var(--socratiq-accent, #8e1537);
     font-weight: 600;
   }
 
   /* Draw-to-select active indicator on the ⋯ button */
   #more-options-button.draw-active {
-    color: #6366f1;
-    background: rgba(99,102,241,0.12);
+    color: var(--socratiq-accent, #8e1537);
+    background: rgba(var(--socratiq-accent-rgb, 142, 21, 55), 0.12);
     border-radius: 6px;
   }
 
@@ -910,7 +1038,7 @@ export const styles = `${utilities}\n${katex}\n${boardingStyles}
   }
   
   .search-input:focus {
-    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+    box-shadow: 0 0 0 2px rgba(var(--socratiq-accent-rgb, 142, 21, 55), 0.2);
   }
 
 
@@ -937,7 +1065,7 @@ export const styles = `${utilities}\n${katex}\n${boardingStyles}
 /* For Firefox */
 #message-container {
   scrollbar-width: thin;
-  scrollbar-color: #0d6efd transparent;
+  scrollbar-color: var(--socratiq-accent, #8e1537) transparent;
   overflow-x: hidden; /* hide horizontal scrollbar */
 }
 
@@ -1006,7 +1134,7 @@ export const styles = `${utilities}\n${katex}\n${boardingStyles}
     width: 16px;
     height: 16px;
     border: 2px solid #f3f3f3;
-    border-top: 2px solid #3498db;
+    border-top: 2px solid var(--socratiq-accent, #8e1537);
     border-radius: 50%;
     animation: spin 1s linear infinite;
 }
@@ -1036,7 +1164,7 @@ export const styles = `${utilities}\n${katex}\n${boardingStyles}
 
 .sr-notification.saving {
     background: #e6f3ff;
-    border-left: 4px solid #0066cc;
+    border-left: 4px solid var(--socratiq-accent, #8e1537);
 }
 
 .save-button-content {
@@ -1080,7 +1208,7 @@ export const styles = `${utilities}\n${katex}\n${boardingStyles}
     }
 
     .boarding-button {
-        background: #007bff;
+        background: var(--socratiq-accent, #8e1537);
         color: white;
         border: none;
         padding: 8px 16px;
@@ -1089,7 +1217,7 @@ export const styles = `${utilities}\n${katex}\n${boardingStyles}
     }
 
     .boarding-button:hover {
-        background: #0056b3;
+        background: var(--socratiq-accent-strong, #74132f);
     }
 
 #floating-ai-btn .menu-item {
@@ -1184,7 +1312,7 @@ export const styles = `${utilities}\n${katex}\n${boardingStyles}
 /* Toggle switch styles */
 .toggle-checkbox:checked {
   right: 0;
-  border-color: #68D391;
+  border-color: var(--socratiq-accent, #8e1537);
 }
 
 .toggle-label {
@@ -1192,7 +1320,7 @@ export const styles = `${utilities}\n${katex}\n${boardingStyles}
 }
 
 .toggle-checkbox:checked + .toggle-label {
-  background-color: #48BB78;
+  background-color: var(--socratiq-accent, #8e1537);
 }
 
 /* Keep the existing deck controls usable when their modal narrows. */
@@ -1243,7 +1371,77 @@ export const styles = `${utilities}\n${katex}\n${boardingStyles}
 :host([data-socratiq-theme="dark"]) .stats-body .text-gray-700 { color: var(--socratiq-muted); }
 :host([data-socratiq-theme="dark"]) .stats-body .text-gray-800,
 :host([data-socratiq-theme="dark"]) .stats-body .text-gray-900 { color: var(--socratiq-text); }
-:host([data-socratiq-theme="dark"]) #socratiq-knowledge-graph-modal { color: #1f2328; }
+:host([data-socratiq-theme="dark"]) #context-menu,
+:host([data-theme="dark"]) #context-menu,
+:host([data-socratiq-theme="dark"]) .at-mentions-dropup,
+:host([data-theme="dark"]) .at-mentions-dropup,
+:host([data-socratiq-theme="dark"]) .folder-filters,
+:host([data-theme="dark"]) .folder-filters,
+:host([data-socratiq-theme="dark"]) .folder-btn,
+:host([data-theme="dark"]) .folder-btn,
+:host([data-socratiq-theme="dark"]) .folder-filter,
+:host([data-theme="dark"]) .folder-filter,
+:host([data-socratiq-theme="dark"]) #context-search,
+:host([data-theme="dark"]) #context-search,
+:host([data-socratiq-theme="dark"]) #context-results > div,
+:host([data-theme="dark"]) #context-results > div,
+:host([data-socratiq-theme="dark"]) .results-container,
+:host([data-theme="dark"]) .results-container,
+:host([data-socratiq-theme="dark"]) .at-mention-item,
+:host([data-theme="dark"]) .at-mention-item,
+:host([data-socratiq-theme="dark"]) .mention-item,
+:host([data-theme="dark"]) .mention-item {
+  background: var(--socratiq-study-surface-elevated, #161b22) !important;
+  background-color: var(--socratiq-study-surface-elevated, #161b22) !important;
+  color: var(--socratiq-study-text, #e6edf3) !important;
+  border-color: var(--socratiq-study-border, #30363d) !important;
+}
+:host([data-socratiq-theme="dark"]) .folder-filter.bg-blue-100,
+:host([data-theme="dark"]) .folder-filter.bg-blue-100,
+:host([data-socratiq-theme="dark"]) .folder-filter.bg-blue-200,
+:host([data-theme="dark"]) .folder-filter.bg-blue-200,
+:host([data-socratiq-theme="dark"]) .at-mention-item.bg-blue-100,
+:host([data-theme="dark"]) .at-mention-item.bg-blue-100,
+:host([data-socratiq-theme="dark"]) .folder-filter:hover,
+:host([data-theme="dark"]) .folder-filter:hover,
+:host([data-socratiq-theme="dark"]) .at-mention-item:hover,
+:host([data-theme="dark"]) .at-mention-item:hover {
+  background: var(--socratiq-hover, #21262d) !important;
+  background-color: var(--socratiq-hover, #21262d) !important;
+  color: var(--socratiq-study-text, #e6edf3) !important;
+}
+:host([data-socratiq-theme="dark"]) #newDeckBtn,
+:host([data-theme="dark"]) #newDeckBtn,
+:host([data-socratiq-theme="dark"]) #createDeckBtn,
+:host([data-theme="dark"]) #createDeckBtn {
+  color: var(--socratiq-accent, #E85D75) !important;
+}
+:host([data-socratiq-theme="dark"]) #socratiq-knowledge-graph-modal > div,
+:host([data-theme="dark"]) #socratiq-knowledge-graph-modal > div,
+:host([data-socratiq-theme="dark"]) #knowledge-graph-modal > div,
+:host([data-theme="dark"]) #knowledge-graph-modal > div,
+:host([data-socratiq-theme="dark"]) .knowledge-graph-sidebar,
+:host([data-theme="dark"]) .knowledge-graph-sidebar,
+:host([data-socratiq-theme="dark"]) .knowledge-graph-actions,
+:host([data-theme="dark"]) .knowledge-graph-actions,
+:host([data-socratiq-theme="dark"]) #list-view,
+:host([data-theme="dark"]) #list-view {
+  background: var(--socratiq-study-surface, #0f1419) !important;
+  background-color: var(--socratiq-study-surface, #0f1419) !important;
+  color: var(--socratiq-study-text, #e6edf3) !important;
+  border-color: var(--socratiq-study-border, #30363d) !important;
+}
+:host([data-socratiq-theme="dark"]) #socratiq-knowledge-graph-modal .sidebar-header,
+:host([data-theme="dark"]) #socratiq-knowledge-graph-modal .sidebar-header,
+:host([data-socratiq-theme="dark"]) #socratiq-knowledge-graph-modal .sidebar-header div,
+:host([data-theme="dark"]) #socratiq-knowledge-graph-modal .sidebar-header div,
+:host([data-socratiq-theme="dark"]) #socratiq-knowledge-graph-modal #list-view .list-item,
+:host([data-theme="dark"]) #socratiq-knowledge-graph-modal #list-view .list-item,
+:host([data-socratiq-theme="dark"]) #socratiq-knowledge-graph-modal #list-view .list-item span,
+:host([data-theme="dark"]) #socratiq-knowledge-graph-modal #list-view .list-item span {
+  color: var(--socratiq-study-text, #e6edf3) !important;
+  border-color: var(--socratiq-study-border, #30363d) !important;
+}
 :host([data-socratiq-theme="dark"]) .stats-body .bg-blue-50 { background-color: var(--socratiq-accent-bg); }
 :host([data-socratiq-theme="dark"]) .stats-body .text-blue-600,
 :host([data-socratiq-theme="dark"]) .stats-body .text-blue-700 { color: var(--socratiq-accent); }
@@ -1253,10 +1451,37 @@ export const styles = `${utilities}\n${katex}\n${boardingStyles}
 .stats-modal, .verification-modal, #socratiq-knowledge-graph-modal, #helpModal {
   z-index: 100001 !important;
 }
+#chapterList button[data-chapter] { gap: 8px; }
+#socratiq-knowledge-graph-modal .quiz-items-container { flex: 1 1 auto; min-height: 0; margin-bottom: 8px !important; max-height: none !important; }
+#socratiq-knowledge-graph-modal .knowledge-graph-actions { position: static !important; flex: 0 0 auto; margin-top: auto; padding-top: 10px !important; }
 #sr-modal-content-container-controls { gap: 8px; flex-wrap: wrap; }
 #sr-controls-container { display: flex; flex-wrap: wrap; gap: 8px; }
 #sr-controls-container > button { margin-left: 0 !important; }
 #showAddCard { align-self: flex-start; flex-shrink: 0; white-space: nowrap; }
+@media (min-width: 641px) and (max-width: 820px) {
+  #sr-modal-content_inner {
+    top: 16px;
+    width: calc(100% - 32px);
+    max-height: calc(100dvh - 32px) !important;
+    padding: 16px;
+  }
+  #sr-modal-content_inner > .grid {
+    grid-template-columns: 200px minmax(0, 1fr) !important;
+  }
+  #sr-sidebar {
+    grid-column: 1 / 2 !important;
+    min-width: 200px;
+  }
+  #sr-modal-content-container {
+    grid-column: 2 / 3 !important;
+    min-width: 0;
+  }
+  #socratiq-knowledge-graph-modal > div {
+    width: calc(100% - 24px) !important;
+    height: calc(100dvh - 24px) !important;
+    padding: 16px !important;
+  }
+}
 @media (max-width: 640px) {
   /* The stacked deck keeps its original actions; duplicate floating actions
      would cover its search and import/export controls. */
@@ -1285,7 +1510,7 @@ export const styles = `${utilities}\n${katex}\n${boardingStyles}
   #socratiq-knowledge-graph-modal .knowledge-graph-layout { flex-direction: column; gap: 12px; min-height: 0; overflow-y: auto; }
   #socratiq-knowledge-graph-modal .knowledge-graph-viewport { flex: 0 0 400px !important; width: 100%; height: 400px !important; }
   #socratiq-knowledge-graph-modal .knowledge-graph-sidebar { flex: 0 0 auto; width: 100% !important; height: auto !important; padding: 16px !important; border-left: 0 !important; border-top: 1px solid #e2e8f0; }
-  #socratiq-knowledge-graph-modal .quiz-items-container { flex: 0 0 auto; max-height: 180px; margin-bottom: 0 !important; }
+  #socratiq-knowledge-graph-modal .quiz-items-container { flex: 0 0 auto; max-height: 180px !important; margin-bottom: 0 !important; }
   #socratiq-knowledge-graph-modal .knowledge-graph-actions { position: static !important; margin-top: 12px; padding-top: 12px !important; }
   #closeModal_sr, #sr-import-btn, #sr-download-btn, #copyButton, #sr-share-btn {
     min-width: 44px;
@@ -1294,30 +1519,35 @@ export const styles = `${utilities}\n${katex}\n${boardingStyles}
     justify-content: center;
   }
   #sr-modal-content_inner {
-    top: 12px;
-    width: calc(100% - 24px);
-    max-height: calc(100dvh - 24px) !important;
-    padding: 16px;
-    margin-bottom: 12px;
+    top: 8px;
+    width: calc(100% - 20px);
+    max-height: calc(100dvh - 16px) !important;
+    padding: 10px 12px;
+    margin-bottom: 8px;
   }
   #sr-modal-content_inner > .grid {
     display: flex;
     flex-direction: column;
-    margin-top: 48px;
+    margin-top: 28px;
+    gap: 8px;
     overflow-y: auto !important;
   }
   #sr-sidebar {
     position: static !important;
     flex: 0 0 auto;
-    max-height: none !important;
-    overflow: visible !important;
+    max-height: 185px !important;
+    overflow-y: auto !important;
     border-right: 0;
     border-bottom: 1px solid var(--socratiq-border);
     padding-right: 0;
-    padding-bottom: 12px;
+    padding-bottom: 8px;
   }
+  #sr-sidebar > .mb-4,
+  #sr-sidebar > .mb-6 { margin-bottom: 6px !important; }
   #sr-modal-content-container { flex: 0 0 auto; min-width: 0; max-height: none !important; padding-left: 0; overflow: visible; }
-  #sr-modal-content-container > .flex.items-center.justify-between.w-full { flex-wrap: wrap; gap: 8px; }
+  #sr-modal-content-container > .mb-4,
+  #sr-modal-content-container > .mb-6 { margin-bottom: 8px !important; }
+  #sr-modal-content-container > .flex.items-center.justify-between.w-full { flex-wrap: wrap; gap: 6px; margin-bottom: 8px !important; }
   #sr-modal-content-container > .flex.items-center.justify-between.w-full > div:first-child { flex-basis: 100%; min-width: 0; }
   #sr-modal-content-container > .flex.items-center.justify-between.w-full > div:last-child { margin-left: 0; }
 }

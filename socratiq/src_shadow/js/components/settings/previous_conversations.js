@@ -5,10 +5,10 @@ import { enableTooltip } from '../tooltip/tooltip.js';
 
 const prev_chats = `
 <div id="popover-container" class="hidden">
-  <div class="modal-content bg-transparent p-4 max-w-md w-full rounded-lg">
+  <div class="p-5 w-full rounded-lg" style="background-color: transparent;">
     <div class="flex justify-between items-center mb-4">
-      <h2 class="text-lg font-semibold text-gray-800">Previous Conversations</h2>
-      <button id="close-btn2" class="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors duration-200">
+      <h2 class="text-lg font-semibold text-gray-800 dark:text-white" style="color: var(--socratiq-text, #1f2328);">Previous Conversations</h2>
+      <button id="close-btn2" class="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:bg-zinc-800 transition-colors duration-200">
         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6">
           <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
         </svg>
@@ -17,23 +17,26 @@ const prev_chats = `
 
     <input 
       id="chat-search" 
-      class="search-input w-full px-3 py-2 rounded-lg border border-gray-200 focus:outline-none focus:border-blue-400 mb-4 text-gray-600 placeholder-gray-400"
+      class="search-input w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-zinc-700 focus:outline-none focus:border-blue-400 mb-4 text-gray-600 dark:text-zinc-200 placeholder-gray-400"
+      style="background-color: var(--socratiq-hover, #ffffff); color: var(--socratiq-text, #1f2328); border-color: var(--socratiq-border, #e5e7eb);"
       placeholder="Search conversations..."
     />
 
     <ul id="new-chat" class="mb-3 list-none">
       <li class="transition-all duration-200">
         <button
-          class="flex items-center justify-between w-full px-4 py-3 text-left rounded-lg bg-blue-50 hover:bg-blue-100 transition-all duration-200 group"
+          class="flex items-center justify-between w-full px-4 py-3 text-left rounded-lg transition-all duration-200 group"
+          style="background-color: var(--socratiq-accent-bg, #faf1f4); color: var(--socratiq-accent, #8e1537);"
         >
-          <span class="text-blue-600 group-hover:text-blue-700 font-medium">New Chat</span>
+          <span class="font-medium" style="color: var(--socratiq-accent, #8e1537);">New Chat</span>
           <svg
             xmlns="http://www.w3.org/2000/svg"
             fill="none"
             viewBox="0 0 24 24"
             stroke-width="1.5"
             stroke="currentColor"
-            class="w-5 h-5 text-blue-600 group-hover:text-blue-700"
+            class="w-5 h-5"
+            style="color: var(--socratiq-accent, #8e1537);"
           >
             <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v12m6-6H6" />
           </svg>
@@ -45,10 +48,10 @@ const prev_chats = `
       <!-- Chat items will be inserted here -->
     </ul>
 
-    <div class="mt-4 flex justify-between">
+    <div class="mt-4 flex justify-between gap-2.5" style="gap: 10px;">
       <button 
         id="reset-btn" 
-        class="flex items-center px-4 py-2 text-yellow-600 bg-yellow-50 rounded-lg hover:bg-yellow-100 transition-colors duration-200"
+        class="flex items-center px-4 py-2 text-yellow-700 dark:text-yellow-300 bg-yellow-50 dark:bg-yellow-900/30 rounded-lg hover:bg-yellow-100 dark:hover:bg-yellow-900/50 transition-colors duration-200"
       >
         <svg 
           xmlns="http://www.w3.org/2000/svg" 
@@ -64,7 +67,7 @@ const prev_chats = `
       </button>
       <button 
         id="clear-btn" 
-        class="flex items-center px-4 py-2 text-red-500 bg-red-50 rounded-lg hover:bg-red-100 transition-colors duration-200"
+        class="flex items-center px-4 py-2 text-red-600 dark:text-red-300 bg-red-50 dark:bg-red-900/30 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/50 transition-colors duration-200"
       >
         <svg 
           xmlns="http://www.w3.org/2000/svg" 
@@ -87,16 +90,15 @@ function addItem(shadowEle, entry) {
   const saveList = shadowEle.querySelector("#list-container");
   if (saveList) {
     const item = document.createElement("li");
-    item.id = "chat-item";
     item.className = "mb-3 transition-all duration-200 ease-in-out";
     item.innerHTML = `
     <div
       data-chat-item
-      class="flex items-center justify-between w-full px-4 py-3 text-left rounded-lg cursor-pointer transition-all duration-200 hover:bg-blue-50 group"
-      style="background-color: #fafafa;"
+      class="flex items-center justify-between w-full px-4 py-3 text-left rounded-lg cursor-pointer transition-all duration-200 hover:bg-blue-50 dark:hover:bg-zinc-800 group"
+      style="background-color: var(--socratiq-hover, #fafafa); color: var(--socratiq-text, #1f2328);"
     >
-      <span class="text-gray-700 group-hover:text-blue-600 font-medium truncate"></span>
-      <div class="flex items-center space-x-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+      <span class="text-gray-700 dark:text-zinc-200 group-hover:text-blue-600 font-medium truncate" style="color: var(--socratiq-text, #374151);"></span>
+      <div class="flex items-center space-x-2 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity duration-200">
         <div data-load-chat class="p-1.5 rounded-lg hover:bg-blue-100 transition-colors duration-200">
           <svg
             xmlns="http://www.w3.org/2000/svg"
@@ -187,7 +189,7 @@ async function populateListAndShowPopover(shadowEle) {
     });
 
     if (prevChats) {
-      if (entries.length === prevChats.length) return; // Entries have not changed
+      if (entries.length === prevChats.length && listContainer.children.length === entries.length) return; // Entries have not changed
     }
 
     listContainer.innerHTML = "";
@@ -273,7 +275,10 @@ export function setupModal_loadchats(shadowEle) {
     transform: translate(-50%, -50%);
     width: 95%;
     max-width: 32rem;
-    background: white;
+    background: var(--socratiq-bg, #ffffff);
+    color: var(--socratiq-text, #1f2328);
+    border: 1px solid var(--socratiq-border, #e5e7eb);
+    border-radius: 0.75rem;
     z-index: 100000;
     display: none;
   `;
@@ -384,8 +389,10 @@ async function searchAndShow(queryText, shadowEle){
       const request = store.getAll();
       request.onsuccess = () => {
         const allEntries = request.result;
-        const filteredEntries = allEntries.filter(entry => 
-          entry.html_content.toLowerCase().includes(queryText.toLowerCase())
+        const q = String(queryText || '').toLowerCase();
+        const filteredEntries = allEntries.filter(entry =>
+          String(entry?.title || '').toLowerCase().includes(q) ||
+          String(entry?.html_content || '').toLowerCase().includes(q)
         );
         resolve(filteredEntries);
       };

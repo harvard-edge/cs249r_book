@@ -3,8 +3,26 @@ import { renderSafeMarkdown } from './render.js';
 import { createParagraphPicker } from './picker.js';
 import { createPassageSessions, passageKey } from './passage-sessions.js';
 import { createReaderEnvironment } from './environment.js';
-import {readLearnerPreferences, saveLearnerPreferences, clearLearnerPreferences} from './preferences.js';
+import {
+  readLearnerPreferences,
+  saveLearnerPreferences,
+  clearLearnerPreferences,
+  SELECTION_CLIP_OPTIONS,
+  DEFAULT_CLIP_ACTIONS,
+  readClipActions,
+  saveClipActions,
+} from './preferences.js';
 import {createReaderTour} from './onboarding.js';
+import {
+  BYOK_PROVIDERS,
+  readActiveByokConfig,
+  saveByokConfig,
+  clearByokConfig,
+  startOpenRouterPKCE,
+  completeOpenRouterPKCE,
+  validateByokKeyFormat,
+} from '../src_shared/byok-provider.js';
+import { resolveChapterTaxonomy } from '../src_shared/taxonomy-map.js';
 
 const MAX_HISTORY_MESSAGES = 12;
 const MAX_VISIBLE_TURNS = 12;
@@ -13,6 +31,7 @@ const LEARNING_QUESTIONS = {
   simplify: 'Explain this passage in simpler language, defining any essential technical terms.',
   example: 'Show a concrete example that helps me understand this passage.',
   check: 'Check my understanding of this passage. Ask me one conceptual question at a time. Do not reveal the answer until I respond; then give feedback before asking another question.',
+  taxonomy: "Locate this passage in the ML Systems Taxonomy (Foundations F, Stack S, Lifecycle P, Qualities Q, System Types T): name the relevant taxonomy subject area(s), connect it to this volume's analytical lens, and explain what upstream or downstream system layers it constrains.",
 };
 
 /**
@@ -33,6 +52,29 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
   const host = document.createElement('div');
   host.id = 'socratiq-reader';
   document.body.appendChild(host);
+  if (!document.getElementById('socratiq-host-layout')) {
+    const hostLayoutStyle = document.createElement('style');
+    hostLayoutStyle.id = 'socratiq-host-layout';
+    hostLayoutStyle.textContent = `
+      #tbl-socratiq-controls table.table, #tbl-socratiq-controls table { display: table !important; width: 100% !important; table-layout: fixed !important; }
+      #tbl-socratiq-controls th, #tbl-socratiq-controls td { white-space: normal !important; overflow-wrap: break-word !important; word-break: normal !important; }
+      html[data-socratiq-picking="true"] main p:hover,
+      html[data-socratiq-picking="true"] main li:hover,
+      html[data-socratiq-picking="true"] main blockquote:hover,
+      html[data-socratiq-picking="true"] main figcaption:hover,
+      html[data-socratiq-picking="true"] main dd:hover {
+        cursor: pointer !important;
+        outline: 2px dashed rgba(165, 28, 48, 0.55) !important;
+        outline-offset: 4px !important;
+        border-radius: 4px !important;
+      }
+      @media (max-width: 800px) {
+        #quarto-back-to-top { bottom: 4.5rem !important; }
+        body { padding-bottom: 4.25rem; }
+      }
+    `;
+    document.head.appendChild(hostLayoutStyle);
+  }
   const root = host.attachShadow({ mode: 'open' });
 
   const style = document.createElement('style');
@@ -46,10 +88,27 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
       <span class="reader-mark" aria-hidden="true">S</span>
       <span>Ask SocratiQ</span>
     </button>
-    <button class="selection-action" type="button" hidden>
-      <span class="reader-mark" aria-hidden="true">S</span>
-      <span>Explain this</span>
-    </button>
+    <div class="selection-clip" role="toolbar" aria-label="Selection actions" hidden>
+      <div class="selection-clip-bar">
+        <button class="selection-action" type="button" data-clip-action="explain" title="Explain this passage">
+          <span class="reader-mark" aria-hidden="true">S</span>
+          <span>Explain this</span>
+        </button>
+        <button class="selection-clip-btn" type="button" data-clip-action="ask" title="Ask a custom question about this passage">Ask…</button>
+        <button class="selection-clip-btn" type="button" data-clip-action="check" title="Quiz me on this passage">Check me</button>
+        <button class="selection-clip-btn" type="button" data-clip-action="taxonomy" title="Map this passage to the ML Systems Taxonomy">Taxonomy</button>
+        <button class="selection-clip-btn" type="button" data-clip-action="simplify" title="Rewrite this passage in simpler terms" hidden>Simplify</button>
+        <button class="selection-clip-btn" type="button" data-clip-action="example" title="Give a concrete worked example" hidden>Example</button>
+        <button class="selection-clip-btn" type="button" data-clip-action="study" title="Open Study Tools with this passage" hidden>Study tools</button>
+        <button class="selection-clip-config-btn" type="button" aria-label="Configure selection actions" aria-expanded="false" title="Configure selection actions">
+          <span aria-hidden="true">⚙</span>
+        </button>
+      </div>
+      <div class="selection-clip-menu" role="group" aria-label="Selection clip actions" hidden>
+        <p class="selection-clip-menu-title">Selection bar actions</p>
+        <div class="selection-clip-options"></div>
+      </div>
+    </div>
     <section class="reader-panel" id="reader-panel" role="region" aria-label="SocratiQ focused reader" hidden>
       <header class="reader-header">
         <div class="reader-heading">
@@ -70,10 +129,24 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
         <summary>Learning preferences</summary>
         <div class="reader-preferences-fields">
           <label>Explanation level<select class="reader-level"><option value="beginner">Beginner — define the essentials</option><option value="intermediate">Intermediate — connect concepts</option><option value="advanced">Advanced — examine trade-offs</option></select></label>
-          <label>What do you already know? <span>(optional)</span><textarea class="reader-background" rows="2" maxlength="1200" placeholder="For example: I know Python; hardware is new to me."></textarea></label>
-          <label>How should explanations help you? <span>(optional)</span><textarea class="reader-teaching" rows="2" maxlength="800" placeholder="For example: Define symbols and use everyday analogies."></textarea></label>
+          <label>What do you already know? <span>(optional)</span><textarea class="reader-background" rows="1" maxlength="1200" placeholder="For example: I know Python; hardware is new to me."></textarea></label>
+          <label>How should explanations help you? <span>(optional)</span><textarea class="reader-teaching" rows="1" maxlength="800" placeholder="For example: Define symbols and use everyday analogies."></textarea></label>
+          <fieldset class="reader-clip-prefs">
+            <legend>Selection bar actions</legend>
+            <div class="reader-clip-prefs-options"></div>
+          </fieldset>
+          <fieldset class="reader-byok-box">
+            <legend>Connect your own AI (optional) <button type="button" class="reader-byok-back-inline">← Learning preferences</button></legend>
+            <button type="button" class="reader-byok-sso">Sign in with OpenRouter (Gemini / Claude / GPT)</button>
+            <label>Provider<select class="reader-byok-provider"><option value="google-gemini">Google Gemini (gemini-2.5-flash)</option><option value="anthropic">Anthropic Claude (claude-sonnet-4-20250514)</option><option value="openrouter">OpenRouter (Gemini / Claude / GPT)</option><option value="openai">OpenAI (gpt-4.1-mini)</option><option value="groq">Groq (openai/gpt-oss-120b)</option><option value="ollama">Local Ollama (gemma3:270m)</option></select></label>
+            <label>Model<input type="text" class="reader-byok-model" value="gemini-2.5-flash" maxlength="160"></label>
+            <label>API key <a class="reader-byok-portal" href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer">Get free Gemini key ↗</a><input type="password" class="reader-byok-key" autocomplete="off" spellcheck="false" maxlength="512" placeholder="Paste API key (session-only by default)"></label>
+            <label class="selection-clip-option"><input type="checkbox" class="reader-byok-remember"><span>Remember key in this browser</span></label>
+            <div class="reader-preference-actions"><button type="button" class="reader-byok-connect">Connect model</button><button type="button" class="reader-byok-disconnect">Use free shared model</button></div>
+            <p class="reader-byok-status" role="status" aria-live="polite"></p>
+          </fieldset>
           <p>Saved in this browser. Included when you ask AI; avoid sensitive details. Changes apply to your next question.</p>
-          <div class="reader-preference-actions"><button type="button" class="reader-preferences-save">Save preferences</button><button type="button" class="reader-preferences-clear">Clear preferences</button></div>
+          <div class="reader-preference-actions"><button type="button" class="reader-preferences-save">Save preferences</button><button type="button" class="reader-preferences-clear">Clear preferences</button><button type="button" class="reader-byok-open-inline" aria-label="Personal AI model (Gemini, Claude, OpenRouter)…" title="Personal AI model (Gemini, Claude, OpenRouter)…">Personal AI model…</button></div>
           <p class="reader-preferences-status" role="status" aria-live="polite"></p>
         </div>
       </details>
@@ -83,10 +156,12 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
         <span class="reader-study-status" role="status" aria-live="polite"></span>
       </div>
         <section class="reader-source" aria-label="Selected source" hidden>
-          <p class="reader-source-label">Selected passage</p>
+          <div class="reader-source-head">
+            <p class="reader-source-label">Selected passage</p>
+            <span class="reader-taxonomy-badge" hidden></span>
+          </div>
           <a class="reader-source-link" target="_blank" rel="noopener noreferrer"></a>
           <p class="reader-quote"></p>
-          <p class="reader-caution">AI explanations can be wrong. Check them against the source.</p>
         </section>
         <div class="reader-instruction">
           <strong>Select a passage to begin.</strong>
@@ -99,6 +174,7 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
           <button type="button" data-learning="simplify">Simplify</button>
           <button type="button" data-learning="example">Show an example</button>
           <button type="button" data-learning="check">Check my understanding</button>
+          <button type="button" data-learning="taxonomy">Map to taxonomy</button>
           <button type="button" class="reader-reset">Start over</button>
           <button class="reader-choose" type="button">Choose another paragraph</button>
         </div>
@@ -109,12 +185,14 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
         <button class="reader-retry" type="button">Retry</button>
       </div>
       <form class="reader-composer" aria-disabled="true">
-        <textarea rows="1" aria-label="Ask a follow-up question" placeholder="Select a passage to begin" disabled></textarea>
+        <textarea rows="1" aria-label="Ask a follow-up question" aria-describedby="socratiq-reader-footnote" placeholder="Select a passage to begin" disabled></textarea>
         <button class="reader-send" type="submit" aria-label="Send question" title="Send" disabled>
           <span aria-hidden="true">↑</span>
         </button>
         <button class="reader-stop" type="button" aria-label="Stop explanation" hidden>Stop</button>
       </form>
+      <p id="socratiq-reader-footnote" class="reader-footnote">SocratiQ uses AI and can make mistakes. Check claims in the book.</p>
+      <p class="reader-model-bar"><span class="reader-model-status">Free shared model</span> · <button type="button" class="reader-footnote-link">Connect your own Gemini or Claude</button></p>
     </section>
   `;
   root.appendChild(shell);
@@ -128,7 +206,13 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
   const launcher = shell.querySelector('.reader-launcher');
   const panel = shell.querySelector('.reader-panel');
   const closeButton = shell.querySelector('.reader-close');
+  const selectionClip = shell.querySelector('.selection-clip');
   const selectionButton = shell.querySelector('.selection-action');
+  const clipButtons = [...shell.querySelectorAll('[data-clip-action]')];
+  const clipConfigButton = shell.querySelector('.selection-clip-config-btn');
+  const clipMenu = shell.querySelector('.selection-clip-menu');
+  const clipOptionsBox = shell.querySelector('.selection-clip-options');
+  const prefsClipOptionsBox = shell.querySelector('.reader-clip-prefs-options');
   const sourceCard = shell.querySelector('.reader-source');
   const sourceLink = shell.querySelector('.reader-source-link');
   const sourceQuote = shell.querySelector('.reader-quote');
@@ -159,14 +243,195 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
   const backgroundInput = shell.querySelector('.reader-background');
   const teachingInput = shell.querySelector('.reader-teaching');
   const preferenceStatus = shell.querySelector('.reader-preferences-status');
+  const modelStatusNode = shell.querySelector('.reader-model-status');
+  const footnoteLink = shell.querySelector('.reader-footnote-link');
+  const byokBox = shell.querySelector('.reader-byok-box');
+  const byokSsoBtn = shell.querySelector('.reader-byok-sso');
+  const byokProviderSelect = shell.querySelector('.reader-byok-provider');
+  const byokModelInput = shell.querySelector('.reader-byok-model');
+  const byokPortalLink = shell.querySelector('.reader-byok-portal');
+  const byokKeyInput = shell.querySelector('.reader-byok-key');
+  const byokRememberInput = shell.querySelector('.reader-byok-remember');
+  const byokConnectBtn = shell.querySelector('.reader-byok-connect');
+  const byokDisconnectBtn = shell.querySelector('.reader-byok-disconnect');
+  const byokStatusNode = shell.querySelector('.reader-byok-status');
+  const byokOpenInlineBtn = shell.querySelector('.reader-byok-open-inline');
+  const byokBackInlineBtn = shell.querySelector('.reader-byok-back-inline');
+
+  byokOpenInlineBtn?.addEventListener('click', () => {
+    preferencesControl.dataset.byokFocus = 'true';
+    preferencesControl.open = true;
+    refreshByokUI();
+    requestAnimationFrame(() => {
+      readerBody.scrollTop = 0;
+      byokKeyInput?.focus({ preventScroll: true });
+    });
+  });
+
+  byokBackInlineBtn?.addEventListener('click', () => {
+    delete preferencesControl.dataset.byokFocus;
+    refreshPreferences();
+  });
+
+  function updateByokPortal(providerId) {
+    const spec = BYOK_PROVIDERS[providerId] || BYOK_PROVIDERS['google-gemini'];
+    if (byokPortalLink) {
+      if (spec.portalUrl) {
+        byokPortalLink.href = spec.portalUrl;
+        byokPortalLink.textContent = spec.portalLabel || 'Get API key ↗';
+        byokPortalLink.hidden = false;
+      } else {
+        byokPortalLink.hidden = true;
+      }
+    }
+  }
+
+  function refreshByokUI() {
+    const cfg = readActiveByokConfig();
+    const spec = BYOK_PROVIDERS[cfg.provider] || BYOK_PROVIDERS['google-gemini'];
+    if (byokProviderSelect) byokProviderSelect.value = cfg.provider;
+    if (byokModelInput) byokModelInput.value = cfg.model || spec.defaultModel;
+    if (byokKeyInput) byokKeyInput.value = cfg.apiKey || '';
+    if (byokRememberInput) byokRememberInput.checked = Boolean(cfg.saveLocally);
+    updateByokPortal(cfg.provider);
+    if (cfg.enabled) {
+      if (modelStatusNode) modelStatusNode.textContent = `Connected: ${spec.shortLabel} (${cfg.model})`;
+      if (footnoteLink) footnoteLink.textContent = 'Manage model';
+    } else {
+      if (modelStatusNode) modelStatusNode.textContent = 'Free shared model';
+      if (footnoteLink) footnoteLink.textContent = 'Connect your own Gemini or Claude';
+    }
+  }
+  refreshByokUI();
+
+  footnoteLink?.addEventListener('click', () => {
+    preferencesControl.dataset.byokFocus = 'true';
+    preferencesControl.open = true;
+    refreshPreferences();
+    refreshByokUI();
+    requestAnimationFrame(() => {
+      readerBody.scrollTop = 0;
+      byokKeyInput?.focus({ preventScroll: true });
+    });
+  });
+
+  byokProviderSelect?.addEventListener('change', () => {
+    const spec = BYOK_PROVIDERS[byokProviderSelect.value] || BYOK_PROVIDERS['google-gemini'];
+    byokModelInput.value = spec.defaultModel;
+    updateByokPortal(spec.id);
+  });
+
+  byokSsoBtn?.addEventListener('click', () => {
+    void startOpenRouterPKCE().catch((err) => {
+      if (byokStatusNode) byokStatusNode.textContent = err?.message || 'Could not start OpenRouter sign-in.';
+    });
+  });
+
+  byokConnectBtn?.addEventListener('click', () => {
+    const provider = byokProviderSelect.value;
+    const spec = BYOK_PROVIDERS[provider] || BYOK_PROVIDERS['google-gemini'];
+    const apiKey = byokKeyInput.value.trim();
+    if (!apiKey && provider !== 'ollama') {
+      byokStatusNode.textContent = 'Paste an API key or use Sign in with OpenRouter.';
+      return;
+    }
+    const validation = validateByokKeyFormat(provider, apiKey);
+    if (!validation.valid) {
+      byokStatusNode.textContent = validation.reason;
+      return;
+    }
+    const saved = saveByokConfig({
+      enabled: true,
+      provider,
+      model: byokModelInput.value.trim() || spec.defaultModel,
+      endpoint: spec.endpoint,
+      apiKey,
+      saveLocally: byokRememberInput.checked,
+      authMethod: 'manual',
+    });
+    refreshByokUI();
+    byokStatusNode.textContent = saved.saveLocally
+      ? `Connected to ${spec.shortLabel} (${saved.model}). Key remembered in this browser.`
+      : `Connected to ${spec.shortLabel} (${saved.model}) for this browser tab only.`;
+  });
+
+  byokDisconnectBtn?.addEventListener('click', () => {
+    clearByokConfig();
+    refreshByokUI();
+    byokStatusNode.textContent = 'Switched back to the free shared model. Personal key cleared.';
+  });
+
+  const handleByokChanged = () => refreshByokUI();
+  window.addEventListener('socratiq:byok-changed', handleByokChanged);
+
+  if (typeof window !== 'undefined' && window.location?.search?.includes('code=')) {
+    void completeOpenRouterPKCE().then((res) => {
+      if (res?.enabled) {
+        refreshByokUI();
+        if (byokStatusNode) byokStatusNode.textContent = 'Connected via OpenRouter SSO for this session.';
+      }
+    }).catch(() => {});
+  }
+  function renderClipOptionCheckboxes(container) {
+    if (!container) return;
+    container.replaceChildren();
+    for (const option of SELECTION_CLIP_OPTIONS) {
+      if (option.id === 'study' && typeof onOpenStudy !== 'function') continue;
+      const label = document.createElement('label');
+      label.className = 'selection-clip-option';
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.value = option.id;
+      checkbox.dataset.clipOption = option.id;
+      checkbox.addEventListener('change', () => {
+        const checked = [...container.querySelectorAll('input[data-clip-option]:checked')].map(el => el.value);
+        saveClipActions(checked);
+        syncClipButtons();
+        if (!selectionClip.hidden && pendingSource?.rect) {
+          environment.positionSelectionAction(selectionClip, pendingSource.rect);
+        }
+      });
+      const text = document.createElement('span');
+      text.textContent = option.shortLabel;
+      label.append(checkbox, text);
+      container.appendChild(label);
+    }
+  }
+  renderClipOptionCheckboxes(clipOptionsBox);
+  renderClipOptionCheckboxes(prefsClipOptionsBox);
+
+  function syncClipButtons() {
+    const enabled = new Set(readClipActions());
+    for (const button of clipButtons) {
+      const action = button.dataset.clipAction;
+      if (action === 'study' && typeof onOpenStudy !== 'function') {
+        button.hidden = true;
+        continue;
+      }
+      button.hidden = !enabled.has(action);
+    }
+    for (const checkbox of shell.querySelectorAll('input[data-clip-option]')) {
+      checkbox.checked = enabled.has(checkbox.dataset.clipOption);
+    }
+  }
+  syncClipButtons();
+
+  function closeClipMenu() {
+    if (!clipMenu) return;
+    clipMenu.hidden = true;
+    clipConfigButton?.setAttribute('aria-expanded', 'false');
+  }
+
   function refreshPreferences() {
     const preferences = readLearnerPreferences();
     levelInput.value = preferences.level;
     backgroundInput.value = preferences.background;
     teachingInput.value = preferences.instructions;
+    syncClipButtons();
   }
   refreshPreferences();
   preferencesControl.querySelector('summary').addEventListener('click', () => {
+    delete preferencesControl.dataset.byokFocus;
     if (!preferencesControl.open) {refreshPreferences(); preferenceStatus.textContent = '';}
   });
   shell.querySelector('.reader-preferences-save').addEventListener('click', () => {
@@ -176,6 +441,7 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
   });
   shell.querySelector('.reader-preferences-clear').addEventListener('click', () => {
     const {persisted} = clearLearnerPreferences();
+    saveClipActions([...DEFAULT_CLIP_ACTIONS]);
     refreshPreferences();
     preferenceStatus.textContent = persisted ? 'Preferences cleared. Explanation level reset to Intermediate.' : 'Preferences cleared for this page. Browser storage is unavailable.';
   });
@@ -200,6 +466,23 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
   let studyActive = false;
   let destroyed = false;
 
+  function publishActiveSource(source = activeSource) {
+    try {
+      const payload = source ? {
+        quote: source.quote,
+        section: source.section,
+        title: source.title,
+        volume: source.volume,
+        url: source.url,
+      } : null;
+      window.__SOCRATIQ_ACTIVE_SOURCE__ = payload;
+      window.dispatchEvent(new CustomEvent('socratiq:active-source-updated', { detail: payload }));
+    } catch {
+      // Ignore environments where window properties are read-only.
+    }
+  }
+  publishActiveSource(null);
+
   studyButton.addEventListener('click', async () => {
     if (studyBusy || studyActive || typeof onOpenStudy !== 'function') return;
     studyBusy = true;
@@ -210,6 +493,7 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
     picker?.stop();
     pendingSource = null;
     hideSelectionAction();
+    publishActiveSource(activeSource);
     try {
       await onOpenStudy();
       if (!destroyed) suspendForStudy();
@@ -226,6 +510,7 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
   function suspendForStudy() {
     if (destroyed) return;
     studyActive = true;
+    publishActiveSource(activeSource);
     clearTimeout(selectionTimer);
     picker?.stop();
     pendingSource = null;
@@ -238,6 +523,7 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
     if (!studyActive || destroyed) return;
     studyActive = false;
     refreshPreferences();
+    refreshByokUI();
     shell.hidden = false;
     studyStatus.textContent = '';
     studyButton.textContent = 'Study tools';
@@ -245,6 +531,7 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
     requestAnimationFrame(() => studyButton.focus({preventScroll: true}));
   }
   window.addEventListener('socratiq:open', suspendForStudy);
+  window.addEventListener('socratiq:study-open', suspendForStudy);
   window.addEventListener('socratiq:close', resumeFromStudy);
 
   const picker = typeof captureParagraph === 'function' ? createParagraphPicker({
@@ -281,23 +568,53 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
     openPanel('launcher');
   });
 
-  selectionButton.addEventListener('pointerdown', (event) => {
+  selectionClip.addEventListener('pointerdown', (event) => {
     selectionActionPressed = true;
-    if (event.pointerType !== 'touch') event.preventDefault();
+    if (event.pointerType !== 'touch' && !event.target.closest('input, label')) {
+      event.preventDefault();
+    }
   });
-  selectionButton.addEventListener('pointercancel', () => {
+  selectionClip.addEventListener('pointercancel', () => {
     selectionActionPressed = false;
     pendingSource = null;
     hideSelectionAction();
   });
-  selectionButton.addEventListener('click', () => {
+  clipConfigButton.addEventListener('click', () => {
     selectionActionPressed = false;
-    if (!pendingSource) return;
-    const source = pendingSource;
-    setActiveSource(source);
-    selectionButton.hidden = true;
-    openPanel('selection');
-    if (!history.length && !thread.childElementCount) void submitQuestion(INITIAL_QUESTION, { initial: true });
+    const nextOpen = clipMenu.hidden;
+    clipMenu.hidden = !nextOpen;
+    clipConfigButton.setAttribute('aria-expanded', String(nextOpen));
+    if (pendingSource?.rect) {
+      environment.positionSelectionAction(selectionClip, pendingSource.rect);
+    }
+  });
+  clipButtons.forEach((button) => {
+    button.addEventListener('click', () => {
+      selectionActionPressed = false;
+      const source = pendingSource || activeSource;
+      if (!source) return;
+      const action = button.dataset.clipAction;
+      hideSelectionAction();
+      setActiveSource(source);
+      if (action === 'study') {
+        publishActiveSource(source);
+        studyButton.click();
+        return;
+      }
+      if (action === 'ask') {
+        openPanel('selection', { focusInput: true });
+        if (!visibleTurns) status.textContent = 'Passage ready. Type your question below.';
+        return;
+      }
+      openPanel('selection');
+      if (action === 'explain') {
+        if (!history.length && !thread.childElementCount) {
+          void submitQuestion(INITIAL_QUESTION, { initial: true });
+        }
+      } else if (LEARNING_QUESTIONS[action]) {
+        void submitQuestion(LEARNING_QUESTIONS[action], { initial: !history.length && !thread.childElementCount });
+      }
+    });
   });
 
   learningButtons.forEach(button => button.addEventListener('click', () => {
@@ -353,18 +670,18 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
   document.addEventListener('keydown', handleEscape, true);
   document.addEventListener('keydown', handleSelectionShortcut, true);
 
-  function openPanel(origin) {
+  function openPanel(origin, { focusInput = false } = {}) {
     if (studyActive) return;
     panel.dataset.launchOrigin = origin;
     panel.hidden = false;
     launcher.hidden = true;
     launcher.setAttribute('aria-expanded', 'true');
-    selectionButton.hidden = true;
+    hideSelectionAction();
     updateComposerState();
     requestAnimationFrame(() => {
       if (!panel.hidden && activeSource) {
-        // Reading an explanation on touch should not open the software keyboard.
-        const target = !input.disabled && !window.matchMedia('(pointer: coarse)').matches
+        // Reading an explanation on touch should not open the software keyboard unless Ask… was explicitly chosen.
+        const target = !input.disabled && (focusInput || !window.matchMedia('(pointer: coarse)').matches)
           ? input : readerBody;
         target.focus({ preventScroll: true });
       }
@@ -380,7 +697,7 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
     panel.hidden = true;
     launcher.hidden = false;
     launcher.setAttribute('aria-expanded', 'false');
-    selectionButton.hidden = true;
+    hideSelectionAction();
     if (restoreFocus) requestAnimationFrame(() => launcher.focus({ preventScroll: true }));
   }
 
@@ -390,15 +707,16 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
       event.preventDefault();
       event.stopPropagation();
       closePanel();
-    } else if (!selectionButton.hidden) {
+    } else if (!selectionClip.hidden) {
       event.preventDefault();
-      selectionButton.hidden = true;
+      if (!clipMenu.hidden) closeClipMenu();
+      else hideSelectionAction();
     }
   }
 
   function handleSelectionShortcut(event) {
     if (picker?.active || studyBusy || studyActive) return;
-    if (event.key.toLowerCase() !== 'e' || !event.ctrlKey || !event.shiftKey || event.altKey || event.metaKey) return;
+    if (event.key.toLowerCase() !== 'e' || !event.shiftKey || event.altKey || (event.ctrlKey === event.metaKey)) return;
     let source;
     try {
       source = captureSelection();
@@ -410,7 +728,7 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
     event.stopPropagation();
     pendingSource = source;
     setActiveSource(source);
-    selectionButton.hidden = true;
+    hideSelectionAction();
     openPanel('selection');
     if (!history.length && !thread.childElementCount) void submitQuestion(INITIAL_QUESTION, { initial: true });
   }
@@ -430,7 +748,7 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
   }
 
   function scheduleSelectionCapture(event) {
-    if (picker?.active || studyBusy || studyActive) return;
+    if (picker?.active || studyBusy) return;
     if (event?.composedPath?.().includes(host)) return;
     if (selectionActionPressed) return;
     if (selectionIsInsideReader()) return;
@@ -439,7 +757,18 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
   }
 
   function readSelection() {
-    if (studyBusy || studyActive) return;
+    if (studyBusy) return;
+    if (studyActive) {
+      try {
+        const source = captureSelection();
+        if (source && String(source.quote || '').trim()) {
+          setActiveSource(source, { preserveInput: true });
+        }
+      } catch {
+        // Ignore selection errors while Study Tools is open.
+      }
+      return;
+    }
     try {
       const source = captureSelection();
       if (!source || !String(source.quote || '').trim()) {
@@ -449,8 +778,10 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
         return;
       }
       pendingSource = source;
-      selectionButton.hidden = false;
-      environment.positionSelectionAction(selectionButton, source.rect);
+      syncClipButtons();
+      closeClipMenu();
+      selectionClip.hidden = false;
+      environment.positionSelectionAction(selectionClip, source.rect);
     } catch (error) {
       pendingSource = null;
       hideSelectionAction();
@@ -465,13 +796,16 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
   }
 
   function hideSelectionAction() {
-    selectionButton.hidden = true;
+    closeClipMenu();
+    selectionClip.hidden = true;
   }
 
-  function setActiveSource(source) {
+  function setActiveSource(source, { preserveInput = false } = {}) {
     if (!source) return;
     pendingSource = null;
     clearTimeout(selectionTimer);
+    const savedInputValue = preserveInput ? input.value : '';
+    const savedInputHeight = preserveInput ? input.style.height : '';
     if (passageKey(source) !== passageKey(activeSource)) {
       stopRequest('Response stopped.');
       sessions.save(activeSource, { history, visibleTurns, lastFailedQuestion, failedUserTurn });
@@ -484,6 +818,11 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
     } else {
       activeSource = source;
     }
+    if (preserveInput && savedInputValue) {
+      input.value = savedInputValue;
+      input.style.height = savedInputHeight;
+    }
+    publishActiveSource(activeSource);
     renderSource(activeSource);
     sessions.render(activeSource);
     updateComposerState();
@@ -506,6 +845,17 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
     const volumeLabel = source.volume ? ` · Volume ${volumeNumber || source.volume}` : '';
     sourceCard.title = source.version ? `Published version: ${source.version}` : '';
     sourceCard.querySelector('.reader-source-label').textContent = `Selected passage${volumeLabel}`;
+    const taxBadge = sourceCard.querySelector('.reader-taxonomy-badge');
+    if (taxBadge) {
+      const tax = resolveChapterTaxonomy(source.url || (typeof window !== 'undefined' ? window.location?.href : ''));
+      if (tax) {
+        taxBadge.textContent = `${tax.primaryGroup} · ${tax.groupTitle}`;
+        taxBadge.title = `ML Systems Taxonomy: ${tax.primaryGroup} (${tax.groupTitle})${tax.subjects?.length ? ' · ' + tax.subjects.join(', ') : ''}`;
+        taxBadge.hidden = false;
+      } else {
+        taxBadge.hidden = true;
+      }
+    }
     sourceQuote.textContent = String(source.quote || '');
     sourceCard.hidden = false;
     instruction.hidden = true;
@@ -539,6 +889,7 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
     learningActions.hidden = !activeSource;
     explainButton.hidden = !activeSource || visibleTurns > 0;
     explainButton.disabled = !activeSource || Boolean(activeController);
+    resetButton.hidden = !activeSource || (visibleTurns === 0 && thread.childElementCount === 0);
     learningButtons.forEach(button => { button.disabled = !activeSource || Boolean(activeController); });
     // Stop remains available while the input and send controls are disabled.
     composer.setAttribute('aria-disabled', String(!activeSource));
@@ -736,8 +1087,12 @@ export function mountReader({ captureSelection, captureParagraph, requestExplana
     host,
     destroy() {
       destroyed = true;
+      publishActiveSource(null);
       window.removeEventListener('socratiq:open', suspendForStudy);
+      window.removeEventListener('socratiq:study-open', suspendForStudy);
       window.removeEventListener('socratiq:close', resumeFromStudy);
+      window.removeEventListener('socratiq:byok-changed', handleByokChanged);
+      document.getElementById('socratiq-host-layout')?.remove();
       picker?.destroy();
       stopRequest('Response stopped.');
       clearTimeout(selectionTimer);

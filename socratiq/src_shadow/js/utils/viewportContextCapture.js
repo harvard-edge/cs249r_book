@@ -5,6 +5,23 @@
  * Based on the reference tooltip pattern for consistent context capture
  */
 
+import { extractReadableBookText } from './textExtractor.js';
+
+const VIEWPORT_EXCLUDED_SELECTOR = [
+  '#socratiq-reader',
+  '#widget-chat-container',
+  '#collaborative-widget-host',
+  'mjx-assistive-mml',
+  '.chapter-concept-map',
+  '.mlsys-figure-tabs',
+  '.mlsys-explore-panel',
+  '[data-socratiq-ignore]',
+  'nav',
+  'header',
+  'footer',
+  'aside:not(.column-margin)'
+].join(', ');
+
 export class ViewportContextCapture {
   /**
    * Capture the current viewport context for quiz generation
@@ -110,12 +127,18 @@ export class ViewportContextCapture {
     contentSelectors.forEach(selector => {
       const elements = document.querySelectorAll(selector);
       elements.forEach(element => {
+        if (
+          typeof element.closest === 'function' &&
+          element.closest(VIEWPORT_EXCLUDED_SELECTOR)
+        ) {
+          return;
+        }
         if (this.isElementVisible(element, viewportHeight, viewportWidth, scrollY, scrollX)) {
           visibleElements.push(element);
         }
       });
     });
-    
+
     // Sort by position in document
     visibleElements.sort((a, b) => {
       const aRect = a.getBoundingClientRect();
@@ -128,6 +151,14 @@ export class ViewportContextCapture {
   }
 
   /**
+   * Alias for finding visible content elements
+   * @returns {Array} Array of visible DOM elements
+   */
+  static findContentElements() {
+    return this.getVisibleElements();
+  }
+
+  /**
    * Check if an element is visible in the current viewport
    * @param {HTMLElement} element - Element to check
    * @param {number} viewportHeight - Viewport height
@@ -137,6 +168,9 @@ export class ViewportContextCapture {
    * @returns {boolean} True if element is visible
    */
   static isElementVisible(element, viewportHeight, viewportWidth, scrollY, scrollX) {
+    if (typeof element?.closest === 'function' && element.closest(VIEWPORT_EXCLUDED_SELECTOR)) {
+      return false;
+    }
     const rect = element.getBoundingClientRect();
     
     // Check if element is within viewport bounds
@@ -167,23 +201,25 @@ export class ViewportContextCapture {
    * @returns {string} Extracted text content
    */
   static extractTextFromElement(element) {
-    // Clone the element to avoid modifying the original
-    const clone = element.cloneNode(true);
-    
-    // Remove script and style elements
-    const scripts = clone.querySelectorAll('script, style');
-    scripts.forEach(script => script.remove());
-    
-    // Get text content and clean it up
-    let text = clone.textContent || '';
-    
-    // Clean up whitespace
-    text = text.replace(/\s+/g, ' ').trim();
+    if (!element) return '';
+    if (typeof element.closest === 'function' && element.closest(VIEWPORT_EXCLUDED_SELECTOR)) {
+      return '';
+    }
+    let text = extractReadableBookText(element);
     
     // Remove common UI elements that aren't content
     text = text.replace(/\b(Home|About|Contact|Login|Sign up|Menu|Navigation|Footer|Header)\b/gi, '');
     
-    return text;
+    return text.replace(/\s+/g, ' ').trim();
+  }
+
+  /**
+   * Alias for extracting text content from an element
+   * @param {HTMLElement} element - Element to extract text from
+   * @returns {string} Extracted text content
+   */
+  static extractElementText(element) {
+    return this.extractTextFromElement(element);
   }
 
   /**

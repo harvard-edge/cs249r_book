@@ -45,8 +45,8 @@ def compute():
     # Caption and prose literals must match the LEGO scenario.
     source = CHAPTER.read_text()
     caption = re.search(r'::: \{#fig-rnn .*?fig-cap="(.*?)" fig-alt=', source).group(1)
-    assert '128-dimensional hidden state' in caption and '100-dimensional input' in caption
-    assert f'{n(rec)} MACs for recurrent' in caption and f'plus {n(inp)} for input' in caption
+    assert ('128-dimensional hidden state' in caption or 'RNNUnfoldingStep.hidden_dim_str`-dimensional hidden state' in caption) and ('100-dimensional input' in caption or 'RNNUnfoldingStep.input_dim_str`-dimensional input' in caption)
+    assert (f'{n(rec)} MACs for recurrent' in caption or 'RNNUnfoldingStep.recurrent_macs_str` MACs for recurrent' in caption) and (f'plus {n(inp)} for input' in caption or 'plus `{python} RNNUnfoldingStep.input_macs_str` for input' in caption)
     assert (H, I, rec, inp, per) == (128, 100, 16384, 12800, 29184)
     assert step.gates == 1 and T == step.steps == 1000 and '\\SequenceLength= 1{,}000$ therefore requires $1{,}000$ ordered state updates' in source
     assert state_bytes == H * int(step.bytes_per_value.to('byte').magnitude) == 512

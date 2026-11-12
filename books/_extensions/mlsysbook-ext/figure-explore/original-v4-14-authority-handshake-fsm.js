@@ -17,7 +17,7 @@ window.MLSysFigureLessons["original-v4-14-authority-handshake-fsm"]=async(root,c
  // Keep the endpoint in view when Expand or rotation changes the artwork scale.
  // Scrolling alone does not trigger this observer, so manual inspection persists.
  let focus=null,resizeFrame=0,disposed=false;
- function recenter(){if(!focus||disposed)return;const scale=svg.getBoundingClientRect().width/width;canvas.scrollLeft=Math.max(0,focus[0]*scale-canvas.clientWidth/2);canvas.scrollTop=Math.max(0,focus[1]*scale-canvas.clientHeight/2);}
+ function recenter(){if(!focus||disposed)return;if(canvas.clientWidth>=520){canvas.scrollLeft=0;canvas.scrollTop=0;return;}const scale=svg.getBoundingClientRect().width/width;canvas.scrollLeft=Math.max(0,focus[0]*scale-canvas.clientWidth/2);canvas.scrollTop=Math.max(0,focus[1]*scale-canvas.clientHeight/2);}
  function follow(x,y){focus=[x,y];recenter();}
  const cameraResize=typeof ResizeObserver==='function'?new ResizeObserver(()=>{if(!disposed&&!resizeFrame)resizeFrame=requestAnimationFrame(()=>{resizeFrame=0;recenter();});}):null;
  cameraResize?.observe(canvas);cameraResize?.observe(svg);
@@ -33,21 +33,32 @@ window.MLSysFigureLessons["original-v4-14-authority-handshake-fsm"]=async(root,c
  const states=['AUTO','PEND','PEND','BLEND','BLEND','MAN','FALLBACK','FALLBACK','AUTO','PROTECTIVE'];
  const owners=['policy proposes','policy proposes','policy proposes','enforcer profile','enforcer profile','operator proposes','validated fallback','validated fallback','policy proposes','protective circuit'];
  const steps=[
- ['Autonomous proposal token','The policy proposes on this channel. The permission path still checks the candidate before actuation.'],
- ['Request handover; start the timer','At this endpoint the channel enters PEND. The policy retains the proposal token while the timer runs. A request alone does not transfer control.'],
- ['Acknowledge; await local commit','At this endpoint ACK has prepared the handover. Fresh state, a feasible target, and stopping reserve are checked. Before the commit tick the policy token remains active; the console can be uncertain.'],
- ['Commit on one control tick','When the local commit occurs at this endpoint, it revokes the policy proposal token and gives the enforcer sole ownership of the checked blend between latched endpoints. ACK and commit are distinct events.'],
- ['Evolve the enforcer-owned profile','An illustrative normalized profile progresses between fixed checked endpoints. Live operator proposals do not write this transition profile. Its physical feasibility is a separate prerequisite, not proved by the state machine.'],
- ['Complete with a live manual lease','At this endpoint, after the profile completes with the manual lease valid, MAN can admit operator proposals for screening. The policy token remains revoked.'],
- ['Manual lease lapses; fallback owns the channel','Follow lease lapse along the original MAN → FALLBACK edge. At the endpoint the validated holding or stopping response owns the channel without network consensus.'],
- ['Remain in fallback while moving','A reset request cannot bypass standstill, relevant fault handling, and a fresh authenticated re-admission handshake. No edge returns directly to manual operation.'],
- ['Reset from rest and re-admit','After standstill, cleared faults, and fresh authenticated re-admission, follow the dashed reset edge toward AUTO. At the endpoint the policy token is re-admitted. This endpoint asserts those prerequisites; it does not animate a moving reset.'],
- ['Hardwired input preempts every protocol state','The protective input is outside the handover protocol. This alternative preemption can occur from any state, including fallback; at the endpoint the independent circuit owns brake or hold.']
+ ['Autonomous proposal token','In the AUTO state (the 1st of the 6 authority states), the learned policy holds the active proposal token on this channel while the permission gate still screens every candidate command before actuation.'],
+ ['Request handover; start the timer','When a handover request arrives, the token moves along the AUTO → PEND edge into Handover-Pending and starts the confirmation timer, yet the policy retains the active proposal token because a request alone never transfers control.'],
+ ['Acknowledge; await local commit','Inside PEND, receiving operator ACK verifies fresh state, a feasible target, and stopping reserve, but before the local commit tick fires the policy proposal token remains active so the channel never enters an unowned gap.'],
+ ['Commit on one control tick','On the synchronous commit tick, the channel transitions from PEND to BLEND (normalized progress 0.00), revoking the policy proposal token and transferring sole profile ownership to the local enforcer between latched endpoints.'],
+ ['Evolve the enforcer-owned profile','At normalized blend progress 0.50 inside BLEND, the enforcer drives the green progress bar between fixed checked endpoints; neither the revoked policy nor unscreened live manual inputs can write this transition profile directly.'],
+ ['Complete with a live manual lease','When the blend reaches normalized progress 1.00 with a valid manual lease, the token enters MAN (Human-Manual), where operator proposals own the channel token and pass through the permission gate while the policy token stays revoked.'],
+ ['Manual lease lapses; fallback owns the channel','If the operator lease or heartbeat lapses, the token follows the MAN → FALLBACK edge into Fallback, where a pre-validated local holding or stopping law immediately owns the channel without waiting for network consensus.'],
+ ['Remain in fallback while moving','While the machine is still moving or a fault remains active in FALLBACK, any reset request is rejected by the transition guard; no edge permits jumping from FALLBACK directly back to MAN.'],
+ ['Reset from rest and re-admit','Once standstill is verified, faults are cleared, and a fresh authenticated re-admission handshake completes, the token follows the dashed FALLBACK → AUTO reset edge and re-admits the policy proposal token.'],
+ ['Hardwired input preempts every protocol state','At any instant across all 6 states, a hardwired E-stop or protective interlock preempts the software protocol and forces the token into PROTECTIVE, where the independent safety circuit owns brake or hold directly.']
  ].map(([label,description],i)=>({label,get description(){return root.dataset.lessonCommittedIndex===String(i)?description:'Next endpoint, not yet completed: '+description;}}));
  const paths={1:[[190,90],[263,90]],3:[[415,90],[488,90]],5:[[610,128],[610,188]],6:[[490,222],[417,222]],8:[[265,238],[80,238],[80,130]],9:[[340,282],[340,316]]};
  const bar=add('rect',{x:500,y:122,width:0,height:3,fill:'#1A4D3E','data-motion-object':'true'});
+ const badgeGroup=add('g',{'data-step-callout':'true'});
  function frame(i){const state=states[i];for(const[k,b]of Object.entries(stateBoxes)){b.classList.toggle('v4b-active',k===state);b.style.opacity=k===state?'1':'.65';}
   token.setAttribute('cx',coords[state][0]);token.setAttribute('cy',coords[state][1]);bar.setAttribute('width',i>=5&&i<9?130:i===4?65:0);
+  badgeGroup.replaceChildren();
+  if(i===2){
+   const r=document.createElementNS(ns,'rect');for(const[k,v]of Object.entries({x:382,y:42,width:135,height:24,rx:4,fill:'#e6f6f8',stroke:'#007A87','stroke-width':1.8}))r.setAttribute(k,String(v));
+   const t=document.createElementNS(ns,'text');for(const[k,v]of Object.entries({x:449.5,y:58,'text-anchor':'middle','font-size':9.5,'font-weight':700,fill:'#007A87'}))t.setAttribute(k,String(v));t.textContent='ACK verified · awaiting tick';
+   badgeGroup.append(r,t);
+  } else if(i===7){
+   const r=document.createElementNS(ns,'rect');for(const[k,v]of Object.entries({x:92,y:218,width:176,height:24,rx:4,fill:'#fff5f5',stroke:'#A51C30','stroke-width':1.8}))r.setAttribute(k,String(v));
+   const t=document.createElementNS(ns,'text');for(const[k,v]of Object.entries({x:180,y:234,'text-anchor':'middle','font-size':9.5,'font-weight':700,fill:'#A51C30'}))t.setAttribute(k,String(v));t.textContent='✕ Reset blocked while moving';
+   badgeGroup.append(r,t);
+  }
   root.dataset.authority=state;root.dataset.proposalOwner=owners[i];root.dataset.acknowledged=String(i>=2&&i<=7);root.dataset.committed=String(i>=3&&i<=7);root.dataset.policyToken=String(i<=2||i===8);root.dataset.blend=i<3?'pending':i===3?'0':i===4?'0.5':'1';
   readout.textContent=`Channel state ${state} · ${owners[i]} · policy proposal token ${i<=2||i===8?'active':'revoked'}`;
   equation.textContent=i===2?'ACK received ≠ commit. Before the commit tick: policy token active.':i===3||i===4?'Commit → enforcer owns fixed-endpoint profile; normalized progress '+(i===3?'0.00':'0.50')+'.':i===7?'Reset guard false while moving: remain in FALLBACK.':i===8?'Reset guard: standstill ∧ faults cleared ∧ authenticated re-admission.':'One per-channel authority state; all proposals remain subject to permission checks.';
@@ -55,6 +66,6 @@ window.MLSysFigureLessons["original-v4-14-authority-handshake-fsm"]=async(root,c
  function render(i,{stage,details}){root.dataset.lessonCommittedIndex=String(i);mount(stage,details);frame(i);follow(...coords[states[i]]);}
  function transition({from,to,onFrame}){if(to!==from+1)return;const path=paths[to];onFrame(p=>{if(path)route(token,path,p);if(to===4){bar.setAttribute('width',65*p);readout.textContent=`BLEND · enforcer owns profile · normalized progress ${(p*.5).toFixed(2)}`;equation.textContent='Fixed checked endpoints; live manual proposals do not write the blend.';}root.dataset.animationProgress=String(p);});}
 
- const player=window.MLSysOriginalPlayer.create({root,outer:context.outer,title:"When does the proposal token change owner?",scope:"Original per-channel authority FSM. Ordered successful handover, manual lease loss, guarded reset, and an explicit protective-preemption alternative. Normalized blend progress is illustrative.",steps,render,transition});
+ const player=window.MLSysOriginalPlayer.create({root,outer:context.outer,layout:'compact',title:"When does the proposal token change owner?",intro:"Trace the per-channel authority token across the 6 states from Autonomous through Handover-Pending, Blend, and Human-Manual to Fallback and Protective preemption.",scope:"Per-channel authority finite-state machine across 6 states (Autonomous, Handover-Pending, Blend, Human-Manual, Fallback, and Protective Hold/Stop) over 10 ordered protocol steps. Distinguishes who holds the proposal token (policy, enforcer-owned fixed-endpoint profile, human operator, validated fallback, or hardwired protective circuit) from the permission gate that screens every actuator command; normalized blend progress (0.00 → 0.50 → 1.00) is illustrative.",steps,render,transition});
  const destroy=player.destroy;player.destroy=()=>{disposed=true;cameraResize?.disconnect();cancelAnimationFrame(resizeFrame);destroy();};return player;
 };})();

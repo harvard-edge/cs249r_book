@@ -57,10 +57,13 @@
       }
       states.push(snapshot());
     }
+    const peakLabels = [], peakBars = [];
     for (let rank = 0; rank < stages; rank++) {
       const printedPeak = texts.find(n => +n.getAttribute('x') === 978 && +n.getAttribute('y') === 78 + rank * 56);
-      const filledBars = rectangles.filter(n => +n.getAttribute('y') === 65 + rank * 56 && +n.getAttribute('width') === 12 && n.getAttribute('fill') === '#C7D7EB').length;
+      const rowBars = rectangles.filter(n => +n.getAttribute('y') === 65 + rank * 56 && +n.getAttribute('width') === 12).sort((a, b) => +a.getAttribute('x') - +b.getAttribute('x'));
+      const filledBars = rowBars.filter(n => n.getAttribute('fill') === '#C7D7EB').length;
       if (!printedPeak || +printedPeak.textContent !== peaks[rank] || filledBars !== peaks[rank] || live[rank].size || forwards[rank].size !== microbatches || backwards[rank].size !== microbatches) throw Error('1F1B endpoints disagree with source peak bars');
+      peakLabels.push(printedPeak); peakBars.push(rowBars);
     }
     const focus = element('rect', {x: 92, y: 44, width: 40, height: 226, rx: 3, fill: 'none', stroke: '#b45309', 'stroke-width': 2, 'data-mlsys-focus': '', 'aria-hidden': 'true'});
     art.append(focus);
@@ -80,8 +83,12 @@
     const legend = document.createElement('p'); legend.className = NAME + '-legend';
     legend.textContent = 'F: forward; B: backward; red hatching: idle. Dashed blue outline on a completed F cell: its activation is still retained. The original right-hand bars show the full-schedule peak, not the current live count.';
     const operationText = slot => cells.filter(c => c.slot === slot).map(c => `GPU ${c.rank}: ${c.kind === 'idle' ? 'idle' : (c.kind === 'F' ? 'save' : 'release') + ' m' + c.micro}`).join('; ');
-    const steps = [{label: 'Begin with no saved activations', description: 'Each row is a stage and each column is one schematic time slot. Forward completion saves an activation; its matching backward completion releases it. The original peak bars remain a reference.'}];
-    for (let slot = 0; slot < slots; slot++) steps.push({label: `Complete slot ${slot + 1}`, description: operationText(slot) + '. ' + (slot === slots - 1 ? `All saved activations are released. Peak live counts were ${peaks.join(', ')} for GPU 0 through GPU 3, versus ${microbatches} for all-forwards-first GPipe. Each stage still had ${idle[0]} idle slots; lower activation residency does not remove the bubble.` : 'Retained activations survive idle slots until their own backward consumer completes.')});
+    const steps = [{label: 'Begin with no saved activations', description: 'Start the 4-stage (p = 4), 8-microbatch (m = 8) 1F1B schedule across 22 equal schematic time slots. Forward completion (F) saves a microbatch activation on that stage; backward completion (B) consumes and frees it. Live counts across [GPU 0, GPU 1, GPU 2, GPU 3]: [0, 0, 0, 0].'}];
+    for (let slot = 0; slot < slots; slot++) {
+      const s = states[slot + 1];
+      const phaseName = slot < 4 ? 'Warm-up phase' : slot < 15 ? 'Steady-state 1F1B alternation' : 'Drain phase';
+      steps.push({label: `Complete slot ${slot + 1}`, description: `${phaseName} (slot ${slot + 1} of ${slots}): ${operationText(slot)}. ` + (slot === slots - 1 ? `All saved activations are released ([0, 0, 0, 0] live). Peak live counts were [${peaks.join(', ')}] for GPU 0 through GPU 3 (bounded by p − stage = 4, 3, 2, 1), versus ${microbatches} per stage for all-forwards-first GPipe. Each stage still spent ${idle[0]} of ${slots} slots idle (bubble fraction (p − 1)/(m + p − 1) = 3/11 ≈ 27%).` : `Live activations on [GPU 0..3]: [${s.live.map(arr => arr.length).join(', ')}] (peaks so far: [${s.peaks.join(', ')}], capped at 4, 3, 2, 1 vs. 8 in GPipe).`)});
+    }
     let stageNode, mounted = false, current = 0, observer;
     function pinLabels() {
       if (!stageNode) return;
@@ -94,10 +101,10 @@
       stageNode.scrollLeft = Math.max(0, (112 + 34 * Math.max(0, index - 1)) * scale - stageNode.clientWidth / 2);
       pinLabels();
     }
-    const player = window.MLSysOriginalPlayer.create({root, outer: context.outer,
+    const player = window.MLSysOriginalPlayer.create({root, outer: context.outer, layout: 'compact',
       title: 'Why does alternating forward and backward reduce saved activations?',
       intro: 'Follow each microbatch through forward and backward, and watch its saved activation remain live until its backward consumer completes.',
-      scope: 'The original four-stage, eight-microbatch 1F1B schedule. Equal slots are schematic, not measured kernel durations. Live sets count retained microbatch activations, not bytes or total training memory. The optimizer update follows all microbatches; it is not a backward cell.',
+      scope: 'The 4-stage (p = 4), 8-microbatch (m = 8) 1F1B pipeline schedule across 22 equal schematic time slots (6 idle bubble slots per stage, bubble fraction (p − 1)/(m + p − 1) = 3/11 ≈ 27%). Interleaving backward passes in steady state caps peak retained microbatch activations at [4, 3, 2, 1] across GPU 0–GPU 3 instead of 8 per stage under GPipe.',
       steps,
       render(index, {stage, details}) {
         current = index;
@@ -107,6 +114,15 @@
           c.group.style.opacity = c.slot < index ? '1' : '.2';
           c.group.dataset.executed = String(c.slot < index);
           c.retained.setAttribute('visibility', c.kind === 'F' && c.slot < index && state.live[c.rank].includes(c.micro) ? 'visible' : 'hidden');
+        }
+        for (let rank = 0; rank < stages; rank++) {
+          const liveCount = state.live[rank].length, peakCount = state.peaks[rank];
+          peakBars[rank].forEach((bar, b) => {
+            bar.setAttribute('fill', b < liveCount ? '#1F407A' : b < peakCount ? '#C7D7EB' : '#f1f5f9');
+            bar.setAttribute('stroke', b < peakCount ? '#1F407A' : '#94a3b8');
+          });
+          peakLabels[rank].textContent = index === slots ? String(peakCount) : `${liveCount}/${peakCount}`;
+          peakLabels[rank].setAttribute('font-size', index === slots ? '16' : '13');
         }
         focus.setAttribute('x', String(92 + 34 * Math.max(0, index - 1)));
         cards.forEach((item, rank) => {

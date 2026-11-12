@@ -15,6 +15,7 @@
  */
 
 import { getDBInstance } from "./indexDb.js";
+import { resolveChapterTaxonomy } from "../../../../src_shared/taxonomy-map.js";
 
 // Guard to prevent duplicate TOC extractions
 let tocExtractionInProgress = false;
@@ -141,8 +142,9 @@ export async function extractPageTOC(options = {}) {
       const headings = contentElement.querySelectorAll(config.headingSelector);
       
       headings.forEach((heading, index) => {
-        // Skip hidden headings
+        // Skip hidden headings and Quarto TOC / sidebar / widget chrome headings
         if (heading.offsetParent === null) return;
+        if (heading.id === 'toc-title' || heading.closest('nav#TOC, #TOC, #quarto-margin-sidebar, .sidebar, #socratiq-reader, #widget-chat-container')) return;
         
         // Get heading text (strip HTML if includeHtml is false)
         const text = config.includeHtml ? heading.innerHTML : heading.textContent.trim();
@@ -199,32 +201,6 @@ export async function extractPageTOC(options = {}) {
         break;
       }
     }
-
-    // Log the TOC to console
-    const extractionId = Math.random().toString(36).substr(2, 9);
-    console.group(`📚 [${extractionId}] Page Table of Contents (TOC)`);
-    console.log(`📊 [${extractionId}] Total headings found:`, tocData.length);
-    console.log(`📋 [${extractionId}] TOC Structure:`);
-    
-    if (tocData.length === 0) {
-      console.log(`❌ [${extractionId}] No headings found on this page`);
-      console.log(`🔍 [${extractionId}] Debug info:`);
-      console.log(`- Content selector:`, config.contentSelector);
-      console.log(`- Heading selector:`, config.headingSelector);
-      console.log(`- Content element found:`, !!document.querySelector(config.contentSelector));
-      console.log(`- All headings in document:`, document.querySelectorAll('h1, h2, h3, h4, h5, h6').length);
-    } else {
-      // Log the hierarchical structure
-      tocData.forEach((heading, index) => {
-        const indent = '  '.repeat(heading.level - 1);
-        console.log(`${indent}${heading.level}. ${heading.text} (ID: ${heading.id})`);
-      });
-      
-      // Log the full data structure
-      console.log(`\n📦 [${extractionId}] Full TOC Data:`, tocData);
-    }
-    
-    console.groupEnd();
 
     return tocData;
 
@@ -481,6 +457,7 @@ export async function saveTOCToChapterMap(tocData, url, title) {
 
     // Normalize the URL to prevent duplicates from query parameters
     const normalizedUrl = normalizeUrl(url);
+    const tax = resolveChapterTaxonomy(url);
     
     const chapterMapEntry = {
       url: normalizedUrl, // Use normalized URL as the key
@@ -491,7 +468,9 @@ export async function saveTOCToChapterMap(tocData, url, title) {
       headingCount: tocData.length,
       // Add some metadata
       pageType: url.includes('socratiq.html') ? 'socratiq' : 'external',
-      domain: new URL(url).hostname
+      domain: tax ? `${tax.primaryGroup} · ${tax.subjects.slice(0, 3).join(', ')}` : new URL(url).hostname,
+      taxonomyGroup: tax ? tax.primaryGroup : null,
+      taxonomySubjects: tax ? tax.subjects : []
     };
 
     console.log(`🔄 Attempting to save TOC to chapterMap:`, {
@@ -850,12 +829,4 @@ export async function forceTOCExtractionAndSave() {
     console.error('❌ Manual TOC extraction failed:', error);
     console.error('❌ Error details:', error.message, error.stack);
   }
-}
-
-// Make test functions available globally for console access
-if (typeof window !== 'undefined') {
-  window.testTOCSaveFunction = testTOCSaveFunction;
-  window.forceTOCExtractionAndSave = forceTOCExtractionAndSave;
-  window.cleanupDuplicateChapterMapEntries = cleanupDuplicateChapterMapEntries;
-  window.normalizeUrl = normalizeUrl;
 }

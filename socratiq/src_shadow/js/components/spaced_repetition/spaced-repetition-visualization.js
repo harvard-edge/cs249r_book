@@ -319,11 +319,12 @@ export class FlashcardVisualization {
             });
 
             // Add card nodes and links for this chapter
-            cards.forEach(card => {
+            cards.forEach((card, cardIndex) => {
                 nodes.push({
                     id: `card-${card.id}`,
                     type: 'card',
                     card: card,
+                    cardIndex: cardIndex,
                     radius: 8,
                     quality: card.quality || 0,
                     chapter: chapterNum
@@ -377,7 +378,7 @@ export class FlashcardVisualization {
                     const showCardEvent = new CustomEvent('show-card', {
                         detail: {
                             chapterNum: d.chapter,
-                            cardIndex: d.index-1,
+                            cardIndex: d.cardIndex ?? (d.index - 1),
                             card: d.card
                         },
                         bubbles: true,
@@ -475,13 +476,13 @@ export class FlashcardVisualization {
             return 'rgba(75, 85, 99, 0.7)'; // Gray for chapter nodes
         }
         
-        // Blue color scale for cards
+        // Crimson color scale for cards
         const blueScale = {
-            0: 'rgba(219, 234, 254, 0.8)',  // lightest blue
-            1: 'rgba(147, 197, 253, 0.8)',
-            2: 'rgba(59, 130, 246, 0.8)',
-            3: 'rgba(29, 78, 216, 0.8)',
-            4: 'rgba(30, 58, 138, 0.8)'     // darkest blue
+            0: 'rgba(247, 230, 234, 0.85)',  // lightest crimson
+            1: 'rgba(233, 155, 178, 0.85)',
+            2: 'rgba(181, 61, 95, 0.85)',
+            3: 'rgba(142, 21, 55, 0.85)',
+            4: 'rgba(92, 14, 36, 0.85)'     // darkest crimson
         };
         
         return blueScale[d.quality] || blueScale[0];
@@ -510,8 +511,8 @@ export class FlashcardVisualization {
             0: `rgba(239, 68, 68, ${opacity})`,   // red
             1: `rgba(249, 115, 22, ${opacity})`,  // orange
             2: `rgba(234, 179, 8, ${opacity})`,   // yellow
-            3: `rgba(59, 130, 246, ${opacity})`,  // blue
-            4: `rgba(99, 102, 241, ${opacity})`,  // indigo
+            3: `rgba(181, 61, 95, ${opacity})`,   // crimson-light
+            4: `rgba(142, 21, 55, ${opacity})`,   // crimson
             5: `rgba(34, 197, 94, ${opacity})`    // green
         };
         return colors[quality] || colors[0];
@@ -537,10 +538,12 @@ export class FlashcardVisualization {
     // Add method to update review count for today
     updateTodayReview(updatedHistory) {
         if (this.currentView === 'heatmap') {
-            const today = new Date().toDateString();
-            const todayCount = (updatedHistory && updatedHistory[today.split('T')[0]]) || 0;
+            const now = new Date();
+            const todayIso = now.toISOString().split('T')[0];
+            const today = now.toDateString();
+            const todayCount = (updatedHistory && (updatedHistory[todayIso] ?? updatedHistory[today])) || 0;
             
-            const todayCell = this.svg.select(`.day[data-date="${today}"]`);
+            const todayCell = this.svg.select(`.day[data-date="${todayIso}"], .day[data-date="${today}"]`);
             if (todayCell.node()) {
                 todayCell
                     .attr('data-count', todayCount)

@@ -27,13 +27,8 @@ function ensureTooltipStyles(shadowRoot) {
                 white-space: nowrap;
             }
 
-            /* Remove focus outline */
-            button {
-                outline: none !important;
-                box-shadow: none !important;
-            }
-
-            button:focus {
+            /* Remove focus outline on pointer focus while preserving keyboard :focus-visible */
+            button:focus:not(:focus-visible) {
                 outline: none !important;
                 box-shadow: none !important;
             }

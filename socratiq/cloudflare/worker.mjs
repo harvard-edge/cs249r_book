@@ -2,6 +2,7 @@
 export const LIMITS = Object.freeze({ bodyBytes: 131072, messageCharacters: 64000,
   totalCharacters: 96000, messages: 32, outputBytes: 262144, maxTokens: 2048,
   bodyTimeoutMs: 5000, requestTimeoutMs: 40000 });
+const DEFAULT_LIMITS = LIMITS;
 export const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
 const MODELS = new Set(['openai/gpt-oss-120b', 'openai/gpt-oss-20b']);
 const UNSUPPORTED = new Set(['gemini', 'cerebras', 'sambanova', 'mistral', 'openai', 'huggingface', 'awan']);
@@ -50,28 +51,36 @@ async function readBounded(body, maximum, gate) {
   for (const part of parts) { bytes.set(part, offset); offset += part.byteLength; }
   return bytes;
 }
-function payloadFor(body, stream) {
+async function readJsonBody(request, limits = DEFAULT_LIMITS, gate) {
+  const bytes = await readBounded(request.body, limits.bodyBytes, gate);
+  try {
+    return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+  } catch {
+    fail(400, 'invalid_json');
+  }
+}
+function validateChatPayload(body, stream, limits = DEFAULT_LIMITS) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) fail(400, 'invalid_payload');
   const fields = new Set(['model', 'messages', 'max_tokens', 'stream', 'temperature', 'top_p']);
   if (Object.keys(body).some(key => !fields.has(key))) fail(400, 'unsupported_parameter');
   if (!MODELS.has(body.model)) fail(400, 'unsupported_model');
   if (body.stream !== undefined && typeof body.stream !== 'boolean') fail(400, 'invalid_stream');
   if (body.stream === true && !stream) fail(400, 'stream_requires_stream_route');
-  if (!Array.isArray(body.messages) || !body.messages.length || body.messages.length > LIMITS.messages) fail(400, 'invalid_messages');
+  if (!Array.isArray(body.messages) || !body.messages.length || body.messages.length > limits.messages) fail(400, 'invalid_messages');
   let total = 0;
   const messages = body.messages.map(message => {
     if (!message || typeof message !== 'object' || Array.isArray(message)
       || Object.keys(message).some(key => key !== 'role' && key !== 'content')
       || !['system', 'user', 'assistant'].includes(message.role)
       || typeof message.content !== 'string' || !message.content.trim()
-      || message.content.length > LIMITS.messageCharacters) fail(400, 'invalid_message');
+      || message.content.length > limits.messageCharacters) fail(400, 'invalid_message');
     total += message.content.length;
     // Preserve instruction text and message order exactly after JSON decoding.
     return { role: message.role, content: message.content };
   });
-  if (total > LIMITS.totalCharacters || !messages.some(message => message.role === 'user')) fail(400, 'invalid_messages');
-  const maxTokens = body.max_tokens ?? LIMITS.maxTokens;
-  if (!Number.isInteger(maxTokens) || maxTokens < 1 || maxTokens > LIMITS.maxTokens) fail(400, 'invalid_max_tokens');
+  if (total > limits.totalCharacters || !messages.some(message => message.role === 'user')) fail(400, 'invalid_messages');
+  const maxTokens = body.max_tokens ?? limits.maxTokens;
+  if (!Number.isInteger(maxTokens) || maxTokens < 1 || maxTokens > limits.maxTokens) fail(400, 'invalid_max_tokens');
   const payload = { model: body.model, messages, max_tokens: maxTokens, stream: stream && body.stream !== false };
   for (const [key, maximum] of [['temperature', 2], ['top_p', 1]]) {
     if (body[key] !== undefined) {
@@ -80,6 +89,9 @@ function payloadFor(body, stream) {
     }
   }
   return payload;
+}
+function payloadFor(body, stream, limits = DEFAULT_LIMITS) {
+  return validateChatPayload(body, stream, limits);
 }
 function corsFor(request, env) {
   const origin = request.headers.get('Origin');
@@ -97,7 +109,7 @@ function jsonError(status, code, cors = {}, extra = {}) {
     status, headers: { ...cors, ...extra, 'Content-Type': 'application/json; charset=utf-8' },
   });
 }
-function boundedStream(body, gate, headers) {
+function boundedStream(body, gate, headers, limits = DEFAULT_LIMITS) {
   const reader = body.getReader();
   let size = 0;
   let finished = false;
@@ -109,7 +121,7 @@ function boundedStream(body, gate, headers) {
         const { value, done } = await gate.race(reader.read());
         if (done) { finish(); controller.close(); return; }
         size += value.byteLength;
-        if (size > LIMITS.outputBytes) throw new GatewayError(502, 'upstream_output_too_large');
+        if (size > limits.outputBytes) throw new GatewayError(502, 'upstream_output_too_large');
         controller.enqueue(value);
       } catch (error) {
         gate.abort();
@@ -129,7 +141,8 @@ function boundedStream(body, gate, headers) {
     },
   }), { headers });
 }
-export function createWorker({ fetchImpl = globalThis.fetch, limits = LIMITS } = {}) {
+export function createWorker({ fetchImpl = globalThis.fetch, limits = DEFAULT_LIMITS } = {}) {
+  const resolvedLimits = { ...DEFAULT_LIMITS, ...limits };
   return { async fetch(request, env) {
     let cors = {};
     let gate;
@@ -164,22 +177,20 @@ export function createWorker({ fetchImpl = globalThis.fetch, limits = LIMITS } =
       if (typeof env.GROQ_API_KEY !== 'string' || !env.GROQ_API_KEY.trim() || !env.AI_RATE_LIMITER?.limit) fail(503, 'gateway_not_configured');
       if (!(request.headers.get('Content-Type') ?? '').toLowerCase().match(/^application\/json(?:\s*;|$)/)) fail(415, 'json_required');
       const length = request.headers.get('Content-Length');
-      if (length && (!/^\d+$/.test(length) || Number(length) > LIMITS.bodyBytes)) fail(413, 'body_too_large');
+      if (length && (!/^\d+$/.test(length) || Number(length) > resolvedLimits.bodyBytes)) fail(413, 'body_too_large');
       // CF-Connecting-IP is supplied by Cloudflare; missing IPs share a conservative bucket.
-      gate = deadline(limits.requestTimeoutMs, request.signal);
+      gate = deadline(resolvedLimits.requestTimeoutMs, request.signal);
       const rate = await gate.race(env.AI_RATE_LIMITER.limit({ key: request.headers.get('CF-Connecting-IP') ?? 'missing-ip' }));
       if (!rate?.success) {
         gate.close();
         return jsonError(429, 'rate_limit_exceeded', cors, { 'Retry-After': '60' });
       }
-      const bodyGate = deadline(limits.bodyTimeoutMs, gate.signal);
+      const bodyGate = deadline(resolvedLimits.bodyTimeoutMs, gate.signal);
       let body;
       try {
-        const bytes = await gate.race(readBounded(request.body, LIMITS.bodyBytes, bodyGate));
-        try { body = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)); }
-        catch { fail(400, 'invalid_json'); }
+        body = await gate.race(readJsonBody(request, resolvedLimits, bodyGate));
       } finally { bodyGate.close(); }
-      const payload = payloadFor(body, CHAT_ROUTES.get(url.pathname));
+      const payload = payloadFor(body, CHAT_ROUTES.get(url.pathname), resolvedLimits);
       const upstream = await gate.race(fetchImpl(GROQ_URL, {
         method: 'POST', redirect: 'manual', signal: gate.signal,
         headers: { Authorization: `Bearer ${env.GROQ_API_KEY}`, 'Content-Type': 'application/json',
@@ -200,11 +211,11 @@ export function createWorker({ fetchImpl = globalThis.fetch, limits = LIMITS } =
       const type = upstream.headers.get('Content-Type')?.split(';')[0].trim().toLowerCase();
       if (payload.stream) {
         if (type !== 'text/event-stream') fail(502, 'upstream_content_type');
-        return boundedStream(upstream.body, gate, { ...cors, 'Content-Type': 'text/event-stream; charset=utf-8' });
+        return boundedStream(upstream.body, gate, { ...cors, 'Content-Type': 'text/event-stream; charset=utf-8' }, resolvedLimits);
       }
       if (type !== 'application/json') fail(502, 'upstream_content_type');
       let bytes;
-      try { bytes = await readBounded(upstream.body, LIMITS.outputBytes, gate); }
+      try { bytes = await readBounded(upstream.body, resolvedLimits.outputBytes, gate); }
       catch (error) { if (error.message === 'body_too_large') fail(502, 'upstream_output_too_large'); throw error; }
       let result;
       try { result = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)); }

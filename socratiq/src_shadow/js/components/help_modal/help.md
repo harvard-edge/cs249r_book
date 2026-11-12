@@ -1,6 +1,6 @@
-# SocratiQ with tinyML: User Guide
+# SocratiQ: User Guide
 
-Welcome to the **SocratiQ with tinyML** widget! This interactive tool is specifically designed to enhance your learning experience with the TinyML textbook by providing a direct interaction platform with an AI assistant. This guide provides detailed instructions on how to navigate and utilize the various features of this widget.
+Welcome to the **SocratiQ** widget! This interactive tool is specifically designed to enhance your learning experience with the Machine Learning Systems textbook by providing a direct interaction platform with an AI assistant. This guide provides detailed instructions on how to navigate and utilize the various features of this widget.
 
 ## Getting Started
 
@@ -8,7 +8,7 @@ Welcome to the **SocratiQ with tinyML** widget! This interactive tool is specifi
 The widget should automatically appear on the right side of your screen when visiting the designated webpage. If not visible, look for a **blue toggle button** on the right edge of your screen and click it to open the widget.
 
 ### Understanding the Interface
-At the top of the slide-out menu, you will see the title "SocratiQ with tinyML."
+At the top of the slide-out menu, you will see the title "SocratiQ."
 
 Below the title are several buttons for different functionalities:
 - **Help Button:** Hover over or click this button to get help related to any questions you may have.
@@ -29,7 +29,7 @@ All your chats are saved locally on your device. This allows you to review past 
 ## Utilizing Tools and Resources
 
 ### Reference Buttons
-Quick links and references related to TinyML are provided for easy access.
+Quick links and references related to Machine Learning Systems are provided for easy access.
 
 ### Share, Copy, Download Buttons
 These are located next to each AI response. Use them to:

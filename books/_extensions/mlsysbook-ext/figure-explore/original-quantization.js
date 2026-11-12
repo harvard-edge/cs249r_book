@@ -29,15 +29,15 @@
   });
   // The original generic activation curves remain visible and explicitly distinguished.
   const steps=[
-   ['Start with two floating-point inputs','Follow one dot product through the original pipeline. The top branch carries activations; the lower branch carries weights.'],
-   ['Quantize the activations','Divide each activation by its scale and round. The converted integers appear when this action finishes.'],
-   ['Quantize the weights','The weight branch uses its own scale. Follow its inputs into the quantizer; the converted integers appear on arrival.'],
-   ['Feed the integer operands','Both INT8 branches feed the same matrix multiplication. This small example computes one output from two pairs.'],
-   ['Accumulate the first product','Send the first product to the INT32 accumulator. The stored sum changes only when the product arrives.'],
-   ['Accumulate the second product','The first partial sum remains stored until the second product arrives. Addition completes the reduction before conversion to INT8.'],
-   ['Requantize the completed sum','All products must arrive before this conversion. Rescale the completed sum, round, and clamp to the INT8 range.'],
-   ['Apply the activation','This worked case uses ReLU: negative represented values become zero. The positive value here passes through unchanged.'],
-   ['Write the INT8 output','Write the completed integer output. Its real value depends on the output scale. This numerical example does not establish a speedup.']
+   ['Start with 2 floating-point inputs',`Follow a 2-element dot product through the original pipeline: the top branch starts with floating-point activations x = ${vector(d.x)}, and the lower branch starts with floating-point weights w = ${vector(d.w)}.`],
+   ['Quantize the activations',`Divide each activation in x = ${vector(d.x)} by the activation scale ${d.sx} and round to nearest integer, producing INT8 activations ${vector(d.qx)} when the action finishes.`],
+   ['Quantize the weights',`Divide each weight in w = ${vector(d.w)} by the separate weight scale ${d.sw} and round to nearest integer, producing INT8 weights ${vector(d.qw)} on arrival.`],
+   ['Feed the integer operands',`Both INT8 branches (${vector(d.qx)} and ${vector(d.qw)}) feed the integer matrix multiplication unit to compute 1 output from 2 pairs, while the INT32 accumulator initializes to 0.`],
+   ['Accumulate the first product',`Multiply the first integer pair (${d.qx[0]} × ${d.qw[0]} = ${d.products[0]}) and send it to the wide INT32 accumulator (0 + ${d.products[0]} = ${d.products[0]}) so intermediate sums cannot overflow 8-bit storage.`],
+   ['Accumulate the second product',`Multiply the second integer pair (${number(d.qx[1])} × ${d.qw[1]} = ${number(d.products[1])}) and add it to the retained partial sum (${d.products[0]} + ${number(d.products[1])} = ${d.accumulator}), completing the reduction before conversion back to INT8.`],
+   ['Requantize the completed sum',`All products must arrive before requantization: rescale the completed INT32 sum ${d.accumulator} by (${d.sx} × ${d.sw} / ${d.sy}), round to nearest, and clamp to [−128, 127] to produce ${d.requantized}.`],
+   ['Apply the activation',`Apply ReLU directly to the requantized integer: max(0, ${d.requantized}) = ${d.output}. Negative values clamp to 0; positive values pass through unchanged.`],
+   ['Write the INT8 output',`Write the completed INT8 output ${d.output}, which represents ${d.output} × ${d.sy} = ${d.reconstructed} compared with the floating-point reference ${d.float_reference}.`]
   ].map(([label,description])=>({label,description}));
   const equations=[
    `x = ${vector(d.x)}; w = ${vector(d.w)}`,
@@ -59,8 +59,8 @@
   }
   function render(i,{stage,details}) {
    overlay.querySelectorAll('.oq-token').forEach(t=>t.remove());
-   if(!calculation){calculation=document.createElement('p');calculation.className='oq-calculation';calculationLabel=document.createElement('span');calculationLabel.className='oq-calculation-label';calculationValue=document.createElement('span');calculation.append(calculationLabel,calculationValue);assumptions=document.createElement('details');const summary=document.createElement('summary');summary.textContent='Example assumptions';const note=document.createElement('p');note.textContent=`Symmetric signed INT8; both zero-points are 0. Input scale ${d.sx}, weight scale ${d.sw}, output scale ${d.sy}. Round to nearest, with ties away from zero; saturate to [−128, 127] after rounding. No bias. Movement illustrates logical data flow, not measured hardware timing. The original activation curves are generic; this example applies ReLU.`;assumptions.append(summary,note);details.append(assumptions);}
-   if(!canvas.isConnected)stage.append(calculation,canvas,cue);
+   if(!calculation){calculation=document.createElement('p');calculation.className='oq-calculation';calculationLabel=document.createElement('span');calculationLabel.className='oq-calculation-label';calculationValue=document.createElement('span');calculation.append(calculationLabel,calculationValue);assumptions=document.createElement('details');const summary=document.createElement('summary');summary.textContent='Example assumptions';const note=document.createElement('p');note.textContent=`Symmetric signed INT8; both zero-points are 0. Input scale ${d.sx}, weight scale ${d.sw}, output scale ${d.sy}. Round to nearest, with ties away from zero; saturate to [−128, 127] after rounding. No bias. Movement illustrates logical data flow, not measured hardware timing. The original activation curves are generic; this example applies ReLU.`;assumptions.append(summary,note);details.append(calculation,assumptions);}
+   if(!canvas.isConnected)stage.append(canvas,cue);
    calculationLabel.textContent=i===0?'Initial values':i===3?'Operands ready · INT32 sum initialized to zero':'Result now stored';
    calculationValue.textContent=equations[i];
    delete root.dataset.oqPending;
@@ -104,6 +104,6 @@
    onFrame(progress=>{const f=progress*(route.length-1),p=Math.min(route.length-2,Math.floor(f)),t=f-p,a=route[p],b=route[p+1],x=a[0]+(b[0]-a[0])*t,y=a[1]+(b[1]-a[1])*t;token.setAttribute('transform',`translate(${x} ${y})`);badge.setAttribute('transform',`translate(0 ${lane-y})`);pointer.setAttribute('d',lane<y?'M -2 7 L 0 9 L 2 7 Z':'M -2 -7 L 0 -9 L 2 -7 Z');if(progress>=1)token.remove();});
    });
   }
-  return window.MLSysOriginalPlayer.create({root,outer:context.outer,title:'How do floating-point inputs become an INT8 output?',scope:'A two-term dot product, with zero-points 0 and no bias. Requantize, then apply ReLU. The original curves show other activation shapes.',steps,render,transition});
+  return window.MLSysOriginalPlayer.create({root,outer:context.outer,layout:'compact',intro:'Follow a 2-element floating-point dot product through INT8 quantization, INT32 accumulation, requantization, and ReLU activation.',title:'How do floating-point inputs become an INT8 output?',scope:'A two-term dot product, with zero-points 0 and no bias. Requantize, then apply ReLU. The original curves show other activation shapes.',steps,render,transition});
  };
 })();

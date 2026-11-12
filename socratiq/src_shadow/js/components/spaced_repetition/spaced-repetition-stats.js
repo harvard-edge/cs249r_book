@@ -21,11 +21,11 @@ export class FlashcardStats {
             quality: null
         };
         this.colors = {
-            primary: '#3b82f6',      // Blue-500
-            lighter: '#60a5fa',      // Blue-400
-            darker: '#2563eb',       // Blue-600
-            muted: '#93c5fd',        // Blue-300
-            background: '#eff6ff'    // Blue-50
+            primary: '#8e1537',      // Blue-500
+            lighter: '#c77088',      // Blue-400
+            darker: '#74132f',       // Blue-600
+            muted: '#dfaab8',        // Blue-300
+            background: '#fcf4f6'    // Blue-50
         };
     }
 
@@ -80,11 +80,11 @@ export class FlashcardStats {
 
         // Update colors based on theme
         this.colors = {
-            primary: '#3b82f6',      // Blue-500
-            lighter: '#60a5fa',      // Blue-400
-            darker: '#2563eb',       // Blue-600
-            muted: '#93c5fd',        // Blue-300
-            background: isDark ? '#1e3a8a' : '#eff6ff'    // Dark blue for dark theme, light blue for light theme
+            primary: '#8e1537',      // Crimson-500
+            lighter: '#c77088',      // Crimson-400
+            darker: '#74132f',       // Crimson-600
+            muted: '#dfaab8',        // Crimson-300
+            background: isDark ? '#2d161e' : '#fcf4f6'    // Dark crimson for dark theme, light crimson for light theme
         };
 
         await this.initializeCharts(flashcards, isDark);

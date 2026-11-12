@@ -27,11 +27,11 @@ function injectFloatingButton(shadowRoot) {
 
        
       #copy-container {
-        display: grid !important;
-        grid-template-columns: repeat(3, 1fr) !important;
+        display: flex !important;
+        flex-wrap: wrap !important;
         gap: 8px !important;
-        padding: 8px !important;
-        margin-bottom: 12px !important;
+        padding: 6px 8px !important;
+        margin-bottom: 10px !important;
         width: 100% !important;
       }
   
@@ -39,11 +39,12 @@ function injectFloatingButton(shadowRoot) {
         background: white !important;
         border-left: 4px solid #22c55e !important;
         border-radius: 6px !important;
-        padding: 8px 12px !important;
+        padding: 6px 10px !important;
         box-shadow: 0 1px 3px rgba(0,0,0,0.1) !important;
         cursor: pointer !important;
         transition: all 0.2s ease !important;
-        min-height: 40px !important;
+        min-height: 32px !important;
+        max-width: 260px;
         display: flex !important;
         align-items: center !important;
         position: relative !important;
@@ -67,7 +68,8 @@ function injectFloatingButton(shadowRoot) {
       }
   
       .copy-item.expanded {
-        grid-column: span 3 !important;
+        max-width: 100% !important;
+        width: 100% !important;
       }
   
       .copy-item.expanded p {
@@ -192,14 +194,27 @@ function injectFloatingButton(shadowRoot) {
     return { button };
 }
 
-export function addToCopyContainer(text, shadowRoot) {
+export function addToCopyContainer(text, shadowRoot, options = {}) {
   const copyContainer = shadowRoot.getElementById('copy-container');
   if (!copyContainer) return;
 
   copyContainer.classList.remove('hidden');
 
+  const isReaderPassage = Boolean(options?.activeReaderPassage || String(text || '').startsWith('Current reader passage'));
+  if (isReaderPassage) {
+    const existing = copyContainer.querySelector('.copy-item[data-active-reader-passage="true"]');
+    if (existing) {
+      const existingP = existing.querySelector('p');
+      if (existingP) existingP.textContent = text;
+      return existing;
+    }
+  }
+
   const copyItem = document.createElement('div');
   copyItem.className = 'copy-item pulse-effect';
+  if (isReaderPassage) {
+    copyItem.dataset.activeReaderPassage = 'true';
+  }
   
   // Create wrapper for text and delete button
   const contentWrapper = document.createElement('div');
@@ -213,6 +228,14 @@ export function addToCopyContainer(text, shadowRoot) {
   // Add the text content
   const p = document.createElement('p');
   p.textContent = text;
+  p.style.cssText = `
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    margin: 0;
+    flex: 1 1 auto;
+    min-width: 0;
+  `;
   
   // Add delete button
   const deleteBtn = document.createElement('button');
@@ -220,11 +243,12 @@ export function addToCopyContainer(text, shadowRoot) {
   deleteBtn.style.cssText = `
     margin-left: 4px;
     padding: 0 4px;
-    color: #1e40af;
+    color: #560d22;
     font-size: 16px;
     cursor: pointer;
     border: none;
     background: none;
+    flex-shrink: 0;
   `;
   
   deleteBtn.addEventListener('click', (e) => {
@@ -240,20 +264,20 @@ export function addToCopyContainer(text, shadowRoot) {
   copyItem.appendChild(contentWrapper);
   
   copyItem.style.cssText = `
-    max-width: 100px;
+    max-width: 260px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
     display: flex;
     align-items: center;
     transition: max-width 0.2s ease;
-    background-color: #dbeafe !important;
-    color: #1e40af !important;
-    border: 1px solid #bfdbfe !important;
+    background-color: #f7e6ea !important;
+    color: #560d22 !important;
+    border: 1px solid #eed0d7 !important;
     border-radius: 0.25rem !important;
     padding: 2px 6px !important;
-    font-size: 14px !important;
-    line-height: 1 !important;
+    font-size: 13px !important;
+    line-height: 1.2 !important;
   `;
 
   // Toggle expansion on click
@@ -266,13 +290,16 @@ export function addToCopyContainer(text, shadowRoot) {
     if (copyItem.classList.contains('expanded')) {
       copyItem.style.maxWidth = '100%';
       copyItem.style.whiteSpace = 'normal';
+      p.style.whiteSpace = 'normal';
     } else {
-      copyItem.style.maxWidth = '100px';
+      copyItem.style.maxWidth = '260px';
       copyItem.style.whiteSpace = 'nowrap';
+      p.style.whiteSpace = 'nowrap';
     }
   });
 
   copyContainer.insertBefore(copyItem, copyContainer.firstChild);
+  return copyItem;
 }
   
   
@@ -374,14 +401,14 @@ export function clearCopyContainer(shadowRoot) {
     document.addEventListener('mouseup', (e) => {
       setTimeout(() => {
         const selection = window.getSelection();
-        selectedText = selection.toString().trim(); // Update the shared selectedText variable
+        selectedText = selection ? selection.toString().trim() : ''; // Update the shared selectedText variable
   
-        if (selectedText) {
+        if (selectedText && selection && selection.rangeCount > 0) {
           const range = selection.getRangeAt(0);
           const rect = range.getBoundingClientRect();
           updateButtonPosition(button, rect);
           button.style.display = 'flex'; // Show the button
-        } else if (!e.target.closest('.copy-item')) {
+        } else if (!(e.target instanceof Element) || !e.target.closest('.copy-item')) {
           button.style.display = 'none';
         }
       }, 10);

@@ -1,11 +1,60 @@
 // Local learner preferences, shared by the focused reader and lazy study workspace.
 export const PREFERENCES_KEY = 'socratiq_learner_preferences_v1';
+export const SELECTION_CLIP_KEY = 'socratiq_selection_clip_v1';
 export const PREFERENCE_LIMITS = Object.freeze({background: 1200, instructions: 800});
+export const SELECTION_CLIP_OPTIONS = Object.freeze([
+  {id: 'explain', label: 'Explain this', shortLabel: 'Explain this', default: true},
+  {id: 'ask', label: 'Ask…', shortLabel: 'Ask…', default: true},
+  {id: 'check', label: 'Check my understanding', shortLabel: 'Check me', default: true},
+  {id: 'taxonomy', label: 'Map to taxonomy', shortLabel: 'Taxonomy', default: true},
+  {id: 'simplify', label: 'Simplify', shortLabel: 'Simplify', default: false},
+  {id: 'example', label: 'Show an example', shortLabel: 'Example', default: false},
+  {id: 'study', label: 'Open Study tools', shortLabel: 'Study tools', default: false},
+]);
+export const DEFAULT_CLIP_ACTIONS = Object.freeze(
+  SELECTION_CLIP_OPTIONS.filter(option => option.default).map(option => option.id),
+);
+const VALID_CLIP_IDS = new Set(SELECTION_CLIP_OPTIONS.map(option => option.id));
 function browserStorage() {try {return globalThis.localStorage;} catch {return null;}}
 const LEVELS = ['beginner', 'intermediate', 'advanced'];
 let temporary = null;
+let temporaryClipActions = null;
 const clean = (value, limit) => typeof value === 'string'
   ? value.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '').trim().slice(0, limit) : '';
+
+export function normalizeClipActions(input) {
+  if (!Array.isArray(input)) return [...DEFAULT_CLIP_ACTIONS];
+  const valid = SELECTION_CLIP_OPTIONS
+    .map(option => option.id)
+    .filter(id => input.includes(id) && VALID_CLIP_IDS.has(id));
+  return valid.length ? valid : ['explain'];
+}
+
+export function readClipActions(storage = browserStorage()) {
+  if (temporaryClipActions) return [...temporaryClipActions];
+  try {
+    const saved = storage?.getItem(SELECTION_CLIP_KEY);
+    if (saved && saved.length <= 2048) {
+      const value = JSON.parse(saved);
+      if (value?.version === 1 && Array.isArray(value.actions)) {
+        return normalizeClipActions(value.actions);
+      }
+    }
+  } catch { /* Unavailable or damaged storage must not prevent reading. */ }
+  return [...DEFAULT_CLIP_ACTIONS];
+}
+
+export function saveClipActions(actions, storage = browserStorage()) {
+  const normalized = normalizeClipActions(actions);
+  let persisted = false;
+  try {
+    storage.setItem(SELECTION_CLIP_KEY, JSON.stringify({version: 1, actions: normalized}));
+    persisted = true;
+  } catch { /* Keep edits usable for this page when browser storage is blocked. */ }
+  temporaryClipActions = persisted ? null : normalized;
+  globalThis.dispatchEvent?.(new Event('socratiq:clip-actions-changed'));
+  return {actions: normalized, persisted};
+}
 
 export function normalizeLearnerPreferences(input = {}) {
   const value = input && typeof input === 'object' && !Array.isArray(input) ? input : {};
@@ -56,7 +105,9 @@ export function saveLearnerPreferences(value, storage = browserStorage()) {
     const raw = storage.getItem('userSettings');
     const legacy = raw && raw.length <= 65536 ? JSON.parse(raw) : null;
     if (legacy && typeof legacy === 'object' && !Array.isArray(legacy)) {
-      legacy.sliderValue = LEVELS.indexOf(preferences.level);
+      if (!(preferences.level === 'advanced' && Number(legacy.sliderValue) === 3)) {
+        legacy.sliderValue = LEVELS.indexOf(preferences.level);
+      }
       if (legacy.customAPI && typeof legacy.customAPI === 'object' && legacy.customAPI.saveLocally !== true && 'apiKey' in legacy.customAPI) {
         legacy.customAPI = {...legacy.customAPI, apiKey: ''};
       }

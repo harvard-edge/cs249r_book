@@ -17,7 +17,7 @@ window.MLSysFigureLessons["original-v4-12-capture-to-onset"]=async(root,context)
  // Keep the endpoint in view when Expand or rotation changes the artwork scale.
  // Scrolling alone does not trigger this observer, so manual inspection persists.
  let focus=null,resizeFrame=0,disposed=false;
- function recenter(){if(!focus||disposed)return;const scale=svg.getBoundingClientRect().width/width;canvas.scrollLeft=Math.max(0,focus[0]*scale-canvas.clientWidth/2);canvas.scrollTop=Math.max(0,focus[1]*scale-canvas.clientHeight/2);}
+ function recenter(){if(!focus||disposed)return;if(canvas.clientWidth>=520){canvas.scrollLeft=0;canvas.scrollTop=0;return;}const scale=svg.getBoundingClientRect().width/width;canvas.scrollLeft=Math.max(0,focus[0]*scale-canvas.clientWidth/2);canvas.scrollTop=Math.max(0,focus[1]*scale-canvas.clientHeight/2);}
  function follow(x,y){focus=[x,y];recenter();}
  const cameraResize=typeof ResizeObserver==='function'?new ResizeObserver(()=>{if(!disposed&&!resizeFrame)resizeFrame=requestAnimationFrame(()=>{resizeFrame=0;recenter();});}):null;
  cameraResize?.observe(canvas);cameraResize?.observe(svg);
@@ -28,7 +28,7 @@ window.MLSysFigureLessons["original-v4-12-capture-to-onset"]=async(root,context)
 
  const X=t=>968+(3665-968)*t/250;
  const cursor=add('line',{x1:X(0),x2:X(0),y1:500,y2:2000,stroke:'#007A87','stroke-width':9,'stroke-dasharray':'20 14','data-motion-object':'true'});
- const travel=add('line',{x1:X(0),x2:X(0),y1:2300,y2:2300,stroke:'#007A87','stroke-width':22,'data-motion-object':'true'});
+ const travel=add('line',{x1:X(0),x2:X(0),y1:2112,y2:2112,stroke:'#007A87','stroke-width':16,'data-motion-object':'true'});
  const base=add('g',{'data-motion-object':'true'});const chassis=add('rect',{x:-55,y:-45,width:110,height:55,fill:'#fff',stroke:'#007A87','stroke-width':8});base.append(chassis);for(const x of [-33,33]){const wheel=add('circle',{cx:x,cy:15,r:15,fill:'#007A87'});base.append(wheel);}
  const spans=[[0,D.dispatch,1035,'#007A87'],[D.dispatch,D.admission,1330,'#B87333'],[D.admission,D.expiry,1630,'#1A4D3E'],[D.expiry,D.tick_end,1630,'#1A4D3E'],[D.tick_end,D.onset,1920,'#A51C30']].map(([a,b,y,c])=>({a,b,line:add('line',{x1:X(a),x2:X(a),y1:y,y2:y,stroke:c,'stroke-width':14,'data-motion-object':'true'})}));
 
@@ -40,22 +40,22 @@ window.MLSysFigureLessons["original-v4-12-capture-to-onset"]=async(root,context)
  miniAdd('text',{x:250,y:98,'text-anchor':'middle','font-size':13,fill:'currentColor'},'Pre-onset travel (mm) · base size schematic');
  const times=[0,D.dispatch,D.admission,D.expiry,D.tick_end,D.onset];
  const steps=[
- ['Date the observation at capture','Time zero is the exposure midpoint, when the observation was physically true. Exposure/readout are not permission.'],
- ['Age the observation until dispatch','Follow the capture clock through perception. At dispatch its age is 51.6 ms. The lease has not started. Travel is a constant-speed budget conversion, not a new sensor measurement.'],
- ['Charge dispatch-to-admission separately','Follow the hatched allocation until admission. This interval belongs to neither observation age-to-dispatch nor the lease. It is a placement budget that loaded measurement must still qualify.'],
- ['Run the lease from admission','At admission the lease clock begins; it expires 60 ms later. The capture-relative clock keeps its original origin. A fresh lease does not make the captured observation new.'],
- ['Charge one tick and one bus cycle','After lease expiry, one tick and one bus cycle carry the fallback response toward the drive. Both durations are charged exactly once.'],
- ['Reach physical brake onset','After drive-onset delay, braking begins at the endpoint. The stop that follows continues beyond the original plot’s right edge. Compare the actual allocated onset with the dashed latest-onset bound; this timeline does not prove loaded qualification.']
+ ['Date the observation at capture','At capture origin t = 0.00 ms (0.00 mm pre-onset travel at v = 1.3 m/s), the top sensor row marks the exposure midpoint when the world observation was physically true; readout and transport have not begun and no permission lease exists yet.'],
+ ['Age the observation until dispatch','Across the teal perception row from 0.00 to 51.6 ms, exposure, readout, and inference age the observation by 51.6 ms while the base advances d = 1.3 × 51.6 = 67.08 mm before any candidate proposal is dispatched.'],
+ ['Charge dispatch-to-admission separately','From 51.6 ms to 114.91 ms, the hatched bronze dispatch-to-admission allocation consumes 63.31 ms (63.3 ms rounded, 82.30 mm of travel to reach 149.38 mm cumulative), leaving 37.46 ms (48.70 mm) of unused reserve before the 152.38 ms latest-admission bound.'],
+ ['Run the lease from admission','At t = 114.91 ms, the permission core admits the command and starts the 60 ms green lease window; when that 60 ms lease expires at 174.91 ms (227.38 mm cumulative travel), the underlying sensor evidence is already 174.91 ms old.'],
+ ['Charge one tick and one bus cycle','Between 174.91 ms and 176.91 ms, lease expiry triggers the local fallback path across 1 ms of permission-tick quantization plus 1 ms of fieldbus delivery (2.00 ms total, adding 2.60 mm to reach 229.98 mm cumulative travel).'],
+ ['Reach physical brake onset','From 176.91 ms to 196.91 ms (196.9 ms), the red 20.00 ms actuator onset delay adds 26.00 mm so physical deceleration begins at 196.91 ms and 255.98 mm pre-onset travel—37.46 ms (48.70 mm) inside the 234.38 ms latest-onset bound.']
  ].map(([label,description],i)=>({label,get description(){return root.dataset.lessonCommittedIndex===String(i)?description:'Next endpoint, not yet completed: '+description;}}));
  function frame(t){const x=X(t),distance=D.v*t,leaseAge=Math.max(0,t-D.admission);
   cursor.setAttribute('x1',x);cursor.setAttribute('x2',x);travel.setAttribute('x2',x);spans.forEach(s=>s.line.setAttribute('x2',X(Math.min(s.b,Math.max(s.a,t)))));
-  base.setAttribute('transform',`translate(${x} 2290)`);miniBase.setAttribute('transform',`translate(${35+distance*400/300} 0)`);physicalScene.setAttribute('aria-label',`Same pre-onset travel ${distance.toFixed(2)} mm; base size schematic`);root.dataset.baseTravelMm=String(distance);root.dataset.time=String(t);root.dataset.travel=String(distance);root.dataset.leaseStarted=String(t>=D.admission);root.dataset.leaseExpired=String(t>=D.expiry);
+  base.setAttribute('transform',`translate(${x} 2102)`);miniBase.setAttribute('transform',`translate(${35+distance*400/300} 0)`);physicalScene.setAttribute('aria-label',`Same pre-onset travel ${distance.toFixed(2)} mm; base size schematic`);root.dataset.baseTravelMm=String(distance);root.dataset.time=String(t);root.dataset.travel=String(distance);root.dataset.leaseStarted=String(t>=D.admission);root.dataset.leaseExpired=String(t>=D.expiry);
   readout.textContent=`Capture clock ${t.toFixed(2)} ms · pre-onset travel reservation ${distance.toFixed(2)} mm · ${t<D.admission?'lease not started':t<D.expiry?`lease age ${leaseAge.toFixed(2)} ms of ${D.lease.toFixed(0)} ms`:'lease expired; fallback response'}`;
   equation.textContent=`d = v t = ${D.v.toFixed(1)} m/s × ${t.toFixed(2)} ms = ${distance.toFixed(2)} mm. Latest admission ${D.latest_admission.toFixed(2)} ms; latest onset ${D.latest_onset.toFixed(2)} ms. Allocation leaves ${D.reserve_ms.toFixed(2)} ms = ${D.reserve_mm.toFixed(2)} mm reserve.`;
  }
  function render(i,{stage,details}){root.dataset.lessonCommittedIndex=String(i);mount(stage,details);frame(times[i]);follow(X(times[i]),[660,960,1250,1550,1550,1845][i]);}
  function transition({from,to,onFrame}){if(to!==from+1)return;onFrame(p=>{frame(times[from]+(times[to]-times[from])*p);root.dataset.animationProgress=String(p);});}
 
- const player=window.MLSysOriginalPlayer.create({root,outer:context.outer,title:"Which clock pays for the path to brake onset?",scope:"Original timing/travel strip, exact canonical interval endpoints at the chosen aisle speed. Dispatch allocation is unqualified; constant-speed travel maps the pre-onset budget only. Base position follows this travel row; icon size is schematic.",steps,render,transition});
+ const player=window.MLSysOriginalPlayer.create({root,outer:context.outer,layout:'compact',title:"Which clock pays for the path to brake onset?",intro:"Follow the 1.3 m/s permission timeline from capture through the 51.6 ms observation age, 63.3 ms dispatch allocation, and 60 ms lease to physical brake onset at 196.9 ms.",scope:"Aisle base pre-onset timing and travel budget at constant speed v = 1.3 m/s (1.3 mm/ms): observation age at dispatch 51.60 ms (67.08 mm), hatched dispatch-to-admission allocation 63.31 ms (82.30 mm, admission at 114.91 ms vs. 152.38 ms latest admission, leaving 37.46 ms = 48.70 mm reserve out of the 100.78 ms = 131.01 mm spare allowance), permission lease 60.00 ms (78.00 mm, expiry at 174.91 ms), 1 ms tick + 1 ms bus cycle (2.00 ms = 2.60 mm to 176.91 ms), and 20.00 ms brake-onset delay (26.00 mm) reaching physical brake onset at 196.91 ms (255.98 mm vs. 234.38 ms latest onset).",steps,render,transition});
  const destroy=player.destroy;player.destroy=()=>{disposed=true;cameraResize?.disconnect();cancelAnimationFrame(resizeFrame);destroy();};return player;
 };})();

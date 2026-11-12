@@ -28,7 +28,7 @@ test('learning actions retain source and completed history, and launcher sends n
   expect(requests).toHaveLength(0);
   const input = page.getByRole('textbox', {name: 'Ask a follow-up question'});
   await input.fill('Keep my draft');
-  for (const label of ['Simplify', 'Show an example', 'Check my understanding']) {
+  for (const label of ['Simplify', 'Show an example', 'Check my understanding', 'Map to taxonomy']) {
     await page.getByRole('button', {name: label, exact: true}).click();
     await expect(page.getByText('Explanation ready.', {exact: true})).toBeVisible();
     await expect(input).toHaveValue('Keep my draft');
@@ -38,10 +38,11 @@ test('learning actions retain source and completed history, and launcher sends n
   expect(requests[2].source).toEqual(requests[0].source);
   expect(requests[2].question).toContain('one conceptual question at a time');
   expect(requests[2].question).toContain('Do not reveal the answer until I respond');
+  expect(requests[3].question).toContain('ML Systems Taxonomy');
   await input.fill('I think it measures data movement.');
   await page.getByRole('button', {name: 'Send question'}).click();
   await expect(page.getByText('Explanation ready.', {exact: true})).toBeVisible();
-  expect(requests[3].history.at(-2).content).toEqual(requests[2].question);
+  expect(requests[4].history.at(-2).content).toEqual(requests[3].question);
 });
 
 test('start over aborts pending work, clears draft and history, and retains passage', async ({page}) => {
@@ -159,4 +160,80 @@ test('short mobile viewport leaves room to read an answer with the composer visi
   expect(readingSpace.answerBottom).toBeGreaterThan(readingSpace.sourceBottom);
   await expect(page.getByRole('button', {name: 'Send question'})).toBeInViewport();
   await page.screenshot({path: testInfo.outputPath('short-mobile.png')});
+});
+
+test('configurable PopClip selection bar supports Ask, Check me, Taxonomy, and custom action toggles', async ({page}) => {
+  const requests = [];
+  await page.route(endpoint, route => {
+    requests.push(payload(route.request()));
+    return route.fulfill({contentType: 'text/event-stream', body: sse(answer)});
+  });
+  await page.goto('/vol1/chapter/');
+  const selectPassage = () => page.locator('#passage').evaluate(node => {
+    const range = document.createRange(); range.selectNodeContents(node);
+    const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range);
+    document.dispatchEvent(new Event('selectionchange'));
+  });
+  await selectPassage();
+
+  const clip = page.getByRole('toolbar', {name: 'Selection actions'});
+  await expect(clip).toBeVisible();
+  for (const label of ['Explain this', 'Ask…', 'Check me', 'Taxonomy', 'Configure selection actions']) {
+    await expect(clip.getByRole('button', {name: label, exact: true})).toBeVisible();
+  }
+  await expect(clip.getByRole('button', {name: 'Simplify', exact: true})).toBeHidden();
+
+  // Configure via gear menu: enable Simplify and persist
+  await clip.getByRole('button', {name: 'Configure selection actions', exact: true}).click();
+  const menu = clip.getByRole('group', {name: 'Selection clip actions'});
+  await expect(menu).toBeVisible();
+  await menu.getByLabel('Simplify', {exact: true}).check();
+  await expect(clip.getByRole('button', {name: 'Simplify', exact: true})).toBeVisible();
+
+  // Clicking Ask… opens reader and focuses textarea without auto-sending a prompt
+  await clip.getByRole('button', {name: 'Ask…', exact: true}).click();
+  expect(requests).toHaveLength(0);
+  const input = page.getByRole('textbox', {name: 'Ask a follow-up question'});
+  await expect(input).toBeFocused();
+  await page.getByRole('button', {name: 'Close SocratiQ reader'}).click();
+
+  // Re-select passage: Simplify remains enabled and Taxonomy sends taxonomy prompt
+  await selectPassage();
+  await expect(clip.getByRole('button', {name: 'Simplify', exact: true})).toBeVisible();
+  await clip.getByRole('button', {name: 'Taxonomy', exact: true}).click();
+  await expect(page.getByText('Explanation ready.', {exact: true})).toBeVisible();
+  expect(requests).toHaveLength(1);
+  expect(requests[0].question).toContain('ML Systems Taxonomy');
+});
+
+test('Focused Reader footer displays Free shared model status and connects/disconnects a session-only Gemini or Claude model', async ({page}) => {
+  await page.goto('/vol1/chapter/');
+  await page.getByRole('button', {name: 'Ask SocratiQ', exact: true}).click();
+
+  await expect(page.locator('#socratiq-reader .reader-model-status')).toHaveText('Free shared model');
+  const connectLink = page.getByRole('button', {name: 'Connect your own Gemini or Claude', exact: true});
+  await expect(connectLink).toBeVisible();
+  await connectLink.click();
+
+  const byokBox = page.locator('#socratiq-reader .reader-byok-box');
+  await expect(byokBox).toBeVisible();
+  await expect(byokBox.locator('.reader-byok-sso')).toContainText('Sign in with OpenRouter');
+
+  await byokBox.locator('.reader-byok-provider').selectOption('anthropic');
+  await expect(byokBox.locator('.reader-byok-model')).toHaveValue('claude-sonnet-4-20250514');
+  await byokBox.locator('.reader-byok-key').fill('sk-ant-constructed-session-only-key');
+  await byokBox.getByRole('button', {name: 'Connect model', exact: true}).click();
+
+  await expect(page.locator('#socratiq-reader .reader-model-status')).toContainText('Connected: Anthropic Claude');
+  const storageCheck = await page.evaluate(() => ({
+    session: sessionStorage.getItem('socratiq_byok_session_v1'),
+    persisted: localStorage.getItem('socratiq_byok_persisted_v1'),
+    legacyKey: JSON.parse(localStorage.getItem('userSettings') || '{}')?.customAPI?.apiKey || '',
+  }));
+  expect(storageCheck.session).toContain('sk-ant-constructed-session-only-key');
+  expect(storageCheck.persisted).toBeNull();
+  expect(storageCheck.legacyKey).toBe('');
+
+  await byokBox.getByRole('button', {name: 'Use free shared model', exact: true}).click();
+  await expect(page.locator('#socratiq-reader .reader-model-status')).toHaveText('Free shared model');
 });

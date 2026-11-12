@@ -1,6 +1,17 @@
 // chapterMapService.js - Book-agnostic chapter system using chapterMap data
 import { getAllChapterMapEntries } from '../../libs/utils/tocExtractor.js';
 import { getDBInstance } from '../../libs/utils/indexDb.js';
+import { formatChapterTaxonomyPrompt, resolveChapterTaxonomy } from '../../../../src_shared/taxonomy-map.js';
+
+/**
+ * Build a taxonomy-grounded concept-map generation prompt for a chapter URL/path.
+ * @param {string} urlOrPath - Chapter URL or path
+ * @returns {string} - Concept-map generation prompt aligned with canonical taxonomy subjects
+ */
+export function buildChapterConceptMapPrompt(urlOrPath = '') {
+    const taxonomyGrounding = formatChapterTaxonomyPrompt(urlOrPath);
+    return `Generate a chapter concept map aligned with the canonical ML Systems Taxonomy subjects. ${taxonomyGrounding}`.trim();
+}
 
 /**
  * Match a quiz title to a page in chapterMap based on various strategies
@@ -161,15 +172,21 @@ export async function getChaptersFromChapterMap() {
         });
 
         // Transform to dashboard format
-        const chapters = sortedPages.map((page, index) => ({
-            chapter: index + 1, // Sequential numbering for dashboard
-            title: page.title,
-            url: page.url,
-            originalPage: page, // Keep reference to original data
-            quizzesTaken: 0, // Will be updated by progress calculation
-            totalQuizzes: null, // The complete quiz inventory is unknown
-            passedQuizzes: 0 // Will be updated by progress calculation
-        }));
+        const chapters = sortedPages.map((page, index) => {
+            const taxonomy = resolveChapterTaxonomy(page.url);
+            return {
+                chapter: index + 1, // Sequential numbering for dashboard
+                title: page.title,
+                url: page.url,
+                originalPage: page, // Keep reference to original data
+                taxonomyGroup: taxonomy ? taxonomy.primaryGroup : (page.taxonomyGroup || null),
+                taxonomySubjects: taxonomy ? taxonomy.subjects : (page.taxonomySubjects || []),
+                taxonomyPrompt: formatChapterTaxonomyPrompt(page.url),
+                quizzesTaken: 0, // Will be updated by progress calculation
+                totalQuizzes: null, // The complete quiz inventory is unknown
+                passedQuizzes: 0 // Will be updated by progress calculation
+            };
+        });
 
         console.log(`📚 Generated ${chapters.length} chapters from chapterMap data`);
         return chapters;
