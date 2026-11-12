@@ -454,14 +454,14 @@ class SettlementBudget:
     _q = fmt(request_loss, precision=2, commas=False)
     _r = fmt(reply_loss, precision=2, commas=False)
     timeout_math = fmt_math(rf"1-(1-{_q})(1-{_r})")
-    duplicate_math = fmt_math(rf"\Pr(\text{{duplicate effect}}) = (1-{_q})\times {_r}\times(1-{_q})")
+    duplicate_math = fmt_math(rf"\DuplicateEffectProbability = (1-{_q})\times {_r}\times(1-{_q})")
 ```
 
 ::: {#nbk-07-settlement-budget .callout-notebook title="Which retry path duplicates an effect?"}
 
 **Problem**: Suppose inbound requests and outbound replies are lost independently, with request-loss probability $\RequestLossProbability$ and reply-loss probability $\ReplyLossProbability$, each `{python} SettlementBudget.loss_str`. Every delivered request executes successfully, and every caller timeout triggers exactly one blind retry of a non-idempotent operation without deduplication. Dropped packets are assumed to be permanently lost rather than delayed. What is the probability that a single dispatched action executes more than once, and how many duplicate mutations will an agent fleet induce each day?
 
-**Math**: The initial attempt times out whenever the outbound request or the returning reply is lost, with probability $\Pr(\text{timeout}) = 1-(1-\RequestLossProbability)(1-\ReplyLossProbability)$, here `{python} SettlementBudget.timeout_math`, or `{python} SettlementBudget.timeout_str`. Producing an unintended duplicate mutation requires a specific sequence. The original request must reach the endpoint, its confirmation reply must be lost in transit, and the subsequent retry request must successfully reach the endpoint, so $\Pr(\text{dup}) = (1-\RequestLossProbability)\,\ReplyLossProbability\,(1-\RequestLossProbability)$. With the assumed rates:
+**Math**: The initial attempt times out whenever the outbound request or the returning reply is lost, with probability $\Pr(\text{timeout}) = 1-(1-\RequestLossProbability)(1-\ReplyLossProbability)$, here `{python} SettlementBudget.timeout_math`, or `{python} SettlementBudget.timeout_str`. Producing an unintended duplicate mutation requires a specific sequence. The original request must reach the endpoint, its confirmation reply must be lost in transit, and the subsequent retry request must successfully reach the endpoint, so $\DuplicateEffectProbability = (1-\RequestLossProbability)\,\ReplyLossProbability\,(1-\RequestLossProbability)$. With the assumed rates:
 
 `{python} SettlementBudget.duplicate_math`
 
@@ -771,22 +771,6 @@ When the result becomes available, the runtime delivers the bounded observation 
 
 ### Resumption mechanisms {#sec-vol3-tool-calling-async-resumption}
 
-Even when a job handle reports pending state accurately, letting the model poll a five-minute background job every five seconds spends 59 full model calls reading the same 32,768-token context only to receive `"still running"`. Systems track asynchronous job state through three primary mechanisms, distinguished by whether state detection requires model inference (@tbl-vol3-resumption-mechanisms).
-
-| Mechanism                           | Who checks or reports status?                         | When model inference is useful                                      |
-|:------------------------------------|:------------------------------------------------------|:--------------------------------------------------------------------|
-| Model-directed inspection           | The model proposes a bounded status or output request | A new observation may change the diagnosis or next action           |
-| Runtime polling                     | The runtime checks on a bounded schedule              | A reported change requires a decision or the final result is ready  |
-| Completion or progress notification | The executor signals a relevant event to the runtime  | The runtime has obtained evidence sufficient to resume deliberation |
-
-: **Resumption choices**: Waiting and status detection can occur outside model inference; deliberate inspection remains useful when it informs a decision. {#tbl-vol3-resumption-mechanisms}
-
-Delegating health checks to the runtime avoids redundant inference calls while retaining simple polling semantics. Event-driven notifications (such as webhooks or message queues) further eliminate polling traffic between the runtime and the executor, though they introduce operational complexity. The runtime must authenticate callbacks, correlate incoming events with job identifiers, and handle dropped, delayed, or duplicated deliveries. Receiving a completion notification therefore often acts as a trigger for the runtime to execute a validated status read, rather than treating the notification payload itself as authoritative proof of completion. Both polling and notification architectures require dedicated supervisory resources to manage pending jobs across runtime host failures.
-
-::: {.column-margin .margin-pointer}
-↪ The durable return path that lets a replacement worker recover a pending job's result after the runtime host fails is developed in @sec-vol3-durable-execution-effect-reconciliation.
-:::
-
 ```{python}
 #| label: calc-vol3-tool-calling-polling
 #| echo: false
@@ -844,6 +828,22 @@ class PollingBudget:
     extra_cost_str = fmt_usd(extra_cost, precision=4)
 ```
 
+Even when a job handle reports pending state accurately, letting the model poll a five-minute background job every five seconds spends `{python} PollingBudget.pending_calls_str` full model calls reading the same `{python} PollingBudget.context_tokens_str`-token context only to receive `"still running"`. Systems track asynchronous job state through three primary mechanisms, distinguished by whether state detection requires model inference (@tbl-vol3-resumption-mechanisms).
+
+| Mechanism                           | Who checks or reports status?                         | When model inference is useful                                      |
+|:------------------------------------|:------------------------------------------------------|:--------------------------------------------------------------------|
+| Model-directed inspection           | The model proposes a bounded status or output request | A new observation may change the diagnosis or next action           |
+| Runtime polling                     | The runtime checks on a bounded schedule              | A reported change requires a decision or the final result is ready  |
+| Completion or progress notification | The executor signals a relevant event to the runtime  | The runtime has obtained evidence sufficient to resume deliberation |
+
+: **Resumption choices**: Waiting and status detection can occur outside model inference; deliberate inspection remains useful when it informs a decision. {#tbl-vol3-resumption-mechanisms}
+
+Delegating health checks to the runtime avoids redundant inference calls while retaining simple polling semantics. Event-driven notifications (such as webhooks or message queues) further eliminate polling traffic between the runtime and the executor, though they introduce operational complexity. The runtime must authenticate callbacks, correlate incoming events with job identifiers, and handle dropped, delayed, or duplicated deliveries. Receiving a completion notification therefore often acts as a trigger for the runtime to execute a validated status read, rather than treating the notification payload itself as authoritative proof of completion. Both polling and notification architectures require dedicated supervisory resources to manage pending jobs across runtime host failures.
+
+::: {.column-margin .margin-pointer}
+↪ The durable return path that lets a replacement worker recover a pending job's result after the runtime host fails is developed in @sec-vol3-durable-execution-effect-reconciliation.
+:::
+
 ::: {#nbk-07-token-cost-and-inference-overhead .callout-notebook title="The extra cost of asking whether a job finished"}
 
 **Problem**: A background test job completes in `{python} PollingBudget.job_s_str`. Under a model-directed polling strategy, the agent queries status every `{python} PollingBudget.interval_s_str`, starting one interval after dispatch and ending strictly before completion. Assume each status check finishes before the next scheduled query and does not alter overall execution time. Each model invocation consumes a `{python} PollingBudget.context_tokens_str`-token prompt (including preceding status history) and generates a `{python} PollingBudget.output_tokens_per_call_str`-token query, with no additional model acknowledgment required. What incremental inference overhead does this polling loop impose compared to event-driven runtime detection?
@@ -890,6 +890,8 @@ def group_alive(pgid):
 
 def terminate_group(pgid, grace_s=3.0):
     for sig, wait_s in ((signal.SIGTERM, grace_s), (signal.SIGKILL, 1.0)):
+        if not group_alive(pgid):        # reap zombies before signaling
+            return "exited" if sig == signal.SIGTERM else "terminated"
         try:
             os.killpg(pgid, sig)
         except ProcessLookupError:   # group already gone
@@ -920,20 +922,6 @@ Across the `src/pool.py` repair, the agent has needed to inspect source files, a
 Two design dimensions govern this trade-off. Granularity determines how much work an individual tool performs, while catalog selection determines which subset of tool definitions the model sees on any given turn, known as the **active toolkit**\index{Active toolkit!definition}. A small catalog can contain either narrowly bounded primitives or a broadly expressive command runner, whereas an enterprise environment registering hundreds of specialized tools must stage them selectively rather than presenting the entire catalog on every turn.
 
 ### Static and on-demand staging {#sec-vol3-tool-calling-tool-staging}
-
-Serializing all 50 registered tool descriptors into every model call burns 15,000 tokens of context capacity on every turn even when a step needs only six tools, whereas selecting a narrow subset on demand risks omitting the one tool the repair needs next. In **static staging**\index{Tool staging!static}, the runtime serializes a fixed set of tool descriptors into every request, keeping available interfaces predictable and eliminating separate discovery steps at the cost of carrying unused schemas on every turn. In **on-demand staging**\index{Tool staging!on-demand}, the runtime dynamically selects descriptors as the trajectory unfolds, shrinking the prompt footprint and prefill latency at the risk that an omitted tool forces the agent to spend extra turns locating it.
-
-Selection mechanisms vary widely in implementation complexity. A runtime can employ deterministic task-to-tool mappings, hierarchical namespace menus, keyword matching, dense vector retrieval, or a combination of these approaches. Dense retrieval represents one possible search technique rather than a universal requirement for large catalogs. Any match returned by a retriever is merely a candidate descriptor. A robust systems design provides a bounded fallback path, such as a dedicated tool-search operation or an explicit discovery-failure signal, so that an omitted descriptor does not cause the model to conclude erroneously that the operation cannot be performed.
-
-Staging a descriptor makes its syntactic and semantic contract visible to the model; under the grant rule, staging confers no execution privileges. The runtime must still resolve and authenticate every proposed invocation against registered tool identities and permissions before execution. If a dynamic discovery step returns a modified or re-versioned descriptor, the runtime must reconcile that version before executing it, preventing the model from dispatching against an interface different from the one it was provided.
-
-Every tool definition staged under that discovery contract also consumes prompt capacity alongside system instructions, source excerpts, previous observations, and generation headroom. Systems engineers must measure the final serialized request, including formatting delimiters, wrapper schemas, and selection metadata, rather than tallying independently tokenized description fragments under the false assumption that token boundaries are free. The following notebook counts the catalog-related input for a single model request.
-
-::: {.column-margin}
-![](images/svg/tool_calling_margin_catalog_budget.svg){width="100%" fig-alt="Two horizontal bars drawn to scale. The full-catalog bar is solid. The selected bar is a short descriptor segment plus a thin selection-overhead segment, with the remaining length outlined and labeled released."}
-
-*Selection frees most of the catalog's input, on every call.*
-:::
 
 ```{python}
 #| echo: false
@@ -981,6 +969,20 @@ class ToolkitCatalogBudget:
     selected_math = fmt_math(rf"{selected_tools} \times {_n(tokens_per_descriptor)} + {_n(selection_overhead)} = {_n(selected_total)}")
     released_math = fmt_math(rf"{_n(static_tokens)} - {_n(selected_total)} = {_n(released_capacity)}")
 ```
+
+Serializing all `{python} ToolkitCatalogBudget.registered_tools_str` registered tool descriptors into every model call burns `{python} ToolkitCatalogBudget.static_tokens_str` tokens of context capacity on every turn even when a step needs only `{python} ToolkitCatalogBudget.selected_tools_str` tools, whereas selecting a narrow subset on demand risks omitting the one tool the repair needs next. In **static staging**\index{Tool staging!static}, the runtime serializes a fixed set of tool descriptors into every request, keeping available interfaces predictable and eliminating separate discovery steps at the cost of carrying unused schemas on every turn. In **on-demand staging**\index{Tool staging!on-demand}, the runtime dynamically selects descriptors as the trajectory unfolds, shrinking the prompt footprint and prefill latency at the risk that an omitted tool forces the agent to spend extra turns locating it.
+
+Selection mechanisms vary widely in implementation complexity. A runtime can employ deterministic task-to-tool mappings, hierarchical namespace menus, keyword matching, dense vector retrieval, or a combination of these approaches. Dense retrieval represents one possible search technique rather than a universal requirement for large catalogs. Any match returned by a retriever is merely a candidate descriptor. A robust systems design provides a bounded fallback path, such as a dedicated tool-search operation or an explicit discovery-failure signal, so that an omitted descriptor does not cause the model to conclude erroneously that the operation cannot be performed.
+
+Staging a descriptor makes its syntactic and semantic contract visible to the model; under the grant rule, staging confers no execution privileges. The runtime must still resolve and authenticate every proposed invocation against registered tool identities and permissions before execution. If a dynamic discovery step returns a modified or re-versioned descriptor, the runtime must reconcile that version before executing it, preventing the model from dispatching against an interface different from the one it was provided.
+
+Every tool definition staged under that discovery contract also consumes prompt capacity alongside system instructions, source excerpts, previous observations, and generation headroom. Systems engineers must measure the final serialized request, including formatting delimiters, wrapper schemas, and selection metadata, rather than tallying independently tokenized description fragments under the false assumption that token boundaries are free. The following notebook counts the catalog-related input for a single model request.
+
+::: {.column-margin}
+![](images/svg/tool_calling_margin_catalog_budget.svg){width="100%" fig-alt="Two horizontal bars drawn to scale. The full-catalog bar is solid. The selected bar is a short descriptor segment plus a thin selection-overhead segment, with the remaining length outlined and labeled released."}
+
+*Selection frees most of the catalog's input, on every call.*
+:::
 
 ::: {#nbk-07-memory-footprint-and-prefill-latency .callout-notebook title="The input budget of an active catalog"}
 
@@ -1117,17 +1119,17 @@ Each "still running" answer is a full model call. In notebook \ref{nbk-07-token-
 
 Every runtime mechanism in this chapter enforces one discipline. An agent may base its next decision only on what returning evidence directly confirms. A schema validates the syntactic shape of a request, an authorization grant restricts its permissible targets, an endpoint check enforces execution preconditions and timing, and an observation reports what the tool actually measured. None of these mechanisms assumes that a proposed operation successfully altered external state, nor does a completed execution guarantee that the broader task has succeeded. When evidence is missing, as it was after the timed-out staging restart, the runtime must record the evidentiary gap explicitly rather than interpolating an assumed outcome. @Tbl-vol3-tool-calling-key-equations summarizes the quantitative relations governing dispatch concurrency, retry safety, and observation overhead across the tool boundary, where $\ToolCallReadSet_i$ and $\ToolCallWriteSet_i$ represent the declared read and write footprints of call $\ToolCallIndex$, $\RequestLossProbability$ and $\ReplyLossProbability$ denote independent request- and reply-loss probabilities, and an asynchronous job of duration $\JobDuration$ polled at intervals of $\FiniteChange \TimeInstant$ incurs per-token input and output prices $\BlendedInputTokenPrice$ and $\OutputTokenPrice$.
 
-| Equation                                                                                                                                                                                | What it bounds or decides                                                                                                                                                            | Where derived                               |
-|:----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:--------------------------------------------|
-| $\ToolCallWriteSet_i \cap (\ToolCallReadSet_j \cup \ToolCallWriteSet_j) = \emptyset$ and $\ToolCallWriteSet_j \cap \ToolCallReadSet_i = \emptyset$                                      | Whether two batched calls may run concurrently; valid only for trustworthy footprints                                                                                                | @sec-vol3-tool-calling-batches-forced-calls |
-| $\HostRuntimeCount \times \ToolServiceCount$ adapters vs. $\HostRuntimeCount + \ToolServiceCount$                                                                                       | Integration work for $\HostRuntimeCount$ hosts and $\ToolServiceCount$ tool services, with and without a shared protocol                                                             | @sec-vol3-tool-calling-mcp                  |
-| $\StateOperation(\StateOperation(\ToolTargetState)) = \StateOperation(\ToolTargetState)$                                                                                                | Whether a timed-out operation may be repeated without settlement, for the named state                                                                                                | @sec-vol3-tool-calling-idempotency          |
-| $\Pr(\text{timeout}) = 1-(1-\RequestLossProbability)(1-\ReplyLossProbability)$; $\Pr(\text{dup}) = (1-\RequestLossProbability)\,\ReplyLossProbability\,(1-\RequestLossProbability)$     | Timeout rate and duplicate-effect rate under one blind retry; duplicates track reply loss                                                                                            | @sec-vol3-tool-calling-idempotency          |
-| $\ReconcilableToolInterface = \langle \text{actuate}(\MutatingToolAction),\ \text{probe}(\MutatingToolAction, \ToolTargetState_0),\ \text{compensate}(\MutatingToolAction) \rangle$     | What a mutating tool without endpoint deduplication must ship so a timeout can be reconciled                                                                                         | @eq-vol3-legacy-tool-contract               |
-| $\ObservationByteBudget = \HeadByteAllocation + \NoticeByteAllocation + \TailByteAllocation$                                                                                            | Fixed capture memory and staged size for a log of any length, and which diagnostic region survives                                                                                   | @eq-vol3-observation-byte-budget            |
-| $\ShapedObservationSize \cdot \RetainingCallCount$ carried input tokens                                                                                                                 | Later input cost of one staged observation of $\ShapedObservationSize$ tokens selected for $\RetainingCallCount$ further calls                                                       | @sec-vol3-tool-calling-streaming            |
-| $\StatusPollCount = \lceil \JobDuration/\FiniteChange \TimeInstant \rceil - 1$, costing $\StatusPollCount(\SequenceLength\,\BlendedInputTokenPrice + \OutputLength\,\OutputTokenPrice)$ | Inference spent on model-directed status checks that runtime detection avoids                                                                                                        | @sec-vol3-tool-calling-async-resumption     |
-| $(\RegisteredDescriptorCount - \SelectedDescriptorCount)\,\ToolDescriptorSize > \SelectionOverheadSize$                                                                                 | When selecting $\SelectedDescriptorCount$ of $\RegisteredDescriptorCount$ descriptors of $\ToolDescriptorSize$ tokens pays for $\SelectionOverheadSize$ tokens of selection overhead | @sec-vol3-tool-calling-toolkit-design       |
+| Equation                                                                                                                                                                                        | What it bounds or decides                                                                                                                                                            | Where derived                               |
+|:------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:--------------------------------------------|
+| $\ToolCallWriteSet_i \cap (\ToolCallReadSet_j \cup \ToolCallWriteSet_j) = \emptyset$ and $\ToolCallWriteSet_j \cap \ToolCallReadSet_i = \emptyset$                                              | Whether two batched calls may run concurrently; valid only for trustworthy footprints                                                                                                | @sec-vol3-tool-calling-batches-forced-calls |
+| $\HostRuntimeCount \times \ToolServiceCount$ adapters vs. $\HostRuntimeCount + \ToolServiceCount$                                                                                               | Integration work for $\HostRuntimeCount$ hosts and $\ToolServiceCount$ tool services, with and without a shared protocol                                                             | @sec-vol3-tool-calling-mcp                  |
+| $\StateOperation(\StateOperation(\ToolTargetState)) = \StateOperation(\ToolTargetState)$                                                                                                        | Whether a timed-out operation may be repeated without settlement, for the named state                                                                                                | @sec-vol3-tool-calling-idempotency          |
+| $\Pr(\text{timeout}) = 1-(1-\RequestLossProbability)(1-\ReplyLossProbability)$; $\DuplicateEffectProbability = (1-\RequestLossProbability)\,\ReplyLossProbability\,(1-\RequestLossProbability)$ | Timeout rate and duplicate-effect rate under one blind retry; duplicates track reply loss                                                                                            | @sec-vol3-tool-calling-idempotency          |
+| $\ReconcilableToolInterface = \langle \text{actuate}(\MutatingToolAction),\ \text{probe}(\MutatingToolAction, \ToolTargetState_0),\ \text{compensate}(\MutatingToolAction) \rangle$             | What a mutating tool without endpoint deduplication must ship so a timeout can be reconciled                                                                                         | @eq-vol3-legacy-tool-contract               |
+| $\ObservationByteBudget = \HeadByteAllocation + \NoticeByteAllocation + \TailByteAllocation$                                                                                                    | Fixed capture memory and staged size for a log of any length, and which diagnostic region survives                                                                                   | @eq-vol3-observation-byte-budget            |
+| $\ShapedObservationSize \cdot \RetainingCallCount$ carried input tokens                                                                                                                         | Later input cost of one staged observation of $\ShapedObservationSize$ tokens selected for $\RetainingCallCount$ further calls                                                       | @sec-vol3-tool-calling-streaming            |
+| $\StatusPollCount = \lceil \JobDuration/\FiniteChange \TimeInstant \rceil - 1$, costing $\StatusPollCount(\SequenceLength\,\BlendedInputTokenPrice + \OutputLength\,\OutputTokenPrice)$         | Inference spent on model-directed status checks that runtime detection avoids                                                                                                        | @sec-vol3-tool-calling-async-resumption     |
+| $(\RegisteredDescriptorCount - \SelectedDescriptorCount)\,\ToolDescriptorSize > \SelectionOverheadSize$                                                                                         | When selecting $\SelectedDescriptorCount$ of $\RegisteredDescriptorCount$ descriptors of $\ToolDescriptorSize$ tokens pays for $\SelectionOverheadSize$ tokens of selection overhead | @sec-vol3-tool-calling-toolkit-design       |
 
 : **Key equations of the tool boundary**: Each relation holds only under the assumptions stated where it is derived, such as independent message loss, a fixed selected payload, or declared footprints that omit no shared state. {#tbl-vol3-tool-calling-key-equations tbl-colwidths="[40,38,22]"}
 
