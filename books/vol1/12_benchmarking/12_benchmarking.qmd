@@ -3215,7 +3215,7 @@ class ServingEnergyBoundary:
     """Same median prompt, two measurement boundaries (Elsworth et al. 2025, Table 1)."""
 
     # ┌── 1. LOAD ──────────────────────────────────────────────────────────
-    _rows = viz.load_series("vol2/15_sustainable_ai/data/gemini_prompt_energy.csv").entries
+    _rows = viz.load_series("vol1/12_benchmarking/data/gemini_prompt_energy.csv").entries
 
     # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
     _full = sum(r["comprehensive_wh"] for r in _rows if r["comprehensive_counted"] == 1)
@@ -4353,7 +4353,7 @@ The structural form of label noise determines its downstream impact. Random labe
 
 Even a cleanly labeled dataset must still be tested for whether a model generalizes from training conditions to deployment environments. Standard evaluation protocols assume that training, validation, and test splits are independent and identically distributed (i.i.d.). In production systems, this assumption fails routinely: temporal drift alters consumer behavior, sensor degradation shifts hardware characteristics, and geographic expansion introduces unmodeled subpopulations. When the i.i.d. assumption breaks down, held-out validation accuracy may become a poor predictor of operational performance. The direction and size of the change depend on the shifted population.
 
-Whether or not the population shifts, a finite evaluation certifies behavior only on the population it sampled, and only within the uncertainty its sample size allows. That limit is the verification gap, which the opening of Part IV states formally as principle \ref{pri-verification-gap}. The gap has two parts, and each limits a different conclusion. The first is coverage. A test set is a sample from a space of possible inputs so large that any test set covers an effectively zero fraction of it. In a $224{\times}224$ RGB image, each of the three 8-bit channels of every pixel multiplies the count of distinct inputs by 256, so the inputs ResNet-50 accepts far outnumber any dataset that could ever be assembled. A score therefore speaks only for inputs drawn the way the test set was drawn, which is why a shift in the deployed population can invalidate a passing result without any change to the model.
+Whether or not the population shifts, a finite evaluation certifies behavior only on the population it sampled, and only within the uncertainty its sample size allows. That limit is the verification gap, which the opening of Part IV states formally as its first deployment principle. The gap has two parts, and each limits a different conclusion. The first is coverage. A test set is a sample from a space of possible inputs so large that any test set covers an effectively zero fraction of it. In a $224{\times}224$ RGB image, each of the three 8-bit channels of every pixel multiplies the count of distinct inputs by 256, so the inputs ResNet-50 accepts far outnumber any dataset that could ever be assembled. A score therefore speaks only for inputs drawn the way the test set was drawn, which is why a shift in the deployed population can invalidate a passing result without any change to the model.
 
 The second part of the gap is resolution. Within the sampled population, measured accuracy is an estimate, and its interval narrows only as the test set grows, the binomial limit that @sec-benchmarking-statistical-methodological-issues-7aa5 worked through. Evaluation is therefore statistical evidence and never proof of correctness. A release criterion that respects the gap names the population the test represents, the error tolerance it checks, and the confidence of the resulting bound, and that bound must be re-estimated whenever the deployed population changes.
 
@@ -4667,7 +4667,28 @@ Applying this matrix organizes hypotheses when system telemetry diverges from th
 ↪ A production troubleshooting matrix that maps common failure symptoms to a candidate D·A·M axis and the measurement that confirms it is collected for reference in @sec-appdx-dam-taxonomy-production-troubleshooting-02fb.
 :::
 
-Validation under controlled laboratory conditions differs from validation in production. A laboratory protocol may fix data, simplify arrivals, or isolate execution to answer a controlled question. In production, all three assumptions can break simultaneously: data drifts, traffic spikes unpredictably, and concurrent workloads compete for shared hardware.
+Validation under controlled laboratory conditions differs from validation in production. A laboratory protocol may fix data, simplify arrivals, or isolate execution to answer a controlled question. In production, all three assumptions can break simultaneously: data drifts, traffic spikes unpredictably, and concurrent workloads compete for shared hardware. A candidate release can therefore pass the hardware, model, and data tests yet still lack evidence for the workload it will serve. A service with bursty requests needs load validation, and a camera trap deployed under changing illumination needs labeled examples from those conditions. Timing and memory telemetry can expose overload, while silent predictive degradation requires labels or validated quality proxies, and when labels arrive late the release protocol must name that delay. @Tbl-predeployment-checklist pairs each simplifying benchmark assumption with the production condition that violates it and the validation step that closes the gap.
+
+```{=latex}
+\begingroup
+%\renewcommand{\arraystretch}{1.4}
+```
+
+| **Benchmark Assumption**       | **Production Reality**       | **Validation Approach**                |
+|:-------------------------------|:-----------------------------|:---------------------------------------|
+| **Uniform request arrival**    | Bursty traffic patterns      | Load test with production trace replay |
+| **Clean, preprocessed inputs** | Variable quality inputs      | Evaluate on production data sample     |
+| **Warm system state**          | Cold starts, cache misses    | Measure cold-start performance         |
+| **Isolated execution**         | Resource contention          | Benchmark under realistic system load  |
+| **Fixed model version**        | A/B testing, gradual rollout | Establish baseline for comparison      |
+
+: **Predeployment Benchmark Checklist**: Each row pairs a simplifying benchmark assumption with a production condition that can violate it and the validation step that closes the gap. Each row should be independently verified against representative operational conditions. {#tbl-predeployment-checklist}
+
+```{=latex}
+\endgroup
+```
+
+Each row of @tbl-predeployment-checklist turns a laboratory blind spot into an explicit pre-release check before live traffic reaches the candidate model.
 
 ## Fallacies and Pitfalls {#sec-benchmarking-fallacies-pitfalls-9781}
 
@@ -4860,6 +4881,14 @@ A short, isolated laboratory run can miss the thermal and architectural constrai
 
 :::
 
+::: {.fallacy-pitfall}
+
+**Pitfall**: *Treating passing throughput and accuracy benchmarks as sufficient evidence of operational reliability.*
+
+Standard benchmark runs assume fault-free nodes, warm caches, and uninterrupted serving loops, omitting crash recovery, checkpoint reload, and failover behavior. Even a service engineered for `{python} FallaciesPitfallsSetup.availability_nines_str` availability permits at most `{python} FallaciesPitfallsSetup.downtime_minutes_month_str` of unplanned downtime per month, a budget that a handful of unbenchmarked cold-start weight reloads or cascading retry storms can exhaust in a single afternoon. Predeployment validation must measure cold-start recovery latency, timeout behavior, and degraded-mode fallback alongside steady-state throughput.
+
+:::
+
 ## Summary {#sec-benchmarking-summary-5b23}
 
 Benchmarking completes Part III's optimization pipeline by validating whether the efficiency gains from data selection, model compression, and hardware acceleration deliver in practice. The three benchmark lenses examine system execution, model behavior, and data representativeness separately, then test whether their assumptions survive when the complete system runs under deployment conditions. Every row of @tbl-benchmarking-chapter-spine began as a claim and now has a test that can settle it. ResNet-50's INT8 claim became a test with stated conditions, a matched pair of MLPerf Inference Offline runs whose result a team can now obtain rather than assume. Its roofline ceiling met an MLPerf throughput that sits `{python} ResNet50RooflineCheck.gap_mult_str` below it. MobileNetV2's accelerator speedup narrowed once the whole frame path on the edge board was timed. Keyword spotting showed that idle power, not inference, sets a duty-cycled device's battery life.
@@ -4912,28 +4941,7 @@ The lenses reveal different failure modes: system benchmarks expose underdeliver
 
 Optimization claims need measured execution rather than analytical proxies. Wall-clock timing captures DRAM bandwidth saturation, kernel launch serialization, and host-device transfer overhead that FLOP counts omit. Percentile profiling under concurrent load exposes queuing delays and thermal throttling that arithmetic means conceal. Evaluating workloads against production-representative data reveals dynamic shape variations and memory churn that uniform synthetic inputs never trigger.
 
-A candidate release can pass the hardware, model, and data tests yet still lack evidence for the workload it will serve. A service with bursty requests needs load validation, and a camera trap deployed under changing illumination needs labeled examples from those conditions. Laboratory benchmarks establish behavior under specified conditions; a release decision must identify which of those conditions remain valid in the target deployment and test the ones that change. Timing and memory telemetry can expose overload, while silent predictive degradation requires labels or validated quality proxies, and when labels arrive late the release protocol must name that delay. A research benchmark remains useful for comparing algorithms, but the release criteria for a serving system must also include load tests, tail-latency measurements, data-quality checks, failure drills, and rollback criteria. @Tbl-predeployment-checklist pairs each simplifying benchmark assumption with the production condition that violates it and the validation step that closes the gap.
-
-```{=latex}
-\begingroup
-%\renewcommand{\arraystretch}{1.4}
-```
-
-| **Benchmark Assumption**       | **Production Reality**       | **Validation Approach**                |
-|:-------------------------------|:-----------------------------|:---------------------------------------|
-| **Uniform request arrival**    | Bursty traffic patterns      | Load test with production trace replay |
-| **Clean, preprocessed inputs** | Variable quality inputs      | Evaluate on production data sample     |
-| **Warm system state**          | Cold starts, cache misses    | Measure cold-start performance         |
-| **Isolated execution**         | Resource contention          | Benchmark under realistic system load  |
-| **Fixed model version**        | A/B testing, gradual rollout | Establish baseline for comparison      |
-
-: **Predeployment Benchmark Checklist**: Each row pairs a simplifying benchmark assumption with a production condition that can violate it and the validation step that closes the gap. Each row should be independently verified against representative operational conditions. {#tbl-predeployment-checklist}
-
-```{=latex}
-\endgroup
-```
-
-Once a model is live, benchmarking becomes a rolling comparison against those baselines\index{Production monitoring!continuous benchmarking}: whether the input distribution remains close to the benchmark distribution, whether latency and throughput stay inside the measured envelope, and whether model quality moves outside its expected range. Serving systems turn this measurement loop into staged rollouts, shadow evaluation (running the new model beside production without serving its outputs), and automated rollback. Benchmarking defines the performance envelope and failure thresholds; production monitoring tests live telemetry against them.
+Once a model passes predeployment gating (@tbl-predeployment-checklist) and goes live, benchmarking becomes a rolling comparison against those baselines\index{Production monitoring!continuous benchmarking}: whether the input distribution remains close to the benchmark distribution, whether latency and throughput stay inside the measured envelope, and whether model quality moves outside its expected range. Serving systems turn this measurement loop into staged rollouts, shadow evaluation (running the new model beside production without serving its outputs), and automated rollback. Benchmarking defines the performance envelope and failure thresholds; production monitoring tests live telemetry against them.
 
 ::: {.column-margin .margin-pointer}
 ↪ Shadow, canary, and blue-green releases and the rollback tiers that act on these thresholds are developed in @sec-ml-operations-model-deployment-b9b9.
@@ -4958,16 +4966,13 @@ The chapter's measurement formulas fit on one page (@tbl-benchmarking-key-equati
 
 ::: {.callout-takeaways title="Measuring what matters"}
 
-* **Benchmarks validate co-design**: System, model, and data benchmarks expose hardware underdelivery, compression quality loss, and distribution mismatch. A system that passes only one axis can still fail when Data, Algorithm, and Machine constraints meet under production load.
-* **A claim becomes a test only when its conditions are fixed**: Benchmark carpentry restates a claim such as "ResNet-50 is faster at INT8" as a task, dataset, model, metric, harness, specification, and run rules. A number reported without those conditions cannot be reproduced, compared, or refuted.
-* **A prediction and a measurement together locate a bottleneck**: The roofline places ResNet-50 training on the compute roof, yet the measured MLPerf throughput sustains only `{python} ResNet50H100Sustained.mfu_pct_str` of peak. The gap says time is going somewhere other than arithmetic, and profiling attributes it.
-* **Proxy numbers need boundaries**: Standardized run rules make comparisons honest, but fixed workloads are still proxies. Batch size, thermal state, input distribution, concurrency, and service-deadline windows decide whether a lab result survives the benchmark–production gap.
-* **Granularity trades diagnosis for realism**: Micro-benchmarks isolate kernels, macro-benchmarks expose model-level costs, and end-to-end benchmarks capture user-visible behavior. Effective measurement stacks all three so teams can see both the symptom and the layer that caused it.
-* **Tail latency often decides pass or fail**: Interactive services with percentile-based SLOs can violate their latency target while mean latency remains acceptable. Reporting percentile latency under representative load prevents a benchmark from approving a system whose mean passes while its worst-served requests violate the SLO.
-* **A component speedup is diluted across the pipeline stages it does not touch**: In the chapter's vision pipeline, unchanged preprocessing at `{python} AmdahlBenchmarkCalc.preprocess_pct_str` of latency turns a `{python} AmdahlBenchmarkCalc.bench_inf_speedup_mult_str` inference speedup into `{python} AmdahlBenchmarkCalc.bench_e2e_improvement_mult_str` end to end. Amdahl's law (@eq-amdahl) caps even an infinitely fast model at `{python} AmdahlBenchmarkCalc.amdahl_ceiling_mult_str`. Benchmark the whole request path before celebrating kernel speedups.
-* **Energy follows the duty cycle**: For always-on keyword spotting on a microcontroller board, the idle floor accounts for `{python} KwsDutyCycle.idle_share_pct_str` of average power, so energy per inference alone misdescribes battery life. A power benchmark states its boundary, its window, and the duty cycle.
-* **A difference is real only beyond its noise**: Paired tests on per-image outcomes and intervals over repeated run pairs decide whether a one-point accuracy gap or a measured latency reduction is a finding. A test set is a measurement instrument with finite resolution, so a passing score is evidence, never proof. It certifies behavior only on the population it sampled and within its interval, and a release criterion names that population, its tolerance, and its confidence.
-* **Efficiency still needs quality evidence**: INT8 may cut raw weight storage `{python} MobileNetLighthouseSetup.mobilenet_v2_compression_ratio_mult_str`; the simplified component model estimates an energy reduction of about `{python} PrecisionEnergySummary.total_savings_factor_mult_str`, but whole-device measurement, confidence calibration, subgroup robustness, and edge-case behavior decide whether the compressed model is deployable.
+* **Benchmarks validate co-design under fixed conditions**: System, model, and data benchmarks expose hardware underdelivery, compression quality loss, and distribution mismatch only when benchmark carpentry fixes the task, dataset, model, metric, harness, specification, and run rules so a claim can be reproduced or refuted.
+* **Predictions, measurements, and granularity together locate bottlenecks**: The roofline places ResNet-50 training on the compute roof while MLPerf sustains `{python} ResNet50H100Sustained.mfu_pct_str` of peak; stacking micro-, macro-, and end-to-end benchmarks separates kernel stalls from model and pipeline overhead.
+* **Tail latency and production boundaries govern pass or fail**: Fixed laboratory workloads remain proxies whose batch size, thermal state, concurrency, and percentile SLO windows must match deployment so a passing mean never hides failing p99 requests.
+* **Unaccelerated pipeline stages cap component speedups**: In the chapter's vision pipeline, unchanged preprocessing at `{python} AmdahlBenchmarkCalc.preprocess_pct_str` of latency dilutes a `{python} AmdahlBenchmarkCalc.bench_inf_speedup_mult_str` inference speedup to `{python} AmdahlBenchmarkCalc.bench_e2e_improvement_mult_str` end to end, bounded by Amdahl's law (@eq-amdahl) at `{python} AmdahlBenchmarkCalc.amdahl_ceiling_mult_str`.
+* **Energy follows the measurement boundary and duty cycle**: For always-on keyword spotting on a microcontroller board, standby draw accounts for `{python} KwsDutyCycle.idle_share_pct_str` of average power, so energy benchmarks must declare device boundaries, windows, and duty cycles rather than per-inference energy alone.
+* **Statistical resolution bounds every comparison**: Paired per-example tests and repeated-run confidence intervals separate genuine improvements from noise while certifying behavior only on the sampled population at the stated tolerance and confidence.
+* **Efficiency gains require whole-system quality evidence**: INT8 cuts raw weight storage `{python} MobileNetLighthouseSetup.mobilenet_v2_compression_ratio_mult_str` and reduces simplified component energy by `{python} PrecisionEnergySummary.total_savings_factor_mult_str`, yet deployment still depends on whole-device power, calibration, subgroup robustness, and out-of-distribution checks.
 
 :::
 

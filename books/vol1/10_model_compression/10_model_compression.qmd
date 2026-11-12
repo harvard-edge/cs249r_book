@@ -3836,6 +3836,8 @@ For DLRM, quantization targets storage density rather than arithmetic throughput
 
 :::
 
+At the opposite end of the memory hierarchy, the same precision lever shifts from fitting terabyte-scale lookup tables across data center nodes to fitting compact convolutional filters inside a few hundred kilobytes of microcontroller SRAM.
+
 ```{python}
 #| echo: false
 #| label: model-compression-kws-quant-imperative
@@ -3885,7 +3887,7 @@ In FP32, even the compact DS-CNN architecture moves 4$\times$ more raw weight by
 
 :::
 
-Together, DLRM and the TinyML lighthouse (\ref{lhs-model-compression-tinyml-quantization-imperative}) illustrate the two operational extremes of this memory constraint. DLRM uses lower precision to fit embedding tables that can reach terabytes into host memory; TinyML uses lower precision to keep every inference within a tiny energy envelope and a few hundred kilobytes of on-chip SRAM. Across both extremes, reducing numerical precision attacks physical execution costs on two fronts, arithmetic energy and latency in the ALU and byte traffic across the memory bus. Both savings assume that the low-precision values still represent the model faithfully, and producing such values is the job of the quantization methods.
+Together, DLRM (lighthouse \ref{lhs-model-compression-dlrm-embedding-quantization}) and the TinyML lighthouse \ref{lhs-model-compression-tinyml-quantization-imperative} illustrate the two operational extremes of this memory constraint. DLRM uses lower precision to fit embedding tables that can reach terabytes into host memory; TinyML uses lower precision to keep every inference within a tiny energy envelope and a few hundred kilobytes of on-chip SRAM. Across both extremes, reducing numerical precision attacks physical execution costs on two fronts, arithmetic energy and latency in the ALU and byte traffic across the memory bus. Both savings assume that the low-precision values still represent the model faithfully, and producing such values is the job of the quantization methods.
 
 ### Quantization methods {#sec-model-compression-precision-reduction-strategies-db83}
 
@@ -5381,39 +5383,58 @@ class GPT2DecodeQuantization:
 
 ```{python}
 #| echo: false
-#| label: illustrative-int8-storage-calc
+#| label: litert-quant-pixel2-calc
 # ┌─────────────────────────────────────────────────────────────────────────────
-# │ ILLUSTRATIVE INT8 WEIGHT STORAGE
+# │ MEASURED LITERT INT8 QUANTIZATION ON PIXEL 2
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: Lead-in paragraph to @fig-quantization-impact.
 # │
-# │ Goal: Show the exact fourfold storage cut for the illustrative Inception bar.
-# │ Show: 135 MB of FP32 weights shrinking to 33.75 MB in INT8.
-# │ How: Scale the illustrative FP32 storage by the INT8-to-FP32 byte ratio.
+# │ Goal: Anchor the storage-versus-latency split in measured mobile benchmarks.
+# │ Show: Inception v3 shrinking from 95.7 MB to 23.9 MB (4.0x) while Pixel 2
+# │       single-big-core QAT latency drops by 1.65x-2.08x across CNN families.
+# │ How: Load vol1/10_model_compression/data/tflite_cnn_quantization_pixel2.csv
+# │      (Google LiteRT / Jacob et al. 2018 Table 1).
 # │
-# │ Note: The TikZ bars in @fig-quantization-impact carry the same values by hand.
+# │ Note: The TikZ bars in @fig-quantization-impact plot the exact CSV values.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.core.units import MB, BYTES_FP32, BYTES_INT8
-from mlsysim.fmt import check, fmt_memory
+from mlsysim import load_series
+from mlsysim.core.units import MB, millisecond
+from mlsysim.fmt import check, fmt_memory, fmt_multiple, fmt_time
 
-class IllustrativeInt8Storage:
+class LiteRTQuantPixel2:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    inception_fp32 = 135 * MB  # scenario assumption: illustrative FP32 bar in the figure
+    _rows = {r["model"]: r for r in load_series("vol1/10_model_compression/data/tflite_cnn_quantization_pixel2.csv").entries}
+    _inc = _rows["Inception_v3"]
+    _mv1 = _rows["Mobilenet-v1-1-224"]
+    _mv2 = _rows["Mobilenet-v2-1-224"]
+
+    inc_fp32_size = _inc["size_fp32_mb"] * MB
+    inc_int8_size = _inc["size_int8_mb"] * MB
+    inc_fp32_lat = _inc["latency_fp32_ms"] * millisecond
+    inc_qat_lat = _inc["latency_qat_ms"] * millisecond
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    inception_int8 = inception_fp32 * (BYTES_INT8 / BYTES_FP32).to("").magnitude
+    size_ratios = [r["size_fp32_mb"] / r["size_int8_mb"] for r in (_inc, _mv1, _mv2)]
+    speedups = [r["latency_fp32_ms"] / r["latency_qat_ms"] for r in (_inc, _mv1, _mv2)]
+    min_speedup = min(speedups)
+    max_speedup = max(speedups)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(abs(inception_int8.to(MB).magnitude - 33.75) < 1e-9, f"Prose says 33.75 MB in INT8, got {inception_int8}.")
+    check(all(3.8 < s < 4.1 for s in size_ratios), f"Expected ~3.9-4.0x FlatBuffer size cut, got {size_ratios}.")
+    check(1.5 < min_speedup < max_speedup < 2.2, f"Expected 1.65x-2.08x QAT CPU speedups, got {speedups}.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    inception_fp32_mb_str = fmt_memory(inception_fp32, unit=MB, precision=0, commas=False)
-    inception_int8_mb_str = fmt_memory(inception_int8, unit=MB, precision=2, commas=False)
+    inc_fp32_mb_str = fmt_memory(inc_fp32_size, unit=MB, precision=1, commas=False)
+    inc_int8_mb_str = fmt_memory(inc_int8_size, unit=MB, precision=1, commas=False)
+    inc_fp32_ms_str = fmt_time(inc_fp32_lat, unit=millisecond, precision=0, commas=True)
+    inc_qat_ms_str = fmt_time(inc_qat_lat, unit=millisecond, precision=0, commas=False)
+    min_speedup_mult_str = fmt_multiple(min_speedup, precision=2, commas=False)
+    max_speedup_mult_str = fmt_multiple(max_speedup, precision=2, commas=False)
 ```
 
-Vision networks show the same split between bytes and time. Across three of them (Inception v3, MobileNet v1, and ResNet v2), INT8 conversion contracts weight storage by exactly $4\times$ (`{python} IllustrativeInt8Storage.inception_fp32_mb_str` to `{python} IllustrativeInt8Storage.inception_int8_mb_str` for the illustrative Inception bar), while the latency change varies with the architecture and its kernels (@fig-quantization-impact).
+Vision networks show the same split between bytes and time. Across three measured mobile benchmarks on a single big CPU core of a Google Pixel 2 (Inception v3, MobileNet v1, and MobileNet v2 under quantization-aware INT8 conversion [@google2024litertquant; @jacob2018]), packaged FlatBuffer model storage shrinks by nearly $4\times$ (`{python} LiteRTQuantPixel2.inc_fp32_mb_str` to `{python} LiteRTQuantPixel2.inc_int8_mb_str` for Inception v3, with INT32 biases and quantization scale metadata accounting for the slight departure on smaller models), whereas inference latency improves by `{python} LiteRTQuantPixel2.min_speedup_mult_str` to `{python} LiteRTQuantPixel2.max_speedup_mult_str` (`{python} LiteRTQuantPixel2.inc_fp32_ms_str` to `{python} LiteRTQuantPixel2.inc_qat_ms_str` on Inception v3) depending on operator mix and kernel overhead (@fig-quantization-impact).
 
-::: {#fig-quantization-impact fig-env="figure" fig-pos="htb" fig-cap="**Illustrative Quantization Scenario**: Paired bars separate FP32 and INT8 alternatives. The right panel shows illustrative weight storage, where reducing each weight from 32 to 8 bits produces an exact fourfold decrease; the left panel shows illustrative, architecture-dependent latency changes." fig-alt="Two paired bar charts compare FP32 and INT8. The left chart shows illustrative inference time in milliseconds for Inception v3, MobileNet v1, and ResNet v2. The right chart shows raw weight storage in megabytes, with every INT8 bar one quarter the FP32 bar."}
+::: {#fig-quantization-impact fig-env="figure" fig-pos="htb" fig-cap="**Measured Quantization Impact on Mobile CPU**: Google LiteRT benchmarks on a Google Pixel 2 single big CPU core comparing FP32 baselines against quantization-aware INT8 models [@google2024litertquant; @jacob2018]. Packaged model storage (right) drops by $3.9\text{--}4.0\times$ across all three architectures, whereas single-core CPU latency (left) improves by $1.65\text{--}2.08\times$ because activation re-quantization, depthwise separable layers, and memory traffic do not scale four-for-one with weight bit width." fig-alt="Two paired bar charts compare FP32 and quantization-aware INT8 models on a Google Pixel 2 single big CPU core. The left chart shows inference time in milliseconds for Inception v3 (1130 vs. 543 ms), MobileNet v1 (124 vs. 64 ms), and MobileNet v2 (89 vs. 54 ms). The right chart shows packaged model size in megabytes for Inception v3 (95.7 vs. 23.9 MB), MobileNet v1 (16.9 vs. 4.3 MB), and MobileNet v2 (14.0 vs. 3.6 MB)."}
 
 ```{.tikz}
 \begin{tikzpicture}[font=\small\sffamily]
@@ -5432,19 +5453,20 @@ Vision networks show the same split between bytes and time. Across three of them
     ybar=1pt, ymin=0,
     bar width=8mm,
     title style={font=\fontsize{8pt}{8}\selectfont\sffamily,yshift=-4pt},
-    symbolic x coords={Inception\_v3,MobileNet\_v1, ResNet\_v2},
+    symbolic x coords={Inception\_v3,MobileNet\_v1,MobileNet\_v2},
     xtick=data,
-    xticklabels={Inception v3,MobileNet v1,ResNet v2},
+    xticklabels={Inception v3,MobileNet v1,MobileNet v2},
    legend style={at={(0.85,0.9)}, anchor=north},
    legend cell align=left,
    legend style={fill=BrownL!40,draw=BrownLine,row sep=1.85pt,
    font=\fontsize{7pt}{7}\selectfont\sffamily},
-    enlarge x limits=0.2,
+    enlarge x limits=0.22,
     tick label style={/pgf/number format/assume math mode=true},
     ticklabel style={font=\footnotesize\sffamily},
     grid=major,
-    major grid style={black!60},
+    major grid style={black!20},
    every node near coord/.append style={yshift=2pt,
+   fill=white, fill opacity=0.85, text opacity=1, inner sep=1pt,
    /pgf/number format/assume math mode=true,
     font=\fontsize{6pt}{6}\selectfont\sffamily, anchor=south},
     %
@@ -5457,39 +5479,40 @@ Vision networks show the same split between bytes and time. Across three of them
 \begin{scope}[local bounding box=RR,shift={(0,0)}]
 \begin{axis}[mybarstyle,
     ymin=0,
+    ymax=1300,
     ytick={0,250,500,750,1000,1250},
     ylabel={Inference Time (ms)},
-    title={Inference Time},
+    title={Inference Time (Pixel 2 CPU)},
    nodes near coords={\pgfmathprintnumber{\pgfplotspointmeta}~ms},
     ]
     \addplot [fill=WeightGradient!80,draw=none] coordinates {
-        ({Inception\_v3},800)
-        ({MobileNet\_v1},700)
-        ({ResNet\_v2},300)};
+        ({Inception\_v3},1130)
+        ({MobileNet\_v1},124)
+        ({MobileNet\_v2},89)};
     \addplot [fill=Activation!90,draw=none] coordinates {
-        ({Inception\_v3},500)
-        ({MobileNet\_v1},30)
-        ({ResNet\_v2},70)};
+        ({Inception\_v3},543)
+        ({MobileNet\_v1},64)
+        ({MobileNet\_v2},54)};
 \end{axis}
  \end{scope}
  %%%%RIGHT
  \begin{scope}[local bounding box=RR2,shift={(7.5,0)}]
 \begin{axis}[mybarstyle,
   ymin=0,
-  ymax=150,
-  ytick={0,25,50,75,100,125,150},
-  ylabel={Weight Storage (MB)},
-  title={Weight Storage},
-  nodes near coords={\pgfmathprintnumber{\pgfplotspointmeta}~MB},
+  ymax=120,
+  ytick={0,25,50,75,100},
+  ylabel={Model Size (MB)},
+  title={Packaged Model Size},
+  nodes near coords={\pgfmathprintnumber[fixed,fixed zerofill,precision=1]{\pgfplotspointmeta}~MB},
     ]
     \addplot [fill=WeightGradient!80,draw=none] coordinates {
-        ({Inception\_v3},135)
-        ({MobileNet\_v1},45)
-        ({ResNet\_v2},24)};
+        ({Inception\_v3},95.7)
+        ({MobileNet\_v1},16.9)
+        ({MobileNet\_v2},14.0)};
     \addplot [fill=Activation!90,draw=none] coordinates {
-        ({Inception\_v3},33.75)
-        ({MobileNet\_v1},11.25)
-        ({ResNet\_v2},6)};
+        ({Inception\_v3},23.9)
+        ({MobileNet\_v1},4.3)
+        ({MobileNet\_v2},3.6)};
 
 \legend{FP32,INT8}
 \coordinate (legend) at (axis description cs:0.85,0.9);
@@ -5498,7 +5521,7 @@ Vision networks show the same split between bytes and time. Across three of them
  font=\fontsize{8pt}{8}\selectfont\sffamily]{Precision};
  \end{scope}
  \node[draw=none,inner sep=0pt,fit=(RR)(RR2)](BB){};
- \node[above=-1pt of BB]{Impact of Quantization on Inference Time and Model Size};
+ \node[above=-1pt of BB]{Measured Impact of Quantization on Mobile Latency and Model Size};
   \node[below=-2pt of BB]{Model};
   \end{tikzpicture}
 ```
@@ -5588,11 +5611,11 @@ The read-compute-write cycle of unfused kernels creates memory bandwidth bottlen
 
 #### Convolution-BatchNorm-ReLU fusion {.unnumbered}
 
-The common Conv-BN-ReLU pattern can replace three launches and intermediate round-trips with one fused path when the compiler can legally fold batch normalization and combine the activation (@lst-conv-bn-relu-fusion). Folding itself is a standard inference step for any network with batch normalization. Compression makes its timing matter, because folding writes batch normalization's per-channel constants into the convolution weights, so it must happen after pruning has fixed which channels survive, and the quantizer must then calibrate the folded weights rather than the unfolded ones.
+The common Conv-BN-ReLU pattern eliminates three separate launches and two intermediate global-memory round-trips through two distinct mechanisms depending on whether normalization statistics are frozen or dynamic. At inference export, batch normalization statistics freeze into fixed per-channel constants: the running mean $\BatchNormRunningMean$ and the stabilized running standard deviation $\BatchNormRunningStandardDeviation$ (the square root of the sum of running variance and the numerical stabilizer). Once frozen, batch normalization is a fixed per-channel affine rescaling that subtracts $\BatchNormRunningMean$, divides by $\BatchNormRunningStandardDeviation$, multiplies by the learned scale $\NormalizationScaleVector$, and adds the learned shift $\NormalizationShiftVector$ directly to the linear output of the convolution. Because composing two linear transformations yields a single linear transformation, distributing $\frac{\NormalizationScaleVector}{\BatchNormRunningStandardDeviation}$ across the convolution output folds batch normalization offline into the preceding convolution weights ($\FusedConvolutionWeight= \frac{\NormalizationScaleVector}{\BatchNormRunningStandardDeviation} \WeightMatrix$) and adjusts the convolution bias to $\FusedConvolutionBias = \frac{\NormalizationScaleVector}{\BatchNormRunningStandardDeviation}(\BiasVector- \BatchNormRunningMean) + \NormalizationShiftVector$, leaving only a fused `Conv + ReLU` kernel at runtime. Compression makes the order of offline folding critical: folding writes per-channel scales into the surviving filters, so a pruned network must be folded after its channel structure stops changing and before the quantizer calibrates weight ranges.
 
-During training, batch normalization recomputes channel means and variances across every mini-batch, but at inference time those statistics freeze into fixed per-channel constants: the running mean $\BatchNormRunningMean$ and the stabilized running standard deviation $\BatchNormRunningStandardDeviation$ (the square root of the sum of running variance and the numerical stabilizer). Once frozen, batch normalization is a fixed per-channel affine rescaling that subtracts $\BatchNormRunningMean$, divides by $\BatchNormRunningStandardDeviation$, multiplies by the learned scale $\NormalizationScaleVector$, and adds the learned shift $\NormalizationShiftVector$ directly to the linear output of the convolution. Because composing two linear transformations yields a single linear transformation, distributing $\frac{\NormalizationScaleVector}{\BatchNormRunningStandardDeviation}$ across the convolution output folds batch normalization into the preceding convolution weights ($\FusedConvolutionWeight= \frac{\NormalizationScaleVector}{\BatchNormRunningStandardDeviation} \WeightMatrix$) and adjusts the convolution bias to $\FusedConvolutionBias = \frac{\NormalizationScaleVector}{\BatchNormRunningStandardDeviation}(\BiasVector- \BatchNormRunningMean) + \NormalizationShiftVector$. Batch normalization's per-channel scale thus multiplies into the surviving filters, and its shift becomes the convolution's bias, so a pruned network is folded once its structure stops changing, before its ranges are calibrated.
+When normalization cannot be folded offline into static weights, such as during training when batch statistics are live or in architectures with dynamic per-instance or per-token normalization, a runtime-fused kernel still avoids intermediate HBM writes by keeping the convolution accumulator in registers across normalization and activation (@lst-conv-bn-relu-fusion).
 
-::: {#lst-conv-bn-relu-fusion lst-cap="**Conv-BN-ReLU Fusion**: Combining three operations into a single kernel reduces the idealized intermediate-tensor stream from 6 transfers to 2; weights, auxiliary inputs, and spills are outside this count."}
+::: {#lst-conv-bn-relu-fusion lst-cap="**Runtime Conv-BN-ReLU Kernel Fusion**: Combining three runtime operations into a single kernel reduces the idealized intermediate-tensor stream from 6 transfers to 2 when normalization runs dynamically; offline inference export goes one step further by folding frozen BN constants into `weight` and `bias` so only `relu(conv2d(input, weight_folded) + bias_folded)` executes."}
 
 ```{.python}
 # Pseudocode: runtime APIs and fusion legality are
@@ -5725,7 +5748,7 @@ class FusionCalc:
     fusion_speedup_mult_str = fmt_multiple(fusion_speedup, precision=2, commas=False)
 ```
 
-A ResNet-50 layer with `{python} FusionCalc.conv_channels_str` channels and a $28{\times}28$ spatial size puts numbers on this. Its feature map occupies `{python} FusionCalc.feat_map_kb_str`, so the four intermediate transfers that fusion removes amount to `{python} ConvFusionCalc.conv_bn_relu_mem_math` per layer. The full accounting also counts weights and parameters. Without fusion, each operation performs its own memory round-trip: Conv reads input (`{python} FusionCalc.feat_map_kb_str`) plus weights (`{python} FusionCalc.weights_mb_str`) and writes output (`{python} FusionCalc.feat_map_kb_str`), totaling `{python} FusionCalc.unfused_conv_mb_str`. BN then reads that output, adds its parameters (`{python} FusionCalc.bn_params_kb_str`), and writes again, for `{python} FusionCalc.unfused_bn_mb_str`. ReLU repeats the pattern for another `{python} FusionCalc.unfused_relu_mb_str`. The total unfused memory traffic is `{python} FusionCalc.total_unfused_mb_str`. With fusion, the entire sequence reads input and weights once and writes the final output once, requiring only `{python} FusionCalc.total_fused_mb_str`, a `{python} FusionCalc.bandwidth_reduction_pct_str` bandwidth reduction.
+A ResNet-50 layer with `{python} FusionCalc.conv_channels_str` channels and a $28{\times}28$ spatial size puts numbers on this runtime three-operator fusion (before any offline weight folding). Its feature map occupies `{python} FusionCalc.feat_map_kb_str`, so the four intermediate transfers that fusion removes amount to `{python} ConvFusionCalc.conv_bn_relu_mem_math` per layer. The full accounting also counts weights and parameters. Without fusion, each operation performs its own memory round-trip: Conv reads input (`{python} FusionCalc.feat_map_kb_str`) plus weights (`{python} FusionCalc.weights_mb_str`) and writes output (`{python} FusionCalc.feat_map_kb_str`), totaling `{python} FusionCalc.unfused_conv_mb_str`. BN then reads that output, adds its parameters (`{python} FusionCalc.bn_params_kb_str`), and writes again, for `{python} FusionCalc.unfused_bn_mb_str`. ReLU repeats the pattern for another `{python} FusionCalc.unfused_relu_mb_str`. The total unfused memory traffic is `{python} FusionCalc.total_unfused_mb_str`. With runtime fusion, the entire sequence reads input and weights once and writes the final output once, requiring only `{python} FusionCalc.total_fused_mb_str`, a `{python} FusionCalc.bandwidth_reduction_pct_str` bandwidth reduction (and offline inference folding drops the `{python} FusionCalc.bn_params_kb_str` normalization-parameter read as well).
 
 ```{python}
 #| echo: false
@@ -8031,7 +8054,7 @@ class SparseFormatBreakEven:
 
 ::: {.fallacy-pitfall}
 
-**Fallacy**: *Sparse matrix representations always save memory and accelerate inference.*
+**Pitfall**: *Converting pruned tensors to sparse formats before crossing the metadata and kernel break-even threshold.*
 
 Sparse formats introduce coordinate metadata that erodes storage savings at moderate densities, as the 16-bit case of @sec-model-compression-sparse-break-even-7e4a showed; 32-bit indices make the penalty larger. To represent $\NonzeroCount$ nonzero values across $\SparseMatrixRowCount$ rows, a coordinate list (COO) stores explicit coordinate tuples `(row_idx, col_idx, value)`. For 32-bit floats and 32-bit integer indices, each nonzero element consumes `{python} SparseFormatBreakEven.coo_bytes_str` (`{python} SparseFormatBreakEven.coo_ratio_mult_str` a dense `{python} SparseFormatBreakEven.value_bytes_str`-byte FP32 entry), requiring greater than `{python} SparseFormatBreakEven.coo_break_even_pct_str` sparsity just to break even on memory footprint. Compressed sparse row (CSR) eliminates redundant row coordinates by storing three arrays: `values` ($\NonzeroCount \times 4\text{ B}$), `col_indices` ($\NonzeroCount \times 4\text{ B}$), and `row_pointers` ($(\SparseMatrixRowCount+1) \times 4\text{ B}$). Each nonzero entry costs `{python} SparseFormatBreakEven.csr_bytes_str` (`{python} SparseFormatBreakEven.csr_ratio_mult_str` a dense FP32 entry), requiring over `{python} SparseFormatBreakEven.csr_break_even_pct_str` sparsity before the sparse structure consumes less memory than the original dense tensor; below `{python} SparseFormatBreakEven.csr_break_even_pct_str` sparsity, CSR metadata expands the model's memory footprint.
 

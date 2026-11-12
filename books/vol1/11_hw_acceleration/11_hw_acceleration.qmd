@@ -1143,16 +1143,16 @@ RISC-V\index{RISC-V!vector extensions},[^fn-riscv-ai-customization] an open inst
 
 ::: {#lst-riscv_vector_mac lst-cap="**Vectorized Dot-Product Loop**: This illustrative loop processes several element pairs per iteration and reduces them into one scalar dot product."}
 
-```{.c}
+```{.asm}
 fmv.w.x fa0, zero          # Scalar dot-product accumulator
 fmv.w.x ft1, zero          # Zero seed for vector reduction
 loop_feature:
-    vsetvli t0, feature_cnt, e32, m1, ta, ma
+    vsetvli t0, feature_cnt, e32, m1, ta, ma  # Set active FP32 lane count
     vle32.v v1, (in_ptr)
     vle32.v v2, (wt_ptr)
     vfmul.vv v3, v1, v2
     vfmv.v.f v0, ft1
-    vfredusum.vs v4, v3, v0
+    vfredusum.vs v4, v3, v0                   # Sum active lanes into v4[0]
     vfmv.f.s ft0, v4
     fadd.s fa0, fa0, ft0
     slli t1, t0, 2         # Four bytes per FP32 element
@@ -5543,12 +5543,12 @@ The table turns the chapter's diagnosis into a selection rule. Its home-regime c
 
 Across data-center, server-CPU, and mobile targets, architects assemble SIMD lanes, Tensor Cores, and systolic arrays into markedly different full-chip organizations depending on which resource runs out first. Training-optimized accelerators such as the NVIDIA A100 pack 108 streaming multiprocessors with wide SIMD units and FP16 Tensor Cores because training throughput scales with aggregate multiply-accumulate capacity across general kernels [@NVIDIA2020]. Google's TPU v4, by contrast, concentrates each chip into two cores built around large $128{\times}128$ BF16 systolic arrays, trading per-thread flexibility for area and energy efficiency on dense matrix multiplications [@jouppi2023]. Inference and edge targets shift the balance again. Intel's Sapphire Rapids dedicates Advanced Matrix Extensions (AMX) tile engines to INT8 and BF16 because server inference models tolerate reduced precision [@intel2021amx], while mobile neural engines shrink those matrix datapaths into low-power SoC blocks that prioritize energy per operation over peak throughput. @Tbl-execution-units compares these architectural configurations.
 
-| Processor                                       | **Vector execution**\index{Vector execution} |   **Matrix engine**\index{Matrix engine}   |  Processing Elements  | **Primary workloads** |
-|:------------------------------------------------|:--------------------------------------------:|:------------------------------------------:|:---------------------:|:----------------------|
-| **NVIDIA A100**\index{NVIDIA A100}              |              CUDA FP/INT lanes               |       Tensor Core instruction tiles        |        108 SMs        | Training, HPC         |
-| **Google TPU v4**\index{Google TPUv4}           |                 Vector unit                  |   $128{\times}128$ BF16 systolic arrays    |      2 cores/chip     | Training              |
-| **Intel Sapphire**\index{Intel!Sapphire Rapids} |               512-bit AVX-512                | AMX tiles (up to 16 rows by 64 bytes each) |     Up to 60 cores    | Inference             |
-| Mobile NPU                                      |             CPU/GPU/DSP vectors              |            Small matrix engines            | Integrated NPU blocks | Mobile inference      |
+| Processor                                              | **Vector execution**\index{Vector execution} |   **Matrix engine**\index{Matrix engine}   |  Processing Elements  | **Primary workloads** |
+|:-------------------------------------------------------|:--------------------------------------------:|:------------------------------------------:|:---------------------:|:----------------------|
+| **NVIDIA A100**\index{NVIDIA A100}                     |              CUDA FP/INT lanes               |       Tensor Core instruction tiles        |        108 SMs        | Training, HPC         |
+| **Google TPU v4**\index{Google TPUv4}                  |                 Vector unit                  |   $128{\times}128$ BF16 systolic arrays    |      2 cores/chip     | Training              |
+| **Intel Sapphire Rapids**\index{Intel!Sapphire Rapids} |               512-bit AVX-512                | AMX tiles (up to 16 rows by 64 bytes each) |     Up to 60 cores    | Inference             |
+| Mobile NPU                                             |             CPU/GPU/DSP vectors              |            Small matrix engines            | Integrated NPU blocks | Mobile inference      |
 
 : **AI Processor Configurations**: Modern AI processors prioritize different execution unit characteristics for specific workloads: NVIDIA A100 uses wide SIMD and Tensor Cores for training, Google TPU v4 emphasizes high-throughput BF16 matrix multiplication, Intel Sapphire Rapids focuses on INT8-optimized inference, and mobile NPUs prioritize low-power execution. These variations in SIMD width, Tensor Core size, and processing element count reflect the growing diversity in AI hardware architectures. {#tbl-execution-units tbl-colwidths="[15,23,20,23,19]"}
 
@@ -5568,7 +5568,7 @@ No worksheet reduces accelerator selection to a single headline specification. A
 
 ### Energy per request {#sec-hardware-acceleration-hardware-sustainability-e902}
 
-At fleet scale, energy per useful inference becomes an important hardware-selection criterion\index{Hardware sustainability!carbon footprint}. Operational emissions depend on workload throughput, measured system power, utilization, cooling overhead, and the electricity mix; embodied emissions add another lifecycle cost. Peak performance per watt\index{Performance per watt!efficiency metric}\index{Energy efficiency!TFLOPS per watt} is therefore a screening metric, not a substitute for end-to-end energy per request. The following scenario shows how useful throughput and a common power boundary determine the fleet needed for the same inference service.
+At fleet scale, energy per useful inference becomes an important hardware-selection criterion\index{Hardware sustainability!carbon footprint}. Operational emissions depend on workload throughput, measured system power, utilization, cooling overhead, and the electricity mix; embodied emissions add another lifecycle cost. Peak performance per watt\index{Performance per watt!efficiency metric}\index{Energy efficiency!TFLOP/s per watt} is therefore a screening metric, not a substitute for end-to-end energy per request. The following scenario shows how useful throughput and a common power boundary determine the fleet needed for the same inference service.
 
 ```{python}
 #| echo: false
@@ -5900,7 +5900,7 @@ class FpPeakVsSustainedRecap:
 
 **Pitfall**: *Planning accelerator capacity from peak FLOP/s specifications.*
 
-Peak FLOP/s\index{Peak FLOPS!misleading metric} measures arithmetic unit capacity under ideal instruction mixes and continuous operand availability, not delivered application throughput. Realized performance depends on kernel arithmetic intensity, matrix dimensions, memory coalescing, and runtime launch overhead. The roofline model (@sec-hardware-acceleration-roofline-model-42ff) bounds the gap between peak compute and bandwidth-limited execution. On an A100 GPU with a `{python} FpPeakVsSustainedRecap.a100_fp16_tflop_per_s_str` peak, an illustrative dense-transformer scenario supplies a sustained range of `{python} FpPeakVsSustainedRecap.transformer_low_tflop_per_s_str`--`{python} FpPeakVsSustainedRecap.transformer_high_tflop_per_s_str` (`{python} FpPeakVsSustainedRecap.transformer_util_low_str`--`{python} FpPeakVsSustainedRecap.transformer_util_high_str` model FLOPs utilization). This supplied range is illustrative, not a measurement or a prediction for every model. Sizing cluster capacity from peak FLOP/s creates severe under-provisioning; capacity planning must rely on measured sustained throughput or roofline-bounded kernel projections.
+Peak FLOP/s\index{Peak FLOP/s!misleading metric} measures arithmetic unit capacity under ideal instruction mixes and continuous operand availability, not delivered application throughput. Realized performance depends on kernel arithmetic intensity, matrix dimensions, memory coalescing, and runtime launch overhead. The roofline model (@sec-hardware-acceleration-roofline-model-42ff) bounds the gap between peak compute and bandwidth-limited execution. On an A100 GPU with a `{python} FpPeakVsSustainedRecap.a100_fp16_tflop_per_s_str` peak, an illustrative dense-transformer scenario supplies a sustained range of `{python} FpPeakVsSustainedRecap.transformer_low_tflop_per_s_str`--`{python} FpPeakVsSustainedRecap.transformer_high_tflop_per_s_str` (`{python} FpPeakVsSustainedRecap.transformer_util_low_str`--`{python} FpPeakVsSustainedRecap.transformer_util_high_str` model FLOPs utilization). This supplied range is illustrative, not a measurement or a prediction for every model. Sizing cluster capacity from peak FLOP/s creates severe under-provisioning; capacity planning must rely on measured sustained throughput or roofline-bounded kernel projections.
 
 :::
 

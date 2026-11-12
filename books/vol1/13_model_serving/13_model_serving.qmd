@@ -3863,22 +3863,19 @@ Traffic-adaptive batching\index{Traffic-adaptive batching!window tuning} adjusts
 
 : **Traffic Patterns and Batching Strategies**: The four MLPerf inference scenarios approximate distinct deployment contexts. Server traffic (cloud APIs) uses dynamic batching with a timeout; MultiStream evaluates grouped queries under its version-specific latency rules, while a production sensor deadline requires separate validation; SingleStream processes requests individually; Offline uses large batches subject to memory capacity to maximize throughput. {#tbl-traffic-patterns-summary tbl-colwidths="[13,29,28,30]"}
 
-The examples developed here (cloud API traffic under the Server scenario, grouped sensor inputs motivated by MultiStream\index{MLPerf Inference!MultiStream scenario}, and throughput-dominated pipelines under Offline inference\index{MLPerf Inference!offline scenario}) all decide how requests share the accelerator. Together with the latency budget and the queueing model, they decide how one replica of the ResNet-50 service schedules its requests. None of them decides how efficiently the accelerator executes each batch once it forms. The same batch of the same model can run several times faster or slower depending on the engine that compiles and schedules its kernels and on the number format it computes in, and those choices are the next lever.
-
 ::: {#chk-model-serving-batching-traffic-patterns .callout-checkpoint title="Batching and traffic patterns"}
 
-Batching is the primary lever for serving economics, but the optimal strategy depends on context.
+Batching is the primary lever for serving economics, but the optimal strategy depends on traffic arrivals and latency deadlines.
 
-- [ ] **Throughput-latency trade-off**: Explain why batch size 32 achieves `{python} BatchThroughputCalc.throughput_ratio_mult_str` higher throughput than batch size 1, yet a production system with a 20 ms end-to-end SLO, which must also cover preprocessing, transfer, and worker backlog, might still choose batch size 8.
-- [ ] **Wait vs. compute**: Given an end-to-end latency budget, can you separate batch formation, waiting for an available worker, and batch service time $\BatchServiceTime(\BatchSize)$? Which wait does a batching timeout control?
-- [ ] **Dynamic vs. static batching**: Describe why static batching fails under variable traffic arrival rates, and how dynamic batching with an adaptive time window resolves queue starvation.
-- [ ] **Traffic pattern matching**: Map deployment scenarios (cloud API, synchronized multi-camera stream, mobile app) to corresponding MLPerf scenarios, identifying the batching strategy suited to each operational constraint.
-- [ ] **Adaptive windows**: For a desired expected batch count, explain why higher traffic permits a shorter formation window. How would you check whether the realized batches can keep up with arrivals, and what must a load test verify before accepting the configuration?
-- [ ] **When not to batch**: Name a latency target, runtime limitation, or memory condition under which a batching window of zero is the right configuration.
-- [ ] **Bytes and joules per image**: Using @tbl-model-serving-resnet-batch-bytes, explain why energy per image falls steeply from batch 1 to batch 8 but only slightly from batch 8 to batch 32.
-- [ ] **One request, start to finish**: For one ResNet-50 request arriving at 500 QPS, name the stage that sets its latency floor, the quantity that sizes the queue's headroom, and the two things the scheduler's batch changes, and explain how each depends on the one before it.
+- [ ] **Throughput-latency trade-off**: Explain why batch size 32 achieves `{python} BatchThroughputCalc.throughput_ratio_mult_str` higher throughput than batch size 1, yet a service with a 20 ms end-to-end SLO covering preprocessing, transfer, and backlog may still cap batch size at 8 (or disable batching altogether when deadlines or memory leave zero formation headroom).
+- [ ] **Wait decomposition and dynamic windows**: Separate batch-formation wait, worker-queue wait, and batch service time $\BatchServiceTime(\BatchSize)$, and explain how dynamic batching with an adaptive timeout avoids static-batch starvation while shortening formation windows at higher arrival rates.
+- [ ] **Traffic pattern matching**: Map cloud APIs, synchronized multi-camera streams, mobile apps, and offline pipelines to their MLPerf scenarios and corresponding batching policies.
+- [ ] **Bytes and joules per image**: Using @tbl-model-serving-resnet-batch-bytes, explain why energy per image drops steeply from batch 1 to batch 8 as weight reads amortize, then flattens from batch 8 to batch 32.
+- [ ] **End-to-end request budget**: For one ResNet-50 request arriving at 500 QPS, trace the stage that sets its latency floor, the utilization margin that bounds queue growth, and the throughput-versus-latency shift introduced by the scheduler's batch size.
 
 :::
+
+The examples developed here (cloud API traffic under the Server scenario, grouped sensor inputs motivated by MultiStream\index{MLPerf Inference!MultiStream scenario}, and throughput-dominated pipelines under Offline inference\index{MLPerf Inference!offline scenario}) all decide how requests share the accelerator. Together with the latency budget and the queueing model, they decide how one replica of the ResNet-50 service schedules its requests. None of them decides how efficiently the accelerator executes each batch once it forms. The same batch of the same model can run several times faster or slower depending on the engine that compiles and schedules its kernels and on the number format it computes in, and those choices are the next lever.
 
 ## Inference Runtime Selection {#sec-model-serving-inference-runtime-selection-5eef}
 
@@ -5128,11 +5125,11 @@ class KvBudget:
 
 Once contexts grow, the cache rather than the weights sets how many conversations one accelerator can hold, and Llama 3 8B makes the budget concrete. Each token stores a key vector and a value vector in every layer for every key-value head. Grouped-query attention (GQA) [@dubey2024llama] lets the model's `{python} KvBudget.heads_str` query heads share a smaller set of key-value heads, which cuts the cache by `{python} KvBudget.mha_ratio_mult_str` relative to full multi-head attention. Storing 16-bit Key and Value tensors across $\LayerCount=32$ layers with $\KvHeadCount=8$ such key-value heads of dimension $\AttentionHeadDimension=128$ requires $2 \times 32 \times 8 \times 128 \times 2\text{ bytes} = 131{,}072\text{ bytes} \approx 131\text{ KB}$ per token per sequence. An `{python} KvBudget.context_tokens_str`-token conversation therefore holds `{python} KvBudget.kv_per_seq_gb_str`.
 
-With `{python} KvBudget.weights8_gb_str` of FP16 weights resident on an H100 whose `{python} KvBudget.capacity_gib_str` datasheet capacity is `{python} KvBudget.capacity_gb_str` in the decimal units used for tensor footprints, about `{python} KvBudget.free8_gb_str` remains for caches before runtime workspace, room for about `{python} KvBudget.n_seq_str` such conversations at once. The weights are a fixed cost; every additional conversation, and every additional thousand tokens of context, draws on the same remainder.
+With `{python} KvBudget.weights8_gb_str` of FP16 weights resident on an H100 whose `{python} KvBudget.capacity_gib_str` binary datasheet capacity ($80 \times 2^{30}\text{ B}$) equals `{python} KvBudget.capacity_gb_str` in the decimal gigabytes ($10^9\text{ B}$) used for tensor footprints, about `{python} KvBudget.free8_gb_str` remains for caches before runtime workspace, room for about `{python} KvBudget.n_seq_str` such conversations at once. The weights are a fixed cost; every additional conversation, and every additional thousand tokens of context, draws on the same remainder.
 
 Larger models make the cache the limiting constraint sooner. For a 70-billion-parameter-class model with grouped-query attention, 4-bit weights consume `{python} KvBudget.weights70_gb_str` of the same H100, leaving `{python} KvBudget.free70_gb_str` for FP16 cache before runtime workspace. A batch of `{python} KvBudget.batch_large_str` conversations exhausts that budget at roughly `{python} KvBudget.crossing70_str` tokens of context, so serving engines trade concurrent batch size against context length to avoid out-of-memory failures (@fig-kv-cache-growth).
 
-::: {#fig-kv-cache-growth data-explore="original-v1-kv-cache-growth" data-explore-key="vol1:fig-kv-cache-growth" fig-env="figure" fig-pos="htb" fig-cap="**The KV-Cache Explosion**: FP16 KV-cache usage vs. context length for a 70-billion-parameter-class model with GQA. On the modeled H100's 80 GB of HBM (85.9 GB decimal), 35.3 GB of INT4 weights leave 50.6 GB for KV cache before runtime overhead. Batch size 32 reaches that cache budget at roughly 4.8k tokens, forcing a trade-off between batch size and context length." fig-alt="Line chart of FP16 KV-cache size against context length for batch sizes 1, 4, 16, and 32. All four lines rise linearly, with steeper slopes for larger batches. A red dashed horizontal line marks the cache budget remaining after the INT4 weights on the modeled H100; batch size 32 crosses it near 4.8k tokens. The region above the budget line is shaded red and labeled Out of Memory (OOM) Zone."}
+::: {#fig-kv-cache-growth data-explore="original-v1-kv-cache-growth" data-explore-key="vol1:fig-kv-cache-growth" fig-env="figure" fig-pos="htb" fig-cap="**The KV-Cache Explosion**: FP16 KV-cache usage vs. context length for a 70-billion-parameter-class model with GQA. On the modeled H100's 80 GB binary datasheet HBM capacity ($80 \times 2^{30}\text{ B}$, or 85.9 GB decimal), 35.3 GB of INT4 weights leave 50.6 GB for KV cache before runtime overhead. Batch size 32 reaches that cache budget at roughly 4.8k tokens, forcing a trade-off between batch size and context length." fig-alt="Line chart of FP16 KV-cache size against context length for batch sizes 1, 4, 16, and 32. All four lines rise linearly, with steeper slopes for larger batches. A red dashed horizontal line marks the cache budget remaining after the INT4 weights on the modeled H100; batch size 32 crosses it near 4.8k tokens. The region above the budget line is shaded red and labeled Out of Memory (OOM) Zone."}
 
 ```{python}
 #| echo: false
@@ -5412,11 +5409,15 @@ The primary way to reduce J/token is to increase hardware utilization and elimin
 
 :::
 
+The chat-energy calculation shows that how many sequences share each weight stream and how much accelerator memory each sequence holds also sets the joules spent per useful token: each decode step streams the weights once for the whole active batch, so a well-filled batch divides that energy across concurrent sequences. Unlike fixed-output inference, LLM energy also grows directly with response length, a dependency that becomes even steeper when models generate internal reasoning traces before answering.
+
 ::: {#psp-model-serving-looking-ahead-rise-inference-time-compute-system-2 .callout-perspective title="Looking ahead: Spending more compute per query"}
 
 Every lever so far takes the number of tokens a request generates as given, and fixed-output serving minimizes latency ($\EndToEndRequestLatency \to 0$) for a fixed amount of work per request. Reasoning models and other inference-time-compute systems\index{Reasoning model!inference-time compute}\index{Inference-time compute!reasoning models} make that token count a choice. They deliberately spend more computation per query to improve answer quality, generating intermediate reasoning or search tokens before the visible answer. The optimization target then expands to include answer quality, and every extra reasoning token pays the decode costs this section derived. It adds one more step of decode work at the batch's cadence, holds one more KV-cache entry until the response ends, and takes its share of the joules per token. Answer quality now trades directly against TPOT, cache capacity, and energy per query.
 
 :::
+
+Together, two-phase latency (TTFT and TPOT), iteration-level KV-cache management, and per-token energy accounting form the single-node foundation of autoregressive serving.
 
 ::: {#chk-model-serving-llm-serving-fundamentals .callout-checkpoint title="LLM serving fundamentals"}
 
@@ -5430,7 +5431,7 @@ LLM serving introduces constraints absent from traditional model serving.
 
 :::
 
-The chat-energy calculation showed that how many sequences share each weight stream and how much accelerator memory each sequence holds also sets the joules spent per useful token, because each decode step streams the weights once for the whole active batch, so a well-filled batch divides that energy across sequences. Unlike fixed-output inference, LLM energy also grows with response length. These per-token bounds, however, describe one accelerator. Deciding how many accelerators a service needs, and what each generated token costs, requires carrying them, together with the fixed-output results of the earlier sections, into capacity planning and unit economics.
+These per-token bounds describe one accelerator or single-node tensor-parallel group. Deciding how many accelerators a service needs, and what each generated token costs at fleet scale, requires carrying them, together with the fixed-output results of the earlier sections, into capacity planning and unit economics.
 
 ## Economics and Planning {#sec-model-serving-economics-capacity-planning-3e7e}
 
@@ -5841,7 +5842,7 @@ class LlmCaseStudyH100BwRecap:
 Four fixed parameters anchor the latency, memory, and cost calculations for this single-GPU deployment:
 
 *   **Model**: 8-billion-parameter Llama 3 (quantized to 4-bit using activation-aware weight quantization (AWQ); see @sec-model-compression-quantization-precision-cd46 for quantization techniques) [@dubey2024llama; @lin2023awq].
-*   **Hardware**: 1$\times$ NVIDIA H100 SXM5 GPU (`{python} LlmCaseStudyHwSpecs.h100_mem_gb_str` HBM3 device capacity, equivalent to `{python} LlmCaseStudyHwSpecs.h100_mem_decimal_gb_str` on the decimal basis used for tensor footprints, `{python} LlmCaseStudyH100BwRecap.h100_bw_tb_per_s_str` bandwidth) [@choquette2023].
+*   **Hardware**: 1$\times$ NVIDIA H100 SXM5 GPU (`{python} LlmCaseStudyHwSpecs.h100_mem_gb_str` binary datasheet HBM3 capacity, $80 \times 2^{30}\text{ B}$, equivalent to `{python} LlmCaseStudyHwSpecs.h100_mem_decimal_gb_str` on the decimal $10^9$-byte basis used for tensor footprints, `{python} LlmCaseStudyH100BwRecap.h100_bw_tb_per_s_str` bandwidth) [@choquette2023].
 *   **Request characteristics**: `{python} LlmCaseStudyHwSpecs.prompt_tokens_str`-token input prompt (Prefill), `{python} LlmCaseStudyHwSpecs.decode_tokens_str`-token generated response (Decode).
 *   **Target SLOs**: TTFT $<$ `{python} LlmCaseStudyHwSpecs.ttft_target_ms_str`, TPOT $<$ `{python} LlmCaseStudyHwSpecs.tpot_target_ms_str`.
 
