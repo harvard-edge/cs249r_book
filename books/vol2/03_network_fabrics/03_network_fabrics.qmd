@@ -84,8 +84,8 @@ class NetworkRunningExampleCluster:
     grad_bytes = _scn.workload.size_in_bytes(BYTES_FP16)
 
     # ┌── 3. GUARD ────────────────────────────────────────────────────────────
-    # The static TikZ/SVG figures in the transport section label 350 GB / 700 GB.
-    check(abs(grad_bytes.to(GB).magnitude - 350) < 1e-6, "Static figures assume a 350 GB FP16 gradient")
+    # Guard the 175B FP16 gradient volume (350 GB) used in the running example.
+    check(abs(grad_bytes.to(GB).magnitude - 350) < 1e-6, "Running example assumes a 350 GB FP16 gradient")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     params_str = fmt_params(params)
@@ -137,6 +137,23 @@ In a single machine, the memory bus moves data between the processor and memory.
 
 ```{python}
 #| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ HISTORICAL NETWORK BANDWIDTH SCALING (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-network-bandwidth-scaling.
+# │
+# │ Goal: Contrast per-direction bandwidth scaling across intra-node NVLink,
+# │       inter-node InfiniBand and Ethernet, and the PCIe x16 host bus.
+# │ Show: Log-scale trajectories from 2010 to 2025 and the shaded intra-node vs.
+# │       external-port gap where both NVLink and InfiniBand have plotted years.
+# │ How: Load interconnect_generations.csv; take fastest generation per family
+# │      and reported product year; viz.setup_plot().
+# │ Provenance:
+# │   - Data (measured): vol2/03_network_fabrics/data/interconnect_generations.csv
+# │     (published standard line rates and product years from IEEE 802.3, IBTA,
+# │     PCI-SIG, and NVIDIA specifications).
+# │
+# └─────────────────────────────────────────────────────────────────────────────
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
@@ -144,8 +161,6 @@ from mlsysim import viz
 
 # Documented TIME slate (figure-visual-language §2.1); shared with @fig-alpha-beta-crossover.
 SLATE_TIME = "#5E6B73"  # time/latency slate, same value as the margin-device TIME constant
-
-from mlsysim import Literature
 
 # Per-direction rates by reported product year: per port for Ethernet
 # and InfiniBand, per x16 link after encoding for PCIe, and a GPU's summed
@@ -168,15 +183,12 @@ data = _bandwidth_trend(viz.load_series("vol2/03_network_fabrics/data/interconne
 fig, ax, COLORS, plt = viz.setup_plot(figsize=(6.2, 4.2))
 _groups = list(dict.fromkeys(data["Technology"]))
 # Network links use the book's network hue (violet): NVLink solid, InfiniBand dashed with hollow markers;
-# Ethernet in neutral slate and the PCIe host bus in dotted gray. Each series is
-# labeled at its last point instead of in a legend.
+# Ethernet in neutral slate and the PCIe host bus in dotted gray. NVLink is
+# labeled directly at its endpoint while the three external links use a legend.
 _colors = {"NVLink": COLORS["VioletLine"], "InfiniBand": COLORS["VioletLine"], "Ethernet": SLATE_TIME, "PCIe (x16)": COLORS["secondary"]}
 _styles = {"InfiniBand": "--", "PCIe (x16)": ":"}
 _markers = {"PCIe (x16)": "s", "Ethernet": "D"}
 _hollow = {"InfiniBand"}
-# Series labels: NVLink and InfiniBand at their last point; Ethernet and PCIe
-# (which end near InfiniBand) beside their early segments, in open space.
-_label_at = {"Ethernet": (2013.2, 42, "center"), "PCIe (x16)": (2012.6, 228, "center")}
 for _i, _g in enumerate(_groups):
     _sub = data[data["Technology"] == _g]
     _c = _colors.get(_g, COLORS["primary"])
@@ -213,7 +225,7 @@ import numpy as np
 
 _nv = data[data["Technology"] == "NVLink"]
 _ib = data[data["Technology"] == "InfiniBand"]
-_yrs = np.linspace(_nv["Year"].min(), _ib["Year"].max(), 200)
+_yrs = np.linspace(max(_nv["Year"].min(), _ib["Year"].min()), min(_nv["Year"].max(), _ib["Year"].max()), 200)
 _nv_y = 10 ** np.interp(_yrs, _nv["Year"], np.log10(_nv["Bandwidth_Gbps"]))
 _ib_y = 10 ** np.interp(_yrs, _ib["Year"], np.log10(_ib["Bandwidth_Gbps"]))
 ax.fill_between(_yrs, _ib_y, _nv_y, color=COLORS["VioletL"], alpha=0.55, lw=0, zorder=0)
@@ -918,6 +930,11 @@ Across the full range of message sizes, each path traces a flat latency-dominate
 # │       RoCE; show latency-dominated (flat) vs bandwidth-dominated (linear).
 # │ Show: Log-log plot with crossover points (~75 KB for IB); alpha/beta model.
 # │ How: T = alpha + n/beta; plot for both fabrics; annotate crossover.
+# │ Provenance:
+# │   - Inputs (assumed): Scenarios.AlphaBetaNdrRoce (NDR alpha = 1.5 us,
+# │     400 Gb/s; RoCE 100G alpha = 5.0 us, 100 Gb/s).
+# │   - Curves (modeled): analytical Hockney point-to-point model via
+# │     mlsysim calc_point_to_point_time and calc_alpha_beta_crossover.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 # ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
@@ -1142,6 +1159,12 @@ Between the two extremes, the model places this fitted collective's knee near `{
 # │ Goal: Overlay measured all-reduce time on the two-parameter model.
 # │ Show: Measured points, model line, floor and bandwidth asymptotes.
 # │ How: MeasuredAllReduce (above); book_style.setup_plot().
+# │ Provenance:
+# │   - Data (measured): vol2/03_network_fabrics/data/nccl_allreduce_h100_node.csv
+# │     (@nvidia2026exemplarnccl; 32 out-of-place 8x H100 NVLink AllReduce rows)
+# │     loaded via MeasuredAllReduce.
+# │   - Curve (modeled): two-parameter alpha + n/beta curve anchored at the
+# │     measured small-message median floor and 16 GiB delivered bandwidth.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 import numpy as np
@@ -1830,6 +1853,23 @@ At the scale of the `{python} TopologyScenario.n_gpus_str`-GPU reference cluster
 ::: {#fig-network-topologies fig-env="figure" fig-pos="htb" fig-cap="**An Illustrative Bandwidth-Cost Scenario for ML Network Topologies**: $\BisectionBandwidth$ (TB/s, horizontal axis) against assumed cost per Gb/s (vertical axis) for four topology configurations on a `{python} TopologyScenario.n_gpus_str`-GPU cluster: fat-tree (`{python} TopologyScenario.fat_tree_tb_str`, `{python} TopologyScenario.fat_tree_cost_str`/Gb/s), dragonfly with tapered global links (`{python} TopologyScenario.dragonfly_tb_str`, `{python} TopologyScenario.dragonfly_cost_str`), rail-optimized with a 2:1 bridging spine (`{python} TopologyScenario.rail_tb_str`, `{python} TopologyScenario.rail_cost_str`), and a 3D torus (`{python} TopologyScenario.torus_tb_str`, `{python} TopologyScenario.torus_cost_str`). The bandwidths follow from the stated structures at one link rate; the costs are scenario inputs that illustrate the comparison method rather than universal properties of each topology family." fig-alt="Illustrative scatter plot of four topology configurations, bisection bandwidth in TB/s on the horizontal axis and assumed cost per Gb/s on the vertical axis, each point labeled with its name and both values. A dashed line labeled price rises with capacity rises from the 3D torus (lowest bandwidth, lowest cost) through rail-optimized to the fat-tree (highest bandwidth), all three drawn as light markers. The dragonfly is a larger solid marker with a bold label, the highest cost per Gb/s, and a dotted vertical riser labeled above the trend connects it down to the dashed line."}
 ```{python}
 #| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ NETWORK TOPOLOGY BANDWIDTH-COST SCENARIO (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-network-topologies.
+# │
+# │ Goal: Illustrate the trade-off between bisection bandwidth and assumed
+# │       interconnect cost per Gb/s across four 1,024-GPU topologies.
+# │ Show: Scatter of fat-tree, dragonfly, rail-optimized, and 3D torus points
+# │       with colinear reference trend and dragonfly off-trend riser.
+# │ How: Read precomputed TopologyScenario coordinates; book_style.setup_plot().
+# │ Provenance:
+# │   - Bandwidths (modeled): cut capacities on Systems.Clusters.Training_1K
+# │     (1,024 GPUs) at Systems.Fabrics.InfiniBand_NDR (50 GB/s per port) via
+# │     TopologyScenario.
+# │   - Costs (assumed): scenario $/Gb/s inputs in TopologyScenario.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
 import numpy as np
 from binder.tools.figures import style as book_style
 
@@ -2745,18 +2785,6 @@ class OpticalDividend:
     equivalent_h100_gpus = (cluster_savings / Hardware.Cloud.H100.tdp).to_base_units().magnitude
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(savings == 1.28 * kilowatt, f"Savings {savings.to(kW).magnitude:.2f}kW unexpected")
-
-    @classmethod
-    def plot(cls):
-        """Visualizes the Optical Dividend."""
-        from binder.tools.figures import style as book_style
-
-        return book_style.bar_compare(
-            labels=["Pluggable", "CPO"],
-            values=[cls.total_pluggable.to(kilowatt).magnitude, cls.total_cpo.to(kilowatt).magnitude],
-            title="Optical Power Dividend",
-            ylabel="Total Optics Power (kW)",
-        )
 
     # ┌── 4. OUTPUT ────────────────────────────────────────
     n_ports_str = fmt(n_ports, precision=0, commas=False)

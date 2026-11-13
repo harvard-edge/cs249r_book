@@ -51,7 +51,7 @@ Error codes (``data-provenance``, ``default=True``):
           # Notes: standalone pretraining runs (N=122, frontier n=23).
           model,date,training_power_draw_w
 
-  ``series_invalid_epistemic``
+  ``series_missing_epistemic`` / ``series_invalid_epistemic``
       Bad::
           # Epistemic: empirical
       Good::
@@ -249,8 +249,24 @@ def check_csv_file(
             )
         )
 
+    # 2026-11-12: require '# Epistemic:' on every Tier-2 figure CSV so no
+    # dataset can omit its measured/modeled/assumed/constructed boundary.
     epistemic = prov.get("epistemic", "").strip()
-    if epistemic:
+    if not epistemic:
+        violations.append(
+            ProvenanceViolation(
+                file=rel,
+                line=1,
+                code="series_missing_epistemic",
+                message=f"{csv_path.name} is missing a '# Epistemic: <measured|modeled|assumed|constructed>' provenance line.",
+                context=first_comment,
+                suggestion=(
+                    "Add '# Epistemic: <measured|modeled|assumed|constructed> (<accounting boundary>)' "
+                    "to the CSV header."
+                ),
+            )
+        )
+    else:
         head_token = re.split(r"[\s(;,:]+", epistemic, maxsplit=1)[0].lower()
         if head_token not in VALID_EPISTEMIC:
             violations.append(

@@ -515,6 +515,23 @@ Because accelerator generations turn over faster than the facility that houses t
 
 ```{python}
 #| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ GPU COMPUTE, BANDWIDTH, AND POWER SCALING TRENDS (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-gpu-scaling-trends.
+# │
+# │ Goal: Contrast growth multiples of dense FP16 compute, HBM bandwidth, and
+# │       TDP across four NVIDIA SXM generations.
+# │ Show: Log-scale series normalized to V100 (18x, 8.9x, 3.3x) and the shaded
+# │       ~2x arithmetic-intensity wedge.
+# │ How: Query Hardware.Cloud.{V100, A100, H100, B200}; normalize to V100.
+# │ Provenance:
+# │   - Specs (measured): mlsysim Hardware.Cloud.{V100, A100, H100, B200}
+# │     vendor datasheet dense FP16 peak throughput, HBM bandwidth, TDP, and
+# │     release_year.
+# │   - Ratios (modeled): normalized specification multiples relative to V100.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Hardware, viz
 from mlsysim.core.units import TFLOPs, GB, second, watt
 import pandas as pd
@@ -525,7 +542,7 @@ devices = [getattr(Hardware.Cloud, name) for name in names]
 data = pd.DataFrame(
     {
         "Accelerator": names,
-        "Year": [2017, 2020, 2022, 2024],
+        "Year": [h.release_year for h in devices],
         "Peak_TFLOPS": [h.compute.peak_flops.to(TFLOPs / second).magnitude for h in devices],
         "Memory_Bandwidth_GBps": [h.memory.bandwidth.to(GB / second).magnitude for h in devices],
         "TDP_W": [h.tdp.to(watt).magnitude for h in devices],
@@ -826,7 +843,7 @@ The four generations in @tbl-power-efficiency sit on a broader and slower trend.
 ↪ How these peak ratios screen a fleet refresh decision is developed in @sec-ml-operations-scale-power-efficiency.
 :::
 
-::: {#fig-flops-per-watt-trend fig-env="figure" fig-pos="htb" fig-cap="**Peak Arithmetic per Watt over Time**: Dense FP16 tensor throughput divided by TDP for ML accelerators released since 2017, on a logarithmic axis, colored by vendor. The dashed line is a least-squares fit across all devices; the four GPUs of @tbl-power-efficiency are circled and labeled. The ratio compares arithmetic ceilings, not measured energy per workload. Data from @epochai2026hardware." fig-alt="Log-scale scatter of TFLOP/s per watt from about 0.1 to 3 against release dates from 2017 to 2026, with NVIDIA points in green and other vendors in other colors. A dashed fitted line rises about 1.2 times per year. Circled, labeled points mark the V100 near 0.42, A100 near 0.78, H100 near 1.4, and B200 near 2.25 TFLOP/s per watt."}
+::: {#fig-flops-per-watt-trend fig-env="figure" fig-pos="htb" fig-cap="**Peak Arithmetic per Watt over Time**: Dense FP16/BF16 tensor throughput divided by vendor-published or Epoch-estimated TDP for ML accelerators released since 2017, on a logarithmic axis, colored by vendor. The dashed line is a least-squares fit across all devices; the four GPUs of @tbl-power-efficiency are circled and labeled. The ratio compares arithmetic ceilings, not measured energy per workload. Data from @epochai2026hardware." fig-alt="Log-scale scatter of TFLOP/s per watt from about 0.1 to 3 against release dates from 2017 to 2026, with NVIDIA points in green and other vendors in other colors. A dashed fitted line rises about 1.2 times per year. Circled, labeled points mark the V100 near 0.42, A100 near 0.78, H100 near 1.4, and B200 near 2.25 TFLOP/s per watt."}
 
 ```{python}
 #| echo: false
@@ -838,6 +855,11 @@ The four generations in @tbl-power-efficiency sit on a broader and slower trend.
 # │ Goal: Plot FP16 FLOP/s per watt by release date with a fitted trend.
 # │ Show: Vendor-colored points, fit line, labeled table GPUs.
 # │ How: FlopsPerWattTrend (above); book_style.setup_plot().
+# │ Provenance:
+# │   - Data (modeled): vol2/02_compute_infrastructure/data/accelerator_flops_per_watt.csv
+# │     (@epochai2026hardware; N = 64 devices with published or Epoch-estimated
+# │     dense FP16/BF16 peak throughput and TDP).
+# │   - Fit (modeled): log-linear OLS of flops_per_w on decimal release date.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from binder.tools.figures import style as book_style
@@ -1070,7 +1092,7 @@ That floor reflects a structural divergence. Transistor scaling has multiplied l
 
 Three levers ease that constraint. Sharding spreads the weights across more memory paths, so each path streams fewer bytes. Quantization shrinks the bytes themselves. Reuse lets each fetched byte feed more arithmetic, which batching and on-chip tiling make possible. The Roofline Model, recapped for one machine in @sec-appdx-dam-taxonomy-roofline, tests whether the resulting data supply can feed the arithmetic units. Its ridge point, peak arithmetic divided by memory bandwidth, is the number of operations a kernel must perform per byte fetched before arithmetic rather than memory becomes the limit. The ridge point recurs throughout the analysis below, and @sec-compute-roofline evaluates it for the H100. Where each architecture places its bytes sets how much bandwidth those levers can draw on (@fig-accelerator-memory-tier-map), because moving the active working set closer to arithmetic increases available bandwidth while reducing the capacity that can reside there.
 
-::: {#fig-accelerator-memory-tier-map fig-env="figure" fig-pos="htb" fig-cap="**Accelerator Memory Tiers**: Peak memory bandwidth and capacity separate local-SRAM designs (solid stars), HBM accelerators (half-tone filled circles), and edge and shared-LPDDR devices (hollow squares); all three are memory, so they share one hue and differ by marker. The dotted arrow marks the design trade-off: moving data closer to compute raises bandwidth but reduces capacity." fig-alt="Log-log scatter plot of memory capacity vs. peak memory bandwidth. All markers use one blue memory hue, and a shaded region encloses each cluster in three clearly stepped tints, darkest for the tier nearest compute: solid stars for local-SRAM designs at low capacity and very high bandwidth, with the outlying WSE-3 wafer in its own small region near 44 GB, half-tone filled circles for HBM accelerators at tens to hundreds of gigabytes and lower bandwidth, and hollow squares for edge and shared-LPDDR devices at the lowest bandwidth. A dotted arrow points from the HBM cluster toward the SRAM cluster, labeled closer to compute: more bandwidth, less capacity."}
+::: {#fig-accelerator-memory-tier-map fig-env="figure" fig-pos="htb" fig-cap="**Accelerator Memory Tiers**: Peak memory bandwidth and capacity separate local-SRAM designs (solid stars), HBM accelerators (half-tone filled circles), and edge and shared-LPDDR devices (hollow squares); all three are memory, so they share one hue and differ by marker. The dotted arrow marks the design trade-off: moving data closer to compute raises bandwidth but reduces capacity." fig-alt="Log-log scatter plot of memory capacity in gigabytes vs. peak memory bandwidth. All markers use one blue memory hue, and a shaded region encloses each cluster in three clearly stepped tints, darkest for the tier nearest compute: solid stars for local-SRAM designs at low capacity and very high bandwidth, with the outlying WSE-3 wafer in its own small region near 44 GB, half-tone filled circles for HBM accelerators at tens to hundreds of gigabytes and lower bandwidth, and hollow squares for edge and shared-LPDDR devices at the lowest bandwidth. A dotted arrow points from the HBM cluster toward the SRAM cluster, labeled closer to compute: more bandwidth, less capacity."}
 
 ```{python}
 #| echo: false
@@ -1082,13 +1104,18 @@ Three levers ease that constraint. Sharding spreads the weights across more memo
 # │ Goal: Show how accelerator memory tiers trade capacity against bandwidth.
 # │ Show: Log-log scatter; per-cluster tinted regions for local SRAM (WSE-3 apart), HBM, and edge/shared-LPDDR;
 # │       dotted arrow for the capacity/bandwidth placement trade-off.
-# │ How: Read accelerator capacity and bandwidth values from the hardware
-# │      registry; plot tier placement on log-log axes.
+# │ How: Read accelerator capacity (GiB) and bandwidth (GB/s) values from the
+# │      hardware registry; plot tier placement on log-log axes.
+# │ Provenance:
+# │   - Specs (measured): mlsysim Hardware.Cloud (15 cloud SRAM/HBM devices) and
+# │     Hardware.Edge (4 edge/shared-LPDDR modules, including the Coral Dev Board
+# │     SoM 1 GiB LPDDR4 paired with the Coral Edge TPU).
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from collections import namedtuple
 import math
 from binder.tools.figures import style as book_style
+from mlsysim.core.units import GiB
 
 # Plotting helper only, not a prose-substitution value; a namedtuple (rather
 # than a frozen dataclass) keeps this figure cell free of a focal prose-ref
@@ -1098,7 +1125,7 @@ MemoryTierPoint = namedtuple("MemoryTierPoint", ["label", "capacity_gb", "bandwi
 def registry_memory_point(label, node, tier):
     return MemoryTierPoint(
         label=label,
-        capacity_gb=node.memory.capacity.to(GB).magnitude,
+        capacity_gb=node.memory.capacity.to(GiB).magnitude,
         bandwidth_gb_per_s=node.memory.bandwidth.to(GB / second).magnitude,
         tier=tier,
     )
@@ -1247,7 +1274,7 @@ ax.set_xscale("log")
 ax.set_yscale("log")
 ax.set_xlim(0.04, 650)
 ax.set_ylim(2, 6e7)
-ax.set_xlabel("Memory capacity per accelerator (GB, log scale)", fontsize=12)
+ax.set_xlabel("Memory capacity per accelerator (GiB, log scale)", fontsize=12)
 ax.set_ylabel("Peak memory bandwidth (GB/s, log scale)", fontsize=12)
 ax.tick_params(labelsize=11.5)
 ax.grid(True, which="major", alpha=0.40, linestyle="--", linewidth=0.75)
@@ -2106,6 +2133,11 @@ Whole phases spread even wider than individual operators. The idealized intensit
 # │       memory-bound vs compute-bound; ridge ~295 FLOP/byte (FP16).
 # │ Show: Log-log; roofline; filled regions; workload scatter.
 # │ How: y = min(BW*x, R_peak); workloads dict; matplotlib.
+# │ Provenance:
+# │   - Hardware ceiling (measured): Hardware.Cloud.H100 dense FP16 peak
+# │     (989 TFLOP/s) and HBM3 bandwidth (3.35 TB/s) via RooflineLandscapeMath.
+# │   - Workload intensities (modeled): idealized weight-traffic scenario
+# │     arithmetic intensities from RooflineLandscapeMath.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 # ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
@@ -3977,7 +4009,7 @@ class ChipVersusSystemPower:
 
 The propagation is visible at both ends of the stack in published data. Vendors publish a power rating for each accelerator package, and @fig-chip-vs-cluster-power (a) collects those ratings across `{python} ChipVersusSystemPower.chip_count_str` NVIDIA, Google, AMD, and Intel parts. The ratings follow each vendor's own convention (TDP, maximum board power, or maximum TGP), so they bound design envelopes rather than measure consumption, but they climb steadily from one generation to the next. Panel (b) plots the facility power of supercomputers that Epoch AI tracks for AI work, together with the largest one operating at each date [@epochai2026supercomputers; @pilz2025supercomputers]. From 2013 through 2021 that record stayed between `{python} ChipVersusSystemPower.plateau_low_power_str` and `{python} ChipVersusSystemPower.plateau_power_str`, a level set by national high-performance computing systems. The Frontier supercomputer raised it to `{python} ChipVersusSystemPower.frontier_power_str` in `{python} ChipVersusSystemPower.break_year_str`, and AI training clusters then lifted it to about `{python} ChipVersusSystemPower.sys_last_power_str` by `{python} ChipVersusSystemPower.end_year_str`, a `{python} ChipVersusSystemPower.sys_growth_mult_str` increase in three years. Over the same three years the rating of one package rose from the H100's `{python} ChipVersusSystemPower.h100_tdp_str` TDP to the `{python} ChipVersusSystemPower.chip_last_label_str`'s `{python} ChipVersusSystemPower.chip_last_power_str` maximum TGP, roughly a `{python} ChipVersusSystemPower.chip_growth_mult_str` increase across the two rating conventions. Hotter packages explain only a small part of the jump. The rest comes from the number of accelerators a single system joins together and the facility built to feed them, which is why the power wall at fleet scale is a provisioning problem for the building as much as a thermal problem for the chip.
 
-::: {#fig-chip-vs-cluster-power fig-env="figure" fig-pos="htb" fig-cap="**Package Power versus System Power**: (a) Published power rating of one accelerator package by release year. Ratings follow each vendor's convention (TDP, maximum board power, or maximum TGP) and describe design envelopes, not measured workload power. (b) Facility power of AI supercomputers by first operational date on a logarithmic axis; the red line tracks the largest system operating at each date. The record held near 20 to 30 MW for most of a decade before AI training clusters raised it roughly ninefold between 2022 and 2025. Sources: (a) @nvidia2013k20x, @foley2017pascal, @choquette2018volta, @choquette2021, @choquette2023, @nvidia2024hgxb200, @nvidia2025blackwellultra, @jouppi2021, @amd2021cdna2, @amd2023mi300x, @intel2023gaudi2, @intel2024gaudi3; (b) @epochai2026supercomputers." fig-alt="Two stacked panels. Top: scatter of accelerator power ratings from 2012 to 2025 on a linear axis from 0 to 1,500 watts, colored by vendor. Ratings rise from 75 watts for TPU v1 and 235 watts for the K20X to 700 watts for the H100, 1,000 watts for the B200, and 1,400 watts for the B300. Bottom: gray points for supercomputers from 2012 to 2025 on a logarithmic power axis from 0.1 to several hundred megawatts, with a red staircase marking the largest system to date. The staircase sits near 20 to 30 megawatts from 2013 through 2021, steps to 40 megawatts at Frontier in 2022, and climbs to about 350 megawatts at xAI Colossus in 2025."}
+::: {#fig-chip-vs-cluster-power fig-env="figure" fig-pos="htb" fig-cap="**Package Power versus System Power**: (a) Published power rating of one accelerator package by release year. Ratings follow each vendor's convention (TDP, maximum board power, or maximum TGP) and describe design envelopes, not measured workload power. (b) Facility power of AI supercomputers by first operational date on a logarithmic axis; the red line tracks the largest system operating at each date. The record held near 20 to 30 MW for most of a decade before AI training clusters raised it roughly ninefold between 2022 and 2025. Sources: (a) @nvidia2013k20x, @foley2017pascal, @choquette2018volta, @choquette2021, @choquette2023, @nvidia2024hgxb200, @nvidia2025blackwellultra, @jouppi2021, @amd2021cdna2, @amd2023mi300x, @intel2023gaudi2, @intel2024gaudi3; (b) @epochai2026supercomputers." fig-alt="Two stacked panels. Top: scatter of accelerator power ratings from 2012 to 2025 on a linear axis from 0 to 1,500 watts, colored by vendor. Ratings rise from 75 watts for TPU v1 and 235 watts for the K20X to 700 watts for the H100, 1,000 watts for the B200, and 1,400 watts for the B300. Bottom: gray points for supercomputers from 2010 to 2025 on a logarithmic power axis from 0.05 to several hundred megawatts, with a red staircase marking the largest system to date. The staircase starts at 8 megawatts in late 2010, sits near 20 to 30 megawatts from 2013 through 2021, steps to 40 megawatts at Frontier in 2022, and climbs to about 350 megawatts at xAI Colossus in 2025."}
 
 ```{python}
 #| echo: false
@@ -3990,6 +4022,12 @@ The propagation is visible at both ends of the stack in published data. Vendors 
 # │ Show: (a) vendor-colored package ratings; (b) system power with the
 # │       largest-to-date staircase.
 # │ How: ChipVersusSystemPower (above); book_style.setup_plot().
+# │ Provenance:
+# │   - Panel (a) (measured): vol2/02_compute_infrastructure/data/accelerator_power_ratings.csv
+# │     (14 vendor-published package design power ratings).
+# │   - Panel (b) (modeled): vol2/02_compute_infrastructure/data/ai_supercomputers.csv
+# │     (@epochai2026supercomputers; @pilz2025supercomputers; 418 operational
+# │     systems with recorded or estimated facility power_mw).
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 import datetime as dt
@@ -4050,8 +4088,8 @@ for _r, _txt, _xy in [(_C.sys_last, "xAI Colossus", (-8, -14)), (_C.frontier_sys
         zorder=5,
     )
 a2.set_yscale("log")
-a2.set_xlim(2012, 2026)
-a2.set_xticks(range(2012, 2027, 2))
+a2.set_xlim(2010.3, 2026.5)
+a2.set_xticks(range(2010, 2027, 2))
 a2.set_xlabel("First operational")
 a2.set_ylabel("Facility power (MW, log scale)")
 a2.set_title("(b) One AI supercomputer", fontsize=10, loc="left")

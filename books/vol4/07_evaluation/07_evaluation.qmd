@@ -410,7 +410,7 @@ This warehouse scenario highlights the two structural mechanisms that cause open
      Guards in calc-evaluation-aisle-heading-drift pin 1.0 degree, 3.05e-4 rad^2, 1.5 m/s, 0.15 m, 5.7 s, and 8.6 m.
      The 1.0 degree offset is also hand-typed as $1.0^\circ$ in the closed-loop-dynamics prose, the fig-cap, the
      unicycle paragraph, and the takeaways; the guard pins it.
-     The figure cell below recomputes theta**2 for its panel label from the same heading_offset_deg. -->
+     The figure cell below reads angular_mse, x_impact, and t_impact directly from AisleDrift. -->
 
 ::: {#fig-07-open-vs-closed-loop data-explore="original-v4-07-open-vs-closed-loop" data-explore-key="vol4:fig-07-open-vs-closed-loop" fig-env="figure" fig-pos="t" fig-cap="**Open vs. closed loop divergence**: A persistent $1.0^\circ$ heading offset gives `{python} AisleDrift.angular_mse_math` angular mean squared error on recorded centerline states. On the mobile manipulator's aisle, the navigation stack's admitted motion with that fixed heading drifts linearly and reaches the `{python} AisleDrift.clearance_str` side clearance after `{python} AisleDrift.t_impact_str` at the `{python} AisleDrift.v_str` drive limit. The example concerns the navigation stack, not the latch policy under evaluation." fig-alt="Two-panel aisle example, stacked. Top: recorded-state replay scores a constant one-degree heading offset with angular mean squared error 3.05 times 10 to the minus four radians squared and resets the next input to the recorded centerline. Bottom: if that heading persists in a physical rollout at 1.5 meters per second, lateral drift grows linearly and reaches the 15-centimeter side clearance after about 5.7 seconds, 8.6 meters along the aisle. Policy proposals pass through the permission path before the plant moves."}
 
@@ -425,7 +425,12 @@ This warehouse scenario highlights the two structural mechanisms that cause open
 # │ Show:    lateral offset against forward position, replay beside physical loop
 # │ How:     one heading offset drives both panels and both numbers;
 # │          speed and clearance come from the aisle via calc-evaluation-aisle-heading-drift
-# ├─────────────────────────────────────────────────────────────────────────────
+# │ Provenance: Inputs from mlsysim Scenarios.AisleHeadingDrift (1.0 deg heading
+# │             bias at 1.5 m/s drive limit) and Embodied.Scenario.WarehouseAisle
+# │             (0.15 m side clearance) via AisleDrift, comparing constant per-step
+# │             replay MSE against planar unicycle lateral integration y = x tan(theta).
+# │             Epistemic: modeled (analytical planar unicycle kinematics).
+# └─────────────────────────────────────────────────────────────────────────────
 import math
 import numpy as np
 from mlsysim import viz
@@ -444,9 +449,9 @@ REACH_M = 10.0  # category: chosen; plot extent, the first third of the aisle
 
 # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────────────
 theta = math.radians(HEADING_OFFSET_DEG)
-angular_mse = theta**2  # rad^2, the offline error signal
-exhausted_m = CLEARANCE_M / math.tan(theta)  # where the drift reaches clearance
-exhausted_s = exhausted_m / SPEED_MS
+angular_mse = AisleDrift.angular_mse.magnitude  # rad^2, offline error signal from AisleDrift
+exhausted_m = AisleDrift.x_impact.to(meter).magnitude  # forward position where drift reaches clearance
+exhausted_s = AisleDrift.t_impact.to(second).magnitude  # exact unicycle time y_clear / (v * sin(theta))
 
 # ┌── 3. PLOT ──────────────────────────────────────────────────────────────────
 fig, (ax_a, ax_b) = plt.subplots(2, 1, figsize=(6.2, 6.6), sharey=True)
@@ -803,7 +808,12 @@ Reading the inversion as a curve makes the logic visible. Plotting $\TrialSucces
 # │ Show:    P(n clean runs | p) = p**n, the alpha line, the crossing at
 # │          p_lower, and the one-in-eight policy above the line
 # │ How:     every plotted value is read from ClopperPearsonZeroFailure
-# ├─────────────────────────────────────────────────────────────────────────────
+# │ Provenance: Inputs from ZeroFailureQualification scenario (n = 20
+# │             independent trials, alpha = 0.05, 1-in-8 candidate policy) via
+# │             ClopperPearsonZeroFailure, evaluating exact binomial clean-streak
+# │             likelihood p**n and one-sided Clopper-Pearson inversion alpha**(1/n).
+# │             Epistemic: modeled (exact iid Bernoulli probability law).
+# └─────────────────────────────────────────────────────────────────────────────
 import numpy as np
 from mlsysim import viz
 
@@ -1093,7 +1103,12 @@ Multiplying those required sample counts by the door-opening cycle shows how rap
 # │          levels; (b) the failure upper limit on log axes, where each
 # │          further nine costs ten times the trials
 # │ How:     p_lower = (1 - c)**(1/n); every annotated value is derived here
-# ├─────────────────────────────────────────────────────────────────────────────
+# │ Provenance: Analytical one-sided Clopper-Pearson zero-failure curves
+# │             p_lower = (1 - c)**(1/n) at c in {0.90, 0.95, 0.99} combined with
+# │             door-cycle duration (40 s) from DoorCycleCampaign scenario
+# │             via DoorCycle and ClopperPearsonZeroFailure. Epistemic: modeled
+# │             (exact iid binomial confidence bounds and scenario cycle budget).
+# └─────────────────────────────────────────────────────────────────────────────
 import numpy as np
 from mlsysim import viz
 from mlsysim.core.units import second
@@ -1804,10 +1819,17 @@ Butler and Finelli's conclusion (perspective \ref{psp-evaluation-untestable-reli
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ RAND MILEAGE REQUIREMENTS VS. A DATED FLEET TOTAL (FIGURE)
 # │ Context: @fig-07-av-miles-scaling
-# │ Goal:    show which event classes a real fleet's exposure can support
+# │ Goal:    show which event classes a commercial fleet's exposure can support
 # │ Show:    required miles per benchmark and question; one sourced exposure line
 # │ How:     every plotted value comes from calc-evaluation-av-exposure
-# ├─────────────────────────────────────────────────────────────────────────────
+# │ Provenance: Inputs from mlsysim literature/scenario registry via AvExposure:
+# │             Kalra & Paddock (2016, RAND RR-1478-RC Table 1) mileage
+# │             requirements at U.S. human fatality (1.09), injury (77), and
+# │             police-reported crash (190) rates per 100M miles, overlaid with
+# │             Waymo's 56.7M rider-only miles through January 2025 (Kusano et
+# │             al. 2025). Epistemic: modeled for statistical mileage bounds;
+# │             measured for Waymo's reported commercial fleet exposure.
+# └─────────────────────────────────────────────────────────────────────────────
 import numpy as np
 from mlsysim import viz
 

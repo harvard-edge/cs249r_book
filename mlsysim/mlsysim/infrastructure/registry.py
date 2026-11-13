@@ -67,7 +67,7 @@ class Datacenters(Registry):
         grid=Grids.Quebec,
         metadata=Metadata(
             provenance=Grids.Quebec.metadata.provenance,
-            description="Hyperscale campus powered by low-carbon Quebec hydroelectric grid (30 gCO2/kWh).",
+            description="Hyperscale campus powered by low-carbon Quebec hydroelectric grid (20 gCO2/kWh).",
         ),
     )
     Norway_Hydro = Datacenter(
@@ -75,7 +75,7 @@ class Datacenters(Registry):
         grid=Grids.Norway,
         metadata=Metadata(
             provenance=Grids.Norway.metadata.provenance,
-            description="Hyperscale campus powered by low-carbon Norwegian hydroelectric grid (30 gCO2/kWh).",
+            description="Hyperscale campus powered by low-carbon Norwegian hydroelectric grid (10 gCO2/kWh).",
         ),
     )
     US_Hyperscale = Datacenter(
@@ -83,7 +83,7 @@ class Datacenters(Registry):
         grid=Grids.US_Avg,
         metadata=Metadata(
             provenance=Grids.US_Avg.metadata.provenance,
-            description="Reference US hyperscale facility operating on US grid average carbon intensity (388 gCO2/kWh).",
+            description="Reference US hyperscale facility operating on US grid average carbon intensity (429 gCO2/kWh).",
         ),
     )
     EU_Average = Datacenter(
@@ -107,7 +107,7 @@ class Datacenters(Registry):
         grid=Grids.Iowa,
         metadata=Metadata(
             provenance=Grids.Iowa.metadata.provenance,
-            description="Hyperscale campus in Iowa with high wind generation share (450 gCO2/kWh).",
+            description="Illustrative high-carbon coal/gas reference site in Iowa (680 gCO2/kWh).",
         ),
     )
     Poland_Coal = Datacenter(
@@ -115,7 +115,7 @@ class Datacenters(Registry):
         grid=Grids.Poland,
         metadata=Metadata(
             provenance=Grids.Poland.metadata.provenance,
-            description="Datacenter operating on Poland coal-heavy electrical grid (700 gCO2/kWh).",
+            description="Datacenter operating on Poland coal-heavy electrical grid (820 gCO2/kWh).",
         ),
     )
 

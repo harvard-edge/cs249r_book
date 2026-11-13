@@ -142,6 +142,11 @@ A first estimate shows why one model cannot do both jobs. If every fresh evaluat
 # │ Show:    f_max = B_sustained / M_weights for FP16 and INT4 weights; intent
 # │          model (7B, 2 Hz) and ACT chunk policy (80M, 20 Hz) below them
 # │ How:     registry bandwidth x dram_efficiency; RM.intent_rate, RM.chunk_rate
+# │ Provenance: Analytical weight-streaming bound f_max = B_sustained / (b * P)
+# │   from mlsysim Scenarios.WarehouseProposerTraffic and
+# │   Embodied.MobileManipulator.WarehouseMobileManipulator. Epistemic: modeled
+# │   (closed-form bandwidth ceiling on Jetson AGX Orin datasheet LPDDR5
+# │   bandwidth scaled by assumed 0.70 sustained DRAM efficiency).
 # └─────────────────────────────────────────────────────────────────────────────
 import numpy as np
 import matplotlib.pyplot as plt
@@ -582,7 +587,7 @@ class MeasuredOrinLatency:
     span_mult_str = fmt_multiple(round(span, -3), precision=0, commas=True)
 ```
 
-:::: {#fig-03-measured-orin-latency fig-env="figure" fig-pos="htb" fig-cap="**Measured single-query latency on the application processor**: The 90th-percentile time to answer one query, on a logarithmic axis, for each MLPerf Inference edge reference model on the 64 GB Jetson AGX Orin, the module in the running machine. Dashed lines mark the machine's chunk renewal period and intent revision period; blue bars finish within one chunk period, the orange bar within the intent period, and gray bars within neither. The reference models span four orders of magnitude on the same silicon, so which proposer a design can afford is fixed by the model class before any tuning. Vendor submissions, latest round per model (v3.1, or v4.1 for the two generative models); data from the MLCommons inference results repositories [@reddi2020mlperf]." fig-alt="Horizontal bar chart on a logarithmic time axis from 0.1 milliseconds to 100 seconds with seven bars, each labeled with a task and its latency. From shortest: image classification under 1 millisecond, question answering about 6 milliseconds, object detection about 12 milliseconds, speech recognition about 94 milliseconds, 3D medical segmentation about 4 seconds, text summarization about 4 seconds, and text-to-image generation about 10 seconds. The three shortest bars are blue, the speech bar orange, and the three longest gray. A dashed vertical line at 50 milliseconds is labeled chunk period and another at 500 milliseconds is labeled intent period."}
+:::: {#fig-03-measured-orin-latency fig-env="figure" fig-pos="htb" fig-cap="**Measured single-query latency on the application processor**: The 90th-percentile time to answer one query, on a logarithmic axis, for each MLPerf Inference edge reference model on the 64 GB Jetson AGX Orin in unconstrained MaxN power mode, using vendor-submitted quantized TensorRT engines. Dashed lines mark the machine's chunk renewal period and intent revision period; blue bars finish within one chunk period, the orange bar within the intent period, and gray bars within neither. The reference models span four orders of magnitude on the same silicon, so which proposer a design can afford is fixed by the model class before any tuning. Vendor submissions, latest round per model (v3.1, or v4.1 for the two generative models); data from the MLCommons inference results repositories [@reddi2020mlperf]." fig-alt="Horizontal bar chart on a logarithmic time axis from 0.1 milliseconds to 100 seconds with seven bars, each labeled with a task and its latency. From shortest: image classification under 1 millisecond, question answering about 6 milliseconds, object detection about 12 milliseconds, speech recognition about 94 milliseconds, 3D medical segmentation about 4 seconds, text summarization about 4 seconds, and text-to-image generation about 10 seconds. The three shortest bars are blue, the speech bar orange, and the three longest gray. A dashed vertical line at 50 milliseconds is labeled chunk period and another at 500 milliseconds is labeled intent period."}
 
 ```{python}
 #| echo: false
@@ -596,6 +601,11 @@ class MeasuredOrinLatency:
 # │       periods as reference lines.
 # │ How: data/mlperf_inference_edge_orin.csv; Embodied.MobileManipulator rates;
 # │      book_style.setup_plot().
+# │ Provenance: Tier-2 CSV vol4/03_brain/data/mlperf_inference_edge_orin.csv
+# │   (MLCommons MLPerf Inference Edge closed division v3.1, v4.0, v4.1 LoadGen
+# │   logs for NVIDIA Jetson AGX Orin Developer Kit 64G TensorRT MaxN) paired
+# │   with chosen cadence periods from mlsysim WarehouseMobileManipulator.
+# │   Epistemic: measured (hardware benchmark latencies against design periods).
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Embodied
 from mlsysim.core.units import millisecond
@@ -824,6 +834,7 @@ The roofline model [@williams2009roofline] turns that ratio into a bound (@fig-p
 #| message: false
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ EMBODIED ROOFLINE (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: @fig-patterson-roofline, placed after the arithmetic-intensity
 # │          and roofline prose of @sec-brain-memory-wall that it illustrates
 # │ Goal:    show single-token decode inside the memory-bound regime and the
@@ -833,7 +844,12 @@ The roofline model [@williams2009roofline] turns that ratio into a bound (@fig-p
 # │          matrix-vector weight sweep, excluding other memory traffic; the
 # │          other the intent model's prefill (intensity ~ S, from
 # │          calc-brain-intent-model-latency, which therefore runs first)
-# ├─────────────────────────────────────────────────────────────────────────────
+# │ Provenance: Analytical Williams-Waterman-Patterson roofline R = min(BW * I,
+# │   R_peak) parameterized from mlsysim WarehouseMobileManipulator.brain_soc
+# │   (Jetson AGX Orin dense FP16 GPU ceiling and peak LPDDR5 bandwidth) and
+# │   IntentModelLatency (OpenVLA-7B). Epistemic: modeled (analytical hardware
+# │   ceiling excluding non-weight traffic and kernel overhead).
+# └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import viz
 from mlsysim import Embodied
 from mlsysim.fmt import fmt_qty, fmt_arithmetic_intensity, fmt_percent, fmt_display_math, check
@@ -1437,7 +1453,7 @@ A chunked policy therefore has two rates that a single "action rate" conflates: 
 # │ Context: opening of @sec-brain-two-proposers and @fig-03-parameter-by-domain
 # │ Goal:    quantify the parameter bifurcation between multimodal VLM/VLA
 # │          backbones and compact visuomotor chunk policies / action experts
-# │ Show:    1,526 Language + Robotics models with parameters (2018-2026);
+# │ Show:    1,516 distinct Language + Robotics models with parameters (2018-2026);
 # │          intent backbones (2.2B-562B) vs. fast chunk policies (80M-300M),
 # │          an 88x ratio between the machine's 7B intent model and 80M ACT
 # │ How:     vol4/03_brain/data/epoch_models_scale_by_domain.csv, cited literature,
@@ -1453,6 +1469,13 @@ def _dec_year(iso_str: str) -> float:
     d = date.fromisoformat(str(iso_str))
     return d.year + (d.timetuple().tm_yday - 1) / 365.25
 
+def _param_rows(entries, exclude=frozenset()):
+    return [
+        (_dec_year(r["publication_date"]), float(r["parameters"]), str(r["model"]))
+        for r in entries
+        if (str(r["model"]), str(r["publication_date"])) not in exclude
+    ]
+
 class EmbodiedModelScaling:
     """Parameter scaling of language and robotics models (Epoch AI and VLA literature)."""
 
@@ -1462,45 +1485,49 @@ class EmbodiedModelScaling:
     RM = Embodied.MobileManipulator.WarehouseMobileManipulator
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    lang_rows = [
-        (_dec_year(r["publication_date"]), float(r["parameters"]), str(r["model"]))
-        for r in series.where(domain_group="Language")
-        if r["parameters"] is not None and r["publication_date"] is not None
-    ]
-    rob_rows = [
-        (_dec_year(r["publication_date"]), float(r["parameters"]), str(r["model"]))
-        for r in series.where(domain_group="Robotics")
-        if r["parameters"] is not None and r["publication_date"] is not None
-    ]
+    _lang_entries = [r for r in series.where(domain_group="Language") if r["parameters"] is not None and r["publication_date"] is not None]
+    _rob_entries = [r for r in series.where(domain_group="Robotics") if r["parameters"] is not None and r["publication_date"] is not None]
+    _rob_keys = {(str(r["model"]), str(r["publication_date"])) for r in _rob_entries}
+    _lang_keys = {(str(r["model"]), str(r["publication_date"])) for r in _lang_entries}
+    lang_rows = _param_rows(_lang_entries)
+    lang_only_rows = _param_rows(_lang_entries, _rob_keys)
+    rob_rows = _param_rows(_rob_entries)
+    rob_by_model = {m: (y, p) for y, p, m in rob_rows}
     n_lang = len(lang_rows)
     n_rob = len(rob_rows)
-    n_models = n_lang + n_rob
-    all_years = [y for y, _, _ in lang_rows + rob_rows]
+    n_overlap = len(_lang_keys & _rob_keys)
+    n_models = len(_lang_keys | _rob_keys)
+    all_years = [y for y, _, _ in lang_only_rows + rob_rows]
     start_year = int(min(all_years))
     end_year = int(max(all_years))
 
     intent_params = RM.intent_model.parameters.to(param).magnitude
     chunk_params = RM.chunk_model.parameters.to(param).magnitude
+    act_year = _dec_year("2023-04-23")  # Zhao et al. (2023), Learning Fine-Grained Bimanual Manipulation (arXiv:2304.13705)
     pi0_total_params = 3300000000.0  # Black, K. et al. (2024), pi0: A Vision-Language-Action Flow Model
-    pi0_expert_params = 300000000.0  # Black, K. et al. (2024), pi0: A Vision-Language-Action Flow Model f...
+    pi0_expert_params = 300000000.0  # Black, K. et al. (2024), pi0: A Vision-Language-Action Flow Model
     gr00t_n1_params = 2200000000.0  # Bjorck, J. et al. (2025), GR00T N1: An Open Foundation Model for Generalist Humanoid Robots
-    helix_s2_params = 7000000000.0  # Figure AI (2025), Helix: A Vision-Language-Action Model for General...
-    helix_s1_params = 80000000.0  # Figure AI (2025), Helix: A Vision-Language-Action Model for General...
-    palm_e_params = 562000000000.0  # Driess, D. et al. (2023), PaLM-E: An Embodied Multimodal Language M...
-    rt2_params = 55000000000.0  # Brohan, A. et al. (2023), RT-2: Vision-Language-Action Models Trans...
-    rt1_params = 35000000.0  # Brohan, A. et al. (2023), RT-1: Robotics Transformer for Real-World...
+    helix_s2_params = 7000000000.0  # Figure AI (2025), Helix System 2 VLM backbone
+    helix_s1_params = 80000000.0  # Figure AI (2025), Helix System 1 visuomotor transformer
+    palm_e_params = 562000000000.0  # Driess, D. et al. (2023), PaLM-E
+    rt2_params = 55000000000.0  # Brohan, A. et al. (2023), RT-2
+    rt1_params = 35000000.0  # Brohan, A. et al. (2023), RT-1
     octo_params = octo.parameters.to(param).magnitude
     split_ratio = intent_params / chunk_params
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(n_lang >= 1400 and n_rob >= 40, f"Unexpected Epoch AI counts: {n_lang}, {n_rob}")
+    check(
+        n_models == 1516 and n_lang == 1484 and n_rob == 42 and n_overlap == 10,
+        f"Unexpected Epoch AI counts: {n_models}, {n_lang}, {n_rob}, {n_overlap}",
+    )
     check(start_year == 2018 and end_year >= 2026, f"Year span drifted: {start_year}-{end_year}")
     check(abs(split_ratio - 87.5) < 0.1, f"Intent-to-chunk parameter ratio drifted: {split_ratio}")
     check(
-        max(p for _, p, m in rob_rows if "PaLM-E" in m) == palm_e_params
-        and max(p for _, p, m in rob_rows if m == "RT-2") == rt2_params
-        and max(p for _, p, m in rob_rows if m == "RT-1") == rt1_params
-        and max(p for _, p, m in rob_rows if m == "Octo-Base") == octo_params,
+        rob_by_model["PaLM-E"][1] == palm_e_params
+        and rob_by_model["RT-2"][1] == rt2_params
+        and rob_by_model["RT-1"][1] == rt1_params
+        and rob_by_model["Octo-Base"][1] == octo_params
+        and rob_by_model["π0 (pi-zero)"][1] == pi0_total_params,
         "Local plot CSV landmark VLA parameter counts drifted from MLSysIM registry",
     )
 
@@ -1508,6 +1535,7 @@ class EmbodiedModelScaling:
     n_models_str = fmt_int(n_models)
     n_lang_str = fmt_int(n_lang)
     n_rob_str = fmt_int(n_rob)
+    n_overlap_str = fmt_int(n_overlap)
     start_year_str = fmt_int(start_year, commas=False)
     end_year_str = fmt_int(end_year, commas=False)
     palm_e_str = fmt_params(palm_e_params * param, precision=0)
@@ -1518,9 +1546,9 @@ class EmbodiedModelScaling:
     split_ratio_mult_str = fmt_multiple(round(split_ratio), precision=0)
 ```
 
-Chunking reduces the weight traffic per waypoint, but the decoder pricing showed that each fresh context still waits for the large backbone's prefill, whatever the decoder. That prefill floor and the weight-streaming ceiling of @fig-cadence-gap explain why embodied models in the published literature split into two parameter regimes rather than converging on a single model size (@fig-03-parameter-by-domain). Across `{python} EmbodiedModelScaling.n_models_str` language and robotics models with disclosed parameter counts in the Epoch AI catalog between `{python} EmbodiedModelScaling.start_year_str` and `{python} EmbodiedModelScaling.end_year_str` (`{python} EmbodiedModelScaling.n_lang_str` language and `{python} EmbodiedModelScaling.n_rob_str` robotics models) [@epochai2026models], language models climbed continuously past hundreds of billions of parameters. Embodied vision-language-action backbones followed that curve upward, from RT-1 (`{python} EmbodiedModelScaling.rt1_str`) to GR00T N1 (`{python} StateOfPractice.gr00t_params_str`), $\pi_0$ (`{python} StateOfPractice.pi0_params_str`), OpenVLA (`{python} IntentModelLatency.params_str`), Helix System 2 (`{python} StateOfPractice.helix_s2_params_str`), RT-2 (`{python} EmbodiedModelScaling.rt2_str`), and PaLM-E (`{python} EmbodiedModelScaling.palm_e_str`), to inherit web-scale semantic and visual breadth [@brohan2023rt1; @bjorck2025gr00t; @black2024pi0; @kim2024openvla; @figureai2025helix; @brohan2023rt2; @driess2023palme]. Alongside those backbones, a compact tier of visuomotor chunk policies and action experts, including ACT (`{python} EmbodiedModelScaling.chunk_params_str`), Octo-Base (`{python} EmbodiedModelScaling.octo_str`), Helix System 1 (`{python} StateOfPractice.helix_s1_params_str`), and the $\pi_0$ action expert (`{python} StateOfPractice.pi0_expert_str`), stayed near $10^8$ parameters (`{python} EmbodiedModelScaling.split_ratio_mult_str` smaller than the machine's `{python} IntentModelLatency.params_str` intent model) so that onboard processors can renew trajectories at tens of hertz [@zhao2023learning; @octo_2023].
+Chunking reduces the weight traffic per waypoint, but the decoder pricing showed that each fresh context still waits for the large backbone's prefill, whatever the decoder. That prefill floor and the weight-streaming ceiling of @fig-cadence-gap explain why embodied models in the published literature split into two parameter regimes rather than converging on a single model size (@fig-03-parameter-by-domain). Across `{python} EmbodiedModelScaling.n_models_str` distinct language and robotics models with disclosed parameter counts in the Epoch AI catalog between `{python} EmbodiedModelScaling.start_year_str` and `{python} EmbodiedModelScaling.end_year_str` (`{python} EmbodiedModelScaling.n_lang_str` language entries and `{python} EmbodiedModelScaling.n_rob_str` robotics entries, with `{python} EmbodiedModelScaling.n_overlap_str` multimodal models tagged in both domains) [@epochai2026models], language models climbed continuously past hundreds of billions of parameters. Embodied vision-language-action backbones followed that curve upward, from RT-1 (`{python} EmbodiedModelScaling.rt1_str`) to GR00T N1 (`{python} StateOfPractice.gr00t_params_str`), $\pi_0$ (`{python} StateOfPractice.pi0_params_str`), OpenVLA (`{python} IntentModelLatency.params_str`), Helix System 2 (`{python} StateOfPractice.helix_s2_params_str`), RT-2 (`{python} EmbodiedModelScaling.rt2_str`), and PaLM-E (`{python} EmbodiedModelScaling.palm_e_str`), to inherit web-scale semantic and visual breadth [@brohan2023rt1; @bjorck2025gr00t; @black2024pi0; @kim2024openvla; @figureai2025helix; @brohan2023rt2; @driess2023palme]. Alongside those backbones, a compact tier of visuomotor chunk policies and action experts, including ACT (`{python} EmbodiedModelScaling.chunk_params_str`), Octo-Base (`{python} EmbodiedModelScaling.octo_str`), Helix System 1 (`{python} StateOfPractice.helix_s1_params_str`), and the $\pi_0$ action expert (`{python} StateOfPractice.pi0_expert_str`), stayed near $10^8$ parameters (`{python} EmbodiedModelScaling.split_ratio_mult_str` smaller than the machine's `{python} IntentModelLatency.params_str` intent model) so that onboard processors can renew trajectories at tens of hertz [@zhao2023learning; @octo_2023].
 
-::: {#fig-03-parameter-by-domain fig-env="figure" fig-pos="htb" fig-cap="**Parameter scaling of language and robotics models, 2018 to 2026**: Each point plots one model with a disclosed parameter count on a logarithmic axis against its publication date. Language models scale continuously past $10^{11}$ parameters, while robotics models after 2022 bifurcate into multi-billion-parameter vision-language-action backbones that supply open-world semantic grounding and compact $80\text{M}$–$300\text{M}$ visuomotor chunk policies and action experts that fit real-time renewal budgets on embedded processors. Catalog series from @epochai2026models; component sizes for ACT, Helix System 1, and the $\pi_0$ action expert from @zhao2023learning, @figureai2025helix, and @black2024pi0." fig-alt="Scatter plot of model parameter counts on a logarithmic axis from 10 to the 5 to 10 to the 13 against publication years from 2018 to 2026. Gray points show 1,484 language models rising from 10 to the 8 to above 10 to the 12. Blue circles and copper squares mark multi-billion-parameter robotics backbones including PaLM-E at 562 billion, RT-2 at 55 billion, OpenVLA and Helix System 2 at 7 billion, pi0 at 3.3 billion, and GR00T N1 at 2.2 billion. A shaded teal band between 50 million and 350 million parameters highlights compact chunk policies and action experts including ACT at 80 million, Octo-Base at 93 million, Helix System 1 at 80 million, and the pi0 action expert at 300 million."}
+::: {#fig-03-parameter-by-domain fig-env="figure" fig-pos="htb" fig-cap="**Parameter scaling of language and robotics models, 2018 to 2026**: Each point plots one distinct model with a disclosed parameter count on a logarithmic axis against its publication date (multimodal robotics models tagged in both domains are plotted once in the robotics series). Language models scale continuously past $10^{11}$ parameters, while robotics models after 2022 bifurcate into multi-billion-parameter vision-language-action backbones that supply open-world semantic grounding and compact $80\text{M}$–$300\text{M}$ visuomotor chunk policies and action experts that fit real-time renewal budgets on embedded processors. Catalog series from @epochai2026models; component sizes for ACT, Helix System 1, and the $\pi_0$ action expert from @zhao2023learning, @figureai2025helix, and @black2024pi0." fig-alt="Scatter plot of model parameter counts on a logarithmic axis from below 10 to the 5 to above 10 to the 14 against publication years from 2018 to 2026. Gray points show language models rising from about 10 to the 7 to above 10 to the 14. Blue circles mark unhighlighted robotics models, copper squares mark multi-billion-parameter robotics backbones including PaLM-E at 562 billion, RT-2 at 55 billion, OpenVLA and Helix at 7 billion, pi0 at 3.3 billion, and GR00T N1 at 2.2 billion, and teal triangles inside a shaded band between 30 million and 380 million parameters mark compact chunk policies and action experts including RT-1 at 35 million, ACT at 80 million, Octo-Base at 93 million, Helix System 1 at 80 million, and the pi0 action expert at 300 million."}
 
 ```{python}
 #| label: plot-03-parameter-by-domain
@@ -1536,9 +1564,16 @@ Chunking reduces the weight traffic per waypoint, but the decoder pricing showed
 # │ Show:    Language vs. Robotics scatter from Epoch AI (2018-2026) plus
 # │          labeled VLM/VLA backbones and visuomotor chunk policies/experts
 # │ How:     EmbodiedModelScaling (above); mlsysim.viz.setup_plot()
+# │ Provenance: Tier-2 CSV vol4/03_brain/data/epoch_models_scale_by_domain.csv
+# │   (Epoch AI AI Models database, CC-BY 4.0, deduplicated across multi-domain
+# │   tags to 1,516 distinct models) supplemented by component parameter counts
+# │   for ACT (Zhao et al. 2023), Helix System 1 (Figure AI 2025), and the pi0
+# │   action expert (Black et al. 2024). Epistemic: modeled (literature-reported
+# │   and Epoch-estimated parameter counts).
 # └─────────────────────────────────────────────────────────────────────────────
 import numpy as np
 from mlsysim import viz
+from mlsysim.fmt import check
 
 _S = EmbodiedModelScaling
 fig, ax, COLORS, plt = viz.setup_plot(figsize=(6.2, 4.3))
@@ -1547,27 +1582,39 @@ ax.set_yscale("log")
 PROPOSAL = "#B87333"
 CHUNK_COLOR = "#007A87"
 
-# 1. Background language and robotics catalog points
-_ly = [r[0] for r in _S.lang_rows]
-_lp = [r[1] for r in _S.lang_rows]
+_highlighted_csv_names = {
+    "PaLM-E",
+    "RT-2",
+    "OpenVLA",
+    "π0 (pi-zero)",
+    "Helix",
+    "GR00T N1 2B",
+    "RT-1",
+    "Octo-Base",
+}
+
+# 1. Background language-only and unhighlighted robotics catalog points (zero duplicate markers)
+_ly = [r[0] for r in _S.lang_only_rows]
+_lp = [r[1] for r in _S.lang_only_rows]
 ax.scatter(_ly, _lp, s=11, color=COLORS["grid"], alpha=0.45, label="Language models (Epoch AI)", zorder=2)
 
-_ry = [r[0] for r in _S.rob_rows]
-_rp = [r[1] for r in _S.rob_rows]
-ax.scatter(_ry, _rp, s=22, color=COLORS["BlueLine"], alpha=0.65, label="Robotics models (Epoch AI)", zorder=3)
+_rob_bg = [(y, p) for y, p, m in _S.rob_rows if m not in _highlighted_csv_names]
+ax.scatter(
+    [r[0] for r in _rob_bg], [r[1] for r in _rob_bg], s=22, color=COLORS["BlueLine"], alpha=0.65, label="Other robotics models (Epoch AI)", zorder=3
+)
 
 # 2. Shaded regime bands for the two-speed split
 ax.axhspan(1.5e9, 7e11, color=PROPOSAL, alpha=0.07, zorder=1)
-ax.axhspan(4e7, 3.8e8, color=CHUNK_COLOR, alpha=0.09, zorder=1)
+ax.axhspan(3e7, 3.8e8, color=CHUNK_COLOR, alpha=0.09, zorder=1)
 
-# 3. Highlighted tier 2 (slow VLM/VLA backbones) and tier 1 (fast chunk policies / experts)
+# 3. Highlighted tier 2 (slow VLM/VLA backbones, exact CSV coordinates) and tier 1 (fast chunk policies / experts)
 _vla_pts = [
-    (2023.18, _S.palm_e_params, "PaLM-E (562B)", (-90, -3)),
-    (2023.57, _S.rt2_params, "RT-2 (55B)", (-66, -4)),
-    (2024.45, _S.intent_params, "OpenVLA (7B)", (-78, -3)),
-    (2024.83, _S.pi0_total_params, r"$\pi_0$ (3.3B)", (-54, -18)),
-    (2025.14, _S.helix_s2_params, "Helix S2 (7B)", (10, 14)),
-    (2025.21, _S.gr00t_n1_params, "GR00T N1 (2.2B)", (16, -13)),
+    (*_S.rob_by_model["PaLM-E"], "PaLM-E (562B)", (-90, -3)),
+    (*_S.rob_by_model["RT-2"], "RT-2 (55B)", (-66, -4)),
+    (*_S.rob_by_model["OpenVLA"], "OpenVLA (7B)", (-78, -3)),
+    (*_S.rob_by_model["π0 (pi-zero)"], r"$\pi_0$ (3.3B)", (-54, -18)),
+    (*_S.rob_by_model["Helix"], "Helix (7B)", (10, 14)),
+    (*_S.rob_by_model["GR00T N1 2B"], "GR00T N1 (2.2B)", (16, -13)),
 ]
 for _i, (_x, _y, _lbl, (_dx, _dy)) in enumerate(_vla_pts):
     ax.plot(
@@ -1590,11 +1637,11 @@ for _i, (_x, _y, _lbl, (_dx, _dy)) in enumerate(_vla_pts):
     )
 
 _fast_pts = [
-    (2022.95, _S.rt1_params, "RT-1 (35M)", (-68, -6)),
-    (2023.30, _S.chunk_params, "ACT (80M)", (-52, 16)),
-    (2024.38, _S.octo_params, "Octo-Base (93M)", (-32, -26)),
-    (2024.83, _S.pi0_expert_params, r"$\pi_0$ Expert (300M)", (14, -3)),
-    (2025.14, _S.helix_s1_params, "Helix S1 (80M)", (12, -12)),
+    (*_S.rob_by_model["RT-1"], "RT-1 (35M)", (-68, -6)),
+    (_S.act_year, _S.chunk_params, "ACT (80M)", (-52, 16)),
+    (*_S.rob_by_model["Octo-Base"], "Octo-Base (93M)", (-32, -26)),
+    (_S.rob_by_model["π0 (pi-zero)"][0], _S.pi0_expert_params, r"$\pi_0$ Expert (300M)", (14, -3)),
+    (_S.rob_by_model["Helix"][0], _S.helix_s1_params, "Helix S1 (80M)", (12, -12)),
 ]
 for _i, (_x, _y, _lbl, (_dx, _dy)) in enumerate(_fast_pts):
     ax.plot(
@@ -1616,8 +1663,10 @@ for _i, (_x, _y, _lbl, (_dx, _dy)) in enumerate(_fast_pts):
         arrowprops=dict(arrowstyle="-", color=CHUNK_COLOR, lw=0.7, alpha=0.7),
     )
 
+_ymin, _ymax = 3e4, 3e14
+check(min(_lp + [r[1] for r in _S.rob_rows]) >= _ymin and max(_lp + [r[1] for r in _S.rob_rows]) <= _ymax, "Axis ylim clips catalog points")
 ax.set_xlim(2017.8, 2027.9)
-ax.set_ylim(3e4, 2e13)
+ax.set_ylim(_ymin, _ymax)
 ax.set_xlabel("Publication year")
 ax.set_ylabel("Parameters (log scale)")
 plt.legend(bbox_to_anchor=(0.5, 1.02), loc="lower center", ncol=2, frameon=False, fontsize=9)
@@ -2045,6 +2094,11 @@ On one clock, the schedule looks like @fig-03-chunk-supply-horizon. With direct 
 # │          at replacement, H = 16 (400 ms) span, 219 ms evidence horizon
 # │ How:     mlsysim.viz.chunk_renewal_strip reads RM.chunk_* and
 # │          RM.chunk_schedule; the horizon is ConveyorChunkSizing.tau_ev
+# │ Provenance: Analytical direct-replacement timing strip from mlsysim
+# │   Embodied.MobileManipulator.WarehouseMobileManipulator and
+# │   ConveyorPickSpec scenario via ConveyorChunkSizing. Epistemic: modeled
+# │   (deterministic renewal schedule and quadratic slip horizon under declared
+# │   conveyor-pick scenario parameters).
 # └─────────────────────────────────────────────────────────────────────────────
 import matplotlib.pyplot as plt
 from mlsysim import viz
