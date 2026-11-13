@@ -1,29 +1,31 @@
-# MLSysSim Data Model
+# MLSysIM Data Model
 
-Ten **zoos** (typed registries) plus support layers. Book LEGO cells and
+Twelve **zoos** (typed registries) plus support layers. Book LEGO cells and
 tutorials should prefer zoos + `mlsysim.physics.*` + explicit operands.
 Measurement units live in `core/units.py`, physical constants in
 `physics/constants.py`, and domain values in registries; the former
 `core/constants.py` shim is deleted (no-backward-compat policy).
 
 This document is the *registry-level* view. The *runtime* view (how workloads,
-hardware, infrastructure, and systems feed the solver layer) is the 5-layer
+hardware, infrastructure, systems, and embodied platforms feed the solver layer) is the 6-layer
 model in [architecture.qmd](architecture.qmd). The zoos below are the registries
-that populate Layers A–D of that stack.
+that populate Layers A–D and Layer F of that stack.
 
 ## Zoos
 
 | Zoo | Registry | Role |
 |-----|----------|------|
-| Hardware | `Hardware.Cloud.*`, `Hardware.Edge.*`, `Hardware.Embodied.*`, … | Chip/board/appliance specs (datasheet truth). **Canonical paths only** (no bare `Hardware.H100`). |
-| Embodied | `Embodied.Quadruped.*`, `Embodied.Humanoid.*`, `Embodied.Manipulator.*`, `Embodied.Drone.*`, `Embodied.AMR.*`, `Embodied.Vehicle.*` | Cyber-physical machine platforms and archetypes across the four Physical AI classes. |
-| Agents | `Agents.Coding.*`, `Agents.Deliberation.*`, `Agents.MultiAgent.*`, `Agents.Interactive.*`, `Agents.Platforms.*` | Agentic ML system profiles, execution harnesses, deliberation search architectures, and reference execution platforms. |
+| Hardware | `Hardware.Cloud.*`, `Hardware.Edge.*`, `Hardware.Mobile.*`, `Hardware.Tiny.*`, `Hardware.Workstation.*`, `Hardware.Tech.*` | Chip/board/appliance specs (datasheet truth) plus technology-class tiers. **Canonical paths only** (no bare `Hardware.H100`). |
+| Embodied | `Embodied.Quadruped.*`, `Embodied.Humanoid.*`, `Embodied.Manipulator.*`, `Embodied.Drone.*`, `Embodied.AMR.*`, `Embodied.Vehicle.*`, `Embodied.MobileManipulator.*`, `Embodied.ContinuousProcess.*` | Cyber-physical machine platforms and archetypes across Physical AI classes. |
+| Sensors | `Sensors.Camera.*`, `Sensors.LiDAR.*`, `Sensors.IMU.*`, `Sensors.SafetyScanner.*`, `Sensors.SafetyLightCurtain.*` | Perceptual and safety-rated sensing hardware specifications. |
+| Actuators | `Actuators.HarmonicDrive.*`, `Actuators.QuasiDirectDrive.*`, `Actuators.Servo.*`, `Actuators.FramelessMotor.*`, `Actuators.PandaClassJoint.*`, `Actuators.HubMotor.*`, `Actuators.SafetyRelay.*` | Joint actuators, drivetrain motors, and safety switching specifications. |
+| Agents | `Agents.Coding.*`, `Agents.Deliberation.*`, `Agents.MultiAgent.*`, `Agents.Interactive.*`, `Agents.Research.*`, `Agents.Remediation.*`, `Agents.Support.*` | Agentic ML system profiles, execution harnesses, and deliberation search architectures. |
 | Models | `Models.*` | Workloads and architectures (parameters, layers, FLOPs). |
 | Datasets | `Datasets.*` | Data zoo: ImageNet, MNIST, CIFAR, etc. |
 | Platforms | `Platforms.*` | Abstract deployment envelopes (RAM, storage, latency ranges). Replaces `Systems.Tiers`. |
 | Infrastructure | `Infrastructure.Grids.*`, `Infrastructure.Datacenters.*`, `Infrastructure.Pricing.*`, `Infrastructure.Capacity.*` | Site/energy/economics layer: utility grid, facility PUE, pricing, and capacity facts. **Not** GPU fleets or network fabrics. |
 | Systems | `Systems.Nodes.*`, `Systems.Racks.*`, `Systems.Fabrics.*`, `Systems.Clusters.*`, `Systems.Pods.*`, `Systems.Storage.*` | Composed physical systems and topology. Fleets live in `Systems.Clusters` (type `Fleet`); rack-level aggregates live in `Systems.Racks`. |
-| Ops | `Ops.Monitoring.*`, `Ops.TrainingRunOverheads.*` | Operational policies, thresholds, and goodput-loss profiles. |
+| Ops | `Ops.Monitoring.*`, `Ops.RuntimeOverheads.*`, `Ops.MemoryProtection.*`, `Ops.TrainingRunOverheads.*`, `Ops.Preemption.*` | Operational policies, runtime dispatch/memory overheads, thresholds, and goodput-loss profiles. |
 | Scenarios | `Scenarios.*` | Executable workload + system + constraint bundles. |
 
 ## Support (not zoos)
@@ -31,10 +33,8 @@ that populate Layers A–D of that stack.
 - **`mlsysim.core.units`**: pint units, byte/bit widths, precision map.
 - **`mlsysim.physics.*`**: physical constants and formulas.
 - **`Literature.*`**: cited appendix scalars (MFU bands, Chinchilla, communication, batch-size anchors).
-- **`Scenarios.*`**: executable workload + system + constraint bundles, suitable for `Scenario.evaluate()`.
 - **`ReferenceStats.*`**: non-executable sourced anchors for real-world scenario and case-study statistics.
 - **`Systems.Reliability` / `Orchestration`**: MTTF, recovery, scheduling assumptions.
-- **`Ops.Monitoring` / `TrainingRunOverheads`**: PSI, KS, drift thresholds, training goodput-loss profiles.
 - **`mlsysim.engine.calibration`**: solver/engine default kwargs (not appendix tables).
 - **`Infrastructure.Pricing`**: cloud, storage, labeling, fleet economics (`PricePoint.rate`).
 - **Regional carbon / PUE / fleet / fabrics**: `Infrastructure.Grids`, `FacilityCooling`, `Systems.Clusters`, `Systems.Fabrics`.
@@ -67,6 +67,8 @@ flowchart TB
   subgraph zoos [Zoos]
     Hardware
     Embodied
+    Sensors
+    Actuators
     Agents
     Models
     Datasets
@@ -79,7 +81,6 @@ flowchart TB
   subgraph support [Support]
     units[core/units.py]
     literature[Literature.*]
-    scenarios[Scenarios.*]
     referenceStats[ReferenceStats.*]
     calibration[engine/calibration.py]
     physics[physics.*]
@@ -87,6 +88,8 @@ flowchart TB
   Hardware --> Systems
   Platforms --> Systems
   Infrastructure --> Systems
+  Sensors --> Embodied
+  Actuators --> Embodied
   Systems --> Agents
   Systems --> Embodied
   Models --> Agents
@@ -98,10 +101,10 @@ flowchart TB
   Scenarios --> physics
   calibration --> physics
   Systems --> physics
-  Models --> scenarios
-  Hardware --> scenarios
-  Systems --> scenarios
-  referenceStats --> scenarios
+  Models --> Scenarios
+  Hardware --> Scenarios
+  Systems --> Scenarios
+  referenceStats --> Scenarios
 ```
 
 - **Fleet ≠ datacenter:** `Systems.Clusters.*` (Fleet) references optional `Infrastructure.Datacenters.*` / grid for carbon and PUE.
@@ -135,27 +138,6 @@ decide the namespace; the type of thing being modeled does.
 2. Use `mlsysim.physics.*` for derived quantities; registries for operands.
 3. Use `Scenario.evaluate()` when a runnable workload + system + constraint bundle is needed.
 4. Use `ReferenceStats.*` for non-executable anchors. Do not route reference statistics through `Scenarios.*`.
-
-## Migration tiers (QMD)
-
-| Tier | Source | Target |
-|------|--------|--------|
-| A | GPU/chip constants (`H100_*`, `NVLINK_*`, …) | `Hardware.*` |
-| B | Network/fabric (`INFINIBAND_*`, `ETHERNET_*`, …) | `Hardware.Networks.*` / `Systems.Fabrics.*` |
-| C | Model/dataset constants | `Models.*` / `Datasets.*` |
-| D | Economics/reliability/ops/literature | `Infrastructure.Pricing.*`, `Systems.Reliability.*`, `Ops.*`, `Literature.*`, `Scenarios.*` |
-| Platforms | `Systems.Tiers`, tier latency/RAM strings | `Platforms.*` |
-
-## No aliases
-
-Hard-delete migrated symbols from `constants.py` after parity tests pass.
-Do not keep `Hardware.H100`, `Infrastructure.Quebec`, or `Systems.Cloud = …` shims.
-
-## Verification gates (every commit)
-
-- L1: pytest, exec affected QMD cells, `lego_focal_verify.py`
-- L2: `test_registry_parity.py` for deleted symbols
-- L3–L5: fmt, HTML build, `audit_lego_html.py` when QMD touched
-- L6: downstream content sign-off before rendered-content commits
+5. Never retain compatibility shims (`Hardware.H100`, `Infrastructure.Quebec`, `Systems.Cloud`, etc.); always reference canonical zoo paths directly.
 
 See `PROVENANCE.md` and `docs/contributing.qmd` for package-side provenance rules.

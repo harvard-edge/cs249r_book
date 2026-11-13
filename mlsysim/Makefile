@@ -22,11 +22,11 @@ audit: ## Run the package provenance audit
 	$(PYTHON) -m mlsysim.tools.audit_provenance --scope all --strict
 
 format: ## Format the code using ruff
-	$(PYTHON) -m ruff format mlsysim scripts
-	$(PYTHON) -m ruff check --fix mlsysim scripts
+	$(PYTHON) -m ruff format mlsysim scripts tests
+	$(PYTHON) -m ruff check --fix mlsysim scripts tests
 
 lint: ## Run the linter (ruff) to check for style violations
-	$(PYTHON) -m ruff check mlsysim scripts
+	$(PYTHON) -m ruff check mlsysim scripts tests
 
 build: ## Build the package for distribution (creates .tar.gz and .whl)
 	$(PYTHON) -m build
@@ -55,4 +55,4 @@ publication-check: ## Verify displayed paper values, timing receipts, and benchm
 	PYTHONPATH=. $(PYTHON) paper/scripts/generate_paper_values.py --check
 	PYTHONPATH=. $(PYTHON) paper/scripts/validate_anchors.py
 
-check: lint test calibration-check modeling-docs-check ## Run package release checks
+check: lint test audit calibration-check modeling-docs-check ## Run package release checks

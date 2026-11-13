@@ -109,7 +109,7 @@ Use these empirically-grounded ranges as starting points:
 |----------|-----------|-----------|
 | Training (Megatron-LM, large Transformer) | 0.40-0.55 | Well-optimized GEMM + FlashAttention |
 | Training (PyTorch eager, small model) | 0.08-0.15 | Kernel launch overhead dominates |
-| Inference decode, batch=1 | 0.01-0.05 | Memory-bound; compute nearly idle |
+| Inference decode, batch=1 (overall MFU) | 0.01-0.05 | Memory-bound; pass compute-kernel eta (0.35-0.55) to `ServingModel` |
 | Inference decode, batch=32+ | 0.15-0.35 | Batch amortizes weight loading |
 | Inference prefill, long context | 0.30-0.50 | Compute-bound GEMM + attention |
 | TinyML (TFLite Micro on ESP32) | 0.05-0.15 | Interpreter overhead, no tensor cores |
@@ -143,18 +143,18 @@ warmup, excluding the first few batches.
 ### Step 3: Back-Calculate Efficiency
 
 ```python
-# Your measurements
-measured_throughput = 1200  # tokens/sec (from step 2)
+# Your measurements (e.g., dense 70B inference pass at ~2 * P FLOPs/token)
+measured_throughput = 2980  # tokens/sec (from step 2)
 
 # Known quantities
-model_flops_per_token = 1.4e12    # FLOPs per token for your model
-peak_flops = 989e12               # H100 SXM FP16 peak
+model_flops_per_token = 1.4e11    # ~2 * 70B FLOPs per token in forward pass
+peak_flops = 989e12               # H100 SXM FP16 dense peak
 
 # Back-calculate
 theoretical_max_throughput = peak_flops / model_flops_per_token
 eta = measured_throughput / theoretical_max_throughput
 
-print(f"eta = {eta:.3f}")  # e.g., eta = 0.423
+print(f"eta = {eta:.3f}")  # eta = 0.422
 ```
 
 ### Step 4: Use Calibrated Efficiency for What-If Analysis
@@ -190,8 +190,11 @@ the workload:
 - Optimized large-batch training: eta ~ 0.40-0.55
 - Small model in eager mode: eta ~ 0.08-0.15
 
-Using eta = 0.5 for decode-phase inference will overestimate throughput by
-10-50x. Always match the efficiency to the workload regime.
+Using eta = 0.5 in a pure FLOP-count equation (`Time = FLOPs / (Peak_FLOPS * eta)`)
+for decode-phase inference will overestimate throughput by 10-50x because decode is
+HBM-bandwidth-bound. Note that `ServingModel` and `SingleNodeModel` already apply
+the Roofline memory-bandwidth ceiling explicitly (`max(t_compute, t_memory)`), so
+on those mechanistic solvers `efficiency` derates only the compute roof (0.35-0.55).
 
 ### Fallacy: "Higher eta is always better"
 
@@ -243,7 +246,7 @@ the domain of ML systems engineering.
 - **Megatron-LM** (Shoeybi et al., 2020): The reference implementation for
   efficient large model training. Published efficiency numbers across model
   sizes and parallelism configurations.
-- **MLPerf Training** (mattson et al., 2020): Standardized benchmarks that
+- **MLPerf Training** (Mattson et al., 2020): Standardized benchmarks that
   provide comparable efficiency measurements across hardware platforms.
 - **Computer Architecture: A Quantitative Approach** (Hennessy & Patterson):
   Chapter 1's treatment of CPI and the CPU performance equation is the direct
