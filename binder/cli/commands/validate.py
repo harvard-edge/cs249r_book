@@ -635,9 +635,9 @@ class ValidateCommand:
             Scope("print-scale", "_run_figure_print_scale", default=False,
                   note="matplotlib body figures print at 0.80-1.05x, text >= 9 pt, styled"),
             Scope("data-provenance", "_run_figure_data_provenance",
-                  note="Tier-2 data/*.csv and load_series() provenance and computation headers"),
-            Scope("cell-provenance", "_run_figure_cell_provenance", default=False,
-                  note="matplotlib #fig-* cell header Provenance: lineage block"),
+                  note="Tier-2 data/*.csv, load_series() consumers, and Frictionless manifest seal"),
+            Scope("cell-provenance", "_run_figure_cell_provenance",
+                  note="matplotlib #fig-* cell header Provenance: lineage and measured-receipt guard"),
         ],
         # ------------------------------------------------------------------
         # Semantic check groups: classify checks by WHAT is validated
@@ -13624,28 +13624,84 @@ class ValidateCommand:
             elapsed_ms=int((time.time() - t0) * 1000),
         )
 
+    @staticmethod
+    def _provenance_repo_root(root: Path, default_repo_root: Path) -> Path:
+        cur = root.resolve()
+        for cand in (cur, *cur.parents):
+            if cand.name == "books" and cand.parent != cand:
+                return cand.parent
+        return default_repo_root
+
     def _run_figure_data_provenance(
         self, root: Path, ns: Optional[argparse.Namespace] = None
     ) -> ValidationRunResult:
-        """figures --scope data-provenance: Tier-2 CSV and load_series() provenance headers."""
+        """figures --scope data-provenance: Tier-2 CSV headers, column schemas, and Frictionless manifest."""
         try:
             from cli.checks import figure_data_provenance as fdp
         except ImportError:
             from binder.cli.checks import figure_data_provenance as fdp
 
         t0 = time.time()
-        repo_root = Path(__file__).resolve().parents[3]
+        repo_root = self._provenance_repo_root(root, Path(__file__).resolve().parents[3])
+        # Never auto-seal books/datapackage.json on --fix: sealing is gated by
+        # figure_data_provenance.py --seal (metadata-only) or --seal-data --reason.
+
         if ns is not None and getattr(ns, "files", None):
             resolved = [(repo_root / f) if not Path(f).is_absolute() else Path(f) for f in ns.files]
             qmds = [p.resolve() for p in resolved if p.suffix == ".qmd" and p.is_file()]
-            csvs = [p.resolve() for p in resolved if p.suffix == ".csv" and p.is_file()]
+            csvs = [p.resolve() for p in resolved if p.suffix == ".csv" and p.is_file() and fdp._is_book_csv(p, repo_root)]
+            manifest_paths = {
+                (repo_root / fdp.DATAPACKAGE_REL_PATH).resolve(),
+                (repo_root / fdp.EPOCH_RECEIPT_REL_PATH).resolve(),
+            }
+            manifest_staged = any(p.resolve() in manifest_paths for p in resolved)
             checked, violations = fdp.collect_data_provenance(
-                qmds, scan_root=Path("/nonexistent"), repo_root=repo_root
+                qmds,
+                scan_root=Path("/nonexistent"),
+                repo_root=repo_root,
+                verify_manifest=bool(qmds),
             )
-            bib_cache: dict = {}
+            for p in resolved:
+                if p.is_file():
+                    for stray in fdp.discover_stray_book_datasets(p, repo_root=repo_root):
+                        checked += 1
+                        violations.append(
+                            fdp.ProvenanceViolation(
+                                file=fdp._rel(stray, repo_root),
+                                line=1,
+                                code="stray_chapter_dataset",
+                                message=(
+                                    f"Dataset file '{stray.name}' sits outside a chapter 'data/' directory, "
+                                    "which would bypass Tier-2 provenance and manifest sealing."
+                                ),
+                                context=fdp._rel(stray, repo_root),
+                                suggestion=(
+                                    "Move empirical datasets to books/volN/<chapter>/data/<name>.csv "
+                                    "and seal books/datapackage.json."
+                                ),
+                            )
+                        )
+            bib_ctx = fdp._load_bib_context(repo_root)
+            anchor_cache: dict = {}
             for csv_path in csvs:
                 checked += 1
-                violations.extend(fdp.check_csv_file(csv_path, repo_root=repo_root, bib_cache=bib_cache))
+                violations.extend(
+                    fdp.check_csv_file(
+                        csv_path,
+                        repo_root=repo_root,
+                        bib_cache=bib_ctx,
+                        anchor_cache=anchor_cache,
+                    )
+                )
+            if csvs or manifest_staged:
+                target_csvs = fdp.discover_book_csvs(repo_root) if manifest_staged else csvs
+                violations.extend(
+                    fdp.check_datapackage(
+                        target_csvs,
+                        repo_root=repo_root,
+                        check_orphans=True,
+                    )
+                )
         else:
             qmds = self._qmd_files(root)
             scan_root = root.parent if (root.is_file() and root.suffix == ".qmd") else root
@@ -13654,7 +13710,7 @@ class ValidateCommand:
         issues = [ValidationIssue(**v.to_issue_kwargs()) for v in violations]
         return ValidationRunResult(
             name="figure-data-provenance",
-            description="Tier-2 data/*.csv and load_series() provenance and computation headers",
+            description="Tier-2 data/*.csv provenance headers, column schemas, and Frictionless manifest",
             files_checked=checked,
             issues=issues,
             elapsed_ms=int((time.time() - t0) * 1000),
@@ -13670,7 +13726,7 @@ class ValidateCommand:
             from binder.cli.checks import figure_data_provenance as fdp
 
         t0 = time.time()
-        repo_root = Path(__file__).resolve().parents[3]
+        repo_root = self._provenance_repo_root(root, Path(__file__).resolve().parents[3])
         if ns is not None and getattr(ns, "files", None):
             resolved = [(repo_root / f) if not Path(f).is_absolute() else Path(f) for f in ns.files]
             qmds = [p.resolve() for p in resolved if p.suffix == ".qmd" and p.is_file()]

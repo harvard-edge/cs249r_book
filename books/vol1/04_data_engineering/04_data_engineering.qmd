@@ -4027,7 +4027,7 @@ class FeedingProblem:
 
 Data gravity dictates the cost of moving data in bulk; **the feeding problem**\index{Feeding problem!definition} dictates the cost of delivering it to execution units in real time. It is an input/output **flow rate**\index{Flow rate!definition} bottleneck: storage bandwidth fails to keep pace with compute throughput. The bottleneck is measured, not hypothetical. Profiling nine widely used vision and audio models found their training time often dominated by data stalls, time spent waiting for data to be fetched and preprocessed [@mohan2021]. In production recommendation training, the data storage and ingestion pipeline has become a dominant constraint on training performance and capacity [@zhao2022dsi].
 
-When data delivery and computation overlap, the bottleneck principle holds that a system runs only as fast as its slowest stage. Consider the chapter's throughput workload, one A100-class accelerator training ResNet-50 on images. The accelerator's peak arithmetic rate is `{python} FeedingProblem.peak_tflop_per_s_str`, and one training step on one image costs about `{python} FeedingProblem.train_gflop_per_img_str`, roughly three times the cost of a single prediction because training must also work out how to adjust every parameter. Dividing the first by the second gives an arithmetic ceiling of about `{python} FeedingProblem.ceiling_img_per_s_str`. In practice a well-tuned pipeline sustains about `{python} FeedingProblem.img_per_s_str`, roughly `{python} FeedingProblem.sustained_fraction_pct_str` of that ceiling, once layers that wait on memory and the synchronization between steps take their share.
+When data delivery and computation overlap, the bottleneck principle holds that a system runs only as fast as its slowest stage. Consider the chapter's throughput workload, one A100-class accelerator training ResNet-50 on images. The accelerator's FP16 Tensor Core peak rate is `{python} FeedingProblem.peak_tflop_per_s_str`, and one training step on one image costs about `{python} FeedingProblem.train_gflop_per_img_str`, roughly three times the cost of a single prediction because training must also work out how to adjust every parameter. Dividing the first by the second gives an arithmetic ceiling of about `{python} FeedingProblem.ceiling_img_per_s_str`. In practice a well-tuned pipeline sustains about `{python} FeedingProblem.img_per_s_str`, roughly `{python} FeedingProblem.sustained_fraction_pct_str` of that ceiling, once layers that wait on memory and the synchronization between steps take their share.
 
 Each image sits on disk as a `{python} FeedingProblem.compressed_image_kb_str` JPEG, so sustaining that rate requires storage to deliver `{python} FeedingProblem.compressed_bw_mb_per_s_str`. When the attached volume supplies only `{python} FeedingProblem.disk_bw_mb_per_s_str`, compute units stall on I/O. The calculation assumes that every epoch reads its images from storage, as it does when the dataset is larger than host memory; @sec-data-engineering-storage-bandwidth-budget-5d2a returns to datasets that fit in memory. The gap between required and supplied bandwidth defines **the feeding loss**\index{Feeding loss!definition}, the throughput penalty from insufficient input supply, which directly degrades system efficiency $(\EfficiencyHw)$\index{System efficiency!feeding loss}. Storage supplies `{python} FeedingProblem.disk_bw_mb_per_s_str` of the `{python} FeedingProblem.compressed_bw_mb_per_s_str` the sustained rate requires, so the pipeline can run at only their ratio of the sustained rate, and the share it loses is a modeled feeding loss of about `{python} FeedingProblem.feeding_tax_pct_str`. The model assumes steady-state overlap, in which the loader fetches the next batch while the accelerator computes on the current one. It compares throughput with the sustained rate rather than the advertised peak, and it does not count all accelerator idle time.
 
@@ -4108,6 +4108,8 @@ Because data movement incurs physical energy costs, data volume acts like physic
 
 :::
 
+The energy hierarchy and the signal-density heuristic converge on the same optimization lever, the Data Selection Gain of @eq-data-selection-gain. Every redundant or uninformative record removed early saves movement energy and interconnect bandwidth at each later stage without costing task-relevant signal.
+
 ::: {#chk-data-engineering-physics-data .callout-checkpoint title="The physics of data"}
 
 Data engineering is governed by physical costs. Check your intuition:
@@ -4118,7 +4120,7 @@ Data engineering is governed by physical costs. Check your intuition:
 
 :::
 
-The energy hierarchy and the signal-density heuristic converge on the same optimization lever, the Data Selection Gain of @eq-data-selection-gain. Every redundant or uninformative record removed early saves movement energy and interconnect bandwidth at each later stage without costing task-relevant signal. For the released dataset, these costs come due in delivery. Every training epoch moves it from storage, through the host, to the accelerator, and the feeding problem decides whether that movement keeps pace.
+For the released dataset, these physical costs come due in delivery: every training epoch moves it from storage, through the host, to the accelerator, and the feeding problem decides whether that movement keeps pace.
 
 ## Storage and Delivery {#sec-data-engineering-strategic-storage-architecture-1a6b}
 
@@ -4673,7 +4675,7 @@ class StorageBandwidth:
 
 **Problem**: What storage configuration keeps an A100-class accelerator from being data-starved while training ResNet-50? @Sec-hardware-acceleration-roofline-model-42ff explains why delivered throughput falls short of an accelerator's advertised peak; here, the point is how a compute ceiling becomes a data-path budget.
 
-Start with the compute ceiling derived in @sec-data-engineering-feeding-problem. The A100's `{python} StorageBandwidth.a100_fp16_tflop_per_s_str` divided by about `{python} StorageBandwidth.resnet_fwdbwd_gflop_str` per training image gives `{python} StorageBandwidth.max_img_per_s_str`.
+Start with the compute ceiling derived in @sec-data-engineering-feeding-problem. The A100's `{python} StorageBandwidth.a100_fp16_tflop_per_s_str` of FP16 Tensor Core peak compute divided by about `{python} StorageBandwidth.resnet_fwdbwd_gflop_str` per training image gives `{python} StorageBandwidth.max_img_per_s_str`.
 
 That compute ceiling becomes a storage requirement once each image must arrive from disk or object storage. Storage reads compressed bytes, so the budget uses the `{python} StorageBandwidth.image_size_kb_str` JPEG rather than the decoded tensor: feeding the ceiling takes approximately `{python} StorageBandwidth.required_bw_gb_per_s_str`, while the `{python} StorageBandwidth.sustained_img_per_s_str` that the accelerator actually sustains takes `{python} StorageBandwidth.sustained_bw_mb_per_s_str`.
 

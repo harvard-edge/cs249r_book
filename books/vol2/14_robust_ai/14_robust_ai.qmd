@@ -209,10 +209,6 @@ As those incidents show, a low-level fault and an environmental change can produ
 The mechanisms that make a fleet efficient also share state or work across many machines. In distributed training, a single node transmitting corrupted gradients during an AllReduce operation can therefore poison the global model weights across every worker. Fault detection and recovery mechanisms keep training jobs running and support inference-time availability, yet a restored checkpoint or a responsive replica does not establish that the model behaves acceptably on current inputs. Robustness extends the recovery argument to graceful degradation\index{Graceful degradation}, in which a reduced service must still meet a validated behavioral contract when inputs are adversarial or components degrade. Containing shared training state requires evidence that corrupted updates are detected or isolated. Byzantine fault tolerance protocols\index{Byzantine fault tolerance!gradient aggregation} address the case in which a contributor sends arbitrary or malicious values rather than simply stopping. Ordinary hardware corruption also demands the fault diagnosis and recovery mechanisms already established for the fleet.
 
 ::: {.column-margin .margin-pointer}
-↩ Gradient synchronization through AllReduce, in which every replica receives the same reduced gradient, is established in @sec-distributed-training-systems-systems-gradient-synchronization-614b.
-:::
-
-::: {.column-margin .margin-pointer}
 ↩ Byzantine failures, in which a component returns arbitrary values rather than stopping, are established in @sec-fault-tolerance-reliability-reliability-byzantine-failures-8a24.
 :::
 
@@ -500,9 +496,7 @@ Covariate shift moves the inputs while the true mapping $\ProbabilityFunction(\E
 
 :::
 
-Because input monitors can miss concept drift entirely, classic drift-adaptive learners\index{Concept drift!detection algorithms} watch error on recently labeled examples and shrink or grow their training window when that error changes, rather than tracking feature statistics [@widmer1996].
-
-A production detector that relies on labeled errors must wait for those outcomes. Input statistics and other proxy signals may justify earlier investigation or containment, but they do not by themselves establish that the input-output relationship has changed.
+Because input monitors can miss concept drift entirely, classic drift-adaptive learners\index{Concept drift!detection algorithms} watch error on recently labeled examples and shrink or grow their training window when that error changes, rather than tracking feature statistics [@widmer1996]; proxy signals on unlabeled traffic can justify earlier investigation, though confirming a changed conditional rule still awaits ground-truth outcomes.
 
 Whereas concept drift alters the conditional mapping for a given input, a hospital's case mix during an epidemic such as the COVID-19 pandemic can change the prevalence of respiratory illness while the radiographic appearance within each diagnosis remains stable. This form is **label shift**\index{Label shift!definition}\index{Label shift!confusion matrix inversion}, in which the label marginal $\ProbabilityFunction(\ExampleLabel)$ changes while the class-conditional input distribution $\ProbabilityFunction(\ModelInput\mid \ExampleLabel)$ remains fixed [@lipton2018detecting]. By Bayes' rule, the posterior probability $\ProbabilityFunction(\ExampleLabel\mid \ModelInput)$ is proportional to $\ProbabilityFunction(\ModelInput\mid \ExampleLabel)\ProbabilityFunction(\ExampleLabel)$, so the probability of a diagnosis given an observed image changes whenever prevalence $\ProbabilityFunction(\ExampleLabel)$ changes, even though each class looks the same inside the scanner. A changed posterior therefore does not by itself indicate concept drift, and the three shifts are best separated by what stays fixed. Covariate shift keeps the input-to-label rule fixed, label shift keeps each class's input distribution fixed, and concept drift changes the input-to-label rule in a way that correcting for the new class frequencies cannot undo, because the inputs typical of each class have themselves changed.
 
@@ -1316,7 +1310,7 @@ Across those access regimes, medical-imaging attacks can cause misdiagnosis [@ts
 
 The classifier that called a panda a gibbon in @fig-adversarial-googlenet was not broken by random noise; a perturbation budget of 0.007 per pixel, spent along the gradient sign, was enough. Defending a deployed perception model against that attacker requires a threat model that names the attacker's access and a budget for testing and mitigation. The resulting robustness claim must state what the system pays in clean accuracy, training compute, inference latency, or operational coverage.
 
-### Adversarial defense workflow {#sec-robust-ai-adversarial-attack-defenses-1dc8}
+### Defense workflow and adversarial training {#sec-robust-ai-adversarial-attack-defenses-1dc8}
 
 A team that applies adversarial training without first naming the perturbation norm and budget can multiply training compute several-fold and lose clean accuracy while leaving the actual deployment threat uncovered. Preventing that misallocation requires an adversarial-defense workflow\index{Adversarial defense!four-layer workflow} with four ordered layers:
 
@@ -1460,7 +1454,7 @@ In this example, generating the adversarial input uses $\AttackStepsPgd$ additio
 
 For lower-risk components, external guardrails such as input filtering and output verification can cost less than training intrinsic robustness into the weights, provided adaptive evaluation (@sec-robust-ai-evaluation-testing-4b54) supports acceptable residual risk against an attacker who knows the guardrail. Passing a finite set of attacks does not prove that no bypass exists. Safety-critical paths more often justify the training and certification budget.
 
-#### Certified defenses {#sec-robust-ai-certified-defenses}
+### Certified defenses {#sec-robust-ai-certified-defenses}
 
 Adversarial training provides empirical resistance that must be tested against the deployment threat model. It can generalize beyond the examples generated during training, but attack evaluation alone does not prove invariance throughout an allowed perturbation set. **Certified robustness**\index{Certified robustness!definition} offers a mathematical guarantee\index{Certified robustness!mathematical guarantee}: for a given input $\ModelInput$ and radius $\AdversarialPerturbationBudget$, no perturbation $\|\AdversarialPerturbation\|_\PerturbationNormOrder< \AdversarialPerturbationBudget$ exists that changes the model's prediction. This certifies local prediction stability, not that the unchanged prediction is correct. The guarantee formalizes the intuition that a robust model limits how quickly its outputs can change as its inputs change. The model's **Lipschitz constant**\index{Lipschitz constant!definition}[^fn-lipschitz-continuity-bound] bounds that rate. If no class score can move by more than the Lipschitz constant times the perturbation size, the margin between the top score and the runner-up score can shrink by at most twice that amount, so the predicted label holds for any perturbation smaller than the margin divided by twice the Lipschitz constant. The certified radius is a provable lower bound on the input-perturbation part of the robustness margin that compression and other efficiency changes must preserve.
 
@@ -1517,7 +1511,7 @@ Certification also carries accuracy and compute trade-offs. On ImageNet, the sam
 
 Certified defenses cover one part of the adversarial workflow. Production systems still need detection paths for suspicious inputs, mitigation strategies that change training or serving behavior, and evaluation procedures that verify which threat models remain covered.
 
-#### Detection techniques {#sec-robust-ai-detection-techniques-0e7e}
+### Detection techniques {#sec-robust-ai-detection-techniques-0e7e}
 
 Detecting adversarial examples before they reach the model forms the first line of defense only when the signal reaches a serving decision: reject, transform, route, or audit. A population-level signal asks whether a window of current inputs still resembles the reference population. The two-sample tests of @sec-robust-ai-statistical-significance-testing-dfde serve here unchanged. A KS test\index{Kolmogorov-Smirnov test!adversarial detection}, or the Anderson-Darling test\index{Anderson-Darling test}, a variant that weights differences in the distribution tails more heavily, can flag a traffic window whose inputs no longer resemble the reference. Such an alert does not identify an individual request as adversarial; per-request rejection requires an additional decision rule. These tests also inherit the drift monitors' blind spot, since an adversarial perturbation can preserve each feature's marginal distribution while corrupting the joint structure that joint-distribution or embedding-space comparisons would expose.
 
@@ -1535,7 +1529,7 @@ Dropout, the training-time regularizer that randomly deactivates neurons [@hinto
 
 Beyond detection, adversarial training, and certification, the remaining mitigation strategies move the spending point rather than eliminating the cost. **Defensive distillation**\index{Defensive distillation!definition} [@papernot2016] teaches a student model from the teacher's soft labels. Its apparent adversarial protection came from gradient masking, in which a defense leaves adversarial inputs in place but makes the model's gradients too flat or uninformative for a gradient-based attack to find them. Attacks that bypassed the masked gradients defeated it [@carlini2017], so making an attack optimizer fail is not evidence that nearby adversarial inputs are absent. Input preprocessing spends the defense budget at serving time: image denoising, JPEG compression, random resizing, padding, and random transformations try to erase perturbations before the model sees them. Ensembles spend it through redundancy, combining models with different architectures, training data, or preprocessing paths so that a perturbation that fools one member is less likely to fool all of them.
 
-#### Evaluation and testing {#sec-robust-ai-evaluation-testing-4b54}
+### Evaluation and testing {#sec-robust-ai-evaluation-testing-4b54}
 
 Evaluation closes the budget loop: the system must measure which attacks the defense actually covers and what performance it sacrifices under controlled attack conditions. Robustness metrics quantify resilience through accuracy on adversarial examples, the distortion required to fool the model, and performance over attack budgets. Standardized benchmarks such as MNIST-C [@mu2019mnistc], CIFAR-10-C, and ImageNet-C [@hendrycks2019benchmarking] measure common corruptions rather than malicious worst-case behavior, so their results occupy a different cell of @tbl-robust-ai-evaluation-matrix.
 

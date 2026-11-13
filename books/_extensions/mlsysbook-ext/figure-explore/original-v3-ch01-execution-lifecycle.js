@@ -18,9 +18,9 @@ window.MLSysFigureLessons["original-v3-ch01-execution-lifecycle"]=async(root,con
  const canvas=document.createElement('div');canvas.className='mlsys-exp-canvas';canvas.tabIndex=0;canvas.setAttribute('aria-label','Original chapter diagram with synchronized state overlay.');canvas.append(svg);
  const readout=document.createElement('p');readout.className='mlsys-exp-readout';
  const invariant=document.createElement('p');invariant.className='mlsys-exp-invariant';
- const steps=[{"label": "Assemble bounded context and invoke model", "description": "In phases 1 and 2, the runtime compiles state and budgets into a prompt and invokes the model, which emits an untrusted action proposal carrying zero execution authority."}, {"label": "Authorize and execute the tool", "description": "In phase 3, the runtime validates schema, policy, and grants before dispatching phase 4 tool execution; phase 5 records the external outcome (marking timed-out calls unknown, never assumed)."}, {"label": "Bypass phase 4 on rejected proposals", "description": "When phase 3 denies an out-of-policy proposal, the red dashed arc routes structured error feedback directly into phase 5 observation history without touching any external tool."}, {"label": "Pause in Wait without exiting", "description": "Proposals requiring human approval in phase 3 or pending background jobs in phase 6 enter the dashed Wait state and resume cleanly once settled rather than terminating."}, {"label": "Assess evidence for next turn or acceptance", "description": "In phase 6, the runtime checks phase 5 external evidence against the contract—looping back to phase 1 when incomplete, or entering green Accept deliverable once independent checks pass."}, {"label": "Stop without acceptance on exhausted budgets", "description": "If step, token, or wall-clock budgets expire—or a timed-out tool leaves state unknown—phase 6 exits to red Stop without acceptance (unresolved or escalate) rather than trusting model self-reports."}];
+ const steps=[{"label": "Assemble bounded context and invoke model", "description": "In phases 1 and 2, the runtime compiles state and budgets into a prompt and invokes the model, which emits an untrusted action proposal carrying zero execution authority."}, {"label": "Authorize and execute the tool", "description": "In phase 3, the runtime validates schema, policy, and grants before dispatching phase 4 tool execution; phase 5 records the external outcome (marking timed-out calls unknown, never assumed)."}, {"label": "Bypass phase 4 on rejected proposals", "description": "When phase 3 denies an out-of-policy proposal, the red dashed arc routes structured error feedback directly into phase 5 observation history without touching any external tool."}, {"label": "Pause in Wait without exiting", "description": "Proposals requiring human approval in phase 3 or pending background jobs in phase 6 enter the dashed Wait state and resume cleanly once settled rather than terminating."}, {"label": "Assess evidence for next turn or acceptance", "description": "In phase 6, the runtime checks phase 5 external evidence against the contract—looping back to phase 1 when incomplete, or entering green Accept deliverable once independent checks pass."}, {"label": "Stop without acceptance on exhausted budgets", "description": "If step, token, or wall-clock budgets expire—or a timed-out tool leaves state unknown—phase 6 exits to red Stop without acceptance (failed, unresolved, or escalated) rather than trusting model self-reports."}];
 
- const phases=[[30,30,220,64,'#7C3AED'],[320,30,220,64,'#0284C7'],[610,30,220,64,'#7C3AED'],[610,250,220,64,'#D97706'],[320,250,220,64,'#7C3AED'],[30,250,220,64,'#7C3AED'],[170,126,220,48,'#64748b'],[30,370,190,54,'#16A34A'],[270,370,210,54,'#DC2626']];
+ const phases=[[30,30,220,64,'#7C3AED'],[320,30,220,64,'#0284C7'],[610,30,220,64,'#7C3AED'],[610,250,220,64,'#D97706'],[320,250,220,64,'#7C3AED'],[30,250,220,64,'#7C3AED'],[170,126,220,48,'#64748b'],[30,370,190,54,'#16A34A'],[270,370,250,54,'#DC2626']];
  const hi=phases.map(([x,y,w,h,c])=>add('rect',{x:x-2.5,y:y-2.5,width:w+5,height:h+5,rx:6,fill:c,'fill-opacity':'.11',stroke:c,'stroke-width':2.2,visibility:'hidden'}));
  const tok=add('circle',{r:7,fill:'#7C3AED',stroke:'#fff','stroke-width':2,'data-motion-object':'true'});
  const tag=add('text',{x:700,y:402,'text-anchor':'middle','font-size':11,'font-weight':'700',fill:'#7C3AED',stroke:'#fff','stroke-width':3.5,'paint-order':'stroke'},'');
@@ -31,7 +31,7 @@ window.MLSysFigureLessons["original-v3-ch01-execution-lifecycle"]=async(root,con
   [[720,62],[575,180],[430,282]],
   [[720,62],[280,150]],
   [[430,282],[140,282],[125,397]],
-  [[140,282],[375,397]]
+  [[140,282],[395,397]]
  ];
  const cols=['#0284C7','#D97706','#DC2626','#64748b','#16A34A','#DC2626'];
  const readouts=[
@@ -40,7 +40,7 @@ window.MLSysFigureLessons["original-v3-ch01-execution-lifecycle"]=async(root,con
   'Phase 3 → 5 exception: Rejected proposal skips Phase 4 completely; error recorded as observation',
   'Wait detour: Needs approval / async job pauses turn in Wait (resumes; not a terminal exit)',
   'Phase 6 → Accept: Independent phase 5 evidence satisfies contract → deliverable accepted',
-  'Phase 6 → Stop without acceptance: Budget exhausted or outcome unknown → unresolved / escalate'
+  'Phase 6 → Stop without acceptance: Budget exhausted or outcome unknown → failed, unresolved, or escalated'
  ];
  function paint(from,to,p){
   const idx=p<1?from:to,moving=from!==to&&p<1;

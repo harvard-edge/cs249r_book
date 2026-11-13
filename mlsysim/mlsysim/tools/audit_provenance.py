@@ -364,8 +364,28 @@ def audit_tier2_book_series() -> list[str]:
     if not books_dir.is_dir():
         return []
 
+    import json
+
     valid_epistemic = {"measured", "modeled", "assumed", "constructed"}
-    issues: list[str] = []
+    valid_methods = {"transcribed", "digitized", "scripted", "derived"}
+    manifest_by_path: dict[str, dict] = {}
+    manifest_path = books_dir / "datapackage.json"
+    if manifest_path.is_file():
+        try:
+            pkg = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest_by_path = {
+                r["path"]: r
+                for r in pkg.get("resources", [])
+                if isinstance(r, dict) and isinstance(r.get("path"), str)
+            }
+        except Exception as exc:
+            issues_init = [f"books/datapackage.json: invalid JSON ({exc})"]
+        else:
+            issues_init = []
+    else:
+        issues_init = ["books/datapackage.json: missing Frictionless manifest"]
+
+    issues: list[str] = list(issues_init)
     for csv_path in sorted(books_dir.rglob("data/*.csv")):
         rel_parts = csv_path.relative_to(books_dir).parts
         if not rel_parts or not rel_parts[0].startswith("vol"):
@@ -375,23 +395,54 @@ def audit_tier2_book_series() -> list[str]:
         label = f"Tier2Series.{csv_path.relative_to(repo_root)}"
         series = LocalSeries(csv_path)
         prov = series.provenance
-        if not prov.get("source", "").strip():
-            issues.append(f"{label}: missing '# Source:' header")
+        for req_field, req_header in (
+            ("figures", "# Figures:"),
+            ("source", "# Source:"),
+            ("locator", "# Locator:"),
+            ("url", "# URL:"),
+            ("license", "# License:"),
+        ):
+            if not prov.get(req_field, "").strip():
+                issues.append(f"{label}: missing '{req_header}' header")
+        if "@" not in " ".join(prov.get(k, "") for k in ("source", "locator", "computation", "notes")):
+            issues.append(f"{label}: '# Source:' must cite at least one verified @bibkey")
         verified = prov.get("verified", "").strip()
         if not verified:
             issues.append(f"{label}: missing '# Verified: YYYY-MM-DD' header")
         else:
             try:
-                date.fromisoformat(verified)
+                vdate = date.fromisoformat(verified)
+                if vdate < date(2020, 1, 1) or vdate > date.today():
+                    issues.append(f"{label}: '# Verified: {verified}' out of valid date range")
             except ValueError:
                 issues.append(f"{label}: '# Verified: {verified}' must be YYYY-MM-DD")
         if not prov.get("computation", "").strip() and not prov.get("notes", "").strip():
             issues.append(f"{label}: missing both '# Computation:' and '# Notes:' headers")
         epistemic = prov.get("epistemic", "").strip()
-        if epistemic:
+        if not epistemic:
+            issues.append(f"{label}: missing '# Epistemic:' header")
+        else:
             head = epistemic.replace("(", " ").replace(";", " ").replace(",", " ").split()[0].lower()
             if head not in valid_epistemic:
                 issues.append(f"{label}: '# Epistemic:' must start with {sorted(valid_epistemic)}")
+        method = prov.get("method", "").strip()
+        if not method:
+            issues.append(f"{label}: missing '# Method:' header")
+        else:
+            mhead = method.replace("(", " ").replace(";", " ").replace(",", " ").split()[0].lower()
+            if mhead not in valid_methods:
+                issues.append(f"{label}: '# Method:' must start with {sorted(valid_methods)}")
+        if tuple(c.name for c in series.column_schema) != series.columns:
+            issues.append(f"{label}: '# Columns:' schema does not match CSV header {list(series.columns)}")
+        rel_books = csv_path.relative_to(books_dir).as_posix()
+        sealed = manifest_by_path.get(rel_books)
+        if manifest_by_path and sealed is None:
+            issues.append(f"{label}: unsealed in books/datapackage.json")
+        elif sealed is not None:
+            if sealed.get("hash") != f"sha256:{series.file_sha256}":
+                issues.append(f"{label}: SHA-256 drifted from books/datapackage.json")
+            if (sealed.get("custom") or {}).get("data_sha256") != series.data_sha256:
+                issues.append(f"{label}: data_sha256 drifted from books/datapackage.json")
     return issues
 
 

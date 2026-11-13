@@ -150,7 +150,7 @@ class InferenceSetup:
 
 Once a trained model is deployed to a global user base at thousands of queries per second, its workload shifts from a bounded batch job to a continuous, latency-sensitive service. Every architectural choice in that service must balance the recurring cost of held accelerators against the strict response deadlines of live traffic.
 
-Running that continuous service takes more than an efficient steady-state replica. Fleet efficiency characterizes a replica by three quantities, each averaged over windows of hours to weeks. The first is model bandwidth utilization (MBU), which measures how close the replica's decode steps come to the bandwidth floor, the time needed to stream each step's weight and KV-cache bytes at peak memory bandwidth. The second is how long the replica takes to become ready. The third is the fraction of the time the replica holds its accelerators that it spends doing useful work at the ideal rate the bandwidth floor sets, which combines the runtime and program factors of ML goodput. Serving policy determines how that capacity is shared when requests arrive unevenly and each carries a latency target. A faster decode step supplies a better service rate, but it does not determine how long requests wait to join a batch, which replica receives them, which requests receive scarce cache space, or when the fleet needs another replica. These decisions connect the local execution toolkit to user-visible performance under load.
+Running that continuous service takes more than an efficient steady-state replica. Fleet efficiency characterizes a replica by three quantities, each averaged over windows of hours to weeks. The first is model bandwidth utilization (MBU), which measures how close the replica's decode steps come to the bandwidth floor, the time needed to stream each step's weight bytes at peak memory bandwidth. The second is how long the replica takes to become ready. The third is the fraction of the time the replica holds its accelerators that it spends doing useful work at the ideal rate the bandwidth floor sets, which combines the runtime and program factors of ML goodput. Serving policy determines how that capacity is shared when requests arrive unevenly and each carries a latency target. A faster decode step supplies a better service rate, but it does not determine how long requests wait to join a batch, which replica receives them, which requests receive scarce cache space, or when the fleet needs another replica. These decisions connect the local execution toolkit to user-visible performance under load.
 
 ::: {.column-margin .margin-pointer}
 ↩ The serving replica's program and runtime goodput, its bandwidth floor, and the fusion, graph replay, and compilation levers that shape it are established in @sec-performance-engineering.
@@ -1016,8 +1016,8 @@ Each level supplies a different measurement boundary. @Tbl-serving-hierarchy ass
 
 Verify your understanding of where specific optimizations sit within the serving hierarchy:
 
-- [ ] **Replica level**: identify the hierarchy level at which KV-cache paging reduces GPU memory waste, and explain why that raises concurrent request capacity rather than single-request latency.
-- [ ] **Caching level**: distinguish response caching, which shortens one request's path, from KV-cache paging, which raises a replica's capacity, and place each in the hierarchy.
+- [ ] **Request vs. replica**: explain how widening a request-level batch-formation window can raise replica-level throughput while worsening individual request latency under light load.
+- [ ] **Caching vs. execution**: distinguish request-level response caching from replica-level kernel and memory management, and state which measurement boundary each control acts on directly.
 - [ ] **Load balancing**: identify why load balancing belongs at the service level and explain how its choice of replica can affect both aggregate goodput and a request's queueing delay.
 - [ ] **Isolation level**: evaluate the claim that multi-tenancy and resource isolation are primarily request-level concerns.
 
@@ -1611,7 +1611,7 @@ class ServingFrontier:
     config_count_str = fmt_int(config_count)
 ```
 
-While the analytical batching model locates the knee from each model class's ratio of fixed to per-request cost (@tbl-batching-by-model), production serving stacks measure the resulting throughput-latency frontier directly. The open InferenceX benchmark serves DeepSeek-R1, a mixture-of-experts reasoning model, with 1,024-token prompts and 1,024-token responses on each accelerator across many combinations of serving framework, parallelism, and concurrency [@semianalysis2026inferencex]. For every configuration it records the output tokens per second each user receives, called interactivity (the reciprocal of TPOT), and the output tokens per second each GPU delivers across all users. @Fig-throughput-interactivity plots `{python} ServingFrontier.config_count_str` such configurations at FP8 precision and traces, for each accelerator, the frontier of configurations that no other configuration beats on both rates. Every frontier falls as interactivity rises, because a faster stream per user permits fewer concurrent sequences per decode step. The best B200 configuration delivers about `{python} ServingFrontier.b200_peak_str` output tokens per second per GPU when each user receives about `{python} ServingFrontier.b200_peak_tps_user_str` tokens per second. It delivers about `{python} ServingFrontier.b200_at_high_str` when each user must receive at least `{python} ServingFrontier.high_tps_user_str`, a `{python} ServingFrontier.b200_span_mult_str` difference in per-GPU output paid for faster streams. The interactivity target alone moves per-GPU output by that much, so it must be fixed before any two throughput figures can be compared.
+While the analytical batching model locates the knee from each model class's ratio of fixed to per-request cost (notebook \ref{nbk-inference-batching-efficiency-curve}), production serving stacks measure the resulting throughput-latency frontier directly. The open InferenceX benchmark serves DeepSeek-R1, a mixture-of-experts reasoning model, with 1,024-token prompts and 1,024-token responses on each accelerator across many combinations of serving framework, parallelism, and concurrency [@semianalysis2026inferencex]. For every configuration it records the output tokens per second each user receives, called interactivity (the reciprocal of TPOT), and the output tokens per second each GPU delivers across all users. @Fig-throughput-interactivity plots `{python} ServingFrontier.config_count_str` such configurations at FP8 precision and traces, for each accelerator, the frontier of configurations that no other configuration beats on both rates. Every frontier falls as interactivity rises, because a faster stream per user permits fewer concurrent sequences per decode step. The best B200 configuration delivers about `{python} ServingFrontier.b200_peak_str` output tokens per second per GPU when each user receives about `{python} ServingFrontier.b200_peak_tps_user_str` tokens per second. It delivers about `{python} ServingFrontier.b200_at_high_str` when each user must receive at least `{python} ServingFrontier.high_tps_user_str`, a `{python} ServingFrontier.b200_span_mult_str` difference in per-GPU output paid for faster streams. The interactivity target alone moves per-GPU output by that much, so it must be fixed before any two throughput figures can be compared.
 
 The same frontiers separate hardware generations by more than their datasheets do. At `{python} ServingFrontier.target_tps_user_str` tokens per second per user, the best measured H100 configuration delivers about `{python} ServingFrontier.h100_at_target_str` output tokens per second per GPU and the best GB200 NVL72 configuration about `{python} ServingFrontier.gb200_at_target_str`, a `{python} ServingFrontier.gen_mult_str` difference. Yet the peak dense FP8 rate of a GB200 GPU is only about `{python} ServingFrontier.peak_mult_str` that of an H100. The benchmark does not apportion the gap, but the candidates lie mostly beyond peak arithmetic, in memory bandwidth and capacity per GPU, a 72-GPU NVLink domain that keeps experts and KV state off slower networks, and platform-tuned serving software. A throughput figure quoted without its latency target therefore says little about either system.
 
@@ -2375,11 +2375,11 @@ class BatchingWorkedExample:
     total_seq_iters_str = fmt_int(total_seq_iters)
     useful_seq_iters_str = fmt_int(useful_seq_iters)
     r1_lat_ms_str = fmt_time(round(r1_latency_ms), 'millisecond', precision=0, commas=True)
-    r2_lat_str = fmt_int(r2_latency_ms)
-    r3_lat_str = fmt_int(r3_latency_ms)
-    r4_lat_str = fmt_int(r4_latency_ms)
+    r2_lat_str = fmt_time(round(r2_latency_ms), 'millisecond', precision=0, commas=True)
+    r3_lat_str = fmt_time(round(r3_latency_ms), 'millisecond', precision=0, commas=True)
+    r4_lat_str = fmt_time(round(r4_latency_ms), 'millisecond', precision=0, commas=True)
     trad_lat_ms_str = fmt_time(round(trad_latency_ms), 'millisecond', precision=0, commas=True)
-    cont_avg_lat_str = fmt_int(cont_avg_latency_ms)
+    cont_avg_lat_str = fmt_time(round(cont_avg_latency_ms), 'millisecond', precision=0, commas=True)
     latency_red_str = fmt_percent(latency_reduction_pct / 100, precision=1, commas=False, style='prose')
     r1_imp_mult_str = fmt_multiple(r1_improvement, precision=0, commas=False)
     r3_imp_mult_str = fmt_multiple(r3_improvement, precision=0, commas=False)
@@ -3056,7 +3056,7 @@ Verify your understanding of different batching mechanics:
 - [ ] **Waste ratio**: explain when refilling completed slots can eliminate the static-batch padding waste ($1 - \BatchMeanOutputLength/\BatchMaxOutputLength$), and why low arrivals or KV-cache pressure prevent perfect slot reuse.
 - [ ] **Adaptive batching**: explain when shrinking the formation window reduces waiting without sacrificing throughput, and why it cannot resolve overload when arrivals exceed service capacity.
 - [ ] **RecSys bottleneck**: in feature-parallel batching for RecSys, identify whether the primary fleet-stack bottleneck is the GPU's Tensor Cores or the distributed Embedding Store's memory bandwidth.
-- [ ] **Batching limit**: explain why free HBM, not Tensor Core compute, often caps the achievable batch size for long-context LLM serving.
+- [ ] **Test-time compute**: explain how parallel candidate search during test-time reasoning increases a replica's concurrent slot demand even when arrival rate stays fixed.
 
 :::
 
@@ -3460,6 +3460,8 @@ Under maximum-size reservation, the manager reserves 10 lockers for each guest. 
 With on-demand allocation, each suitcase receives any free locker, and a directory records which lockers belong to each guest. At the current one-suitcase occupancy, the room can accommodate 100 guests. Additional suitcases still consume real capacity; allocation does not remove the storage limit.
 
 :::
+
+In an LLM serving engine, each guest's directory becomes a per-sequence block table, and each locker becomes a fixed-token slice of HBM allocated only as new tokens arrive.
 
 ::: {#dfn-inference-pagedattention .callout-definition title="PagedAttention"}
 
@@ -4924,7 +4926,7 @@ This comparison uses a conservative decimal HBM budget matching the A100 namepla
 
 ### Selecting a quantization format {#sec-inference-scale-quantization-selection-guidelines-24fb}
 
-Choosing a quantization format from datasheet TFLOPS or nominal bit width alone fails when a 4-bit checkpoint degrades task accuracy on production prompts or when a smaller replica completes fewer SLO-compliant tokens per GPU. The final selection must satisfy memory, quality, and latency requirements together. Native support makes a precision path a candidate without establishing the model's quality at that precision, and no universal quality ordering separates 4-bit weight-only from 8-bit weight-and-activation quantization, so both are evaluated against the same task baseline. For compute-bound prefill, W8A8 offers the illustrated `{python} W8A8Ceilings.int8_ratio_mult_str` INT8 compute ceiling; for decode dominated by weight reads, W4A16 can cut the weight payload by up to 4$\times$, provided conversion and other costs leave a useful saving.
+Choosing a quantization format from datasheet TFLOP/s or nominal bit width alone fails when a 4-bit checkpoint degrades task accuracy on production prompts or when a smaller replica completes fewer SLO-compliant tokens per GPU. The final selection must satisfy memory, quality, and latency requirements together. Native support makes a precision path a candidate without establishing the model's quality at that precision, and no universal quality ordering separates 4-bit weight-only from 8-bit weight-and-activation quantization, so both are evaluated against the same task baseline. For compute-bound prefill, W8A8 offers the illustrated `{python} W8A8Ceilings.int8_ratio_mult_str` INT8 compute ceiling; for decode dominated by weight reads, W4A16 can cut the weight payload by up to 4$\times$, provided conversion and other costs leave a useful saving.
 
 These precision choices affect cost per million useful tokens. The A100 residency calculation explains why fewer GPUs become possible at all, because INT4 weights shrink the resident payload enough for a 70B replica to fit on fewer devices. @Tbl-quantization-serving-cost isolates the effect of GPU count by assuming equal per-GPU prices and the same completed token rate across three configurations. Under that contract, reducing the number of billed GPUs reduces cost proportionally. The calculation does not establish that the smaller replicas sustain the same rate or meet the same quality and latency targets.
 
@@ -6739,6 +6741,8 @@ class ColdStartTimeline:
 **Systems lesson**: Cold-start latency depends on artifact size, effective storage bandwidth, provisioning delay, compilation, and warmup. The controller must measure this distribution and begin provisioning far enough ahead that its high percentile fits inside the forecast horizon.
 
 :::
+
+Because a multi-minute cold start outlasts typical interactive SLO tolerances, a purely reactive autoscaler cannot protect latency during predictable traffic ramps; the controller must instead schedule provisioning ahead of expected demand.
 
 ::: {#exmp-inference-predictive-scaling-traffic .callout-example title="Predictive scaling for traffic"}
 
