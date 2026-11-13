@@ -107,8 +107,43 @@ def main(folder):
         })
     out = (Path(__file__).resolve().parents[4] / "books" / "vol3" / "01_introduction"
            / "data" / "swe_bench_verified_mini_v1_sonnet4_run.csv")
-    with out.open("w", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=list(rows[0]))
+    with out.open("w", newline="", encoding="utf-8") as f:
+        f.write(
+            "# Figures: auxiliary (slides/vol3/01_introduction/images/extract_run.py)\n"
+            "# Source: SWE-bench Verified (@jimenez2024swebench) public leaderboard submission "
+            "20250726_mini-v1.0.0_claude-sonnet-4-20250514 (mini-swe-agent v1.0.0 with Claude Sonnet 4, @yang2024sweagent)\n"
+            "# Locator: evaluation/verified/20250726_mini-v1.0.0_claude-sonnet-4-20250514/per_instance_details.json "
+            "joined with s3://swe-bench-submissions/bash-only/20250726_mini-v1.0.0_claude-sonnet-4-20250514/trajs/<instance_id>/<instance_id>.traj.json\n"
+            "# URL: https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20250726_mini-v1.0.0_claude-sonnet-4-20250514\n"
+            "# License: Factual-Extract (per-task call, cost, outcome, and bash-observation counts extracted from "
+            "public SWE-bench Verified submission logs; SWE-bench framework MIT)\n"
+            "# Verified: 2026-11-12\n"
+            "# Epistemic: measured (per-instance call counts, dollar cost, resolution outcome, and shell-observation counts "
+            "across all 500 SWE-bench Verified tasks; command-class columns are regex pattern classifications)\n"
+            "# Method: scripted (extracted via slides/vol3/01_introduction/images/extract_run.py joining "
+            "per_instance_details.json with 500 trajectory JSON logs)\n"
+            "# Generator: python3 slides/vol3/01_introduction/images/extract_run.py\n"
+            "# Computation: Joined model_calls, cost_usd, and resolved flag from per_instance_details.json with "
+            "exit_status, observation counts, error markers, command-category counts, and diff file counts parsed from "
+            "the 500 trajectory logs in s3://swe-bench-submissions/bash-only/20250726_mini-v1.0.0_claude-sonnet-4-20250514/trajs/.\n"
+            "# Columns:\n"
+            "#   instance_id: string [identifier] — SWE-bench Verified repository-issue task identifier\n"
+            "#   model_calls: integer [call] — Total model API calls recorded for the task trajectory\n"
+            "#   cost_usd: number [USD] — Recorded model inference dollar cost for the task run\n"
+            "#   resolved: integer [indicator] — Binary resolution outcome (1 if evaluation tests passed, 0 otherwise)\n"
+            "#   exit_status: string [label] — Agent harness termination status string recorded in trajectory info\n"
+            "#   observations: integer [count] — Shell command observations carrying a returncode tag in the transcript\n"
+            "#   nonzero_exit: integer [count] — Shell command observations returning a non-zero exit code\n"
+            "#   truncated: integer [count] — Shell command observations truncated for exceeding the harness output limit\n"
+            "#   syntax_error_seen: integer [indicator] — Binary flag (1 if SyntaxError or IndentationError appeared in any observation, 0 otherwise)\n"
+            "#   cmd_read: integer [count] — Assistant bash commands classified by regex as read-only inspection\n"
+            "#   cmd_write: integer [count] — Assistant bash commands classified by regex as working-tree file modifications\n"
+            "#   cmd_run: integer [count] — Assistant bash commands classified by regex as code or test execution\n"
+            "#   cmd_net: integer [count] — Assistant bash commands classified by regex as network or package-install invocations\n"
+            "#   files_in_submission: integer [file] — Files modified in the submitted git diff patch\n"
+            "# Notes: Command classes (cmd_read, cmd_write, cmd_run, cmd_net) classify bash commands by regex pattern and are approximate.\n"
+        )
+        w = csv.DictWriter(f, fieldnames=list(rows[0]), lineterminator="\n")
         w.writeheader()
         w.writerows(rows)
     print(f"{len(rows)} tasks -> {out.name}")
