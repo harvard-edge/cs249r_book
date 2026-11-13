@@ -387,7 +387,7 @@ Queueing adds a further conflict between utilization and latency, because a flee
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Scenarios
-from mlsysim.fmt import check, fmt
+from mlsysim.fmt import check, fmt_multiple, fmt_percent
 
 class QueuingTheory:
     # ┌── 1. LOAD ──────────────────────────────────────────
@@ -403,24 +403,29 @@ class QueuingTheory:
     check(abs(wq_uniform - 4) < 1e-9, f"Expected 4, got {wq_uniform}")
     check(abs(wq_ml - 20) < 1e-9, f"Expected 20, got {wq_ml}")
     # ┌── 4. OUTPUT ────────────────────────────────────────
-    wq_uniform_str = fmt(wq_uniform, precision=0)
-    wq_ml_str = fmt(wq_ml, precision=0)
+    wq_uniform_mult_str = fmt_multiple(wq_uniform, precision=0, commas=False)
+    wq_ml_mult_str = fmt_multiple(wq_ml, precision=0, commas=False)
     rho_pct_str = fmt_percent(rho, precision=0, commas=False, style='prose')
 ```
 
 ::: {#nbk-fleet-orchestration-queuing-theory-gpu-clusters .callout-notebook title="The queuing theory of GPU clusters"}
 
-To isolate the effect of runtime variability, consider an M/G/1 queue with first-come-first-served service. Kendall notation names the queue by its arrival process, service-time distribution, and server count: M for memoryless (Poisson) arrivals, G for a general service-time distribution, and 1 for a single server. Treating a fleet as one server means modeling its aggregate capacity as a single resource that works through one job at a time, with each job's service time equal to its GPU-hours divided by the fleet's GPU count. That mapping ignores gang packing and parallel admission, so it isolates the variability effect rather than predicting a real fleet's wait. Jobs arrive according to a Poisson process $(\ArrivalRate)$, and independent service times follow a general distribution $(\Glyph{G})$ with mean $1/\ServiceRate$ and finite standard deviation $\ServiceTimeStandardDeviation$. When offered load is below service capacity, the Pollaczek-Khinchine formula gives the steady-state expected waiting time in the queue $(\QueueWaitTime)$:
+**Problem**: To isolate the effect of runtime variability, consider an M/G/1 queue with first-come-first-served service at `{python} QueuingTheory.rho_pct_str` offered load $(\ServingUtilization = 0.8)$. Kendall notation names the queue by its arrival process, service-time distribution, and server count: M for memoryless (Poisson) arrivals, G for a general service-time distribution, and 1 for a single server. Treating a fleet as one server means modeling its aggregate capacity as a single resource that works through one job at a time, with each job's service time equal to its GPU-hours divided by the fleet's GPU count. That mapping ignores gang packing and parallel admission, so it isolates the variability effect rather than predicting a real fleet's wait. How many average job durations does a job wait in the queue under an exponential workload $(\ServiceTimeVariationCoefficient = 1)$ versus a high-variability mixed ML queue $(\ServiceTimeVariationCoefficient = 3)$?
+
+**Math**: Jobs arrive according to a Poisson process $(\ArrivalRate)$, and independent service times follow a general distribution $(\Glyph{G})$ with mean $1/\ServiceRate$, finite standard deviation $\ServiceTimeStandardDeviation$, and **coefficient of variation**\index{Coefficient of variation!definition} $\ServiceTimeVariationCoefficient= \ServiceTimeStandardDeviation\ServiceRate$. When offered load $\ServingUtilization = \ArrivalRate/\ServiceRate$ is below capacity, the Pollaczek-Khinchine formula gives expected queue wait $(\QueueWaitTime)$ in multiples of average job duration $1/\ServiceRate$:
 
 $$ \frac{\QueueWaitTime}{1/\ServiceRate} = \frac{\ServingUtilization}{1-\ServingUtilization} \cdot \frac{1+\ServiceTimeVariationCoefficient^2}{2} $$
 
-Here, $\ServingUtilization = \ArrivalRate/\ServiceRate$ represents offered load relative to the model's service capacity, $1/\ServiceRate$ is the average job duration, and $\ServiceTimeVariationCoefficient= \ServiceTimeStandardDeviation\ServiceRate$ is the **coefficient of variation**\index{Coefficient of variation!definition} of job duration. The right-hand side is therefore the waiting time expressed as a multiple of the average job duration; a fleet's measured GPU-busy percentage is not automatically this model's load.
+At $\ServingUtilization = 0.8$, the utilization factor is $0.8 / (1 - 0.8) = 4$:
 
-An exponential service-time distribution provides a reference case, yielding $\ServiceTimeVariationCoefficient\approx 1$. A mixed ML queue can have much greater variability when short debugging jobs measured in minutes share capacity with training runs measured in weeks. The representative $\ServiceTimeVariationCoefficient=3$ calculation in this callout captures that variability without claiming a universal fleet constant. The impact on wait times is multiplicative. For the scheduling argument here, the single-server multiplier is sufficient; @sec-appdx-inference-scale-queuing-theory-batched-inference-bbf0 develops an explicit single-server surrogate for batched serving and explains why multi-server, finite-buffer M/G/c/K systems require additional modeling.
+- Exponential workload $(\ServiceTimeVariationCoefficient = 1)$: variability factor $(1 + 1^2)/2 = 1$, giving $\QueueWaitTime / (1/\ServiceRate) = 4 \times 1 =$ `{python} QueuingTheory.wq_uniform_mult_str` the average job duration.
+- Mixed ML workload $(\ServiceTimeVariationCoefficient = 3$, where short debugging runs share capacity with multi-week training jobs): variability factor $(1 + 3^2)/2 = 5$, giving $\QueueWaitTime / (1/\ServiceRate) = 4 \times 5 =$ `{python} QueuingTheory.wq_ml_mult_str` the average job duration.
 
-At `{python} QueuingTheory.rho_pct_str` utilization $(\ServingUtilization = 0.8)$: with an exponential workload $(\ServiceTimeVariationCoefficient= 1)$, $\QueueWaitTime=$ `{python} QueuingTheory.wq_uniform_str` $\times$ the average job duration. With an illustrative high-variability workload $(\ServiceTimeVariationCoefficient= 3)$, $\QueueWaitTime=$ `{python} QueuingTheory.wq_ml_str` $\times$ the average job duration. In this M/G/1 model, service-time variability multiplies waiting time at the same offered load. The example does not prescribe a universal GPU-utilization threshold or model gang placement directly. It explains why capacity planning needs the service-time distribution and queue-delay objective as well as average load.
+**Systems insight**: Service-time variability multiplies waiting time at the same offered load (`{python} QueuingTheory.wq_ml_mult_str` versus `{python} QueuingTheory.wq_uniform_mult_str`). A fleet's measured GPU-busy percentage is not automatically this model's load, and @sec-appdx-inference-scale-queuing-theory-batched-inference-bbf0 develops an explicit single-server surrogate for batched serving while explaining why multi-server, finite-buffer M/G/c/K systems require additional modeling. Capacity planning therefore needs the service-time distribution and queue-delay objective alongside average load.
 
 :::
+
+Throughput, tail latency, fairness, and cost efficiency therefore pull the cluster in competing directions even before multi-resource packing or network topology enter the picture. Before a scheduler can balance those competing objectives, however, it must enforce the hard feasibility constraints that determine whether an allocated job can execute at all.
 
 ## Core Allocation Constraints {#sec-fleet-orchestration-core-allocation}
 
@@ -735,7 +740,7 @@ Where bin packing and device sharing govern how requests fit onto individual nod
 ↩ Ring and tree AllReduce schedules, each of which completes only after every rank's contribution has been reduced, are established in @sec-communication-collective-operations-collective-operations-allreduce-algorithms-7545.
 :::
 
-The partial-allocation pattern is a hold-and-wait deadlock\index{Deadlock!hold-and-wait},[^fn-deadlock-scheduling-cycle] and its price is the whole allocation for as long as the cycle persists. At the scale of the chapter's reference workload, two `{python} ClusterEconomicsContext.gang_job_gpus_str`-GPU gangs that have each acquired `{python} ClusterEconomicsContext.gang_held_gpus_str` GPUs from a pool too small to complete either one burn about `{python} ClusterEconomicsContext.gang_idle_burn_str` per hour apiece. The limiting case is two jobs that each request the entire cluster, the example OpenAI used to motivate group admission (war story \ref{ws-fleet-orchestration-openai-gang-scheduling}). On the `{python} ClusterEconomicsContext.cluster_size_str`-GPU cluster, a deadlock that strands every device wastes `{python} ClusterEconomicsContext.cluster_hourly_cost_str` per hour at the chapter's rate while producing no progress for either job. Measured against the stake computed at the start of the chapter, raising utilization from `{python} ClusterEconomicsContext.util_low_pct_str` to `{python} ClusterEconomicsContext.util_high_pct_str` recovers about `{python} ClusterEconomicsContext.daily_gain_str` per day in equivalent capacity value. About `{python} ClusterEconomicsContext.deadlock_hours_str` hours of such a deadlock therefore erase a full day of that gain. Gang scheduling does not create the gain, but it protects it. For a rigid job $\RigidGangJob$ requiring $\DeviceCount$ GPUs, the scheduler must grant all $\DeviceCount$ GPUs atomically or leave the job queued without a partial allocation. This all-or-nothing rule removes hold-and-wait for the resources covered by that allocation; it does not prevent later deadlocks in application code or auxiliary resources.
+The partial-allocation pattern is a hold-and-wait deadlock\index{Deadlock!hold-and-wait},[^fn-deadlock-scheduling-cycle] and its price is the whole allocation for as long as the cycle persists. At the scale of the chapter's reference workload, two `{python} ClusterEconomicsContext.gang_job_gpus_str`-GPU gangs that have each acquired `{python} ClusterEconomicsContext.gang_held_gpus_str` GPUs from a pool too small to complete either one burn about `{python} ClusterEconomicsContext.gang_idle_burn_str` per hour apiece. The limiting case is two jobs that each request the entire cluster, the example OpenAI used to motivate group admission (example \ref{exmp-fleet-orchestration-openai-gang-scheduling}). On the `{python} ClusterEconomicsContext.cluster_size_str`-GPU cluster, a deadlock that strands every device wastes `{python} ClusterEconomicsContext.cluster_hourly_cost_str` per hour at the chapter's rate while producing no progress for either job. Measured against the stake computed at the start of the chapter, raising utilization from `{python} ClusterEconomicsContext.util_low_pct_str` to `{python} ClusterEconomicsContext.util_high_pct_str` recovers about `{python} ClusterEconomicsContext.daily_gain_str` per day in equivalent capacity value. About `{python} ClusterEconomicsContext.deadlock_hours_str` hours of such a deadlock therefore erase a full day of that gain. Gang scheduling does not create the gain, but it protects it. For a rigid job $\RigidGangJob$ requiring $\DeviceCount$ GPUs, the scheduler must grant all $\DeviceCount$ GPUs atomically or leave the job queued without a partial allocation. This all-or-nothing rule removes hold-and-wait for the resources covered by that allocation; it does not prevent later deadlocks in application code or auxiliary resources.
 
 [^fn-deadlock-scheduling-cycle]: **Hold-and-wait**\index{Deadlock!Coffman conditions}: One of the four Coffman conditions (mutual exclusion, hold-and-wait, no preemption, and circular wait), all of which must hold for deadlock to occur [@coffman1971]. Gang scheduling removes hold-and-wait through atomic allocation, which is why it prevents this deadlock by construction; the price is reduced packing flexibility.
 
@@ -904,15 +909,11 @@ class OpenAiK8sScale:
     nodes_str = fmt(nodes, precision=0)
 ```
 
-::: {#ws-fleet-orchestration-openai-gang-scheduling .callout-war-story title="OpenAI's gang-scheduling example (2021)"}
+::: {#exmp-fleet-orchestration-openai-gang-scheduling .callout-example title="OpenAI's gang-scheduling example (2021)"}
 
-**Context**: OpenAI scaled Kubernetes clusters to `{python} OpenAiK8sScale.nodes_str` nodes for workloads including GPT-3, CLIP, and DALL-E. Its account explains that MPI-coordinated optimizer groups needed all members scheduled before training could progress [@sigler2021openai_kubernetes].
+**Scenario**: OpenAI scaled Kubernetes clusters to `{python} OpenAiK8sScale.nodes_str` nodes for workloads including GPT-3, CLIP, and DALL-E. Its account explains that MPI-coordinated optimizer groups needed all members scheduled before training could progress [@sigler2021openai_kubernetes].
 
-**Mechanism**: The account illustrates the risk with two experiments each requesting the entire cluster. Incremental pod placement could allocate half the capacity to each, leaving neither with a complete group.
-
-**Impact**: In that example, both jobs hold capacity without making progress. It demonstrates the deadlock mechanism rather than documenting a particular pair of stalled production runs.
-
-**Fix**: OpenAI reports adopting the coscheduling plugin to add group-aware admission to the Kubernetes scheduler.
+**Diagnosis**: The account illustrates the risk with two experiments each requesting the entire cluster. Incremental pod placement could allocate half the capacity to each, leaving neither with a complete group so both jobs hold capacity without making progress. It demonstrates the deadlock mechanism rather than documenting a particular pair of stalled production runs, and OpenAI reports adopting the coscheduling plugin to add group-aware admission to the Kubernetes scheduler.
 
 **Systems lesson**: Distributed ML scheduling must encode the job's execution semantics. For MPI-style training, "some pods scheduled" is not partial progress; it is wasted allocation. Production schedulers need gang scheduling, quota controls, and workload-aware policies rather than generic pod placement alone.
 
@@ -1326,13 +1327,13 @@ Evaluating all possible placements for a 256-GPU job across a 10,000-GPU cluster
 
 **Scenario**: Consider a 256-GPU training job using 3D parallelism: 8-way tensor parallel, 4-way pipeline parallel, 8-way data parallel.
 
-**Good placement**\index{Good placement!definition} (topology-aware):
+**Good placement** (topology-aware):
 
 - Tensor parallel groups: 32 groups of 8 GPUs, each confined to one 8-GPU node (NVLink: `{python} FleetTopologyInterconnect.nvlink_h100_perdir_gb_per_s_str` per direction)
 - Pipeline stages: 4 consecutive nodes within the same rack (1 switch hop, InfiniBand: `{python} FleetTopologyInterconnect.ib_ndr_gb_per_s_str` per direction)
 - Data parallel replicas: 8 racks (3 switch hops through leaf-spine-leaf paths)
 
-**Bad placement**\index{Bad placement!definition} (topology-unaware):
+**Bad placement** (topology-unaware):
 
 - Tensor parallel groups split across 2 nodes (InfiniBand instead of NVLink)
 - Pipeline stages scattered across racks (3 switch hops instead of 1)
@@ -1366,13 +1367,11 @@ Cluster topology is an operating state, not a fixed schematic. Hardware failures
 
 A checkpoint-and-restart migration spends time saving state, releasing the old allocation, obtaining a new one, and restoring execution. Its value depends on measured transition cost and remaining work. If migration takes 10 minutes and removes a sustained 20 percent throughput loss, each later minute of training recovers a fifth of a minute of progress, so the move pays back in less than an hour of subsequent training. That comparison assumes a healthy destination is available and the gain persists. A practical policy also accounts for queue delay and requires evidence that placement causes the slowdown, such as rising collective time on the affected path, before it moves the job.
 
-::: {#ws-fleet-orchestration-health-checks .callout-war-story title="Performance-aware health checks (2021)"}
+::: {#exmp-fleet-orchestration-health-checks .callout-example title="Performance-aware health checks (2021)"}
 
-**Context**: OpenAI's account of scaling Kubernetes describes automated health checks that remove misbehaving nodes from the schedulable pool [@sigler2021openai_kubernetes].
+**Scenario**: OpenAI's account of scaling Kubernetes describes automated health checks that remove misbehaving nodes from the schedulable pool [@sigler2021openai_kubernetes].
 
-**Mechanism**: Passive checks monitor reachability, disks, and GPU errors, but error codes do not expose every hardware or driver problem. Active GPU tests exercise the device before admitting ordinary workloads and periodically during its lifetime.
-
-**Fix**: Nodes enter with a preflight taint, a node marking that repels ordinary pods, which blocks normal scheduling until the tests pass. Failed passive checks cordon a node, marking it unschedulable for new work; more serious failures can trigger eviction requests.
+**Diagnosis**: Passive checks monitor reachability, disks, and GPU errors, but error codes do not expose every hardware or driver problem. Active GPU tests exercise the device before admitting ordinary workloads and periodically during its lifetime. Nodes enter with a preflight taint, a node marking that repels ordinary pods, which blocks normal scheduling until the tests pass. Failed passive checks cordon a node, marking it unschedulable for new work; more serious failures can trigger eviction requests.
 
 **Systems lesson**: Reachability alone is not a sufficient admission test. A scheduler needs health evidence that reflects the resources its jobs depend on, together with a policy for removing suspect nodes from placement.
 
@@ -2324,7 +2323,7 @@ Consider training a `{python} SpotTrainingEconomics.model_params_b_str` paramete
 
 **On-Demand**\index{On-demand capacity!cost comparison}: `{python} SpotTrainingEconomics.spot_gpus_str` $\times$ `{python} SpotTrainingEconomics.spot_run_hours_str` $\times$ `{python} SpotTrainingEconomics.on_demand_rate_str` = `{python} SpotTrainingEconomics.on_demand_cost_str`
 
-**Spot**\index{Spot!definition} (`{python} SpotTrainingEconomics.spot_discount_pct_str` discount, `{python} SpotTrainingEconomics.checkpoint_overhead_pct_str` checkpoint overhead, `{python} SpotTrainingEconomics.interruptions_per_day_str` per day of useful training with `{python} SpotTrainingEconomics.restart_min_str` restart):
+**Spot**\index{Spot instances!cost comparison} (`{python} SpotTrainingEconomics.spot_discount_pct_str` discount, `{python} SpotTrainingEconomics.checkpoint_overhead_pct_str` checkpoint overhead, `{python} SpotTrainingEconomics.interruptions_per_day_str` per day of useful training with `{python} SpotTrainingEconomics.restart_min_str` restart):
 
 - Base cost: `{python} SpotTrainingEconomics.spot_gpus_str` $\times$ `{python} SpotTrainingEconomics.spot_run_hours_str` $\times$ `{python} SpotTrainingEconomics.spot_rate_str` = `{python} SpotTrainingEconomics.spot_base_cost_str`
 - Checkpoint overhead: `{python} SpotTrainingEconomics.checkpoint_overhead_pct_math` $\times$ `{python} SpotTrainingEconomics.spot_run_hours_str` = `{python} SpotTrainingEconomics.checkpoint_extra_hours_str`
@@ -3575,7 +3574,7 @@ Schedulers that ignore connectivity can place communication-intensive groups acr
 
 ::: {.fallacy-pitfall}
 
-**Pitfall**: *Using elastic training to avoid gang-scheduling decisions.*
+**Fallacy**: *Elastic training eliminates the need for gang scheduling.*
 
 Elastic training complements gang scheduling by moving between viable execution groups. With a fixed 8-way tensor-parallel layout, each group still requires eight workers; changing the number of data-parallel replicas does not relax that requirement. A runtime that changes the tensor or pipeline layout must also redistribute state and establish a new viable group. The scheduler must honor the supported resize granularity, atomic admission requirements, and placement budget for each configuration. Elasticity adds feasible choices; it does not make an incomplete group productive or an arbitrary placement efficient.
 

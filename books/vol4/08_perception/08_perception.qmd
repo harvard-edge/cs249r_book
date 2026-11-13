@@ -2351,12 +2351,14 @@ class NavObservationRecord:
     upper_age_str = fmt_latency(upper_age, unit=millisecond, precision=1)
     refuse_threshold_str = fmt_latency(refuse_threshold, unit=millisecond, precision=1)
     f_frame_str = fmt_frequency(f_frame, unit=hertz, precision=0)
+    t_readout_str = fmt_latency(camera.readout_time.to(millisecond), unit=millisecond, precision=1)
     dx_sync_str = fmt_length(dx_sync, unit=millimeter, precision=1)
 ```
 
 | Record field                               | Meaning                                                                                                                 | Consumer check                                                                                     | Navigation camera                                                                                                                                                           |
 |:-------------------------------------------|:------------------------------------------------------------------------------------------------------------------------|:---------------------------------------------------------------------------------------------------|:----------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `capture_timestamp_ns`, `capture_clock_id` | Exposure midpoint in one shared, monotonic capture clock                                                                | Convert to safety microcontroller (MCU) time with a valid bounded-skew mapping before checking age | Trigger edge plus $\ExposureDuration/2$ (top-row exposure midpoint) on clock `cam_nav`; dispatched `{python} NavObservationRecord.t_age_str` later (@tbl-08-latency-budget) |
+| `reference_row_idx`, `readout_duration_us` | Reference scan line for `capture_timestamp_ns` and frame readout span $\SensorReadoutTime$                              | Shift per-row timestamp or evaluate age under the declared top-row vs. middle-row convention       | Top row (`0`) with `{python} NavObservationRecord.t_readout_str` readout span (stopping budget); middle row for $\SignalHandoff_1$                                          |
 | `sync_error_ns`                            | Bound on capture-to-MCU clock conversion error                                                                          | Add to worst-case age; refuse if missing or expired                                                | `{python} NavObservationRecord.eps_sync_str`, so the upper age at dispatch is `{python} NavObservationRecord.upper_age_str`                                                 |
 | `sequence_index`                           | Monotonic camera frame counter                                                                                          | Detect gaps and reordering                                                                         | One count per frame at `{python} NavObservationRecord.f_frame_str`                                                                                                          |
 | `sensor_frame_id`                          | Transform-tree key and calibration revision                                                                             | Select the valid extrinsic transform                                                               | `nav_cam` with its calibration revision                                                                                                                                     |
@@ -2415,7 +2417,7 @@ Passing contract triage and computing state updates still does not make an obser
 
 ::: {.fallacy-pitfall}
 
-**Fallacy**: *Accepting an observation because its semantic classification confidence is high, regardless of its age.*
+**Fallacy**: *High semantic classification confidence makes an observation safe to act on regardless of its age.*
 
 Consider a mobile manipulator that receives an observation indicating with high semantic confidence that the rack end ahead is clear. If a scheduling stall in the vision pipeline\index{Perception!pipeline latency} delivers that observation several frames late, a warehouse worker who stepped into the aisle after the camera exposure will not appear in the image. The confidence score\index{Confidence score} describes only the classifier's assessment of past sensory input, not current physical clearance. Treating an overdue packet as present state risks commanding actuators directly into occupied space. The perception interface must verify measurement age against its freshness limit (@sec-perception-observation-contract)\index{Observation!freshness limit} and reject observations that exceed the threshold. Any state propagation\index{State estimation!propagation} that continues without fresh data must also inflate kinematic uncertainty covariances\index{Kinematics!uncertainty}, incorporating heavy-tailed residuals or reachability bounds on dynamic obstacles. This growth forces downstream controllers to contract their safety envelopes\index{Safety!envelope} and slow the robot as sensory evidence ages. High softmax confidence reflects internal model certainty on an acquired image, but it guarantees neither temporal freshness nor true physical clearance.
 
@@ -2431,9 +2433,17 @@ Suppose two cameras on the mobile manipulator observe the same rack upright whil
 
 ::: {.fallacy-pitfall}
 
-**Pitfall**: *Inferring a critical read's deadline from average camera bandwidth.*
+**Fallacy**: *Average camera bandwidth utilization bounds single-frame capture-to-dispatch latency.*
 
 A comfortable average utilization figure says nothing about how long a critical read stalls behind synchronized sensor capture and inference bursts. On the mobile manipulator, safety permission checks execute on a dedicated real-time microcontroller reading from local memory, shielding the immediate control path from host bus contention. The danger instead appears on the application processor, where concurrent DMA transfers, memory bus saturation, and inference bursts delay the sensor ingestion pipeline (@sec-perception-cost-ingestion). This contention inflates the capture-to-dispatch age of the perceptual observation and stretches the renewal interval between successive updates. System architects must verify worst-case capture-to-dispatch age and end-to-end renewal intervals under peak burst conditions rather than relying on average throughput metrics.
+
+:::
+
+::: {.fallacy-pitfall}
+
+**Pitfall**: *Treating neural depth network outputs as calibrated geometric covariances without empirical residual validation.*
+
+Monocular depth estimation backbones and bird's-eye-view (BEV) lifting transformers output continuous depth fields or discrete depth-bin categorical distributions. Engineers often mistake these softmax spreads or secondary network confidence heads for calibrated geometric uncertainties ($\BodyFramePointCovariance$), passing them directly into a downstream state estimator or safety clearance check. In practice, raw neural confidence scores correlate poorly with true physical error distributions. When presented with unfamiliar textures, specular reflections, or occluding object silhouettes, depth networks produce gross multimodal outliers that deviate by tens of standard deviations from physical ground truth. Downstream clearance insets ($\ClearanceInset$) must never rely on raw neural variance. Safe execution requires empirical validation against heavy-tailed residual distributions and hard spatial bounds cross-verified by active ranging sensors such as LiDAR or radar.
 
 :::
 
@@ -2442,14 +2452,6 @@ A comfortable average utilization figure says nothing about how long a critical 
 **Fallacy**: *Assuming an end-to-end Vision-Language-Action (VLA) policy implicitly learns to compensate for rolling shutter and sensor latency without explicit temporal tokenization.*
 
 Deep imitation learning often assumes that large Vision-Language-Action (VLA) policies trained on extensive robot teleoperation datasets will automatically learn action corrections that compensate for sensor distortion and communication latency. In practice, demonstration datasets aggregate trajectories collected across fluctuating chassis velocities, camera frame rates, and host bus loads. If the model receives only raw pixel arrays without capture timestamps or row readout schedules, it cannot distinguish true physical obstacle geometry from rolling-shutter scanline shear or motion lag. Unresolved temporal ambiguity degrades closed-loop trajectory tracking and induces control oscillations. The quadratic compounding bound of @eq-data-quadratic-drift describes how per-step imitation error grows over a horizon, but it assumes a stationary Markov process rather than unmodeled phase lags and sensor dynamics. Providing explicit timing metadata, such as capture time deltas ($\FiniteChange \TimeInstant = \CurrentWallClockTime - \TimeInstant_0$), readout offsets, and forward-propagated kinematic states, gives the network the causal context required to resolve these distortions. Even with temporal tokenization, empirical evaluation must verify closed-loop stability, and independent out-of-band safety permission checks remain mandatory.
-
-:::
-
-::: {.fallacy-pitfall}
-
-**Pitfall**: *Treating neural depth network outputs as calibrated geometric covariances without empirical residual validation.*
-
-Monocular depth estimation backbones and bird's-eye-view (BEV) lifting transformers output continuous depth fields or discrete depth-bin categorical distributions. Engineers often mistake these softmax spreads or secondary network confidence heads for calibrated geometric uncertainties ($\BodyFramePointCovariance$), passing them directly into a state estimator such as an extended Kalman filter or a safety filter such as a control barrier function. In practice, raw neural confidence scores correlate poorly with true physical error distributions. When presented with unfamiliar textures, specular reflections, or occluding object silhouettes, depth networks produce gross multimodal outliers that deviate by tens of standard deviations from physical ground truth. Downstream clearance insets ($\ClearanceInset$) must never rely on raw neural variance. Safe execution requires empirical validation against heavy-tailed residual distributions and hard spatial bounds cross-verified by active ranging sensors such as LiDAR or radar.
 
 :::
 

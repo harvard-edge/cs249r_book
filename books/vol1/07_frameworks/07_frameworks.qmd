@@ -1964,17 +1964,9 @@ The breakeven arithmetic treats the per-run saving as given, but its size depend
 | **ResNet-50 (compute-bound)** | $\frac{\Operations}{\PeakRate \cdot \EfficiencyHw}$ (Compute)            | Compiled dense kernels                          | Regular dense kernels benefit from layout selection, precision lowering, and backend specialization; fusion helps most in surrounding memory- or launch-bound regions               |
 | **GPT-2 (bandwidth-bound)**   | $\frac{\DataVolume}{\Bandwidth}$ (Memory Bandwidth)                      | Fused attention + graph compilation             | Fused attention eliminates intermediate activation round-trips, while compilation removes kernel launch overhead; streaming parameter and KV-cache traffic remain bandwidth-limited |
 | **DLRM (capacity-bound)**     | Capacity first, then $\frac{\DataVolume}{\Bandwidth}+\Latency$ (gathers) | Specialized lookup kernels and measured capture | Irregular gathers limit some optimizations; measure compilation benefits in dense regions and surrounding dispatch                                                                  |
-| **DS-CNN (power-bound)**      | Energy and memory capacity (feasibility limits)                          | Static-arena microcontroller runtime            | Fixed memory and a small native runtime must fit the target before latency can be optimized                                                                                         |
+| **KWS (DS-CNN, power-bound)** | Energy and memory capacity (feasibility limits)                          | Static-arena microcontroller runtime            | Fixed memory and a small native runtime must fit the target before latency can be optimized                                                                                         |
 
 : **Framework Execution Strategy by Workload**: Each workload archetype pairs with a candidate execution strategy aligned to its dominant iron law term. Fusion cannot lift the bandwidth-bound row's weight-streaming limit; only larger batches or lower precision move it. For the power-bound row, memory capacity is a feasibility threshold that must be met before any iron law term matters. For the capacity-bound row, the bandwidth and latency are those of irregular embedding gathers and the network exchange that follows them, not the streaming peak. {#tbl-framework-archetype-strategy tbl-colwidths="[17,28,22,33]"}
-
-::: {#lhs-frameworks-framework-strategy-by-archetype .callout-lighthouse title="Framework strategy by archetype"}
-
-The four recurring archetypes in @tbl-framework-archetype-strategy follow one rule. Dispatch and fusion savings are largest in overhead-bound and memory-bound regions, while dense compute-bound kernels gain mainly from layout, precision, and backend specialization, and usually by less.
-
-**Systems insight**: In the illustrative scenario, compute-bound workloads such as the ResNet-50 row in @tbl-training-benchmark gain mainly from layout selection and precision lowering in their dense kernels, and fusion helps them chiefly in the surrounding elementwise and normalization regions. Bandwidth-bound workloads such as small-batch GPT-2 generation require distinguishing intermediate activation traffic from parameter streaming. Fusing attention kernels eliminates round-trips for transient activation tensors and removes dispatch latency, but memory bandwidth still limits the streaming of model weights and key-value caches unless batching increases arithmetic intensity. Capacity-bound workloads such as DLRM can gain less when irregular embedding lookups leave limited compiler scope.
-
-:::
 
 #### The dispatch overhead law {#sec-ml-frameworks-dispatch-overhead-law-9e0a}
 
@@ -4415,13 +4407,7 @@ The two hypothetical measurements establish latency and memory feasibility only 
 
 #### Model requirements {#sec-ml-frameworks-model-requirements-ca8b}
 
-For the fixed-shape vision model, the first filter is successful conversion of every required operation with acceptable numerical results. On the PyTorch path, every operator in the exported graph needs an ONNX operator and an ONNX Runtime CPU kernel; on the TensorFlow path, every operator must convert to one that TensorFlow Lite supports. Training support is needed in the development framework but not in the deployed runtime. TensorFlow\index{TensorFlow!full framework}, TensorFlow Lite\index{TensorFlow Lite!mobile deployment}, and TensorFlow Lite Micro\index{TensorFlow Lite Micro!microcontroller deployment} expose different operator and training capabilities. A missing inference operator, by contrast, can invalidate the deployment path even when the rest of the graph fits, which is why operator coverage is the discriminating row among the capabilities in @tbl-tf-comparison.
-
-::: {#psp-frameworks-dynamic-vs-static-computational-graphs .callout-perspective title="Dynamic vs. static computational graphs"}
-
-The static-vs.-dynamic graph distinction (examined in @sec-ml-frameworks-execution-problem-e1e1) has direct implications for model requirements analysis. Static graphs require control flow and dynamic behavior to be represented in forms understood by the graph runtime, which enables ahead-of-time optimization for deployment. Eager execution follows ordinary Python control flow directly, while graph-capture paths such as `torch.compile` and `tf.function` recover optimization opportunities when they can represent the executed program.
-
-:::
+For the fixed-shape vision model, the first filter is successful conversion of every required operation with acceptable numerical results, including representing any Python control flow in static graph operators that the target runtime understands (@sec-ml-frameworks-execution-problem-e1e1). On the PyTorch path, every operator in the exported graph needs an ONNX operator and an ONNX Runtime CPU kernel; on the TensorFlow path, every operator must convert to one that TensorFlow Lite supports. Training support is needed in the development framework but not in the deployed runtime. TensorFlow\index{TensorFlow!full framework}, TensorFlow Lite\index{TensorFlow Lite!mobile deployment}, and TensorFlow Lite Micro\index{TensorFlow Lite Micro!microcontroller deployment} expose different operator and training capabilities. A missing inference operator, by contrast, can invalidate the deployment path even when the rest of the graph fits, which is why operator coverage is the discriminating row among the capabilities in @tbl-tf-comparison.
 
 #### Software dependencies {#sec-ml-frameworks-software-dependencies-5245}
 
@@ -4467,9 +4453,9 @@ Engineers assume that a model performs the same in every framework because the m
 
 ::: {.fallacy-pitfall}
 
-**Pitfall**: *Choosing frameworks based on popularity rather than project requirements.*
+**Pitfall**: *Choosing frameworks based on popularity rather than project requirements and export portability.*
 
-Engineers assume the most popular framework works for any project. In reality, deployment constraints dominate. A mobile runtime such as ExecuTorch or TensorFlow Lite and a microcontroller runtime such as TensorFlow Lite Micro make different assumptions about memory allocation, operator coverage, and hardware delegates. The former targets phones with GB-scale memory, while the latter often targets devices with hundreds of KB of RAM, commonly below 256 KB for small TinyML deployments. Teams that prototype edge applications without checking the final runtime can face memory bloat that exceeds device capacity or a late framework migration after development completes. The deployment runtime (@sec-model-serving-inference-runtime-selection-5eef) therefore belongs among the first checks, made before the training framework is chosen.
+Engineers assume the most popular framework works for any project and that migrating later is trivial because models are "just math." In reality, deployment constraints and serialization lock-in dominate. A mobile runtime such as ExecuTorch or TensorFlow Lite and a microcontroller runtime such as TensorFlow Lite Micro make different assumptions about memory allocation, operator coverage, and hardware delegates: the former targets phones with GB-scale memory, while the latter often targets devices with hundreds of KB of RAM, commonly below 256 KB for small TinyML deployments. Even with interchange formats such as ONNX (@sec-model-serving-inference-runtime-selection-5eef), custom operators, dynamic shapes, and backend-specific kernels require manual re-implementation and numerical re-validation. Teams that prototype without checking the final deployment runtime and export path early face memory bloat or costly late framework migrations.
 
 :::
 
@@ -4478,14 +4464,6 @@ Engineers assume the most popular framework works for any project. In reality, d
 **Fallacy**: *Framework abstractions eliminate the need for systems knowledge.*
 
 Engineers assume high-level APIs handle all optimization automatically. The training step of @sec-ml-frameworks-putting-together-anatomy-training-step-c7f1 shows otherwise. Its ReLU has an arithmetic intensity (FLOPs performed per byte moved) of `{python} TrainingStepCalc.train_relu_ai_str`, about `{python} MnistTrainingStepCalc.relu_below_ridge_mult_str` below the H100's FP32 ridge of roughly `{python} MnistTrainingStepCalc.h100_fp32_ridge_str` FLOP/byte (the arithmetic intensity below which an operation is memory bound), and the whole step spends about `{python} MnistTrainingStepCalc.mnist_t_overhead_us_str` in host dispatch against well under a microsecond of ideal device time. No API call reveals either fact. Engineers must identify the limiting resource before choosing fusion, batching, layout, or precision optimizations.
-
-:::
-
-::: {.fallacy-pitfall}
-
-**Pitfall**: *Ignoring vendor lock-in from framework-specific formats.*
-
-Engineers assume framework migration is straightforward since models are "just math." Converting TensorFlow SavedModel to PyTorch can require rewriting custom operations, validating numerical equivalence across large test suites, and retraining when operations lack exact equivalents. The ONNX interchange format (@sec-model-serving-inference-runtime-selection-5eef) improves portability, but custom operators, dynamic shapes, and backend-specific optimizations can still require manual work. Organizations that ignore this during initial framework selection face costly migrations when deployment requirements change or better frameworks emerge.
 
 :::
 
@@ -4641,12 +4619,11 @@ The counting rules developed across the chapter fit on one page (@tbl-framework-
 * **Gradients cost memory as well as arithmetic**: Reverse-mode differentiation keeps the forward values that backward rules read, so saved activations grow with batch size and depth and often dominate training memory; activation checkpointing trades recomputation for that storage.
 * **Where a tensor lives sets what it costs**: A host-to-device copy runs at a small fraction of on-device bandwidth, so placement, pinned memory, and stream overlap decide whether transfers hide behind computation, while layout and data type decide which kernel runs.
 * **Module abstractions automate state management**: Automatic parameter registration, mode flags that propagate from the root, hierarchical serialization, and hooks let one object be updated, saved, switched between training and evaluation, and inspected without per-tensor bookkeeping.
-* **A step can be estimated before it is profiled**: The chapter's cost formulas (dispatch overhead ratio, fused traffic, compilation breakeven, saved activations, transfer time) show that a small MLP training step is overhead-bound on a data-center accelerator before any profiler runs.
 * **Deployment targets filter the development framework**: A framework is viable only if it can export every required operator to a runtime that fits the target device; among the viable paths, team expertise and migration cost decide.
 
 :::
 
-A framework presents itself as an ergonomic programming interface, yet its true role is translating mathematical graphs into physical hardware operations. That translation determines the work, traffic, and overhead paid under the iron law of ML systems (principle \ref{pri-iron-law}). Eager execution prioritizes developer iteration at the cost of host dispatch latency ($\Latency$), while graph compilation trades upfront optimization time to reduce avoidable global memory traffic ($\DataVolume/\Bandwidth$) through fused kernels. Automatic differentiation adds backward work and traffic ($\DataVolume$), with checkpointing trading retained activation storage against recomputed arithmetic ($\Operations$). What appears to be an API convenience therefore decides, for as long as a project uses it, how much avoidable work and data movement the implementation performs within physical limits that no framework can remove.
+A framework presents itself as an ergonomic programming interface, yet its true role is translating mathematical graphs into physical hardware operations under the iron law (principle \ref{pri-iron-law}). What appears to be an API convenience therefore decides, for as long as a project uses it, how much avoidable dispatch latency, memory traffic, and recomputed work the implementation pays within physical limits that no software layer can remove.
 
 ::: {.callout-chapter-connection title="From one training step to a training run"}
 

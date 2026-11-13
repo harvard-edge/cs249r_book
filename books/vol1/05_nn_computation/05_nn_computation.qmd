@@ -146,7 +146,7 @@ class MNISTInference:
     out_dim_str = fmt(out_dim, precision=0, commas=False)
 ```
 
-Recognizing one handwritten digit costs the small network at the center of this chapter `{python} MNISTInference.total_macs_str`. A multiply-accumulate (MAC) multiplies one weight by one input value and adds the product to a running sum ($\MacAccumulator\leftarrow \MacAccumulator+ \ModelWeight\cdot \LayerInputComponent$), and the usual convention counts it as two floating-point operations ($1\text{ MAC} = 2\text{ FLOPs}$), so the digit costs `{python} MNISTInference.total_flops_str`. None of that work is a logical branch. A program that once tested pixel thresholds and stroke patterns with if-then-else rules has become a fixed sequence of arithmetic. How fast it runs now depends on how quickly the machine can supply operands to that arithmetic, and so on whether memory bandwidth or arithmetic capacity runs out first. Such a program also fails differently. It rarely fails logically; it fails numerically, as values grow or shrink until they stop carrying information.
+Recognizing one $28{\times}28$ handwritten digit from the Modified National Institute of Standards and Technology (MNIST) dataset [@lecun1998] costs the small network at the center of this chapter `{python} MNISTInference.total_macs_str`. The network flattens those 784 grayscale pixels and maps them through hidden layers of `{python} MNISTInference.h1_dim_str` and `{python} MNISTInference.h2_dim_str` units to `{python} MNISTInference.out_dim_str` class scores (`784` $\to$ `128` $\to$ `64` $\to$ `10`), holding `{python} MNISTInference.total_params_str` (`{python} MNISTInference.weight_kb_str` in 32-bit floating point, FP32). A multiply-accumulate (MAC) multiplies one weight by one input value and adds the product to a running sum ($\MacAccumulator\leftarrow \MacAccumulator+ \ModelWeight\cdot \LayerInputComponent$), and the usual convention counts it as two floating-point operations ($1\text{ MAC} = 2\text{ FLOPs}$), so the digit costs `{python} MNISTInference.total_flops_str`. None of that work is a logical branch. A program that once tested pixel thresholds and stroke patterns with if-then-else rules has become a fixed sequence of arithmetic. How fast it runs now depends on how quickly the machine can supply operands to that arithmetic, and so on whether memory bandwidth or arithmetic capacity runs out first. Such a program also fails differently. It rarely fails logically; it fails numerically, as values grow or shrink until they stop carrying information.
 
 That arithmetic begins where the data pipeline of @sec-data-engineering ends, because a clean, versioned training example by itself teaches the model nothing. Learning begins when the digit crosses from the pipeline into the model, the algorithm axis of D·A·M, where mathematical operators fix the work to be done and the state to be held. Under the silicon contract (principle \ref{pri-silicon-contract}), those operators supply the model's side of the contract, while precision, data layout, implementation, and hardware fix how many bytes actually move and which machine resource saturates first.
 
@@ -170,16 +170,6 @@ The iron law of ML systems (principle \ref{pri-iron-law}) charges each stage for
 
 : **Where Each Stage Spends Its Budget**: Work, data movement, and retained state for the five stages in the life of a model, for the running 784-128-64-10 network. Training repeats the first four stages for every batch, while serving runs only the forward pass. Later sections derive each row, and the summary returns to the table. {#tbl-nn-computation-stage-costs tbl-colwidths="[14,24,24,19,19]"}
 
-::: {#exmp-nn-computation-running-example-mnist-digit-recognition .callout-example title="Running example: MNIST digit recognition"}
-
-**Scenario**: A handwritten-digit classifier receives $28{\times}28$ grayscale images from the Modified National Institute of Standards and Technology (MNIST) dataset [@lecun1998], flattens each into 784 pixel values, and maps them through hidden layers of `{python} MNISTInference.h1_dim_str` and `{python} MNISTInference.h2_dim_str` units to `{python} MNISTInference.out_dim_str` class scores, one per digit (784 → 128 → 64 → 10).
-
-**Diagnosis**: The network holds `{python} MNISTInference.total_params_str`, which occupy `{python} MNISTInference.weight_kb_str` in 32-bit floating point (FP32), and it spends `{python} MNISTInference.total_macs_str` (`{python} MNISTInference.total_flops_str`) to classify one digit. Those three numbers summarize what one classification costs.
-
-**Systems lesson**: The task is small enough to compute by hand yet exercises every mechanism that larger networks scale up. Each later section either derives one of these numbers or asks what happens to it when the network trains, grows, or ships.
-
-:::
-
 Even this small network counts as deep in the sense the field uses, because it stacks more than one layer of learned features between input and output. Each of its layers computes new features from the layer before, and training learns those features from examples instead of receiving them from a designer.
 
 ::: {#dfn-nn-computation-deep-learning .callout-definition title="Deep learning"}
@@ -192,7 +182,9 @@ Even this small network counts as deep in the sense the field uses, because it s
 
 :::
 
-Learning representations end to end also introduces engineering failure modes that conventional software debugging cannot isolate. Deep learning failures produce subtle symptoms: gradient instabilities\index{Gradient instabilities!training failure mode}[^fn-gradient-instabilities-depth] that stop training from making progress, numerical precision errors that corrupt parameter state across millions of updates, or inefficient memory access patterns in tensor operations (operations on multidimensional arrays of numbers) that leave accelerator compute units underutilized. Resolving these failures requires reasoning about the physical execution of tensor algebra on hardware rather than stepping through procedural control flow. Those hardware demands depend first on representation, that is, on whether patterns are expressed through hand-authored rules, engineered statistical features, or learned parameters.
+Learning representations end to end also introduces engineering failure modes that conventional software debugging cannot isolate. Deep learning failures produce subtle symptoms: gradient instabilities\index{Gradient instabilities!training failure mode}[^fn-gradient-instabilities-depth] that stop training from making progress, numerical precision errors that corrupt parameter state across millions of updates, or inefficient memory access patterns in tensor operations (operations on multidimensional arrays of numbers) that leave accelerator compute units underutilized. Resolving these failures requires reasoning about the physical execution of tensor algebra on hardware rather than stepping through procedural control flow.
+
+The chapter traces that tensor execution across the five stages of @tbl-nn-computation-stage-costs. @Sec-neural-computation-evolution-ml-paradigms-ec9c first contrasts rules, engineered features, and learned representations to explain why neural computation trades low operation counts for regular dense arithmetic. @Sec-neural-computation-neural-network-fundamentals-07e4 builds the forward pass from single neurons to batched matrix layers, @sec-neural-computation-learning-process-0b83 derives the loss, backward pass, optimizer state, and training memory footprint, and @sec-neural-computation-inference-pipeline-5372 strips that training scaffolding away to expose the leaner serving pass before @sec-neural-computation-case-study-usps-digit-recognition-97be traces the full loop on postal digit recognition. Those hardware demands begin with representation: whether patterns are expressed through hand-authored rules, engineered statistical features, or learned parameters.
 
 ```{python}
 #| echo: false
@@ -232,6 +224,16 @@ class EarlySystemsClaims:
 ## Computing with Patterns {#sec-neural-computation-evolution-ml-paradigms-ec9c}
 
 Before a learned network spent `{python} MNISTInference.total_macs_str` on that $28{\times}28$ digit, earlier generations of computing attacked the same classification problem with two simpler representation strategies. An illustrative rule tree tests roughly one hundred pixel comparisons per digit; an engineered feature pipeline performs several thousand arithmetic operations; the three-layer neural network performs more than one hundred thousand multiply-accumulates. Each strategy replaced a predecessor whose representations ran out of expressive reach on unconstrained handwriting, and each step up in representation capacity shifted which hardware resource bound execution.
+
+::: {#exmp-nn-computation-running-example-mnist-digit-recognition .callout-example title="Running example: MNIST digit recognition"}
+
+**Scenario**: A handwritten-digit classifier receives $28{\times}28$ grayscale images from the MNIST dataset [@lecun1998], flattens each into 784 pixel values, and maps them through hidden layers of `{python} MNISTInference.h1_dim_str` and `{python} MNISTInference.h2_dim_str` units to `{python} MNISTInference.out_dim_str` class scores, one per digit (784 → 128 → 64 → 10).
+
+**Diagnosis**: The network holds `{python} MNISTInference.total_params_str`, which occupy `{python} MNISTInference.weight_kb_str` in FP32, and it spends `{python} MNISTInference.total_macs_str` (`{python} MNISTInference.total_flops_str`) to classify one digit. Those three numbers summarize what one classification costs.
+
+**Systems lesson**: The task is small enough to compute by hand yet exercises every mechanism that larger networks scale up. Each later section either derives one of these numbers or asks what happens to it when the network trains, grows, or ships.
+
+:::
 
 ::: {.column-margin .margin-pointer}
 ↩ The succession of logic, knowledge, feature-engineering, and infrastructure bottlenecks that these paradigms answered is established in @sec-introduction-ai-paradigm-evolution-ae2b.
@@ -3089,7 +3091,7 @@ Subtracting the same $\max(\PreactivationVector)$ from every logit leaves the so
 
 2. Prefer fused cross-entropy from logits. Applying $-\log(\cdot)$ directly to the shifted ratio in @eq-softmax-stable for target class $\CorrectClassIndex$ and $\MaximumLogit=\max(\PreactivationVector)$ separates the numerator and denominator logarithms:
 $$ \LossFunction= -(\CorrectClassLogit-\MaximumLogit) + \log\!\sum_j \exp(\NeuronPreactivation_j-\MaximumLogit) $$ {#eq-cross-entropy-from-logits-stable}
-@Eq-cross-entropy-from-logits-stable is mathematically equivalent to $-\log \CorrectClassProbability$, but the logarithm and exponential cancel in the numerator, leaving the linear difference $-(\CorrectClassLogit-\MaximumLogit)$ instead of a tiny intermediate probability that could round to zero. Meanwhile, the denominator sum is guaranteed to be at least one because the maximum logit contributes $\exp(0)=1$, so its logarithm remains well behaved. Clamping a probability or adding $\NumericalStabilityConstant$ can be a defensive fallback, but it changes the objective and should not replace the stable formulation.
+@Eq-cross-entropy-from-logits-stable is mathematically equivalent to $-\log \CorrectClassProbability$, but the logarithm and exponential cancel in the numerator, leaving the linear difference $-(\CorrectClassLogit-\MaximumLogit)$ instead of a tiny intermediate probability that could round to zero. Meanwhile, the denominator sum is guaranteed to be at least one because the maximum logit contributes $\exp(0)=1$, so its logarithm remains well behaved. Clamping a probability or adding a small positive constant $\NumericalStabilityConstant$ can be a defensive fallback, but it changes the objective and should not replace the stable formulation.
 
 #### Impact on learning dynamics {#sec-neural-computation-impact-learning-dynamics-fb35}
 
@@ -3277,7 +3279,7 @@ $$ \frac{\partial \LossFunction}{\partial \ActivationMatrix^{(\LayerIndex)}} = \
 
 Because @eq-chain-rule walks the layers in reverse, the backward pass consumes saved outputs in the opposite order from the one in which the forward pass produced them. The forward pass finishes holding every layer's output, and the backward pass releases those outputs from the last layer to the first, while parameter gradients accumulate as it goes. Memory therefore peaks at the turnaround between the passes when saved activations dominate, or late in the backward pass when weights, optimizer state, and gradients do, a profile that @sec-neural-computation-memory-training-vs-inference plots for the running network.
 
-Cascading @eq-chain-rule across $\LayerCount$ layers also multiplies $\LayerCount$ local Jacobian factors end to end. Notebook \ref{nbk-nn-computation-tracing-gradients-worked-backpropagation-example}, after the derivative equations below, traces those factors with numbers on a two-unit network. Keeping that repeated product informative requires controlling both the initial scale of the weights and the numerical range of the hardware format.
+Cascading @eq-chain-rule across $\LayerCount$ layers also multiplies $\LayerCount$ local Jacobian factors end to end. Example \ref{exmp-nn-computation-tracing-gradients-worked-backpropagation-example}, after the derivative equations below, traces those factors with numbers on a two-unit network. Keeping that repeated product informative requires controlling both the initial scale of the weights and the numerical range of the hardware format.
 
 #### Initialization and numerical range {#sec-neural-computation-parameter-initialization-5d1a}
 
@@ -3497,7 +3499,7 @@ Two inputs, two ReLU hidden units, and one output are enough to trace every back
 \vspace*{-1.5ex}
 ```
 
-::: {#nbk-nn-computation-tracing-gradients-worked-backpropagation-example .callout-notebook title="Tracing gradients: A worked backpropagation example"}
+::: {#exmp-nn-computation-tracing-gradients-worked-backpropagation-example .callout-example title="Tracing gradients: A worked backpropagation example"}
 
 **Setup**: Consider a network with two inputs, a hidden layer of two neurons (ReLU activation), and one output neuron (no activation, for simplicity). Suppose the current weights and biases are:
 
@@ -4249,7 +4251,8 @@ The inner loop in @algo-minibatch-sgd is the unit that the hardware repeatedly e
 # │      operations per step x per-operation overhead; energy from Hardware.Tech.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Ops
-from mlsysim.fmt import fmt, fmt_flops, fmt_magnitude, fmt_multiple, fmt_percent, fmt_time, check
+from mlsysim.core.units import GB, MB, TB
+from mlsysim.fmt import fmt, fmt_bandwidth, fmt_flops, fmt_magnitude, fmt_memory, fmt_multiple, fmt_percent, fmt_time, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class EpochTimeEnergy:
@@ -4275,6 +4278,9 @@ class EpochTimeEnergy:
     run = epoch.result
     ops_per_step = run.ops_per_step
     flops_step = run.step_flops
+    step_bytes = flops_step / epoch.network.result.intensity
+    bw_cpu = run.bandwidth["host"]
+    bw_acc = run.bandwidth["accelerator"]
     rate = {"cpu": run.rate["host"], "acc": run.rate["accelerator"]}
     work_epoch_cpu = run.work_time["host"]
     work_epoch_acc = run.work_time["accelerator"]
@@ -4297,6 +4303,9 @@ class EpochTimeEnergy:
     _ms = lambda q: round(q.to(millisecond).magnitude) * millisecond  # whole milliseconds for prose
     steps_str = fmt(steps, precision=0, commas=True)
     flops_step_mflop_str = fmt_flops(flops_step, unit=MFLOPs, precision=1, commas=False)
+    step_bytes_mb_str = fmt_memory(step_bytes, unit=MB, precision=2, commas=False)
+    bw_cpu_str = fmt_bandwidth(bw_cpu, unit=GB / second, precision=0, commas=False)
+    bw_acc_str = fmt_bandwidth(bw_acc, unit=TB / second, precision=2, commas=False)
     work_cpu_ms_str = fmt_time(_ms(work_epoch_cpu), unit="millisecond", precision=0, commas=False)
     work_acc_ms_str = fmt_time(work_epoch_acc, unit="millisecond", precision=1, commas=False)
     acc_work_speedup_mult_str = fmt_multiple(round(acc_work_speedup), precision=0, commas=False)
@@ -4318,7 +4327,7 @@ class EpochTimeEnergy:
 
 **Problem**: How long does one training epoch of the running network take on a desktop CPU and on a data-center accelerator, which term of the iron law sets that time, and where does the energy go?
 
-**Background**: One epoch at batch `{python} MnistEpochLocal.batch_size_str` is `{python} EpochTimeEnergy.steps_str` steps of about `{python} EpochTimeEnergy.flops_step_mflop_str` each, the forward work of @tbl-nn-computation-mnist-params scaled by the training-step ratio derived earlier. At batch `{python} MnistEpochLocal.batch_size_str` the network's arithmetic intensity sits below both machines' ridge points (@fig-mnist-roofline), so each step runs at the bandwidth-limited rate. Every operation a step launches also pays a fixed cost: about `{python} EpochTimeEnergy.dispatch_us_str` for the framework to dispatch it and, on the accelerator, about `{python} EpochTimeEnergy.launch_us_str` more to launch it, across roughly `{python} EpochTimeEnergy.ops_per_step_str` operations per step.
+**Background**: One epoch at batch `{python} MnistEpochLocal.batch_size_str` is `{python} EpochTimeEnergy.steps_str` steps of about `{python} EpochTimeEnergy.flops_step_mflop_str` and `{python} EpochTimeEnergy.step_bytes_mb_str` of memory traffic each, the forward work of @tbl-nn-computation-mnist-params scaled by the training-step ratio derived earlier. At batch `{python} MnistEpochLocal.batch_size_str` the network's arithmetic intensity sits below both machines' ridge points (@fig-mnist-roofline), so each step streams at the memory-bandwidth limit: `{python} EpochTimeEnergy.bw_cpu_str` on the desktop CPU and `{python} EpochTimeEnergy.bw_acc_str` on the H100 accelerator. Every operation a step launches also pays a fixed cost: about `{python} EpochTimeEnergy.dispatch_us_str` for the framework to dispatch it and, on the accelerator, about `{python} EpochTimeEnergy.launch_us_str` more to launch it, across `{python} EpochTimeEnergy.ops_per_step_str` operations per step.
 
 **Solution**: The arithmetic and data movement of a whole epoch take about `{python} EpochTimeEnergy.work_cpu_ms_str` on the CPU and `{python} EpochTimeEnergy.work_acc_ms_str` on the accelerator, a `{python} EpochTimeEnergy.acc_work_speedup_mult_str` advantage. The fixed per-operation costs add about `{python} EpochTimeEnergy.ovh_cpu_ms_str` on the CPU and `{python} EpochTimeEnergy.ovh_acc_ms_str` on the accelerator, so the totals come to about `{python} EpochTimeEnergy.total_cpu_ms_str` and `{python} EpochTimeEnergy.total_acc_ms_str`. On the accelerator, `{python} EpochTimeEnergy.ovh_share_acc_str` of the epoch is overhead, and the CPU finishes first. Energy tells a parallel story. The energy constants introduced alongside the iron law [@horowitz2014] are about `{python} EpochTimeEnergy.e_dram_pj_value_str` pJ per byte moved from dynamic random-access memory (DRAM) and `{python} EpochTimeEnergy.e_fp32_pj_value_str` pJ per FP32 operation (the average of a multiply and an add). With those constants, moving a step's bytes costs `{python} EpochTimeEnergy.move_b32_mult_str` the energy of its arithmetic at batch `{python} MnistEpochLocal.batch_size_str`, and `{python} EpochTimeEnergy.move_b1_mult_str` at batch 1.
 
@@ -5357,9 +5366,9 @@ Neural networks do not offer the line-by-line causal trace of traditional code, 
 
 ::: {.fallacy-pitfall}
 
-**Pitfall**: *Discarding domain expertise because a deep model is available.*
+**Pitfall**: *Designing objectives and thresholds without domain error costs and class balance.*
 
-Teams assume automatic feature learning removes the need for domain knowledge. Successful systems require domain expertise at every stage: architecture selection, training objective design, dataset curation, and output interpretation. The document-recognition history in @sec-neural-computation-case-study-usps-digit-recognition-97be shows why confidence thresholds must reflect operating economics and route uncertain cases to human operators. Without domain knowledge, teams can deploy networks that look strong on a test set but fail in production because their thresholds, fallback paths, or error costs are wrong.
+Teams assume automatic feature learning removes the need for domain knowledge and exploratory data analysis. In practice, networks on imbalanced datasets often fail on the minority class\index{Class imbalance!minority-class performance}: a fraud detector with `{python} FallacyQuantExamples.imbalance_ratio_str` imbalance achieves `{python} FallacyQuantExamples.imbalance_majority_acc_str` accuracy by always predicting "not fraud" while catching zero fraud cases, because the unweighted batch average of @eq-batch-loss underweights rare but critical events unless sampling, loss weighting, and evaluation intervene. Likewise, the document-recognition history in @sec-neural-computation-case-study-usps-digit-recognition-97be shows that confidence thresholds must reflect operating economics and route uncertain cases to human operators. Without domain-informed objectives, thresholds, and slice metrics, teams deploy networks that look strong on aggregate accuracy yet fail in production.
 
 :::
 
@@ -5368,14 +5377,6 @@ Teams assume automatic feature learning removes the need for domain knowledge. S
 **Fallacy**: *Deeper networks are always more accurate than wider ones.*
 
 Engineers assume that stacking more layers is the primary path to higher accuracy, since depth enables hierarchical feature extraction. In practice, depth alone encounters diminishing returns. ResNet showed that very deep residual networks can train effectively, yet its 1,202-layer CIFAR-10 network tested worse than its 110-layer counterpart [@he2016]. EfficientNet later showed that compound scaling, which grows width, depth, and input resolution together, can outperform depth-only scaling at a given resource budget [@tan2019efficientnet]. Depth itself is not the problem; scaling it alone is. Teams should profile capacity utilization and scale the dimension that gives the best accuracy per FLOP, since depth adds sequential steps and saved activations while width adds arithmetic inside each step (@eq-depth-width-cost).
-
-:::
-
-::: {.fallacy-pitfall}
-
-**Fallacy**: *Training data distribution issues can be fixed after model design.*
-
-Teams treat training as mechanically feeding data through architectures. Networks on imbalanced datasets often perform poorly on the minority class\index{Class imbalance!minority-class performance}: a fraud detector with `{python} FallacyQuantExamples.imbalance_ratio_str` imbalance achieves `{python} FallacyQuantExamples.imbalance_majority_acc_str` accuracy by always predicting "not fraud" while catching zero fraud cases. The unweighted batch average of @eq-batch-loss can underweight rare but critical classes unless sampling, weighting, loss design, and evaluation address the imbalance. Teams that skip exploratory data analysis may deploy models with strong aggregate metrics but unacceptable minority-class performance.
 
 :::
 
