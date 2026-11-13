@@ -498,77 +498,7 @@ Static inference\index{Static inference!precomputed predictions} (also called of
 
 #### Dynamic inference {#sec-model-serving-dynamic-inference-d2d5}
 
-**Dynamic inference**\index{Dynamic inference!definition}\index{Online inference|see{Dynamic inference}} (also called online or real-time inference) evaluates inputs on demand as requests arrive. On-demand execution accommodates arbitrary, previously unseen inputs within the model schema and immediately reflects newly deployed model weights without requiring precomputation. However, executing the model directly within the user request path subjects inference to the strict end-to-end latency budget set by its SLO. Because user requests arrive stochastically, the serving runtime cannot delay execution indefinitely to accumulate large batches. Serving requests individually or in small batches ($\BatchSize=1$ to $\BatchSize=4$) can expose weight traffic or launch overhead that larger batches amortize. When these costs dominate execution, the device completes fewer queries per unit time, increasing provisioned cost per query. This tension between interactive response time and hardware efficiency can make dynamic serving more expensive per query than offline batching (example \ref{exmp-cost-latency}).
-
-```{python}
-#| echo: false
-#| label: cost-latency-calc
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ COST OF LATENCY CALCULATION
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Callout "The Cost of Latency" (Serving Paradigm section)
-# │
-# │ Goal: Quantify the economic trade-off between response time and hardware bill.
-# │ Show: That batch one costs several times more per query than batch eight
-# │       for almost the same latency.
-# │ How: ResNet-50 eager FP16 profile on the H100 at batch 1 and batch 8.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Scenarios
-from mlsysim.fmt import check, fmt, fmt_usd, fmt_time, fmt_rate
-
-class CostLatencyCalc:
-    """Quantifies the economic trade-off between latency and hardware cost per million queries."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    _s = Scenarios.ResNet50BatchOneVersusEightCostH100  # the chapter's ResNet-50 reference profile, batch 1 and 8
-    gpu_cost_per_hour_value = _s.price
-    batch_a, batch_b = _s.batch_sizes
-
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    latency_a_ms_value = _s.service.service_time(batch_a)
-    throughput_a_rps_value = _s.service.throughput(batch_a)
-    latency_b_ms_value = _s.service.service_time(batch_b)
-    throughput_b_rps_value = _s.service.throughput(batch_b)
-    cost_per_million_a_value = _s.cost_per_million(batch_a)
-    cost_per_million_b_value = _s.cost_per_million(batch_b)
-    cost_increase_pct_value = (_s.cost_ratio - 1) * 100
-    cost_ratio_value = _s.cost_ratio
-
-    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    check(cost_ratio_value > 1, "Scenario A (low latency) must cost more per query than Scenario B.")
-    check(7.45 < cost_ratio_value < 7.55, f"Prose prints a 7.5x cost ratio, matching the printed dollar values; got {cost_ratio_value:.3f}.")
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    gpu_cost_per_hour_str = fmt_usd(gpu_cost_per_hour_value, precision=0, commas=False, per="hour")
-    latency_a_ms_str = fmt_time(latency_a_ms_value, 'millisecond', precision=1, commas=False)
-    throughput_a_rps_str = fmt_rate(round(throughput_a_rps_value.magnitude) * (count / second), 'req/s', precision=0, commas=True)
-    latency_b_ms_str = fmt_time(latency_b_ms_value, 'millisecond', precision=1, commas=False)
-    throughput_b_rps_str = fmt_rate(round(throughput_b_rps_value.magnitude) * (count / second), 'req/s', precision=0, commas=True)
-    cost_a_str = fmt_usd(cost_per_million_a_value, precision=2, commas=False)
-    cost_b_str = fmt_usd(cost_per_million_b_value, precision=2, commas=False)
-    cost_ratio_mult_str = fmt_multiple(cost_ratio_value, precision=1, commas=False)
-```
-
-::: {#exmp-cost-latency .callout-example title="The cost of latency"}
-
-Latency constraints directly dictate infrastructure costs. The figures below come from the ResNet-50 reference profile that @sec-model-serving-batching-helps-f1dc later sweeps across batch sizes. Consider a GPU server renting for `{python} CostLatencyCalc.gpu_cost_per_hour_str`.
-
-Scenario A (low latency): Batch size 1.
-
-*   Latency: `{python} CostLatencyCalc.latency_a_ms_str`.
-*   Throughput: `{python} CostLatencyCalc.throughput_a_rps_str`.
-*   Cost per million queries: `{python} CostLatencyCalc.cost_a_str`.
-
-Scenario B (high throughput): Batch size 8.
-
-*   Latency: `{python} CostLatencyCalc.latency_b_ms_str`, barely above batch one, because the fixed launch cost dominates both.
-*   Throughput: `{python} CostLatencyCalc.throughput_b_rps_str`.
-*   Cost per million queries: `{python} CostLatencyCalc.cost_b_str`.
-
-**Systems insight**: Serving one image at a time saves only the difference between `{python} CostLatencyCalc.latency_b_ms_str` and `{python} CostLatencyCalc.latency_a_ms_str` of latency, yet multiplies the hardware cost per million queries by `{python} CostLatencyCalc.cost_ratio_mult_str`. The batch-8 latency counts execution only; it leaves out the time the server spends waiting for eight requests to arrive, the formation delay that @sec-model-serving-batching-tax quantifies. Engineers must quantify whether that speedup generates enough business value to justify the `{python} CostLatencyCalc.cost_ratio_mult_str` cost increase.
-
-:::
+**Dynamic inference**\index{Dynamic inference!definition}\index{Online inference|see{Dynamic inference}} (also called online or real-time inference) evaluates inputs on demand as requests arrive. On-demand execution accommodates arbitrary, previously unseen inputs within the model schema and immediately reflects newly deployed model weights without requiring precomputation. However, executing the model directly within the user request path subjects inference to the strict end-to-end latency budget set by its SLO. Because user requests arrive stochastically, the serving runtime cannot delay execution indefinitely to accumulate large batches. Serving requests individually or in small batches ($\BatchSize=1$ to $\BatchSize=4$) can expose weight traffic or launch overhead that larger batches amortize. When these costs dominate execution, the device completes fewer queries per unit time, increasing provisioned cost per query. This tension between interactive response time and hardware efficiency can make dynamic serving several times more expensive per query than batched execution (@sec-model-serving-batching-helps-f1dc).
 
 ```{python}
 #| echo: false
@@ -847,13 +777,7 @@ The deployment tiers differ first in their operating envelopes (latency targets,
 \endgroup
 ```
 
-::: {#psp-resnet-serving .callout-perspective title="ResNet-50 across the serving spectrum"}
-
-**Systems insight**: It is tempting to read @tbl-resnet-serving-spectrum as one model deployed three ways. That reading is misleading, because the cloud and mobile tiers share the ResNet-50 graph but use different precision and runtimes, while the TinyML tier cannot run ResNet-50 at all and substitutes an architecture designed for its constraints. Treating these as one model hides the work that makes each deployment possible.
-
-:::
-
-Temporal and spatial placement fix when predictions are computed and which form of the model fits the target hardware tier's memory and power envelope. On the networked tiers where this chapter's ResNet-50 and LLM services run, each model replica still has to accept live client traffic inside a server process.
+Reading @tbl-resnet-serving-spectrum as a single model deployed three ways would miss the engineering work behind each column: cloud and mobile share the ResNet-50 graph under different precisions and runtimes, whereas TinyML cannot fit ResNet-50 at all and substitutes an architecture built for its SRAM ceiling. Temporal and spatial placement therefore fix when predictions are computed and which form of the model fits the target hardware tier's memory and power envelope. On the networked tiers where this chapter's ResNet-50 and LLM services run, each model replica still has to accept live client traffic inside a server process.
 
 ## Serving System Architecture {#sec-model-serving-serving-system-architecture-4879}
 
@@ -2795,7 +2719,77 @@ Consider the reference ResNet-50 classifier on an H100\index{H100!batching throu
 
 ### Why batching helps {#sec-model-serving-batching-helps-f1dc}
 
-A single request often leaves an accelerator's compute units idle because its operations expose too little parallel work to hide kernel launch overhead or reuse weights streamed from memory (though large spatial inputs or smaller edge accelerators may already saturate at batch one). For workloads that underuse the device at small batches, increasing the batch size improves hardware efficiency\index{GPU utilization!batch size dependency} [@shen2019] by amortizing fixed costs across multiple requests and running inputs in parallel across the batch dimension.
+A single request often leaves an accelerator's compute units idle because its operations expose too little parallel work to hide kernel launch overhead or reuse weights streamed from memory (though large spatial inputs or smaller edge accelerators may already saturate at batch one). For workloads that underuse the device at small batches, increasing the batch size improves hardware efficiency\index{GPU utilization!batch size dependency} [@shen2019] by amortizing fixed costs across multiple requests and running inputs in parallel across the batch dimension (example \ref{exmp-cost-latency}).
+
+```{python}
+#| echo: false
+#| label: cost-latency-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ COST OF LATENCY CALCULATION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Callout "The Cost of Latency" (@sec-model-serving-batching-helps-f1dc)
+# │
+# │ Goal: Quantify the economic trade-off between response time and hardware bill.
+# │ Show: That batch one costs several times more per query than batch eight
+# │       for almost the same latency.
+# │ How: ResNet-50 eager FP16 profile on the H100 at batch 1 and batch 8.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
+from mlsysim.fmt import check, fmt, fmt_usd, fmt_time, fmt_rate
+
+class CostLatencyCalc:
+    """Quantifies the economic trade-off between latency and hardware cost per million queries."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    _s = Scenarios.ResNet50BatchOneVersusEightCostH100  # the chapter's ResNet-50 reference profile, batch 1 and 8
+    gpu_cost_per_hour_value = _s.price
+    batch_a, batch_b = _s.batch_sizes
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    latency_a_ms_value = _s.service.service_time(batch_a)
+    throughput_a_rps_value = _s.service.throughput(batch_a)
+    latency_b_ms_value = _s.service.service_time(batch_b)
+    throughput_b_rps_value = _s.service.throughput(batch_b)
+    cost_per_million_a_value = _s.cost_per_million(batch_a)
+    cost_per_million_b_value = _s.cost_per_million(batch_b)
+    cost_increase_pct_value = (_s.cost_ratio - 1) * 100
+    cost_ratio_value = _s.cost_ratio
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(cost_ratio_value > 1, "Scenario A (low latency) must cost more per query than Scenario B.")
+    check(7.45 < cost_ratio_value < 7.55, f"Prose prints a 7.5x cost ratio, matching the printed dollar values; got {cost_ratio_value:.3f}.")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    gpu_cost_per_hour_str = fmt_usd(gpu_cost_per_hour_value, precision=0, commas=False, per="hour")
+    latency_a_ms_str = fmt_time(latency_a_ms_value, 'millisecond', precision=1, commas=False)
+    throughput_a_rps_str = fmt_rate(round(throughput_a_rps_value.magnitude) * (count / second), 'req/s', precision=0, commas=True)
+    latency_b_ms_str = fmt_time(latency_b_ms_value, 'millisecond', precision=1, commas=False)
+    throughput_b_rps_str = fmt_rate(round(throughput_b_rps_value.magnitude) * (count / second), 'req/s', precision=0, commas=True)
+    cost_a_str = fmt_usd(cost_per_million_a_value, precision=2, commas=False)
+    cost_b_str = fmt_usd(cost_per_million_b_value, precision=2, commas=False)
+    cost_ratio_mult_str = fmt_multiple(cost_ratio_value, precision=1, commas=False)
+```
+
+::: {#exmp-cost-latency .callout-example title="The cost of latency"}
+
+Latency constraints directly dictate infrastructure costs on the ResNet-50 reference profile swept below. Consider a GPU server renting for `{python} CostLatencyCalc.gpu_cost_per_hour_str`.
+
+Scenario A (low latency): Batch size 1.
+
+*   Latency: `{python} CostLatencyCalc.latency_a_ms_str`.
+*   Throughput: `{python} CostLatencyCalc.throughput_a_rps_str`.
+*   Cost per million queries: `{python} CostLatencyCalc.cost_a_str`.
+
+Scenario B (high throughput): Batch size 8.
+
+*   Latency: `{python} CostLatencyCalc.latency_b_ms_str`, barely above batch one, because the fixed launch cost dominates both.
+*   Throughput: `{python} CostLatencyCalc.throughput_b_rps_str`.
+*   Cost per million queries: `{python} CostLatencyCalc.cost_b_str`.
+
+**Systems insight**: Serving one image at a time saves only the difference between `{python} CostLatencyCalc.latency_b_ms_str` and `{python} CostLatencyCalc.latency_a_ms_str` of latency, yet multiplies the hardware cost per million queries by `{python} CostLatencyCalc.cost_ratio_mult_str`. The batch-8 latency counts execution only; it leaves out the time the server spends waiting for eight requests to arrive, the formation delay that @sec-model-serving-batching-tax quantifies. Engineers must quantify whether that speedup generates enough business value to justify the `{python} CostLatencyCalc.cost_ratio_mult_str` cost increase.
+
+:::
 
 ```{python}
 #| echo: false

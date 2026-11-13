@@ -304,40 +304,10 @@ class GPT2LighthouseSpecs:
 
 ### Running cases: GPT-2 XL and ResNet-50 {#sec-model-training-running-example-training-gpt2-19cd}
 
-Two of the book's lighthouse models, the recurring workloads each chapter tests its ideas against, carry this chapter. GPT-2\index{GPT-2!training lighthouse} is the bandwidth-bound lighthouse because generating one token at a time reads every weight for little arithmetic, making bandwidth its home regime in inference. Training changes that profile as a batch of long sequences reuses each weight across thousands of token positions, so the same model now presses on arithmetic throughput and, through activations and optimizer state, on memory capacity. The chapter uses it to test each training cost and optimization.
+Two of the book's lighthouse models, the recurring workloads each chapter tests its ideas against, carry this chapter. GPT-2\index{GPT-2!training lighthouse} (`{python} GPT2LighthouseSpecs.gpt2_params_b_str` parameters in its XL configuration, trained over `{python} GPT2LighthouseSpecs.gpt2_dataset_size_gb_str` of WebText) is the bandwidth-bound lighthouse because generating one token at a time reads every weight for little arithmetic, making bandwidth its home regime in inference. Training changes that profile as a batch of long sequences reuses each weight across thousands of token positions, so the same model now presses on arithmetic throughput (`{python} GPT2LighthouseSpecs.gpt2_total_flops_str` across the full run) and, through activations and optimizer state, on memory capacity. The chapter uses it to test each training cost and optimization.
 
 ::: {.column-margin .margin-pointer}
 ↩ GPT-2's home regime in inference, bandwidth-bound because each generated token rereads every weight, is established in @sec-ml-systems-workload-archetypes-fd10.
-:::
-
-::: {#lhs-training-lighthouse-example-training-gpt-2 .callout-lighthouse title="Lighthouse example: Training GPT-2"}
-
-**Context**:
-GPT-2 (1.5 billion parameters) serves as the primary case study because it is large enough to expose meaningful compute, activation, and optimizer-state constraints while remaining easier to analyze than frontier-scale models. Whether it requires distributed training depends on precision, optimizer state, activation memory, hardware capacity, and the target training time. @Tbl-training-gpt2-lighthouse-specs maps each model property to the systems constraint it creates:
-
-```{=latex}
-\begingroup
-\renewcommand{\arraystretch}{1.3}
-```
-
-| **Property**     |                         **Specification**                         | **Systems Implication**                                                                                                                                        |
-|:-----------------|:-----------------------------------------------------------------:|:---------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **Parameters**   |       `{python} GPT2LighthouseSpecs.gpt2_params_b_str` (XL)       | Requires ~`{python} GPT2LighthouseSpecs.gpt2_weights_fp16_gb_str` (FP16) or ~`{python} GPT2LighthouseSpecs.gpt2_weights_fp32_gb_str` (FP32) for weights alone. |
-| **Architecture** |                        48 Layers, 1600 Dim                        | Deep pipeline creates heavy activation memory pressure.                                                                                                        |
-| **Dataset**      | WebText (`{python} GPT2LighthouseSpecs.gpt2_dataset_size_gb_str`) | Preprocessing, shuffling, and delivery must sustain the selected training configuration.                                                                       |
-| **Compute**      |       ~ `{python} GPT2LighthouseSpecs.gpt2_total_flops_str`       | Training duration depends on achieved throughput and accelerator count.                                                                                        |
-
-: **GPT-2 (1.5 Billion Parameters) Lighthouse Model Specifications**: Parameter count, architecture depth, dataset size, and total training compute mapped to their systems implications. Each row pairs a model property with the engineering constraint it creates: memory footprint for weights, activation pressure from pipeline depth, I/O throughput requirements, and parallelization demand. {#tbl-training-gpt2-lighthouse-specs tbl-colwidths="[20,26,54]"}
-
-```{=latex}
-\endgroup
-```
-
-**Mechanism**:
-In dense transformer models, the arithmetic work per token is directly proportional to parameter count $\Parameters$. In the forward pass, each parameter participates in one multiply-accumulate operation ($1\text{ MAC} = 2\text{ FLOPs}$), consuming $2\Parameters\text{ FLOPs/token}$. Backpropagation computes two matrix products per parameter: one to propagate gradients backward with respect to activations ($2\Parameters\text{ FLOPs}$), and another to calculate weight gradients for the optimizer ($2\Parameters\text{ FLOPs}$). The backward pass therefore requires twice the compute of the forward pass ($4\Parameters\text{ FLOPs/token}$), yielding a total work factor of $2\Parameters + 4\Parameters = 6\Parameters\text{ FLOPs/token}$. Across a dataset of $\DatasetSize$ tokens, total training work is $\Operations \approx 6 \cdot \Parameters \cdot \DatasetSize$, or `{python} GPT2LighthouseSpecs.gpt2_total_flops_str`.
-
-The run must also fit the four-term training-memory budget of @eq-training-memory, $\TotalMemoryFootprint =\WeightMemory + \GradientMemory + \OptimizerStateMemory + \ActivationMemory$. Its execution time is $\TrainingTime= \frac{\Operations}{\PeakRate \times \EfficiencyHw}$, where $\PeakRate$ is the accelerator's peak arithmetic rate and $\EfficiencyHw$ is the fraction of that peak the run actually achieves (@sec-model-training-iron-law-training-performance-a53f develops this law). A fast run therefore keeps the accelerator supplied with data and busy with arithmetic while weights, gradients, optimizer state, and activations all fit in HBM.
-
 :::
 
 ```{python}
@@ -458,6 +428,36 @@ Here $\Operations$ counts useful model forward-and-backward FLOPs, excluding rem
 :::
 
 Three levers for improvement follow from @eq-training-iron-law: reduce total operations through data curation or algorithmic innovation, increase peak throughput through hardware selection and precision formats, or improve utilization through pipeline orchestration. Measured runs show how far below peak the utilization factor sits. Counting only useful model arithmetic, Megatron-Turing NLG trained at `{python} MeasuredUtilizationAnchors.mtnlg_mfu_pct_str` of peak and PaLM at `{python} MeasuredUtilizationAnchors.palm_mfu_pct_str` [@chowdhery2022palm]. The `{python} MeasuredUtilizationAnchors.megatron_peak_pct_str` of peak that @narayanan2021 report for Megatron-LM is higher because their count includes rematerialization work, which $\Operations$ excludes. Although memory does not appear in the law at all, it acts as a feasibility constraint because a configuration whose state does not fit runs at no speed. The chapter map (@tbl-training-chapter-spine) shows which section works on which factor, and @tbl-optimization places each optimization technique against the factor it moves, with its memory effect listed separately.
+
+::: {#lhs-training-lighthouse-example-training-gpt-2 .callout-lighthouse title="Lighthouse example: Training GPT-2"}
+
+**Context**:
+GPT-2 (1.5 billion parameters) serves as the primary case study because it is large enough to expose meaningful compute, activation, and optimizer-state constraints while remaining easier to analyze than frontier-scale models. Whether it requires distributed training depends on precision, optimizer state, activation memory, hardware capacity, and the target training time. @Tbl-training-gpt2-lighthouse-specs maps each model property to the systems constraint it creates:
+
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.3}
+```
+
+| **Property**     |                         **Specification**                         | **Systems Implication**                                                                                                                                        |
+|:-----------------|:-----------------------------------------------------------------:|:---------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Parameters**   |       `{python} GPT2LighthouseSpecs.gpt2_params_b_str` (XL)       | Requires ~`{python} GPT2LighthouseSpecs.gpt2_weights_fp16_gb_str` (FP16) or ~`{python} GPT2LighthouseSpecs.gpt2_weights_fp32_gb_str` (FP32) for weights alone. |
+| **Architecture** |                        48 Layers, 1600 Dim                        | Deep pipeline creates heavy activation memory pressure.                                                                                                        |
+| **Dataset**      | WebText (`{python} GPT2LighthouseSpecs.gpt2_dataset_size_gb_str`) | Preprocessing, shuffling, and delivery must sustain the selected training configuration.                                                                       |
+| **Compute**      |       ~ `{python} GPT2LighthouseSpecs.gpt2_total_flops_str`       | Training duration depends on achieved throughput and accelerator count.                                                                                        |
+
+: **GPT-2 (1.5 Billion Parameters) Lighthouse Model Specifications**: Parameter count, architecture depth, dataset size, and total training compute mapped to their systems implications. Each row pairs a model property with the engineering constraint it creates: memory footprint for weights, activation pressure from pipeline depth, I/O throughput requirements, and parallelization demand. {#tbl-training-gpt2-lighthouse-specs tbl-colwidths="[20,26,54]"}
+
+```{=latex}
+\endgroup
+```
+
+**Mechanism**:
+In dense transformer models, the arithmetic work per token is directly proportional to parameter count $\Parameters$. In the forward pass, each parameter participates in one multiply-accumulate operation ($1\text{ MAC} = 2\text{ FLOPs}$), consuming $2\Parameters\text{ FLOPs/token}$. Backpropagation computes two matrix products per parameter: one to propagate gradients backward with respect to activations ($2\Parameters\text{ FLOPs}$), and another to calculate weight gradients for the optimizer ($2\Parameters\text{ FLOPs}$). The backward pass therefore requires twice the compute of the forward pass ($4\Parameters\text{ FLOPs/token}$), yielding a total work factor of $2\Parameters + 4\Parameters = 6\Parameters\text{ FLOPs/token}$. Across a dataset of $\DatasetSize$ tokens, total training work is $\Operations \approx 6 \cdot \Parameters \cdot \DatasetSize$, or `{python} GPT2LighthouseSpecs.gpt2_total_flops_str`.
+
+The run must also fit the four-term training-memory budget of @eq-training-memory, $\TotalMemoryFootprint =\WeightMemory + \GradientMemory + \OptimizerStateMemory + \ActivationMemory$, and its execution time follows @eq-training-iron-law, $\TrainingTime= \frac{\Operations}{\PeakRate \times \EfficiencyHw}$. A fast run therefore keeps the accelerator supplied with data and busy with arithmetic while weights, gradients, optimizer state, and activations all fit in HBM.
+
+:::
 
 The training-time law focuses on execution efficiency, how fast the hardware processes a given workload. It does not predict how data quality, dataset size, or curriculum design determines the total operations $\Operations$ needed to reach a target accuracy; that workload must be supplied or estimated separately. A cleaner dataset or a better data mix can reduce the number of epochs required, shrinking $\Operations$ without touching hardware at all. Holding the workload fixed, the question is how to execute it as fast as possible.
 

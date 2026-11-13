@@ -465,140 +465,11 @@ plt.close()
 
 :::
 
-::: {#chk-hw-acceleration-parallelism-gate .callout-checkpoint title="The parallelism check"}
-
-These checks turn Amdahl's bound into a hardware-selection test.
-
-**Amdahl's reality**
-
-- [ ] **Serial bottlenecks**: use Amdahl's bound to explain why a 1,000$\times$ faster GPU may only speed up training by 5$\times$ when data loading is slow.
-- [ ] **Speedup ceiling**: for $\ParallelFraction=0.95$ and $\AcceleratorGain=100$, estimate total speedup and compare it with the infinite-accelerator ceiling.
-- [ ] **Workload variation**: what baseline profiling would establish the ResNet-50\index{ResNet-50!compute-bound workload} and MobileNet accelerated fractions for a proposed hardware change? Explain how those fractions would determine which benefits more.
-
-:::
-
-The serial bottleneck becomes concrete on real hardware, where the same accelerator that nears its parallel ceiling on one workload can stall on another. The comparison below uses the INT8 (8-bit integer) path, whose advantage over FP32 or FP16 has two sources. Each operand occupies a half or a quarter of the bytes, and an 8-bit multiplier occupies far less silicon area than a floating-point one, so the same die holds more multiply-accumulate (MAC) units. Two workloads on an NVIDIA H100 with different unaccelerated fractions show how that fraction governs whether this peak INT8 advantage becomes realized speedup. A second look at the decode case then separates that limit from a different one, bandwidth-boundedness.
-
 ::: {.column-margin .margin-pointer}
 ↪ Order-of-magnitude throughput, bandwidth, and capacity for each accelerator class are collected for reference in @sec-appdx-machine-foundations-ai-hardware-cheat-sheet-modern-reference-4dc1.
 :::
 
-```{python}
-#| echo: false
-#| label: amdahl-h_h100-calc
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ AMDAHL'S LAW ON H100
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: "Amdahl's Law on H100" lighthouse callout
-# │
-# │ Goal: Demonstrate the limits of parallel speedup on H100.
-# │ Show: Why ResNet achieves 20× speedup while GPT-2 is capped at 5×.
-# │ How: Apply Amdahl's Law with different parallelizable fractions (95% vs 80%).
-# │      Then re-evaluate GPT-2 decode with a bandwidth-set path gain, to keep
-# │      memory-boundedness (shrinks G_accel) distinct from the serial fraction.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt, fmt_math, fmt_ops_rate, fmt_ratio, check
-
-# ┌── LEGO ───────────────────────────────────────────────
-class AmdahlH100:
-    """
-    Namespace for Amdahl's Law on H100.
-    Scenario: Comparing speedup for a 5% vs 20% unaccelerated fraction (ResNet vs GPT-2).
-    """
-
-    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    # H100 INT8 peak against an assumed 8 TOPS server CPU; 95% (ResNet-50) and
-    # 80% (GPT-2 decode) of baseline time on the accelerated path.
-    resnet = Scenarios.ResNet50InferenceH100OverServerCpu
-    gpt2 = Scenarios.Gpt2DecodeH100OverServerCpu
-    gpt2_bw = Scenarios.Gpt2DecodeH100OverServerCpuBandwidth  # path gain set by bandwidth
-    cpu_int8_tops = resnet.baseline_rate  # scenario assumption: baseline server-CPU INT8 throughput
-    p_resnet = resnet.fraction
-    p_gpt2 = gpt2.fraction
-
-    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    # Amdahl's Law: Speedup = 1 / ((1-p) + (p/G_accel))
-    hw_speedup_factor = resnet.gain
-    speedup_resnet = resnet.speedup
-    speedup_gpt2 = gpt2.speedup
-
-    # Step 1: Theoretical ceiling (if accelerator gain tends to infinity)
-    ceiling_gpt2 = gpt2.ceiling
-
-    # Step 2: Decode is memory bound, so its path gain is the bandwidth ratio
-    bw_gain = gpt2_bw.gain
-    speedup_gpt2_bw = gpt2_bw.speedup
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(speedup_resnet >= speedup_gpt2 * 3, f"ResNet speedup ({speedup_resnet:.1f}x) should be much higher than GPT-2 ({speedup_gpt2:.1f}x).")
-    check(speedup_gpt2 <= ceiling_gpt2, "Speedup cannot exceed theoretical ceiling.")
-    check(bw_gain < hw_speedup_factor, "Bandwidth gain should be well below the INT8 compute ratio.")
-    check(speedup_gpt2_bw < speedup_gpt2, "A smaller path gain must lower the bound.")
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    # Hardware context
-    h100_int8_tops_str = fmt_ops_rate(Hardware.Cloud.H100.compute.precision_flops["int8"], unit=TOPS, precision=0, commas=False)
-    cpu_int8_tops_str = fmt_ops_rate(cpu_int8_tops, unit=TOPS, precision=0, commas=False)
-    hw_speedup_mult_str = fmt_multiple(round(hw_speedup_factor), precision=0, commas=False)
-    hw_speedup_factor_str = fmt_int(hw_speedup_factor, commas=False)
-
-    # ResNet
-    p_resnet_str = fmt(p_resnet, precision=2, commas=False)
-    p_resnet_pct_str = fmt_percent(p_resnet, precision=0, commas=False, style='prose')
-    serial_resnet_str = fmt(1 - p_resnet, precision=2, commas=False)
-    serial_resnet_pct_str = fmt_percent(1 - p_resnet, precision=0, commas=False, style='prose')
-    p_resnet_over_accel_str = fmt_ratio(p_resnet / hw_speedup_factor, precision=4, commas=False)
-    amdahl_resnet_str = fmt(speedup_resnet, precision=1, commas=False)
-    amdahl_resnet_speedup_mult_str = fmt_multiple(speedup_resnet, precision=1, commas=False)
-
-    # GPT-2
-    p_gpt2_str = fmt(p_gpt2, precision=2, commas=False)
-    serial_gpt2_str = fmt(1 - p_gpt2, precision=2, commas=False)
-    serial_gpt2_pct_str = fmt_percent(1 - p_gpt2, precision=0, commas=False, style='prose')
-    p_gpt2_over_accel_str = fmt_ratio(p_gpt2 / hw_speedup_factor, precision=4, commas=False)
-    amdahl_gpt2_str = fmt(speedup_gpt2, precision=1, commas=False)
-    amdahl_gpt2_ceiling_speedup_mult_str = fmt_multiple(ceiling_gpt2, precision=0, commas=False)
-    amdahl_gpt2_speedup_mult_str = fmt_multiple(speedup_gpt2, precision=1, commas=False)
-    bw_gain_mult_str = fmt_multiple(round(bw_gain), precision=0, commas=False)
-    amdahl_gpt2_bw_speedup_mult_str = fmt_multiple(speedup_gpt2_bw, precision=1, commas=False)
-
-    resnet_speedup_eq_math = fmt_math(
-        rf"\text{{Speedup}} = \frac{{1}}{{(1-{p_resnet_str}) + \frac{{{p_resnet_str}}}{{{hw_speedup_factor_str}}}}} "
-        rf"= \frac{{1}}{{{serial_resnet_str} + {p_resnet_over_accel_str}}} "
-        rf"\approx {amdahl_resnet_str}\times"
-    )
-    gpt2_speedup_eq_math = fmt_math(
-        rf"\text{{Speedup}} = \frac{{1}}{{(1-{p_gpt2_str}) + \frac{{{p_gpt2_str}}}{{{hw_speedup_factor_str}}}}} "
-        rf"= \frac{{1}}{{{serial_gpt2_str} + {p_gpt2_over_accel_str}}} "
-        rf"\approx {amdahl_gpt2_str}\times"
-    )
-```
-
-::: {#lhs-amdahl-h_h100 .callout-lighthouse title="An illustrative Amdahl budget on H100"}
-
-**Illustrative ResNet-50 inference on NVIDIA H100**:
-
-- Assume H100 provides $\AcceleratorGain$ = `{python} AmdahlH100.hw_speedup_mult_str` on matrix multiplication relative to a server CPU without matrix extensions (`{python} AmdahlH100.h100_int8_tops_str` INT8 vs. ~`{python} AmdahlH100.cpu_int8_tops_str`) [@choquette2023]. The CPU's INT8 rate is a scenario assumption for this budget, not the FP32 peak of the reference CPU used elsewhere in the chapter.
-- Assume $\ParallelFraction$ = `{python} AmdahlH100.p_resnet_str`: `{python} AmdahlH100.p_resnet_pct_str` of baseline time receives that gain, while `{python} AmdahlH100.serial_resnet_pct_str` remains in data loading, preprocessing, postprocessing, and other work.
-$$
-\text{`{python} AmdahlH100.resnet_speedup_eq_math`}
-$$
-The `{python} AmdahlH100.hw_speedup_mult_str` path gain produces only `{python} AmdahlH100.amdahl_resnet_speedup_mult_str` end-to-end speedup because the `{python} AmdahlH100.serial_resnet_pct_str` unaffected fraction sets the ceiling.
-
-**Contrast with GPT-2 (autoregressive)**:
-
-- For GPT-2 token generation, assume $\ParallelFraction$ = `{python} AmdahlH100.p_gpt2_str`; the remaining `{python} AmdahlH100.serial_gpt2_pct_str` includes host overhead, sampling, and decoding work outside the accelerated matrix path.
-$$
-\text{`{python} AmdahlH100.gpt2_speedup_eq_math`}
-$$
-Less token-generation time receives the assumed gain, so even an infinite path gain yields at most $1/(1-\ParallelFraction)$ = `{python} AmdahlH100.amdahl_gpt2_ceiling_speedup_mult_str`.
-
-This calculation still overstates the decode path gain. Decode is bandwidth bound, limited by how fast memory delivers weights rather than by how fast the chip multiplies, so its accelerated path runs at memory's rate, not the INT8 TOPS rate. The relevant ratio is the H100's memory bandwidth over the reference CPU socket's, `{python} AmdahlH100.bw_gain_mult_str` (each chip's path to its own local memory, the H100's HBM against the CPU socket's DRAM, not the PCIe link between host and accelerator). INT8 helps decode on either machine by halving the bytes each weight occupies relative to FP16, not by multiplying faster. With that gain the bound falls from `{python} AmdahlH100.amdahl_gpt2_speedup_mult_str` to `{python} AmdahlH100.amdahl_gpt2_bw_speedup_mult_str`, barely moving, because the unaccelerated fraction already dominates. Two distinct limits are at work here, because bandwidth-boundedness shrinks $\AcceleratorGain$ whereas the unaccelerated fraction caps what any $\AcceleratorGain$ can deliver. Serving optimizations attack both limits. Batching raises $\AcceleratorGain$, because each weight byte fetched now serves many requests, while speculative decoding, developed in @sec-model-serving, changes the execution schedule by having a smaller model propose tokens for the full model to verify together. Its speedup requires a new timing breakdown that includes drafting, verification, and rejected proposals.
-
-:::
-
-Whether an operation is limited by compute rate or by data movement dictates both hardware selection and software optimization. Under the arithmetic intensity law (principle \ref{pri-arithmetic-intensity}), upgrading to an accelerator with $10\times$ higher peak compute yields negligible speedup if data delivery is the bottleneck. The roofline model\index{Roofline model!hardware diagnosis}, previewed in @sec-ml-systems-matching-workloads-hardware-bf91, makes this diagnosis [@williams2009]. It compares an operation's arithmetic intensity\index{Arithmetic intensity!roofline diagnostic}, the ratio of operations to bytes of memory traffic (FLOP/byte), with the hardware's ridge point, the peak compute rate divided by memory bandwidth, which is the intensity at which the compute limit and the bandwidth limit meet. An operation below the ridge is bandwidth bound, the regime the roofline literature calls *memory bound*; an operation above it is compute bound. GPT-2 decode and ResNet-50 sit on opposite sides of that line, a difference the Amdahl budget above already registered in the decode path gain. @Sec-hardware-acceleration-roofline-model-42ff turns the classification into numbers once the compute units and memory systems that set the two ceilings have been examined.
+Even within the accelerated fraction $\ParallelFraction$, whether an operation is limited by compute rate or by data movement dictates how much speedup $\AcceleratorGain$ the hardware path actually delivers. Under the arithmetic intensity law (principle \ref{pri-arithmetic-intensity}), upgrading to an accelerator with $10\times$ higher peak compute yields negligible speedup if data delivery is the bottleneck. The roofline model\index{Roofline model!hardware diagnosis}, previewed in @sec-ml-systems-matching-workloads-hardware-bf91, makes this diagnosis [@williams2009]. It compares an operation's arithmetic intensity\index{Arithmetic intensity!roofline diagnostic}, the ratio of operations to bytes of memory traffic (FLOP/byte), with the hardware's ridge point, the peak compute rate divided by memory bandwidth, which is the intensity at which the compute limit and the bandwidth limit meet. An operation below the ridge is bandwidth bound, the regime the roofline literature calls *memory bound*; an operation above it is compute bound. GPT-2 decode and ResNet-50 sit on opposite sides of that line, so bandwidth-boundedness shrinks GPT-2 decode's path gain $\AcceleratorGain$ while its unaccelerated host and sampling fraction caps what any $\AcceleratorGain$ can deliver. @Sec-hardware-acceleration-roofline-model-42ff turns both limits into concrete H100 numbers once the compute units and memory systems that set the two ceilings have been examined.
 
 ::: {.column-margin .margin-pointer}
 ↩ The arithmetic-intensity spectrum that separates the workload signatures of the major architectures is established in @sec-network-architectures-understanding-arithmetic-intensity-ade5.
@@ -645,7 +516,7 @@ In D·A·M terms, this efficiency gain stems from tailoring machine resources to
 
 On a late-1970s microprocessor without floating-point hardware, a single 32-bit floating-point multiply\index{Floating-point unit!precision bottleneck} required a software routine of dozens of integer shift-and-add instructions, turning scientific and signal-processing loops into an instruction-fetch bottleneck. Hardware specialization emerges whenever one computational pattern becomes a bottleneck that general-purpose processors cannot scale past. The Intel 8087\index{Intel 8087!floating-point coprocessor}\index{Floating-point unit!history} coprocessor (1980) executed floating-point operations directly in hardware [@palmer1980intel8087], and the Intel 486DX (1989) later moved the floating-point unit onto the CPU die itself [@patterson2017hardware]. That cycle of specializing silicon to relieve an acute bottleneck, then integrating it once the capability proves universal, recurs in every later era, and so does its limit. Dedicated silicon removes the instruction overhead around a dominant operation, but the overall gain is bounded by how much of the run time that operation occupies.
 
-Graphics supplied the second lesson, throughput over latency. A CPU spends most of its silicon on control logic, branch prediction, and caches that minimize the latency of a single instruction stream, which buys nothing when identical arithmetic must be applied to millions of independent pixels. GPUs\index{GPU!history} reallocated that silicon to dense arrays of arithmetic units, and when unified shader architectures (2006) replaced separate vertex and pixel pipelines with arrays of identical programmable cores, the GPU became a general-purpose parallel processor [@owens2008]. Digital signal processors\index{Digital signal processing!multiply-accumulate units} such as Texas Instruments' TMS32010 (1983) contributed the memory organization. To meet hard real-time deadlines, they replaced caches, whose misses introduce variable latency, with software-managed scratchpads feeding dedicated MAC data paths [@lyons2011understanding]. ML accelerators inherit both lessons.
+Graphics supplied the second lesson, throughput over latency. A CPU spends most of its silicon on control logic, branch prediction, and caches that minimize the latency of a single instruction stream, which buys nothing when identical arithmetic must be applied to millions of independent pixels. GPUs\index{GPU!history} reallocated that silicon to dense arrays of arithmetic units, and when unified shader architectures (2006) replaced separate vertex and pixel pipelines with arrays of identical programmable cores, the GPU became a general-purpose parallel processor [@owens2008]. Digital signal processors\index{Digital signal processing!multiply-accumulate units} such as Texas Instruments' TMS32010 (1983) contributed the memory organization. To meet hard real-time deadlines, they replaced caches, whose misses introduce variable latency, with software-managed scratchpads feeding dedicated multiply-accumulate (MAC) data paths [@lyons2011understanding]. ML accelerators inherit both lessons.
 
 The payoff arrived in 2012, when AlexNet\index{AlexNet!GPU deep learning era} [@krizhevsky2012imagenet] won the ImageNet competition after training on two consumer GPUs, the co-design result examined in @sec-introduction-deep-learning-era-infrastructure-bottleneck-2f02. Its dense 2D convolutions mapped directly onto thousands of GPU arithmetic lanes. In D·A·M terms, the machine constraint had dictated which algorithms were feasible, and aligning the algorithm's parallel structure with throughput-oriented hardware lifted it.
 
@@ -3154,7 +3025,134 @@ A reference off-chip DRAM access costs far more energy per event than arithmetic
 *Low arithmetic intensity places the modeled throughput ceiling on the bandwidth slope.*
 :::
 
-The compute units fix how fast an accelerator can calculate, and the memory system fixes how fast it can be fed. A kernel's performance is bounded by whichever of the two runs out first. Putting numbers on that statement takes three pieces: the roofline's ceilings for each precision path, the ridge point at which they meet, and the hardware balance that moves the ridge from one generation to the next. The ResNet-50 INT8 workload meets its sharpest lesson in these bounds. The INT8 path doubles the H100's arithmetic ceiling without moving its bandwidth ceiling, so a layer that cleared the ridge at FP16 can fall below it at INT8 if its activations still move at 16 bits.
+The compute units fix how fast an accelerator can calculate, and the memory system fixes how fast it can be fed. A kernel's performance is bounded by whichever of the two runs out first, while end-to-end speedup is bounded by the work that never reaches the accelerator (@eq-amdahl). Putting numbers on both bounds begins by contrasting how two workloads with different unaccelerated fractions and memory-traffic demands behave on the H100's INT8 path, then develops the roofline's ceilings for each precision path, the ridge point at which they meet, and the hardware balance that moves the ridge from one generation to the next. The ResNet-50 INT8 workload meets its sharpest lesson in these bounds. The INT8 path doubles the H100's arithmetic ceiling without moving its bandwidth ceiling, so a layer that cleared the ridge at FP16 can fall below it at INT8 if its activations still move at 16 bits.
+
+```{python}
+#| echo: false
+#| label: amdahl-h_h100-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ AMDAHL'S LAW ON H100
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "Amdahl's Law on H100" lighthouse callout
+# │
+# │ Goal: Demonstrate the limits of parallel speedup on H100.
+# │ Show: Why ResNet achieves 20× speedup while GPT-2 is capped at 5×.
+# │ How: Apply Amdahl's Law with different parallelizable fractions (95% vs 80%).
+# │      Then re-evaluate GPT-2 decode with a bandwidth-set path gain, to keep
+# │      memory-boundedness (shrinks G_accel) distinct from the serial fraction.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt_int, fmt, fmt_math, fmt_ops_rate, fmt_ratio, check
+
+# ┌── LEGO ───────────────────────────────────────────────
+class AmdahlH100:
+    """
+    Namespace for Amdahl's Law on H100.
+    Scenario: Comparing speedup for a 5% vs 20% unaccelerated fraction (ResNet vs GPT-2).
+    """
+
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    # H100 INT8 peak against an assumed 8 TOPS server CPU; 95% (ResNet-50) and
+    # 80% (GPT-2 decode) of baseline time on the accelerated path.
+    resnet = Scenarios.ResNet50InferenceH100OverServerCpu
+    gpt2 = Scenarios.Gpt2DecodeH100OverServerCpu
+    gpt2_bw = Scenarios.Gpt2DecodeH100OverServerCpuBandwidth  # path gain set by bandwidth
+    cpu_int8_tops = resnet.baseline_rate  # scenario assumption: baseline server-CPU INT8 throughput
+    p_resnet = resnet.fraction
+    p_gpt2 = gpt2.fraction
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    # Amdahl's Law: Speedup = 1 / ((1-p) + (p/G_accel))
+    hw_speedup_factor = resnet.gain
+    speedup_resnet = resnet.speedup
+    speedup_gpt2 = gpt2.speedup
+
+    # Step 1: Theoretical ceiling (if accelerator gain tends to infinity)
+    ceiling_gpt2 = gpt2.ceiling
+
+    # Step 2: Decode is memory bound, so its path gain is the bandwidth ratio
+    bw_gain = gpt2_bw.gain
+    speedup_gpt2_bw = gpt2_bw.speedup
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(speedup_resnet >= speedup_gpt2 * 3, f"ResNet speedup ({speedup_resnet:.1f}x) should be much higher than GPT-2 ({speedup_gpt2:.1f}x).")
+    check(speedup_gpt2 <= ceiling_gpt2, "Speedup cannot exceed theoretical ceiling.")
+    check(bw_gain < hw_speedup_factor, "Bandwidth gain should be well below the INT8 compute ratio.")
+    check(speedup_gpt2_bw < speedup_gpt2, "A smaller path gain must lower the bound.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    # Hardware context
+    h100_int8_tops_str = fmt_ops_rate(Hardware.Cloud.H100.compute.precision_flops["int8"], unit=TOPS, precision=0, commas=False)
+    cpu_int8_tops_str = fmt_ops_rate(cpu_int8_tops, unit=TOPS, precision=0, commas=False)
+    hw_speedup_mult_str = fmt_multiple(round(hw_speedup_factor), precision=0, commas=False)
+    hw_speedup_factor_str = fmt_int(hw_speedup_factor, commas=False)
+
+    # ResNet
+    p_resnet_str = fmt(p_resnet, precision=2, commas=False)
+    p_resnet_pct_str = fmt_percent(p_resnet, precision=0, commas=False, style='prose')
+    serial_resnet_str = fmt(1 - p_resnet, precision=2, commas=False)
+    serial_resnet_pct_str = fmt_percent(1 - p_resnet, precision=0, commas=False, style='prose')
+    p_resnet_over_accel_str = fmt_ratio(p_resnet / hw_speedup_factor, precision=4, commas=False)
+    amdahl_resnet_str = fmt(speedup_resnet, precision=1, commas=False)
+    amdahl_resnet_speedup_mult_str = fmt_multiple(speedup_resnet, precision=1, commas=False)
+
+    # GPT-2
+    p_gpt2_str = fmt(p_gpt2, precision=2, commas=False)
+    serial_gpt2_str = fmt(1 - p_gpt2, precision=2, commas=False)
+    serial_gpt2_pct_str = fmt_percent(1 - p_gpt2, precision=0, commas=False, style='prose')
+    p_gpt2_over_accel_str = fmt_ratio(p_gpt2 / hw_speedup_factor, precision=4, commas=False)
+    amdahl_gpt2_str = fmt(speedup_gpt2, precision=1, commas=False)
+    amdahl_gpt2_ceiling_speedup_mult_str = fmt_multiple(ceiling_gpt2, precision=0, commas=False)
+    amdahl_gpt2_speedup_mult_str = fmt_multiple(speedup_gpt2, precision=1, commas=False)
+    bw_gain_mult_str = fmt_multiple(round(bw_gain), precision=0, commas=False)
+    amdahl_gpt2_bw_speedup_mult_str = fmt_multiple(speedup_gpt2_bw, precision=1, commas=False)
+
+    resnet_speedup_eq_math = fmt_math(
+        rf"\text{{Speedup}} = \frac{{1}}{{(1-{p_resnet_str}) + \frac{{{p_resnet_str}}}{{{hw_speedup_factor_str}}}}} "
+        rf"= \frac{{1}}{{{serial_resnet_str} + {p_resnet_over_accel_str}}} "
+        rf"\approx {amdahl_resnet_str}\times"
+    )
+    gpt2_speedup_eq_math = fmt_math(
+        rf"\text{{Speedup}} = \frac{{1}}{{(1-{p_gpt2_str}) + \frac{{{p_gpt2_str}}}{{{hw_speedup_factor_str}}}}} "
+        rf"= \frac{{1}}{{{serial_gpt2_str} + {p_gpt2_over_accel_str}}} "
+        rf"\approx {amdahl_gpt2_str}\times"
+    )
+```
+
+::: {#lhs-amdahl-h_h100 .callout-lighthouse title="An illustrative Amdahl budget on H100"}
+
+**Illustrative ResNet-50 inference on NVIDIA H100**:
+
+- Assume H100 provides $\AcceleratorGain$ = `{python} AmdahlH100.hw_speedup_mult_str` on matrix multiplication relative to a server CPU without matrix extensions (`{python} AmdahlH100.h100_int8_tops_str` INT8 vs. ~`{python} AmdahlH100.cpu_int8_tops_str`) [@choquette2023]. The CPU's INT8 rate is a scenario assumption for this budget, not the FP32 peak of the reference CPU used elsewhere in the chapter.
+- Assume $\ParallelFraction$ = `{python} AmdahlH100.p_resnet_str`: `{python} AmdahlH100.p_resnet_pct_str` of baseline time receives that gain, while `{python} AmdahlH100.serial_resnet_pct_str` remains in data loading, preprocessing, postprocessing, and other work.
+$$
+\text{`{python} AmdahlH100.resnet_speedup_eq_math`}
+$$
+The `{python} AmdahlH100.hw_speedup_mult_str` path gain produces only `{python} AmdahlH100.amdahl_resnet_speedup_mult_str` end-to-end speedup because the `{python} AmdahlH100.serial_resnet_pct_str` unaffected fraction sets the ceiling.
+
+**Contrast with GPT-2 (autoregressive)**:
+
+- For GPT-2 token generation, assume $\ParallelFraction$ = `{python} AmdahlH100.p_gpt2_str`; the remaining `{python} AmdahlH100.serial_gpt2_pct_str` includes host overhead, sampling, and decoding work outside the accelerated matrix path.
+$$
+\text{`{python} AmdahlH100.gpt2_speedup_eq_math`}
+$$
+Less token-generation time receives the assumed gain, so even an infinite path gain yields at most $1/(1-\ParallelFraction)$ = `{python} AmdahlH100.amdahl_gpt2_ceiling_speedup_mult_str`.
+
+This calculation still overstates the decode path gain. Decode is bandwidth bound, limited by how fast memory delivers weights rather than by how fast the chip multiplies, so its accelerated path runs at memory's rate, not the INT8 TOPS rate. The relevant ratio is the H100's memory bandwidth over the reference CPU socket's, `{python} AmdahlH100.bw_gain_mult_str` (each chip's path to its own local memory, the H100's HBM against the CPU socket's DRAM, not the PCIe link between host and accelerator). INT8 helps decode on either machine by halving the bytes each weight occupies relative to FP16, not by multiplying faster. With that gain the bound falls from `{python} AmdahlH100.amdahl_gpt2_speedup_mult_str` to `{python} AmdahlH100.amdahl_gpt2_bw_speedup_mult_str`, barely moving, because the unaccelerated fraction already dominates. Two distinct limits are at work here, because bandwidth-boundedness shrinks $\AcceleratorGain$ whereas the unaccelerated fraction caps what any $\AcceleratorGain$ can deliver. Serving optimizations attack both limits. Batching raises $\AcceleratorGain$, because each weight byte fetched now serves many requests, while speculative decoding, developed in @sec-model-serving, changes the execution schedule by having a smaller model propose tokens for the full model to verify together. Its speedup requires a new timing breakdown that includes drafting, verification, and rejected proposals.
+
+:::
+
+::: {#chk-hw-acceleration-parallelism-gate .callout-checkpoint title="The parallelism check"}
+
+These checks turn Amdahl's bound into a hardware-selection test.
+
+**Amdahl's reality**
+
+- [ ] **Serial bottlenecks**: use Amdahl's bound to explain why a 1,000$\times$ faster GPU may only speed up training by 5$\times$ when data loading is slow.
+- [ ] **Speedup ceiling**: for $\ParallelFraction=0.95$ and $\AcceleratorGain=100$, estimate total speedup and compare it with the infinite-accelerator ceiling.
+- [ ] **Workload variation**: what baseline profiling would establish the ResNet-50\index{ResNet-50!compute-bound workload} and MobileNet accelerated fractions for a proposed hardware change? Explain how those fractions would determine which benefits more.
+
+:::
 
 ### The roofline model {#sec-hardware-acceleration-roofline-model-3e1a}
 

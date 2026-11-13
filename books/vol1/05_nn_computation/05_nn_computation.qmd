@@ -146,7 +146,7 @@ class MNISTInference:
     out_dim_str = fmt(out_dim, precision=0, commas=False)
 ```
 
-Recognizing one handwritten digit costs the small network at the center of this chapter `{python} MNISTInference.total_macs_str`. A multiply-accumulate (MAC) multiplies one weight by one input value and adds the product to a running sum ($\MacAccumulator\leftarrow \MacAccumulator+ \ModelWeight\cdot \LayerInputComponent$), and the usual convention counts it as two floating-point operations ($1\text{ MAC} = 2\text{ FLOPs}$), so the digit costs `{python} MNISTInference.total_flops_str`. None of that work is a logical branch. A program that once tested pixel thresholds and stroke patterns with if-then-else rules has become a fixed sequence of arithmetic. How fast it runs now depends on how quickly the machine can supply operands to that arithmetic, and so on whether memory bandwidth or arithmetic capacity runs out first. Such a program also fails differently. It rarely fails logically; it fails numerically, as values grow or shrink until they stop carrying information.
+Recognizing one $28{\times}28$ handwritten digit from the Modified National Institute of Standards and Technology (MNIST) dataset [@lecun1998] costs the small network at the center of this chapter `{python} MNISTInference.total_macs_str`. The network flattens those 784 grayscale pixels and maps them through hidden layers of `{python} MNISTInference.h1_dim_str` and `{python} MNISTInference.h2_dim_str` units to `{python} MNISTInference.out_dim_str` class scores (`784` $\to$ `128` $\to$ `64` $\to$ `10`), holding `{python} MNISTInference.total_params_str` (`{python} MNISTInference.weight_kb_str` in 32-bit floating point, FP32). A multiply-accumulate (MAC) multiplies one weight by one input value and adds the product to a running sum ($\MacAccumulator\leftarrow \MacAccumulator+ \ModelWeight\cdot \LayerInputComponent$), and the usual convention counts it as two floating-point operations ($1\text{ MAC} = 2\text{ FLOPs}$), so the digit costs `{python} MNISTInference.total_flops_str`. None of that work is a logical branch. A program that once tested pixel thresholds and stroke patterns with if-then-else rules has become a fixed sequence of arithmetic. How fast it runs now depends on how quickly the machine can supply operands to that arithmetic, and so on whether memory bandwidth or arithmetic capacity runs out first. Such a program also fails differently. It rarely fails logically; it fails numerically, as values grow or shrink until they stop carrying information.
 
 That arithmetic begins where the data pipeline of @sec-data-engineering ends, because a clean, versioned training example by itself teaches the model nothing. Learning begins when the digit crosses from the pipeline into the model, the algorithm axis of D·A·M, where mathematical operators fix the work to be done and the state to be held. Under the silicon contract (principle \ref{pri-silicon-contract}), those operators supply the model's side of the contract, while precision, data layout, implementation, and hardware fix how many bytes actually move and which machine resource saturates first.
 
@@ -170,16 +170,6 @@ The iron law of ML systems (principle \ref{pri-iron-law}) charges each stage for
 
 : **Where Each Stage Spends Its Budget**: Work, data movement, and retained state for the five stages in the life of a model, for the running 784-128-64-10 network. Training repeats the first four stages for every batch, while serving runs only the forward pass. Later sections derive each row, and the summary returns to the table. {#tbl-nn-computation-stage-costs tbl-colwidths="[14,24,24,19,19]"}
 
-::: {#exmp-nn-computation-running-example-mnist-digit-recognition .callout-example title="Running example: MNIST digit recognition"}
-
-**Scenario**: A handwritten-digit classifier receives $28{\times}28$ grayscale images from the Modified National Institute of Standards and Technology (MNIST) dataset [@lecun1998], flattens each into 784 pixel values, and maps them through hidden layers of `{python} MNISTInference.h1_dim_str` and `{python} MNISTInference.h2_dim_str` units to `{python} MNISTInference.out_dim_str` class scores, one per digit (784 → 128 → 64 → 10).
-
-**Diagnosis**: The network holds `{python} MNISTInference.total_params_str`, which occupy `{python} MNISTInference.weight_kb_str` in 32-bit floating point (FP32), and it spends `{python} MNISTInference.total_macs_str` (`{python} MNISTInference.total_flops_str`) to classify one digit. Those three numbers summarize what one classification costs.
-
-**Systems lesson**: The task is small enough to compute by hand yet exercises every mechanism that larger networks scale up. Each later section either derives one of these numbers or asks what happens to it when the network trains, grows, or ships.
-
-:::
-
 Even this small network counts as deep in the sense the field uses, because it stacks more than one layer of learned features between input and output. Each of its layers computes new features from the layer before, and training learns those features from examples instead of receiving them from a designer.
 
 ::: {#dfn-nn-computation-deep-learning .callout-definition title="Deep learning"}
@@ -192,7 +182,9 @@ Even this small network counts as deep in the sense the field uses, because it s
 
 :::
 
-Learning representations end to end also introduces engineering failure modes that conventional software debugging cannot isolate. Deep learning failures produce subtle symptoms: gradient instabilities\index{Gradient instabilities!training failure mode}[^fn-gradient-instabilities-depth] that stop training from making progress, numerical precision errors that corrupt parameter state across millions of updates, or inefficient memory access patterns in tensor operations (operations on multidimensional arrays of numbers) that leave accelerator compute units underutilized. Resolving these failures requires reasoning about the physical execution of tensor algebra on hardware rather than stepping through procedural control flow. Those hardware demands depend first on representation, that is, on whether patterns are expressed through hand-authored rules, engineered statistical features, or learned parameters.
+Learning representations end to end also introduces engineering failure modes that conventional software debugging cannot isolate. Deep learning failures produce subtle symptoms: gradient instabilities\index{Gradient instabilities!training failure mode}[^fn-gradient-instabilities-depth] that stop training from making progress, numerical precision errors that corrupt parameter state across millions of updates, or inefficient memory access patterns in tensor operations (operations on multidimensional arrays of numbers) that leave accelerator compute units underutilized. Resolving these failures requires reasoning about the physical execution of tensor algebra on hardware rather than stepping through procedural control flow.
+
+The chapter traces that tensor execution across the five stages of @tbl-nn-computation-stage-costs. @Sec-neural-computation-evolution-ml-paradigms-ec9c first contrasts rules, engineered features, and learned representations to explain why neural computation trades low operation counts for regular dense arithmetic. @Sec-neural-computation-neural-network-fundamentals-07e4 builds the forward pass from single neurons to batched matrix layers, @sec-neural-computation-learning-process-0b83 derives the loss, backward pass, optimizer state, and training memory footprint, and @sec-neural-computation-inference-pipeline-5372 strips that training scaffolding away to expose the leaner serving pass before @sec-neural-computation-case-study-usps-digit-recognition-97be traces the full loop on postal digit recognition. Those hardware demands begin with representation: whether patterns are expressed through hand-authored rules, engineered statistical features, or learned parameters.
 
 ```{python}
 #| echo: false
@@ -232,6 +224,16 @@ class EarlySystemsClaims:
 ## Computing with Patterns {#sec-neural-computation-evolution-ml-paradigms-ec9c}
 
 Before a learned network spent `{python} MNISTInference.total_macs_str` on that $28{\times}28$ digit, earlier generations of computing attacked the same classification problem with two simpler representation strategies. An illustrative rule tree tests roughly one hundred pixel comparisons per digit; an engineered feature pipeline performs several thousand arithmetic operations; the three-layer neural network performs more than one hundred thousand multiply-accumulates. Each strategy replaced a predecessor whose representations ran out of expressive reach on unconstrained handwriting, and each step up in representation capacity shifted which hardware resource bound execution.
+
+::: {#exmp-nn-computation-running-example-mnist-digit-recognition .callout-example title="Running example: MNIST digit recognition"}
+
+**Scenario**: A handwritten-digit classifier receives $28{\times}28$ grayscale images from the MNIST dataset [@lecun1998], flattens each into 784 pixel values, and maps them through hidden layers of `{python} MNISTInference.h1_dim_str` and `{python} MNISTInference.h2_dim_str` units to `{python} MNISTInference.out_dim_str` class scores, one per digit (784 → 128 → 64 → 10).
+
+**Diagnosis**: The network holds `{python} MNISTInference.total_params_str`, which occupy `{python} MNISTInference.weight_kb_str` in FP32, and it spends `{python} MNISTInference.total_macs_str` (`{python} MNISTInference.total_flops_str`) to classify one digit. Those three numbers summarize what one classification costs.
+
+**Systems lesson**: The task is small enough to compute by hand yet exercises every mechanism that larger networks scale up. Each later section either derives one of these numbers or asks what happens to it when the network trains, grows, or ships.
+
+:::
 
 ::: {.column-margin .margin-pointer}
 ↩ The succession of logic, knowledge, feature-engineering, and infrastructure bottlenecks that these paradigms answered is established in @sec-introduction-ai-paradigm-evolution-ae2b.
