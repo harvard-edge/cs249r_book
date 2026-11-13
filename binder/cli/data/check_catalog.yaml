@@ -306,11 +306,11 @@ groups:
     - name: data-provenance
       when: Every commit (pre-commit)
       cost: <1s
-      invariant: Tier-2 data/*.csv and load_series() targets carry Source, Verified, and Computation/Notes headers
+      invariant: Tier-2 data/*.csv, load_series() consumers, bibs/manifest.json citations, and Frictionless SHA-256 manifest match
     - name: cell-provenance
-      when: Opt-in (--scope cell-provenance / --all-scopes)
+      when: Every commit (pre-commit)
       cost: <1s
-      invariant: Matplotlib #fig-* cell headers document Provenance inputs, recipe, and epistemic boundary
+      invariant: Matplotlib #fig-* cell headers document substantive Provenance and back measured claims with receipts
     error_codes:
     - code: figure_missing_label
       trigger: Body markdown image lacks {#fig-X}
@@ -430,28 +430,76 @@ groups:
       message_template: "CSV cell value is incompatible with its declared '# Columns:' type"
     - code: series_manifest_missing
       trigger: "books/datapackage.json is missing or invalid JSON"
-      fix: "Run 'python3 binder/cli/checks/figure_data_provenance.py --seal' to generate books/datapackage.json"
+      fix: "Run 'python3 binder/cli/checks/figure_data_provenance.py --seal-data --reason \"...\"' after verifying sources"
       message_template: "Frictionless manifest books/datapackage.json is missing or malformed"
     - code: series_manifest_unsealed
       trigger: "A book data/*.csv file has no resource entry in books/datapackage.json"
-      fix: "Run 'python3 binder/cli/checks/figure_data_provenance.py --seal' to seal the dataset"
+      fix: "Authenticate @bibkeys in bibs/manifest.json, then run 'figure_data_provenance.py --seal-data --reason \"...\"'"
       message_template: "Book CSV file is not sealed in books/datapackage.json"
     - code: series_manifest_drift
       trigger: "A book data/*.csv SHA-256 hash, row count, schema, or provenance drifted from books/datapackage.json"
-      fix: "Verify the CSV change is intentional and run 'python3 binder/cli/checks/figure_data_provenance.py --seal'"
+      fix: "Run 'figure_data_provenance.py --seal' (metadata-only) or '--seal-data --reason \"...\"' (row changes)"
       message_template: "Book CSV file has drifted from its sealed entry in books/datapackage.json"
     - code: series_manifest_orphan
       trigger: "books/datapackage.json lists a CSV path that no longer exists under books/"
-      fix: "Run 'python3 binder/cli/checks/figure_data_provenance.py --seal' to prune stale entries"
+      fix: "Restore the missing CSV or run 'figure_data_provenance.py --seal-data --reason \"...\"'"
       message_template: "books/datapackage.json contains a stale resource path"
+    - code: series_receipt_mismatch
+      trigger: "A scripted CSV SHA-256 disagrees with its upstream extraction receipt manifest"
+      fix: "Re-run the extraction script instead of hand-editing scripted CSV outputs"
+      message_template: "CSV SHA-256 disagrees with upstream extraction receipt manifest"
+    - code: series_missing_citekey
+      trigger: "Book data/*.csv provenance header cites zero @bibkey references"
+      fix: "Authenticate primary source via './binder/binder bib add' and cite @bibkey in '# Source:'"
+      message_template: "CSV provenance header cites no @bibkey"
+    - code: series_unverified_citekey
+      trigger: "CSV header or citation column cites a @bibkey not sealed as 'verified' in bibs/manifest.json"
+      fix: "Authenticate or re-seal the citation via './binder/binder bib add' / 'reseal'"
+      message_template: "Cited @bibkey is unverified or drifted in bibs/manifest.json"
+    - code: series_banned_reassurance_word
+      trigger: "CSV provenance header contains banned reassurance wording instead of mechanism details"
+      fix: "Remove reassurance wording and state the measurement boundary or derivation formula"
+      message_template: "CSV provenance comment contains banned reassurance wording"
+    - code: series_placeholder_metadata
+      trigger: "CSV header or column schema uses placeholder tokens (TODO, TBD, example.com, [unit], ...)"
+      fix: "Replace placeholder tokens with concrete source metadata and physical/semantic units"
+      message_template: "CSV provenance or column schema contains placeholder text"
+    - code: series_vacuous_metadata
+      trigger: "'# Epistemic:', '# Locator:', '# Computation:'/'# Notes:', or column description is too brief"
+      fix: "Provide specific accounting boundaries, table/page locators, and >=3-word column descriptions"
+      message_template: "CSV provenance field or column description lacks required specificity"
+    - code: series_empty_rows
+      trigger: "CSV lacks data rows or has blank/duplicate column names in its header row"
+      fix: "Populate empirical rows and ensure unique non-empty column names"
+      message_template: "CSV must have unique non-empty column headers and at least one data row"
+    - code: series_ragged_row
+      trigger: "A CSV data row has a field count differing from the header row"
+      fix: "Quote fields containing commas and keep rectangular row widths"
+      message_template: "CSV data row field count does not match header column count"
+    - code: series_empty_column
+      trigger: "A CSV column is empty across every data row"
+      fix: "Populate values for the column or drop unused blank columns"
+      message_template: "CSV column is blank across every row"
+    - code: qmd_bypass_series_loader
+      trigger: "Book .qmd Python code reads tabular/binary data directly (pd.read_csv, csv.reader, np.loadtxt, ...)"
+      fix: "Place dataset under books/volN/<chapter>/data/*.csv and load via load_series(...)"
+      message_template: "Direct dataset reader in .qmd bypasses load_series() provenance gate"
+    - code: qmd_dynamic_load_series
+      trigger: "Book .qmd calls load_series() with a dynamic variable instead of a string literal path"
+      fix: "Pass a static string literal CSV path to load_series(...)"
+      message_template: "load_series() in book chapters must pass a static string literal path"
+    - code: stray_chapter_dataset
+      trigger: "Tabular or binary dataset file under books/vol* sits outside a chapter data/ directory"
+      fix: "Move dataset to books/volN/<chapter>/data/*.csv and seal books/datapackage.json"
+      message_template: "Dataset file sits outside books/volN/<chapter>/data/"
     - code: series_invalid_sha256
       trigger: "'# Upstream-SHA256:' is not a 64-character lowercase hex digest"
       fix: "Record the full 64-character SHA-256 hex digest of the raw upstream file"
       message_template: "CSV file has malformed '# Upstream-SHA256:' digest"
     - code: series_missing_generator_script
-      trigger: "'# Generator:' names a repo script path that does not exist on disk"
-      fix: "Point '# Generator:' to a committed script path or mark manual transcription"
-      message_template: "CSV file names a generator script that does not exist in the repository"
+      trigger: "'# Generator:' names a repo script path that does not exist or never references the CSV"
+      fix: "Point '# Generator:' to the committed script that writes this CSV"
+      message_template: "CSV file names a missing or unrelated generator script"
     - code: series_unresolved_citekey
       trigger: "CSV header cites @key that is missing from the volume bibliography"
       fix: "Add the entry to bibs/references.bib and sync, or fix the citekey"
@@ -460,6 +508,14 @@ groups:
       trigger: "Matplotlib #fig-* cell header lacks a 'Provenance:' block"
       fix: "Add '# │ Provenance:' lines summarizing data inputs, recipe, and epistemic boundary"
       message_template: "Matplotlib #fig-* cell lacks a 'Provenance:' header block"
+    - code: figure_stub_cell_provenance
+      trigger: "Matplotlib #fig-* 'Provenance:' block is a <6-word stub, omits epistemic status, or uses banned tokens"
+      fix: "Document concrete inputs, equation/fit, and epistemic status in >= 6 words"
+      message_template: "Matplotlib #fig-* 'Provenance:' block is a stub or uses disallowed tokens"
+    - code: figure_unbacked_measured_cell
+      trigger: "Matplotlib #fig-* cell claims 'measured' without a CSV/mlsysim receipt or hardcodes float literal arrays"
+      fix: "Load measured points from a sealed data/*.csv series via load_series(...) or mlsysim"
+      message_template: "Matplotlib #fig-* cell claims 'measured' without a receipt or embeds inline float arrays"
     common_invocations:
     - - ./binder/binder check figures
       - '# all curated figure scopes'
