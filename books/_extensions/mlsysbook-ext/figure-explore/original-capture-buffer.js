@@ -41,7 +41,7 @@
       ['Release the last reference','The GPU drops the final consumer reference to physical pages A (0 references remaining), turning the panel c guard green so A becomes eligible for requeue.'],
       ['Requeue A for a later capture','In panel c, the capture driver returns physical pages A to the DMA ring for a future frame while separate pages B still retain converted frame F.']
     ].map(([label,description])=>({label,description}));
-    steps.forEach((step,i)=>{const description=step.description;Object.defineProperty(step,'description',{get(){return root.dataset.lessonCommittedIndex===String(i)?description:'On completion: '+description;}});});
+    steps.forEach((step,i)=>{const description=step.description;Object.defineProperty(step,'description',{get(){return root.dataset.lessonCommittedIndex===String(i)?description:description;}});});
     const initialFills=new Map([...copy,dma,pages,...mappings,converted,...owners].map(n=>[n,n.getAttribute('fill')]));
     const focusPoints=[[340,75],[92.5,72],[257.5,72],[422.5,72],[587.5,72],[200,215],[200,215],[310,310],[310,365],[110,310],[310,310],[435,460],[595,460]];
     function render(index,{stage,details}){root.dataset.lessonCommittedIndex=String(index);
@@ -76,6 +76,7 @@
       token.classList.add('ocb-transient');
     }
     const commit=(i,context)=>{overlay.querySelectorAll('.ocb-transient').forEach(n=>n.remove());render(i,context);};
+    const __syncFocusGuard=s=>{const b=(s.getAttribute('viewBox')||'').trim().split(/[\s,]+/).map(Number);if(b.length!==4||!b[2]||!b[3])return;let g=s.querySelector(':scope>[data-mlsys-focus-guard]');if(!g){g=document.createElementNS('http://www.w3.org/2000/svg','path');g.setAttribute('fill','none');g.setAttribute('stroke','none');g.setAttribute('data-mlsys-focus','');g.setAttribute('data-mlsys-focus-guard','');s.append(g);}g.setAttribute('d',`M${(b[0]+b[2]*.1).toFixed(2)},${(b[1]+b[3]*.1).toFixed(2)}h${(b[2]*.8).toFixed(2)}v${(b[3]*.8).toFixed(2)}h-${(b[2]*.8).toFixed(2)}z`);};__syncFocusGuard(svg);
     return window.MLSysOriginalPlayer.create({root,outer:context.outer,layout:'compact',intro:'Compare 4 staged payload buffers against zero-copy shared pages A and trace how 3 consumer references gate capture buffer reuse.',viewControls:inspect,title:'When can capture pages be reused?',scope:'Two alternative ingestion designs for one camera frame F on an Application SoC: panel a stages 4 separate payload buffers across 3 memory copies, whereas panels b and c trace zero-copy dma_buf/IOMMU page sharing for physical pages A across 3 mapped consumers (CPU, ISP, GPU) plus separate converted output pages B.',steps,render:commit,transition});
   };
 })();

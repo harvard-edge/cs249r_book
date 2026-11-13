@@ -46,7 +46,7 @@
     const tokens=['the','mat','mat','today','today','[end]'],retained=['The','cat','sat','on','the','mat','today'];
     const tokenLabels=gb.map((b,i)=>{const g=make('g',{'data-token':tokens[i]});g.append(make('rect',{x:b.x+.5,y:b.y+.5,width:b.w-1,height:b.h-1,fill:'#dcfda6'}));const label=make('text',{x:center(b).x,y:center(b).y,'dominant-baseline':'middle','text-anchor':'middle',fill:'#151515','font-size':6.5,'font-family':'sans-serif'},tokens[i]);g.append(label);layer.append(g);return{g,label};});
     const cacheLabels=cb.map((b,i)=>{const label=make('text',{x:center(b).x,y:center(b).y,'dominant-baseline':'middle','text-anchor':'middle',fill:'#5c2b00','font-size':i===6?4.1:4.6,'font-weight':'600','font-family':'sans-serif','data-cache-token':retained[i]},retained[i]);layer.append(label);return label;});
-    const focus=make('rect',{fill:'none',stroke:'#005f8e','stroke-width':1.3,rx:1,'data-active-pass':''});
+    const focus=make('rect',{fill:'none',stroke:'#005f8e','stroke-width':1.3,rx:1,'data-active-pass':'','data-mlsys-focus':''});
     const dMinX=Math.min(...pb.slice(1).map(b=>b.x)),dMinY=Math.min(...pb.slice(1).map(b=>b.y)),dMaxX=Math.max(...pb.slice(1).map(b=>b.x+b.w)),dMaxY=Math.max(...pb.slice(1).map(b=>b.y+b.h));
     const compareDecodeFocus=make('rect',{x:dMinX-1,y:dMinY-1,width:dMaxX-dMinX+2,height:dMaxY-dMinY+2,fill:'none',stroke:'#b45100','stroke-width':1.5,'stroke-dasharray':'3 1.5',rx:1});
     layer.append(focus,compareDecodeFocus);
@@ -58,35 +58,41 @@
     const insetOperation=document.createElement('p');inset.append(insetTitle,insetCells,insetOperation);
     const cacheStatus=document.createElement('p');cacheStatus.className='prefill-cache-status';cacheStatus.setAttribute('aria-live','off');
     let current=0,stage;
-    function updateView(){inset.hidden=!(view.value==='follow'&&current>=3);if(view.value==='whole')svg.setAttribute('viewBox',originalBox);else svg.setAttribute('viewBox',current<3?'0 0 182 162.212':'178 0 185.372 162.212');}
+    function syncFocus(){
+      const active=current===15?(view.value==='follow'?pb[1]:pb[0]):current===3?(view.value==='follow'?gb[0]:pb[0]):current>0&&current<15?(current<4?pb[0]:pb[(lesson[current][4]||0)+1]):null;
+      const fallback=current===0?{x:ib[0].x,y:ib[0].y,w:ib[3].x+ib[3].w-ib[0].x,h:ib[0].h}:pb[2];
+      const box=active||fallback;
+      focus.style.visibility='visible';
+      focus.setAttribute('stroke',active?'#005f8e':'none');
+      for(const [key,value]of Object.entries({x:box.x-1,y:box.y-1,width:box.w+2,height:box.h+2}))focus.setAttribute(key,value);
+    }
+    function updateView(){inset.hidden=!(view.value==='follow'&&current>=3);if(view.value==='whole')svg.setAttribute('viewBox',originalBox);else svg.setAttribute('viewBox',current<3?'0 0 182 162.212':'178 0 185.372 162.212');syncFocus();}
     view.addEventListener('change',updateView);
     function render(index,context){
       current=index;stage=context.stage;
-      if(!stage.contains(svg)){stage.append(svg);}
-      if(context.details&&!context.details.contains(cacheStatus)){context.details.append(cacheStatus,inset);}
+      if(!stage.contains(svg)){stage.append(svg,inset);}
+      if(context.details&&!context.details.contains(cacheStatus)){context.details.append(cacheStatus);}
       const [,,kind,count,k=0]=lesson[index];
       tokenLabels.forEach(({g,label},i)=>{let visible=false;if(i===0)visible=index>=3;else if(i===1)visible=index>=6;else if(i===2)visible=index>=7;else if(i===3)visible=index>=10;else if(i===4)visible=index>=11;else if(i===5)visible=index>=14;label.style.visibility=visible?'visible':'hidden';g.firstChild.setAttribute('fill',visible?'#dcfda6':'#fff');});
       cache.forEach((cell,i)=>{cell.style.fill=i<count?'rgb(98.039246%, 83.137512%, 68.624878%)':'white';cacheLabels[i].style.visibility=i<count?'visible':'hidden';cacheLabels[i].style.opacity='1';cell.style.strokeWidth=(kind==='read'&&i<count)?'1.4':'.59776';});
       insetNodes.forEach((n,i)=>{n.dataset.retained=String(i<count);n.classList.toggle('is-read',kind==='read'&&i<count);n.textContent=i<count?retained[i]:'·';});
       insetOperation.textContent=kind==='release'?'The request has finished. Its private cache can be reclaimed; generated tokens remain visible.':kind==='read'?`Read all ${count} earlier entries into the highlighted pass. These entries remain stored.`:kind==='append'?`Append the consumed input “${retained[count-1]}.” Earlier entries stay unchanged.`:'The newly predicted output is not a cache entry until a later pass consumes it.';
-      const active=index===15?pb[0]:index>0&&index<15?(index<4?pb[0]:pb[k+1]):null;
-      focus.style.visibility=active?'visible':'hidden';if(active)for(const [key,value]of Object.entries({x:active.x-1,y:active.y-1,width:active.w+2,height:active.h+2}))focus.setAttribute(key,value);
       compareDecodeFocus.style.visibility=index===15?'visible':'hidden';
       cacheStatus.textContent=kind==='release'?'Request complete: no retained entries are needed by this request. Its private cache is eligible for reclamation.':count?`Retained KV entries (${count}): ${retained.slice(0,count).join(' · ')}. Each labeled cell stands for that token’s keys and values across the model.`:'Retained KV entries: none. Orange cells mark available places in this illustrative request cache.';
       root.dataset.prefillState=String(index);root.dataset.cacheCount=String(count);updateView();motion.replaceChildren();
     }
     const trajectory=(from,to,bend=0)=>t=>({x:from.x+(to.x-from.x)*t,y:from.y+(to.y-from.y)*t-bend*4*t*(1-t)});
-    function pathsFor(index){const [,,kind,count,k=0]=lesson[index],block=pb[k+1];
+    function pathsFor(index){const [,,kind,count,k=0]=lesson[index],block=pb[k+1],followDecode=view.value==='follow'&&index>=3;
       if(kind==='prefill')return ib.map(b=>trajectory({x:center(b).x,y:b.y+b.h},{x:center(b).x,y:pb[0].y}));
       if(kind==='write-prompt')return cb.slice(0,4).map(b=>trajectory({x:center(b).x,y:pb[0].y+pb[0].h},{x:center(b).x,y:b.y}));
       if(kind==='first')return[trajectory({x:pb[0].x+pb[0].w,y:center(pb[0]).y},{x:gb[0].x,y:center(gb[0]).y},-3)];
-      if(kind==='read')return cb.slice(0,count).map((b,i)=>trajectory(center(b),{x:block.x+block.w*(i+1)/(count+1),y:block.y+block.h},12));
-      if(kind==='append')return[trajectory({x:center(block).x,y:block.y+block.h},center(cb[count-1]),-8)];
+      if(kind==='read')return cb.slice(0,count).map((b,i)=>followDecode?trajectory({x:block.x+block.w*(i+1)/(count+1),y:block.y+block.h+20},{x:block.x+block.w*(i+1)/(count+1),y:block.y+block.h},0):trajectory(center(b),{x:block.x+block.w*(i+1)/(count+1),y:block.y+block.h},12));
+      if(kind==='append')return[followDecode?trajectory({x:center(block).x,y:block.y+block.h},{x:center(block).x,y:block.y+block.h+20},0):trajectory({x:center(block).x,y:block.y+block.h},center(cb[count-1]),-8)];
       if(kind==='emit')return[trajectory({x:block.x+block.w,y:block.y},center(gb[k*2+1]))];
       if(kind==='handoff')return[trajectory({x:center(gb[k*2-1]).x,y:gb[k*2-1].y},{x:center(gb[k*2]).x,y:gb[k*2].y},8)];
       return[];
     }
-    const controller=window.MLSysOriginalPlayer.create({root,outer,layout:'compact',intro:'Process 4 prompt tokens in one prefill pass, then decode 3 tokens one by one as the KV cache grows to 7 entries.',viewControls:viewControl,title:'How does a prompt become a growing KV cache?',scope:'One request. Words stand for tokens; cache cells stand for their keys and values. Attention includes the current input’s newly computed keys and values; arrows emphasize earlier entries. Append marks retention for later passes. Motion is illustrative.',steps:lesson.map(([label,description],i)=>({label,get description(){return current===i?description:'On completion: '+description;}})),render,transition:async({to,onFrame,signal})=>{
+    const controller=window.MLSysOriginalPlayer.create({root,outer,layout:'compact',intro:'Process 4 prompt tokens in one prefill pass, then decode 3 tokens one by one as the KV cache grows to 7 entries.',viewControls:viewControl,title:'How does a prompt become a growing KV cache?',scope:'One request. Words stand for tokens; cache cells stand for their keys and values. Attention includes the current input’s newly computed keys and values; arrows emphasize earlier entries. Append marks retention for later passes. Motion is illustrative.',steps:lesson.map(([label,description])=>({label,description})),render,transition:async({to,onFrame,signal})=>{
       const tracks=pathsFor(to);
       if(lesson[to][2]==='release'){
         onFrame(t=>cacheLabels.forEach(el=>el.style.opacity=String(1-t)));

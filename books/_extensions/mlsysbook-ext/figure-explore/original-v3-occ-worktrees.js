@@ -19,13 +19,13 @@ const spec = {
     "interface": {
       "x": 102,
       "y": 160,
-      "width": 130,
+      "width": 118,
       "font": 11
     },
     "caller": {
       "x": 258,
       "y": 160,
-      "width": 130,
+      "width": 118,
       "font": 11
     },
     "base": {
@@ -55,31 +55,31 @@ const spec = {
     "revalidate": {
       "x": 88,
       "y": 324,
-      "width": 125,
+      "width": 104,
       "font": 10
     },
     "build": {
       "x": 226,
       "y": 324,
-      "width": 125,
+      "width": 104,
       "font": 10
     },
     "checks": {
       "x": 364,
       "y": 324,
-      "width": 125,
+      "width": 104,
       "font": 10
     },
     "cas": {
       "x": 510,
       "y": 324,
-      "width": 125,
+      "width": 120,
       "font": 10
     },
     "published": {
       "x": 644,
       "y": 324,
-      "width": 125,
+      "width": 82,
       "font": 10
     },
     "loop": {
@@ -819,9 +819,10 @@ window.MLSysFigureLessons[spec.name]=async(root,context)=>{
  for(const [key,b]of Object.entries(spec.slots)){const matches=textNodes.filter(n=>Number(n.getAttribute('x'))===b.x&&Number(n.getAttribute('y'))===b.y);if(matches.length!==1)throw Error('Original slot changed: '+key);bindings[key]={node:matches[0],original:matches[0].innerHTML,font:matches[0].getAttribute('font-size'),fill:matches[0].getAttribute('fill'),weight:matches[0].getAttribute('font-weight')};}
  const circles=[...svg.querySelectorAll('circle')].map(n=>({n,fill:n.getAttribute('fill'),stroke:n.getAttribute('stroke'),'stroke-width':n.getAttribute('stroke-width')}));
  const baseRects=[...svg.querySelectorAll('rect')].filter(r=>+r.getAttribute('width')<=300&&+r.getAttribute('height')<=90&&+r.getAttribute('height')>=30);
- const overlay=node('g',{class:'v3-original-overlay'});svg.append(overlay);
+ const overlay=node('g',{class:'v3-original-overlay'});svg.append(overlay);(function(s){const vb=s.getAttribute('viewBox').trim().split(/[\s,]+/).map(Number),bg=[...s.children].find(n=>n.localName==='rect'&&n.getAttribute('fill')==='#ffffff'&&(+n.getAttribute('x')||0)===0&&(+n.getAttribute('y')||0)===0);if(bg){bg.setAttribute('y',String(vb[1]));bg.setAttribute('width',String(vb[2]));bg.setAttribute('height',String(vb[3]));}if(!s.querySelector('[data-mlsys-focus]')){const fg=document.createElementNS('http://www.w3.org/2000/svg','path');fg.setAttribute('d',`M${vb[0]+vb[2]*0.08},${vb[1]+vb[3]*0.08}h${vb[2]*0.84}v${vb[3]*0.84}h${-vb[2]*0.84}z`);fg.setAttribute('fill','none');fg.setAttribute('stroke','none');fg.setAttribute('data-mlsys-focus','');s.insertBefore(fg,s.lastElementChild||null);}})(svg);
  const markerLayer=node('g');overlay.append(markerLayer);
- const packet=node('g',{class:'v3-original-packet',visibility:'hidden'});packet.append(node('rect',{x:-24,y:-10,width:48,height:20,rx:3}),node('text',{'text-anchor':'middle',y:4}));overlay.append(packet);
+ const packetGroup=node('g',{transform:'translate(10,10)'});overlay.append(packetGroup);
+ const packet=node('g',{class:'v3-original-packet',visibility:'hidden'});packet.append(node('rect',{x:-24,y:-10,width:48,height:20,rx:3}),node('text',{'text-anchor':'middle',y:4}));packetGroup.append(packet);
  const canvas=document.createElement('div');canvas.className='v3-original-canvas';canvas.tabIndex=0;canvas.setAttribute('aria-label','Original diagram. Swipe horizontally or vertically to inspect; the view follows the active object.');canvas.append(svg);
  const cue=document.createElement('p');cue.className='v3-original-cue';cue.textContent='Swipe the original diagram to inspect. The view follows the active object; Expand keeps the same state.';
  const readout=document.createElement('div');readout.className='v3-original-readout';readout.setAttribute('aria-label','Current systems state');
@@ -833,7 +834,7 @@ window.MLSysFigureLessons[spec.name]=async(root,context)=>{
  if(spec.variants){choice=document.createElement('label');choice.className='v3-original-choice';choice.textContent=spec.variantLabel+' ';const select=document.createElement('select');select.setAttribute('aria-label',spec.variantLabel);spec.variants.forEach(v=>{const o=document.createElement('option');o.value=v.id;o.textContent=v.label;select.append(o);});select.addEventListener('change',()=>{variant=select.value;frames().forEach((s,i)=>Object.assign(steps[i],{label:s.label,description:s.description}));player.go(0);});choice.append(select);}
  function follow(x,y){active=[x,y];const scale=svg.getBoundingClientRect().width/vb.width;if(canvas.scrollWidth>canvas.clientWidth)canvas.scrollLeft=Math.max(0,x*scale-canvas.clientWidth/2);if(canvas.scrollHeight>canvas.clientHeight)canvas.scrollTop=Math.max(0,y*scale-canvas.clientHeight/2);}
  function render(i,{stage,details}){
-  if(!canvas.isConnected){stage.append(cue,canvas);details.append(readout);}
+  if(!canvas.isConnected){stage.append(canvas);details.append(cue,readout);}
   const frame=frames()[i];packet.setAttribute('visibility','hidden');markerLayer.replaceChildren();
   const prevText=i>0?Object.assign({},spec.defaults,frames()[i-1].text):null,currText=Object.assign({},spec.defaults,frame.text),drawnRects=new Set();
   const frameBox=(px,py,color='#0284c7')=>{const hits=baseRects.filter(r=>{const x=+r.getAttribute('x'),y=+r.getAttribute('y'),w=+r.getAttribute('width'),h=+r.getAttribute('height');return px>=x-6&&px<=x+w+6&&py>=y-6&&py<=y+h+6;}).sort((a,b)=>(+a.getAttribute('width')*+a.getAttribute('height'))-(+b.getAttribute('width')*+b.getAttribute('height')));if(hits[0]&&!drawnRects.has(hits[0])){drawnRects.add(hits[0]);const tr=hits[0].closest('g[transform]')?.getAttribute('transform');markerLayer.append(node('rect',Object.assign({x:hits[0].getAttribute('x'),y:hits[0].getAttribute('y'),width:hits[0].getAttribute('width'),height:hits[0].getAttribute('height'),rx:hits[0].getAttribute('rx')||4,fill:'none',stroke:color,'stroke-width':2.5},tr?{transform:tr}:{})));return true;}return false;};

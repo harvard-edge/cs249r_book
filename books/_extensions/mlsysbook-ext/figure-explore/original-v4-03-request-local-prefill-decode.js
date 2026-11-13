@@ -8,7 +8,7 @@
   const art=context.verifiedArtwork.cloneNode(true),vb=art.viewBox.baseVal;
   if(!vb.width||!vb.height)throw Error('Original geometry missing');
   art.classList.add(NAME+'-art');art.setAttribute('role','img');art.setAttribute('aria-label',CFG.question+' Original artwork with synchronized mechanism overlay.');
-  const layer=el('svg',{viewBox:'0 0 1000 1000',width:vb.width,height:vb.height,preserveAspectRatio:'none','aria-hidden':'true'});art.append(layer);
+  const layer=el('svg',{viewBox:'0 0 1000 1000',width:vb.width,height:vb.height,preserveAspectRatio:'none','aria-hidden':'true'});art.append(layer);art.append(el('path',{d:`M${(vb.x+vb.width*.08).toFixed(1)},${(vb.y+vb.height*.08).toFixed(1)}h${(vb.width*.84).toFixed(1)}v${(vb.height*.84).toFixed(1)}h-${(vb.width*.84).toFixed(1)}z`,fill:'none',stroke:'none','data-mlsys-focus':''}));
   const proof=document.createElement('p');proof.className=NAME+'-proof';
   let mounted=false,current=0,stageNode;
   // Repaint the exact paused frame after a width/context change, never on scroll.
@@ -35,7 +35,7 @@
    proof.textContent=['Request state: 0 cached KV tiles · 0 decode passes completed · prefill pending for current observation.','Request state: 3 prefix KV tiles cached (snapshot 0) · sampled token 1 emitted · 0 action tokens cached in KV.','Request state: 4 KV tiles cached in snapshot 1 (3 prefix + 1 consumed token) · sampled token 2 emitted without KV.','Request state: 5 KV tiles cached in snapshot 2 (3 prefix + 2 consumed tokens) · sampled token 3 emitted without KV.','Request state: 0 KV tiles retained across evaluations · prior 5-tile cache released · next observation starts fresh prefill.'][phase];root.dataset.kvConsumed=String(phase===4?0:Math.max(0,phase-1));root.dataset.kvReleased=String(phase===4);
    if(stageNode)stageNode.scrollLeft=Math.max(0,art.getBoundingClientRect().width*([120,120,340,560,560][to]/680)-stageNode.clientWidth/2);
   }
-  const steps=CFG.steps.map(([label,description],i)=>({label,get description(){return i!==Number(root.dataset.step)?'Next endpoint will show the following (not yet completed): '+description:description;}}));
+  const steps=CFG.steps.map(([label,description])=>({label,description}));
   const player=window.MLSysOriginalPlayer.create({root,outer:context.outer,layout:'compact',intro:CFG.intro,title:CFG.question,scope:CFG.scope,steps,
    render(index,{stage,details}){current=index;root.dataset.step=String(index);if(!mounted){stageNode=stage;stage.tabIndex=0;stage.setAttribute('aria-label','Original diagram; scroll horizontally or use Expand for dense artwork');stage.classList.add(NAME+'-stage');stage.append(art);details.append(proof);mounted=true;}draw(index,index,1);root.dataset.originalState=JSON.stringify({index,kind:CFG.key});},
    transition({from,to,onFrame}){if(to!==from+1)return;onFrame(p=>draw(from,to,p));}

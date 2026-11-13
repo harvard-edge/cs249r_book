@@ -8,7 +8,7 @@
   const art=context.verifiedArtwork.cloneNode(true),vb=art.viewBox.baseVal;
   if(!vb.width||!vb.height)throw Error('Original geometry missing');
   art.classList.add(NAME+'-art');art.setAttribute('role','img');art.setAttribute('aria-label',CFG.question+' Original artwork with synchronized mechanism overlay.');
-  const layer=el('svg',{viewBox:'0 0 1000 1000',width:vb.width,height:vb.height,preserveAspectRatio:'none','aria-hidden':'true'});art.append(layer);
+  const layer=el('svg',{viewBox:'0 0 1000 1000',width:vb.width,height:vb.height,preserveAspectRatio:'none','aria-hidden':'true'});art.append(layer);art.append(el('path',{d:`M${(vb.x+vb.width*.08).toFixed(1)},${(vb.y+vb.height*.08).toFixed(1)}h${(vb.width*.84).toFixed(1)}v${(vb.height*.84).toFixed(1)}h-${(vb.width*.84).toFixed(1)}z`,fill:'none',stroke:'none','data-mlsys-focus':''}));
   const scene=el('svg',{viewBox:'0 0 680 185',role:'img','aria-label':'Synchronized mechanism assembly',class:NAME+'-scene'});const proof=document.createElement('p');proof.className=NAME+'-proof';
   let mounted=false,current=0,stageNode;
   // Repaint the exact paused frame after a width/context change, never on scroll.
@@ -45,7 +45,7 @@
    if(root.clientWidth<500){scene.setAttribute('viewBox','0 0 320 220');scene.replaceChildren();scene.append(el('text',{x:8,y:18,'font-size':13,fill:'#1A202C'},'Base travel integrates modeled speed'));for(const[j,onset,color]of[[0,D.onset_ms,'#009E73'],[1,D.late_ms,'#A51C30']]){const yy=62+j*78,d=distance(t,onset),xx=20+d*.30;scene.append(el('text',{x:8,y:yy-20,'font-size':12,fill:color},j?'late onset':'on-time onset'),el('line',{x1:20,x2:280,y1:yy+15,y2:yy+15,stroke:'#4A5568'}),el('line',{x1:20+D.travel_bound_mm*.30,x2:20+D.travel_bound_mm*.30,y1:yy-14,y2:yy+15,stroke:'#A51C30','stroke-dasharray':'4 3'}),el('rect',{x:xx-10,y:yy-6,width:20,height:15,fill:color,'fill-opacity':.2,stroke:color}),el('text',{x:8,y:yy+35,'font-size':12,fill:'#1A202C'},`${d.toFixed(1)} mm · ${t<onset?'coast':speed(t,onset)>0?'deceleration':'rest'}`));}scene.append(el('text',{x:8,y:212,'font-size':12,fill:'#1A202C'},t>=D.late_ms?'late onset FAIL is independent of travel':'physical onset witness remains separate'));}else scene.setAttribute('viewBox','0 0 680 185');
    if(stageNode)stageNode.scrollLeft=stageNode.clientWidth>=520?0:Math.max(0,art.getBoundingClientRect().width*((t<=130?topx:bottomx)/1000)-stageNode.clientWidth/2);
   }
-  const steps=CFG.steps.map(([label,description],i)=>({label,get description(){return i!==Number(root.dataset.step)?'Next endpoint will show the following (not yet completed): '+description:description;}}));
+  const steps=CFG.steps.map(([label,description])=>({label,description}));
   const player=window.MLSysOriginalPlayer.create({root,outer:context.outer,layout:'compact',title:CFG.question,intro:CFG.intro,scope:CFG.scope,steps,
    render(index,{stage,details}){current=index;root.dataset.step=String(index);if(!mounted){const artScroll=document.createElement('div');artScroll.className=NAME+'-art-scroll';stageNode=artScroll;stage.tabIndex=0;stage.setAttribute('aria-label','Original diagram; scroll horizontally or use Expand for dense artwork');stage.classList.add(NAME+'-stage');artScroll.append(art);stage.append(artScroll,scene);details.append(proof);mounted=true;}draw(index,index,1);root.dataset.originalState=JSON.stringify({index,kind:CFG.key});},
    transition({from,to,onFrame}){if(to!==from+1)return;onFrame(p=>draw(from,to,p));}

@@ -60,7 +60,7 @@ window.MLSysFigureLessons[NAME]=async(root,{outer,verifiedArtwork})=>{
  ];
  if(text.length!==D.states.length)throw Error('Rollback narration and ledger disagree');
  let committed=0,mounted=false;
- const steps=text.map(([label,description],i)=>({label,get description(){return committed===i?description:'On completion: '+description;}}));
+ const steps=text.map(([label,description],i)=>({label,get description(){return committed===i?description:description;}}));
  const live=s=>s==='in-flight'||s==='cancel-requested';
  // Token set at a committed state: live requests, plus the refused R3 ghost.
  function tokens(i,L){const st=D.states[i],out={};for(const r of D.requests){const q=st.requests[r];if(q.bundle&&live(q.status))out[r]={xy:L.slots[r],bundle:q.bundle,cancel:q.status==='cancel-requested'};}
@@ -100,7 +100,7 @@ window.MLSysFigureLessons[NAME]=async(root,{outer,verifiedArtwork})=>{
    [r,q.admitted?q.admitted+' cutover':'—',q.bundle?'Bundle '+q.bundle:'—',STATUS[q.status]].forEach((v,k)=>{const c=document.createElement(k?'td':'th');if(!k)c.scope='row';c.textContent=v;tr.append(c);});return tr;}));
   root.dataset.ledger=JSON.stringify({target:st.target,b1_in_flight:st.b1,b2_in_flight:st.b2,b2_state:st.b2_state,refused:st.refused,log_records:st.log.length,log_flagged:st.log_flagged,requests:Object.fromEntries(D.requests.map(r=>[r,st.requests[r].status]))});
  }
- const player=window.MLSysOriginalPlayer.create({root,outer,layout:'compact',intro:'Trace 6 requests across a router rollback from Bundle 2 to Bundle 1 to see why Bundle 2 cannot be released until all 4 pinned requests drain.',title:'When can the candidate bundle be released after rollback?',
+ const __syncFocusGuard=s=>{const b=(s.getAttribute('viewBox')||'').trim().split(/[\s,]+/).map(Number);if(b.length!==4||!b[2]||!b[3])return;let g=s.querySelector(':scope>[data-mlsys-focus-guard]');if(!g){g=document.createElementNS('http://www.w3.org/2000/svg','path');g.setAttribute('fill','none');g.setAttribute('stroke','none');g.setAttribute('data-mlsys-focus','');g.setAttribute('data-mlsys-focus-guard','');s.append(g);}g.setAttribute('d',`M${(b[0]+b[2]*.1).toFixed(2)},${(b[1]+b[3]*.1).toFixed(2)}h${(b[2]*.8).toFixed(2)}v${(b[3]*.8).toFixed(2)}h-${(b[2]*.8).toFixed(2)}z`);};[...source.querySelectorAll('svg')].forEach(__syncFocusGuard);const player=window.MLSysOriginalPlayer.create({root,outer,layout:'compact',intro:'Trace 6 requests across a router rollback from Bundle 2 to Bundle 1 to see why Bundle 2 cannot be released until all 4 pinned requests drain.',title:'When can the candidate bundle be released after rollback?',
   scope:'The original rollback figure with six toy request markers, R1–R6. Their number, order, and completion pattern are illustrative: the chapter gives no request counts, rates, or durations, and movement speed encodes none. No drain timeout is modeled. Degraded-window records are counted for requests admitted to Bundle 2.',steps,
   render(i,{stage,details}){committed=i;if(!mounted){stage.append(source);(details||stage).append(summary,toy,table);mounted=true;}paint(deskLayer,DESK,i,i,1);paint(mobLayer,MOB,i,i,1);readout(i);delete root.dataset.pending;},
   transition({from,to,onFrame}){root.dataset.pending=String(to);onFrame(p=>{paint(deskLayer,DESK,from,to,p);paint(mobLayer,MOB,from,to,p);root.dataset.animationProgress=String(p);});}

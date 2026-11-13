@@ -17,7 +17,7 @@ window.MLSysFigureLessons["original-v4-10-latch-force-budget"]=async(root,contex
  // Keep the endpoint in view when Expand or rotation changes the artwork scale.
  // Scrolling alone does not trigger this observer, so manual inspection persists.
  let focus=null,resizeFrame=0,disposed=false;
- function recenter(){if(!focus||disposed)return;if(canvas.clientWidth>=520){canvas.scrollLeft=0;canvas.scrollTop=0;return;}const scale=svg.getBoundingClientRect().width/width;canvas.scrollLeft=Math.max(0,focus[0]*scale-canvas.clientWidth/2);canvas.scrollTop=Math.max(0,focus[1]*scale-canvas.clientHeight/2);}
+ function recenter(){if(!focus||disposed)return;const scale=svg.getBoundingClientRect().width/width;canvas.scrollLeft=canvas.scrollWidth>canvas.clientWidth+2?Math.max(0,focus[0]*scale-canvas.clientWidth/2):0;canvas.scrollTop=canvas.scrollHeight>canvas.clientHeight+2?Math.max(0,focus[1]*scale-canvas.clientHeight/2):0;}
  function follow(x,y){focus=[x,y];recenter();}
  const cameraResize=typeof ResizeObserver==='function'?new ResizeObserver(()=>{if(!disposed&&!resizeFrame)resizeFrame=requestAnimationFrame(()=>{resizeFrame=0;recenter();});}):null;
  cameraResize?.observe(canvas);cameraResize?.observe(svg);
@@ -34,7 +34,7 @@ window.MLSysFigureLessons["original-v4-10-latch-force-budget"]=async(root,contex
  const spring=add('path',{d:'',fill:'none',stroke:'#B87333','stroke-width':9,'data-motion-object':'true'});
  add('text',{x:2700,y:1445,'text-anchor':'middle','font-size':56,fill:'#4A5568'},'spring compression (amplified)');
 
- const physicalScene=document.createElementNS(ns,'svg');physicalScene.setAttribute('viewBox','0 0 500 100');physicalScene.classList.add('v4b-physical');physicalScene.setAttribute('role','img');physicalScene.setAttribute('aria-label','Same arm and spring state as the force plot; compression amplified');
+ const physicalScene=document.createElementNS(ns,'svg');physicalScene.setAttribute('viewBox','0 0 500 100');const _fg=document.createElementNS(ns,'path');_fg.setAttribute('d','M40,16h420v68h-420z');_fg.setAttribute('fill','none');_fg.setAttribute('stroke','none');_fg.setAttribute('data-mlsys-focus','');physicalScene.append(_fg);physicalScene.classList.add('v4b-physical');physicalScene.setAttribute('role','img');physicalScene.setAttribute('aria-label','Same arm and spring state as the force plot; compression amplified');
  const pg=add('g');physicalScene.append(pg);
  const miniAdd=(tag,attrs,text)=>{const e=add(tag,attrs,text);pg.append(e);return e;};
  miniAdd('line',{x1:460,x2:460,y1:16,y2:72,stroke:'#718096','stroke-width':4});
@@ -49,7 +49,7 @@ window.MLSysFigureLessons["original-v4-10-latch-force-budget"]=async(root,contex
  ['Decelerate while the spring keeps compressing','At t = 6.00 ms (τ = 2.75 ms after brake onset), constant deceleration a = 2.951 m/s² slows the arm from 0.030 to 0.022 m/s, yet positive forward velocity continues compressing the spring to 67.6 N (vs. 72.0 N on the dashed red unbraked line).'],
  ['Compare the unbraked branch at the limit','At t = 8.33 ms, the dashed red unbraked trajectory hits the 100 N latch limit at full 0.030 m/s speed, whereas the green braked curve sits at 84.3 N (0.2108 mm compression) with arm speed reduced to 0.015 m/s.'],
  ['Stop at the modeled force limit','At t = 13.42 ms (10.17 ms after brake onset), arm speed reaches 0.000 m/s and spring compression peaks at 0.2500 mm right at the 100 N latch limit, consuming the entire 61 N braking budget with zero spare margin.']
- ].map(([label,description],i)=>({label,get description(){return root.dataset.lessonCommittedIndex===String(i)?description:'Next endpoint, not yet completed: '+description;}}));
+ ].map(([label,description])=>({label,description}));
  const force=t=>{const tau=Math.max(0,(t-D.onset_ms)/1000);return t<=D.onset_ms?D.k*D.v*t/1000:D.onset_force+D.k*(D.v*tau-.5*D.a*tau*tau);};
  function frame(t){const f=force(t),tau=Math.max(0,(t-D.onset_ms)/1000),v=Math.max(0,D.v-D.a*tau),nb=D.k*D.v*t/1000;
   actual.setAttribute('cx',X(t));actual.setAttribute('cy',Y(f));unbraked.style.display=nb<=145?'':'none';unbraked.setAttribute('cx',X(t));unbraked.setAttribute('cy',Y(nb));

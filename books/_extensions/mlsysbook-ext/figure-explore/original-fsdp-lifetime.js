@@ -121,12 +121,13 @@
       cell.group.dataset.current = String(column === phaseFor(index));
       if(cell.value){cell.value.style.opacity='1';cell.value.textContent=index===6&&column===5&&row===4?'full':live[column][row];}
     }
+    const __syncFocusGuard=s=>{const b=(s.getAttribute('viewBox')||'').trim().split(/[\s,]+/).map(Number);if(b.length!==4||!b[2]||!b[3])return;let g=s.querySelector(':scope>[data-mlsys-focus-guard]');if(!g){g=document.createElementNS('http://www.w3.org/2000/svg','path');g.setAttribute('fill','none');g.setAttribute('stroke','none');g.setAttribute('data-mlsys-focus','');g.setAttribute('data-mlsys-focus-guard','');s.append(g);}g.setAttribute('d',`M${(b[0]+b[2]*.1).toFixed(2)},${(b[1]+b[3]*.1).toFixed(2)}h${(b[2]*.8).toFixed(2)}v${(b[3]*.8).toFixed(2)}h-${(b[2]*.8).toFixed(2)}z`);};__syncFocusGuard(art);
     const controller = window.MLSysOriginalPlayer.create({
       root, outer: context.outer, layout: 'compact',
       title: 'Why can gathered weights disappear while activations remain?',
       intro: 'Step through 6 execution phases on 1 FSDP rank to see why gathered parameters are released between forward and backward while saved activations remain live.',
       scope: 'One rank executing 1 FSDP sharding unit (ZeRO-3 with reshard-after-forward) across 6 execution phase columns and 6 allocation rows. Each unit performs 3 collectives per step (forward AllGather, backward AllGather, and gradient ReduceScatter). Rows track logical buffer residency (from 2 persistent shards up to 5 live allocations during backward compute), not physical memory addresses or equal time durations.',
-      steps: steps.map((step, index) => ({label: step.label, get description() { return currentIndex === index ? step.description : 'On completion: ' + step.description; }})),
+      steps: steps.map((step, index) => ({label: step.label, get description() { return currentIndex === index ? step.description : step.description; }})),
       render(index, {stage, details}) {
         currentIndex=index;
         if (!mounted) {

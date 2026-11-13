@@ -141,6 +141,7 @@
         if (progress >= 1) packet.setAttribute('visibility', 'hidden');
       });
     }
+    const __syncFocusGuard=s=>{const b=(s.getAttribute('viewBox')||'').trim().split(/[\s,]+/).map(Number);if(b.length!==4||!b[2]||!b[3])return;let g=s.querySelector(':scope>[data-mlsys-focus-guard]');if(!g){g=document.createElementNS('http://www.w3.org/2000/svg','path');g.setAttribute('fill','none');g.setAttribute('stroke','none');g.setAttribute('data-mlsys-focus','');g.setAttribute('data-mlsys-focus-guard','');s.append(g);}g.setAttribute('d',`M${(b[0]+b[2]*.1).toFixed(2)},${(b[1]+b[3]*.1).toFixed(2)}h${(b[2]*.8).toFixed(2)}v${(b[3]*.8).toFixed(2)}h-${(b[2]*.8).toFixed(2)}z`);};__syncFocusGuard(svg);
     const player = window.MLSysOriginalPlayer.create({root, outer: context.outer, layout: 'compact', title: 'How can capture stay bounded while a child keeps writing?', intro: 'Trace 16 output bytes through a 4-byte head buffer and an 8-byte tail ring so capture memory stays capped at 12 byte slots.', scope: 'Bounded stream capture of 16 ASCII bytes (A through P) alternating across stdout and stderr into a 4-byte head buffer and an 8-byte circular tail ring (12 byte slots total, with bytes E through H omitted).', steps, render, transition});
     return player;
   };

@@ -8,7 +8,7 @@
   const art=context.verifiedArtwork.cloneNode(true),vb=art.viewBox.baseVal;
   if(!vb.width||!vb.height)throw Error('Original geometry missing');
   art.classList.add(NAME+'-art');art.setAttribute('role','img');art.setAttribute('aria-label',CFG.question+' Original artwork with synchronized mechanism overlay.');
-  const layer=el('svg',{viewBox:'0 0 680 262',width:vb.width,height:vb.height,preserveAspectRatio:'none','aria-hidden':'true'});art.append(layer);
+  const layer=el('svg',{viewBox:'0 0 680 262',width:vb.width,height:vb.height,preserveAspectRatio:'none','aria-hidden':'true'});art.append(layer);art.append(el('path',{d:`M${(vb.x+vb.width*.08).toFixed(1)},${(vb.y+vb.height*.08).toFixed(1)}h${(vb.width*.84).toFixed(1)}v${(vb.height*.84).toFixed(1)}h-${(vb.width*.84).toFixed(1)}z`,fill:'none',stroke:'none','data-mlsys-focus':''}));
   const scene=el('svg',{viewBox:'0 0 680 185',role:'img','aria-label':'Synchronized mechanism assembly',class:NAME+'-scene'});const proof=document.createElement('p');proof.className=NAME+'-proof';
   let mounted=false,current=0,stageNode;
   // Repaint the exact paused frame after a width/context change, never on scroll.
@@ -34,7 +34,7 @@
    if(root.clientWidth<500){scene.setAttribute('viewBox','0 0 320 190');scene.replaceChildren();for(let j=0;j<4;j++){scene.append(el('rect',{x:5+j*79,y:8,width:75,height:26,fill:hasRecord(j)?'#E3F3F5':'#F8FAFC',stroke:'#007A87'}),el('text',{x:10+j*79,y:26,'font-size':10,fill:'#1A202C'},['drift','blend','reorient','stabilized'][j]));}scene.append(el('text',{x:12,y:60,'font-size':14,fill:'#1A202C'},'Current curation record'),el('text',{x:12,y:86,'font-size':13,fill:'#1A202C'},phase===1?'state s: eligible for expert relabel':phase===2?'state s: excluded':phase===3?'state s: expert recovery':'learner action changes next state'),el('text',{x:12,y:112,'font-size':13,fill:phase===3?'#1A4D3E':'#A51C30'},phase===3?'expert action a*: retained':phase>0?'command a: MASKED':'no expert pair retained'),el('text',{x:12,y:142,'font-size':13,fill:'#1A202C'},phase===3?'(s, a*) → expert dataset':'takeover alone is not an expert label'));}else scene.setAttribute('viewBox','0 0 680 185');
    if(stageNode)stageNode.scrollLeft=stageNode.clientWidth>=520?0:Math.max(0,art.getBoundingClientRect().width*(to===0?.2:.76)-stageNode.clientWidth/2);
   }
-  const steps=CFG.steps.map(([label,description],i)=>({label,get description(){return i!==Number(root.dataset.step)?'Next endpoint will show the following (not yet completed): '+description:description;}}));
+  const steps=CFG.steps.map(([label,description])=>({label,description}));
   const player=window.MLSysOriginalPlayer.create({root,outer:context.outer,layout:'compact',intro:CFG.intro,title:CFG.question,scope:CFG.scope,steps,
    render(index,{stage,details}){current=index;root.dataset.step=String(index);if(!mounted){const artScroll=document.createElement('div');artScroll.className=NAME+'-art-scroll';stageNode=artScroll;stage.tabIndex=0;stage.setAttribute('aria-label','Original diagram; scroll horizontally or use Expand for dense artwork');stage.classList.add(NAME+'-stage');artScroll.append(art);stage.append(artScroll,scene);details.append(proof);mounted=true;}draw(index,index,1);root.dataset.originalState=JSON.stringify({index,kind:CFG.key});},
    transition({from,to,onFrame}){if(to!==from+1)return;onFrame(p=>draw(from,to,p));}

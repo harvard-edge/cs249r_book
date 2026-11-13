@@ -17,7 +17,7 @@ window.MLSysFigureLessons["original-v4-12-capture-to-onset"]=async(root,context)
  // Keep the endpoint in view when Expand or rotation changes the artwork scale.
  // Scrolling alone does not trigger this observer, so manual inspection persists.
  let focus=null,resizeFrame=0,disposed=false;
- function recenter(){if(!focus||disposed)return;if(canvas.clientWidth>=520){canvas.scrollLeft=0;canvas.scrollTop=0;return;}const scale=svg.getBoundingClientRect().width/width;canvas.scrollLeft=Math.max(0,focus[0]*scale-canvas.clientWidth/2);canvas.scrollTop=Math.max(0,focus[1]*scale-canvas.clientHeight/2);}
+ function recenter(){if(!focus||disposed)return;const scale=svg.getBoundingClientRect().width/width;canvas.scrollLeft=canvas.scrollWidth>canvas.clientWidth+2?Math.max(0,focus[0]*scale-canvas.clientWidth/2):0;canvas.scrollTop=canvas.scrollHeight>canvas.clientHeight+2?Math.max(0,focus[1]*scale-canvas.clientHeight/2):0;}
  function follow(x,y){focus=[x,y];recenter();}
  const cameraResize=typeof ResizeObserver==='function'?new ResizeObserver(()=>{if(!disposed&&!resizeFrame)resizeFrame=requestAnimationFrame(()=>{resizeFrame=0;recenter();});}):null;
  cameraResize?.observe(canvas);cameraResize?.observe(svg);
@@ -32,7 +32,7 @@ window.MLSysFigureLessons["original-v4-12-capture-to-onset"]=async(root,context)
  const base=add('g',{'data-motion-object':'true'});const chassis=add('rect',{x:-55,y:-45,width:110,height:55,fill:'#fff',stroke:'#007A87','stroke-width':8});base.append(chassis);for(const x of [-33,33]){const wheel=add('circle',{cx:x,cy:15,r:15,fill:'#007A87'});base.append(wheel);}
  const spans=[[0,D.dispatch,1035,'#007A87'],[D.dispatch,D.admission,1330,'#B87333'],[D.admission,D.expiry,1630,'#1A4D3E'],[D.expiry,D.tick_end,1630,'#1A4D3E'],[D.tick_end,D.onset,1920,'#A51C30']].map(([a,b,y,c])=>({a,b,line:add('line',{x1:X(a),x2:X(a),y1:y,y2:y,stroke:c,'stroke-width':14,'data-motion-object':'true'})}));
 
- const physicalScene=document.createElementNS(ns,'svg');physicalScene.setAttribute('viewBox','0 0 500 100');physicalScene.classList.add('v4b-physical');physicalScene.setAttribute('role','img');physicalScene.setAttribute('aria-label','Same pre-onset base travel as original strip; icon size schematic');
+ const physicalScene=document.createElementNS(ns,'svg');physicalScene.setAttribute('viewBox','0 0 500 100');const _fg=document.createElementNS(ns,'path');_fg.setAttribute('d','M40,16h420v68h-420z');_fg.setAttribute('fill','none');_fg.setAttribute('stroke','none');_fg.setAttribute('data-mlsys-focus','');physicalScene.append(_fg);physicalScene.classList.add('v4b-physical');physicalScene.setAttribute('role','img');physicalScene.setAttribute('aria-label','Same pre-onset base travel as original strip; icon size schematic');
  const pg=add('g');physicalScene.append(pg);const miniAdd=(tag,attrs,text)=>{const e=add(tag,attrs,text);pg.append(e);return e;};
  miniAdd('line',{x1:35,x2:435,y1:58,y2:58,stroke:'#718096','stroke-width':2});
  for(const d of [0,100,200,300]){const x=35+d*400/300;miniAdd('line',{x1:x,x2:x,y1:54,y2:63,stroke:'#718096','stroke-width':2});miniAdd('text',{x,y:80,'text-anchor':'middle','font-size':14,fill:'currentColor'},String(d));}
@@ -46,7 +46,7 @@ window.MLSysFigureLessons["original-v4-12-capture-to-onset"]=async(root,context)
  ['Run the lease from admission','At t = 114.91 ms, the permission core admits the command and starts the 60 ms green lease window; when that 60 ms lease expires at 174.91 ms (227.38 mm cumulative travel), the underlying sensor evidence is already 174.91 ms old.'],
  ['Charge one tick and one bus cycle','Between 174.91 ms and 176.91 ms, lease expiry triggers the local fallback path across 1 ms of permission-tick quantization plus 1 ms of fieldbus delivery (2.00 ms total, adding 2.60 mm to reach 229.98 mm cumulative travel).'],
  ['Reach physical brake onset','From 176.91 ms to 196.91 ms (196.9 ms), the red 20.00 ms actuator onset delay adds 26.00 mm so physical deceleration begins at 196.91 ms and 255.98 mm pre-onset travel—37.46 ms (48.70 mm) inside the 234.38 ms latest-onset bound.']
- ].map(([label,description],i)=>({label,get description(){return root.dataset.lessonCommittedIndex===String(i)?description:'Next endpoint, not yet completed: '+description;}}));
+ ].map(([label,description])=>({label,description}));
  function frame(t){const x=X(t),distance=D.v*t,leaseAge=Math.max(0,t-D.admission);
   cursor.setAttribute('x1',x);cursor.setAttribute('x2',x);travel.setAttribute('x2',x);spans.forEach(s=>s.line.setAttribute('x2',X(Math.min(s.b,Math.max(s.a,t)))));
   base.setAttribute('transform',`translate(${x} 2102)`);miniBase.setAttribute('transform',`translate(${35+distance*400/300} 0)`);physicalScene.setAttribute('aria-label',`Same pre-onset travel ${distance.toFixed(2)} mm; base size schematic`);root.dataset.baseTravelMm=String(distance);root.dataset.time=String(t);root.dataset.travel=String(distance);root.dataset.leaseStarted=String(t>=D.admission);root.dataset.leaseExpired=String(t>=D.expiry);

@@ -103,12 +103,13 @@
         cell.bar.style.opacity = active ? '1' : '.5';
       }
     }
+    const __syncFocusGuard=s=>{const b=(s.getAttribute('viewBox')||'').trim().split(/[\s,]+/).map(Number);if(b.length!==4||!b[2]||!b[3])return;let g=s.querySelector(':scope>[data-mlsys-focus-guard]');if(!g){g=document.createElementNS('http://www.w3.org/2000/svg','path');g.setAttribute('fill','none');g.setAttribute('stroke','none');g.setAttribute('data-mlsys-focus','');g.setAttribute('data-mlsys-focus-guard','');s.append(g);}g.setAttribute('d',`M${(b[0]+b[2]*.1).toFixed(2)},${(b[1]+b[3]*.1).toFixed(2)}h${(b[2]*.8).toFixed(2)}v${(b[3]*.8).toFixed(2)}h-${(b[2]*.8).toFixed(2)}z`);};__syncFocusGuard(art);
     const controller = window.MLSysOriginalPlayer.create({
       root, outer: context.outer, layout: 'compact',
       title: 'How does a partial chunk become a sum on every GPU?',
       intro: 'Follow chunk A around a 4-GPU ring across 3 ReduceScatter rounds and 3 AllGather rounds to see how 6 steps reduce and distribute all 4 chunks.',
       scope: 'A 4-GPU logical ring (GPU 0 → GPU 1 → GPU 2 → GPU 3 → GPU 0) with a gradient of size M split into 4 equal chunks (A, B, C, D of size M/4). Row (a) executes N − 1 = 3 ReduceScatter rounds (adding disjoint contributions), and row (b) executes N − 1 = 3 AllGather rounds (copying finished sums ΣA–ΣD), totaling 6 rounds and 6 × (M/4) = 1.5M bytes sent per GPU.',
-      steps: names.map((label, index) => ({label, get description() { return currentIndex === index ? explanations[index] : 'On completion: ' + explanations[index]; }})),
+      steps: names.map((label, index) => ({label, get description() { return currentIndex === index ? explanations[index] : explanations[index]; }})),
       render(index, {stage, details}) {
         currentIndex=index;
         if (!mounted) { mountedStage=stage; stage.classList.add('original-ring-stage'); stage.tabIndex=0; stage.setAttribute('aria-label','Ring diagram; horizontal scrolling is available on narrow screens'); stage.append(art); details.append(cue, reading); mounted = true; }

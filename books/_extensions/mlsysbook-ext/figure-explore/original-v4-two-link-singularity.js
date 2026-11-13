@@ -9,7 +9,7 @@ window.MLSysFigureLessons['original-v4-two-link-singularity']=async(root,context
  const svg=make('svg',{viewBox:'0 0 600 550',role:'img','aria-label':'Two-link arm and current tool-velocity ellipse. Green links, teal velocity ellipse, orange weakest-direction arrow.'});
  const px=p=>[70+p[0]*560,430-p[1]*560],path=points=>points.map((p,i)=>(i?'L':'M')+p.join(',')).join(' ');
  const arc=[];for(let a=-14;a<=80;a+=1){const t=a*Math.PI/180;arc.push(px([D.reach*Math.cos(t),D.reach*Math.sin(t)]));}
- svg.append(make('path',{d:path(arc),class:'two-link-reach'}));
+ svg.append(make('path',{d:'M50,50h500v450h-500z',fill:'none',stroke:'none','data-mlsys-focus':''}),make('path',{d:path(arc),class:'two-link-reach'}));
  const ghost=make('path',{class:'two-link-ghost'}),ellipse=make('path',{class:'two-link-ellipse'}),arm=make('path',{class:'two-link-arm'}),arrow=make('path',{class:'two-link-arrow'});
  const halos=[0,1].map(()=>make('circle',{r:14,fill:'#A51C30','fill-opacity':.18,stroke:'#A51C30','stroke-width':2.5,'stroke-dasharray':'4 3',visibility:'hidden'}));
  const joints=[0,1,2].map(()=>make('circle',{r:6,class:'two-link-joint'}));
@@ -36,7 +36,7 @@ window.MLSysFigureLessons['original-v4-two-link-singularity']=async(root,context
   'At the 10° posture, decomposing the 37.8 rad/s demand exposes individual joint rates q̇₁ = 18.19 rad/s and q̇₂ = -33.09 rad/s—over 15× the ±2.175 rad/s drive limit on Joint 2, which caps feasible tool speed along the weakest direction to 0.066 m/s.'
  ];
  const steps=labels.map((label,i)=>({label,description:descriptions[i]}));
- steps.forEach((step,i)=>{const description=step.description;Object.defineProperty(step,'description',{get(){return root.dataset.lessonCommittedIndex===String(i)?description:'On completion: '+description;}});});
+ const sourceFig=document.createElement('div');sourceFig.className='two-link-source-ref';const sourceCap=document.createElement('p');sourceCap.className='two-link-source-caption';sourceCap.textContent='Chapter reference curve (singular values and joint-rate norm across elbow angle θ₂):';const sourceArt=context.verifiedArtwork.cloneNode(true);sourceArt.setAttribute('data-verified-source','');sourceFig.append(sourceCap,sourceArt);
  function draw(deg,phase){const k=Math.max(0,Math.min(D.samples.length-1,Math.round((90-deg)*10))),s=D.samples[k],p0=px([0,0]),p1=px(s.elbow),p2=px(s.tool);
   arm.setAttribute('d',path([p0,p1,p2]));[p0,p1,p2].forEach((p,i)=>{joints[i].setAttribute('cx',p[0]);joints[i].setAttribute('cy',p[1]);});
   [p0,p1].forEach((p,i)=>{halos[i].setAttribute('cx',p[0]);halos[i].setAttribute('cy',p[1]);halos[i].setAttribute('visibility',phase===5?'visible':'hidden');});
@@ -57,7 +57,7 @@ window.MLSysFigureLessons['original-v4-two-link-singularity']=async(root,context
   summary.textContent=phase===0?'First identify shoulder, elbow, and tool. Next adds the velocity ellipse.':phase===5?'A tool-speed limit alone cannot enforce individual joint-speed limits.':`As the elbow opens, the ellipse narrows and joint-rate demand grows. Grey links retain the initial pose for comparison.`;
   root.dataset.values=JSON.stringify({...s,joint_limit:D.joint_limit,requested_speed:D.speed,phase});root.dataset.sceneStep=String(phase);
  }
- function render(i,{stage,details}){root.dataset.lessonCommittedIndex=String(i);if(!wrap.isConnected)stage.append(wrap);if(details&&!formula.isConnected)details.append(compact,formula,sigmaText,jointDetail,summary,legend,definitions);draw(angles[i],i);}
+ function render(i,{stage,details}){root.dataset.lessonCommittedIndex=String(i);if(!wrap.isConnected)stage.append(wrap);if(details&&!formula.isConnected)details.append(compact,formula,sigmaText,jointDetail,summary,legend,definitions,sourceFig);draw(angles[i],i);}
  function transition({from,to,onFrame}){if(to!==from+1)return;onFrame(p=>draw(angles[from]+(angles[to]-angles[from])*p,p===0?from:to));}
  return window.MLSysOriginalPlayer.create({root,outer:context.outer,layout:'compact',title:'Why does the same tool speed demand faster joints?',intro:'Sweep the elbow from 90° to 10° to see why holding a 1.0 m/s tool speed along the weakest direction raises required joint rate from 4.9 to 37.8 rad/s.',scope:'Planar two-link kinematics with link lengths l₁ = 0.316 m and l₂ = 0.384 m (maximum reach 0.70 m), requested tool speed v = 1.0 m/s along each posture’s local weakest Jacobian direction (orange arrow), and individual joint-drive speed limits ±2.175 rad/s. Singular values σ_min have units m/rad and ‖q̇‖ = v / σ_min is the two-joint vector norm (kinematic snapshots, not a timed trajectory or torque/collision certificate).',steps,render,transition});
 };})();
