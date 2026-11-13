@@ -13627,7 +13627,7 @@ class ValidateCommand:
     def _run_figure_data_provenance(
         self, root: Path, ns: Optional[argparse.Namespace] = None
     ) -> ValidationRunResult:
-        """figures --scope data-provenance: Tier-2 CSV and load_series() provenance headers."""
+        """figures --scope data-provenance: Tier-2 CSV headers, column schemas, and Frictionless manifest."""
         try:
             from cli.checks import figure_data_provenance as fdp
         except ImportError:
@@ -13635,17 +13635,43 @@ class ValidateCommand:
 
         t0 = time.time()
         repo_root = Path(__file__).resolve().parents[3]
+        if ns is not None and getattr(ns, "fix", False):
+            fdp.seal_datapackage(repo_root=repo_root)
+
         if ns is not None and getattr(ns, "files", None):
             resolved = [(repo_root / f) if not Path(f).is_absolute() else Path(f) for f in ns.files]
             qmds = [p.resolve() for p in resolved if p.suffix == ".qmd" and p.is_file()]
             csvs = [p.resolve() for p in resolved if p.suffix == ".csv" and p.is_file()]
+            manifest_staged = any(
+                p.resolve() == (repo_root / fdp.DATAPACKAGE_REL_PATH).resolve() for p in resolved
+            )
             checked, violations = fdp.collect_data_provenance(
-                qmds, scan_root=Path("/nonexistent"), repo_root=repo_root
+                qmds,
+                scan_root=Path("/nonexistent"),
+                repo_root=repo_root,
+                verify_manifest=bool(qmds),
             )
             bib_cache: dict = {}
+            anchor_cache: dict = {}
             for csv_path in csvs:
                 checked += 1
-                violations.extend(fdp.check_csv_file(csv_path, repo_root=repo_root, bib_cache=bib_cache))
+                violations.extend(
+                    fdp.check_csv_file(
+                        csv_path,
+                        repo_root=repo_root,
+                        bib_cache=bib_cache,
+                        anchor_cache=anchor_cache,
+                    )
+                )
+            if csvs or manifest_staged:
+                target_csvs = fdp.discover_book_csvs(repo_root) if manifest_staged else csvs
+                violations.extend(
+                    fdp.check_datapackage(
+                        target_csvs,
+                        repo_root=repo_root,
+                        check_orphans=True,
+                    )
+                )
         else:
             qmds = self._qmd_files(root)
             scan_root = root.parent if (root.is_file() and root.suffix == ".qmd") else root
@@ -13654,7 +13680,7 @@ class ValidateCommand:
         issues = [ValidationIssue(**v.to_issue_kwargs()) for v in violations]
         return ValidationRunResult(
             name="figure-data-provenance",
-            description="Tier-2 data/*.csv and load_series() provenance and computation headers",
+            description="Tier-2 data/*.csv provenance headers, column schemas, and Frictionless manifest",
             files_checked=checked,
             issues=issues,
             elapsed_ms=int((time.time() - t0) * 1000),

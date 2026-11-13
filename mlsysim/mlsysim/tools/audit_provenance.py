@@ -365,6 +365,7 @@ def audit_tier2_book_series() -> list[str]:
         return []
 
     valid_epistemic = {"measured", "modeled", "assumed", "constructed"}
+    valid_methods = {"transcribed", "digitized", "scripted", "derived"}
     issues: list[str] = []
     for csv_path in sorted(books_dir.rglob("data/*.csv")):
         rel_parts = csv_path.relative_to(books_dir).parts
@@ -375,8 +376,15 @@ def audit_tier2_book_series() -> list[str]:
         label = f"Tier2Series.{csv_path.relative_to(repo_root)}"
         series = LocalSeries(csv_path)
         prov = series.provenance
-        if not prov.get("source", "").strip():
-            issues.append(f"{label}: missing '# Source:' header")
+        for req_field, req_header in (
+            ("figures", "# Figures:"),
+            ("source", "# Source:"),
+            ("locator", "# Locator:"),
+            ("url", "# URL:"),
+            ("license", "# License:"),
+        ):
+            if not prov.get(req_field, "").strip():
+                issues.append(f"{label}: missing '{req_header}' header")
         verified = prov.get("verified", "").strip()
         if not verified:
             issues.append(f"{label}: missing '# Verified: YYYY-MM-DD' header")
@@ -388,10 +396,21 @@ def audit_tier2_book_series() -> list[str]:
         if not prov.get("computation", "").strip() and not prov.get("notes", "").strip():
             issues.append(f"{label}: missing both '# Computation:' and '# Notes:' headers")
         epistemic = prov.get("epistemic", "").strip()
-        if epistemic:
+        if not epistemic:
+            issues.append(f"{label}: missing '# Epistemic:' header")
+        else:
             head = epistemic.replace("(", " ").replace(";", " ").replace(",", " ").split()[0].lower()
             if head not in valid_epistemic:
                 issues.append(f"{label}: '# Epistemic:' must start with {sorted(valid_epistemic)}")
+        method = prov.get("method", "").strip()
+        if not method:
+            issues.append(f"{label}: missing '# Method:' header")
+        else:
+            mhead = method.replace("(", " ").replace(";", " ").replace(",", " ").split()[0].lower()
+            if mhead not in valid_methods:
+                issues.append(f"{label}: '# Method:' must start with {sorted(valid_methods)}")
+        if tuple(c.name for c in series.column_schema) != series.columns:
+            issues.append(f"{label}: '# Columns:' schema does not match CSV header {list(series.columns)}")
     return issues
 
 
