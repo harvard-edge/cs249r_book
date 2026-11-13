@@ -8,7 +8,7 @@ window.MLSysFigureLessons["original-v4-14-authority-handshake-fsm"]=async(root,c
  root.classList.add("mlsys-original-v4-14-authority-handshake-fsm");
  const canvas=document.createElement('div');canvas.className='v4b-canvas';canvas.tabIndex=0;canvas.setAttribute('aria-label','Original artwork. Scroll to inspect; Expand opens a larger view.');canvas.append(svg);
  svg.setAttribute('role','img');svg.setAttribute('aria-label',"When does the proposal token change owner?");
- const overlay=document.createElementNS(ns,'g');svg.append(overlay);
+ const overlay=document.createElementNS(ns,'g');svg.append(overlay);{const vb=svg.viewBox.baseVal,_fg=document.createElementNS(ns,'path');_fg.setAttribute('d',`M${(vb.x+vb.width*.08).toFixed(1)},${(vb.y+vb.height*.08).toFixed(1)}h${(vb.width*.84).toFixed(1)}v${(vb.height*.84).toFixed(1)}h-${(vb.width*.84).toFixed(1)}z`);_fg.setAttribute('fill','none');_fg.setAttribute('stroke','none');_fg.setAttribute('data-mlsys-focus','');overlay.append(_fg);}
  const add=(tag,attrs={},text)=>{const el=document.createElementNS(ns,tag);for(const[k,v]of Object.entries(attrs))el.setAttribute(k,String(v));if(text!=null)el.textContent=text;overlay.append(el);return el;};
  const readout=document.createElement('p');readout.className='v4b-readout';readout.setAttribute('aria-live','off');
  const equation=document.createElement('p');equation.className='v4b-equation';
@@ -17,7 +17,7 @@ window.MLSysFigureLessons["original-v4-14-authority-handshake-fsm"]=async(root,c
  // Keep the endpoint in view when Expand or rotation changes the artwork scale.
  // Scrolling alone does not trigger this observer, so manual inspection persists.
  let focus=null,resizeFrame=0,disposed=false;
- function recenter(){if(!focus||disposed)return;if(canvas.clientWidth>=520){canvas.scrollLeft=0;canvas.scrollTop=0;return;}const scale=svg.getBoundingClientRect().width/width;canvas.scrollLeft=Math.max(0,focus[0]*scale-canvas.clientWidth/2);canvas.scrollTop=Math.max(0,focus[1]*scale-canvas.clientHeight/2);}
+ function recenter(){if(!focus||disposed)return;const scale=svg.getBoundingClientRect().width/width;canvas.scrollLeft=canvas.scrollWidth>canvas.clientWidth+2?Math.max(0,focus[0]*scale-canvas.clientWidth/2):0;canvas.scrollTop=canvas.scrollHeight>canvas.clientHeight+2?Math.max(0,focus[1]*scale-canvas.clientHeight/2):0;}
  function follow(x,y){focus=[x,y];recenter();}
  const cameraResize=typeof ResizeObserver==='function'?new ResizeObserver(()=>{if(!disposed&&!resizeFrame)resizeFrame=requestAnimationFrame(()=>{resizeFrame=0;recenter();});}):null;
  cameraResize?.observe(canvas);cameraResize?.observe(svg);
@@ -43,7 +43,7 @@ window.MLSysFigureLessons["original-v4-14-authority-handshake-fsm"]=async(root,c
  ['Remain in fallback while moving','While the machine is still moving or a fault remains active in FALLBACK, any reset request is rejected by the transition guard; no edge permits jumping from FALLBACK directly back to MAN.'],
  ['Reset from rest and re-admit','Once standstill is verified, faults are cleared, and a fresh authenticated re-admission handshake completes, the token follows the dashed FALLBACK → AUTO reset edge and re-admits the policy proposal token.'],
  ['Hardwired input preempts every protocol state','At any instant across all 6 states, a hardwired E-stop or protective interlock preempts the software protocol and forces the token into PROTECTIVE, where the independent safety circuit owns brake or hold directly.']
- ].map(([label,description],i)=>({label,get description(){return root.dataset.lessonCommittedIndex===String(i)?description:'Next endpoint, not yet completed: '+description;}}));
+ ].map(([label,description])=>({label,description}));
  const paths={1:[[190,90],[263,90]],3:[[415,90],[488,90]],5:[[610,128],[610,188]],6:[[490,222],[417,222]],8:[[265,238],[80,238],[80,130]],9:[[340,282],[340,316]]};
  const bar=add('rect',{x:500,y:122,width:0,height:3,fill:'#1A4D3E','data-motion-object':'true'});
  const badgeGroup=add('g',{'data-step-callout':'true'});

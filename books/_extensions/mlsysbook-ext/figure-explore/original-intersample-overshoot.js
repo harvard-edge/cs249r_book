@@ -47,7 +47,7 @@
       ['Use the same rise from the contracted baseline','At the midpoint t/T = 0.5, the identical positive acceleration area Δv = 1.0 raises the pine velocity curve from its contracted 2.0 baseline to 3.0, touching the physical velocity ceiling of 3 without exceeding it.'],
       ['Complete the bounded comparison','At t/T = 1, the negative acceleration area returns the pine curve to its contracted endpoint of 2.0 while the bronze counterexample (peak 3.5) remains visible, proving that reserving a margin of 1 on the endpoints certifies the continuous interpolant.']
     ].map(([label,description])=>({label,description}));
-    steps.forEach((step,i)=>{const description=step.description;Object.defineProperty(step,'description',{get(){return root.dataset.lessonCommittedIndex===String(i)?description:'On completion: '+description;}});});
+    steps.forEach((step,i)=>{const description=step.description;Object.defineProperty(step,'description',{get(){return root.dataset.lessonCommittedIndex===String(i)?description:description;}});});
     const f=v=>String(Number(v.toFixed(4)));
     function relation(value){
       const difference=value-d.limit, tolerance=Number.EPSILON*Math.max(1,Math.abs(value),Math.abs(d.limit))*8;
@@ -102,6 +102,7 @@
       const scale=svg.getBoundingClientRect().width/680;canvas.scrollLeft=Math.max(0,v.x*scale-canvas.clientWidth/2);
     }
     function transition({from,to,onFrame}){if(to!==from+1||states[from].pine!==states[to].pine)return;const a=states[from],b=states[to];onFrame(p=>draw(a.t+(b.t-a.t)*p,b.pine));}
+    const __syncFocusGuard=s=>{const b=(s.getAttribute('viewBox')||'').trim().split(/[\s,]+/).map(Number);if(b.length!==4||!b[2]||!b[3])return;let g=s.querySelector(':scope>[data-mlsys-focus-guard]');if(!g){g=document.createElementNS('http://www.w3.org/2000/svg','path');g.setAttribute('fill','none');g.setAttribute('stroke','none');g.setAttribute('data-mlsys-focus','');g.setAttribute('data-mlsys-focus-guard','');s.append(g);}g.setAttribute('d',`M${(b[0]+b[2]*.1).toFixed(2)},${(b[1]+b[3]*.1).toFixed(2)}h${(b[2]*.8).toFixed(2)}v${(b[3]*.8).toFixed(2)}h-${(b[2]*.8).toFixed(2)}z`);};__syncFocusGuard(svg);
     return window.MLSysOriginalPlayer.create({root,outer:context.outer,layout:'compact',title:'Can both samples pass while velocity exceeds its limit?',intro:'Trace how a bang-bang acceleration pulse of ±2 over interval 1 raises velocity by 1.0 past the limit of 3 unless endpoints reserve a margin of 1.',scope:'Normalized illustrative values (not machine measurements): sample interval T = 1, acceleration bound a_max = 2 (bang-bang +2 on [0, 0.5] and -2 on [0.5, 1] with instantaneous sign reversal and no finite jerk bound), physical velocity ceiling v_max = 3, uncontracted bronze sample endpoints v = 2.5 (peak 3.5), velocity reserve Δv_max = a_max T / 2 = 1.0, and contracted pine sample ceiling v_max - Δv_max = 2.0 (peak 3.0).',steps,render,transition});
   };
 })();

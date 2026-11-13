@@ -92,7 +92,7 @@ window.MLSysFigureLessons[NAME]=async(root,{outer,verifiedArtwork})=>{
  const slotNodes=SUB.map((_,k)=>{const c=html('div','rnn-slot');c.dataset.slot=String(k);const name=html('span','rnn-slot-name');name.append(hsub('h',k));c.append(name,html('span','rnn-slot-status'),html('span','rnn-slot-size'));slots.append(c);return c;});
  panel.append(mode,slots,memory,work,compare);
  const narrow=matchMedia('(max-width:600px)');let committed=0,mounted=false;
- const layout=()=>art.setAttribute('viewBox',narrow.matches?NARROW:WIDE);narrow.addEventListener?.('change',layout);layout();
+ const __syncFocusGuard=s=>{const b=(s.getAttribute('viewBox')||'').trim().split(/[\s,]+/).map(Number);if(b.length!==4||!b[2]||!b[3])return;let g=s.querySelector(':scope>[data-mlsys-focus-guard]');if(!g){g=document.createElementNS('http://www.w3.org/2000/svg','path');g.setAttribute('fill','none');g.setAttribute('stroke','none');g.setAttribute('data-mlsys-focus','');g.setAttribute('data-mlsys-focus-guard','');s.append(g);}g.setAttribute('d',`M${(b[0]+b[2]*.1).toFixed(2)},${(b[1]+b[3]*.1).toFixed(2)}h${(b[2]*.8).toFixed(2)}v${(b[3]*.8).toFixed(2)}h-${(b[2]*.8).toFixed(2)}z`);};const layout=()=>{art.setAttribute('viewBox',narrow.matches?NARROW:WIDE);__syncFocusGuard(art);};narrow.addEventListener?.('change',layout);layout();
  const steps=states.map((s,i)=>({label:s.label,get description(){return committed===i?s.description:'Pending: '+s.label+'. The retained states and counts below change only when this action completes.';}}));
 
  const veil=(cx,cy,r,opacity,dash)=>{nodeLayer.append(svg('circle',{cx,cy,r:r+.6,fill:'#fff','fill-opacity':opacity}));if(dash)nodeLayer.append(svg('circle',{cx,cy,r:r+1.6,fill:'none',stroke:dash,'stroke-width':1.1,'stroke-dasharray':'3 2'}));};

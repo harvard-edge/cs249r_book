@@ -8,7 +8,7 @@ window.MLSysFigureLessons["original-v4-03-chunk-supply-horizon"]=async(root,cont
  root.classList.add("mlsys-original-v4-03-chunk-supply-horizon");
  const canvas=document.createElement('div');canvas.className='v4b-canvas';canvas.tabIndex=0;canvas.setAttribute('aria-label','Original artwork. Scroll to inspect; Expand opens a larger view.');canvas.append(svg);
  svg.setAttribute('role','img');svg.setAttribute('aria-label',"Why does buffered supply outlast permission?");
- const overlay=document.createElementNS(ns,'g');svg.append(overlay);
+ const overlay=document.createElementNS(ns,'g');svg.append(overlay);{const vb=svg.viewBox.baseVal,_fg=document.createElementNS(ns,'path');_fg.setAttribute('d',`M${(vb.x+vb.width*.08).toFixed(1)},${(vb.y+vb.height*.08).toFixed(1)}h${(vb.width*.84).toFixed(1)}v${(vb.height*.84).toFixed(1)}h-${(vb.width*.84).toFixed(1)}z`);_fg.setAttribute('fill','none');_fg.setAttribute('stroke','none');_fg.setAttribute('data-mlsys-focus','');overlay.append(_fg);}
  const add=(tag,attrs={},text)=>{const el=document.createElementNS(ns,tag);for(const[k,v]of Object.entries(attrs))el.setAttribute(k,String(v));if(text!=null)el.textContent=text;overlay.append(el);return el;};
  const readout=document.createElement('p');readout.className='v4b-readout';readout.setAttribute('aria-live','off');
  const equation=document.createElement('p');equation.className='v4b-equation';
@@ -17,7 +17,7 @@ window.MLSysFigureLessons["original-v4-03-chunk-supply-horizon"]=async(root,cont
  // Keep the endpoint in view when Expand or rotation changes the artwork scale.
  // Scrolling alone does not trigger this observer, so manual inspection persists.
  let focus=null,resizeFrame=0,disposed=false;
- function recenter(){if(!focus||disposed)return;if(canvas.clientWidth>=520){canvas.scrollLeft=0;canvas.scrollTop=0;return;}const scale=svg.getBoundingClientRect().width/width;canvas.scrollLeft=Math.max(0,focus[0]*scale-canvas.clientWidth/2);canvas.scrollTop=Math.max(0,focus[1]*scale-canvas.clientHeight/2);}
+ function recenter(){if(!focus||disposed)return;const scale=svg.getBoundingClientRect().width/width;canvas.scrollLeft=canvas.scrollWidth>canvas.clientWidth+2?Math.max(0,focus[0]*scale-canvas.clientWidth/2):0;canvas.scrollTop=canvas.scrollHeight>canvas.clientHeight+2?Math.max(0,focus[1]*scale-canvas.clientHeight/2):0;}
  function follow(x,y){focus=[x,y];recenter();}
  const cameraResize=typeof ResizeObserver==='function'?new ResizeObserver(()=>{if(!disposed&&!resizeFrame)resizeFrame=requestAnimationFrame(()=>{resizeFrame=0;recenter();});}):null;
  cameraResize?.observe(canvas);cameraResize?.observe(svg);
@@ -45,7 +45,7 @@ window.MLSysFigureLessons["original-v4-03-chunk-supply-horizon"]=async(root,cont
  ['Inspect the old chunk’s still-valid evidence','Sweeping the cursor to t = 200 ms inspects chunk 0 after replacement: its slip error bound reaches 13.00 mm, still inside the 15.0 mm grasp tolerance while newer chunks command the arm.'],
  ['Reach the first evidence horizon','At t = 219.1 ms, tracked slip drift e₀ + ½ a_slip t² reaches the 15.00 mm grasp tolerance (red dashed line), so the 7 remaining setpoints from 225 ms to 375 ms are crossed out in red as expired.'],
  ['Inspect the supply-only tail','At t = 400 ms, chunk 0 reaches the end of its H = 16 setpoint span with a 43.00 mm drift bound; the hatched tail beyond 219.1 ms is buffered setpoint supply for jitter, never permission to execute.']
- ].map(([label,description],i)=>({label,get description(){return root.dataset.lessonCommittedIndex===String(i)?description:'Next endpoint, not yet completed: '+description;}}));
+ ].map(([label,description])=>({label,description}));
  function frame(t){const valid=t<D.horizon,first=t<D.latency?'unavailable':t<D.replacement?'in force':'replaced',age=t,error=D.initial+.5*D.slip*(age/1000)**2*1000;
   cursor.setAttribute('x1',X(t));cursor.setAttribute('x2',X(t));used.setAttribute('x2',X(Math.min(D.replacement,Math.max(D.latency,t))));supply.setAttribute('x2',X(t));supply.setAttribute('stroke',valid?'#B87333':'#A51C30');
   const counts={unavailable:0,queued:0,consumed:0,replaced:0,withheld:0};ticks.forEach(({time,mark,slash})=>{const status=time<D.latency?'unavailable':time<D.replacement&&time<=t?'consumed':t>=D.horizon&&time>=D.horizon?'withheld':t>=D.replacement&&time>=D.replacement?'replaced':'queued';counts[status]++;mark.dataset.status=status;mark.setAttribute('fill',status==='unavailable'?'#A0AEC0':status==='consumed'?'#1A4D3E':status==='withheld'?'#A51C30':'#B87333');mark.setAttribute('opacity',status==='replaced'?'.22':status==='queued'?'.55':'1');slash.setAttribute('display',status==='withheld'?'':'none');});

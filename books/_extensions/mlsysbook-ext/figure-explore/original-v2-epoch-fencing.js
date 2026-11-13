@@ -23,6 +23,7 @@
     if (!context.verifiedArtwork || !window.MLSysOriginalPlayer) throw Error('Verified fencing artwork and player required');
     const art = context.verifiedArtwork.cloneNode(true);
     if (art.getAttribute('viewBox') !== '0 0 700 290') throw Error('Epoch-fencing geometry changed');
+    art.setAttribute('viewBox', '0 -6 700 298');
     art.classList.add(NAME + '-art');
     art.setAttribute('role', 'img');
     art.setAttribute('aria-label', 'Original four-lane epoch-fencing timeline; coordinator ownership and checkpoint-store enforcement advance separately.');

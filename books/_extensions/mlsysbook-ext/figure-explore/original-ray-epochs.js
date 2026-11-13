@@ -45,7 +45,7 @@
       {label:'Record the occupied return',description:'At cell 10, the range return deposits positive (occupied) evidence at epoch t₁ and halts ray marching; the 4 occluded cells behind the hit receive no line-of-sight evidence and remain at t₀.'},
       {label:'Publish without renewing untouched cells',description:'Publishing the map at t₁ leaves 9 crossed free cells and 1 occupied hit cell at t₁, while the 4 occluded cells behind the hit stay at t₀ and the 56 off-ray cells keep their own prior epochs.'}
     ];
-    steps.forEach((step,i)=>{const description=step.description;Object.defineProperty(step,'description',{get(){return root.dataset.lessonCommittedIndex===String(i)?description:'On completion: '+description;}});});
+    steps.forEach((step,i)=>{const description=step.description;Object.defineProperty(step,'description',{get(){return root.dataset.lessonCommittedIndex===String(i)?description:description;}});});
     function epoch(label,value,color) {
       label.replaceChildren(document.createTextNode('t'));
       const sub=document.createElementNS(ns,'tspan');sub.setAttribute('baseline-shift','sub');sub.setAttribute('font-size','8.5');sub.textContent=String(value);label.append(sub);label.setAttribute('fill',color);
@@ -86,6 +86,7 @@
       ray.setAttribute('visibility','visible');
       onFrame(progress=>ray.setAttribute('x2',String(source+(target-source)*progress))); 
     }
+    const __syncFocusGuard=s=>{const b=(s.getAttribute('viewBox')||'').trim().split(/[\s,]+/).map(Number);if(b.length!==4||!b[2]||!b[3])return;let g=s.querySelector(':scope>[data-mlsys-focus-guard]');if(!g){g=document.createElementNS('http://www.w3.org/2000/svg','path');g.setAttribute('fill','none');g.setAttribute('stroke','none');g.setAttribute('data-mlsys-focus','');g.setAttribute('data-mlsys-focus-guard','');s.append(g);}g.setAttribute('d',`M${(b[0]+b[2]*.1).toFixed(2)},${(b[1]+b[3]*.1).toFixed(2)}h${(b[2]*.8).toFixed(2)}v${(b[3]*.8).toFixed(2)}h-${(b[2]*.8).toFixed(2)}z`);};__syncFocusGuard(svg);
     return window.MLSysOriginalPlayer.create({root,outer:context.outer,layout:'compact',intro:'Trace one range ray across 14 row cells as it renews 9 free cells and 1 occupied hit to epoch t₁ while leaving 4 occluded cells at t₀.',title:'Which cells does one range return actually renew?',scope:'Single-ray occupancy and evidence-epoch update across a 14-cell row in a 70-cell grid under qualified beam coverage and geometric error bounds. Amanatides-Woo traversal applies negative (free) evidence to 9 crossed cells and positive (occupied) evidence to 1 hit cell at capture epoch t₁, leaving 4 occluded cells behind the hit at t₀.',steps,render,transition});
   };
 })();
