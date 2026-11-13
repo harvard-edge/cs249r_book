@@ -59,7 +59,7 @@ A training job can leave expensive accelerators idle even when its models fit in
 - Design shard packaging, prefetching, locality, and direct-storage paths that keep fleet accelerators fed when small files or slow tiers would starve them
 - Select checkpoint staging and replication strategies that balance pause time, recovery risk, and storage cost
 - Specify storage commit and replay contracts that preserve correctness when distributed pipeline stages fail, including the provenance that generated training data must retain
-- Analyze serving-time storage workloads, from bulk model loads and rollout bursts to retrieval indexes bound by random-access IOPS
+- Analyze serving-time storage workloads, from bulk model loads and rollout bursts to retrieval indexes bound by random-access read rates
 - Evaluate staging and tiering choices by total delivery cost, including transfer fees and idle accelerators
 
 :::
@@ -291,7 +291,7 @@ Hold the batch representation and storage path fixed while improving compute thr
 
 A normalized example isolates the effect. Suppose input delivery takes one quarter of the original compute time and overlaps perfectly with computation, so each batch takes the longer of the two service times. Doubling compute speed halves batch time, and quadrupling it halves batch time again, at which point compute and delivery take equal time. Beyond that point the pipeline is delivery bound. A sixteenfold faster accelerator still raises batch throughput only fourfold, and the remaining compute sits idle behind the input path. That plateau is an I/O wall\index{I/O wall!hardware trend} for this workload and allocation. Faster storage, a more compact representation, or additional independent input paths can move it; deeper prefetching alone cannot.
 
-The first inversion is access pattern\index{Access pattern!sequential vs. random}. Where database workloads issue *random access patterns* that benefit from seek-time optimization, full-corpus pretraining performs large *sequential scans*. An epoch in the running example reads each selected sample once, in the order produced by shard and buffer shuffling, so the pattern resembles video streaming more than database queries. Storage systems optimized for random IOPS[^fn-iops-throughput-tradeoff] waste capabilities on this workload, whereas systems optimized for sequential throughput excel. The penalty for the wrong pattern is large. A Gen4/Gen5 NVMe drive delivers roughly 7--14 GB/s for sequential reads, while small 4 KB random reads can fall near 0.5 GB/s, an order-of-magnitude to 30$\times$ drop. Hard drives pay an even steeper 100$\times$ throughput reduction because mechanical seek times dominate random access.
+The first inversion is access pattern\index{Access pattern!sequential vs. random}. Where database workloads issue *random access patterns* that benefit from seek-time optimization, full-corpus pretraining performs large *sequential scans*. An epoch in the running example reads each selected sample once, in the order produced by shard and buffer shuffling, so the pattern resembles video streaming more than database queries. Storage systems optimized for random input/output operations per second (IOPS)[^fn-iops-throughput-tradeoff] waste capabilities on this workload, whereas systems optimized for sequential throughput excel. The penalty for the wrong pattern is large. A Gen4/Gen5 NVMe drive delivers roughly 7--14 GB/s for sequential reads, while small 4 KB random reads can fall near 0.5 GB/s, an order-of-magnitude to 30$\times$ drop. Hard drives pay an even steeper 100$\times$ throughput reduction because mechanical seek times dominate random access.
 
 [^fn-iops-throughput-tradeoff]: **IOPS (input/output operations per second)**\index{IOPS!ML irrelevance}: The metric that dominated storage procurement for decades because database workloads issue millions of small random reads. ML training inverts this priority: a pipeline streaming 256 MB shards sequentially needs sustained GB/s throughput, not per-operation speed. Provisioning storage by IOPS rating for an ML workload over-spends on random-access capability the pipeline never exercises.
 
@@ -1845,7 +1845,7 @@ class ShardContention:
     # ┌── 4. OUTPUT ────────────────────────────────────────
     sc_n_workers_str = fmt_count(n_workers, commas=False, label="worker")
     sc_n_shards_str = fmt(n_shards, precision=0, commas=True)
-    sc_collision_prob_str = fmt_percent(p_collision, precision=1, commas=False, style='prose')
+    sc_collision_prob_str = fmt_percent(round(p_collision, 2), precision=0, commas=False, style='prose')
 ```
 
 ```{=latex}
@@ -1860,7 +1860,7 @@ class ShardContention:
 This is a variant of the "Birthday Problem" in probability.
 
 1. **Probability of No Collision**: $\approx e^{-\ShardReaderCount^2/(2\DatasetShardCount)} = e^{-32^2/2{,}000} \approx 0.60$.
-2. **Probability of Contention**: $1 - 0.60 = 40\%$.
+2. **Probability of Contention**: $1 - 0.60 \approx 40\%$.
 
 **Systems insight**: With `{python} ShardContention.sc_n_workers_str` and `{python} ShardContention.sc_n_shards_str` shards, the `{python} ShardContention.sc_collision_prob_str` collision probability identifies a potential storage-shard hotspot\index{Shard contention!collision probability}. Whether that collision delays workers depends on shard placement, caching, and available service capacity. Coordinating shard assignments can reduce this source of tail latency\index{Tail latency!storage shard contention} when assignments spread demand across independently serving devices while preserving the intended sampling policy.
 
@@ -3793,11 +3793,11 @@ Complementing retention pruning, incremental checkpointing\index{Incremental che
 
 **Context**: On January 31, 2017, a GitLab.com site reliability engineer working a database replication incident accidentally wiped the primary PostgreSQL data directory [@gitlab2017postmortem].
 
-**Mechanism**: All five layered backup paths failed simultaneously: S3 dumps were silently empty due to a version mismatch, Azure disk snapshots were disabled, replication was broken, LVM snapshots were six hours stale, and WAL archiving was unimplemented.
+**Mechanism**: All five layered backup paths failed simultaneously: S3 dumps were silently empty due to a version mismatch, Azure disk snapshots were disabled, replication was broken, logical-volume snapshots were six hours stale, and write-ahead log archiving was unimplemented.
 
 **Impact**: Six hours of production database writes, user comments, and repository metadata were permanently lost, requiring an 18-hour emergency restoration from a staging snapshot.
 
-**Fix**: GitLab instituted automated daily backup restoration testing, unified PostgreSQL versioning across environments, and implemented automated WAL archiving to S3.
+**Fix**: GitLab instituted automated daily backup restoration testing, unified PostgreSQL versioning across environments, and implemented automated write-ahead log archiving to S3.
 
 **Systems lesson**: Storage reliability is a restore property, not a backup property. A checkpoint, replica, or dump only counts if the team regularly proves that it can be located, validated, and restored under incident conditions. ML systems face the same vulnerability. A model checkpoint written to object storage or a snapshot of a feature store (the system that stores model input features) is useless if silent version mismatches or missing restore tests\index{Checkpointing!restore validation} prevent resuming a multi-day training run after node preemption.
 

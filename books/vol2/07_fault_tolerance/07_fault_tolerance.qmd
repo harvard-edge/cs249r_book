@@ -973,17 +973,6 @@ The containment hierarchy in @tbl-failure-domains and @fig-failure-domains expla
 ↩ The failure domain and its physical nesting from node to rack to building are established in @sec-compute-infrastructure-node-health-reliability-56a6.
 :::
 
-::: {#chk-fault-tolerance-mapping-failure-domains .callout-checkpoint title="Mapping failure domains"}
-
-Verify your understanding of how failure domains nest and their operational impact:
-
-- [ ] **Blast radius**: calculate how many 8-GPU nodes a rack switch failure typically affects in a standard data center configuration.
-- [ ] **Power-domain correlation**: explain why placing all 3 model replicas in the same power domain fails to provide protection against a power outage confined to that domain.
-- [ ] **Staged rollouts**: identify the failure domain addressed by staged rollouts rather than hardware redundancy.
-- [ ] **Nested domains**: explain hierarchical containment and decide whether the rack failure domain still matters once the power domain containing that rack fails.
-
-:::
-
 ```{python}
 #| echo: false
 #| label: tpuv4-war-story-scale
@@ -1021,6 +1010,21 @@ class TpuV4WarStoryScale:
 **Systems lesson**: Fault tolerance is a topology-management problem. In tightly coupled accelerator fleets, recovery must preserve the communication graph, not merely replace an individual component; otherwise one local hardware fault can become a cluster-wide training interruption.
 
 :::
+
+Hardware reconfiguration and independent placement both obey the same principle: recovery succeeds only when redundancy aligns with the scope of the failed resource. Before examining specific hardware fault modes in detail, verify how those failure domains nest across the cluster.
+
+::: {#chk-fault-tolerance-mapping-failure-domains .callout-checkpoint title="Mapping failure domains"}
+
+Verify your understanding of how failure domains nest and their operational impact:
+
+- [ ] **Blast radius**: calculate how many 8-GPU nodes a rack switch failure typically affects in a standard data center configuration.
+- [ ] **Power-domain correlation**: explain why placing all 3 model replicas in the same power domain fails to provide protection against a power outage confined to that domain.
+- [ ] **Staged rollouts**: identify the failure domain addressed by staged rollouts rather than hardware redundancy.
+- [ ] **Nested domains**: explain hierarchical containment and decide whether the rack failure domain still matters once the power domain containing that rack fails.
+
+:::
+
+Each domain boundary sets the blast radius once a fault occurs; the next question is how physical faults inside silicon and memory manifest to the training runtime.
 
 ## Hardware Faults at Fleet Scale {#sec-fault-tolerance-hardware-fault-taxonomy}
 
@@ -1201,7 +1205,7 @@ Telemetry from production training fleets shows this corruption is routine rathe
 
 In the Google training telemetry presented by @dean2024mlsys, @fig-sdc-training-fault identifies an abrupt gradient-norm anomaly as an SDC event. The plot shows the symptom without identifying the damaged bit or circuit. Corrupting a floating-point exponent is one mechanism that can greatly change a tensor value and subsequent updates. Gradient clipping can limit update magnitude, but it does not reconstruct the correct gradient; an anomaly detector must trigger validation or recovery before suspect state is accepted.
 
-::: {#fig-sdc-training-fault fig-env="figure" fig-pos="htb" fig-cap="**Gradient Norm Deviation**: Transient hardware faults, such as silent data corruption (SDC), can disrupt optimization by causing abrupt changes in gradient norms. Google's production examples show SDC anomalies surfacing as visible gradient-norm spikes. Source: [@dean2024mlsys]." fig-alt="Line graph of gradient norm over training time showing smooth baseline with sudden spike anomaly caused by silent data corruption event."}
+::: {#fig-sdc-training-fault fig-env="figure" fig-pos="htb" fig-cap="**Gradient Norm Deviation**: Transient hardware faults, such as silent data corruption (SDC), can disrupt optimization by causing abrupt changes in gradient norms. Google's production examples show SDC anomalies surfacing as visible gradient-norm spikes. Source: [@dean2024mlsys]." fig-alt="Photograph of a projected conference slide titled Metrics anomaly: anomaly due to SDC, showing a noisy scatter plot of gradient norm versus training time with a yellow box highlighting high outlier points."}
 
 ![](images/jpg/google_sdc_jeff_dean_anomaly.jpg)
 
@@ -2548,21 +2552,17 @@ class StragglerTax:
 
 :::: {#nbk-fault-tolerance-straggler-tax .callout-notebook title="The cost of a straggler"}
 
-Consider a `{python} StragglerTax.n_gpus_str`-GPU cluster where a normal training iteration takes `{python} StragglerTax.normal_step_str` second. A single GPU enters a thermally throttled state, clocking down to `{python} StragglerTax.throttle_pct_str` speed, and now takes `{python} StragglerTax.straggler_step_str` seconds to complete its computation.
-
-Because AllReduce cannot complete until every rank has submitted its gradients, the other `{python} StragglerTax.healthy_gpus_str` healthy GPUs sit idle waiting for the straggler.
+**Problem**: Consider a `{python} StragglerTax.n_gpus_str`-GPU cluster where a normal training iteration takes `{python} StragglerTax.normal_step_str` second. A single GPU enters a thermally throttled state, clocking down to `{python} StragglerTax.throttle_pct_str` speed, and now takes `{python} StragglerTax.straggler_step_str` seconds to complete its computation while the other `{python} StragglerTax.healthy_gpus_str` healthy GPUs wait at the AllReduce barrier. How much cluster throughput and hourly compute budget does that single straggler waste?
 
 ```{=latex}
 \tcbbreak
 ```
 
-**Impact**:
+**Math**:
 
-- Normal step time: `{python} StragglerTax.normal_step_str` second
-- Straggler step time: `{python} StragglerTax.straggler_step_str` seconds
-- Effective cluster speed: 1 step/`{python} StragglerTax.straggler_step_str`s = `{python} StragglerTax.effective_speed_str` steps/sec
-
-A single failing device (`{python} StragglerTax.straggler_frac_str` of the hardware) has reduced the throughput of the entire cluster by `{python} StragglerTax.throughput_loss_str` percent. At `{python} StragglerTax.gpu_cost_str`, this straggler wastes `{python} StragglerTax.wasted_cost_str` in idle compute.
+- Normal step time: `{python} StragglerTax.normal_step_str` second; straggler step time: `{python} StragglerTax.straggler_step_str` seconds
+- Effective cluster speed: 1 step $\div$ `{python} StragglerTax.straggler_step_str` s = `{python} StragglerTax.effective_speed_str` steps/sec (`{python} StragglerTax.throughput_loss_str` percent throughput loss from `{python} StragglerTax.straggler_frac_str` of the hardware)
+- Hourly idle compute waste: `{python} StragglerTax.n_gpus_str` GPUs $\times$ `{python} StragglerTax.throughput_loss_str`% $\times$ `{python} StragglerTax.gpu_cost_str` = `{python} StragglerTax.wasted_cost_str`
 
 **Systems insight**: Replacement is worthwhile only when the expected time saved exceeds recovery and replay costs. Suppose the slowdown is expected to persist for the next $\SlowdownPersistenceUpdateCount$ useful updates, whose step times are $\DegradedStepTime$ on the degraded allocation and $\HealthyStepTime$ after replacement. The simplified break-even condition is then $\SlowdownPersistenceUpdateCount(\DegradedStepTime-\HealthyStepTime) > \JobRestartTime+ \LostWorkReplayTime$. The right side includes waiting for capacity and restoring state. A short-lived slowdown may clear before replacement pays off; false-positive detection and uncertain persistence also affect the decision. MTBF describes failure recurrence, not how long this slowdown will last.
 

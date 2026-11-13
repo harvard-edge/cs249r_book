@@ -2385,7 +2385,7 @@ class NotationRegistry:
     KeyRightSingularMatrix: NotationSymbol  # orthonormal matrix whose columns are the right singular vectors of a key activation matrix ($\mathbf{V}$)
     KeyRightSingularVector: NotationSymbol  # one right singular vector of a key activation matrix, a column of its right singular matrix ($\mathbf{v}$)
     KeySingularNumber: NotationSymbol  # one singular value of a key activation matrix, indexed in decreasing order ($\sigma$) [dimensionless]
-    KeySingularSpectrumMatrix: NotationSymbol  # rectangular diagonal matrix holding the singular values of a key activation matrix in decreasing order ($\mathbf{\Sigma}$)
+    KeySingularSpectrumMatrix: NotationSymbol  # rectangular diagonal matrix holding the singular values of a key activation matrix in decreasing order ($\boldsymbol{\Sigma}$)
     KeySourceMatrix: NotationSymbol  # representations attention draws its keys from, before a head-specific key projection ($\mathbf{X}_{K}$)
     KeySpectrumLength: NotationSymbol  # number of singular values of a key activation matrix, the smaller of its sequence length and head dimension ($q$)
     KeyVector: NotationSymbol  # key vector of one token, one row of the key matrix ($\mathbf{k}$)
@@ -2424,7 +2424,7 @@ class NotationRegistry:
     LabeledSampleCount: NotationSymbol  # number of samples in a dataset that carry labels ($D_{\text{labeled}}$)
     LabelingRoundIndex: NotationSymbol  # position of one on-policy data-collection and retraining round ($k$)
     LaggedModelInput: NotationSymbol  # model input features as they existed a lag before the current time, as point-in-time retrieval reconstructs them for training ($x_{t-\Delta}$)
-    LaggedStateDigest: NotationSymbol  # digest of the canonicalized workspace projection captured a recurrence period before the current observation step ($h_{\text{state},t-k}$)
+    LaggedStateDigest: NotationSymbol  # digest of the canonicalized workspace projection captured a recurrence period before the current observation step ($h_{\text{state},t-\ell}$)
     LandmarkDepth: NotationSymbol  # distance of a landmark along its bearing ray from the optical center where it was first observed ($d$) [m]
     LanguageInstruction: NotationSymbol  # high-level natural-language instruction a language-grounded planner must carry out ($c_{\text{instr}}$)
     LanguageSkillPrior: NotationSymbol  # probability a language model assigns that a skill contributes to completing an instruction, the semantic prior of a language-grounded planner ($p_{\text{LLM}}$)
@@ -3990,7 +3990,7 @@ class NotationRegistry:
     SampledSimulationParameterVector: NotationSymbol  # simulator parameter vector drawn from the domain randomization distribution ($\tilde{\boldsymbol{\xi}}$) [varies]
     SampledUnit: NotationSymbol  # one independently sampled unit of an evaluation, such as a paired task record, that a bootstrap resamples whole ($y$)
     SampledUnitCount: NotationSymbol  # number of independently sampled units in an evaluation, which each bootstrap resample redraws with replacement ($m$)
-    SamplingParameters: NotationSymbol  # sampling configuration of one model call, such as temperature, top-k and top-p, that sets the decoding rule ($\mathbf{\Theta}_{\text{sample}}$)
+    SamplingParameters: NotationSymbol  # sampling configuration of one model call, such as temperature, top-k and top-p, that sets the decoding rule ($\boldsymbol{\Theta}_{\text{sample}}$)
     SamplingPeriod: NotationSymbol  # time between successive executions of a discrete controller ($T_s$) [s]
     SamplingRate: NotationSymbol  # number of controller executions or signal samples per second ($f_s$) [Hz]
     SamplingTemperature: NotationSymbol  # positive scalar that divides a language model's logits before the softmax at sampling time, sharpening the distribution below one and flattening it above ($\tau_{\text{temp}}$) [dimensionless]
@@ -4091,7 +4091,7 @@ class NotationRegistry:
     SensorNoiseDensity: NotationSymbol  # white-noise density of an inertial sensor, its random error per square root of measurement bandwidth ($N_{\text{IMU}}$) [varies]
     SensorNoiseStandardDeviation: NotationSymbol  # standard deviation of the additive Gaussian noise on one sensor channel ($\sigma$) [varies]
     SensorObservationFunction: NotationSymbol  # function that produces the robot's observation from the physical state and the environment parameters ($g$)
-    SensorPatternDictionary: NotationSymbol  # dictionary matrix whose columns are the recurring basis patterns of sensor traces ($\mathbf{\Phi}_{\text{dict}}$)
+    SensorPatternDictionary: NotationSymbol  # dictionary matrix whose columns are the recurring basis patterns of sensor traces ($\boldsymbol{\Phi}_{\text{dict}}$)
     SensorPitchAngle: NotationSymbol  # pitch angle of a sensor mounting relative to the mobile base frame ($\theta_{\text{pitch}}$) [rad]
     SensorPointAcceleration: NotationSymbol  # linear acceleration of a sensor point fixed to a rotating rigid body ($\mathbf{a}_P$) [m/s^2]
     SensorPointVelocity: NotationSymbol  # linear velocity of a sensor point fixed to a rotating rigid body ($\mathbf{v}_P$) [m/s]
@@ -4194,7 +4194,7 @@ class NotationRegistry:
     SingleJointVelocityLimit: NotationSymbol  # largest speed one joint may be commanded to move at, indexed by joint ($\dot{q}_{i,\max}$) [varies]
     SingleLinkBandwidth: NotationSymbol  # bandwidth of one network link in one direction, written in the core bandwidth notation outside alpha-beta formulas ($\text{BW}_{\text{link}}$) [bytes/s]
     SingleStepImitationError: NotationSymbol  # bound on the probability that the imitation policy makes an error at a single step ($\epsilon$) [dimensionless]
-    SingularSpectrumMatrix: NotationSymbol  # diagonal matrix holding the singular values of a weight matrix in decreasing order ($\mathbf{\Sigma}$)
+    SingularSpectrumMatrix: NotationSymbol  # diagonal matrix holding the singular values of a weight matrix in decreasing order ($\boldsymbol{\Sigma}$)
     SisaShardCount: NotationSymbol  # number of independent shards, and so of constituent models, that SISA training partitions the data into ($K$)
     SisaTrainingShard: NotationSymbol  # one isolated partition of the training data in SISA training, on which one constituent model is trained ($S$)
     SixthHarmonicTorqueRipple: NotationSymbol  # torque ripple at six times the electrical frequency that dead-time voltage distortion produces in a three-phase motor ($\tau_{\text{ripple}}$) [N*m]
@@ -4871,7 +4871,7 @@ class NotationRegistry:
     TruncatedKeyApproximation: NotationSymbol  # rank-r truncated singular value decomposition approximation of a key activation matrix, the optimal approximation of that rank in spectral and Frobenius norm ($\hat{\mathbf{K}}_r$)
     TruncatedKeyLeftSingularMatrix: NotationSymbol  # matrix of the first r left singular vectors of a key activation matrix ($\mathbf{U}_r$)
     TruncatedKeyRightSingularMatrix: NotationSymbol  # matrix of the first r right singular vectors of a key activation matrix ($\mathbf{V}_r$)
-    TruncatedKeySpectrumMatrix: NotationSymbol  # diagonal matrix of the r largest singular values of a key activation matrix ($\mathbf{\Sigma}_r$)
+    TruncatedKeySpectrumMatrix: NotationSymbol  # diagonal matrix of the r largest singular values of a key activation matrix ($\boldsymbol{\Sigma}_r$)
     TruncationBandVolume: NotationSymbol  # volume of the shell around observed surfaces within the truncation band ($V_{\text{band}}$) [m^3]
     TruncationRank: NotationSymbol  # number of leading singular components a truncated singular value decomposition keeps ($r$)
     TruthInstrumentSet: NotationSymbol  # set of independent truth instruments (sensors and digitizers) that observe the plant separately from the system under test ($\mathcal{I}_{\text{truth}}$)
