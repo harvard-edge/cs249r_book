@@ -325,24 +325,25 @@ class RankingDriftScenario:
 
 The week-two problem takes concrete shape on the ranking service in an illustrative scenario. Initial measurements show `{python} RankingDriftScenario.acc_initial_pct_str` click-prediction accuracy, p99 latency inside the service's budget, and strong performance across test segments. By week four, accuracy has dropped to `{python} RankingDriftScenario.acc_week4_pct_str`, but the infrastructure metrics show nothing wrong. By week eight, a product manager notices that recommended items convert poorly; investigation reveals the model has not adapted to a competitor's new promotion that shifted what users click. The model needed investigation six weeks ago, but no system was watching for this degradation. MLOps provides the framework to detect such changes, assess whether retraining addresses them, and validate replacement models while limiting the impact on users.
 
-The chapter builds the operations loop in the order a team needs it (@tbl-ml-ops-chapter-spine). Technical debt explains why ML systems accumulate the hidden coupling that makes silent failure likely. Development infrastructure builds the pipeline that can rebuild and trace any model exactly, and releasing models moves a candidate onto live traffic with a tested path back. Production monitoring then watches the deployed model for the evidence the loop runs on, and retraining decisions turn that evidence into a choice to retrain, roll back, or wait. Incident response and governance handle the failures that monitoring surfaces, operational maturity decides which control a team should add next, and two case studies carry the loop to the edge and into the clinic.
+The chapter builds the operations loop in the order a team needs it (@tbl-ml-ops-chapter-spine). Five operational principles first fix the invariants that govern versioning, layer boundaries, feature parity, observability, and retraining cost. Technical debt then explains why ML systems accumulate the hidden coupling that makes silent failure likely. Development infrastructure builds the pipeline that can rebuild and trace any model exactly, and releasing models moves a candidate onto live traffic with a tested path back. Production monitoring watches the deployed model for the evidence the loop runs on, and retraining decisions turn that evidence into a choice to retrain, roll back, or wait. Incident response and governance handle the failures that monitoring surfaces, operational maturity decides which control a team should add next, and two case studies carry the loop to the edge and into the clinic.
 
-| **Section**                          | **Loop step**       | **Question it answers**                                 | **Machine cost on the ranking service**                                                  |
-|:-------------------------------------|:--------------------|:--------------------------------------------------------|:-----------------------------------------------------------------------------------------|
-| **Technical Debt**                   | Why the loop exists | Where hidden coupling accumulates                       | Glue code and unused features that still move bytes                                      |
-| **Development Infrastructure**       | Release (prepare)   | How a model is rebuilt and traced exactly               | Versioned copies of data, features, and `{python} OpsRunningCases.dlrm_gb_str` of tables |
-| **Releasing Models**                 | Release, recover    | How a candidate reaches traffic and how it is withdrawn | A second resident copy of the tables for each release control                            |
-| **Production Monitoring**            | Detect              | Whether predictions are still right                     | Telemetry bytes per second and their retention                                           |
-| **Retraining Decisions**             | Decide              | Whether a new model is worth its run                    | Accelerator-hours that contend with serving                                              |
-| **Incident Response and Governance** | Diagnose, recover   | Which layer failed, and who acts                        | Replay and slice queries over logged requests                                            |
-| **Operational Maturity**             | All steps           | Which control to add next                               | Operational spend matched to the model's value                                           |
-| **Case Studies**                     | All steps           | How the loop changes at the edge and in the clinic      | Flash banks, radio energy, and clinician review time                                     |
+| **Section**                          | **Loop step**       | **Question it answers**                                    | **Machine cost on the ranking service**                                                  |
+|:-------------------------------------|:--------------------|:-----------------------------------------------------------|:-----------------------------------------------------------------------------------------|
+| **Five Operational Principles**      | Rules of the loop   | Which invariants govern versioning, parity, and retraining | Artifact hashes, skew checks, and net retraining value                                   |
+| **Technical Debt**                   | Why the loop exists | Where hidden coupling accumulates                          | Glue code and unused features that still move bytes                                      |
+| **Development Infrastructure**       | Release (prepare)   | How a model is rebuilt and traced exactly                  | Versioned copies of data, features, and `{python} OpsRunningCases.dlrm_gb_str` of tables |
+| **Releasing Models**                 | Release, recover    | How a candidate reaches traffic and how it is withdrawn    | A second resident copy of the tables for each release control                            |
+| **Production Monitoring**            | Detect              | Whether predictions are still right                        | Telemetry bytes per second and their retention                                           |
+| **Retraining Decisions**             | Decide              | Whether a new model is worth its run                       | Accelerator-hours that contend with serving                                              |
+| **Incident Response and Governance** | Diagnose, recover   | Which layer failed, and who acts                           | Replay and slice queries over logged requests                                            |
+| **Operational Maturity**             | All steps           | Which control to add next                                  | Operational spend matched to the model's value                                           |
+| **Case Studies**                     | All steps           | How the loop changes at the edge and in the clinic         | Flash banks, radio energy, and clinician review time                                     |
 
 : **Chapter Map**: Each section builds one step of the operations loop and names the machine resource that step consumes on the DLRM ranking service. {#tbl-ml-ops-chapter-spine tbl-colwidths="[24,16,30,30]"}
 
-Operating this feedback path requires adding statistical controls to the release and reliability practices of DevOps. Technical debt accumulates wherever one of the three interface boundaries erodes. Feature stores, versioning, and CI/CD pipelines restore the reproducibility needed to isolate a fault at those boundaries, while monitoring, drift detection, and staged rollout protect predictive quality once inputs begin to shift. A small set of foundational principles decides which of these controls a given model needs and when each should act.
+Operating this feedback path requires adding statistical controls to the release and reliability practices of DevOps. Technical debt accumulates wherever one of the three interface boundaries erodes. Feature stores, versioning, and CI/CD pipelines restore the reproducibility needed to isolate a fault at those boundaries, while monitoring, drift detection, and staged rollout protect predictive quality once inputs begin to shift. Five foundational principles decide which of these controls a given model needs and when each should act.
 
-### Five operational principles {#sec-ml-operations-mlops-3ea3}
+## Five Operational Principles {#sec-ml-operations-mlops-3ea3}
 
 Without clear operating rules, a team cannot tell whether an accuracy drop came from an unrecorded data change, a mismatched serving feature, or an overdue retraining run. Five operational principles prevent these blind spots by anchoring each boundary of the ML node to a measurable quantity, from a complete artifact hash for reproducibility to net retraining value for automation (@tbl-mlops-principles-summary). The sections that follow build the controls that enforce them.
 
@@ -365,7 +366,7 @@ Without clear operating rules, a team cannot tell whether an accuracy drop came 
 \endgroup
 ```
 
-#### Reproducibility {#sec-ml-operations-principle-1-reproducibility-d408}
+### Reproducibility {#sec-ml-operations-principle-1-reproducibility-d408}
 
 Reproducibility\index{Reproducibility!versioning principle} requires every artifact\index{Artifact!versioning, reproducibility requirement}[^fn-artifact-reproducibility-hashing] that influences model behavior to be versioned and traceable. This principle extends beyond code repositories to encompass input datasets, feature schemas, hyperparameter configurations, and execution environments. @Eq-model-reproducibility expresses this dependency formally:
 $$\text{Model Output} = \TrainingPipelineFunction(\text{Code}_\ArtifactVersion, \text{Data}_\ArtifactVersion, \text{Config}_\ArtifactVersion, \text{Environment}_\ArtifactVersion; \ExecutionNondeterminism)$$ {#eq-model-reproducibility}
@@ -379,7 +380,7 @@ Fixing random seeds (such as `torch.manual_seed(42)`) still fails to guarantee b
 
 [^fn-artifact-reproducibility-hashing]: **Artifact**\index{Artifact!reproducibility}: Model weights are realized training outputs; the inputs and randomness that produced them cannot generally be inferred from the parameters. Versioning only code is therefore insufficient, and even versioning code, data, configuration, and environment may not guarantee exact replay when kernels or training are nondeterministic.
 
-#### Separation of concerns {#sec-ml-operations-principle-2-separation-concerns-6f84}
+### Separation of concerns {#sec-ml-operations-principle-2-separation-concerns-6f84}
 
 Reproducing a run is tractable only when changing one part of the system does not force rebuilding the rest. Separation of concerns\index{Separation of concerns!MLOps layers} decomposes MLOps systems into distinct functional layers that can evolve independently. Because data schemas, training algorithms, traffic patterns, and business rules change on different schedules, isolating each layer lets a team update one without rebuilding the others, as @tbl-mlops-layers summarizes:
 
@@ -392,7 +393,7 @@ Reproducing a run is tractable only when changing one part of the system does no
 
 : **MLOps Separation of Concerns**: Each layer addresses a distinct responsibility and evolves at different rates across the data, training, serving, and monitoring layers. This separation enables independent scaling and updates, reducing blast radius when changes are required. {#tbl-mlops-layers}
 
-#### Consistency imperative {#sec-ml-operations-principle-3-consistency-imperative-a292}
+### Consistency imperative {#sec-ml-operations-principle-3-consistency-imperative-a292}
 
 The architectural boundaries in @tbl-mlops-layers allow teams to upgrade serving runtimes without retraining models, adjust alert thresholds without redeployment, and modify data ingestion pipelines while preserving interface contracts. That architectural independence remains safe only when training and serving environments process features identically, establishing training-serving parity as the consistency imperative\index{Consistency imperative!training-serving parity} of @sec-data-engineering-ensuring-trainingserving-consistency-c683. A violation of that parity is training-serving skew. The training-serving skew diagnostic (principle \ref{pri-training-serving-skew}) detects it without waiting for labels, by comparing what the training and serving code paths compute, from features through model scores, for the same inputs. The financial consequence of this discrepancy is captured in @eq-skew-cost:
 $$\text{Skew Cost} = \text{Rate}_{\text{skew}} \times \DailyQueryVolume\times \ErroneousPredictionCost$$ {#eq-skew-cost}
@@ -444,7 +445,7 @@ class SkewEconomics:
 
 For a system serving `{python} SkewEconomics.queries_daily_str` with `{python} SkewEconomics.error_rate_pct_str` skew-induced errors costing `{python} SkewEconomics.error_cost_str` each, @eq-skew-cost gives a daily loss, and over the 365 days of a year that loss reaches `{python} SkewEconomics.skew_cost_str`. The loss recurs every year until consistency mechanisms remove its cause. Shared feature stores, unified C++ or Rust feature-extraction libraries invoked identically during offline training and online serving, and automated schema validation tests support consistency at the system boundary; matched-input tests must still verify feature values and semantics.
 
-#### Observable degradation {#sec-ml-operations-principle-4-observable-degradation-87a9}
+### Observable degradation {#sec-ml-operations-principle-4-observable-degradation-87a9}
 
 Even when training and serving compute features identically, accuracy still erodes as the live population moves away from the training set. Observable degradation\index{Observable degradation!continuous measurement} requires ML systems to make silent failures\index{Silent failure!gradual degradation} visible through continuous measurement. Model accuracy degrades along a continuous statistical spectrum rather than failing as a discrete binary crash. An observed failure's time signature (an acute drop, gradual drift, or localized cohort decay) governs both the detection mechanism and the operational response. The ranking service's four-week slide from `{python} RankingDriftScenario.acc_initial_num_str` to `{python} RankingDriftScenario.acc_week4_pct_str` was a gradual signature, the kind that trend analysis on accuracy catches and that no uptime or latency alert can see. Making degradation observable therefore means pairing each failure signature with the telemetry that can see it and the countermeasure it calls for, as @tbl-degradation-types outlines.
 
@@ -466,7 +467,7 @@ Even when training and serving compute features identically, accuracy still erod
 \endgroup
 ```
 
-#### Cost-aware automation {#sec-ml-operations-principle-5-costaware-automation-631e}
+### Cost-aware automation {#sec-ml-operations-principle-5-costaware-automation-631e}
 
 Once telemetry detects degradation, the fifth principle governs when executing a countermeasure is worth its price. Cost-aware automation\index{Cost-aware automation!retraining decisions} balances computational costs against accuracy improvements. Let $\FiniteChange\text{Accuracy}$ be the expected gain in accuracy percentage points, $\text{Value per Point}$ the monetary value of one percentage-point gain over the decision horizon, $\text{Training Cost}$ the compute and labor cost of a retraining run, and $\text{Deployment Risk}$ the expected cost of validation and rollout failure. @Eq-retrain-decision models this trade-off:
 $$\text{Retrain if: } \FiniteChange\text{Accuracy} \times \text{Value per Point} > \text{Training Cost} + \text{Deployment Risk}$$ {#eq-retrain-decision}
