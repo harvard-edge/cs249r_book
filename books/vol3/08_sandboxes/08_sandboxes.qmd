@@ -90,36 +90,47 @@ In the repair scenario, a single line planted in `README.md` turns a routine dep
 # │ Context: @fig-vol3-offensive-capability-trend and the paragraph after it.
 # │ Goal: Show that the code a sandbox contains is written by increasingly
 # │       capable exploit authors.
-# │ Show: Best unguided solve rate among 2024 releases vs. the latest best.
+# │ Show: Best unguided solve rate among 2024 releases, independent leaderboard
+# │       best, and latest lab-reported result across task subsets.
 # │ How:  data/cybench_unguided.csv (leaderboard and lab-reported rows).
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Literature, viz
+from mlsysim import load_series
 from mlsysim.fmt import check, fmt_int, fmt_percent
 
 class CybenchCapability:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    rows = viz.load_series("vol3/08_sandboxes/data/cybench_unguided.csv").entries
-    n_tasks = 40  # task count published by the benchmark authors
+    rows = load_series("vol3/08_sandboxes/data/cybench_unguided.csv").entries
+    n_tasks = 40  # full task count published by the benchmark authors
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    _board = [r for r in rows if r["source"] == "Cybench leaderboard"]
+    _lab = [r for r in rows if r["source"] != "Cybench leaderboard"]
     best_2024 = max(r["unguided_solved"] for r in rows if r["release_date"] < "2025-01-01")
+    best_board = max(r["unguided_solved"] for r in _board)
     best_latest = max(r["unguided_solved"] for r in rows)
     latest_row = max(rows, key=lambda r: r["unguided_solved"])
     latest_is_lab = latest_row["source"] != "Cybench leaderboard"
+    subset_lo = min(int(r["n_tasks"]) for r in _lab)
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    check(best_2024 < 0.25 and best_latest > 0.9, "Prose contrasts under a quarter in 2024 with over 90% now")
-    check(latest_is_lab, "Prose says the latest point is lab-reported")
+    check(len(rows) == 21 and len(_board) == 12 and len(_lab) == 9, "12 independent leaderboard + 9 lab-reported evaluations")
+    check(
+        abs(best_2024 - 0.175) < 1e-6 and abs(best_board - 0.225) < 1e-6 and abs(best_latest - 0.93) < 1e-6,
+        "2024 best 17.5%, leaderboard best 22.5%, latest lab 93%",
+    )
+    check(latest_is_lab and subset_lo == 37, "Latest result is lab-reported on a 37-task runnable subset")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     n_tasks_str = fmt_int(n_tasks)
+    subset_lo_str = fmt_int(subset_lo)
     best_2024_str = fmt_percent(best_2024, precision=1, style="prose")
+    best_board_str = fmt_percent(best_board, precision=1, style="prose")
     best_latest_str = fmt_percent(best_latest, style="prose")
 ```
 
 The threat model must also fix how capable the hostile code is, and measured capability has moved quickly. @zhang2024cybench assemble `{python} CybenchCapability.n_tasks_str` professional-level capture-the-flag tasks, each initialized in an environment where an agent runs commands and observes their output, and score whether the agent identifies the vulnerability and executes the exploit without intermediate hints. @Fig-vol3-offensive-capability-trend plots the unguided solve rate of each evaluated model against its release date.
 
-::: {#fig-vol3-offensive-capability-trend fig-env="figure" fig-pos="htb" fig-cap="**The Code Inside the Boundary Is Getting Better at Exploits**: Fraction of `{python} CybenchCapability.n_tasks_str` professional capture-the-flag tasks an agent solves without hints, for each evaluated model at its release date. Filled points come from the benchmark's leaderboard and open points from the developing lab's own model or system card, so the most recent gains rest on self-reported runs under each lab's agent configuration. The dashed step traces the best result among the plotted evaluations, which cover model releases through February 2026. Data from @zhang2024cybench via @epochai2026benchmarks." fig-alt="Scatter plot of tasks solved without hints, from 0 to 100 percent, against model release dates from early 2024 to early 2026. Filled blue points sit between 5 and 20 percent through early 2025 and reach about 55 percent by late 2025. Open red points appear from mid 2025, the highest at about 93 percent in 2026. A gray dashed step line rises through the highest points. Selected points carry model names."}
+::: {#fig-vol3-offensive-capability-trend fig-env="figure" fig-pos="htb" fig-cap="**The Code Inside the Boundary Is Getting Better at Exploits**: Share of professional capture-the-flag tasks an agent solves without hints, plotted at each evaluated model's release date. Filled points come from independent runs on the full `{python} CybenchCapability.n_tasks_str`-task leaderboard, and open points come from each developing lab's model or system card on `{python} CybenchCapability.subset_lo_str`- to `{python} CybenchCapability.n_tasks_str`-task runnable subsets under the lab's own agent configuration. The dashed step traces the running maximum through February 2026. Data from @zhang2024cybench and developer system cards via @epochai2026benchmarks." fig-alt="Scatter plot of tasks solved without hints, from 0 to 100 percent, against model release dates from early 2024 to early 2026. Twelve filled blue points for independent leaderboard evaluations sit between 5 and 22.5 percent through February 2025. Nine open red circles for lab-reported model and system card evaluations span 30 to 93 percent from May 2025 to February 2026. A gray dashed step line rises through the highest points, and selected points carry model names."}
 
 ```{python}
 #| echo: false
@@ -132,10 +143,13 @@ The threat model must also fix how capable the hostile code is, and measured cap
 # │ Show: Unguided solve rate vs. release date, leaderboard vs. lab-reported,
 # │       running best.
 # │ How: data/cybench_unguided.csv (MLSysIM); book_style.setup_plot().
+# │ Provenance: measured — unguided CTF task solve rates across 12 independent
+# │   40-task leaderboard evaluations and 9 developer model/system-card
+# │   evaluations (37-, 39-, or 40-task subsets) from
+# │   vol3/08_sandboxes/data/cybench_unguided.csv (@zhang2024cybench; @epochai2026benchmarks).
 # └─────────────────────────────────────────────────────────────────────────────
 import datetime as dt
 import matplotlib.dates as mdates
-from mlsysim import Literature
 from binder.tools.figures import style as book_style
 
 fig, ax, COLORS, plt = book_style.setup_plot(figsize=(6.2, 4.0))
@@ -148,7 +162,12 @@ lab = [r for r in rows if r["source"] != "Cybench leaderboard"]
 
 # ┌── 2. RENDER ───────────────────────────────────────────────────────────────
 ax.scatter(
-    [date(r) for r in board], [100 * r["unguided_solved"] for r in board], color=COLORS["BlueLine"], s=34, zorder=4, label="Benchmark leaderboard"
+    [date(r) for r in board],
+    [100 * r["unguided_solved"] for r in board],
+    color=COLORS["BlueLine"],
+    s=34,
+    zorder=4,
+    label="Benchmark leaderboard (40 tasks)",
 )
 ax.scatter(
     [date(r) for r in lab],
@@ -159,28 +178,43 @@ ax.scatter(
     s=42,
     marker="o",
     zorder=4,
-    label="Lab-reported (model/system card)",
+    label="Lab-reported (37–40 tasks)",
 )
-best, run = [], 0.0
+by_date = {}
 for r in rows:
-    run = max(run, 100 * r["unguided_solved"])
-    best.append(run)
-ax.step([date(r) for r in rows], best, where="post", color=COLORS["secondary"], lw=1.2, ls="--", zorder=2, label="Best result to date")
+    by_date[r["release_date"]] = max(by_date.get(r["release_date"], 0.0), 100 * r["unguided_solved"])
+step_dates, step_best, run = [], [], 0.0
+for d_iso in sorted(by_date):
+    run = max(run, by_date[d_iso])
+    step_dates.append(dt.datetime.fromisoformat(d_iso))
+    step_best.append(run)
+ax.step(step_dates, step_best, where="post", color=COLORS["secondary"], lw=1.2, ls="--", zorder=2, label="Best result to date")
 names = {
-    "claude-3-opus-20240229": ("Claude 3 Opus", (6, 2), "left"),
-    "claude-3-5-sonnet-20240620": ("Claude 3.5 Sonnet", (-14, 7), "left"),
+    "claude-3-opus-20240229": ("Claude 3 Opus", (-8, 25), "left"),
+    "claude-3-5-sonnet-20240620": ("Claude 3.5 Sonnet", (5, 6), "left"),
     "o3-mini-2025-01-31_medium": ("o3-mini", (-6, 6), "right"),
-    "claude-opus-4-20250514": ("Claude Opus 4", (-6, 6), "right"),
-    "grok-4-0709": ("Grok 4", (-6, 6), "right"),
-    "claude-sonnet-4-5-20250929": ("Claude Sonnet 4.5", (-6, 6), "right"),
-    "claude-opus-4-5-20251101_unknown": ("Claude Opus 4.5", (-6, -12), "right"),
+    "claude-opus-4-20250514": ("Claude Opus 4", (-7, 6), "right"),
+    "grok-4-0709": ("Grok 4", (-7, 6), "right"),
+    "claude-sonnet-4-5-20250929": ("Claude Sonnet 4.5", (-7, 6), "right"),
+    "claude-opus-4-5-20251101_unknown": ("Claude Opus 4.5", (-7, -12), "right"),
     "claude-opus-4-6_unknown": ("Claude Opus 4.6", (-8, -2), "right"),
 }
-bbox = dict(fc="white", ec="none", pad=0.4, alpha=0.85)
+bbox = dict(fc="white", ec="none", pad=0.4, alpha=0.88)
 for r in rows:
     if r["model"] in names:
         lbl, off, ha = names[r["model"]]
-        ax.annotate(lbl, (date(r), 100 * r["unguided_solved"]), xytext=off, textcoords="offset points", ha=ha, fontsize=9, bbox=bbox)
+        arrow = dict(arrowstyle="-", color=COLORS["secondary"], lw=0.7) if r["model"] == "claude-3-opus-20240229" else None
+        ax.annotate(
+            lbl,
+            (date(r), 100 * r["unguided_solved"]),
+            xytext=off,
+            textcoords="offset points",
+            ha=ha,
+            fontsize=9,
+            bbox=bbox,
+            arrowprops=arrow,
+            zorder=5,
+        )
 
 # ┌── 3. DECORATE ─────────────────────────────────────────────────────────────
 ax.set_ylim(0, 102)
@@ -204,7 +238,7 @@ plt.close()
 
 :::
 
-The best unguided result among models released in 2024 was `{python} CybenchCapability.best_2024_str`; the latest reported result is `{python} CybenchCapability.best_latest_str`. That trend removes a comfortable assumption from the threat model. Admitted code cannot be treated as merely buggy, because the model proposing it is measured finding and exploiting weaknesses in exactly the kind of environment a sandbox provides. Every interface the guest can reach, from the filesystem and process table to the network stack and the host kernel, is therefore attack surface. Containment must hold against code written by a capable exploit author, even when that code arrives as an ordinary step of the repair.
+The best unguided result among models released in 2024 was `{python} CybenchCapability.best_2024_str`, and independent 40-task leaderboard runs reached `{python} CybenchCapability.best_board_str` in early 2025; subsequent lab-reported evaluations on `{python} CybenchCapability.subset_lo_str`- to `{python} CybenchCapability.n_tasks_str`-task subsets reach `{python} CybenchCapability.best_latest_str`. That trend removes a comfortable assumption from the threat model. Admitted code cannot be treated as merely buggy, because the model proposing it is measured finding and exploiting weaknesses in exactly the kind of environment a sandbox provides. Every interface the guest can reach, from the filesystem and process table to the network stack and the host kernel, is therefore attack surface. Containment must hold against code written by a capable exploit author, even when that code arrives as an ordinary step of the repair.
 
 ### Untrusted input and execution reach {#sec-vol3-sandboxes-cohabitation}
 
@@ -729,7 +763,7 @@ That workspace policy delineates four boundaries: the immutable source baseline,
 A full private copy offers a straightforward way to provision an agent workspace, but creating duplicate copies of large source repositories, compilers, language runtimes, and dependencies introduces severe storage and I/O bottlenecks. Copy-on-write solves this by decoupling the immutable base environment from the modifications generated by individual tasks. The runtime pins a read-only base image and exposes a private, writable view for each trajectory. Read requests transparently access the shared base contents, while write operations allocate private storage on demand according to the underlying filesystem's copying rules. Workspaces sharing the same underlying base remain completely isolated from each other's mutations.
 
 ::: {.column-margin}
-![](images/svg/vol3_sandboxes_margin_copy_payload.svg){width="100%" fig-alt="Two horizontal bars on a log scale: full copy at 76.8 GB and copy-on-write at 1.28 GB of provisioning payload for 32 workspaces."}
+![](images/svg/vol3_sandboxes_margin_copy_payload.svg){width="100%" fig-alt="Two horizontal bars on a linear scale from 0 to 80 GB: full copy at 76.8 GB for 32 workspaces and copy-on-write at 1.28 GB, 60 times less."}
 
 *Copy-on-write provisioning moves what tasks write, not what they can see.*
 :::
@@ -1066,7 +1100,7 @@ class SandboxPoolReserve:
 
 ::: {#nbk-08-reserve-from-arrival-rate .callout-notebook title="Sizing a pool from its arrival rate"}
 
-**Problem**: A platform receives `{python} SandboxPoolReserve.arrival_rate_str` offered coding trajectories per second under the no-loss, constant-lead-time policy, and each holds its lease for `{python} SandboxPoolReserve.t_hold_str`. In the chapter's illustrative sandbox profile, restoring one clean instance from its snapshot takes `{python} SandboxPoolReserve.t_init_str` and a full guest image is `{python} SandboxPoolReserve.m_guest_str`. Each active lease writes about `{python} SandboxPoolReserve.m_dirty_str` of private pages, and each standby keeps `{python} SandboxPoolReserve.m_standby_str`. Does one standby meet the request-level miss target of `{python} SandboxPoolReserve.target_miss_str`, what is the smallest supported reserve, and what guest-page allowance covers mean active leases and that reserve?
+**Problem**: A platform receives `{python} SandboxPoolReserve.arrival_rate_str` offered coding trajectories per second under the no-loss, constant-lead-time policy, and each holds its lease for `{python} SandboxPoolReserve.t_hold_str`. In the chapter's illustrative sandbox profile, restoring one clean instance from its snapshot takes `{python} SandboxPoolReserve.t_init_str` and a full guest image is `{python} SandboxPoolReserve.m_guest_str` ($2^{29}$ bytes). Each active lease writes about `{python} SandboxPoolReserve.m_dirty_str` of private pages, and each standby keeps `{python} SandboxPoolReserve.m_standby_str`. Does one standby meet the request-level miss target of `{python} SandboxPoolReserve.target_miss_str`, what is the smallest supported reserve, and what guest-page allowance covers mean active leases and that reserve?
 
 **Math**: By @eq-vol3-pool-active, active leases average $\ArrivalRate \LeaseHoldTime$ = `{python} SandboxPoolReserve.arrival_rate_str` per second × `{python} SandboxPoolReserve.t_hold_str` = `{python} SandboxPoolReserve.n_active_str`. Arrivals during one restore average $\ArrivalRate \InstanceReplenishTime$ = `{python} SandboxPoolReserve.mu_init_str`, far too small a mean for the normal approximation in @eq-vol3-pool-reserve, so the Poisson tail is read directly. One standby misses when at least one prior replacement remains outstanding, with probability `{python} SandboxPoolReserve.p_one_str`, above the target. The smallest supported reserve is `{python} SandboxPoolReserve.reserve_str`; its miss event requires at least two prior outstanding replacements, with probability $1 - e^{-\ArrivalRate \InstanceReplenishTime}(1 + \ArrivalRate \InstanceReplenishTime) \approx$ `{python} SandboxPoolReserve.p_dry_str`, below the target. Private guest images for every active lease would occupy about `{python} SandboxPoolReserve.m_private_str`. With copy-on-write, @eq-vol3-pool-memory gives about `{python} SandboxPoolReserve.m_pool_str`, `{python} SandboxPoolReserve.cow_ratio_mult_str` less.
 

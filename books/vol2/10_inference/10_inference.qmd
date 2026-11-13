@@ -750,6 +750,9 @@ A reduction in cost per completed request yields recurring savings only if workl
 # │       optimized; show break-even vs typical pricing.
 # │ Show: Log-log; three curves; break-even line; shaded regions.
 # │ How: Power-law cost models; matplotlib.
+# │ Provenance: ServingCostCurve LEGO cell; power-law unit
+# │             cost C(V) = C_ref * (V_ref / V)^alpha vs assumed price line;
+# │             constructed illustrative cost curves.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 # ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
@@ -827,9 +830,9 @@ plt.close()
 
 :::
 
-The cost ranges in @tbl-cost-ratios give a static comparison. @Fig-serving-cost-crossover instead accumulates assumed monthly serving expense over a 36-month deployment and marks when the serving portion equals the initial training expense, within days in the plotted recommendation scenario and roughly six weeks in the 70B LLM scenario. These timings follow from the specified expenses, not from model size or user count, and a larger training expense, lower traffic, or shorter deployment can reverse which activity dominates. When recurring traffic makes inference the dominant expense, serving-specific designs can substantially reduce cost and power per query [@patel2024], provided each optimization targets the workload's actual bottleneck and the right level of the serving stack.
+The cost ranges in @tbl-cost-ratios give a static comparison. @Fig-serving-cost-crossover instead accumulates assumed monthly serving expense over a 36-month deployment and marks when the serving portion equals the initial training expense: within days in the plotted recommendation scenario, roughly six weeks in the 70B LLM scenario, and ten months in the low-traffic scenario. These timings follow from the specified expenses, not from model size or user count, and a larger training expense, lower traffic, or shorter deployment can reverse which activity dominates. When recurring traffic makes inference the dominant expense, serving-specific designs can substantially reduce cost and power per query [@patel2024], provided each optimization targets the workload's actual bottleneck and the right level of the serving stack.
 
-::: {#fig-serving-cost-crossover fig-env="figure" fig-pos="htb" fig-cap="**The Serving Cost Crossover**: Cumulative total deployment cost (initial training plus ongoing serving) for three illustrative scenarios. Vertical markers (scenarios A and B) indicate when the serving portion equals the one-time training cost. In the two high-traffic scenarios, serving expense matches training expense within weeks or days. In the low-traffic scenario, training expense remains larger over the plotted period. These differences follow from the specified training costs, traffic, and unit serving prices." fig-alt="Line chart on a log cost axis showing cumulative total deployment cost over 36 months for three scenarios, drawn as gray lines of different weights and labeled at their right ends with each scenario's training and monthly serving cost. Dotted horizontal lines mark each scenario's training cost, open circles mark where each total reaches twice its training cost, and for scenarios A and B a short dashed vertical segment rises from the training baseline to that circle."}
+::: {#fig-serving-cost-crossover fig-env="figure" fig-pos="htb" fig-cap="**The Serving Cost Crossover**: Cumulative total deployment cost (initial training plus ongoing serving) over 36 months for three illustrative scenarios. Vertical markers (scenarios A and B) indicate when cumulative serving cost equals the one-time training cost: within days in the high-traffic recommendation scenario (C), roughly six weeks in the 70B LLM scenario (B), and at month 10 in the low-traffic scenario (A), where cumulative serving reaches \$180K (3.6× training) by month 36. Only deployments shorter than 10 months or with lower monthly traffic keep training dominant in scenario A. These timings follow from the assumed training costs, traffic, and unit serving prices." fig-alt="Line chart on a log cost axis showing cumulative total deployment cost over 36 months for three scenarios, drawn as gray lines of different weights and labeled at their right ends with each scenario's training and monthly serving cost. Dotted horizontal lines mark each scenario's training cost, open circles mark where each total reaches twice its training cost, and for scenarios A and B a short dashed vertical segment rises from the training baseline to that circle."}
 
 ```{python}
 #| echo: false
@@ -843,6 +846,10 @@ The cost ranges in @tbl-cost-ratios give a static comparison. @Fig-serving-cost-
 # │ Show: Three lines; fill_between; crossover markers.
 # │ How: total_cost = train + serve_per_month*months; vertical markers show
 # │      where the serving portion equals the one-time training cost.
+# │ Provenance: ServingCostSimple LEGO cell for Scenario B
+# │             plus inline Scenario A ($50K train, $5K/mo serve) and Scenario C
+# │             ($12K train, $250K/mo serve); C(m) = C_train + C_serve * m;
+# │             assumed illustrative deployment scenarios.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 # ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
@@ -1362,10 +1369,21 @@ Recommendation systems shift the bottleneck again: sparse embedding lookup\index
 
 ```{python}
 #| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ GPU COMPUTE VS. BANDWIDTH GROWTH (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-gpu-memory-wall — decode bandwidth deficit across GPUs.
+# │
+# │ Goal: Plot peak dense FP16/BF16 Tensor compute and HBM bandwidth normalized
+# │       to V100 across four NVIDIA data-center GPU generations.
+# │ Provenance: vol2/10_inference/data/gpu_memory_wall.csv via load_series();
+# │             Peak_TFLOPS and Memory_Bandwidth_GBps normalized to V100 row;
+# │             assumed vendor SXM/HGX datasheet peak specifications.
+# └─────────────────────────────────────────────────────────────────────────────
 import pandas as pd
 from binder.tools.figures import style as book_style
 
-data = pd.read_csv("vol2/10_inference/data/gpu_memory_wall.csv", comment="#")
+data = pd.DataFrame(book_style.load_series("vol2/10_inference/data/gpu_memory_wall.csv").entries)
 base = data.iloc[0]
 data["Compute"] = data["Peak_TFLOPS"] / base["Peak_TFLOPS"]
 data["Bandwidth"] = data["Memory_Bandwidth_GBps"] / base["Memory_Bandwidth_GBps"]
@@ -1514,7 +1532,7 @@ The knee occurs where the variable compute cost $(\BatchSize\times \MarginalRequ
 # │ Goal: Show the batching trade-off as measured on production serving stacks.
 # │ Show: B200 frontier spans ~30× from peak throughput to 100 tok/s/user;
 # │       at 50 tok/s/user GB200 NVL72 delivers ~44× an H100 per GPU, against
-# │       a ~2.3× gap in peak dense FP8 rate.
+# │       a ~2.5× gap in peak dense FP8 rate.
 # │ How: Frontier and best rate at a target over
 # │      data/inferencex_dsr1_fp8_1k1k.csv; peak rates from
 # │      Hardware.Cloud.
@@ -1536,10 +1554,12 @@ class ServingFrontier:
     gb200_rack = Hardware.Cloud.GB200_NVL72
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    plotted_hw_keys = tuple(hw for hw, _ in hardware)
+    plotted_rows = (lambda rows=rows, keys=plotted_hw_keys: [r for r in rows if r["hardware"] in keys])()
     frontiers = {}
     for _hw, _ in hardware:
         _pts = (
-            lambda rows=rows, hw=_hw: sorted(
+            lambda rows=plotted_rows, hw=_hw: sorted(
                 ((r["interactivity_tok_s_user"], r["output_tok_s_gpu"]) for r in rows if r["hardware"] == hw), key=lambda p: -p[0]
             )
         )()
@@ -1550,12 +1570,12 @@ class ServingFrontier:
                 _best = _b
         frontiers[_hw] = sorted(_out)
     h100_at_target = (
-        lambda rows=rows, t=target_tps_user: max(
+        lambda rows=plotted_rows, t=target_tps_user: max(
             r["output_tok_s_gpu"] for r in rows if r["hardware"] == "h100" and r["interactivity_tok_s_user"] >= t
         )
     )()
     gb200_at_target = (
-        lambda rows=rows, t=target_tps_user: max(
+        lambda rows=plotted_rows, t=target_tps_user: max(
             r["output_tok_s_gpu"] for r in rows if r["hardware"] == "gb200" and r["interactivity_tok_s_user"] >= t
         )
     )()
@@ -1565,10 +1585,12 @@ class ServingFrontier:
     b200_peak = max(y for _, y in frontiers["b200"])
     b200_peak_tps_user = max(frontiers["b200"], key=lambda p: p[1])[0]
     b200_at_high = (
-        lambda rows=rows, h=high_tps_user: max(r["output_tok_s_gpu"] for r in rows if r["hardware"] == "b200" and r["interactivity_tok_s_user"] >= h)
+        lambda rows=plotted_rows, h=high_tps_user: max(
+            r["output_tok_s_gpu"] for r in rows if r["hardware"] == "b200" and r["interactivity_tok_s_user"] >= h
+        )
     )()
     b200_span = b200_peak / b200_at_high
-    config_count = len(rows)
+    config_count = len(plotted_rows)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(20 <= gen_ratio <= 80, f"Prose says GB200 is roughly 44x an H100 at 50 tok/s/user, got {gen_ratio:.1f}.")
@@ -1593,7 +1615,7 @@ While the analytical batching model locates the knee from each model class's rat
 
 The same frontiers separate hardware generations by more than their datasheets do. At `{python} ServingFrontier.target_tps_user_str` tokens per second per user, the best measured H100 configuration delivers about `{python} ServingFrontier.h100_at_target_str` output tokens per second per GPU and the best GB200 NVL72 configuration about `{python} ServingFrontier.gb200_at_target_str`, a `{python} ServingFrontier.gen_mult_str` difference. Yet the peak dense FP8 rate of a GB200 GPU is only about `{python} ServingFrontier.peak_mult_str` that of an H100. The benchmark does not apportion the gap, but the candidates lie mostly beyond peak arithmetic, in memory bandwidth and capacity per GPU, a 72-GPU NVLink domain that keeps experts and KV state off slower networks, and platform-tuned serving software. A throughput figure quoted without its latency target therefore says little about either system.
 
-::: {#fig-throughput-interactivity fig-env="figure" fig-pos="htb" fig-cap="**Throughput versus Interactivity in Measured LLM Serving**: Output tokens per second per GPU against output tokens per second per user for DeepSeek-R1 at FP8 with 1,024-token prompts and responses. Faint points are individual serving configurations (framework, parallelism, and concurrency); each line is the frontier of configurations that no other configuration on the same accelerator beats on both axes. The dashed line marks 50 tokens per second per user. Data from @semianalysis2026inferencex, latest published result per configuration as of October 2026." fig-alt="Scatter plot with frontier lines. The horizontal axis is interactivity in output tokens per second per user from 0 to 280; the vertical axis is output tokens per second per GPU on a logarithmic scale from 5 to 15,000. Five descending frontier lines for H100, H200, B200, GB200 NVL72, and MI355X all fall as interactivity rises. GB200 NVL72 is highest, near 8,000 at low interactivity and about 3,650 at 50 tokens per second per user; B200 starts near 6,300; MI355X and H200 lie below it; H100 is lowest, about 80 at 50 tokens per second per user. A dashed vertical line marks 50 tokens per second per user."}
+::: {#fig-throughput-interactivity fig-env="figure" fig-pos="htb" fig-cap="**Throughput versus Interactivity in Measured LLM Serving**: Output tokens per second per GPU against output tokens per second per user for DeepSeek-R1 at FP8 with 1,024-token prompts and responses. Faint points are individual serving configurations (framework, parallelism, and concurrency); each line is the frontier of configurations that no other configuration on the same accelerator beats on both axes. The dashed line marks 50 tokens per second per user. Data from @semianalysis2026inferencex, latest published result per configuration as of October 2026." fig-alt="Scatter plot with frontier lines. The horizontal axis is interactivity in output tokens per second per user from 0 to 280; the vertical axis is output tokens per second per GPU on a logarithmic scale from 1 to 15,000. Five descending frontier lines for H100, H200, B200, GB200 NVL72, and MI355X all fall as interactivity rises. GB200 NVL72 is highest, near 8,000 at low interactivity and about 3,650 at 50 tokens per second per user; B200 starts near 6,300; MI355X and H200 lie below it; H100 is lowest, about 80 at 50 tokens per second per user. A dashed vertical line marks 50 tokens per second per user."}
 
 ```{python}
 #| echo: false
@@ -1606,6 +1628,11 @@ The same frontiers separate hardware generations by more than their datasheets d
 # │ Show: Faint configuration points, one frontier line per accelerator, and
 # │       the 50 tok/s/user reference.
 # │ How: ServingFrontier (above); book_style.setup_plot().
+# │ Provenance: vol2/10_inference/data/inferencex_dsr1_fp8_1k1k.csv
+# │             (@semianalysis2026inferencex) via ServingFrontier; per-GPU
+# │             Pareto frontier over (interactivity_tok_s_user, output_tok_s_gpu)
+# │             across 255 configurations on five accelerators; measured
+# │             open-source serving benchmark observations.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from binder.tools.figures import style as book_style
@@ -1620,7 +1647,7 @@ _col = {
     "mi355x": COLORS["RedLine"],
 }
 for _hw, _name in _C.hardware:
-    _pts = [r for r in _C.rows if r["hardware"] == _hw]
+    _pts = [r for r in _C.plotted_rows if r["hardware"] == _hw]
     ax.scatter(
         [r["interactivity_tok_s_user"] for r in _pts],
         [r["output_tok_s_gpu"] for r in _pts],
@@ -1636,7 +1663,7 @@ ax.axvline(_C.target_tps_user, color=COLORS["primary"], ls="--", lw=1, zorder=1)
 ax.text(_C.target_tps_user + 3, 9e3, f"{_C.target_tps_user} tokens/s per user", fontsize=9, color=COLORS["primary"], va="top")
 ax.set_yscale("log")
 ax.set_xlim(0, 280)
-ax.set_ylim(5, 1.5e4)
+ax.set_ylim(1, 1.5e4)
 ax.set_xlabel("Interactivity: output tokens/s per user (1 / TPOT)")
 ax.set_ylabel("Output tokens/s per GPU (log scale)")
 ax.legend(loc="upper right", fontsize=9, frameon=True, framealpha=0.95)
@@ -3150,6 +3177,9 @@ Even when a 4-bit quantized 70B model occupies only `{python} KVCacheWallInputs.
 # │       batch 1/2/4/8; show 80 GB HBM limit; OOM zone.
 # │ Show: fill_between weights; sloped KV lines; capacity dashed line.
 # │ How: Inputs from KVCacheWallInputs (registry-backed); book_style.set_book_style().
+# │ Provenance: KVCacheWallInputs (Models.Language.Llama2_70B, Hardware.Cloud.H100);
+# │             M_total(S) = M_weights + B * S * M_kv_per_token against 80 GB
+# │             nameplate HBM limit; constructed analytical capacity model.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 # ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
@@ -6741,6 +6771,16 @@ Example \ref{exmp-inference-predictive-scaling-traffic} shows how capacity can b
 ```{python}
 #| echo: false
 #| warning: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ PREDICTIVE VS. REACTIVE SCALING (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-predictive-reactive-scaling — autoscaling cold-start lag.
+# │
+# │ Goal: Compare capacity deficits under reactive vs forecast-driven scaling.
+# │ Provenance: Gaussian demand surge D(t) = 1 + 3*exp(-(t-5)^2 / (2*0.95^2))
+# │             vs piecewise linear reactive and predictive capacity ramps;
+# │             constructed illustrative scaling trajectories.
+# └─────────────────────────────────────────────────────────────────────────────
 from binder.tools.figures import style as book_style
 import numpy as np
 

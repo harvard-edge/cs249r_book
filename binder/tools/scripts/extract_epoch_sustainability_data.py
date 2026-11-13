@@ -158,9 +158,16 @@ def extract_compute_csv(
     ordered = sorted(candidates, key=lambda r: (r.get("Publication date") or "").strip())
     selected: list[dict[str, object]] = []
     for row in ordered:
+        model_name = row["Model"].strip()
+        base_model = bool((row.get("Base model") or "").strip())
+        notes_blob = " ".join(
+            (row.get(col) or "")
+            for col in ("Training time notes", "Training compute notes", "Compute cost notes", "Hardware utilization notes")
+        ).lower()
+        hw_valid = 0 if (base_model or PEAK_PRODUCT_WARNING in notes_blob or model_name == "IMPALA") else 1
         selected.append(
             {
-                "model": row["Model"].strip(),
+                "model": model_name,
                 "date": (row.get("Publication date") or "").strip(),
                 "domain": (row.get("Domain") or "").strip(),
                 "training_compute_flop": _format_optional_float(row.get("Training compute (FLOP)") or ""),
@@ -169,6 +176,7 @@ def extract_compute_csv(
                 "training_time_hours": _format_optional_float(row.get("Training time (hours)") or ""),
                 "mfu": _format_optional_float(row.get("Hardware utilization (MFU)") or ""),
                 "frontier": 1 if (row.get("Frontier model") or "").strip() == "True" else 0,
+                "standalone_hw_valid": hw_valid,
             }
         )
 
@@ -184,12 +192,15 @@ def extract_compute_csv(
         f"# Generator: {GENERATOR_CMD} --write-compute-csv\n"
         f"# Upstream-SHA256: {raw_sha256}\n"
         "# Computation: filter Publication date >= 2012-01-01 with non-empty Training compute (FLOP) or "
-        "Hardware quantity, ordered by publication date; @fig-ai-compute-growth filters rows with positive "
+        "Hardware quantity, ordered by publication date; fig-ai-compute-growth filters rows with positive "
         f"training_compute_flop (N={with_flop}, frontier n={n_frontier} where Frontier model == True) and fits "
-        "OLS + White HC3 95% confidence bounds on log2(training_compute_flop) vs. decimal publication year\n"
+        "OLS + White HC3 95% confidence bounds on log2(training_compute_flop) vs. decimal publication year; "
+        "standalone_hw_valid == 1 marks standalone runs (empty Base model) without peak-hardware-product or "
+        "actor-learner CPU-omission mismatches (OpenAI Five, IMPALA) for per-accelerator rate decomposition in fig-training-compute-trend\n"
         "# Notes: training_compute_flop follows Epoch AI's cumulative convention (summing parent pretraining and "
         "post-training FLOPs where applicable); hardware_quantity is accelerator count, training_time_hours is "
-        "wall-clock duration, mfu is reported model FLOPs utilization, and frontier is Epoch's release-date top-10 flag\n"
+        "wall-clock duration, mfu is reported model FLOPs utilization, frontier is Epoch's release-date top-10 flag, "
+        "and standalone_hw_valid (1 or 0) guards against dividing cumulative parent FLOPs by fine-tune-only chip-hours or learner-only GPU counts\n"
     )
     fieldnames = [
         "model",
@@ -201,6 +212,7 @@ def extract_compute_csv(
         "training_time_hours",
         "mfu",
         "frontier",
+        "standalone_hw_valid",
     ]
     writer = csv.DictWriter(buf, fieldnames=fieldnames, lineterminator="\n")
     writer.writeheader()
@@ -271,7 +283,7 @@ def extract_energy_csv(
         f"# Upstream-SHA256: {raw_sha256}\n"
         "# Computation: filter Publication date >= 2016-01-01, Training power draw (W) > 0, Training time (hours) > 0, "
         f"Base model empty (excludes {len(excluded_base_models)} fine-tune/checkpoint rows), and no hardware-quantity * runtime warning "
-        "(excludes OpenAI Five); @fig-frontier-training-energy computes E_MWh = training_power_draw_w * training_time_hours / 1e6 "
+        "(excludes OpenAI Five); fig-frontier-training-energy computes E_MWh = training_power_draw_w * training_time_hours / 1e6 "
         "where training_power_draw_w = N_chips * TDP_W * 1.82 * PUE(t) for N_chips > 1 and TDP_W * PUE(t) for N_chips = 1, "
         f"fits OLS + White HC3 95% confidence bounds on log10(E_MWh) across standalone frontier runs (n={n_frontier}), "
         "and rounds modeled upper-bound callouts to 2 significant figures\n"

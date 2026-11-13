@@ -77,9 +77,35 @@ def _conv(id: str, ref: str, *, notes: str | None = None) -> Provenance:
 IEA_WEO_2023 = Provenance(
     id="prov:iea-weo-2023-carbon",
     kind=ProvenanceKind.INDUSTRY_REPORT,
-    ref="IEA World Energy Outlook 2023 (rounded gCO2/kWh)",
+    ref="IEA World Energy Outlook 2023 (macro-regional electricity statistics)",
     url="https://www.iea.org/reports/world-energy-outlook-2023",
-    verified="2026-03-06",
+    verified="2026-11-12",
+    notes="Macro-regional WEO Annex A tables; country-level grid anchors in Grids.* use REGIONAL_GRID_CARBON_ANCHORS and PATTERSON_US_AVG_GRID.",
+)
+
+PATTERSON_US_AVG_GRID = _lit(
+    "prov:patterson-2021-us-grid",
+    "Patterson et al. (2021), 'Carbon Emissions and Large Neural Network Training', Table 4 (US average grid anchor from EPA eGRID)",
+    url="https://arxiv.org/abs/2104.10350",
+    verified="2026-11-12",
+    notes=(
+        "Table 4 (GPT-3 column) uses 429 gCO2e/kWh (0.429 kg/kWh) as the US datacenter grid "
+        "factor from EPA eGRID; PUE 1.12 and WUE 1.8 are paired reference hyperscale facility assumptions."
+    ),
+)
+
+REGIONAL_GRID_CARBON_ANCHORS = _est(
+    "prov:regional-grid-carbon-anchors",
+    "Rounded regional electricity carbon-intensity reference anchors synthesized from Ember, EEA, EPA eGRID, and ML carbon-accounting literature (Lacoste et al. 2019; Luccioni et al. 2023)",
+    notes=(
+        "Pedagogical multi-year rounded reference anchors (Norway 10, Iceland 28, France 50, "
+        "EU_Avg 270, Germany 385, Texas ERCOT 400, China_Avg 555, India_Avg 720, Poland 820 gCO2/kWh) "
+        "paired with representative facility PUE/WUE tiers. Not single-year IEA WEO 2023 country tables "
+        "(IEA WEO publishes macro-regions rather than individual European countries or ERCOT), and "
+        "reflects ~2018-2022 reference levels rather than time-matched marginal or lifecycle factors."
+    ),
+    url="https://ember-energy.org/data/electricity-data-explorer/",
+    verified="2026-11-12",
 )
 
 # --- Facility PUE anchors (one record per source; each tier cites its own) ---
@@ -180,11 +206,12 @@ REFERENCE_WORKLOAD_SCALE = Provenance(
     ref="Illustrative real-world scale anchors (Gmail volume, Google searches, Waymo sensor rate) for order-of-magnitude intuition",
     verified="2026-03-06",
 )
-TINYML_ANOMALY_CASE = Provenance(
-    id="prov:tinyml-anomaly-case",
-    kind=ProvenanceKind.ILLUSTRATIVE,
-    ref="TinyML anomaly-detection case study (latency / AUC / energy) used as a benchmarking example",
-    verified="2026-03-06",
+TINYML_ANOMALY_CASE = _lit(
+    "prov:tinyml-anomaly-case",
+    "Banbury et al. (2021), 'MLPerf Tiny Benchmark' (arXiv:2106.07597), Anomaly Detection reference benchmark",
+    url="https://arxiv.org/abs/2106.07597",
+    verified="2026-11-12",
+    notes="MLPerf Tiny v0.5 ToyADMOS Deep AutoEncoder reference case (0.86 AUC target quality, 10.4 ms latency, and 516 uJ per inference on Cortex-M4 reference hardware).",
 )
 CLINICAL_IMAGING_WORKFLOW_ANCHORS = Provenance(
     id="prov:clinical-imaging-workflow-anchors",
@@ -284,10 +311,17 @@ ILLUSTRATIVE_IOWA_CARBON = Provenance(
     verified="2026-03-06",
 )
 
-HYDRO_QUEBEC_GRID = _ds(
+HYDRO_QUEBEC_GRID = _est(
     "prov:hydro-quebec-grid",
-    "Hydro-Québec electricity mix and carbon intensity",
-    "https://www.hydroquebec.com/about/our-energy.html",
+    "Lacoste et al. (2019), 'Quantifying the Carbon Emissions of Machine Learning' (ML CO2 Impact, Canada-Quebec anchor) and Hydro-Québec electricity mix",
+    notes=(
+        "20 gCO2e/kWh is the rounded Quebec hydroelectric grid anchor used in ML carbon-accounting "
+        "tools (Lacoste et al. 2019, ca-east); Hydro-Québec reports ~1.7 gCO2e/kWh direct operational "
+        "emissions and ~34.5 gCO2e/kWh ISO 14067 lifecycle emissions. PUE 1.06 and WUE 0.0 are reference "
+        "free/liquid-cooled facility assumptions."
+    ),
+    url="https://arxiv.org/abs/1910.09700",
+    verified="2026-11-12",
 )
 
 # --- Cloud accelerators ---

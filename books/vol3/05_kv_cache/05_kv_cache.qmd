@@ -277,7 +277,7 @@ class KvFootprintByArchitecture:
     mla_session_str = fmt_memory(mla_session, unit=GB, precision=1)
 ```
 
-::: {#fig-vol3-kv-footprint-by-architecture fig-env="figure" fig-pos="htb" fig-cap="**Attention Architecture Sets the KV Payload**: (a) Bytes retained per token at 16-bit precision for six published model geometries, on a logarithmic axis, colored by attention design. (b) One session's KV payload against retained tokens for one model of each design, beside the memory of a single accelerator. Parameter count barely predicts the payload: the latent-attention model, the largest of the three in panel (b), caches the least. The dotted segment extends the multi-head model past its trained window for scale only." fig-alt="Two panels. Panel a is a horizontal bar chart on a logarithmic axis of kilobytes per token for six models: GPT-3 longest in gray, Mixtral-8x7B, Llama-2-70B, Llama-3.1-70B and Llama-3.1-405B in blue, and DeepSeek-V3 shortest in green, each bar labeled with its value. Panel b plots KV gigabytes for one session against context length from 1K to 128K tokens on log-log axes. Three straight rising lines, gray, blue and green from top to bottom, with the gray line dotted after 2K tokens. Two horizontal dotted lines mark the memory of one H100 and one B200 accelerator."}
+::: {#fig-vol3-kv-footprint-by-architecture fig-env="figure" fig-pos="htb" fig-cap="**Attention Architecture Sets the KV Payload**: (a) Bytes retained per token at 16-bit precision for six published model geometries, on a logarithmic axis, colored by attention design. (b) One session's KV payload against retained tokens for one model of each design, beside the memory of a single accelerator. Parameter count barely predicts the payload: the latent-attention model, the largest of the three in panel (b), caches the least. The dotted segment extends the multi-head model past its trained window for scale only." fig-alt="Two panels. Panel a is a horizontal dot plot on a logarithmic axis of kilobytes per token for six models ordered from largest to smallest: GPT-3 at 12,583 KB in gray, Llama-3.1-405B at 516 KB, Llama-3.1-70B at 328 KB, Llama-2-70B at 328 KB, and Mixtral-8x7B at 131 KB in blue, and DeepSeek-V3 at 70.3 KB in green, each point labeled with its value. Panel b plots KV gigabytes for one session against context length from 1K to 128K tokens on log-log axes. Three straight rising lines, gray, blue, and green from top to bottom, with the gray line dotted after 2K tokens. Two horizontal dotted lines mark the memory of one H100 and one B200 accelerator."}
 
 ```{python}
 #| echo: false
@@ -287,12 +287,15 @@ class KvFootprintByArchitecture:
 # │ Context: @fig-vol3-kv-footprint-by-architecture
 # │
 # │ Goal: Show attention design, not parameter count, setting KV payload.
-# │ Show: (a) per-token KiB for six registry models; (b) one session vs.
+# │ Show: (a) per-token KB for six registry models; (b) one session vs.
 # │       retained tokens for MHA, GQA, MLA against accelerator memory.
 # │ How: Models.Language get_kv_cache_size; Hardware.Cloud memory capacity.
+# │ Provenance: modeled — analytical 16-bit KV-cache footprint computed from
+# │   published architecture geometries via mlsysim Models.Language.{*} get_kv_cache_size
+# │   and calc_kv_attention_design against Hardware.Cloud H100 and B200 HBM capacities.
 # └─────────────────────────────────────────────────────────────────────────────
 import numpy as np
-from matplotlib.patches import Patch
+from matplotlib.lines import Line2D
 from mlsysim import Models, Hardware
 from mlsysim.core.units import BYTES_FP16
 from mlsysim.physics.memory import calc_kv_attention_design
@@ -305,22 +308,26 @@ fig, (a1, a2) = plt.subplots(2, 1, figsize=(6.2, 5.8), gridspec_kw=dict(height_r
 
 # ┌── 1. DATA ─────────────────────────────────────────────────────────────────
 L = Models.Language
-models = [L.DeepSeek_V3, L.Llama3_70B, L.Llama2_70B, L.Llama3_405B, L.Mixtral_8x7B, L.GPT3]
+models = [L.DeepSeek_V3, L.Mixtral_8x7B, L.Llama2_70B, L.Llama3_70B, L.Llama3_405B, L.GPT3]
 design = lambda m: calc_kv_attention_design(m.heads, m.kv_heads, m.kv_lora_rank)
 color = {"MHA": COLORS["secondary"], "GQA": COLORS["BlueLine"], "MLA": COLORS["GreenLine"]}
 kb = [m.get_kv_cache_size(seq_len=1, batch_size=1, precision=BYTES_FP16).to("kilobyte").magnitude for m in models]
+ys = np.arange(len(models))
 
 # ┌── 2. PANEL A ──────────────────────────────────────────────────────────────
-a1.barh([m.name for m in models], kb, color=[color[design(m)] for m in models], height=0.68)
-for y, v in enumerate(kb):
-    a1.text(v * 1.08, y, f"{v:,.0f} KB" if v >= 100 else f"{v:.1f} KB", va="center", fontsize=9, color=COLORS["primary"])
+for y, m, v in zip(ys, models, kb):
+    a1.scatter([v], [y], color=color[design(m)], s=52, zorder=4)
+    a1.text(v * 1.16, y, f"{v:,.0f} KB" if v >= 100 else f"{v:.1f} KB", va="center", fontsize=9, color=COLORS["primary"])
+a1.set_yticks(ys)
+a1.set_yticklabels([m.name for m in models])
+a1.set_ylim(-0.6, len(models) - 0.4)
 a1.set_xscale("log")
-a1.set_xlim(30, 28000)
+a1.set_xlim(40, 32000)
 a1.set_xlabel("KV cache per token (KB)")
 a1.set_title("(a) Bytes retained per token", loc="left", fontsize=10.5, fontweight="bold")
-a1.grid(axis="y", visible=False)
+a1.grid(axis="y", visible=True, ls=":", alpha=0.5)
 a1.legend(
-    handles=[Patch(color=c, label=k) for k, c in color.items()],
+    handles=[Line2D([0], [0], marker="o", ls="none", color=c, ms=6.5, label=k) for k, c in color.items()],
     loc="lower right",
     fontsize=9,
     frameon=True,
@@ -332,12 +339,15 @@ a1.legend(
 )
 
 # ┌── 3. PANEL B ──────────────────────────────────────────────────────────────
-n = np.logspace(np.log10(1024), np.log10(131_072), 120)
+n = 2.0 ** np.linspace(10, 17, 141)
 for m, ls in ((L.GPT3, "-"), (L.Llama3_70B, "-"), (L.DeepSeek_V3, "-")):
     per = m.get_kv_cache_size(seq_len=1, batch_size=1, precision=BYTES_FP16).to("GB").magnitude
-    trained = n <= (m.context_length or n[-1])
+    win = m.context_length or n[-1]
+    trained = n <= win
     a2.plot(n[trained], per * n[trained], color=color[design(m)], lw=2.0, label=f"{m.name} ({design(m)})")
-    a2.plot(n[~trained], per * n[~trained], color=color[design(m)], lw=1.4, ls=":")
+    if np.any(n > win):
+        ext = n >= win
+        a2.plot(n[ext], per * n[ext], color=color[design(m)], lw=1.4, ls=":")
 for acc, dy in ((Hardware.Cloud.H100, 0.72), (Hardware.Cloud.B200, 1.18)):
     cap = acc.memory.capacity.to("GB").magnitude
     a2.axhline(cap, color=COLORS["primary"], lw=0.9, ls=":")

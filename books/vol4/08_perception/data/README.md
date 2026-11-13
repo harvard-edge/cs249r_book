@@ -1,3 +1,5 @@
-# Camera bandwidth illustration
+# Chapter 8 Data Provenance
 
-`camera_bandwidth_scaling.csv` contains constructed camera formats, not historical deployments or measured bus traffic. The chapter cell computes ideal packed raw ingress as `width × height × bits_per_pixel × frame_rate / 8 / 10^6` MB/s. It excludes blanking, link protocol overhead, ISP reads/writes, copies, burst shape, and arbitration delay. The 1080p and 4K rows are the format assumptions used in the camera-ingress example.
+Chapter 8 (`08_perception.qmd`) stores no local Tier-2 `.csv` tables in this directory. All sensor datasheet specifications (navigation camera, wrist camera, Ouster OS1-64 Rev 7 LiDAR, IMU) and scenario timing/error budgets (`WarehouseAisle`, `WarehouseNavCameraAge`, `WarehouseNavCameraRollingShutter`, `WarehouseLidarSweep`, `WarehouseLongAisleMountError`, `WarehouseLidarExtrinsicShift`, `WarehouseStereoRigDepthError`, `AluminumLinkWarming`) are loaded from the `mlsysim` registry (`Embodied.MobileManipulator.WarehouseMobileManipulator`, `Embodied.Scenario.WarehouseAisle`, and `Scenarios.*`) and guarded in the chapter's LEGO calculation cells.
+
+An earlier synthetic format table (`camera_bandwidth_scaling.csv`) was retired; camera ingress rates are computed analytically from configured resolution, bit depth, and frame rate in `calc-perception-camera-bandwidth`.

@@ -2312,6 +2312,7 @@ class StorageDemandMeasured:
     result_count = len(rows)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(result_count == 130, f"Expected all 130 Closed passing MLPerf Storage v1.0 submissions across 13 submitters, got {result_count}.")
     check(10 <= workload_spread <= 20, f"Prose says per-accelerator demand differs ~15x across workloads, got {workload_spread:.1f}.")
     check(1.4 <= min(gen_ratios) and max(gen_ratios) <= 2.2, f"Prose says H100 emulation raises demand 1.6-2x, got {gen_ratios}.")
     check(
@@ -2332,7 +2333,7 @@ MLPerf Storage measures these profiles on production storage systems. Each submi
 
 Per accelerator, the median demand differs about `{python} StorageDemandMeasured.workload_spread_mult_str` across workloads. ResNet-50 is demanding by image-classification standards, yet it is the lightest of the three because its samples are small 2D images while 3D U-Net reads whole medical volumes. An emulated H100 needs about `{python} StorageDemandMeasured.unet_h100_str` for 3D U-Net on medical volumes, `{python} StorageDemandMeasured.cosmo_h100_str` for CosmoFlow, and `{python} StorageDemandMeasured.resnet_h100_str` for ResNet-50 (@fig-mlperf-storage-demand, panel b). Emulating H100s instead of A100s raises every workload's demand by `{python} StorageDemandMeasured.gen_ratio_mult_range_str`, because the faster accelerator shortens $\IronLawComputeTime$ while the bytes per batch stay the same. A storage tier sized for one accelerator generation is therefore undersized for the next, even when the dataset and the model do not change.
 
-::: {#fig-mlperf-storage-demand fig-env="figure" fig-pos="htb" fig-cap="**Measured Storage Demand per Accelerator**: (a) Read throughput sustained by each passing closed-division MLPerf Storage v1.0 submission against its number of emulated accelerators, on logarithmic axes, by workload (color) and emulated accelerator (marker); throughput grows in proportion to the accelerator count. (b) Median throughput per emulated accelerator for each workload and accelerator, on a logarithmic axis. Accelerators are emulated with a fixed per-sample compute time and must stay at least 90 percent busy (70 percent for CosmoFlow); the values measure storage systems under that load, not real GPUs. Data from @mlcommons2024storage." fig-alt="Two stacked panels. Top: log-log scatter of storage throughput from about 0.2 to 700 gigabytes per second against 1 to about 2,000 emulated accelerators, for 3D U-Net in blue, CosmoFlow in orange, and ResNet-50 in green, with circles for A100 and triangles for H100; each workload forms a band rising in proportion to accelerator count, U-Net highest and ResNet-50 lowest. Bottom: grouped bars on a logarithmic axis of median gigabytes per second per accelerator, A100 and H100 side by side for each workload: 3D U-Net about 1.4 and 2.8, CosmoFlow about 0.35 and 0.55, ResNet-50 about 0.09 and 0.18."}
+::: {#fig-mlperf-storage-demand fig-env="figure" fig-pos="htb" fig-cap="**Measured Storage Demand per Accelerator**: (a) Read throughput sustained by each of the `{python} StorageDemandMeasured.result_count_str` passing closed-division MLPerf Storage v1.0 submissions against its number of emulated accelerators, on logarithmic axes, by workload (color) and emulated accelerator (marker); throughput grows in proportion to the accelerator count. (b) Median throughput per emulated accelerator for each workload and accelerator, on a logarithmic axis. Accelerators are emulated with a fixed per-sample compute time and must stay at least 90 percent busy (70 percent for CosmoFlow); the values measure storage systems under that load rather than physical GPUs. Following MLCommons' reporting convention, throughput equals DLIO's binary megabytes per second divided by 1,000 (about 5 percent below decimal GB/s). Data from @mlcommons2024storage." fig-alt="Two stacked panels. Top: log-log scatter of 130 passing closed-division storage throughput results from about 0.2 to 700 gigabytes per second against 1 to about 2,100 emulated accelerators, for 3D U-Net in blue, CosmoFlow in orange, and ResNet-50 in green, with circles for A100 and triangles for H100; each workload forms a band rising in proportion to accelerator count, U-Net highest and ResNet-50 lowest. Bottom: grouped bars on a logarithmic axis of median gigabytes per second per accelerator, A100 and H100 side by side for each workload: 3D U-Net about 1.4 and 2.8, CosmoFlow about 0.35 and 0.55, ResNet-50 about 0.092 and 0.18."}
 
 ```{python}
 #| echo: false
@@ -2344,6 +2345,11 @@ Per accelerator, the median demand differs about `{python} StorageDemandMeasured
 # │ Goal: Show throughput scaling with accelerators and per-accelerator demand.
 # │ Show: (a) log-log scatter by workload and accelerator; (b) median bars.
 # │ How: StorageDemandMeasured (above); book_style.setup_plot().
+# │ Provenance:
+# │   - Data (measured): vol2/04_data_storage/data/mlperf_storage_v1_training.csv
+# │     (@mlcommons2024storage; @devarajan2021dlio; 130 Closed passing training
+# │     submissions across 13 submitters, io_GBps = DLIO MiB/s / 1,000) via
+# │     StorageDemandMeasured.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 import numpy as np
@@ -2449,10 +2455,23 @@ class StallFrontierPoints:
 
 ```{python}
 #| echo: false
-# ┌── LEGO ───────────────────────────────────────────────
-# │ Context: @fig-data-stall-frontier
-# │ Goal: Ideal active-time fraction from overlapped service times, with the
-# │       chapter's operating points from StallFrontierPoints.
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ DATA-STALL FRONTIER (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-data-stall-frontier.
+# │
+# │ Goal: Plot the ideal overlapped compute active-time fraction min(1, B/B_req)
+# │       and place three worked chapter scenarios on the frontier.
+# │ Show: Piecewise linear-on-log saturation curve, starved vs. fed bands, and
+# │       headroom spans for the stalled notebook, image job, and text job.
+# │ How: Evaluate min(1, ratio) on logspace; read ratios from StallFrontierPoints.
+# │ Provenance:
+# │   - Operating points (assumed): Systems.Storage.PfsOneTbPerSecond and
+# │     Scenarios.{DataPipelineNotebookStall, DataPipelineThroughputDemand,
+# │     DataPipelineTextIngestionDemand} via StallFrontierPoints.
+# │   - Curve (modeled): ideal overlapped service-rate bound min(1, B / B_req).
+# │
+# └─────────────────────────────────────────────────────────────────────────────
 import numpy as np
 from binder.tools.figures import style as book_style
 
@@ -3985,20 +4004,6 @@ class SyntheticStorage:
     provenance_overhead_pct_str = fmt_percent(provenance_metadata_overhead, precision=0, commas=False, style='prose')
     footprint_factor_str = fmt_ratio(1 + provenance_metadata_overhead, precision=1, commas=False)
     data_size_tb_str = fmt_memory(data_size, unit=TB, precision=0, commas=False)
-
-    @classmethod
-    def plot(cls):
-        """Visualizes the storage cost of synthetic data."""
-        from binder.tools.figures import style as book_style
-
-        return book_style.bar_compare(
-            **{
-                "labels": ["Human (Raw)", "Synthetic (Verified)"],
-                "values": [cls.data_size.to(TB).magnitude, cls.stored_footprint.to(TB).magnitude],
-                "title": "Synthetic Dataset Capacity",
-                "ylabel": "Dataset Footprint (TB)",
-            }
-        )
 ```
 
 ::: {#nbk-data-storage-napkin-math-synthetic-tax .callout-notebook title="The storage cost of synthetic data"}

@@ -1,3 +1,3 @@
-# Autonomous-mileage scenario
+# Chapter 1 Data Manifest
 
-`autonomous_miles_scaling.csv` contains synthetic, illustrative cumulative miles for the chapter 01 exposure plot. The values are not observations from a fleet, jurisdiction, or industry aggregate. Scenario years zero through fifteen do not represent calendar years. The scenario illustrates how cumulative exposure grows with repeated physical operation.
+- `epoch_models_by_domain.csv`: Training-compute estimates by domain (`Language`, `Vision`, `Robotics`) extracted from Epoch AI's AI Models database (`all_ai_models.csv`, CC-BY 4.0, verified 2026-10-12). Used by `#fig-01-compute-by-domain` and the `ComputeByDomain` LEGO cell in `01_boundary.qmd`. Values are Epoch AI literature and model-card compute estimates with confidence ratings, not direct hardware counter measurements; multi-domain models appear once per matching `domain_group`.
