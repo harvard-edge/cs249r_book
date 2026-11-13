@@ -123,4 +123,7 @@ def serve_main(
             typer.echo(f"  Memory Usage     : {result.memory_utilization:.1%}")
             typer.echo("")
 
+        if not result.feasible:
+            exit_with_code(ExitCode.PHYSICS_FAIL)
+
     exit_with_code(ExitCode.SUCCESS)

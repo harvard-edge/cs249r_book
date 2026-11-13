@@ -9,9 +9,12 @@ from __future__ import annotations
 
 from ..engine import Engine, PerformanceProfile
 from ..results import (
+    AmdahlResult,
+    DecodeBoundResult,
     EfficiencyResult,
-    SynthesisResult,
+    IronLawResult,
     SensitivityResult,
+    SynthesisResult,
 )
 from ...core.units import ureg, Q_, resolve_precision
 from ...literature.registry import Literature
@@ -652,18 +655,6 @@ class SynthesisSolver(BaseSolver):
         )
 
 
-__all__ = [
-    "SingleNodeModel",
-    "NetworkRooflineModel",
-    "EfficiencyModel",
-    "SensitivitySolver",
-    "SynthesisSolver",
-    "DecodeBoundModel",
-    "IronLawModel",
-    "AmdahlModel",
-]
-
-
 class DecodeBoundModel(ForwardModel):
     """
     Weight-streaming bound on one autoregressive decode step.
@@ -682,6 +673,7 @@ class DecodeBoundModel(ForwardModel):
     """
 
     requires = ("workload", "hardware")
+    produces = DecodeBoundResult
 
     def solve(
         self,
@@ -777,7 +769,6 @@ class DecodeBoundModel(ForwardModel):
 
 # ── Single-machine iron law and Amdahl (added 2026-10-20) ─────────────────────
 
-from ..results import AmdahlResult, IronLawResult  # noqa: E402
 from ...physics.performance import calc_amdahls_speedup  # noqa: E402
 
 
@@ -938,3 +929,15 @@ class AmdahlModel(ForwardModel):
             stage_reduction=1 - 1 / speedup,
             speedup_bound=(total / rest).to("").magnitude,
         )
+
+
+__all__ = [
+    "SingleNodeModel",
+    "NetworkRooflineModel",
+    "EfficiencyModel",
+    "SensitivitySolver",
+    "SynthesisSolver",
+    "DecodeBoundModel",
+    "IronLawModel",
+    "AmdahlModel",
+]

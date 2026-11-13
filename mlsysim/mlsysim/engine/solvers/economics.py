@@ -294,16 +294,17 @@ class EconomicsModel(ForwardModel):
             target = grid or datacenter or fleet.datacenter or fleet.region
             price = getattr(target, "kwh_price", None)
             if price is None:
-                price = Infrastructure.Pricing.Cloud.ElectricityPerKwh.rate.magnitude
+                price = Infrastructure.Pricing.Cloud.ElectricityPerKwh.rate.to("USD/kWh").magnitude
+        price_val = price.to("USD/kWh").magnitude if hasattr(price, "to") else float(price)
 
-        opex_energy = energy_result.total_energy_kwh.magnitude * price
+        opex_energy = energy_result.total_energy_kwh.to("kWh").magnitude * price_val
 
         unit_cost = fleet.node.accelerator.unit_cost
         if unit_cost is None:
             # Unknown hardware price should not silently inherit an H100 cost.
             # Registries with sourced pricing populate unit_cost explicitly.
             unit_cost = Q_("0 USD")
-        total_capex_hardware = unit_cost.magnitude * fleet.total_accelerators
+        total_capex_hardware = unit_cost.to("USD").magnitude * fleet.total_accelerators
         # Apply infrastructure multiplier for networking, cooling, facility, staff costs
         # Default 1.0 (hardware only). Set 2.0-2.5x for full datacenter TCO.
         total_capex = total_capex_hardware * infrastructure_multiplier
@@ -344,7 +345,7 @@ class ResponsibleEngineeringModel(ForwardModel):
     2. Anil et al. (2022), "Large-Scale Differentially Private BERT."
     """
 
-    requires = ("training_time",)
+    requires = ("base_training_time",)
     produces = ResponsibleEngineeringResult
 
     def solve(

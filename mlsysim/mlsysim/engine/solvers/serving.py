@@ -1121,7 +1121,7 @@ class TailLatencyModel(ForwardModel):
     1. Dean & Barroso (2013), "The Tail at Scale."
     """
 
-    requires = ("hardware",)
+    requires = ("arrival_rate_qps", "service_latency_ms")
     produces = TailLatencyResult
 
     def solve(

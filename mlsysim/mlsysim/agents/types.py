@@ -28,6 +28,11 @@ class AgentArchitecture(BaseModel):
     coordination_overhead_beta: Optional[float] = None
     metadata: Metadata = Field(default_factory=Metadata)
 
+    @field_validator("context_window", "working_memory", mode="after")
+    @classmethod
+    def _validate_token_windows(cls, v, info):
+        return _require_tokens(v, info.field_name)
+
     @field_validator("sandbox_startup_latency", mode="after")
     @classmethod
     def _validate_latency(cls, v):
@@ -220,6 +225,8 @@ class RemediationWorkload(AgentWorkload):
         >>> workload.attempt_cost == other + workload.approval_cost_per_attempt
         True
         """
+        if self.model_cost_per_attempt is None:
+            raise ValueError(f"{self.name}: model_cost_per_attempt must be populated to compute attempt_cost")
         return (self.model_cost_per_attempt + self.environment_cost_per_attempt
                 + self.assessment_cost_per_attempt + self.approval_cost_per_attempt).to(ureg.USD)
 

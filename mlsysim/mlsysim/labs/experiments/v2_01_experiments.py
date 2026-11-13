@@ -626,6 +626,7 @@ __all__ = [
     "evaluate_c3_scaling",
     "evaluate_machine_boundary",
     "evaluate_partition_policy",
+    "evaluate_quality_demand",
     "get_track_profile",
     "get_track_scenario",
     "restore_quantities",
@@ -649,7 +650,7 @@ def evaluate_quality_demand(*, equal_loss_gain: float) -> dict[str, object]:
     if isinstance(equal_loss_gain, bool) or not isinstance(equal_loss_gain, (int, float)):
         raise ValueError("equal_loss_gain must be a finite number between zero and one half")
     if not math.isfinite(equal_loss_gain) or not 0 < equal_loss_gain < 0.5:
-        raise ValueError("equal_loss_gain must be strictly between zero and one half")
+        raise ValueError("equal_loss_gain must lie in (0, 0.5)")
     exponent = Scenarios.ShallowPowerLawExample.exponent
     targets = tuple(1.0 - step * equal_loss_gain for step in range(3))
     compute = tuple(target ** (-1.0 / exponent) for target in targets)

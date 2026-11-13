@@ -3,7 +3,7 @@
 Each anchor is a provenance-carrying scalar; the values live as YAML under
 ``literature/data/<category>.yaml`` and are loaded via ``load_sourced_registry``
 (provenance referenced by catalog key). See the project MLSysIM rules →
-*Storage format*. Literature holds ONLY genuinely-cited field figures.
+*Storage format*. Literature holds ONLY primary-cited field figures.
 """
 from pathlib import Path
 

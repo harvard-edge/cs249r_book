@@ -71,7 +71,7 @@ def evaluate_main(
                 precision=schema.hardware.precision,
                 efficiency=schema.hardware.efficiency,
                 fleet_obj=schema.fleet_obj,
-                nodes=schema.hardware.total_accelerators,
+                nodes=schema.total_accelerators,
                 duration_days=schema.ops.duration_days if schema.ops else None
             )
             
@@ -127,6 +127,8 @@ def evaluate_main(
                 exit_with_code(ExitCode.SLA_FAIL)
             
             render_scorecard(eval_obj, output_format=output_format)
+            if eval_obj.feasibility.status == "FAIL":
+                exit_with_code(ExitCode.PHYSICS_FAIL)
 
         # Branch 2: Quick Evaluation (CLI Flags)
         else:
@@ -156,5 +158,7 @@ def evaluate_main(
             )
             
             render_scorecard(eval_obj, output_format=output_format)
+            if eval_obj.feasibility.status == "FAIL":
+                exit_with_code(ExitCode.PHYSICS_FAIL)
             
     exit_with_code(ExitCode.SUCCESS)

@@ -11,8 +11,10 @@ from typing import Optional
 
 from ..results import (
     CheckpointResult,
-    TrainingMemoryResult,
     ScalingResult,
+    TrainingMemoryResult,
+    TrainingRunResult,
+    TrainingStateResult,
 )
 from ...core.units import ureg, Q_, resolve_precision
 from ...literature.registry import Literature
@@ -132,7 +134,7 @@ class CheckpointModel(ForwardModel):
         # blocked on the synchronous write (training stalls while state drains).
         interval_s = Q_(checkpoint_interval_hours, "hour").to("second")
         if interval_s.magnitude > 0:
-            penalty_pct = (t_write / interval_s).magnitude
+            penalty_pct = (t_write / interval_s).to_base_units().magnitude
         else:
             # Degenerate zero interval: checkpointing continuously, no useful work.
             penalty_pct = 1.0
@@ -512,14 +514,6 @@ class ScalingModel(ForwardModel):
             tokens_per_parameter=d_opt / p_opt if p_opt > 0 else 0,
         )
 
-__all__ = [
-    "CheckpointModel",
-    "TrainingMemoryModel",
-    "ScalingModel",
-    "TrainingRunModel",
-    "TrainingStateModel",
-]
-
 
 class TrainingRunModel(ForwardModel):
     """
@@ -536,7 +530,7 @@ class TrainingRunModel(ForwardModel):
     2. Narayanan et al. (2021), scaling efficiency at cluster scale.
     """
     requires = ("workload", "fleet")
-    produces = None
+    produces = TrainingRunResult
 
     def solve(self, model: Workload, fleet, local_efficiency: float, scaling_efficiency: float,
               overheads: dict, precision: str = "fp8", tokens: Quantity = None):
@@ -648,7 +642,7 @@ class TrainingStateModel(ForwardModel):
     2. Shoeybi et al. (2019), "Megatron-LM" (tensor parallelism).
     """
     requires = ("workload",)
-    produces = None
+    produces = TrainingStateResult
 
     def solve(self, model: Workload, tp_size: int, dp_size: int, activations: Quantity):
         """Account for mixed-precision Adam state under selected sharding choices.
@@ -732,3 +726,12 @@ class TrainingStateModel(ForwardModel):
             zero_moments_per_tp_group=moments / dp_size,
             zero_weights_and_moments_per_device=weights / tp + moments / zero,
         )
+
+
+__all__ = [
+    "CheckpointModel",
+    "TrainingMemoryModel",
+    "ScalingModel",
+    "TrainingRunModel",
+    "TrainingStateModel",
+]

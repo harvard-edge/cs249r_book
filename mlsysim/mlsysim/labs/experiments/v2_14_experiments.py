@@ -566,7 +566,7 @@ def conformal_quantile(calibration_scores: Sequence[float], alpha: float) -> tup
     if not calibration_scores:
         raise ValueError("calibration_scores must not be empty")
     if not 0.0 < alpha < 1.0:
-        raise ValueError("alpha must be strictly between zero and one")
+        raise ValueError("alpha must lie in (0, 1)")
     if any(not math.isfinite(score) or score < 0.0 for score in calibration_scores):
         raise ValueError("calibration scores must be finite and nonnegative")
     count = len(calibration_scores)
@@ -728,7 +728,7 @@ def conformal_experiment_payload(
     alpha: float,
     exchangeability_assumed: bool,
 ) -> dict[str, object]:
-    """Run and strictly serialize finite conformal fixture evidence."""
+    """Run and deterministically serialize finite conformal fixture evidence."""
 
     inputs = {
         "calibration_scores": list(calibration_scores),

@@ -21,7 +21,7 @@ def error_shield(output_format: str = "text"):
     Context manager to catch exceptions, format them properly via renderers,
     and exit with the correct semantic code. Promotes DRY principles.
     """
-    from mlsysim.core.exceptions import OOMError
+    from mlsysim.core.exceptions import OOMError, SLAViolation
     from pydantic import ValidationError
     from mlsysim.cli.renderers import print_error
     
@@ -30,6 +30,9 @@ def error_shield(output_format: str = "text"):
     except OOMError as e:
         print_error("Physics Violation (Out of Memory)", str(e), output_format=output_format)
         exit_with_code(ExitCode.PHYSICS_FAIL)
+    except SLAViolation as e:
+        print_error("SLA Violation", str(e), output_format=output_format)
+        exit_with_code(ExitCode.SLA_FAIL)
     except ValidationError as e:
         # Format Pydantic errors cleanly
         msg = "\n".join([f"- {err['msg']} (Input: {err.get('input')})" for err in e.errors()])

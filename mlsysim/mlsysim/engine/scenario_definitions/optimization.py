@@ -1810,7 +1810,7 @@ class SelfContainedReplicaScenario(BaseScenario):
         Equation: Follow the pipeline_depth calculation below; branch conditions and
         rounding are part of its definition."""
         hbm = self.fleet.node.accelerator.memory.capacity
-        state = self.workload.parameters.magnitude * self.bytes_per_param
+        state = self.workload.parameters.to("param").magnitude * self.bytes_per_param
         pp = 1
         while (state / (self.tensor_parallel * pp)).to("GiB") > hbm:
             pp *= 2

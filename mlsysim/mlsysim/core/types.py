@@ -38,9 +38,10 @@ def serialize_quantity(v: Q_) -> str:
 def require_dimensionality(v: Any, expected_unit, field_name: str):
     """Parse a value as a Quantity and validate its physical dimension.
 
-    This catches obvious unit errors such as watts in a latency field. The
-    unit-family helpers below add the stricter semantic checks for Pint units
-    that are dimensionless by construction, such as bytes, FLOPs, and dollars.
+    This catches obvious unit errors such as watts in a latency field. Note
+    that ``flop`` carries its own ``[flop]`` base dimension, whereas ``byte``,
+    ``count``, ``param``, ``token``, and currency units remain dimensionless
+    aliases in Pint and are separated by the unit-family helpers below.
     """
     if v is None:
         return None
@@ -53,9 +54,10 @@ def require_dimensionality(v: Any, expected_unit, field_name: str):
     return q
 
 
-# Pint represents byte, flop, count, parameter, and currency units as
-# dimensionless aliases. MLSysIM treats those aliases as distinct modeling
-# families so registry typos fail before reaching solver math.
+# Pint represents byte, count, parameter, token, and currency units as
+# dimensionless aliases (while flop carries its own [flop] base dimension).
+# MLSysIM treats those aliases as distinct modeling families so registry typos
+# fail before reaching solver math.
 _DATA_UNIT_NAMES = {
     "B",
     "KB", "MB", "GB", "TB", "PB",
@@ -68,7 +70,11 @@ _OP_UNIT_NAMES = {
     "PFLOPs", "EFLOP", "EFLOPs", "ZFLOPs",
     "count",
 }
-_COUNT_UNIT_NAMES = {"count", "param", "Kparam", "Mparam", "Bparam", "Tparam"}
+_COUNT_UNIT_NAMES = {
+    "count",
+    "param", "Kparam", "Mparam", "Bparam", "Tparam",
+    "token", "Ktoken", "Mtoken", "Btoken", "Ttoken",
+}
 _CURRENCY_UNIT_NAMES = {"dollar", "USD", "EUR"}
 
 

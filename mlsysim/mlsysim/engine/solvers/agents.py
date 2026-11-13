@@ -56,11 +56,11 @@ class HorizonCompoundingModel(ForwardModel):
         Parameters
         ----------
         step_success : float
-            Per-step success probability, dimensionless and strictly between zero and one.
+            Per-step success probability, dimensionless and in the open interval (0, 1).
         horizons : Sequence[int]
             Positive step counts at which to report task success.
         target_success : float
-            Desired task success probability, strictly between zero and one.
+            Desired task success probability in the open interval (0, 1).
         target_horizon : int
             Positive number of steps over which the target must hold.
 

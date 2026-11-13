@@ -165,9 +165,9 @@ class EstimatorConsistencyModel(ForwardModel):
         dimension : int
             Positive state or innovation dimension.
         confidence : float
-            Confidence probability strictly between zero and one.
+            Confidence probability in the open interval (0, 1).
         gate_confidences : sequence of float
-            Gate coverage probabilities strictly between zero and one.
+            Gate coverage probabilities in the open interval (0, 1).
         nis_expected : float
             Expected dimensionless NIS, at least dimension.
 

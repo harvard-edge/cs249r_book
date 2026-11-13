@@ -17,7 +17,7 @@ def zoo_main(
     output_format = resolve_output_format(ctx, output, supported={"text", "json", "markdown"})
 
     if not category:
-        # The argument is genuinely optional (2026-06-06 UX fix: it used to be
+        # The argument is intentionally optional (2026-06-06 UX fix: it used to be
         # marked optional in --help yet error out): no category renders both.
         render_zoo_table("hardware", Hardware.list(sort_by="compute.peak_flops", reverse=True), output_format)
         render_zoo_table("models", Models.list(sort_by="parameters", reverse=True), output_format)

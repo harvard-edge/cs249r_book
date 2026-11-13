@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from mlsysim.core.units import ureg
-from mlsysim.core._validation import validate_positive
+from mlsysim.core._validation import validate_nonnegative, validate_positive
 
 from ._units import _ensure_unit
 
@@ -43,8 +43,15 @@ def calc_coolant_mass_flow(heat_load, specific_heat, temperature_rise):
     >>> calc_coolant_mass_flow(0, 4000, 10).m_as('kg/s')
     0.0
     """
+    if isinstance(temperature_rise, ureg.Quantity) and not temperature_rise._ok_for_muldiv():
+        raise ValueError(
+            "temperature_rise must be a temperature difference (e.g., kelvin or delta_degC), "
+            "not an offset temperature such as degC."
+        )
     q = _ensure_unit(heat_load, ureg.watt, "heat_load")
     cp = _ensure_unit(specific_heat, ureg.joule / (ureg.kilogram * ureg.kelvin), "specific_heat")
     dt = _ensure_unit(temperature_rise, ureg.kelvin, "temperature_rise")
+    validate_nonnegative(q.magnitude, "heat_load")
+    validate_positive(cp.magnitude, "specific_heat")
     validate_positive(dt.magnitude, "temperature_rise")
     return (q / (cp * dt)).to(ureg.kilogram / ureg.second)

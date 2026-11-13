@@ -5,9 +5,8 @@ model is arithmetic on stated counts: whole serialized records in a token
 allowance, one BM25 term in two documents, the bandwidth floor of an exact
 vector scan, the resident bytes of approximate indexes, an exact tree's
 neighborhood against an allowance, the write-path cost of keeping an index
-current, the auxiliary bytes and re-index time of two stores, cost per
-accepted task with store upkeep, and the words two texts share. None models
-a tokenizer, a trained encoder, cache effects, or a real code graph's cycles.
+current, and the auxiliary bytes and re-index time of two stores. None models
+a tokenizer, a trained encoder, cache effects, or code-graph cycles.
 """
 
 from __future__ import annotations

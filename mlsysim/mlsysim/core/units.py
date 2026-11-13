@@ -52,13 +52,13 @@ __all__ = [
     # Model parameters
     "param", "Kparam", "Mparam", "Bparam", "Tparam",
     # Tokens
-    "token", "Ktoken", "Mtoken", "Btoken",
+    "token", "Ktoken", "Mtoken", "Btoken", "Ttoken",
     # Energy and power aliases
     "J", "kJ", "MJ", "mJ", "uJ", "pJ", "Wh", "kWh", "MWh", "GWh",
     "GW", "MW", "kW", "mW", "uW",
     "kilojoule", "microjoule", "gigawatt", "megawatt", "microwatt",
     # Mass and length
-    "gram", "kilogram", "kg", "metric_ton", "tonne", "kilometer", "km", "meter", "millimeter", "mm", "foot", "feet",
+    "gram", "kilogram", "kg", "metric_ton", "tonne", "kilometer", "km", "millimeter", "mm", "foot", "feet",
     # Electrical and kinematic (Physical AI / Embodied)
     "volt", "V", "millivolt", "mV", "ampere", "A", "milliampere", "mA",
     "ohm", "milliohm", "newton", "N", "radian", "rad", "hertz", "Hz",
@@ -353,6 +353,7 @@ token = ureg.token
 Ktoken = ureg.Ktoken
 Mtoken = ureg.Mtoken
 Btoken = ureg.Btoken
+Ttoken = ureg.Ttoken
 
 # --- Convenience aliases (prefer these over ureg.* in authored examples) ---
 J = joule

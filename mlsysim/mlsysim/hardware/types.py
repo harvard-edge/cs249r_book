@@ -177,6 +177,7 @@ class MemoryHierarchy(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid", frozen=True)
     capacity: Quantity           # Primary memory (HBM for GPUs, SRAM for MCUs)
     bandwidth: Quantity          # Primary memory bandwidth
+    latency: Optional[Quantity] = None
     # On-chip SRAM (optional — for modeling FlashAttention tiling on GPUs,
     # or the fast scratchpad on microcontrollers)
     sram_capacity: Optional[Quantity] = None
@@ -213,6 +214,11 @@ class MemoryHierarchy(BaseModel):
     @classmethod
     def _validate_bandwidth_fields(cls, v, info):
         return require_unit_family(v, ureg.byte / ureg.second, info.field_name, "data")
+
+    @field_validator("latency", mode="after")
+    @classmethod
+    def _validate_latency(cls, v):
+        return require_dimensionality(v, ureg.second, "latency")
 
 class StorageHierarchy(BaseModel):
     """
@@ -477,15 +483,29 @@ class HardwareNode(BaseModel):
         """
         flops = self.compute.peak_flops
         if precision:
-            if precision.lower() in self.compute.precision_flops:
-                flops = self.compute.precision_flops[precision.lower()]
+            key = precision.lower()
+            pf = self.compute.precision_flops
+            if key in pf:
+                flops = pf[key]
+            elif key in ("fp16", "float16", "bf16", "bfloat16"):
+                if "fp16_dense" in pf:
+                    flops = pf["fp16_dense"]
+                elif "fp16" in pf:
+                    flops = pf["fp16"]
+                elif "bf16" in pf:
+                    flops = pf["bf16"]
             else:
-                import warnings
-                warnings.warn(
-                    f"Precision '{precision}' not found in hardware '{self.name}'; "
-                    f"using default peak_flops.",
-                    stacklevel=2
-                )
+                from ..core.units import PRECISION_MAP
+                canonical = PRECISION_MAP.get(key, (None, None))[0]
+                if canonical and canonical in pf:
+                    flops = pf[canonical]
+                else:
+                    import warnings
+                    warnings.warn(
+                        f"Precision '{precision}' not found in hardware '{self.name}'; "
+                        f"using default peak_flops.",
+                        stacklevel=2
+                    )
         return (flops / self.memory.bandwidth).to('flop/byte')
 
     def __repr__(self):

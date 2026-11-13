@@ -351,11 +351,19 @@ class GoalSetMembershipScenario(BaseScenario):
 
     @property
     def norms(self) -> List[float]:
-        """Signed axial offsets divided by grasp tolerance, as dimensionless ratios.
+        """Nonnegative axial offsets divided by grasp tolerance, as dimensionless ratios.
 
         Equation:
             return [(d / self.site.grasp_tolerance).to('').magnitude for d in self.offsets]"""
-        return [(d / self.site.grasp_tolerance).to("").magnitude for d in self.offsets]
+        out: List[float] = []
+        for d in self.offsets:
+            ratio = (d / self.site.grasp_tolerance).to("").magnitude
+            if ratio < 0:
+                raise ValueError(
+                    f"GoalSetMembershipScenario requires nonnegative axial offsets; got {d}"
+                )
+            out.append(ratio)
+        return out
 
     @property
     def inside(self) -> List[bool]:

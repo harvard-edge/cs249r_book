@@ -8,7 +8,11 @@ from __future__ import annotations
 
 
 from ..results import (
+    CheckpointIntervalResult,
+    FailureIntervalResult,
+    RecoveryBudgetResult,
     ReliabilityResult,
+    SeriesFailureResult,
 )
 from ...physics import (
     calc_mtbf_cluster,
@@ -131,13 +135,9 @@ class ReliabilityModel(ForwardModel):
             fleet_mtbf=fleet_mtbf,
             failure_probability=prob_fail,
             optimal_checkpoint_interval=optimal_interval,
-            expected_failures=(job_dur_q / fleet_mtbf).magnitude,
+            expected_failures=(job_dur_q / fleet_mtbf).to_base_units().magnitude,
             goodput_ratio=goodput_ratio,
         )
-
-__all__ = [
-    "ReliabilityModel",
-]
 
 
 class FailureIntervalModel(ForwardModel):
@@ -150,6 +150,7 @@ class FailureIntervalModel(ForwardModel):
     that interval.
     """
     requires = ("component_mtbf", "n_components")
+    produces = FailureIntervalResult
 
     def solve(self, component_mtbf: Quantity, n_components: int, run_duration: Quantity):
         """Calculate the failure interval of independent identical components.
@@ -217,6 +218,7 @@ class SeriesFailureModel(ForwardModel):
     Added 2026-10-20.
     """
     requires = ("n_devices", "devices_per_node", "component_mttf", "per_node")
+    produces = SeriesFailureResult
 
     def solve(self, n_devices: int, devices_per_node: int, component_mttf: dict, per_node: dict):
         """Aggregate heterogeneous component hazards for a synchronous job.
@@ -285,6 +287,7 @@ class CheckpointIntervalModel(ForwardModel):
     Added 2026-10-20.
     """
     requires = ("write_time", "mtbf")
+    produces = CheckpointIntervalResult
 
     def solve(self, write_time: Quantity, mtbf: Quantity):
         """Balance checkpoint write time against expected rework.
@@ -352,6 +355,7 @@ class RecoveryBudgetModel(ForwardModel):
     checkpoint waste, not here. Added 2026-10-20.
     """
     requires = ("checkpoint_bytes", "recovery", "failure_interval", "n_devices")
+    produces = RecoveryBudgetResult
 
     def solve(self, checkpoint_bytes: Quantity, recovery, failure_interval: Quantity, n_devices: int):
         """Price serial cold-restart phases at a given failure frequency.
@@ -416,4 +420,10 @@ class RecoveryBudgetModel(ForwardModel):
         )
 
 
-__all__ += ["SeriesFailureModel", "CheckpointIntervalModel", "RecoveryBudgetModel"]
+__all__ = [
+    "ReliabilityModel",
+    "FailureIntervalModel",
+    "SeriesFailureModel",
+    "CheckpointIntervalModel",
+    "RecoveryBudgetModel",
+]

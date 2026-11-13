@@ -12,6 +12,8 @@ The solvers in engine/solvers/tool_calls.py compose these.
 
 import math as _math
 
+from mlsysim.core._validation import validate_positive
+
 
 def calc_timeout_probability(request_loss: float, reply_loss: float) -> float:
     """Return timeout probability for independently lost request and reply.
@@ -110,7 +112,7 @@ def calc_pending_polls(job_duration, poll_interval) -> int:
 
     References
     ----------
-    Derivation: Count positive interval multiples strictly less than the completion time.
+    Derivation: Count positive interval multiples below the completion time.
 
     Examples
     --------
@@ -118,8 +120,10 @@ def calc_pending_polls(job_duration, poll_interval) -> int:
     >>> calc_pending_polls(Q_("3 s"), Q_("1 s")) == 2
     True
     """
+    validate_positive(job_duration, "job_duration")
+    validate_positive(poll_interval, "poll_interval")
     ratio = (job_duration / poll_interval).to("").magnitude
-    return _math.ceil(ratio) - 1
+    return max(0, _math.ceil(ratio - 1e-12) - 1)
 
 
 def calc_selection_break_even(selection_overhead: float, descriptor_tokens: float) -> float:

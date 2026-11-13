@@ -341,9 +341,10 @@ ALL_WALLS = [
 # Lookup helpers
 _BY_NUMBER = {w.number: w for w in ALL_WALLS}
 _BY_NAME = {w.name.lower(): w for w in ALL_WALLS}
-_BY_RESOLVER = {}
-for w in ALL_WALLS:
-    _BY_RESOLVER.setdefault(w.resolver_name, []).append(w)
+_BY_RESOLVER: dict[str, list[Wall]] = {}
+for _wall in ALL_WALLS:
+    _BY_RESOLVER.setdefault(_wall.resolver_name, []).append(_wall)
+del _wall
 
 # Composite/secondary resolvers map onto existing walls without changing the
 # canonical 22-wall taxonomy.

@@ -248,7 +248,7 @@ def calc_max_decoder_evaluations(budget, encode, per_evaluation):
     Equation:
         N_max = floor((t_budget - t_encode) / t_eval)
 
-    Assumptions: Equal serial evaluation duration with the encoder charged once. Budget and encoding durations should be nonnegative; this function validates only positive per_evaluation.
+    Assumptions: Equal serial evaluation duration with the encoder charged once; budget and encoding durations are nonnegative and per_evaluation is positive.
 
     Excludes: Transport, contention, stochastic latency, and feasibility of encoding when zero is returned.
 
@@ -262,9 +262,11 @@ def calc_max_decoder_evaluations(budget, encode, per_evaluation):
     >>> bool(calc_iterative_decoder_latency(2 * ureg.millisecond, 3 * ureg.millisecond, count) <= 10 * ureg.millisecond)
     True
     """
+    validate_nonnegative(budget, "budget")
+    validate_nonnegative(encode, "encode")
     validate_positive(per_evaluation, "per_evaluation")
     room = ((budget - encode) / per_evaluation).to("").magnitude
-    return max(0, math.floor(room))
+    return max(0, math.floor(room + 1e-12))
 
 
 def calc_series_stiffness(stiffness_a, stiffness_b):

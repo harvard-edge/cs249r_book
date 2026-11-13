@@ -1135,9 +1135,13 @@ class ReferenceTrainingStepScenario(BaseScenario):
         """Unsharded training-state memory per accelerator, excluding activations and
         workspace.
 
-        Equation: ``return replica.workload.parameters.magnitude * replica.bytes_per_param
+        Equation: ``return replica.workload.parameters.to('param').magnitude * replica.bytes_per_param
         / replica.replica_gpus``."""
-        return self.replica.workload.parameters.magnitude * self.replica.bytes_per_param / self.replica.replica_gpus
+        return (
+            self.replica.workload.parameters.to("param").magnitude
+            * self.replica.bytes_per_param
+            / self.replica.replica_gpus
+        )
 
     @property
     def result(self):

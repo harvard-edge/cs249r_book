@@ -990,6 +990,9 @@ __all__ = [
     "scaling_interpretation",
     "sweep_scale",
     "with_execution_resources",
+    "attention_state_comparison",
+    "embedding_lookup_reference",
+    "language_phase_reference",
 ]
 
 

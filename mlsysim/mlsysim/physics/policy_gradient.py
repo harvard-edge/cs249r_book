@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import math
 
-from mlsysim.core._validation import validate_at_least
+from mlsysim.core._validation import validate_at_least, validate_nonnegative
 
 
 def calc_group_relative_coefficients(rewards, stabilizer: float = 0.0, bessel: bool = False):
@@ -57,6 +57,7 @@ def calc_group_relative_coefficients(rewards, stabilizer: float = 0.0, bessel: b
     >>> calc_group_relative_coefficients([1, 1], stabilizer=1)[2] == [0.0, 0.0]
     True
     """
+    validate_nonnegative(stabilizer, "stabilizer")
     values = [float(r) for r in rewards]
     group = len(values)
     validate_at_least(group, 2 if bessel else 1, "rollouts in the group")
@@ -78,7 +79,7 @@ def calc_continuation_fork_tokens(turns: int, tokens_per_turn: int, branches: in
     branches : int
         Continuations sampled at each selected boundary; nonnegative.
     boundaries : iterable of int or None, optional
-        Distinct turn indices strictly between zero and turns; None selects every interior boundary.
+        Distinct interior turn indices between 1 and ``turns - 1`` inclusive; None selects every interior boundary.
 
     Returns
     -------
@@ -104,9 +105,11 @@ def calc_continuation_fork_tokens(turns: int, tokens_per_turn: int, branches: in
     True
     """
     validate_at_least(turns, 2, "turns")
+    validate_nonnegative(tokens_per_turn, "tokens_per_turn")
+    validate_nonnegative(branches, "branches")
     ks = list(range(1, turns)) if boundaries is None else list(boundaries)
     if any(not 0 < k < turns for k in ks) or len(set(ks)) != len(ks):
-        raise ValueError("fork boundaries must be distinct turns strictly inside the trajectory")
+        raise ValueError("fork boundaries must be distinct interior turn indices (1 <= k < turns)")
     base = turns * tokens_per_turn
     remaining = sum(turns - k for k in ks)
     return base, branches * len(ks), base + branches * tokens_per_turn * remaining

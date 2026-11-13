@@ -99,6 +99,8 @@ def calc_first_order_temperature(elapsed, start, asymptote, time_constant):
     >>> calc_first_order_temperature(0 * ureg.s, 300 * ureg.K, 350 * ureg.K, 10 * ureg.s) == 300 * ureg.K
     True
     """
+    validate_nonnegative(elapsed, "elapsed")
+    validate_positive(time_constant, "time_constant")
     x = (elapsed / time_constant).to("").magnitude
     return (_k(asymptote) - (_k(asymptote) - _k(start)) * math.exp(-x)).to(ureg.kelvin)
 
@@ -142,14 +144,19 @@ def calc_first_order_time_to_temperature(start, target, asymptote, time_constant
     >>> calc_first_order_time_to_temperature(300 * ureg.K, 300 * ureg.K, 350 * ureg.K, 10 * ureg.s).m_as('s')
     0.0
     """
-    head = (_k(asymptote) - _k(target)).to(ureg.kelvin).magnitude
-    if head < 0 and _k(target) <= _k(start):  # cooling toward a lower asymptote
-        ratio = ((_k(start) - _k(asymptote)) / (_k(target) - _k(asymptote))).to("").magnitude
+    validate_positive(time_constant, "time_constant")
+    t0 = _k(start).magnitude
+    tt = _k(target).magnitude
+    ti = _k(asymptote).magnitude
+    if tt == t0:
+        return 0.0 * ureg.second
+    if t0 < tt < ti:  # heating toward higher asymptote
+        ratio = (ti - t0) / (ti - tt)
         return (time_constant * math.log(ratio)).to(ureg.second)
-    if head <= 0:
-        return None
-    ratio = ((_k(asymptote) - _k(start)) / (_k(asymptote) - _k(target))).to("").magnitude
-    return (time_constant * math.log(ratio)).to(ureg.second)
+    if ti < tt < t0:  # cooling toward lower asymptote
+        ratio = (t0 - ti) / (tt - ti)
+        return (time_constant * math.log(ratio)).to(ureg.second)
+    return None
 
 
 def calc_periodic_burst_peak_rise(power, thermal_resistance, on_time, period, time_constant):

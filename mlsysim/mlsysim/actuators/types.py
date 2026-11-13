@@ -319,6 +319,18 @@ class FramelessMotor(BaseModel):
     def _v_kt(cls, v, info):
         return require_dimensionality(v, _NM / ureg.ampere, info.field_name)
 
+    @field_validator("motor_constant", mode="after")
+    @classmethod
+    def _v_km(cls, v, info):
+        return require_dimensionality(v, _NM / ureg.watt**0.5, info.field_name)
+
+    @field_validator("no_load_speed", mode="after")
+    @classmethod
+    def _v_no_load_speed(cls, v, info):
+        if v is None:
+            return v
+        return require_dimensionality(v, ureg.radian / ureg.second, info.field_name)
+
     @field_validator("terminal_resistance", mode="after")
     @classmethod
     def _v_res(cls, v, info):

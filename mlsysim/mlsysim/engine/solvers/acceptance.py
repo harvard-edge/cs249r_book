@@ -1,17 +1,13 @@
 """Agent evaluation solvers: what a set of graded trials supports about a configuration.
 
 Domain implementations behind ``mlsysim.solvers`` (added 2026-10-20). Each
-model is arithmetic on stated trial counts, verdicts, and costs: the
-acceptance rate when some trials never resolve; a grader's error rates
-against a reference assessment; how tasks and repeated runs share an
-evaluation budget; Wald and Wilson intervals; the task counts a precision or
-detection target needs; a paired candidate-against-baseline comparison
-(Newcombe's method 10, McNemar's exact test, and the variance pairing
-removes); the within-model spread of a leaderboard across scaffolds and the
-neighboring ranks it cannot separate; repeated runs of one task against new
-tasks; batch and sequential selection under one candidate cap; and the
-summary of a paired repeated-run evaluation. Repeated-run consistency over
-``k`` recurrences is horizon compounding (``HorizonCompoundingModel``).
+model is arithmetic on stated trial counts, verdicts, and costs: Wald and
+Wilson binomial intervals; the task counts a precision or detection target
+needs; a paired candidate-against-baseline comparison (Newcombe's method 10,
+McNemar's exact test, and the variance pairing removes); repeated runs of one
+task against new tasks; and batch versus sequential selection under one
+candidate cap. Repeated-run consistency over ``k`` recurrences is horizon
+compounding (``HorizonCompoundingModel``).
 """
 
 from __future__ import annotations
@@ -170,7 +166,7 @@ class ProportionPlanningModel(ForwardModel):
         Parameters
         ----------
         rate : float
-            Planning success probability strictly between zero and one.
+            Planning success probability in the open interval (0, 1).
         planning_tasks : int
             Positive number of independent tasks in the proposed evaluation.
         target_half_width : float
@@ -338,8 +334,8 @@ class TaskMixConsistencyModel(ForwardModel):
 
     Repeating one randomly drawn task passes every run with ``E[p_i^k]``;
     ``k`` independently drawn tasks all pass with ``(E[p_i])^k``, which
-    Jensen's inequality places at or below it, strictly when task difficulty
-    varies and ``k >= 2``. Task types are equally weighted.
+    Jensen's inequality places at or below it (with inequality when task
+    difficulty varies and ``k >= 2``). Task types are equally weighted.
     """
 
     requires = ()

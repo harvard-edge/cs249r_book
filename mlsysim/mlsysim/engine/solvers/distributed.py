@@ -563,7 +563,7 @@ class DistributedModel(ForwardModel):
         if straggler_factor > 1.0:
             step_latency_total = step_latency_total * straggler_factor
 
-        scaling_efficiency = (node_perf.latency / step_latency_total).magnitude
+        scaling_efficiency = (node_perf.latency / step_latency_total).to_base_units().magnitude
 
         constraint_trace = [
             (

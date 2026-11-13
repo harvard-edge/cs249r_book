@@ -3,12 +3,11 @@
 Domain implementations behind ``mlsysim.solvers`` (added 2026-10-20). Each
 model is arithmetic on stated rates, counts, and durations: the share of an
 update's accepted rollouts that failed, binary rewards centered on a fixed
-baseline, a shaped reward's ordering condition, a turn valued by forked
-continuations and the tokens forking costs, group-relative coefficients, the
-per-token push of length normalization, the rollouts one informative group
-costs, an all-pass rule over repeated trials, the room a ratio clip leaves, a
-sandbox slot's episode cycle, a group barrier, and a verifier pool. None
-models a trained network's learning dynamics.
+baseline, a turn valued by forked continuations and the tokens forking costs,
+group-relative coefficients, the per-token push of length normalization, the
+rollouts one informative group costs, an all-pass rule over repeated trials,
+the room a ratio clip leaves, a sandbox slot's episode cycle, a group barrier,
+and a verifier pool. None models a trained network's learning dynamics.
 """
 
 from __future__ import annotations

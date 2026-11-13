@@ -176,7 +176,9 @@ class CompressionModel(ForwardModel):
                 # Compute-bound: check if hardware has accelerated low-precision paths
                 prec_key = f"int{target_bitwidth}" if target_bitwidth <= 8 else f"fp{target_bitwidth}"
                 if prec_key in hardware.compute.precision_flops:
-                    hw_speedup = (hardware.compute.precision_flops[prec_key] / hardware.compute.peak_flops).magnitude
+                    hw_speedup = (
+                        hardware.compute.precision_flops[prec_key] / hardware.compute.peak_flops
+                    ).to_base_units().magnitude
                     inference_speedup = min(hw_speedup, compression_ratio)
                 else:
                     inference_speedup = 1.0  # No hardware support → no compute speedup

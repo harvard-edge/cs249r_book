@@ -707,8 +707,7 @@ class ClearanceQueryScenario(BaseScenario):
     def slab_volume(self) -> Quantity:
         """Rectangular stopping-corridor volume in cubic meters.
 
-        Equation:
-            return (self.site.aisle_width * self.site.d_clear * self.slab_height).to('``m**3``')"""
+        Equation: ``return (self.site.aisle_width * self.site.d_clear * self.slab_height).to('m**3')``."""
         return (self.site.aisle_width * self.site.d_clear * self.slab_height).to("m**3")
 
     @property

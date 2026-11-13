@@ -37,7 +37,7 @@ class PowerTransientModel(ForwardModel):
     voltage droop ``L dI/dt``. Across the cluster the same step, aligned by the
     barrier, is a power ramp the facility supplies must follow.
     """
-    requires = ("hardware",)
+    requires = ("high_power", "low_power", "rail_voltage", "loop_inductance", "rise_times", "n_devices", "ramp_window")
     produces = PowerTransientResult
 
     def solve(self, high_power: Quantity, low_power: Quantity, rail_voltage: Quantity,
@@ -178,7 +178,7 @@ class OutageCostModel(ForwardModel):
     synchronous job that cannot continue idles every device, and rolling back
     to the last checkpoint adds the lost work to the repair window.
     """
-    requires = ("fleet",)
+    requires = ("failed_devices", "job_devices", "repair_time", "device_hour_rate")
     produces = OutageCostResult
 
     def solve(self, failed_devices: int, job_devices: int, repair_time: Quantity,

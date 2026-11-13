@@ -1,3 +1,4 @@
+import math
 import time
 from typing import Any, Callable, Optional, Tuple
 import scipy.optimize
@@ -104,23 +105,36 @@ class ScipyBackend(OptimizerProtocol):
         else:
             method = 'SLSQP' if self.constraints else 'L-BFGS-B'
             initial_guess = [self.bounds[0]]
+            objective = (
+                (lambda arr: self.objective_fn(float(arr[0])))
+                if self.is_scalar
+                else self.objective_fn
+            )
+            wrapped_constraints = [
+                {
+                    **c,
+                    "fun": (lambda arr, _f=c["fun"]: _f(float(arr[0]))) if self.is_scalar else c["fun"],
+                }
+                for c in self.constraints
+            ]
             res = scipy.optimize.minimize(
-                self.objective_fn,
+                objective,
                 initial_guess,
                 method=method,
                 bounds=[self.bounds],
-                constraints=self.constraints
+                constraints=wrapped_constraints,
             )
 
         solve_time_ms = (time.time() - start_time) * 1000
         best_val = float(res.x[0]) if hasattr(res.x, '__len__') else float(res.x)
+        optimal_val = float(res.fun)
 
         msg = getattr(res, "message", "Success" if res.success else "Failed")
         nit = getattr(res, "nit", 0)
 
         return OptimizationResult(
-            feasible=res.success,
-            optimal_value=float(res.fun),
+            feasible=bool(res.success and math.isfinite(optimal_val)),
+            optimal_value=optimal_val,
             best_configuration={"optimal_variable": best_val},
             metrics={"scipy_iterations": nit, "message": str(msg)},
             solver_name=f"scipy.optimize ({method})",

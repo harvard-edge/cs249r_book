@@ -95,15 +95,15 @@ class Workload(BaseModel):
     # growth-trend figures that plot a model against time).
     release_year: Optional[int] = None
 
-    @field_validator("parameters", "embedding_entries", mode="after")
+    @field_validator("parameters", "embedding_entries", "parameter_range_min", "parameter_range_max", mode="after")
     @classmethod
     def _validate_count_fields(cls, v, info):
         return require_unit_family(v, ureg.count, info.field_name, "count")
 
-    @field_validator("model_size", mode="after")
+    @field_validator("model_size", "training_dataset_size", mode="after")
     @classmethod
-    def _validate_model_size(cls, v):
-        return require_unit_family(v, ureg.byte, "model_size", "data")
+    def _validate_model_size(cls, v, info):
+        return require_unit_family(v, ureg.byte, info.field_name, "data")
 
     @field_validator("inference_flops", mode="after")
     @classmethod
@@ -293,6 +293,11 @@ class TransformerWorkload(Workload):
     def _validate_training_days_ref(cls, v):
         return require_dimensionality(v, ureg.day, "training_days_ref")
 
+    @field_validator("training_energy_mwh", mode="after")
+    @classmethod
+    def _validate_training_energy_mwh(cls, v):
+        return require_dimensionality(v, ureg.joule, "training_energy_mwh")
+
     @model_validator(mode="after")
     def _check_training_fleet_consistency(self):
         """Keep the reference fleet internally consistent.
@@ -422,7 +427,11 @@ class TransformerWorkload(Workload):
         >>> model.head_width == model.hidden_dim // model.heads
         True
         """
-        return self.head_dim or self.hidden_dim // self.heads
+        if self.head_dim is not None:
+            return self.head_dim
+        if self.hidden_dim is None or self.heads is None:
+            raise ValueError(f"{self.name}: head_width requires head_dim or both hidden_dim and heads")
+        return self.hidden_dim // self.heads
 
     @property
     def kv_width(self) -> int:
@@ -457,7 +466,10 @@ class TransformerWorkload(Workload):
         >>> model.kv_width == model.kv_heads * model.head_width
         True
         """
-        return (self.kv_heads or self.heads) * self.head_width
+        n_kv = self.kv_heads if self.kv_heads is not None else self.heads
+        if n_kv is None:
+            raise ValueError(f"{self.name}: kv_width requires kv_heads or heads")
+        return n_kv * self.head_width
 
     @property
     def queries_per_kv_head(self) -> int:
@@ -490,7 +502,10 @@ class TransformerWorkload(Workload):
         >>> model.queries_per_kv_head * model.kv_heads == model.heads
         True
         """
-        return self.heads // (self.kv_heads or self.heads)
+        if self.heads is None:
+            raise ValueError(f"{self.name}: queries_per_kv_head requires heads")
+        n_kv = self.kv_heads if self.kv_heads is not None else self.heads
+        return self.heads // n_kv
 
     def training_memory(self, batch_size: int, seq_len: int, precision: str = "fp16", optimizer: str = "adam", strategy: str = "selective", zero_stage: int = 0, dp_size: int = 1, is_lora: bool = False, lora_rank: int = 16) -> Quantity:
         """Estimate per-device weights, gradients, optimizer state, and activations.
