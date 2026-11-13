@@ -82,61 +82,7 @@ Suppose the targeted test forces an interleaving where one worker thread waits w
 ![](images/svg/diagnostic_tree.svg)
 :::
 
-```{python}
-#| label: calc-vol3-probe-allocation
-#| echo: false
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ PROBE AND GENERATION ALLOWANCES (LEGO)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: nbk-03-probe-versus-generation.
-# │ Goal: Compare a short diagnostic operation with an output allowance.
-# │ Show: Generation time and output charge, distinct from probe duration.
-# │ How: Reuse the registry weight-read allowance from Foundation Model;
-# │      exclude prefill, queueing, transport, and probe setup overhead.
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import *
-
-class ProbeAllocation:
-    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    scenario = Scenarios.ProbeVsGeneratedExplanation  # 8-bit Llama-3 70B decode floor, one H100
-    answer_tokens = scenario.answer_tokens  # hypothetical output length
-    probe_time = scenario.probe_time  # hypothetical already-prepared test duration
-    output_price = scenario.output_price  # hypothetical dollars per million output tokens
-
-    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    result = scenario.result
-    token_time = result.token_time
-    answer_time = result.answer_time
-    answer_cost = result.answer_cost
-    time_ratio = result.time_ratio
-
-    # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────
-    check(answer_time > probe_time > 0 * second, "Positive scenario durations")
-    check(answer_cost > 0 * USD, "Output has a positive scenario charge")
-
-    # ┌── 4. OUTPUT (Formatting) ───────────────────────────────────────────
-    answer_tokens_str = fmt_int(answer_tokens)
-    probe_time_str = fmt_time(probe_time, unit="ms", precision=0)
-    token_time_str = fmt_time(token_time, unit="ms", precision=2)
-    answer_time_str = fmt_time(answer_time, unit="s", precision=2)
-    answer_cost_str = fmt_usd(answer_cost, precision=5)
-    output_price_str = fmt_usd((output_price * Mtoken).to(USD), precision=0)
-    time_mult_str = fmt_multiple(time_ratio, precision=1)
-```
-
-::: {#nbk-03-probe-versus-generation .callout-notebook title="A probe vs. a longer answer"}
-
-**Problem**: A prepared diagnostic test takes `{python} ProbeAllocation.probe_time_str`. A proposed explanation contains `{python} ProbeAllocation.answer_tokens_str` output tokens. How long does the explanation take to generate relative to the test?
-
-**Variables**: The illustrative per-token generation time from @sec-vol3-foundation-model-per-call-work-estimate is `{python} ProbeAllocation.token_time_str`, derived from memory-bandwidth limits rather than a measured production service rate. The hypothetical output pricing is `{python} ProbeAllocation.output_price_str` per million tokens. Prompt processing, queueing, transport, test preparation, and the downstream model call that reads the test observation are excluded.
-
-**Math**: Generating `{python} ProbeAllocation.answer_tokens_str` tokens at `{python} ProbeAllocation.token_time_str` per token requires `{python} ProbeAllocation.answer_time_str` and incurs `{python} ProbeAllocation.answer_cost_str` in token charges. Dividing this generation latency by the `{python} ProbeAllocation.probe_time_str` test run yields a factor of `{python} ProbeAllocation.time_mult_str`.
-
-**Systems insight**: When the unresolved question concerns dynamic program behavior, the probe settles it `{python} ProbeAllocation.time_mult_str` faster than the model can generate a speculative explanation of it, and only the probe's answer is an observation. Running a test is preferable whenever its preparation and execution time remain below the explanation's `{python} ProbeAllocation.answer_time_str` and its outcome cleanly separates the competing failure modes. Conversely, an inconclusive test that does not separate the hypotheses provides no diagnostic gain regardless of its speed. Failure to reproduce can still supply negative evidence when the test's sensitivity to the suspected fault is known. A sound runtime spends work on whichever operation most cheaply removes the main source of uncertainty.
-
-:::
-
-The probe, and the decision to revise the patch on its evidence, both happened outside any single model call. The invocation contract of the previous chapter ends at one prompt and one candidate, accompanied only by metadata indicating whether generation reached a stop token or an output limit. That interface cannot decide whether the next second of latency or fraction of a cent is better spent on longer reasoning, extra candidate samples, or a runtime probe. An API response marked complete confirms only that generation finished, not that the proposed patch fixes the bug. **Test-time compute**\index{Test-time compute!definition} is all the system work the runtime orchestrates around the model call, with model weights held fixed, to generate, test, and select candidates before committing to an action. Governing that spend requires a runtime policy that sets hard ceilings on latency and cost, routes work across reasoning and checks, and stops cleanly without mistaking an exhausted budget for a verified solution.
+That targeted test, and the decision to revise the patch on its evidence, both happened outside any single model call. The invocation contract of the previous chapter ends at one prompt and one candidate, accompanied only by metadata indicating whether generation reached a stop token or an output limit. That interface cannot decide whether the next second of latency or fraction of a cent is better spent on longer reasoning, extra candidate samples, or a runtime probe. An API response marked complete confirms only that generation finished, not that the proposed patch fixes the bug. **Test-time compute**\index{Test-time compute!definition} is all the system work the runtime orchestrates around the model call, with model weights held fixed, to generate, test, and select candidates before committing to an action. Governing that spend requires a runtime policy that sets hard ceilings on latency and cost, routes work across reasoning and checks, and stops cleanly without mistaking an exhausted budget for a verified solution.
 
 ::: {.column-margin .margin-pointer}
 ↩ The bounded single-invocation model contract is established in @sec-vol3-foundation-model-contract.
@@ -200,7 +146,61 @@ Breadth also shifts the burden downstream, because generating a wide pool of can
 
 Neither a longer chain of thought nor a wider pool of samples tells the model whether a waiting thread actually receives a condition-variable signal at runtime. The feedback axis supplies that missing evidence by executing a check on a candidate and feeding the resulting observation into the next model request. Instead of relying on frozen weights and a static prompt alone, the repair agent proposes a candidate patch, the runtime runs a bounded test suite, and the next model call receives concrete diagnostics such as a stack trace from a deadlocked worker thread. Those runtime observations narrow the next candidate far more sharply than asking the model to reread the original prompt on its own [@shinn2023reflexion].
 
-Verification checks return structured outcomes: failure, pass, or inconclusive execution (such as a test timeout). A failure trace points to broken assertions or regressions; a passing test confirms that the code satisfies the exercised assertions under the tested conditions; and final acceptance remains a separate policy gate. Running diagnostics is itself an external action that consumes CPU and memory, runs inside a sandbox, and adds wall-clock latency even when used only inside deliberation.
+Verification checks return structured outcomes: failure, pass, or inconclusive execution (such as a test timeout). A failure trace points to broken assertions or regressions; a passing test confirms that the code satisfies the exercised assertions under the tested conditions; and final acceptance remains a separate policy gate. Running diagnostics is itself an external action that consumes CPU and memory, runs inside a sandbox, and adds wall-clock latency even when used only inside deliberation. Notebook \ref{nbk-03-probe-versus-generation} compares that diagnostic latency directly against the cost of generating a speculative explanation.
+
+```{python}
+#| label: calc-vol3-probe-allocation
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ PROBE AND GENERATION ALLOWANCES (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: nbk-03-probe-versus-generation.
+# │ Goal: Compare a short diagnostic operation with an output allowance.
+# │ Show: Generation time and output charge, distinct from probe duration.
+# │ How: Reuse the registry weight-read allowance from Foundation Model;
+# │      exclude prefill, queueing, transport, and probe setup overhead.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+
+class ProbeAllocation:
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    scenario = Scenarios.ProbeVsGeneratedExplanation  # 8-bit Llama-3 70B decode floor, one H100
+    answer_tokens = scenario.answer_tokens  # hypothetical output length
+    probe_time = scenario.probe_time  # hypothetical already-prepared test duration
+    output_price = scenario.output_price  # hypothetical dollars per million output tokens
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    result = scenario.result
+    token_time = result.token_time
+    answer_time = result.answer_time
+    answer_cost = result.answer_cost
+    time_ratio = result.time_ratio
+
+    # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────
+    check(answer_time > probe_time > 0 * second, "Positive scenario durations")
+    check(answer_cost > 0 * USD, "Output has a positive scenario charge")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────────────────────────────
+    answer_tokens_str = fmt_int(answer_tokens)
+    probe_time_str = fmt_time(probe_time, unit="ms", precision=0)
+    token_time_str = fmt_time(token_time, unit="ms", precision=2)
+    answer_time_str = fmt_time(answer_time, unit="s", precision=2)
+    answer_cost_str = fmt_usd(answer_cost, precision=5)
+    output_price_str = fmt_usd((output_price * Mtoken).to(USD), precision=0)
+    time_mult_str = fmt_multiple(time_ratio, precision=1)
+```
+
+::: {#nbk-03-probe-versus-generation .callout-notebook title="A probe vs. a longer answer"}
+
+**Problem**: A prepared diagnostic test takes `{python} ProbeAllocation.probe_time_str`. A proposed explanation contains `{python} ProbeAllocation.answer_tokens_str` output tokens. How long does the explanation take to generate relative to the test?
+
+**Variables**: The illustrative per-token generation time from @sec-vol3-foundation-model-per-call-work-estimate is `{python} ProbeAllocation.token_time_str`, derived from memory-bandwidth limits rather than a measured production service rate. The hypothetical output pricing is `{python} ProbeAllocation.output_price_str` per million tokens. Prompt processing, queueing, transport, test preparation, and the downstream model call that reads the test observation are excluded.
+
+**Math**: Generating `{python} ProbeAllocation.answer_tokens_str` tokens at `{python} ProbeAllocation.token_time_str` per token requires `{python} ProbeAllocation.answer_time_str` and incurs `{python} ProbeAllocation.answer_cost_str` in token charges. Dividing this generation latency by the `{python} ProbeAllocation.probe_time_str` test run yields a factor of `{python} ProbeAllocation.time_mult_str`.
+
+**Systems insight**: When the unresolved question concerns dynamic program behavior, the probe settles it `{python} ProbeAllocation.time_mult_str` faster than the model can generate a speculative explanation of it, and only the probe's answer is an observation. Running a test is preferable whenever its preparation and execution time remain below the explanation's `{python} ProbeAllocation.answer_time_str` and its outcome cleanly separates the competing failure modes. Conversely, an inconclusive test that does not separate the hypotheses provides no diagnostic gain regardless of its speed. Failure to reproduce can still supply negative evidence when the test's sensitivity to the suspected fault is known. A sound runtime spends work on whichever operation most cheaply removes the main source of uncertainty.
+
+:::
 
 Each feedback round is also one more turn of the horizon $\TurnHorizon$, which ties this axis to horizon compounding (@eq-vol3-horizon-compounding). Unchecked turns compound error as $(1-\PerStepErrorRate)^{\TurnHorizon}$, and the introduction showed (@sec-vol3-intro-horizon-arithmetic) that a check which rejects a bad step and retries it resets that compounding. Feedback is the one axis that places such a check inside every turn, so it can lengthen a deliberation without the unchecked compounding its extra turns would otherwise carry, to the extent that its checks deserve trust (@sec-vol3-test-time-compute-verification).
 
