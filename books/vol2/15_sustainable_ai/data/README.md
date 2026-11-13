@@ -1,6 +1,6 @@
 # Chapter 15 Figure and Table Data Provenance (`15_sustainable_ai`)
 
-Every Tier-2 CSV in this directory carries structured `# Source:`, `# URL:`, `# Verified:`, `# Epistemic:`, `# Computation:`, and `# Notes:` header fields parsed at load time by `mlsysim.core.series_loader.LocalSeries.provenance` and verified by `./binder/binder check figures --scope data-provenance`.
+Every Tier-2 CSV in this directory conforms to the Tier-2 Data Provenance Standard v1 (`books/DATA_PROVENANCE.md`), carrying `# Figures:`, `# Source:`, `# Locator:`, `# URL:`, `# License:`, `# Verified:`, `# Epistemic:`, `# Method:`, `# Columns:`, and `# Computation:` / `# Notes:` header fields parsed at load time by `mlsysim.core.series_loader.LocalSeries` and sealed in `books/datapackage.json` (`./binder/binder check figures --scope data-provenance`).
 
 ## Epoch AI Compute and Energy Series (`@fig-ai-compute-growth`, `@fig-frontier-training-energy`)
 
