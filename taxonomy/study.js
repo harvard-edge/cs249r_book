@@ -145,6 +145,25 @@
     while (shortened && verbMeasure.measureText(shortened + '…').width > width) shortened = shortened.slice(0, -1);
     return shortened.trimEnd() + '…';
   };
+  // A map verb gets up to two lines of `width` px; only a verb longer than that is shortened.
+  const verbLabel = (rel, width) => {
+    verbMeasure.font = '500 10.5px Inter, -apple-system, BlinkMacSystemFont, sans-serif';
+    const full = verb(rel);
+    if (verbMeasure.measureText(full).width <= width) return { label: full, lw: width, two: false };
+    // A word wider than the line cannot wrap; keep the single shortened line.
+    if (full.split(/\s+/).some((wd) => verbMeasure.measureText(wd).width > width)) return { label: shortVerb(rel, width), lw: width, two: false };
+    // Break the lines here, word by word, so the map never shows a third line.
+    const fits = (t) => verbMeasure.measureText(t).width <= width;
+    const words = full.split(/\s+/);
+    let first = '';
+    while (words.length && fits(first ? `${first} ${words[0]}` : words[0])) first = first ? `${first} ${words.shift()}` : words.shift();
+    let second = words.join(' ');
+    if (!fits(second)) {
+      while (second && !fits(`${second}…`)) second = second.slice(0, -1);
+      second = `${second.trimEnd()}…`;
+    }
+    return { label: `${first}\n${second}`, lw: width + 40, two: true };
+  };
   const crossStepRelationships = (stepIndex) => {
     const matches = [];
     for (const rel of data.relationships || []) {
@@ -341,7 +360,7 @@
   function renderRelease() {
     const fw = data.framework;
     const citation = `Vijay Janapa Reddi. ML Systems Taxonomy, version ${fw.version}. Machine Learning Systems, 2026. ${data.url}`;
-    $('bok-cite-text').textContent = citation;
+    $('bok-cite-text').textContent = citation.replace(/(\d)-(draft)/g, '$1\u2011$2');
     $('bok-cite-meta').innerHTML = `Version ${esc(fw.version)} · Taxonomy data licensed <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a> · Editorial draft for expert review · <a href="https://github.com/harvard-edge/cs249r_book/issues/new?template=taxonomy_feedback.yml">Suggest a change on GitHub</a>`;
     $('bok-copy-cite').addEventListener('click', async () => {
       try { await navigator.clipboard.writeText(citation); $('bok-copy-cite').textContent = 'Copied'; } catch { $('bok-copy-cite').textContent = 'Select the text to copy'; }
@@ -371,10 +390,14 @@
         return `<li><a href="#area=${esc(area.id)}"${open && !activeSubject ? ' aria-current="page"' : ''}${open ? ' class="is-open"' : ''}>${code(area.code)}${esc(area.display_label || area.label)}</a>${subjects}</li>`;
       }).join('')}</ul>`;
     }).join('') + '</details>';
+    const tree = $('bok-tree');
+    const cur = tree.querySelector('[aria-current="page"]');
+    if (cur && tree.scrollHeight > tree.clientHeight) tree.scrollTop = Math.max(0, cur.offsetTop - tree.clientHeight / 3);
   }
 
   function crumbs(parts) {
-    $('bok-crumbs').innerHTML = [`<a href="#view=matrix">Matrix</a>`, ...parts].join('<span aria-hidden="true">›</span>');
+    const root = /Concept map/.test(parts[0] || '') ? [] : [`<a href="#view=matrix">Matrix</a>`];
+    $('bok-crumbs').innerHTML = [...root, ...parts].join('<span aria-hidden="true">›</span>');
   }
 
   const facts = (items) => `<div class="bok-facts" role="group" aria-label="Facts">${items.filter(([, v]) => v).map(([k, v]) => `<p><span class="bok-facts-label">${esc(k)}</span>${v}</p>`).join('')}</div>`;
@@ -390,7 +413,7 @@
 
   function conceptTable(ids, caption) {
     if (!ids.length) return '';
-    return `<h3 class="bok-section">${esc(caption)}</h3><table class="bok-table"><thead><tr><th>Concept</th><th>Definition</th></tr></thead><tbody>${ids.map((id) =>
+    return `<h3 class="bok-section">${esc(caption)}</h3><table class="bok-table bok-concepts-table"><thead><tr><th>Concept</th><th>Definition</th></tr></thead><tbody>${ids.map((id) =>
       `<tr><td>${conceptLink(id)}${concepts.get(id)?.scope === 'background' ? ' <span class="bok-tag">background</span>' : ''}</td><td>${esc(concepts.get(id)?.definition)}</td></tr>`).join('')}</tbody></table>`;
   }
 
@@ -464,8 +487,10 @@
       // Desktop: each line carries its verb above its own segment, next to the
       // outer concept, so every link reads left to right as a sentence.
       { selector: 'edge.into, edge.from', style: { 'font-size': 10.5, 'font-weight': 500, color: c.muted, 'font-family': 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' } },
-      { selector: 'edge.into', style: { 'taxi-turn': (e) => e.data('turn'), 'source-label': 'data(label)', 'source-text-offset': (e) => e.data('offset'), 'source-text-margin-y': -8 } },
-      { selector: 'edge.from', style: { 'taxi-turn': (e) => e.data('turn'), 'target-label': 'data(label)', 'target-text-offset': (e) => e.data('offset'), 'target-text-margin-y': -8 } },
+      // Verbs wrap to a second line instead of being cut; a two-line verb sits higher so it clears its own line.
+      { selector: 'edge.into, edge.from', style: { 'text-wrap': 'wrap', 'text-max-width': (e) => `${e.data('lw')}px`, 'line-height': 1.15 } },
+      { selector: 'edge.into', style: { 'taxi-turn': (e) => e.data('turn'), 'source-label': 'data(label)', 'source-text-offset': (e) => e.data('offset'), 'source-text-margin-y': (e) => (e.data('two') ? -14 : -8) } },
+      { selector: 'edge.from', style: { 'taxi-turn': (e) => e.data('turn'), 'target-label': 'data(label)', 'target-text-offset': (e) => e.data('offset'), 'target-text-margin-y': (e) => (e.data('two') ? -14 : -8) } },
       { selector: 'node.hover', style: { 'border-color': c.accent, 'border-width': 2 } },
       { selector: 'edge.hover', style: { 'line-color': c.accent, 'target-arrow-color': c.accent, width: 2 } },
     ];
@@ -494,7 +519,8 @@
   // Incoming links on the left, outgoing links on the right, grouped by relation; at most
   // MAP_LIMIT per group, with every relationship in the table below. Text
   // stays at full size: the canvas grows to fit instead of zooming out.
-  const COLUMN = 360;
+  let COLUMN = 360;          // set per draw: wider when the container has room
+  const CHIP_MAX = 200;
   const SPINE = 150;
   function drawMap(id, container) {
     if (!ensureMap(container)) return;
@@ -503,6 +529,7 @@
     const box = container.closest('.bok-mapbox');
     box.hidden = false;
     if (container.clientWidth < 640) { box.hidden = true; return; }
+    COLUMN = Math.max(380, Math.min(470, Math.floor((container.clientWidth - 24 - CHIP_MAX - 20) / 2)));
     const isActionableKind = (relId) => {
       const k = relations.get(relId)?.kind;
       return k === 'constraint' || k === 'failure' || k === 'mechanism';
@@ -535,15 +562,19 @@
           if (seen.has(other)) continue;
           seen.add(other);
           const c = concepts.get(other);
-          const w = chipWidth(c.label, 200);
+          const w = chipWidth(c.label, CHIP_MAX);
+          const vl = verbLabel(rel, COLUMN - CHIP_MAX / 2 - SPINE - 24);
+          if (vl.two) y += 10;  // room above for the second line of the verb
           const gc = palette.grp?.[groupOfConcept(other)];
-          els.push({ group: 'nodes', position: { x, y }, data: { id: other, label: c.label, w, tw: 180, background: c.scope === 'background', ...(gc ? { gc } : {}) } });
+          // Chips align on the edge that faces the center, so each column reads as one ragged-outward list.
+          const cx = x < 0 ? x + (CHIP_MAX - w) / 2 : x - (CHIP_MAX - w) / 2;
+          els.push({ group: 'nodes', position: { x: cx, y }, data: { id: other, label: c.label, w, tw: 180, background: c.scope === 'background', ...(gc ? { gc } : {}) } });
           ys.push(y);
           const into = rel.target === id;
           // The outer segment runs from the concept to the spine; the verb sits on it.
-          const segment = COLUMN - w / 2 - SPINE;
+          const segment = COLUMN - CHIP_MAX / 2 - SPINE;
           els.push({ group: 'edges', classes: into ? 'into' : 'from', data: { id: rel.id, source: rel.source, target: rel.target,
-            label: shortVerb(rel, segment - 24), offset: segment / 2, turn: into ? segment : SPINE - centerHalf } });
+            ...vl, offset: segment / 2, turn: into ? segment : SPINE - centerHalf } });
           y += 44;
         }
         if (block.rels.length > MAP_LIMIT) {
@@ -1373,7 +1404,7 @@
       if (capEl) capEl.innerHTML = `<strong>Relationships between the ${areas.length} areas (row acts on column).</strong> Each cell counts relationships from concepts in the row area to concepts in the column area; hatched diagonal cells count relationships within the same area. Bars on the right and bottom show each area's total outgoing and incoming links with other areas. Select any cell or area label to read the relationships on the right. With a cell focused, use arrow keys to move and Enter to select. Counts describe recorded links, not importance or completeness.`;
     } else {
       drawCouplingWheel(stageEl);
-      if (capEl) capEl.innerHTML = `<strong>Relationships across the ${groups.length} groups, ${areas.length} areas, and ${rows.size} subjects.</strong> Thicker curves show more relationships between two subjects. Select a subject or an area on the ring to show what it acts on (crimson) and what acts on it (ink), and to list the relationships on the right.`;
+      if (capEl) capEl.innerHTML = `<strong>Relationships across the ${groups.length} groups, ${areas.length} areas, and ${rows.size} subjects.</strong> Thicker curves show more relationships between two subjects. Select a subject or an area on the ring to show what it acts on (crimson) and what acts on it (ink), and to list those relationships in the panel.`;
     }
     const fromPicker = $('bok-explore-area');
     const toPicker = $('bok-explore-target');
@@ -1450,8 +1481,8 @@
       ${[...byLetter.entries()].map(([letter, list]) => `<tbody id="letter-${esc(letter)}"><tr class="bok-letter-row"><th colspan="3">${esc(letter)}</th></tr>${list.map((c) => {
         const row = homeOf.get(c.id);
         return `<tr class="bok-term" id="term-${esc(c.id)}" data-area="${esc(areaOf.get(row?.id)?.id || '')}" data-search="${esc([c.label, ...(c.aliases || []), c.definition].join(' ').toLowerCase())}">
-          <td>${conceptLink(c.id)}${c.aliases?.length ? `<span class="bok-alias">${c.aliases.map(esc).join(' · ')}</span>` : ''}</td>
-          <td>${esc(c.definition)}</td><td>${row ? `<a class="bok-mono" href="${subjectHref(row)}" title="${esc(row.label)}">${esc(row.code || row.label)}</a>` : ''}</td></tr>`;
+          <td>${conceptLink(c.id)}${c.scope === 'background' ? ' <span class="bok-tag" title="Background concept: assumed knowledge the taxonomy names but does not develop">background</span>' : ''}${c.aliases?.length ? `<span class="bok-alias">${c.aliases.map(esc).join(' · ')}</span>` : ''}</td>
+          <td>${esc(c.definition)}</td><td>${row ? `<a class="bok-gloss-subject" href="${subjectHref(row)}" title="${esc(row.label)}">${code(row.code || row.label)}</a>` : ''}</td></tr>`;
       }).join('')}</tbody>`).join('')}</table>`;
   }
 
@@ -2318,6 +2349,20 @@
     return false;
   }
 
+  // Phones stack table cells; copying each header onto its cells keeps the
+  // column meaning (Core subjects, Working knowledge, Concepts) visible.
+  function labelTables(scope) {
+    for (const table of scope.querySelectorAll('table.bok-table')) {
+      const heads = [...table.querySelectorAll('thead th')].map((th) => th.textContent.trim());
+      if (!heads.length) continue;
+      for (const tr of table.querySelectorAll('tbody tr')) {
+        const cells = tr.querySelectorAll(':scope > td');
+        if (cells.length !== heads.length) continue;
+        cells.forEach((td, i) => { if (heads[i]) td.dataset.label = heads[i]; });
+      }
+    }
+  }
+
   function render() {
     const v = state.view;
     const entry = ['area', 'subject', 'concept', 'landing'].includes(v);
@@ -2344,6 +2389,7 @@
       else { drawRoleSankey(); drawSymptomFlow(); }
     }
     syncFull();
+    labelTables(document.querySelector('.bok') || document);
     const target = v === 'glossary' && state.term ? document.getElementById(`term-${state.term}`)
       : v === 'guides' && state.guide ? document.getElementById(`guide-${state.guide}`) : null;
     if (target) {
