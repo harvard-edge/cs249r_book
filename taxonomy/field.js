@@ -104,7 +104,7 @@
       matches=model.concepts.filter(n=>n.family===activeFamily);
       $("topic-title").textContent=families.get(activeFamily).label;$("topic-question").textContent=families.get(activeFamily).question;
     } else {
-      $("topic-title").textContent="Choose a topic";$("topic-question").textContent="Open a topic on the left to browse its concepts.";
+      $("topic-title").textContent="Choose a topic";$("topic-question").textContent="Pick a topic to browse its concepts.";
     }
     $("results").textContent=query||activeFamily?`${matches.length} ${matches.length===1?"concept":"concepts"}`:"";
     $("list").innerHTML=matches.map(n=>`<div class="field-concept-row">${conceptButton(n.id)}<p>${escape(query?families.get(n.family).label:n.definition)}</p></div>`).join("")+(query&&!matches.length?'<p>No matching concepts. Try a shorter term or an abbreviation.</p>':"");
@@ -235,5 +235,8 @@
   const measureHeader=()=>root.style.setProperty("--field-top",`${Math.max(0,header?.getBoundingClientRect().bottom||0)+12}px`);
   if(header)new ResizeObserver(measureHeader).observe(header);
   window.addEventListener("resize",measureHeader);measureHeader();
+  // Opaque surfaces (sticky headings, inputs) take the page's own background, which changes with the theme toggle.
+  const matchPage=()=>{root.style.removeProperty("--field-bg");const bg=getComputedStyle(document.body).backgroundColor;if(bg&&!/rgba\(0, 0, 0, 0\)|transparent/.test(bg))root.style.setProperty("--field-bg",bg);};
+  new MutationObserver(()=>requestAnimationFrame(matchPage)).observe(document.body,{attributes:true,attributeFilter:["class"]});matchPage();
   renderTopics();restore();window.addEventListener("popstate",restore);
 })();
