@@ -392,7 +392,16 @@
     }).join('') + '</details>';
     const tree = $('bok-tree');
     const cur = tree.querySelector('[aria-current="page"]');
-    if (cur && tree.scrollHeight > tree.clientHeight) tree.scrollTop = Math.max(0, cur.offsetTop - tree.clientHeight / 3);
+    if (cur && tree.scrollHeight > tree.clientHeight) {
+      // Start the view at the current entry's group heading, so no row is cut at the top.
+      const head = cur.closest('.bok-tree-box > ul')?.previousElementSibling;
+      const fitsBelow = head && cur.offsetTop + cur.offsetHeight - head.offsetTop < tree.clientHeight - 32;
+      tree.scrollTop = Math.max(0, fitsBelow ? head.offsetTop - 4 : cur.offsetTop - tree.clientHeight / 3);
+    }
+    // The bottom fade shows only while there is more below.
+    const syncEnd = () => tree.classList.toggle('is-end', tree.scrollTop + tree.clientHeight >= tree.scrollHeight - 2);
+    if (!tree.dataset.endBound) { tree.addEventListener('scroll', syncEnd, { passive: true }); tree.dataset.endBound = '1'; }
+    syncEnd();
   }
 
   function crumbs(parts) {
@@ -1076,6 +1085,8 @@
       <g class="viz-layer-nodes">${nodesHtml}</g>
       ${legendHtml}
     </svg>`;
+    // On phones the frame scrolls sideways; open centered on the circle.
+    if (stageEl.scrollWidth > stageEl.clientWidth + 4) stageEl.scrollLeft = (stageEl.scrollWidth - stageEl.clientWidth) / 2;
   }
 
   function drawCouplingDsm(stageEl) {
@@ -2012,8 +2023,11 @@
       entry.rels.push(rel);
     }
 
-    const W = 960, H = 196;
+    // The canvas grows with the step count so labels keep their room; long paths
+    // stagger labels over three rows instead of two.
+    const rowsN = n > 10 ? 3 : 2;
     const padX = 72;
+    const W = Math.max(960, padX * 2 + (n - 1) * 70), H = 176 + rowsN * 20;
     const baseY = 118;
     const stepX = (i) => padX + (n > 1 ? (i / (n - 1)) * (W - padX * 2) : (W - padX * 2) / 2);
 
@@ -2038,8 +2052,7 @@
       const st = steps[i];
       const r = rows.get(st.subject);
       const x = stepX(i);
-      const stagger = i % 2 === 1;
-      const lblY = stagger ? baseY + 42 : baseY + 22;
+      const lblY = baseY + 22 + (i % rowsN) * 20;
       const shortName = r?.display_label || r?.label || st.subject;
       stationsHtml += `<g class="viz-path-station" style="--node:${gvar(r ? groupOfSubject(r.id) : undefined)}" data-path-id="${esc(lp.id)}" data-station-idx="${i}" role="button" tabindex="0" aria-label="Step ${i + 1}: ${esc(r?.code || '')} ${esc(r?.label || st.subject)}">
         <line x1="${x.toFixed(1)}" y1="${baseY + 7}" x2="${x.toFixed(1)}" y2="${lblY - 9}" stroke="var(--bok-line-strong)" stroke-width="0.8"/>

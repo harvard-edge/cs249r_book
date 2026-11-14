@@ -131,10 +131,9 @@
     return { w, h, width, contain, cover: Math.max(width, availH / h) };
   }
   function initialZoom(f) {
-    // Embedded in a chapter, keep the full-width overview. On the standalone
-    // page, fill the frame and open at a readable size; the reader pans.
-    if (document.body.classList.contains("embedded-map")) return f.width;
-    return Math.min(1, Math.max(f.cover, 0.62));
+    // Open on the whole-map overview, fitted to the frame's width, so a first
+    // visit shows the shape of the volume; readers zoom in from there.
+    return f.width;
   }
   function setZoom(value, mode = "manual") {
     const svg = $("concept-map")?.querySelector("svg");
@@ -144,6 +143,17 @@
     const lo = Math.min(f.contain, 1) * 0.75,
       hi = Math.max(4, f.width * 8);
     zoom = Math.min(hi, Math.max(lo, value));
+    // On the standalone page the frame hugs the overview instead of leaving a
+    // blank band under a short, wide map; any other zoom restores the full frame.
+    const frame = document.querySelector(".map-frame");
+    if (frame && !document.body.classList.contains("embedded-map")) {
+      frame.style.height = "";
+      if (mode === "initial") {
+        const cs = getComputedStyle(frame);
+        const want = Math.round(f.h * zoom + parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom) + 20);
+        if (want < frame.clientHeight) frame.style.height = `${want}px`;
+      }
+    }
     svg.style.width = `${Math.round(f.w * zoom)}px`;
     svg.style.height = `${Math.round(f.h * zoom)}px`;
     svg.style.minWidth = "0";
