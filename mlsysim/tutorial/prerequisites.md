@@ -75,13 +75,13 @@ print('All checks passed.')
 "
 ```
 
-Expected output (approximate):
+Expected output:
 
 ```
-mlsysim v0.1.1
-ResNet-50 on A100: 0.XX ms, bottleneck=Memory
-Hardware: XX accelerators
-Models:   XX workloads
+mlsysim v0.3.1
+ResNet-50 on A100: 0.07 ms, bottleneck=Compute
+Hardware: 52 accelerators
+Models:   44 workloads
 All checks passed.
 ```
 
@@ -117,7 +117,7 @@ manual source installs).
 
 **Fix:**
 ```bash
-pip install pint>=0.23 pydantic>=2.0 numpy>=1.24
+pip install "pint>=0.24.4" "pydantic>=2.10.5" "numpy>=2.0" "typer>=0.25.1" "rich>=15.0.0" "pyyaml>=6.0"
 ```
 
 ### 3. `ImportError: cannot import name 'Hardware' from 'mlsysim'`

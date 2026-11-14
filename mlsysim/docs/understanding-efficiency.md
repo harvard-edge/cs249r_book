@@ -1,18 +1,23 @@
-# Understanding the Efficiency Parameter
+---
+title: "Understanding the Efficiency Parameter"
+subtitle: "Why compute-bound solvers expose an empirical utilization factor (η) alongside exact Roofline bounds."
+---
 
-> Every equation in mlsysim needs one number it cannot derive from first
-> principles. That number is **efficiency**.
+> Compute-bound latency equations in `mlsysim` take one empirical parameter they
+> do not invent from microarchitectural heuristics: **efficiency** ($\eta$).
 
 ---
 
 ## What Efficiency Is
 
-The efficiency parameter, written as **eta** in equations and `efficiency` in code,
-is the ratio of achieved FLOPS to peak FLOPS. MLSys·im exposes it on every
-solver where the compute term depends on achieved FLOP/s, including
-`Engine.solve()`, `SingleNodeModel`, `ServingModel`, `DistributedModel`,
-`ContinuousBatchingModel`, `ServingCapacityModel`, and the optimizers that call
-those models.
+The efficiency parameter, written as $\eta$ (`eta`) in equations and `efficiency` in code,
+is the ratio of achieved Tensor Core/ALU throughput to peak datasheet FLOP/s during
+compute-bound execution. Exact byte-accounting, memory capacity, TCO, carbon/water,
+reliability, and kinematic safety equations do **not** depend on $\eta$; MLSys·im
+exposes `efficiency` specifically on solvers whose compute term depends on achieved
+FLOP/s, including `Engine.solve()`, `SingleNodeModel`, `ServingModel`,
+`DistributedModel`, `ContinuousBatchingModel`, `ServingCapacityModel`, and the
+optimizers that call those models.
 
 ```
 eta = Achieved_FLOPS / Peak_FLOPS
@@ -53,7 +58,7 @@ eta actually absorbs:
 | **Pipeline bubbles** | In pipeline-parallel training, micro-batch scheduling leaves some stages idle while others compute. The bubble fraction depends on the number of micro-batches relative to pipeline stages. |
 | **Communication overlap** | Modern training overlaps AllReduce with backward computation. How well this overlap works depends on network bandwidth, gradient sizes, and scheduling. |
 | **Framework overhead** | Python GIL contention, graph compilation time (for torch.compile or XLA), operator dispatch overhead, and autograd bookkeeping all steal cycles from useful compute. |
-| **Attention implementation** | FlashAttention achieves 2-4x the throughput of naive attention by fusing operations and reducing HBM reads. The choice of attention kernel alone can shift eta by 0.15-0.25. |
+| **Attention implementation** | FlashAttention achieves 2–4× the throughput of materialized attention by tiling $Q, K, V$ in SRAM and avoiding $\mathcal{O}(S^2)$ HBM reads/writes (`EfficiencyModel` in `mlsysim.solvers` computes the exact Dao et al. SRAM IO-complexity ceiling for attention, while $\eta$ captures residual kernel efficiency). |
 | **Quantization runtime overhead** | INT8/INT4 kernels may not achieve the same fraction of peak as FP16 GEMM, especially for non-standard shapes or when dequantization is on the critical path. |
 | **Data loader stalls** | If the CPU cannot tokenize, augment, and transfer data to the GPU fast enough, the GPU sits idle between batches. |
 | **Garbage collection pauses** | Python's GC and CUDA's memory allocator can cause periodic stalls, especially with large batch sizes and frequent tensor allocation. |
@@ -168,7 +173,7 @@ result = Engine.solve(
     hardware=Hardware.Cloud.B200,
     batch_size=32,
     precision="fp16",
-    efficiency=0.423  # calibrated from H100 measurement
+    efficiency=0.422  # calibrated from H100 measurement above
 )
 ```
 

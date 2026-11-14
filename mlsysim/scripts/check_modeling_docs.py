@@ -26,6 +26,8 @@ from numpydoc.docscrape import NumpyDocString
 from numpydoc.validate import validate
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 
 def _public_function(node):

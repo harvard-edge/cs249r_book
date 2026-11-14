@@ -19,31 +19,14 @@ parameters affect training time.
 ```{python}
 #| echo: false
 #| output: asis
-import sys
-from pathlib import Path
-
-for candidate in [Path.cwd(), *Path.cwd().parents]:
-    pkg_dir = candidate / "mlsysim"
-    if (pkg_dir / "mlsysim" / "__init__.py").exists():
-        if str(pkg_dir) not in sys.path:
-            sys.path.insert(0, str(pkg_dir))
-        for mod in list(sys.modules.keys()):
-            if mod == "mlsysim" or mod.startswith("mlsysim."):
-                del sys.modules[mod]
-        break
-
 import mlsysim
 
-def print_tier_table(title, tier_class):
-    print(f"### {title}")
-    print("| Tier | RAM | Storage | Latency Budget |")
-    print("|:---|:---:|:---:|:---:|")
-    for attr_name in sorted(dir(tier_class)):
-        if attr_name.startswith("_"): continue
-        item = getattr(tier_class, attr_name)
-        if "DeploymentTier" in type(item).__name__:
-            print(f"| **{item.name}** | {item.ram:~P} | {item.storage:~P} | {item.typical_latency_budget:~P} |")
-    print("\n")
+_c_res = mlsysim.Systems.Clusters.Research_256
+_c_1k = mlsysim.Systems.Clusters.Training_1K
+_n_clusters = len(mlsysim.Systems.Clusters.list())
+_bw_100g = mlsysim.Systems.Fabrics.Ethernet_100G.bandwidth.to("GB/s").magnitude
+_bw_ndr = mlsysim.Systems.Fabrics.InfiniBand_NDR.bandwidth.to("GB/s").magnitude
+_bw_ratio = _bw_ndr / _bw_100g
 
 def print_node_table(title, node_class):
     print(f"### {title}")
@@ -52,7 +35,7 @@ def print_node_table(title, node_class):
     for attr_name in sorted(dir(node_class)):
         if attr_name.startswith("_"): continue
         item = getattr(node_class, attr_name)
-        if "Node" in type(item).__name__ and not "HardwareNode" in type(item).__name__:
+        if "Node" in type(item).__name__ and "HardwareNode" not in type(item).__name__:
             host_cpu = item.host_cpu if getattr(item, "host_cpu", None) is not None else "---"
             host_memory = f"{item.host_memory:~P}" if item.host_memory is not None else "---"
             print(f"| **{item.name}** | {item.accelerator.name} | {item.accelerators_per_node} | {host_cpu} | {host_memory} | {item.intra_node_bw:~P} |")
@@ -70,6 +53,21 @@ def print_rack_table(title, rack_class):
             print(f"| **{item.name}** | {item.node.name} | {item.nodes_per_rack} | {item.accelerator_count} | {item.accelerator_power:~P} | {support_power} | {item.total_power:~P} |")
     print("\n")
 
+def print_fabric_table(title, fabric_class):
+    print(f"### {title}")
+    print("| Fabric | Topology | Per-Port Bandwidth | Latency | Oversubscription |")
+    print("|:---|:---:|:---:|:---:|:---:|")
+    for attr_name in sorted(dir(fabric_class)):
+        if attr_name.startswith("_"): continue
+        item = getattr(fabric_class, attr_name)
+        if "NetworkFabric" in type(item).__name__:
+            topo = getattr(item, "topology", None) or "---"
+            bw = f"{item.bandwidth.to('GB/s'):~.1f}" if item.bandwidth is not None else "---"
+            lat = f"{item.latency.to('us'):~.1f}" if item.latency is not None else "---"
+            over = f"{item.oversubscription_ratio:g}:1" if getattr(item, "oversubscription_ratio", None) else "1:1"
+            print(f"| **{item.name}** | {topo} | {bw} | {lat} | {over} |")
+    print("\n")
+
 def print_fleet_table(title, fleet_class):
     print(f"### {title}")
     print("| Cluster Name | Node Type | Node Count | Total GPUs | Fabric |")
@@ -81,12 +79,42 @@ def print_fleet_table(title, fleet_class):
             print(f"| **{item.name}** | {item.node.name} | {item.count} | {item.total_accelerators} | {item.fabric.name} |")
     print("\n")
 
+def print_pod_table(title, pod_class):
+    print(f"### {title}")
+    print("| Pod Envelope | Chips | Total HBM | Power Envelope |")
+    print("|:---|:---:|:---:|:---:|")
+    for attr_name in sorted(dir(pod_class)):
+        if attr_name.startswith("_"): continue
+        item = getattr(pod_class, attr_name)
+        if "PodEnvelope" in type(item).__name__:
+            mem = f"{item.memory.to('TB'):~.1f}" if item.memory is not None else "---"
+            pwr = f"{item.power.to('MW'):~.2f}" if item.power is not None else "---"
+            print(f"| **{item.name}** | {item.chips:,} | {mem} | {pwr} |")
+    print("\n")
+
+def print_storage_table(title, storage_class):
+    print(f"### {title}")
+    print("| Storage Subsystem | Media / Tech | Capacity | Sequential BW | Latency |")
+    print("|:---|:---|:---:|:---:|:---:|")
+    for attr_name in sorted(dir(storage_class)):
+        if attr_name.startswith("_"): continue
+        item = getattr(storage_class, attr_name)
+        if "StorageSubsystem" in type(item).__name__:
+            tech = getattr(item, "storage_tech", None) or getattr(item, "media", None) or "---"
+            cap = f"{item.capacity:~P}" if item.capacity is not None else "---"
+            bw = f"{item.bandwidth:~P}" if item.bandwidth is not None else "---"
+            lat = f"{item.latency:~P}" if item.latency is not None else "---"
+            print(f"| **{item.name}** | {tech} | {cap} | {bw} | {lat} |")
+    print("\n")
+
 reg = getattr(mlsysim, 'Systems', None)
 if reg:
-    if hasattr(reg, 'Tiers'): print_tier_table("Deployment Tiers", reg.Tiers)
     if hasattr(reg, 'Nodes'): print_node_table("Reference Nodes", reg.Nodes)
     if hasattr(reg, 'Racks'): print_rack_table("Reference Racks", reg.Racks)
+    if hasattr(reg, 'Fabrics'): print_fabric_table("Network Fabrics", reg.Fabrics)
     if hasattr(reg, 'Clusters'): print_fleet_table("Production Clusters", reg.Clusters)
+    if hasattr(reg, 'Pods'): print_pod_table("TPU Pod Envelopes", reg.Pods)
+    if hasattr(reg, 'Storage'): print_storage_table("Storage Subsystems", reg.Storage)
 else:
     print("Error: Systems registry not found in mlsysim.")
 ```
@@ -111,15 +139,15 @@ uses the same node count, accelerator count, support power, and total power.
 
 ### Why the Fabric Matters
 
-Compare the two clusters above: both use DGX H100 nodes, but one uses 100 GbE while the other uses InfiniBand NDR. The 20x bandwidth difference changes scaling efficiency substantially. Try both in the [Scaling to 1000 GPUs tutorial](../tutorials/06_scaling_1000_gpus.qmd) to see the effect.
+Across the `{python} _n_clusters` registered cluster tiers, interconnect choice directly sets scaling efficiency. For example, `{python} _c_res.name` pairs `{python} _c_res.node.name` servers over 100 GbE (`{python} f"{_bw_100g:.1f} GB/s"` per link), whereas `{python} _c_1k.name` pairs `{python} _c_1k.node.name` servers over InfiniBand NDR (`{python} f"{_bw_ndr:.0f} GB/s"` per link, a `{python} f"{_bw_ratio:.0f}×"` per-port step-up across `{python} _c_1k.node.nics_per_node` NICs per node). Try both in the [Scaling to 1000 GPUs tutorial](../tutorials/06_scaling_1000_gpus.qmd) to see how collective communication latency shifts.
 
-### Deployment Tiers
+### Deployment Envelopes (`Platforms`)
 
-The deployment tiers (Cloud, Edge, Mobile, Tiny) define the resource envelope for different deployment scenarios. Each tier specifies a RAM budget, storage capacity, and latency target, and these constraints determine which models are feasible.
+Abstract deployment envelopes (Cloud, Edge, Mobile, TinyML RAM/storage/latency ranges, formerly `Systems.Tiers`) now live in their own registry: see the [Platforms Zoo](platforms.qmd).
 
 ### Textbook Connection
 
-The *Distributed Training* and *Collective Communication* chapters use fleet configurations to analyze scaling efficiency and communication bottlenecks. The *Compute Infrastructure* chapter covers the hardware composition of these clusters.
+[Vol II · Ch 3: Network Fabrics](https://mlsysbook.ai/vol2/03_network_fabrics/03_network_fabrics.html) ([Lab](https://mlsysbook.ai/labs/vol2/lab_03_communication/) · [Slides](https://mlsysbook.ai/slides/vol2.html#ch-03)), [Vol II · Ch 4: Data Storage](https://mlsysbook.ai/vol2/04_data_storage/04_data_storage.html) ([Lab](https://mlsysbook.ai/labs/vol2/lab_04_data_storage/) · [Slides](https://mlsysbook.ai/slides/vol2.html#ch-04)), [Vol II · Ch 5: Collective Communication](https://mlsysbook.ai/vol2/05_collective_communication/05_collective_communication.html) ([Lab](https://mlsysbook.ai/labs/vol2/lab_05_collective_communication/) · [Slides](https://mlsysbook.ai/slides/vol2.html#ch-05)), and [Vol II · Ch 6: Distributed Training](https://mlsysbook.ai/vol2/06_distributed_training/06_distributed_training.html) ([Lab](https://mlsysbook.ai/labs/vol2/lab_06_dist_train/) · [Slides](https://mlsysbook.ai/slides/vol2.html#ch-06)) use these fleet, fabric, and storage configurations to analyze scaling efficiency and checkpoint I/O bottlenecks.
 
 ---
 

@@ -117,7 +117,7 @@ bottleneck is most visible there. LLM training on tokenized text has a tiny data
 JPEG decoding, resizing, and augmentation can demand 10–100× more CPU work per sample,
 and that is where the GPU starves.
 
-First, establish how fast the `{python} _hw.name` processes a `{python} _model.name` step at batch `{python} _bs` in isolation, with no
+First, establish how fast the `{python} _hw.name` processes a `{python} _model.name` forward pass at batch `{python} _bs` in isolation (note: a full forward + backward training step takes ~3× longer on the GPU, yet is still far faster than CPU JPEG decoding), with no
 data loading and no preprocessing, only compute:
 
 ```{python}
@@ -215,11 +215,9 @@ prefetching.
 
 ---
 
-## 5. Batch Size Sweep: Finding the Crossover
+## 5. Batch Size Sweep: Watching Utilization Collapse
 
-A sweep over batch sizes locates the point where the CPU becomes the binding constraint. At
-small batches, the GPU is slower and data arrives in time. At large batches, the GPU
-becomes more efficient but the CPU falls behind:
+A sweep over batch sizes shows how CPU transformation dominates across the entire operating range. Even at batch size 1, decoding a 500 KB JPEG at 2 GB/s takes longer than the A100's single-image pass, and as larger batches amortize GPU weight loads and dispatch overhead, the GPU finishes each image faster while the CPU scales linearly:
 
 ```{python}
 rows = []
@@ -248,12 +246,7 @@ crossover = next(r[0] for r in rows if r[3] == "Transformation")
 info("Crossover", First_CPU_bound_batch=crossover)
 ```
 
-The crossover sits at batch size **`{python} crossover`**. At batch size 1 (`{python} f"{_p1.latency.to('ms').magnitude:.2f} ms"` GPU step vs. `{python} f"{_t1.transform_time.to('ms').magnitude:.2f} ms"` CPU transform) and batch size 2, the CPU keeps
-up and the GPU runs at `{python} f"{_t1.accelerator_utilization:.0%}"` duty cycle, yet by batch size `{python} crossover` Wall 9 binds and
-never lets go. CPU transform time is strictly proportional to batch size. The GPU step is
-a fixed dispatch overhead plus a per-sample compute cost, and that fixed overhead only
-shields the GPU while batches are tiny. Once it is amortized, both costs grow linearly, so
-the GPU duty cycle levels off near `{python} f"{_t1024.accelerator_utilization:.1%}"` (at batch 1024: `{python} f"{_p1024.latency.to('ms').magnitude:.2f} ms"` GPU step vs. `{python} f"{_t1024.transform_time.to('ms').magnitude:.1f} ms"` CPU transform) instead of falling to zero.
+Wall 9 binds immediately at batch size **`{python} crossover`**. At batch size 1 (`{python} f"{_p1.latency.to('ms').magnitude:.2f} ms"` GPU step including dispatch overhead vs. `{python} f"{_t1.transform_time.to('ms').magnitude:.2f} ms"` CPU transform), the GPU already sits at `{python} f"{_t1.accelerator_utilization:.0%}"` duty cycle because HBM weight loading and hardware dispatch briefly slow the GPU per image. Once larger batches amortize those fixed costs and push ResNet-50 onto the A100's compute ceiling, both GPU and CPU times grow linearly with batch size, so the GPU duty cycle settles near `{python} f"{_t1024.accelerator_utilization:.1%}"` (at batch 1024: `{python} f"{_p1024.latency.to('ms').magnitude:.2f} ms"` GPU step vs. `{python} f"{_t1024.transform_time.to('ms').magnitude:.1f} ms"` CPU transform).
 
 ---
 
@@ -284,6 +277,18 @@ Doubling workers from 8 to 16 doubles active GPU duty cycle from `{python} f"{_u
 (Wall 8) or PCIe bandwidth. The lesson is to check *all three stages* of the pipeline every time.
 
 ---
+
+## Where This Clicks in the Textbook
+
+```{python}
+#| echo: false
+#| output: asis
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path("../scripts").resolve()))
+from curriculum_links import render_tutorial_links
+print(render_tutorial_links("04_starving_the_gpu"))
+```
 
 ## Next Steps
 

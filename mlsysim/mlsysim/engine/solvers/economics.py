@@ -44,7 +44,7 @@ class SustainabilityModel(ForwardModel):
     - per-device power = idle_fraction * TDP + dynamic_fraction * TDP * MFU.
     - IT energy = device power * accelerator count * duration.
     - facility energy applies PUE; operational carbon applies grid carbon
-      intensity to facility energy; water applies WUE to facility energy.
+      intensity to facility energy; water applies on-site WUE to IT energy.
     """
 
     requires = ("fleet",)
@@ -64,8 +64,9 @@ class SustainabilityModel(ForwardModel):
         power is an energy-proportionality model
         (``idle_fraction * TDP + dynamic_fraction * TDP * MFU``), scaled to
         the fleet, integrated over the duration, then taxed by PUE for
-        facility energy. Carbon and water apply the regional grid's carbon
-        intensity and WUE to facility (post-PUE) energy.
+        facility energy. Operational carbon applies the regional grid's carbon
+        intensity to facility (post-PUE) energy, whereas water applies on-site
+        WUE (L / kWh_IT) to pre-PUE IT equipment energy.
 
         Parameters
         ----------

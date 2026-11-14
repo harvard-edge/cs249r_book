@@ -1,4 +1,7 @@
-# MLSysIM Data Model
+---
+title: "MLSys·im Data Model"
+subtitle: "Registry taxonomy, physical unit invariants, and ownership rules across the 12 Zoos."
+---
 
 Twelve **zoos** (typed registries) plus support layers. Book LEGO cells and
 tutorials should prefer zoos + `mlsysim.physics.*` + explicit operands.
@@ -15,7 +18,7 @@ that populate Layers A–D and Layer F of that stack.
 
 | Zoo | Registry | Role |
 |-----|----------|------|
-| Hardware | `Hardware.Cloud.*`, `Hardware.Edge.*`, `Hardware.Mobile.*`, `Hardware.Tiny.*`, `Hardware.Workstation.*`, `Hardware.Tech.*` | Chip/board/appliance specs (datasheet truth) plus technology-class tiers. **Canonical paths only** (no bare `Hardware.H100`). |
+| Hardware | `Hardware.Cloud.*`, `Hardware.Edge.*` (aliased as `Hardware.Embodied.*`), `Hardware.Mobile.*`, `Hardware.Tiny.*`, `Hardware.Workstation.*`, `Hardware.Tech.*` | Chip/board/appliance specs (datasheet truth) plus shared technology-class tiers. **Canonical paths only** (no bare `Hardware.H100`). |
 | Embodied | `Embodied.Quadruped.*`, `Embodied.Humanoid.*`, `Embodied.Manipulator.*`, `Embodied.Drone.*`, `Embodied.AMR.*`, `Embodied.Vehicle.*`, `Embodied.MobileManipulator.*`, `Embodied.ContinuousProcess.*` | Cyber-physical machine platforms and archetypes across Physical AI classes. |
 | Sensors | `Sensors.Camera.*`, `Sensors.LiDAR.*`, `Sensors.IMU.*`, `Sensors.SafetyScanner.*`, `Sensors.SafetyLightCurtain.*` | Perceptual and safety-rated sensing hardware specifications. |
 | Actuators | `Actuators.HarmonicDrive.*`, `Actuators.QuasiDirectDrive.*`, `Actuators.Servo.*`, `Actuators.FramelessMotor.*`, `Actuators.PandaClassJoint.*`, `Actuators.HubMotor.*`, `Actuators.SafetyRelay.*` | Joint actuators, drivetrain motors, and safety switching specifications. |
@@ -23,8 +26,8 @@ that populate Layers A–D and Layer F of that stack.
 | Models | `Models.*` | Workloads and architectures (parameters, layers, FLOPs). |
 | Datasets | `Datasets.*` | Data zoo: ImageNet, MNIST, CIFAR, etc. |
 | Platforms | `Platforms.*` | Abstract deployment envelopes (RAM, storage, latency ranges). Replaces `Systems.Tiers`. |
-| Infrastructure | `Infrastructure.Grids.*`, `Infrastructure.Datacenters.*`, `Infrastructure.Pricing.*`, `Infrastructure.Capacity.*` | Site/energy/economics layer: utility grid, facility PUE, pricing, and capacity facts. **Not** GPU fleets or network fabrics. |
-| Systems | `Systems.Nodes.*`, `Systems.Racks.*`, `Systems.Fabrics.*`, `Systems.Clusters.*`, `Systems.Pods.*`, `Systems.Storage.*` | Composed physical systems and topology. Fleets live in `Systems.Clusters` (type `Fleet`); rack-level aggregates live in `Systems.Racks`. |
+| Infrastructure | `Infrastructure.Grids.*`, `Infrastructure.Datacenters.*`, `Infrastructure.FacilityCooling.*`, `Infrastructure.Pricing.*`, `Infrastructure.Capacity.*`, `Infrastructure.Racks.*` | Site/energy/economics layer: utility grid, facility PUE/WUE, cooling loops, pricing, and capacity facts. **Not** GPU fleets or network fabrics. |
+| Systems | `Systems.Nodes.*`, `Systems.Racks.*`, `Systems.Fabrics.*`, `Systems.Clusters.*`, `Systems.Pods.*`, `Systems.Storage.*`, `Systems.SwitchFabric.*`, `Systems.NetworkEnergy.*` | Composed physical systems and topology. Fleets live in `Systems.Clusters` (type `Fleet`); rack-level aggregates live in `Systems.Racks`. |
 | Ops | `Ops.Monitoring.*`, `Ops.RuntimeOverheads.*`, `Ops.MemoryProtection.*`, `Ops.TrainingRunOverheads.*`, `Ops.Preemption.*` | Operational policies, runtime dispatch/memory overheads, thresholds, and goodput-loss profiles. |
 | Scenarios | `Scenarios.*` | Executable workload + system + constraint bundles. |
 
@@ -140,4 +143,4 @@ decide the namespace; the type of thing being modeled does.
 4. Use `ReferenceStats.*` for non-executable anchors. Do not route reference statistics through `Scenarios.*`.
 5. Never retain compatibility shims (`Hardware.H100`, `Infrastructure.Quebec`, `Systems.Cloud`, etc.); always reference canonical zoo paths directly.
 
-See `PROVENANCE.md` and `docs/contributing.qmd` for package-side provenance rules.
+See [provenance.qmd](provenance.qmd) and [contributing.qmd](contributing.qmd) for package-side provenance rules.
