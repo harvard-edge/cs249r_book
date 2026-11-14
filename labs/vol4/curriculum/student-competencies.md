@@ -123,15 +123,15 @@ This card serves as the concrete, observable sign-off sheet for students and ins
 
 | Competency | Signed off in | Due |
 |:---|:---|:---:|
-| **A1** Plant Kinematics & Safe Envelope | [Lab 1: The Digital Twin](../labs/lab-01-digital-twin.md) | Week 3 |
-| **A2** Multi-Modal Sensing & Calibration | [Lab 3: Learned Control with VLAs](../labs/lab-03-learned-control.md) | Week 6 |
-| **A3** Feedback Timing & Latency | Clock alignment and stale-telemetry evidence in [Lab 2](../labs/lab-02-sim-to-real.md); full visual-feedback-loop evidence in [Lab 4](../labs/lab-04-real-data-and-fine-tuning.md) | Weeks 4 and 8 |
-| **B1** Physical Dataset Engineering | [Lab 4: Real-World Data Collection & Fine-Tuning](../labs/lab-04-real-data-and-fine-tuning.md) | Week 8 |
-| **B2** Deterministic Baseline Benchmarking | [Lab 3](../labs/lab-03-learned-control.md) | Week 6 |
-| **B3** Edge Model Profiling & Optimization | Export/profile in [Lab 3](../labs/lab-03-learned-control.md); student training/validation evidence in [Lab 4](../labs/lab-04-real-data-and-fine-tuning.md), retained in the final packet | Weeks 6 and 8 |
-| **C1** Closed-Loop Physical Action | [Lab 4](../labs/lab-04-real-data-and-fine-tuning.md) | Week 8 |
-| **C2** Action Chunk Dynamics | [Lab 5: Stress-Testing](../labs/lab-05-stress-testing.md) | Week 9 |
-| **C3** Disturbance Recovery & Replanning | [Lab 5](../labs/lab-05-stress-testing.md) | Week 9 |
-| **D1** Hardware Authority Routing | [Lab 6: Safety Governor](../labs/lab-06-safety-governor.md) (first traced in Getting Started) | Week 11 |
-| **D2** Real-Time Safety Governor & Cutoff | [Lab 6](../labs/lab-06-safety-governor.md) | Week 11 |
-| **D3** Physical Release Defense | [Capstone](../labs/lab-capstone-studio.md) | Week 14 |
+| **A1** Plant Kinematics & Safe Envelope | [Lab 1: Forward Kinematics](../labs/lab1.md); workspace and singularities in [Lab 3](../labs/lab3.md) | Weeks 2 and 4 |
+| **A2** Multi-Modal Sensing & Calibration | Not yet assigned to a lab (staff) | TBD |
+| **A3** Feedback Timing & Latency | Stop-trigger latency in [Lab 2](../labs/lab2.md); VLA execution time and RPC latency in [Lab 5](../labs/lab5.md) | Weeks 3 and 6 |
+| **B1** Physical Dataset Engineering | [Lab 6: Real Data and Fine-Tuning](../labs/lab6.md) | Week 8 |
+| **B2** Deterministic Baseline Benchmarking | Not yet assigned to a lab (staff) | TBD |
+| **B3** Edge Model Profiling & Optimization | Latency benchmark in [Lab 4](../labs/lab4.md); execution time on the constrained hardware in [Lab 5](../labs/lab5.md) | Weeks 5 and 6 |
+| **C1** Closed-Loop Physical Action | [Lab 5](../labs/lab5.md); fine-tuned policy on the robot in [Lab 6](../labs/lab6.md) | Weeks 6 and 8 |
+| **C2** Action Chunk Dynamics | [Lab 7: Robustness Testing](../labs/lab7.md) | Week 9 |
+| **C3** Disturbance Recovery & Replanning | Not yet assigned to a lab (staff) | TBD |
+| **D1** Hardware Authority Routing | [Lab 2: The Safety Governor](../labs/lab2.md) | Week 3 |
+| **D2** Real-Time Safety Governor & Cutoff | [Lab 2](../labs/lab2.md) | Week 3 |
+| **D3** Physical Release Defense | [Capstone](../labs/capstone.md) | Week 13 |

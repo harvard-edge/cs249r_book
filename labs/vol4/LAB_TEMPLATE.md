@@ -1,6 +1,6 @@
 # Volume IV Lab Template
 
-Every Volume IV lab has five sections in this order. Copy the block below to `labs/lab-NN-slug.md` to start a new lab.
+Every Volume IV lab has five sections in this order. Copy the block below to `labs/labN.md` to start a new lab.
 
 | Section | Written by | Purpose |
 |:---|:---|:---|
