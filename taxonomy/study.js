@@ -1518,7 +1518,7 @@
 
     const roleCol = layoutCol(rolesOrdered.map((x) => ({ id: x.role.id, label: x.role.label, w: x.totalW, role: x.role })), (x) => x.w, 10, 9);
     const grpCol = layoutCol(orderedGroups.map((gr) => ({ id: gr.id, label: gr.label, code: gr.code, w: groupW.get(gr.id) || 1 })), (x) => x.w, 20, 14);
-    const areaCol = layoutCol(orderedAreas.map((ar) => ({ id: ar.id, label: ar.display_label || ar.label, code: ar.code, w: areaW.get(ar.id) || 1 })), (x) => x.w, 8, 8);
+    const areaCol = layoutCol(orderedAreas.map((ar) => ({ id: ar.id, label: ar.display_label || ar.label, code: ar.code, group: ar.group, w: areaW.get(ar.id) || 1 })), (x) => x.w, 8, 8);
 
     const activeRole = state.activeRole;
     const activeArea = state.activeAreaRole;
@@ -1531,8 +1531,16 @@
       }
     }
 
-    // Build Role -> Group ribbons.
-    let ribbonsHtml = '';
+    // Build Role -> Group ribbons. Paths go into z-order buckets so core ribbons
+    // paint over working ones and faded context paints underneath everything.
+    const layers = { dim: '', working: '', core: '' };
+    const put = (cls, html) => {
+      const k = cls.includes('is-dim') ? 'dim' : cls.includes('is-working') ? 'working' : 'core';
+      layers[k] += html;
+    };
+    const roleLabel = new Map(rolesOrdered.map(({ role }) => [role.id, role.label]));
+    const groupLabel = new Map(orderedGroups.map((gr) => [gr.id, gr.label]));
+    const tip = (roleId, grpId, kind, areaLabel) => `<title>${esc(roleLabel.get(roleId) || roleId)} → ${esc(groupLabel.get(grpId) || grpId)}${areaLabel ? ` · ${esc(areaLabel)}` : ''} (${kind === 'core' ? 'core' : 'working knowledge'})</title>`;
     for (const lnk of rgLinks) {
       const rBox = roleCol.boxes.get(lnk.roleId);
       const gBox = grpCol.boxes.get(lnk.groupId);
@@ -1542,19 +1550,22 @@
       const d = sankeyRibbon(xRole + barW, y0, xGrp, y1, h0, h1);
       rBox.outY += h0;
       gBox.inY += h1;
+      const rib = ` style="--rib:var(--grp-${esc(lnk.groupId)}, var(--bok-ink))"`;
+      const t = tip(lnk.roleId, lnk.groupId, lnk.kind);
       let cls = `viz-ribbon${lnk.kind === 'working' ? ' is-working' : ''}`;
       if (activeRole) {
         cls += lnk.roleId === activeRole ? ' is-active' : ' is-dim';
-        ribbonsHtml += `<path class="${cls}" d="${d}" data-sankey-role="${esc(lnk.roleId)}"/>`;
+        put(cls, `<path class="${cls}" d="${d}"${rib} data-sankey-role="${esc(lnk.roleId)}">${t}</path>`);
       } else if (activeArea) {
-        ribbonsHtml += `<path class="${cls} is-dim" d="${d}" data-sankey-role="${esc(lnk.roleId)}"/>`;
+        put(`${cls} is-dim`, `<path class="${cls} is-dim" d="${d}"${rib} data-sankey-role="${esc(lnk.roleId)}">${t}</path>`);
         const wA = gaMap.get(`${lnk.roleId}__${lnk.groupId}__${activeArea}__${lnk.kind}`) || 0;
         if (wA > 0) {
           const dSub = sankeyRibbon(xRole + barW, y0, xGrp, y1, (h0 * wA) / lnk.w, (h1 * wA) / lnk.w);
-          ribbonsHtml += `<path class="viz-ribbon is-active${lnk.kind === 'working' ? ' is-working' : ''}" d="${dSub}" data-sankey-role="${esc(lnk.roleId)}"/>`;
+          const sc = `viz-ribbon is-active${lnk.kind === 'working' ? ' is-working' : ''}`;
+          put(sc, `<path class="${sc}" d="${dSub}"${rib} data-sankey-role="${esc(lnk.roleId)}">${t}</path>`);
         }
       } else {
-        ribbonsHtml += `<path class="${cls}" d="${d}" data-sankey-role="${esc(lnk.roleId)}"/>`;
+        put(cls, `<path class="${cls}" d="${d}"${rib} data-sankey-role="${esc(lnk.roleId)}">${t}</path>`);
       }
     }
 
@@ -1575,7 +1586,7 @@
             let cls = `viz-ribbon${kind === 'working' ? ' is-working' : ''}`;
             if (activeRole) cls += role.id === activeRole ? ' is-active' : ' is-dim';
             else if (activeArea) cls += ar.id === activeArea ? ' is-active' : ' is-dim';
-            ribbonsHtml += `<path class="${cls}" d="${d}" data-sankey-role="${esc(role.id)}" data-sankey-area="${esc(ar.id)}"/>`;
+            put(cls, `<path class="${cls}" d="${d}" style="--rib:var(--grp-${esc(gr.id)}, var(--bok-ink))" data-sankey-role="${esc(role.id)}" data-sankey-area="${esc(ar.id)}">${tip(role.id, gr.id, kind, `${ar.code} ${ar.display_label || ar.label}`)}</path>`);
           }
         }
       }
@@ -1596,10 +1607,11 @@
     }
     for (const [, b] of grpCol.boxes) {
       const cy = b.y + b.h / 2;
-      const pillW = b.item.label.length * 7.2 + 14;
+      const pillW = b.item.label.length * 7.2 + 26;
       nodesHtml += `<g>
-        <rect x="${xGrp}" y="${b.y.toFixed(1)}" width="${barW}" height="${b.h.toFixed(1)}" fill="var(--bok-ink)"/>
+        <rect x="${xGrp}" y="${b.y.toFixed(1)}" width="${barW}" height="${b.h.toFixed(1)}" fill="var(--grp-${esc(b.item.id)}, var(--bok-ink))"/>
         <rect x="${(xGrp - pillW - 5).toFixed(1)}" y="${(cy - 6.5).toFixed(1)}" width="${pillW.toFixed(1)}" height="13" rx="2" fill="var(--bok-surface)" fill-opacity="0.92"/>
+        <rect x="${(xGrp - pillW + 1).toFixed(1)}" y="${(cy - 3.5).toFixed(1)}" width="7" height="7" rx="1.5" fill="var(--grp-${esc(b.item.id)}, var(--bok-ink))"/>
         <text x="${xGrp - 9}" y="${(cy + 3.2).toFixed(1)}" text-anchor="end" class="bok-svg-group-label" style="fill:var(--bok-ink)">${esc(b.item.label)}</text>
       </g>`;
     }
@@ -1607,7 +1619,7 @@
       const isSel = activeArea === id;
       const cy = b.y + b.h / 2;
       nodesHtml += `<g class="viz-interactive" data-sankey-area="${esc(id)}" role="button" tabindex="0" aria-label="Area ${esc(b.item.code)} ${esc(b.item.label)}">
-        <rect x="${xArea}" y="${b.y.toFixed(1)}" width="${barW}" height="${b.h.toFixed(1)}" fill="${isSel ? 'var(--bok-accent)' : 'var(--bok-ink)'}"/>
+        <rect x="${xArea}" y="${b.y.toFixed(1)}" width="${barW}" height="${b.h.toFixed(1)}" fill="${isSel ? 'var(--bok-accent)' : `var(--grp-${esc(b.item.group)}, var(--bok-ink))`}"/>
         <text x="${xArea + barW + 7}" y="${(cy + 3.2).toFixed(1)}" text-anchor="start" class="bok-svg-label" style="font-size:10px;font-weight:${isSel ? '700' : '400'};fill:${isSel ? 'var(--bok-accent)' : 'var(--bok-ink)'}">
           <tspan class="bok-svg-mono" style="font-weight:700;fill:${isSel ? 'var(--bok-accent)' : 'var(--bok-ink)'}">${esc(b.item.code)}</tspan> ${esc(b.item.label)}
         </text>
@@ -1617,7 +1629,7 @@
     stage.innerHTML = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="group" aria-labelledby="sankey-title sankey-desc">
       <title id="sankey-title">How ${rolesOrdered.length} ML systems roles draw on the ${orderedGroups.length} groups and ${orderedAreas.length} areas</title>
       <desc id="sankey-desc">Shows how core and working-knowledge subjects for each role are distributed across the taxonomy.</desc>
-      <g>${ribbonsHtml}</g>
+      <g>${layers.dim}${layers.working}${layers.core}</g>
       <g>${nodesHtml}</g>
     </svg>`;
 
@@ -2006,7 +2018,7 @@
   function renderGuides() {
     const g = data.framework.guides || { roles: [], symptoms: [], learning_paths: [] };
     if (!state.activeSymptom && g.symptoms?.length) state.activeSymptom = g.symptoms[0].id;
-    const subj = (id) => (rows.has(id) ? `<a class="bok-guide-subject" href="${subjectHref(rows.get(id))}">${code(rows.get(id).code)}${esc(rows.get(id).display_label || rows.get(id).label)}</a>` : esc(id));
+    const subj = (id) => (rows.has(id) ? `<a class="bok-guide-subject" href="${subjectHref(rows.get(id))}"><span class="bok-grp-dot" style="background:var(--grp-${esc(areaOf.get(id)?.group || '')}, var(--bok-line-strong))" aria-hidden="true"></span>${code(rows.get(id).code)}${esc(rows.get(id).display_label || rows.get(id).label)}</a>` : esc(id));
     const list = (ids, f) => (ids && ids.length ? `<ul class="bok-guide-list">${ids.map((id) => `<li>${f(id)}</li>`).join('')}</ul>` : '<span class="bok-muted">—</span>');
     const roles = g.roles.map((r) => `<tr id="guide-role-${esc(r.id)}"><td><strong>${esc(r.label)}</strong><span class="bok-alias">${esc(r.summary)}</span>
         <span style="display:block;margin-top:4px;font-size:0.76rem"><button type="button" class="bok-viz-clear" data-pick-role="${esc(r.id)}" style="margin-right:10px">Show in diagram &uarr;</button><a href="#overlay=role:${esc(r.id)}" class="bok-viz-clear">Highlight on Matrix &nearr;</a></span></td>
@@ -2047,7 +2059,7 @@
           ${expandBtn('bok-role-sankey-fig')}
         </div>
         <div class="bok-viz-stage" id="bok-role-sankey-stage"></div>
-        <figcaption class="bok-viz-caption"><strong>How each role draws on the groups and areas of the taxonomy.</strong> Darker ribbons show core subjects for a role, and lighter ribbons show working knowledge. Select a role on the left or an area on the right to highlight its connections.</figcaption>
+        <figcaption class="bok-viz-caption"><strong>How each role draws on the groups and areas of the taxonomy.</strong> Each ribbon takes the color of its taxonomy group. Darker ribbons show core subjects for a role, and lighter ribbons show working knowledge. Select a role on the left or an area on the right to highlight its connections.</figcaption>
       </figure>
       <table class="bok-table bok-guide-table"><thead><tr><th>Role</th><th>Core subjects</th><th>Working knowledge</th></tr></thead><tbody>${roles}</tbody></table>
       <h3 id="guide-section-symptoms">By symptom</h3><p class="bok-lead">${esc(g.symptoms_note || '')}</p>
