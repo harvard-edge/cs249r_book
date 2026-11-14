@@ -427,6 +427,14 @@ Here $\Operations$ counts useful model forward-and-backward FLOPs, excluding rem
 
 Three levers for improvement follow from @eq-training-iron-law: reduce total operations through data curation or algorithmic innovation, increase peak throughput through hardware selection and precision formats, or improve utilization through pipeline orchestration. Measured runs show how far below peak the utilization factor sits. Counting only useful model arithmetic, Megatron-Turing NLG trained at `{python} MeasuredUtilizationAnchors.mtnlg_mfu_pct_str` of peak and PaLM at `{python} MeasuredUtilizationAnchors.palm_mfu_pct_str` [@chowdhery2022palm]. The `{python} MeasuredUtilizationAnchors.megatron_peak_pct_str` of peak that @narayanan2021 report for Megatron-LM is higher because their count includes rematerialization work, which $\Operations$ excludes. Although memory does not appear in the law at all, it acts as a feasibility constraint because a configuration whose state does not fit runs at no speed. The chapter map (@tbl-training-chapter-spine) shows which section works on which factor, and @tbl-optimization places each optimization technique against the factor it moves, with its memory effect listed separately.
 
+The training-time law focuses on execution efficiency, how fast the hardware processes a given workload. It does not predict how data quality, dataset size, or curriculum design determines the total operations $\Operations$ needed to reach a target accuracy; that workload must be supplied or estimated separately. A cleaner dataset or a better data mix can reduce the number of epochs required, shrinking $\Operations$ without touching hardware at all. Holding the workload fixed, the question is how to execute it as fast as possible.
+
+::: {.column-margin .margin-pointer}
+↪ Data selection, which shrinks total operations ($\Operations$) by keeping the examples that return the most learning per unit of compute, is developed in @sec-data-selection-data-selection-fundamentals-e839.
+:::
+
+Actual training throughput remains below the arithmetic peak whenever kernels, data delivery, or communication leave resources idle. Scaling to multiple accelerators introduces additional communication overhead, a trade-off quantified in @sec-model-training-scaling-training-systems-adfd. Lighthouse \ref{lhs-training-lighthouse-example-training-gpt-2} derives the $6\Parameters$ per-token operation count for GPT-2 XL and maps the model's dimensions to the memory, I/O, and throughput constraints the rest of the chapter solves.
+
 ::: {#lhs-training-lighthouse-example-training-gpt-2 .callout-lighthouse title="Lighthouse example: Training GPT-2"}
 
 **Context**:
@@ -456,14 +464,6 @@ In dense transformer models, the arithmetic work per token is directly proportio
 The run must also fit the four-term training-memory budget of @eq-training-memory, $\TotalMemoryFootprint =\WeightMemory + \GradientMemory + \OptimizerStateMemory + \ActivationMemory$, and its execution time follows @eq-training-iron-law, $\TrainingTime= \frac{\Operations}{\PeakRate \times \EfficiencyHw}$. A fast run therefore keeps the accelerator supplied with data and busy with arithmetic while weights, gradients, optimizer state, and activations all fit in HBM.
 
 :::
-
-The training-time law focuses on execution efficiency, how fast the hardware processes a given workload. It does not predict how data quality, dataset size, or curriculum design determines the total operations $\Operations$ needed to reach a target accuracy; that workload must be supplied or estimated separately. A cleaner dataset or a better data mix can reduce the number of epochs required, shrinking $\Operations$ without touching hardware at all. Holding the workload fixed, the question is how to execute it as fast as possible.
-
-::: {.column-margin .margin-pointer}
-↪ Data selection, which shrinks total operations ($\Operations$) by keeping the examples that return the most learning per unit of compute, is developed in @sec-data-selection-data-selection-fundamentals-e839.
-:::
-
-Actual training throughput remains below the arithmetic peak whenever kernels, data delivery, or communication leave resources idle. Scaling to multiple accelerators introduces additional communication overhead, a trade-off quantified in @sec-model-training-scaling-training-systems-adfd.
 
 ```{python}
 #| echo: false
@@ -1910,19 +1910,19 @@ Consider a GPT-2 attention layer\index{Arithmetic intensity!attention layer} tha
 
 At `{python} H100Ridge.ridge_str`, the H100's ridge sits far to the right of the `{python} AttentionIntensity.attn_intensity_str` materialized attention estimate, so low-intensity operations such as attention softmax remain memory bound even when large matrix multiplications on the same device are compute bound.
 
+In @fig-training-roofline, the arrow from standard attention to FlashAttention[^fn-flashattention-tiling-sram] shows how tiling can shift transformer attention toward, and for favorable shapes across, the `{python} H100Ridge.ridge_str` ridge line onto the compute ceiling. By never materializing the full $\SequenceLength{\times}\SequenceLength$ attention matrix in HBM and instead processing tiles that fit in fast SRAM (tiling, the general technique developed in @sec-hardware-acceleration-tiling-principle), FlashAttention reduces auxiliary attention memory from $\mathcal{O}(\SequenceLength^2)$ to $\mathcal{O}(\SequenceLength)$ and sharply reduces HBM traffic. The original work reports up to 3$\times$ speedups on evaluated workloads [@dao2022], with gains depending on tensor shape, hardware, and baseline. The algorithm and the conditions under which it applies are examined in detail in @sec-model-training-flash-attention-ioaware-attention-optimization-3da0.
+
+[^fn-flashattention-tiling-sram]: **FlashAttention**\index{FlashAttention!I/O-aware design}: The core mechanism processes attention in small tiles that fit within the accelerator's fast on-chip SRAM, avoiding writes of the full intermediate $\SequenceLength{\times}\SequenceLength$ matrix to slower HBM. The exact HBM IO bound depends on tile size and SRAM capacity, but the practical effect is a large reduction in memory traffic and auxiliary activation storage.
+
+Batch size\index{Batch size!arithmetic intensity effect} also moves an operation along the intensity axis, because a larger batch spreads each weight load over more examples. Where the transition from memory-bound to compute-bound execution falls depends on the operation's shape, its precision, and the hardware (perspective \ref{psp-training-peak-flops-vs-sustained-performance}).
+
 ::: {#psp-training-peak-flops-vs-sustained-performance .callout-perspective title="Peak FLOP/s vs. sustained performance"}
 
 Peak TFLOP/s is an arithmetic ceiling rather than a prediction of sustained application performance. For an implementation that is strictly bandwidth bound, raising only the arithmetic ceiling does not improve the roofline bound. Mixed-precision training\index{Mixed-precision training!FP16/BF16} can both enable faster arithmetic paths and reduce traffic for tensors actually stored and transferred at lower precision. The realized gain depends on kernel support, conversion overhead, numerical requirements, and which resource is the bottleneck. Roofline-guided optimization therefore measures the implementation before choosing fusion, precision changes, or additional compute.
 
 :::
 
-Batch size\index{Batch size!arithmetic intensity effect} also moves an operation along the intensity axis, because a larger batch spreads each weight load over more examples. Where the transition from memory-bound to compute-bound execution falls depends on the operation's shape, its precision, and the hardware.
-
-This analysis guides optimization strategy selection. For memory-bound operations, reducing data movement through kernel fusion, reduced precision, or algorithmic improvements like FlashAttention provides the largest gains. For compute-bound operations, increasing throughput through Tensor Cores and parallel execution matters more. The first case asks how to move fewer bytes, and the second asks how to keep more arithmetic units busy.
-
-The trajectory vector in @fig-training-roofline illustrates how FlashAttention[^fn-flashattention-tiling-sram] can shift transformer attention toward, and for favorable shapes across, the `{python} H100Ridge.ridge_str` ridge line onto the compute ceiling. By never materializing the full $\SequenceLength{\times}\SequenceLength$ attention matrix in HBM and instead processing tiles that fit in fast SRAM (tiling, the general technique developed in @sec-hardware-acceleration-tiling-principle), FlashAttention reduces auxiliary attention memory from $\mathcal{O}(\SequenceLength^2)$ to $\mathcal{O}(\SequenceLength)$ and sharply reduces HBM traffic. The original work reports up to 3$\times$ speedups on evaluated workloads [@dao2022], with gains depending on tensor shape, hardware, and baseline. The algorithm and the conditions under which it applies are examined in detail in @sec-model-training-flash-attention-ioaware-attention-optimization-3da0.
-
-[^fn-flashattention-tiling-sram]: **FlashAttention**\index{FlashAttention!I/O-aware design}: The core mechanism processes attention in small tiles that fit within the accelerator's fast on-chip SRAM, avoiding writes of the full intermediate $\SequenceLength{\times}\SequenceLength$ matrix to slower HBM. The exact HBM IO bound depends on tile size and SRAM capacity, but the practical effect is a large reduction in memory traffic and auxiliary activation storage.
+Roofline position therefore guides optimization strategy selection. For memory-bound operations, reducing data movement through kernel fusion, reduced precision, or algorithmic improvements like FlashAttention provides the largest gains. For compute-bound operations, increasing throughput through Tensor Cores and parallel execution matters more. The first case asks how to move fewer bytes, and the second asks how to keep more arithmetic units busy.
 
 Arithmetic-intensity analysis is how the silicon contract (principle \ref{pri-silicon-contract}) is checked in training. The silicon contract names the resource a workload is built to exploit; the analysis determines which physical resource actually constrains a particular implementation. Dense matrix multiplication reaches the compute-bound regime when tensor shapes provide sufficient data reuse, while standalone normalization and elementwise activation kernels remain memory bandwidth bound.
 
@@ -2487,7 +2487,7 @@ However, transforming records assumes that storage delivers raw bytes fast enoug
 
 Preprocessed data must then transfer across the host-accelerator interconnect before computation can begin. End-to-end training throughput is consequently constrained by the slowest of three sequential stages, as formalized in @eq-training-bottleneck. In this three-stage pipeline model, the host preparation rate $\PreprocessingThroughput$ captures the joint bound of storage delivery and CPU worker transformation, while the remaining terms capture host-to-device bus transfer and device execution:
 $$\TrainingThroughput=\min\left(\PreprocessingThroughput, \frac{\HostTransferBandwidth}{\BatchDataVolume}, \frac{\SustainedComputeRate}{\BatchOperations}\right)$$ {#eq-training-bottleneck}
-where $\HostTransferBandwidth$ is the host-to-accelerator transfer bandwidth, $\BatchDataVolume$ is the input bytes per batch transferred to the device, $\SustainedComputeRate$ is the accelerator's sustained compute rate in FLOP/s, and $\BatchOperations$ is the forward-backward work per batch in FLOPs. Every term is therefore expressed in batches per second before the minimum is taken.
+where $\HostTransferBandwidth$ is the host-to-accelerator transfer bandwidth, $\BatchDataVolume$ is the input bytes per batch transferred to the device, $\SustainedComputeRate$ is the accelerator's sustained compute rate in FLOP/s, and $\BatchOperations$ is the forward-backward work per batch in FLOPs. Every term is therefore expressed in batches per second before the minimum is taken. Example \ref{exmp-training-gpt-2-language-model-data-pipeline} evaluates all three stages for GPT-2 XL under single-core tokenization.
 
 ```{python}
 #| echo: false
@@ -2652,7 +2652,7 @@ class StorageBandwidthNvme:
 \vspace*{0.5ex}
 ```
 
-This min-of-three relationship\index{Training bottleneck!min-of-three relationship} governs training pipeline design because system throughput equals bottleneck throughput. An accelerator with `{python} PipelineThroughputHardware.h100_fp16_tflop_per_s_str` of compute capacity delivers zero useful work while waiting for data. Conversely, a perfectly optimized data pipeline provides no benefit if the accelerator is already compute-saturated. Balanced pipeline design aligns preprocessing capacity, transfer bandwidth, and compute throughput so that no single stage dominates iteration time. For GPT-2, CPU tokenization, not storage or bus transfer, limits throughput unless parallel workers and prefetching hide host preparation latency.
+The min-of-three relationship in @eq-training-bottleneck\index{Training bottleneck!min-of-three relationship} governs training pipeline design because system throughput equals bottleneck throughput. An accelerator with `{python} PipelineThroughputHardware.h100_fp16_tflop_per_s_str` of compute capacity delivers zero useful work while waiting for data. Conversely, a perfectly optimized data pipeline provides no benefit if the accelerator is already compute-saturated. Balanced pipeline design aligns preprocessing capacity, transfer bandwidth, and compute throughput so that no single stage dominates iteration time. For GPT-2, CPU tokenization, not storage or bus transfer, limits throughput unless parallel workers and prefetching hide host preparation latency.
 
 Data pipeline throughput is not the only flow that can starve the accelerator. Multi-GPU training adds a second stream of traffic: the gradient synchronization required after every step. Once synchronization time exceeds compute time, communication becomes the limiting factor. @Sec-model-training-scaling-beyond-single-node-a671 quantifies that network wall at the point where training crosses the node boundary.
 
@@ -3266,7 +3266,7 @@ class GPT2CheckpointPayload:
 
 Resuming requires restoring model weights and optimizer state in lockstep: first-moment vectors, second-moment variance estimates, and step counters. In the mixed-precision Adam recipe of @sec-model-training-optimization-algorithm-system-implications-f9f2, a checkpoint holds the FP16 working weights (2 bytes per parameter), the FP32 master weights (4 bytes), and the two FP32 moments (8 bytes), 14 bytes per parameter. The FP16 gradients, 2 of the 16 bytes per parameter that training holds in device memory, are recomputed every step and so are left out of the checkpoint. For GPT-2 XL the checkpoint payload is therefore about `{python} GPT2CheckpointPayload.total_gb_str` (`{python} GPT2CheckpointPayload.fp16_gb_str` + `{python} GPT2CheckpointPayload.master_gb_str` + `{python} GPT2CheckpointPayload.adam_gb_str`), `{python} GPT2CheckpointPayload.ckpt_mult_str` the FP16 weights alone, and writing it to a local NVMe drive at `{python} GPT2CheckpointPayload.nvme_bw_str` takes about `{python} GPT2CheckpointPayload.write_time_s_str`. Checkpoint volume governs how long a save stalls the run and how long recovery takes, because every save adds its bytes to the data movement that the iron law's $\DataVolume$ term counts.
 
-At the framework level, optimizers expose internal state dictionaries via `state_dict()` for serialization (@lst-state-dict-interface), and the same interface saves and restores model parameters and optimizer states (@lst-checkpoint-save-load). Reproducing the training trajectory also requires the relevant random-number state, data position, learning-rate scheduler, and gradient-scaler state. Without them, a resumed run would draw different random numbers, repeat or skip examples, and fall back to the wrong learning rate and loss scale.
+At the framework level, optimizers expose internal state dictionaries via `state_dict()` for serialization (@lst-state-dict-interface).
 
 ::: {#lst-state-dict-interface lst-cap="**State Dictionary Interface**: Optimizers expose internal state through state_dict(), enabling serialization of momentum buffers and adaptive learning rate estimates for checkpointing."}
 
@@ -3289,6 +3289,8 @@ state = optimizer.state_dict()
 ```
 
 :::
+
+The same interface saves and restores model parameters and optimizer states together (@lst-checkpoint-save-load). Reproducing the training trajectory also requires the relevant random-number state, data position, learning-rate scheduler, and gradient-scaler state. Without them, a resumed run would draw different random numbers, repeat or skip examples, and fall back to the wrong learning rate and loss scale.
 
 ::: {#lst-checkpoint-save-load lst-cap="**Checkpoint Save and Load**: Save both model parameters and optimizer state to properly resume training with correct momentum and adaptive learning rate values."}
 
@@ -3423,6 +3425,24 @@ Checkpoint cadence decides how much work a failure discards. Because every updat
 
 PaLM's recoveries kept 6,144 chips busy on steps that were later thrown away, so the cluster's time was spent without the run advancing. In the training-time law that discarded work appears as a lower utilization factor $\EfficiencyHw$, which makes checkpoint cadence a throughput decision as well as a reliability one. Frequent saves stall the run for the write time above, while sparse saves lengthen the replay after each failure.
 
+::: {#chk-training-memory-compute-trade-off .callout-checkpoint title="Costing a step and building its pipeline"}
+
+The first half of the chapter costed one training step and assembled the pipeline that runs it. Check that each piece can be computed before moving on to diagnosis and optimization.
+
+**Cost of a step**
+
+- [ ] **Run time and energy**: Using the training-time law, estimate how many days one accelerator needs for a run of $10^{21}$ FLOPs at a given peak rate and utilization, and how much energy it draws at a given device power.
+- [ ] **Static state**: Explain why the common mixed-precision Adam recipe holds 16 bytes per parameter, and why switching to 16-bit arithmetic does not shrink that number.
+- [ ] **Memory estimate**: For GPT-2 XL in mixed precision at batch 32 and sequence length 1,024, estimate weights, gradients, master weights, optimizer state, and activations, identify the largest term, and decide whether the total fits on an 80 GB accelerator.
+- [ ] **Fine-tuning scope**: Explain why full fine-tuning of an 8-billion-parameter model overflows one 80 GB accelerator while low-rank adapters fit, and which memory terms each choice populates.
+
+**Pipeline**
+
+- [ ] **Slowest stage**: Given host preparation, transfer, and compute rates in batches per second, identify the stage that sets training throughput and compute the accelerator's busy-time fraction.
+- [ ] **Training state**: Explain why a training checkpoint file is smaller than the training state in device memory, and what else must be saved to resume a run exactly.
+
+:::
+
 ```{python}
 #| echo: false
 #| label: slowest-stage-bound-calc
@@ -3461,25 +3481,7 @@ class SlowestStageBound:
     step_time_ms_str = fmt_time(step_time, millisecond, precision=0, commas=False)
 ```
 
-Decomposing the training pipeline exposes the mechanics of data loading, forward and backward execution, parameter updates, and saved training state, while the computation and memory costs in @sec-model-training-mathematical-foundations-d894 quantify the FLOPs, memory footprint, and bandwidth each phase demands, but knowing how stages execute does not reveal where a specific training workload stalls. A pipeline is only as fast as its slowest stage. In an overlapped pipeline where data loading takes `{python} SlowestStageBound.load_time_ms_str` and computation takes `{python} SlowestStageBound.compute_time_ms_str`, a `{python} SlowestStageBound.kernel_speedup_pct_str` faster kernel saves nothing, because the step still takes `{python} SlowestStageBound.step_time_ms_str`.
-
-::: {#chk-training-memory-compute-trade-off .callout-checkpoint title="Costing a step and building its pipeline"}
-
-The first half of the chapter costed one training step and assembled the pipeline that runs it. Check that each piece can be computed before moving on to diagnosis and optimization.
-
-**Cost of a step**
-
-- [ ] **Run time and energy**: Using the training-time law, estimate how many days one accelerator needs for a run of $10^{21}$ FLOPs at a given peak rate and utilization, and how much energy it draws at a given device power.
-- [ ] **Static state**: Explain why the common mixed-precision Adam recipe holds 16 bytes per parameter, and why switching to 16-bit arithmetic does not shrink that number.
-- [ ] **Memory estimate**: For GPT-2 XL in mixed precision at batch 32 and sequence length 1,024, estimate weights, gradients, master weights, optimizer state, and activations, identify the largest term, and decide whether the total fits on an 80 GB accelerator.
-- [ ] **Fine-tuning scope**: Explain why full fine-tuning of an 8-billion-parameter model overflows one 80 GB accelerator while low-rank adapters fit, and which memory terms each choice populates.
-
-**Pipeline**
-
-- [ ] **Slowest stage**: Given host preparation, transfer, and compute rates in batches per second, identify the stage that sets training throughput and compute the accelerator's busy-time fraction.
-- [ ] **Training state**: Explain why a training checkpoint file is smaller than the training state in device memory, and what else must be saved to resume a run exactly.
-
-:::
+Decomposing the training pipeline exposes the mechanics of data loading, forward and backward execution, parameter updates, and saved training state, while the computation and memory costs in @sec-model-training-mathematical-foundations-d894 quantify the FLOPs, memory footprint, and bandwidth each phase demands. Knowing how stages execute, however, still does not reveal where a specific workload stalls, because a pipeline is only as fast as its slowest stage. In an overlapped pipeline where data loading takes `{python} SlowestStageBound.load_time_ms_str` and computation takes `{python} SlowestStageBound.compute_time_ms_str`, a `{python} SlowestStageBound.kernel_speedup_pct_str` faster kernel saves nothing, because the step still takes `{python} SlowestStageBound.step_time_ms_str`.
 
 ## Identifying Bottlenecks {#sec-model-training-identifying-bottlenecks-f57f}
 
@@ -3549,7 +3551,7 @@ Training bottlenecks can be investigated through three categories aligned with t
 
 : **D·A·M Taxonomy Applied to Training Bottlenecks**: Each row associates a D·A·M axis with one common bottleneck and its characteristic symptoms. Profiling reveals the workload's limiting constraint and guides practitioners to an appropriate optimization technique. {#tbl-dam-training-bottlenecks tbl-colwidths="[12,16,40,32]"}
 
-Among these three regimes, data-bound stalls are the most frequently misdiagnosed because they manifest on the accelerator as idle gaps rather than saturated execution units. When host-side ingestion, decoding, or preprocessing cannot sustain the throughput demanded by the accelerator, the accelerator starves.
+Among these three regimes, data-bound stalls are the most frequently misdiagnosed because they manifest on the accelerator as idle gaps rather than saturated execution units. When host-side ingestion, decoding, or preprocessing cannot sustain the throughput demanded by the accelerator, the accelerator starves. Example \ref{exmp-training-gil-locked-gpu} traces how host-side thread serialization produces that starvation in a Python data loader.
 
 ```{python}
 #| echo: false
@@ -3867,8 +3869,6 @@ class PipelineTimingRecap:
 
 Those data waits are long because in ML training, a "Read" stage is rarely a simple disk fetch. For image workloads it encompasses JPEG decoding, random crops, and color jitter applied on CPU cores before the tensor is ready to transfer; for language workloads it encompasses tokenization, subword encoding, and sequence padding. The Gantt schedule in @fig-fetching-naive isolates the serial bottleneck of unbuffered ingestion. The GPU Train row remains completely idle during file-open intervals (Open 1, Open 2) and read stages (Read 1, Read 2), stretching the two-epoch schedule out to about `{python} PipelineTimingRecap.seq_pipeline_time_min_str` because compute steps cannot begin until host-side decoding and transfer finish.
 
-Framework data loaders such as PyTorch `DataLoader` and `tf.data` [@murray2021] eliminate those synchronous gaps by staging the next batch into host memory while the accelerator is still executing the current batch.
-
 ::: {#fig-fetching-naive fig-env="figure" fig-pos="htb" fig-cap="**Illustrative Sequential Data Fetching**: Under the assumed stage durations, file-open, read, and train operations execute serially while the GPU remains idle during file operations. The schedule spans approximately `{python} PipelineTimingRecap.seq_pipeline_time_min_str` and provides a schematic baseline for the overlap comparison." fig-alt="Illustrative Gantt chart with Open, Read, Train, and Epoch rows. Operations execute serially, ending at 95 minutes on a time axis labeled up to 01:35."}
 
 ```{.tikz}
@@ -3987,7 +3987,7 @@ Framework data loaders such as PyTorch `DataLoader` and `tf.data` [@murray2021] 
 
 :::
 
-Overlapping extends prefetching by coordinating multiple pipeline stages to execute concurrently. As the system processes the current batch on the accelerator, background host threads load and preprocess subsequent batches. Set against the serial schedule of @fig-fetching-naive, the overlapped timeline in @fig-fetching-optimized hides host latency behind computation. Concurrent staging of Open 2 and Read 3 behind active execution eliminates idle bubbles between training blocks (Train 1 through Train 3). It compresses total wall-clock duration from approximately `{python} PipelineTimingRecap.seq_pipeline_time_min_str` down to `{python} PipelineTimingRecap.opt_pipeline_time_min_str` (a `{python} PipelineTimingRecap.pipeline_speedup_pct_str` reduction). Actual gains depend on stage balance and available concurrency.
+Framework data loaders such as PyTorch `DataLoader` and `tf.data` [@murray2021] eliminate those synchronous gaps by coordinating pipeline stages to execute concurrently, staging subsequent batches on background host threads while the accelerator processes the current batch. Set against the serial schedule of @fig-fetching-naive, the overlapped timeline in @fig-fetching-optimized hides host latency behind computation. Concurrent staging of Open 2 and Read 3 behind active execution eliminates idle bubbles between training blocks (Train 1 through Train 3). It compresses total wall-clock duration from approximately `{python} PipelineTimingRecap.seq_pipeline_time_min_str` down to `{python} PipelineTimingRecap.opt_pipeline_time_min_str` (a `{python} PipelineTimingRecap.pipeline_speedup_pct_str` reduction). Actual gains depend on stage balance and available concurrency.
 
 ::: {#fig-fetching-optimized data-explore="original-v1-fetching-optimized" data-explore-key="vol1:fig-fetching-optimized" fig-env="figure" fig-pos="htb" fig-cap="**Illustrative Overlapped Data Prefetching**: File-open and read work overlaps accelerator training while preserving the same individual stage durations as the serial schedule. The schematic schedule spans approximately `{python} PipelineTimingRecap.opt_pipeline_time_min_str`, compared with `{python} PipelineTimingRecap.seq_pipeline_time_min_str` for the serial schedule." fig-alt="Illustrative Gantt chart with Open, Read, Train, and Epoch rows. The same stage durations as the serial schedule overlap, and the schedule ends at 65 minutes."}
 
@@ -4185,7 +4185,7 @@ Buffer management is the main trade-off. A buffer that is too small causes the G
 
 Prefetch buffers and overlap depth are tunable, so the same machinery adapts to whichever stage is the bottleneck, whether slow storage, limited network bandwidth, or computational throughput. Prefetching and overlapping deliver the greatest gains when preprocessing lies on the critical path but can run concurrently with model computation. In an illustrative image pipeline, random cropping (`{python} PreprocessingScenarios.crop_time_ms_str`), color jittering (`{python} PreprocessingScenarios.jitter_time_ms_str`), and normalization (`{python} PreprocessingScenarios.norm_time_ms_str`) total `{python} PreprocessingScenarios.total_preprocess_ms_str` per batch. Overlap can hide up to the concurrent accelerator-computation time; any excess remains on the critical path. NLP workloads similarly benefit when tokenization and subword processing would otherwise block the training loop.
 
-The primary trade-off is memory: prefetch buffers consume host memory, or device memory when a separate device-side queue is used, in proportion to buffer depth and batch size. With batch size `{python} PreprocessingScenarios.buffer_batch_size_str` high-resolution images (`{python} PreprocessingScenarios.buffer_dims_math` pixels), one buffered batch requires approximately `{python} PreprocessingScenarios.buffer_batch_mem_gb_str`. With `{python} PreprocessingScenarios.num_workers_str` and `{python} PreprocessingScenarios.prefetch_factor_str`, the `{python} PreprocessingScenarios.prefetch_buffer_batches_str`-batch prefetch window can hold about `{python} PreprocessingScenarios.buffer_total_mem_gb_str`. Tuning these parameters requires empirical testing because excessive workers contend for CPU, storage, and memory resources, while insufficient buffering reintroduces data stalls. Start with a modest worker count, increase it while measuring throughput and memory, and stop when additional workers no longer reduce accelerator idle time. When the input pipeline already exceeds compute demand, deeper prefetching adds complexity without improving throughput.
+The primary trade-off is memory: prefetch buffers consume host memory, or device memory when a separate device-side queue is used, in proportion to buffer depth and batch size. With batch size `{python} PreprocessingScenarios.buffer_batch_size_str` high-resolution images (`{python} PreprocessingScenarios.buffer_dims_math` pixels), one buffered batch requires approximately `{python} PreprocessingScenarios.buffer_batch_mem_gb_str`. With `{python} PreprocessingScenarios.num_workers_str` and `{python} PreprocessingScenarios.prefetch_factor_str`, the `{python} PreprocessingScenarios.prefetch_buffer_batches_str`-batch prefetch window can hold about `{python} PreprocessingScenarios.buffer_total_mem_gb_str`. Tuning these parameters requires empirical testing because excessive workers contend for CPU, storage, and memory resources, while insufficient buffering reintroduces data stalls. Practical tuning begins with a modest worker count, increases it while measuring throughput and memory, and stops when additional workers no longer reduce accelerator idle time. When the input pipeline already exceeds compute demand, deeper prefetching adds complexity without improving throughput.
 
 ### Mixed-precision training {#sec-model-training-mixedprecision-training-9218}
 
@@ -4466,7 +4466,7 @@ class MixedPrecisionBenefits:
     model_1b_fp16_gb_str = MixedPrecisionIntro.model_1b_fp16_gb_str
 ```
 
-Once dynamic loss scaling or BF16 preserves gradient fidelity, mixed-precision training compounds gains across memory footprint, arithmetic throughput, and communication volume. Although the `{python} MixedPrecisionBenefits.mp_mem_savings_pct_str` reduction in working weight storage (from `{python} MixedPrecisionBenefits.model_1b_fp32_gb_str` to `{python} MixedPrecisionBenefits.model_1b_fp16_gb_str` on a one-billion-parameter model) is absorbed by the 16-bytes-per-parameter static master weights and Adam moments derived above, forward activations shrink by the full `{python} MixedPrecisionBenefits.mp_mem_savings_pct_str`. Computationally, reduced precision routes dense matrix multiplication kernels to high-throughput Tensor Core pipelines (@sec-model-training-mixedprecision-hardware-support-d7c1), while in distributed topologies, transferring 16-bit rather than 32-bit gradients halves collective AllReduce traffic across the interconnect. Because reclaimed activation memory permits larger micro-batches, Tensor Cores run at higher arithmetic intensity while narrower tensors reduce gradient exchange latency. The following case study evaluates these memory effects on GPT-2 XL at batch 32, the configuration the activation notebook left far over the H100's capacity.
+Once dynamic loss scaling or BF16 preserves gradient fidelity, mixed-precision training compounds gains across memory footprint, arithmetic throughput, and communication volume. Although the `{python} MixedPrecisionBenefits.mp_mem_savings_pct_str` reduction in working weight storage (from `{python} MixedPrecisionBenefits.model_1b_fp32_gb_str` to `{python} MixedPrecisionBenefits.model_1b_fp16_gb_str` on a one-billion-parameter model) is absorbed by the 16-bytes-per-parameter static master weights and Adam moments derived above, forward activations shrink by the full `{python} MixedPrecisionBenefits.mp_mem_savings_pct_str`. Computationally, reduced precision routes dense matrix multiplication kernels to high-throughput Tensor Core pipelines (@sec-model-training-mixedprecision-hardware-support-d7c1), while in distributed topologies, transferring 16-bit rather than 32-bit gradients halves collective AllReduce traffic across the interconnect. Because reclaimed activation memory permits larger micro-batches, Tensor Cores run at higher arithmetic intensity while narrower tensors reduce gradient exchange latency. Notebook \ref{nbk-training-gpt-2-mixed-precision-memory} evaluates these memory effects on GPT-2 XL at batch 32, the configuration the activation notebook left far over the H100's capacity.
 
 ```{python}
 #| echo: false
@@ -4567,7 +4567,7 @@ class MixedPrecisionMemory:
 
 Memory savings alone do not guarantee stable training. In the FP16 training recipe used here, maintaining FP32 master weights\index{FP32 master weights!optimizer stability} is necessary because parameter updates $\FiniteChange \ModelWeight= -\LearningRate \cdot \LossGradient$ (learning rate times gradient) are typically orders of magnitude smaller than the weight values $\ModelWeight$. In FP16, where the 10-bit mantissa provides roughly three decimal digits of precision, adding an update that is more than $2^{11} \approx 2048$ times smaller than the weight magnitude results in arithmetic swamping: the updated weight rounds back to its original value. This loss of an increment through rounding is distinct from the update value itself underflowing. Retaining master weights in FP32 preserves these incremental updates across thousands of optimizer steps, casting to 16 bits only when staging weights for the forward pass. Autocast policies\index{Selective FP32 computation!mixed precision} similarly isolate wide reductions, layer normalizations, and softmax layers in FP32 to prevent catastrophic cancellation, the loss of significant digits when nearly equal numbers are subtracted.
 
-Once numerical stability is established, reduced-precision arithmetic and reduced memory traffic can shorten execution when they reduce work on the critical path. Comparing complete training recipes does not isolate the contribution of precision alone; model quality, batch size, optimizer representation, and activation policy must be accounted for. The following scenario models these compound throughput, schedule, and infrastructure cost gains for a GPT-2 XL training run.
+Once numerical stability is established, reduced-precision arithmetic and reduced memory traffic can shorten execution when they reduce work on the critical path. Comparing complete training recipes does not isolate the contribution of precision alone; model quality, batch size, optimizer representation, and activation policy must be accounted for. Notebook \ref{nbk-training-gpt-2-mixed-precision-throughput-cost} models these compound throughput, schedule, and infrastructure cost gains for a GPT-2 XL training run.
 
 ```{python}
 #| echo: false
@@ -4753,7 +4753,7 @@ Because hardware support for low-precision formats evolved across accelerator ge
 
 : **Precision Strategy by Hardware Target**: Format choice depends on hardware support, kernel coverage, and numerical validation. V100 supports FP16 Tensor Core training, A100 adds native BF16, H100 adds FP8 paths requiring recipe-specific scaling, and FP32 remains the fallback for sensitive operations or unsupported paths. {#tbl-hw-precision-strategy tbl-colwidths="[16,26,58]"}
 
-Measured speedups across these generations reflect the software stacks, kernels, and batch dimensions that changed alongside the hardware, not the tensor units alone. The peak-rate ratios in Notebook \ref{nbk-training-gpt-2-mixed-precision-throughput-cost} bound what a format switch can deliver on one H100. In practice, BF16 is the default where the hardware supports it, and FP16 with loss scaling is the fallback.
+Measured speedups across these generations reflect the software stacks, kernels, and batch dimensions that changed alongside the hardware, not the tensor units alone. The peak-rate ratios in notebook \ref{nbk-training-gpt-2-mixed-precision-throughput-cost} bound what a format switch can deliver on one H100. In practice, BF16 is the default where the hardware supports it, and FP16 with loss scaling is the fallback.
 
 ### FlashAttention: IO-aware attention optimization {#sec-model-training-flash-attention-ioaware-attention-optimization-3da0}
 
@@ -4894,6 +4894,31 @@ The key algorithmic insight relies on the structure of @eq-attention. Softmax no
 
 @Algo-streaming-attention decomposes this computation by partitioning the queries and the keys/values into tiles small enough to fit in SRAM, then streaming over the key/value tiles while maintaining the running softmax statistics needed to assemble each output tile, without ever forming the full score matrix.
 
+```pseudocode
+#| label: algo-streaming-attention
+#| pdf-line-number: true
+#| pdf-right-comment: false
+#| html-comment-delimiter: "▷"
+\begin{algorithm}
+\caption{FlashAttention: tiled attention with online softmax}
+\begin{algorithmic}
+\Require queries $\AttentionQueryMatrix$, keys $\AttentionKeyMatrix$, values $\AttentionValuesMatrix$ for a length-$\SequenceLength$ sequence; tile size $b_{\text{tile}}$
+\Ensure attention output $\AttentionHeadOutput$, without materializing the $\SequenceLength\times \SequenceLength$ score matrix
+\For{each query tile $\AttentionQueryMatrix_i$}
+    \State in SRAM: $\AttentionHeadOutput_i^{\text{acc}} \gets \mathbf{0}$, $\SoftmaxRunningMaximum_i \gets -\infty$, $\SoftmaxNormalizer_i \gets 0$
+    \For{each key/value tile $(\AttentionKeyMatrix_j, \AttentionValuesMatrix_j)$}
+        \State load $\AttentionQueryMatrix_i, \AttentionKeyMatrix_j, \AttentionValuesMatrix_j$ into SRAM; $\AttentionScoreMatrix_{ij} \gets \AttentionQueryMatrix_i \AttentionKeyMatrix_j^T / \sqrt{\AttentionHeadDimension}$
+        \State $\UpdatedSoftmaxRunningMaximum_i \gets \max(\SoftmaxRunningMaximum_i,\operatorname{rowmax}(\AttentionScoreMatrix_{ij}))$ \Comment{new stable max}
+        \State $\AttentionHeadOutput_i^{\text{acc}} \gets \AttentionHeadOutput_i^{\text{acc}}\odot e^{\SoftmaxRunningMaximum_i-\UpdatedSoftmaxRunningMaximum_i} + e^{\AttentionScoreMatrix_{ij}-\UpdatedSoftmaxRunningMaximum_i}\AttentionValuesMatrix_j$
+        \State $\SoftmaxNormalizer_i \gets \SoftmaxNormalizer_i\odot e^{\SoftmaxRunningMaximum_i-\UpdatedSoftmaxRunningMaximum_i} + \operatorname{rowsum}(e^{\AttentionScoreMatrix_{ij}-\UpdatedSoftmaxRunningMaximum_i})$; $\SoftmaxRunningMaximum_i \gets \UpdatedSoftmaxRunningMaximum_i$
+        \State discard $\AttentionScoreMatrix_{ij}$ \Comment{never written to HBM}
+    \EndFor
+    \State $\AttentionHeadOutput_i \gets \AttentionHeadOutput_i^{\text{acc}} / \SoftmaxNormalizer_i$; write $\AttentionHeadOutput_i$ to HBM
+\EndFor
+\end{algorithmic}
+\end{algorithm}
+```
+
 ::: {.column-margin}
 ![](images/svg/vol1_training_margin_003.svg){width="100%" fig-alt="Two-rung memory ladder comparing a full 4096 by 4096 attention matrix at about 67 MB with a 128 by 128 SRAM tile at about 65.5 KB."}
 
@@ -4939,31 +4964,6 @@ The storage boundary distinguishes the tiled algorithm from the materialized imp
 :::
 
 Keeping the intermediate tiles on chip removes their HBM writeback and reload. It does not remove the input reads or output writes, and backward propagation still requires saved statistics and recomputation.
-
-```pseudocode
-#| label: algo-streaming-attention
-#| pdf-line-number: true
-#| pdf-right-comment: false
-#| html-comment-delimiter: "▷"
-\begin{algorithm}
-\caption{FlashAttention: tiled attention with online softmax}
-\begin{algorithmic}
-\Require queries $\AttentionQueryMatrix$, keys $\AttentionKeyMatrix$, values $\AttentionValuesMatrix$ for a length-$\SequenceLength$ sequence; tile size $b_{\text{tile}}$
-\Ensure attention output $\AttentionHeadOutput$, without materializing the $\SequenceLength\times \SequenceLength$ score matrix
-\For{each query tile $\AttentionQueryMatrix_i$}
-    \State in SRAM: $\AttentionHeadOutput_i^{\text{acc}} \gets \mathbf{0}$, $\SoftmaxRunningMaximum_i \gets -\infty$, $\SoftmaxNormalizer_i \gets 0$
-    \For{each key/value tile $(\AttentionKeyMatrix_j, \AttentionValuesMatrix_j)$}
-        \State load $\AttentionQueryMatrix_i, \AttentionKeyMatrix_j, \AttentionValuesMatrix_j$ into SRAM; $\AttentionScoreMatrix_{ij} \gets \AttentionQueryMatrix_i \AttentionKeyMatrix_j^T / \sqrt{\AttentionHeadDimension}$
-        \State $\UpdatedSoftmaxRunningMaximum_i \gets \max(\SoftmaxRunningMaximum_i,\operatorname{rowmax}(\AttentionScoreMatrix_{ij}))$ \Comment{new stable max}
-        \State $\AttentionHeadOutput_i^{\text{acc}} \gets \AttentionHeadOutput_i^{\text{acc}}\odot e^{\SoftmaxRunningMaximum_i-\UpdatedSoftmaxRunningMaximum_i} + e^{\AttentionScoreMatrix_{ij}-\UpdatedSoftmaxRunningMaximum_i}\AttentionValuesMatrix_j$
-        \State $\SoftmaxNormalizer_i \gets \SoftmaxNormalizer_i\odot e^{\SoftmaxRunningMaximum_i-\UpdatedSoftmaxRunningMaximum_i} + \operatorname{rowsum}(e^{\AttentionScoreMatrix_{ij}-\UpdatedSoftmaxRunningMaximum_i})$; $\SoftmaxRunningMaximum_i \gets \UpdatedSoftmaxRunningMaximum_i$
-        \State discard $\AttentionScoreMatrix_{ij}$ \Comment{never written to HBM}
-    \EndFor
-    \State $\AttentionHeadOutput_i \gets \AttentionHeadOutput_i^{\text{acc}} / \SoftmaxNormalizer_i$; write $\AttentionHeadOutput_i$ to HBM
-\EndFor
-\end{algorithmic}
-\end{algorithm}
-```
 
 #### Memory and IO complexity analysis {#sec-model-training-memory-io-complexity-analysis-5da5}
 
@@ -5507,7 +5507,7 @@ Not all operations are equally expensive to recompute, which motivates selective
 
 #### Memory and computational benefits {#sec-model-training-memory-computational-benefits-9372}
 
-Both techniques reduce activation-memory requirements without adding hardware, though each targets a different dimension of the activation footprint. Gradient accumulation produces an effective batch larger than the resident micro-batch without storing all of its activations simultaneously. A larger effective batch reduces sampling variance, but it does not by itself guarantee faster convergence or better generalization. Activation checkpointing instead reduces the per-layer memory footprint of intermediate activations by discarding and recomputing them as needed, freeing capacity for deeper models, additional layers, or higher-resolution inputs. For lighthouse \ref{lhs-training-lighthouse-example-training-gpt-2}, accumulation provides a direct way to reach a chosen effective batch size while keeping the resident micro-batch within one H100's memory.
+Both techniques reduce activation-memory requirements without adding hardware, though each targets a different dimension of the activation footprint. Gradient accumulation produces an effective batch larger than the resident micro-batch without storing all of its activations simultaneously. A larger effective batch reduces sampling variance, but it does not by itself guarantee faster convergence or better generalization. Activation checkpointing instead reduces the per-layer memory footprint of intermediate activations by discarding and recomputing them as needed, freeing capacity for deeper models, additional layers, or higher-resolution inputs. For lighthouse \ref{lhs-training-lighthouse-example-training-gpt-2}, accumulation provides a direct way to reach a chosen effective batch size while keeping the resident micro-batch within one H100's memory, as notebook \ref{nbk-training-gpt-2-gradient-accumulation-strategy} quantifies.
 
 ```{python}
 #| echo: false
@@ -5879,9 +5879,7 @@ The walkthrough combines memory calculations with a modeled execution profile. U
 
 :::
 
-Single-accelerator optimizations address complementary constraints: mixed precision enables higher-throughput arithmetic, FlashAttention avoids materializing full attention matrices in HBM, accumulation and checkpointing bound activation memory, and asynchronous prefetching hides host input latency. Even fully optimized, however, a run of GPT-2 XL's size occupies one accelerator for about `{python} GPT2WalkthroughCalc.run_days_str`, and larger runs are bounded by the arithmetic throughput of an individual chip.
-
-Together, those four interventions exhaust what software and memory planning can recover on a single accelerator, fitting the working set into HBM and keeping the execution units fed until only the chip's physical throughput and memory capacity remain.
+Single-accelerator optimizations address complementary constraints, as mixed precision raises arithmetic throughput, FlashAttention avoids materializing full attention matrices in HBM, accumulation and checkpointing bound activation memory, and asynchronous prefetching hides host input latency. Together, those four interventions exhaust what software and memory planning can recover on one chip, fitting the working set into HBM and keeping the execution units fed until only the accelerator's physical memory capacity and `{python} GPT2WalkthroughCalc.run_days_str` compute schedule remain.
 
 ## Scaling Training Systems {#sec-model-training-scaling-training-systems-adfd}
 
@@ -6531,18 +6529,6 @@ below=4mm of B5.south,anchor= north](DT3){Loss gradient};
 
 :::
 
-::: {#psp-training-data-vs-model-parallelism .callout-perspective title="Data vs. model parallelism"}
-
-When a selected workload is partitioned across $\AcceleratorCount$ devices, the split may divide examples, model state, layers, or tensor operations. For a model with parameters $\Parameters$ and batch size $\BatchSize$, data and model parallelism provide two starting points.
-
-**Data parallelism (split the batch)**: For a fixed global batch, each of $\AcceleratorCount$ workers processes about $1/\AcceleratorCount$ of the examples, but every worker holds a model replica and ordinarily its associated training state. Dense gradient communication is proportional to $\Parameters$ per update. Scaling departs from the ideal as local batches shrink or synchronization and input costs grow.
-
-**Model parallelism (split model computation)**: Each accelerator stores and computes a portion of the model. An even partition may approach $\Parameters/\AcceleratorCount$ parameters per worker, but embeddings, buffers, imbalance, and replicated state alter that estimate. Communication depends on the partition: layerwise pipeline parallelism exchanges activations at stage boundaries, while tensor parallelism performs collectives within partitioned layers.
-
-**Systems insight**: Data parallelism is the simplest candidate when the complete training state fits per worker and more throughput is needed. Model-state, pipeline, or tensor partitioning becomes necessary when it does not, often in combination with data parallelism.
-
-:::
-
 At transformer block granularity, that layerwise split assigns contiguous groups of blocks to sequential devices. @Fig-layers-blocks stages this pipeline allocation across a four-accelerator execution chain, grouping 24 transformer blocks into contiguous six-block partitions (Blocks 1–6 through 19–24) that exchange boundary activations over the interconnect. This chain is a separate illustration, smaller than the 48-layer, three-device split of @fig-model-parallelism; both follow the same rule of giving each device one contiguous group of layers.
 
 ::: {#fig-layers-blocks fig-env="figure" fig-pos="htb" fig-cap="**Layer-Wise Model Partitioning**: Distributing consecutive transformer layers across sequential devices bounds network communication to intermediate activations (forward) and boundary gradients (backward). However, sequential layer dependencies leave downstream devices idle during forward passes unless micro-batches are pipelined." fig-alt="Diagram showing transformer blocks 1 to 6 on Device 1, blocks 7 to 12 on Device 2, blocks 13 to 18 on Device 3, and blocks 19 to 24 on Device 4, with arrows labeled Activations between devices."}
@@ -6706,7 +6692,19 @@ node[above,pos=0.45,text=black!50,font=\sffamily
 
 The main bottleneck in naive layer-wise partitioning is device serialization. Because layer evaluation is sequential, Device 1 computes layers 1--6 while Devices 2--4 sit idle waiting for forward activations, and during the backward pass the dependency reverses as Device 4 computes first while upstream devices wait for returning gradients. This idle duration constitutes the *pipeline bubble*, which caps theoretical hardware utilization at $1/\AcceleratorCount$ under naive sequential execution. It differs from the accelerator bubbles of the staged training pipeline, which arise when one device's data-loading, transfer, and compute stages run at mismatched rates. A pipeline bubble arises even with perfectly fed devices, because each device must wait for another device's layers. Mitigating this idle time requires either pipelining micro-batches across stages or partitioning tensor dimensions within layers so that all devices compute simultaneously.
 
-Both remedies fit inside one node. Pipeline parallelism\index{Pipeline parallelism!micro-batching}\index{Pipeline parallelism!micro-batch scheduling} splits each batch into micro-batches and streams them through the stages, so Device 2 works on the first micro-batch while Device 1 starts the second. The bubble then shrinks to the time spent filling and draining the pipeline at the start and end of each batch [@huang2019gpipe; @narayanan2019], a share of the step that shrinks as the number of micro-batches grows relative to the number of stages. Tensor parallelism\index{Tensor parallelism!operation splitting}\index{Tensor parallelism!intra-layer splitting} instead splits the matrix operations of each layer across devices, so every device works on every layer at once [@shoeybi2019megatron]. The price is communication inside every layer, because the partial results must be combined before the next layer can begin. That frequency is why tensor parallelism is normally kept within one node, on its fastest links.
+Both remedies fit inside one node. Pipeline parallelism\index{Pipeline parallelism!micro-batching}\index{Pipeline parallelism!micro-batch scheduling} splits each batch into micro-batches and streams them through the stages, so Device 2 works on the first micro-batch while Device 1 starts the second. The bubble then shrinks to the time spent filling and draining the pipeline at the start and end of each batch [@huang2019gpipe; @narayanan2019], a share of the step that shrinks as the number of micro-batches grows relative to the number of stages. Tensor parallelism\index{Tensor parallelism!operation splitting}\index{Tensor parallelism!intra-layer splitting} instead splits the matrix operations of each layer across devices, so every device works on every layer at once [@shoeybi2019megatron]. The price is communication inside every layer, because the partial results must be combined before the next layer can begin. That frequency is why tensor parallelism is normally kept within one node, on its fastest links. Perspective \ref{psp-training-data-vs-model-parallelism} contrasts how data and model parallelism divide examples, parameters, and communication across $\AcceleratorCount$ devices.
+
+::: {#psp-training-data-vs-model-parallelism .callout-perspective title="Data vs. model parallelism"}
+
+When a selected workload is partitioned across $\AcceleratorCount$ devices, the split may divide examples, model state, layers, or tensor operations. For a model with parameters $\Parameters$ and batch size $\BatchSize$, data and model parallelism provide two starting points.
+
+**Data parallelism (split the batch)**: For a fixed global batch, each of $\AcceleratorCount$ workers processes about $1/\AcceleratorCount$ of the examples, but every worker holds a model replica and ordinarily its associated training state. Dense gradient communication is proportional to $\Parameters$ per update. Scaling departs from the ideal as local batches shrink or synchronization and input costs grow.
+
+**Model parallelism (split model computation)**: Each accelerator stores and computes a portion of the model. An even partition may approach $\Parameters/\AcceleratorCount$ parameters per worker, but embeddings, buffers, imbalance, and replicated state alter that estimate. Communication depends on the partition: layerwise pipeline parallelism exchanges activations at stage boundaries, while tensor parallelism performs collectives within partitioned layers.
+
+**Systems insight**: Data parallelism is the simplest candidate when the complete training state fits per worker and more throughput is needed. Model-state, pipeline, or tensor partitioning becomes necessary when it does not, often in combination with data parallelism.
+
+:::
 
 ```{python}
 #| echo: false
@@ -6812,7 +6810,7 @@ Memory capacity is the first such limit, reached when model weights, gradients, 
 
 Data parallelism also meets a statistical ceiling. Each added replica enlarges the global batch, and beyond the critical batch size defined in the discussion of mini-batch processing (@sec-model-training-minibatch-processing-4eb0), larger batches stop reducing the number of updates needed to reach a target loss [@mccandlish2018empirical]. Past that point, more replicas raise throughput in samples per second without shortening the time to target quality, so a scaling decision needs both the hardware ceiling and the batch at which the recipe's convergence flattens.
 
-These limits are technical, but scaling carries a cost beyond complexity and capacity. The training-time law already ties energy to run time. With ideal scaling, adding devices multiplies the power drawn and divides the run time by the same factor, so energy stays flat. Every loss in scaling efficiency raises the energy of the run, because each device keeps drawing power through the communication and idle time that the loss adds. @Sec-responsible-engineering-tco-calculation-methodology-7cb0 converts that energy into carbon emissions.
+These limits are technical, but scaling carries a cost beyond complexity and capacity. The training-time law already ties energy to run time. With ideal scaling, adding devices multiplies the power drawn and divides the run time by the same factor, so energy stays flat. Every loss in scaling efficiency raises the energy of the run, because each device keeps drawing power through the communication and idle time that the loss adds. @Sec-responsible-engineering-tco-calculation-methodology-7cb0 converts that energy into carbon emissions, and notebook \ref{nbk-training-carbon-footprint-training} applies that accounting to a 1,024-GPU training run.
 
 ```{python}
 #| echo: false
@@ -6931,8 +6929,6 @@ class TrainingCarbonFootprint:
 
 :::
 
-Scaling changes the limiting constraint rather than removing it. Data parallelism adds throughput, sharded and model parallelism add memory capacity, pipeline parallelism recovers utilization lost to idle stages, and tensor parallelism makes layers larger than one device feasible, but each adds communication and coordination cost. The implementation details of multi-node distributed training, including collective communication primitives, fault tolerance mechanisms, and elastic scheduling, build directly on the single-machine principles covered throughout this chapter and are treated in depth in advanced distributed systems texts.
-
 ::: {#chk-training-scaling-decisions .callout-checkpoint title="Scaling decisions"}
 
 Scaling trades compute bottlenecks for communication bottlenecks.
@@ -6944,6 +6940,8 @@ Scaling trades compute bottlenecks for communication bottlenecks.
 - [ ] **Scaling ceiling**: Estimate the theoretical speedup ceiling via Amdahl's law when unparallelized synchronization accounts for 10 percent of step time, and determine where adding accelerators yields diminishing returns.
 
 :::
+
+Scaling changes the limiting constraint rather than removing it. Data parallelism adds throughput, sharded and model parallelism add memory capacity, pipeline parallelism recovers utilization lost to idle stages, and tensor parallelism makes layers larger than one device feasible, but each adds communication and coordination cost. The implementation details of multi-node distributed training, including collective communication primitives, fault tolerance mechanisms, and elastic scheduling, build directly on the single-machine principles covered throughout this chapter and are treated in depth in advanced distributed systems texts.
 
 ```{python}
 #| echo: false

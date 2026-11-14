@@ -5221,7 +5221,7 @@ Model quality is the second barrier. Extreme quantization sharply reduces the re
 
 ### When fewer bits run faster {#sec-model-compression-performance-gains-0656}
 
-Shrinking weights from 16 bits to 8 bits fails to speed up a compute-bound matrix multiplication if the processor lacks a faster 8-bit datapath, just as faster integer ALUs fail to speed up autoregressive decoding when latency is stalled on memory-bus transfers. Every byte that quantization removes is a byte the memory system no longer moves. Whether a quantized model runs faster, however, depends on which hardware resource is the bottleneck. A compute-bound matrix multiplication speeds up only when the hardware provides a higher-throughput datapath for the narrower format, whereas a bandwidth-bound decode speeds up in proportion to the bytes removed from each token's traffic. The same FP16-to-INT8 change therefore halves weight traffic on a bandwidth-bound decode, but on a compute-bound layer it gains the ratio of the two datapaths' peak rates, which is nothing without a faster 8-bit path. The worked examples below bracket the payoff, first on the reference H100 for a compute-bound layer and then on the running case's phone for GPT-2 XL decoding.
+Shrinking weights from 16 bits to 8 bits fails to speed up a compute-bound matrix multiplication if the processor lacks a faster 8-bit datapath, just as faster integer ALUs fail to speed up autoregressive decoding when latency is stalled on memory-bus transfers. Every byte that quantization removes is a byte the memory system no longer moves, yet whether that saving shortens wall-clock time depends on which resource is the limiting constraint. An FP16-to-INT8 conversion halves weight traffic and speeds up a bandwidth-bound decode in proportion to the bytes removed from each token's read, whereas on a compute-bound layer it gains only the peak-rate ratio of the narrower datapath. The worked examples below bracket both regimes, first on the reference H100 for a compute-bound layer and then on the running case's phone for GPT-2 XL decoding.
 
 ```{python}
 #| echo: false
@@ -6868,7 +6868,7 @@ That pruned graph is the distillation student. Teacher supervision recovers its 
 
 :::
 
-Because these transformations interact through shared parameters and activation distributions, alternative schedules should be compared at matched recovery and calibration budgets. Combining techniques also changes the size-quality trade-off itself [@han2016deep]. On VGG-16 evaluated on ImageNet (@fig-compression-methods), while individual SVD and pruning curves suffer steep top-5 accuracy cliffs below about 15 percent and 8 percent model size respectively, combining pruning with quantization extends the near-zero-loss plateau down to roughly 3 percent of original parameter footprint. This comparison does not isolate transformation order. The magnitude of these gains remains model- and runtime-specific, requiring engineers to validate each transformation stage independently.
+Because these transformations interact through shared parameters and activation distributions, alternative schedules should be compared at matched recovery and calibration budgets. Combining techniques also changes the size-quality trade-off itself [@han2016deep]. On VGG-16 evaluated on ImageNet (@fig-compression-methods), standalone SVD and pruning curves hit steep top-5 accuracy cliffs below about 15 percent and 8 percent model size respectively, whereas combining pruning with quantization extends the near-zero-loss plateau down to roughly 3 percent of the original parameter footprint.
 
 ::: {#fig-compression-methods fig-env="figure" fig-pos="htb" fig-cap="**Compression Methods on VGG-16 (ImageNet)**: Top-5 ImageNet accuracy change against compressed model-size ratio for pruning plus quantization, pruning alone, quantization alone, and singular value decomposition (SVD) on VGG-16. Combining pruning with quantization reaches the smallest model-size ratio near baseline accuracy; the ordering is model- and implementation-specific. Digitized from @han2016deep." fig-alt="Line graph of VGG-16 ImageNet top-5 accuracy change from minus 5 to plus 0.4 percentage points versus compressed model-size ratio from 2 to 21 percent across four series: pruning plus quantization, pruning only, quantization only, and SVD. SVD drops steeply below 15 percent model size, quantization only and pruning only drop below about 8 percent, while pruning plus quantization stays near zero loss down to roughly 3 percent."}
 
@@ -6939,6 +6939,8 @@ plt.close()
 ```
 
 :::
+
+The curves in @fig-compression-methods measure compressed parameter footprint rather than wall-clock latency, and they do not isolate transformation order. Because the realized gain remains model- and runtime-specific, each transformation stage must be validated independently on the target runtime rather than extrapolated from a compound size ratio.
 
 ::: {#psp-model-compression-optimization-composition-problem .callout-perspective title="The optimization composition problem"}
 
@@ -7202,15 +7204,13 @@ Converting weights to INT8 shrinks the artifact by `{python} ResNet50Int8Metrics
 
 The quality side of the profile moves less visibly. While aggregate top-1 accuracy drops by only `{python} ResNet50Int8Metrics.top1_drop_pp_prose_str` (from `{python} ResNet50Int8Metrics.fp32_top1_prose_str` to `{python} ResNet50Int8Metrics.int8_top1_prose_str`), confidence-calibration error (the gap between predicted probability and observed accuracy, distinct from the range calibration of quantization) increases from `{python} ResNet50Int8Metrics.calibration_error_fp32_prose_str` to `{python} ResNet50Int8Metrics.calibration_error_int8_prose_str`. Post-quantization probability distributions drift, which can compromise safety-critical confidence thresholds even when top-1 classification accuracy appears preserved. Production deployment decisions require corresponding quality, latency, and energy measurements using a supported execution path on target hardware.
 
-Suppose the application requires at least `{python} ResNet50Int8Metrics.top1_limit_prose_str` top-1 accuracy and no more than 3.0 percent confidence-calibration error, measured with the same validation data and calibration metric as the profile. The INT8 candidate passes the accuracy limit but fails the calibration limit. Its modeled resource savings therefore do not justify acceptance. Retain the baseline for comparison, try confidence recalibration or a less aggressive quantization configuration, and repeat the quality checks before validating resource gains on the target runtime.
-
 ::: {.column-margin}
 ![](images/svg/model_compression_int8_beforeafter.svg){width="100%" fig-alt="Two horizontal gray bars start from a shared zero line, labeled FP32 2.1% and INT8 3.4%. A red dashed vertical line labeled Limit 3.0% crosses them; the FP32 bar ends to its left and the INT8 bar extends past it."}
 
 *The INT8 candidate fails the calibration limit despite holding accuracy.*
 :::
 
-A deployment profile shows whether a compressed model meets its limits but not why it misses one. Explaining a failure such as the calibration miss above requires looking inside the model, at where clipping, rounding, and pruning masks have changed its internal values.
+Suppose the application requires at least `{python} ResNet50Int8Metrics.top1_limit_prose_str` top-1 accuracy and no more than 3.0 percent confidence-calibration error, measured with the same validation data and calibration metric as the profile. The INT8 candidate passes the accuracy limit but fails the calibration limit. Its modeled resource savings therefore do not justify acceptance. Retain the baseline for comparison, try confidence recalibration or a less aggressive quantization configuration, and repeat the quality checks before validating resource gains on the target runtime.
 
 ### Diagnostic visualization {#sec-model-compression-diagnostic-visualization}
 
@@ -7798,11 +7798,11 @@ A compressed artifact must pass the same application requirements as its baselin
 
 :::
 
-Profiling, six-metric deployment scorecards, and layer-wise diagnostic plots turn compression from a paper-FLOP exercise into a verifiable engineering discipline, while the experimental design and statistical rigor that make benchmark comparisons reproducible across systems are developed in @sec-benchmarking. Even with those measurement tools in place, however, recurring traps across pruning, quantization, and hardware lowering can still turn a promising checkpoint into a latency regression or a silent quality failure, and the fallacies that follow collect the most common ones.
+Profiling, six-metric deployment scorecards, and layer-wise diagnostic plots turn compression from a paper-FLOP exercise into a verifiable engineering discipline, while the experimental design and statistical rigor that make benchmark comparisons reproducible across systems are developed in @sec-benchmarking.
 
 ## Fallacies and Pitfalls {#sec-model-compression-fallacies-pitfalls-1b5e}
 
-A team deploying GPT-2 XL on a phone might find that an uncalibrated 4-bit quantization cuts weight memory by 4$\times$ while generation quality collapses. Conversely, a vision team might achieve 70 percent weight sparsity through unstructured pruning only to find inference latency increases because commodity GPU kernels cannot execute irregular sparse indexing. Model compression presents numerous counterintuitive traps where theoretical parameter or FLOP reductions fail to produce wall-clock speedups. The following fallacies and pitfalls examine where standard engineering assumptions break down across the model-runtime interface.
+A team deploying GPT-2 XL on a phone might find that an uncalibrated 4-bit quantization cuts weight memory by 4$\times$ while generation quality collapses. Conversely, a vision team might achieve 70 percent weight sparsity through unstructured pruning only to find inference latency increases because commodity GPU kernels cannot execute irregular sparse indexing. Across pruning, quantization, and hardware lowering, recurring failures trace to treating paper reductions in bits, parameters, or FLOPs as guaranteed deployment gains across the model-runtime interface.
 
 ```{python}
 #| echo: false
