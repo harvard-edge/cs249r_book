@@ -115,8 +115,21 @@
   }
 
   const groupOf = (area) => groups.find((g) => g.id === area.group);
+  // Group color key, shared by every figure: a CSS variable reference that falls
+  // back to ink when a group has no hue. Labels never take these colors.
+  const gvar = (gid) => (gid ? `var(--grp-${esc(gid)}, var(--bok-ink))` : 'var(--bok-ink)');
+  const groupOfSubject = (sid) => areaOf.get(sid)?.group;
+  const groupOfConcept = (cid) => { const r = homeOf.get(cid); return r ? groupOfSubject(r.id) : undefined; };
+  const groupOfCode = (value) => {
+    const letter = String(value || '').charAt(0);
+    return groups.find((g) => g.code && g.code === letter)?.id;
+  };
   const conceptCount = (area) => area.rows.reduce((n, r) => n + r.concepts.length, 0);
-  const code = (value) => (value ? `<span class="bok-code">${esc(value)}</span>` : '');
+  const code = (value) => {
+    if (!value) return '';
+    const gid = groupOfCode(value);
+    return `<span class="bok-code"${gid ? ` data-g style="--g:${gvar(gid)}"` : ''}>${esc(value)}</span>`;
+  };
   const subjectHref = (row) => `#subject=${encodeURIComponent(row.id)}`;
   const conceptHref = (id) => `#concept=${encodeURIComponent(id)}`;
   const conceptLink = (id) => `<a href="${conceptHref(id)}"${concepts.get(id)?.scope === 'background' ? ' class="is-background"' : ''}>${esc(concepts.get(id)?.label || id)}</a>`;
@@ -315,7 +328,7 @@
             const list = state.showConcepts ? `<span class="bok-cell-concepts">${row.concepts.map((cid) => esc(concepts.get(cid)?.label)).join(' · ')}</span>` : '';
             return `<li><a class="${classes}" href="${subjectHref(row)}" title="${esc(row.definition)}"><span class="bok-cell-head">${code(row.code)}${ov.badge}</span><span class="bok-cell-label">${esc(row.display_label || row.label)}</span>${list}</a></li>`;
           }).join('')}</ul></div>`).join('');
-      return `<section class="bok-band" aria-labelledby="band-${esc(id)}">
+      return `<section class="bok-band" style="--grp:${gvar(id)}" aria-labelledby="band-${esc(id)}">
         <h3 class="bok-band-head" id="band-${esc(id)}">${code(group.code)}${esc(group.label)}<span>${esc(group.question)}</span></h3>
         <div class="bok-cols">${columns}</div></section>`;
     }).join('');
@@ -352,7 +365,7 @@
   function renderTree(activeArea, activeSubject) {
     $('bok-tree').innerHTML = `<details class="bok-tree-box"${window.matchMedia('(min-width: 901px)').matches ? ' open' : ''}><summary>Browse the taxonomy</summary>` + bandOrder().map((id) => {
       const group = groups.find((g) => g.id === id);
-      return `<p class="bok-tree-group">${esc(group.label)}</p><ul>${areas.filter((a) => a.group === id).map((area) => {
+      return `<p class="bok-tree-group" style="--grp:${gvar(id)}">${esc(group.label)}</p><ul>${areas.filter((a) => a.group === id).map((area) => {
         const open = area.id === activeArea;
         const subjects = open ? `<ul>${area.rows.map((row) => `<li><a href="${subjectHref(row)}"${row.id === activeSubject ? ' aria-current="page"' : ''}>${code(row.code)}${esc(row.display_label || row.label)}</a></li>`).join('')}</ul>` : '';
         return `<li><a href="#area=${esc(area.id)}"${open && !activeSubject ? ' aria-current="page"' : ''}${open ? ' class="is-open"' : ''}>${code(area.code)}${esc(area.display_label || area.label)}</a>${subjects}</li>`;
@@ -425,7 +438,8 @@
     const style = getComputedStyle($('bok-root'));
     const v = (name) => style.getPropertyValue(name).trim();
     palette = { ink: v('--bok-ink'), muted: v('--bok-muted'), faint: v('--bok-faint'), surface: v('--bok-surface'),
-      bg: v('--bok-page') || v('--bok-surface'), line: v('--bok-line-strong'), edge: v('--bok-edge'), accent: v('--bok-accent') };
+      bg: v('--bok-page') || v('--bok-surface'), line: v('--bok-line-strong'), edge: v('--bok-edge'), accent: v('--bok-accent'),
+      grp: Object.fromEntries(BAND_ORDER.map((g) => [g, v(`--grp-${g}`)])) };
   }
 
   // Concepts are text chips: outlined ink, the centered concept solid,
@@ -438,6 +452,9 @@
         label: 'data(label)', color: c.ink, 'font-family': 'Inter, -apple-system, BlinkMacSystemFont, sans-serif', 'font-size': 13,
         'font-weight': 500, 'text-valign': 'center', 'text-halign': 'center', 'text-wrap': 'ellipsis', 'text-max-width': 'data(tw)',
       } },
+      { selector: 'node[gc]', style: { 'background-fill': 'linear-gradient', 'background-gradient-direction': 'to-right',
+        'background-gradient-stop-colors': (e) => `${e.data('gc')} ${e.data('gc')} ${c.surface} ${c.surface}`,
+        'background-gradient-stop-positions': (e) => { const p = Math.min(5, (5 / (e.data('w') || 180)) * 100).toFixed(2); return `0 ${p} ${p} 100`; } } },
       { selector: 'node[?background]', style: { 'border-style': 'dashed', color: c.muted } },
       { selector: 'node.center', style: { height: 38, 'background-color': c.ink, 'border-color': c.ink, color: c.bg, 'font-size': 15, 'font-weight': 700 } },
       { selector: 'node.group-heading', style: { 'border-width': 0, 'background-opacity': 0, color: c.muted, 'font-size': 12, 'font-weight': 700, events: 'no' } },
@@ -519,7 +536,8 @@
           seen.add(other);
           const c = concepts.get(other);
           const w = chipWidth(c.label, 200);
-          els.push({ group: 'nodes', position: { x, y }, data: { id: other, label: c.label, w, tw: 180, background: c.scope === 'background' } });
+          const gc = palette.grp?.[groupOfConcept(other)];
+          els.push({ group: 'nodes', position: { x, y }, data: { id: other, label: c.label, w, tw: 180, background: c.scope === 'background', ...(gc ? { gc } : {}) } });
           ys.push(y);
           const into = rel.target === id;
           // The outer segment runs from the concept to the spine; the verb sits on it.
@@ -964,7 +982,7 @@
       const bottom = Math.sin(mid) > 0.25;
       const arcId = `bok-grp-arc-${g.id}`;
       defs += `<path id="${arcId}" d="${svgArc(cx, cy, bottom ? R_group_lbl + 5 : R_group_lbl, a0, a1, bottom)}" fill="none"/>`;
-      arcsHtml += `<path d="${svgArc(cx, cy, R_group, a0, a1)}" fill="none" stroke="var(--bok-ink)" stroke-width="2"/>`;
+      arcsHtml += `<path d="${svgArc(cx, cy, R_group, a0, a1)}" fill="none" stroke="${gvar(g.id)}" stroke-width="2.5"/>`;
       arcsHtml += `<text class="bok-svg-group-label"><textPath href="#${arcId}" startOffset="50%" text-anchor="middle">${esc(g.label)}</textPath></text>`;
     }
 
@@ -976,7 +994,7 @@
       const [lx, ly] = polar(cx, cy, R_area_lbl, mid);
       const isAreaSel = sel?.kind === 'area' && sel.id === a.id;
       arcsHtml += `<g class="viz-interactive" data-wheel-area="${esc(a.id)}" role="button" tabindex="0" aria-label="Select area ${esc(a.code)} ${esc(a.label)}">
-        <path d="${svgArc(cx, cy, R_area, a0, a1)}" fill="none" stroke="${isAreaSel ? 'var(--bok-accent)' : 'var(--bok-line-strong)'}" stroke-width="${isAreaSel ? '3.5' : '2.5'}"/>
+        <path d="${svgArc(cx, cy, R_area, a0, a1)}" fill="none" stroke="${isAreaSel ? 'var(--bok-accent)' : gvar(a.group)}" stroke-opacity="${isAreaSel ? '1' : '0.55'}" stroke-width="${isAreaSel ? '3.5' : '2.5'}"/>
         <text x="${lx.toFixed(1)}" y="${(ly + 3).toFixed(1)}" text-anchor="middle" class="bok-svg-mono" style="font-size:9px;font-weight:700;fill:${isAreaSel ? 'var(--bok-accent)' : 'var(--bok-muted)'}">${esc(a.code)}</text>
       </g>`;
     }
@@ -1001,7 +1019,7 @@
       const labelBody = leftHalf
         ? `<tspan class="viz-subj-name">${esc(nameStr)} </tspan><tspan>${esc(s.code)}</tspan>`
         : `<tspan>${esc(s.code)} </tspan><tspan class="viz-subj-name">${esc(nameStr)}</tspan>`;
-      nodesHtml += `<g class="${cls}" data-wheel-subj="${esc(s.id)}" role="button" tabindex="0" aria-label="${esc(s.code)} ${esc(s.label)}">
+      nodesHtml += `<g class="${cls}" style="--node:${gvar(groupOfSubject(s.id))}" data-wheel-subj="${esc(s.id)}" role="button" tabindex="0" aria-label="${esc(s.code)} ${esc(s.label)}">
         <line x1="${tx0.toFixed(1)}" y1="${ty0.toFixed(1)}" x2="${tx1.toFixed(1)}" y2="${ty1.toFixed(1)}" stroke="var(--bok-line)" stroke-width="0.75"/>
         <circle class="viz-subj-node" cx="${nx.toFixed(1)}" cy="${ny.toFixed(1)}" r="${isSelected ? '3.5' : '2.3'}"/>
         <text class="viz-subj-label" transform="translate(${lx.toFixed(1)},${ly.toFixed(1)}) rotate(${rot.toFixed(2)})" dy="0.32em" text-anchor="${anchor}">${labelBody}</text>
@@ -1137,9 +1155,9 @@
         <text x="0" y="0" text-anchor="start"><tspan style="font-weight:700">${esc(a.code)}</tspan> <tspan style="font-family:Inter,sans-serif;font-size:8.5px;fill:var(--bok-muted)">${esc(fullLbl)}</tspan></text>
       </g>`;
       // Marginal bars: right (outgoing cross-area) and bottom (incoming cross-area)
-      headersHtml += `<rect x="${x0 + gridSpan + 8}" y="${y0 + p + 6}" width="${rBarW}" height="8" fill="var(--bok-ink)" fill-opacity="0.32"><title>${esc(a.code)} outgoing to other areas: ${rTot}</title></rect>`;
+      headersHtml += `<rect x="${x0 + gridSpan + 8}" y="${y0 + p + 6}" width="${rBarW}" height="8" fill="${gvar(a.group)}" fill-opacity="0.7"><title>${esc(a.code)} outgoing to other areas: ${rTot}</title></rect>`;
       headersHtml += `<text x="${x0 + gridSpan + 12 + rBarW}" y="${y0 + p + 13.5}" class="bok-svg-mono" style="font-size:8px;fill:var(--bok-faint)">${rTot}</text>`;
-      headersHtml += `<rect x="${x0 + p + 6}" y="${y0 + gridSpan + 8}" width="8" height="${cBarH}" fill="var(--bok-ink)" fill-opacity="0.32"><title>${esc(a.code)} incoming from other areas: ${cTot}</title></rect>`;
+      headersHtml += `<rect x="${x0 + p + 6}" y="${y0 + gridSpan + 8}" width="8" height="${cBarH}" fill="${gvar(a.group)}" fill-opacity="0.7"><title>${esc(a.code)} incoming from other areas: ${cTot}</title></rect>`;
       headersHtml += `<text x="${x0 + p + 10}" y="${y0 + gridSpan + 18 + cBarH}" text-anchor="middle" class="bok-svg-mono" style="font-size:7.5px;fill:var(--bok-faint)">${cTot}</text>`;
     }
 
@@ -1900,7 +1918,7 @@
       const cls = ['viz-diag-node', isAct || isNbr ? 'is-active' : '', isDim ? 'is-dim' : ''].filter(Boolean).join(' ');
       nodesHtml += `<g class="${cls}" data-diag-node="${esc(id)}" transform="translate(${pt.x},${pt.y - 16})" role="button" tabindex="0" aria-label="${esc(lbl)}">
         <rect x="0" y="0" width="${colW}" height="32" rx="2" fill="var(--bok-surface)" stroke="${isAct ? 'var(--bok-accent)' : 'var(--bok-line)'}" stroke-width="${isAct ? '1.5' : '1'}"/>
-        <rect class="viz-diag-tick" x="0" y="0" width="3" height="32" fill="${isAct || isNbr ? 'var(--bok-accent)' : 'var(--bok-ink)'}"/>
+        <rect class="viz-diag-tick" x="0" y="0" width="3" height="32" fill="${isAct || isNbr ? 'var(--bok-accent)' : gvar(r ? groupOfSubject(r.id) : undefined)}"/>
         <text x="10" y="12" class="bok-svg-mono" style="font-size:8.5px;fill:var(--bok-faint)">${esc(r?.code || '')} · ${esc(subjShort)}${esc(metricTag)}</text>
         <text class="viz-diag-title bok-svg-label" x="10" y="25" style="font-size:10.5px;font-weight:${isAct ? '700' : '500'}">${esc(shortLbl)}</text>
       </g>`;
@@ -1992,7 +2010,7 @@
       const stagger = i % 2 === 1;
       const lblY = stagger ? baseY + 42 : baseY + 22;
       const shortName = r?.display_label || r?.label || st.subject;
-      stationsHtml += `<g class="viz-path-station" data-path-id="${esc(lp.id)}" data-station-idx="${i}" role="button" tabindex="0" aria-label="Step ${i + 1}: ${esc(r?.code || '')} ${esc(r?.label || st.subject)}">
+      stationsHtml += `<g class="viz-path-station" style="--node:${gvar(r ? groupOfSubject(r.id) : undefined)}" data-path-id="${esc(lp.id)}" data-station-idx="${i}" role="button" tabindex="0" aria-label="Step ${i + 1}: ${esc(r?.code || '')} ${esc(r?.label || st.subject)}">
         <line x1="${x.toFixed(1)}" y1="${baseY + 7}" x2="${x.toFixed(1)}" y2="${lblY - 9}" stroke="var(--bok-line-strong)" stroke-width="0.8"/>
         <circle cx="${x.toFixed(1)}" cy="${baseY}" r="7"/>
         <text x="${x.toFixed(1)}" y="${baseY + 3}" text-anchor="middle" class="viz-station-num bok-svg-mono" style="font-size:8px;font-weight:700">${i + 1}</text>
@@ -2018,7 +2036,7 @@
   function renderGuides() {
     const g = data.framework.guides || { roles: [], symptoms: [], learning_paths: [] };
     if (!state.activeSymptom && g.symptoms?.length) state.activeSymptom = g.symptoms[0].id;
-    const subj = (id) => (rows.has(id) ? `<a class="bok-guide-subject" href="${subjectHref(rows.get(id))}"><span class="bok-grp-dot" style="background:var(--grp-${esc(areaOf.get(id)?.group || '')}, var(--bok-line-strong))" aria-hidden="true"></span>${code(rows.get(id).code)}${esc(rows.get(id).display_label || rows.get(id).label)}</a>` : esc(id));
+    const subj = (id) => (rows.has(id) ? `<a class="bok-guide-subject" href="${subjectHref(rows.get(id))}">${code(rows.get(id).code)}${esc(rows.get(id).display_label || rows.get(id).label)}</a>` : esc(id));
     const list = (ids, f) => (ids && ids.length ? `<ul class="bok-guide-list">${ids.map((id) => `<li>${f(id)}</li>`).join('')}</ul>` : '<span class="bok-muted">—</span>');
     const roles = g.roles.map((r) => `<tr id="guide-role-${esc(r.id)}"><td><strong>${esc(r.label)}</strong><span class="bok-alias">${esc(r.summary)}</span>
         <span style="display:block;margin-top:4px;font-size:0.76rem"><button type="button" class="bok-viz-clear" data-pick-role="${esc(r.id)}" style="margin-right:10px">Show in diagram &uarr;</button><a href="#overlay=role:${esc(r.id)}" class="bok-viz-clear">Highlight on Matrix &nearr;</a></span></td>
