@@ -1447,8 +1447,8 @@ def test_token_serving_scenarios():
     assert k70.result.kv_budget.m_as('GB') == pytest.approx(50.59935, rel=1e-06)
     assert k70.context_fit() == pytest.approx(4825.53, rel=1e-06)
     cs = Scenarios.Llama3_8BInt4ChatServiceH100
-    assert cs.ttft.m_as('ms') == pytest.approx(41.93186, rel=1e-06)
-    assert cs.tpot.m_as('ms') == pytest.approx(1.56765, rel=1e-05)
+    assert cs.ttft.m_as('ms') == pytest.approx(41.26921, rel=1e-06)
+    assert cs.tpot.m_as('ms') == pytest.approx(1.24765, rel=1e-05)
     assert cs.kv_capacity_tokens == 589824 and cs.resident_requests == 469
     assert cs.request_rate.m_as('1/s') == pytest.approx(10)
     assert cs.cost_per_million_tokens.m_as('dollar') == pytest.approx(0.0663482, rel=1e-05)

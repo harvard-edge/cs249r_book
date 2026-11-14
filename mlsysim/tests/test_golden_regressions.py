@@ -23,12 +23,16 @@ def test_golden_roofline_resnet50_a100_batch1():
         efficiency=0.5,
     )
 
+    # 2026-11-14 audit: re-pinned after removing the ungrounded 0.01 ms/layer
+    # default tax (B3) and replacing the 0.1 * W activation heuristic with
+    # ResNet-50's architecture-derived feature-map traffic (2 * 11,468,264 * 2 B
+    # = 45.873 MB per sample, B1).
     assert result.feasible is True
     assert result.bottleneck == "Compute"
-    assert result.latency.m_as("ms") == pytest.approx(0.5675641025641026)
-    assert result.throughput.m_as("1/s") == pytest.approx(1761.915518409758)
+    assert result.latency.m_as("ms") == pytest.approx(0.06756410256410257)
+    assert result.throughput.m_as("1/s") == pytest.approx(14800.75901328273)
     assert result.memory_footprint.m_as("GB") == pytest.approx(0.051114064)
-    assert result.arithmetic_intensity.m_as("flop/byte") == pytest.approx(145.84137654453485)
+    assert result.arithmetic_intensity.m_as("flop/byte") == pytest.approx(84.5473089622622)
 
 
 def test_golden_bottleneck_intensity_scaled_units():
@@ -77,9 +81,11 @@ def test_golden_serving_llama3_8b_h100():
         efficiency=0.5,
     )
 
+    # 2026-11-14 audit: re-pinned for causal half-square prefill attention
+    # (2 * L * H * S^2 * B, A5) and layer_overhead_ms = 0.0 default (B3).
     assert result.feasible is True
-    assert result.ttft.m_as("ms") == pytest.approx(70.97037058756726)
-    assert result.itl.m_as("ms") == pytest.approx(5.194159837611941)
+    assert result.ttft.m_as("ms") == pytest.approx(68.7468890349363)
+    assert result.itl.m_as("ms") == pytest.approx(4.87415983761194)
     assert result.kv_cache_size.m_as("GB") == pytest.approx(0.268435456)
     assert result.model_weights_size.m_as("GB") == pytest.approx(16.060000000000002)
     assert result.total_memory_required.m_as("GB") == pytest.approx(16.328435456)
@@ -125,14 +131,16 @@ def test_golden_distributed_llama3_8b_research_cluster():
     # TP8 x PP4 shard (1/32 of the model, was 1/8), and with TP=8 on 8-GPU nodes
     # every rank sits on its own node, so the 8-rank ring crosses the 100GbE
     # fabric instead of mostly riding NVLink: DP comm 7.8 -> 71.0 ms.
+    # 2026-11-14 audit: re-pinned after removing default 0.01 ms/layer tax (B3;
+    # 12 microbatches * 8 layers/stage * 0.01 ms = 0.96 ms removed from node step).
     assert result.node_profile.feasible is True
-    assert result.step_latency_total.m_as("ms") == pytest.approx(1392.7097363320572)
+    assert result.step_latency_total.m_as("ms") == pytest.approx(1391.5697363320571)
     assert result.communication_latency.m_as("ms") == pytest.approx(338.42890952888894)
     assert result.dp_communication_latency.m_as("ms") == pytest.approx(70.9625)
     assert result.tp_communication_latency.m_as("ms") == pytest.approx(267.4664095288889)
-    assert result.pipeline_bubble_latency.m_as("ms") == pytest.approx(166.4653937057634)
-    assert result.effective_throughput.m_as("1/s") == pytest.approx(735.2572996989894)
-    assert result.scaling_efficiency == pytest.approx(0.6374734159866081)
+    assert result.pipeline_bubble_latency.m_as("ms") == pytest.approx(166.2853937057634)
+    assert result.effective_throughput.m_as("1/s") == pytest.approx(735.8596362544439)
+    assert result.scaling_efficiency == pytest.approx(0.6373057777434898)
     assert result.bubble_fraction == pytest.approx(0.15789473684210525)
 
 
@@ -143,7 +151,9 @@ def test_golden_sustainability_and_economics_research_cluster():
     assert sustainability.it_energy_kwh.magnitude == pytest.approx(2644.992)
     assert sustainability.total_energy_kwh.magnitude == pytest.approx(2962.3910400000004)
     assert sustainability.carbon_footprint_kg == pytest.approx(1270.8657561600003)
-    assert sustainability.water_usage_liters == pytest.approx(5332.303872000001)
+    # 2026-11-14 audit: The Green Grid WUE standard defines WUE = Water / E_IT
+    # (1.8 L / kWh_IT * 2644.992 kWh_IT = 4760.9856 L), removing PUE double-count (A4).
+    assert sustainability.water_usage_liters == pytest.approx(4760.985600000001)
     assert sustainability.pue == pytest.approx(1.12)
     assert sustainability.region_name == "US Average"
 
@@ -169,15 +179,14 @@ def test_golden_engine_utilization_and_energy_resnet50_a100():
     from mlsysim.engine.engine import Engine
 
     p = Engine.solve(Models.Vision.ResNet50, Hardware.Cloud.A100, batch_size=1)
-    assert p.mfu == pytest.approx(0.046306754009487236, rel=1e-9)
+    assert p.mfu == pytest.approx(0.38899430740037944, rel=1e-9)
     assert p.hfu == pytest.approx(p.mfu, rel=1e-12)  # no recompute -> identical
-    assert p.energy.m_as("J") == pytest.approx(0.07546666666666667, rel=1e-9)
-    assert p.overhead_dominated is True
+    assert p.energy.m_as("J") == pytest.approx(0.015466666666666668, rel=1e-9)
+    assert p.overhead_dominated is False
 
-    # Batch-traffic heuristic (weights x (1 + 0.1 x B)) pinned at batch 32:
-    # intensity was previously pinned only implicitly at batch=1.
+    # Architecture-derived feature-map traffic (weights + 32 * 45.873 MB) pinned at batch 32:
     p32 = Engine.solve(Models.Vision.ResNet50, Hardware.Cloud.A100, batch_size=32)
-    assert p32.arithmetic_intensity.magnitude == pytest.approx(1222.2896319922922, rel=1e-9)
+    assert p32.arithmetic_intensity.magnitude == pytest.approx(172.73933010487036, rel=1e-9)
 
 
 def test_golden_engine_non_transformer_training_memory():

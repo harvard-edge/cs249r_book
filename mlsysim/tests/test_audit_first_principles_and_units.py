@@ -437,3 +437,177 @@ def test_viz_timing_strip_ax_and_distributed_roofline():
     texts_dist = " ".join(t.get_text() for t in ax_dist.texts)
     assert "204800 GB/s" in texts_dist
     plt.close(fig_dist)
+
+
+# ---------------------------------------------------------------------------
+# 5. Phase 2 First-Principles Solver & Heuristic Audit (A1-A6, B1-B5)
+# ---------------------------------------------------------------------------
+
+
+def test_moe_active_compute_and_ep_sharding_first_principles():
+    from mlsysim.engine.solvers import (
+        ContinuousBatchingModel,
+        DecodeBoundModel,
+        DistributedModel,
+        ServingModel,
+        TrainingMemoryModel,
+        WeightStreamingModel,
+    )
+
+    mixtral = Models.Language.Mixtral_8x7B
+    h100 = Hardware.Cloud.H100
+    assert mixtral.effective_compute_parameters.m_as("Bparam") == pytest.approx(12.9)
+    assert Models.Language.Llama3_405B.context_length == 131072
+
+    # A1: DecodeBoundModel arithmetic intensity uses active parameters (12.9B) over total weight bytes (46.7B * 2)
+    db = DecodeBoundModel().solve(mixtral, h100, precision="fp16", batch_size=1)
+    assert db.flops_per_step.m_as("GFLOP") == pytest.approx(2.0 * 12.9)
+    assert db.intensity.m_as("flop/byte") == pytest.approx(12.9 / 46.7)
+
+    # ServingModel, ContinuousBatchingModel, and WeightStreamingModel use active parameters for compute
+    dense_equiv = Models.Language.Llama3_8B.model_copy(
+        update={
+            "parameters": mixtral.active_parameters,
+            "layers": mixtral.layers,
+            "heads": mixtral.heads,
+            "kv_heads": mixtral.kv_heads,
+            "hidden_dim": mixtral.hidden_dim,
+            "head_dim": mixtral.head_dim,
+            "inference_flops": None,
+        }
+    )
+    srv_moe = ServingModel().solve(mixtral, h100, seq_len=512, batch_size=1, efficiency=0.5)
+    srv_dense = ServingModel().solve(dense_equiv, h100, seq_len=512, batch_size=1, efficiency=0.5)
+    assert srv_moe.ttft.m_as("ms") == pytest.approx(srv_dense.ttft.m_as("ms"))
+    assert srv_moe.model_weights_size.m_as("GB") == pytest.approx(46.7 * 2.0)
+
+    cb_moe = ContinuousBatchingModel().solve(mixtral, h100, max_seq_len=512, max_batch_size=1, efficiency=0.5)
+    assert cb_moe.ttft.m_as("ms") == pytest.approx(srv_dense.ttft.m_as("ms"))
+
+    ws_moe = WeightStreamingModel().solve(
+        mixtral, Hardware.Cloud.Cerebras_CS3, seq_len=128, batch_size=1, phase="prefill"
+    )
+    ws_dense = WeightStreamingModel().solve(
+        dense_equiv, Hardware.Cloud.Cerebras_CS3, seq_len=128, batch_size=1, phase="prefill"
+    )
+    assert ws_moe.layer_compute_time.m_as("ms") == pytest.approx(ws_dense.layer_compute_time.m_as("ms"))
+
+    # A2: Shared vs routed parameter separation under EP
+    p_shared = (8 * 12.9e9 - 2 * 46.7e9) / 6.0
+    p_routed = 46.7e9 - p_shared
+    sharded_ep8 = mixtral.sharded_parameter_count(tp_size=1, pp_size=1, ep_size=8).m_as("param")
+    assert sharded_ep8 == pytest.approx(p_shared + p_routed / 8.0)
+
+    tm_ep8 = TrainingMemoryModel().solve(mixtral, h100, batch_size=1, seq_len=512, ep_size=8)
+    assert tm_ep8.weights.m_as("byte") == pytest.approx(sharded_ep8 * 2.0)
+
+    # Dense workload rejects ep_size > 1 in TrainingMemoryModel and DistributedModel
+    with pytest.raises(ValueError, match="ep_size > 1"):
+        TrainingMemoryModel().solve(Models.Language.Llama3_8B, h100, batch_size=1, ep_size=2)
+    with pytest.raises(ValueError, match="ep_size > 1"):
+        DistributedModel().solve(
+            Models.Language.Llama3_8B, Systems.Clusters.Research_256, batch_size=256, ep_size=2
+        )
+
+
+def test_young_daly_rework_wue_and_causal_chunked_prefill():
+    from mlsysim.engine.solvers import ReliabilityModel, ServingModel, SustainabilityModel, WaterUseModel
+
+    # A3: ReliabilityModel includes tau / (2 * M) rework loss
+    fleet = Systems.Clusters.Research_256
+    rel = ReliabilityModel().solve(
+        fleet, job_duration_hours=24.0, checkpoint_time_s=60.0, avg_recovery_time_s=600.0
+    )
+    mtbf_s = rel.fleet_mtbf.m_as("s")
+    tau_s = rel.optimal_checkpoint_interval.m_as("s")
+    expected_goodput = max(0.0, 1.0 - 60.0 / tau_s - tau_s / (2.0 * mtbf_s) - 600.0 / mtbf_s)
+    rework_omitted = 1.0 - 60.0 / tau_s - 600.0 / mtbf_s
+    assert rel.goodput_ratio == pytest.approx(expected_goodput)
+    assert rel.goodput_ratio < rework_omitted
+
+    # A4: SustainabilityModel water matches WaterUseModel (E_IT * WUE, no PUE double-count)
+    from mlsysim import Infrastructure
+
+    sus = SustainabilityModel().solve(fleet, duration_days=1.0, mfu=0.5)
+    wue_val = fleet.datacenter.grid.wue if (fleet.datacenter and fleet.datacenter.grid) else Infrastructure.Grids.US_Avg.wue
+    wu = WaterUseModel().solve(sus.it_energy_kwh, {"site": Q_(wue_val, "liter / kWh")})
+    assert sus.water_usage_liters == pytest.approx(wu.water["site"].m_as("liter"))
+
+    # A5: Chunked causal prefill sums exact causal tiles (no quadratic underestimation)
+    zero_tax_h100 = Hardware.Cloud.H100.model_copy(update={"dispatch_tax": Q_(0.0, "s")})
+    full = ServingModel().solve(
+        Models.Language.Llama3_8B, zero_tax_h100, seq_len=1024, batch_size=1, prefill_chunk_tokens=None
+    )
+    chunked = ServingModel().solve(
+        Models.Language.Llama3_8B, zero_tax_h100, seq_len=1024, batch_size=1, prefill_chunk_tokens=256
+    )
+    assert chunked.ttft.m_as("ms") == pytest.approx(full.ttft.m_as("ms"), rel=1e-9)
+
+
+def test_efficiency_dao_io_attention_flops_and_continuous_offload():
+    from mlsysim.engine.engine import Engine
+    from mlsysim.engine.solvers import EfficiencyModel, ResponsibleEngineeringModel
+    from mlsysim.physics.transformer import calc_attention_matmul_flops
+
+    # B1: CNN feature-map activation traffic and Transformer residual-stream traffic
+    assert Models.Vision.ResNet50.activation_traffic_bytes().m_as("byte") == pytest.approx(
+        2.0 * 11468264.0 * 2.0
+    )
+    llama8 = Models.Language.Llama3_8B
+    assert llama8.activation_traffic_bytes(tokens_per_sample=512).m_as("byte") == pytest.approx(
+        4.0 * llama8.layers * 512 * llama8.hidden_dim * 2.0
+    )
+
+    # B2: EfficiencyModel Roofline + Dao IO-complexity + unity partition
+    eff_flash = EfficiencyModel().solve(
+        llama8, Hardware.Cloud.H100, workload_type="attention", use_flash_attention=True, seq_len=8192
+    )
+    eff_unfused = EfficiencyModel().solve(
+        llama8, Hardware.Cloud.H100, workload_type="attention", use_flash_attention=False, seq_len=8192
+    )
+    assert eff_flash.mfu > eff_unfused.mfu
+    assert (
+        eff_flash.mfu
+        + eff_flash.overhead_breakdown["occupancy_loss"]
+        + eff_flash.overhead_breakdown["memory_stall"]
+    ) == pytest.approx(1.0)
+    assert (
+        eff_unfused.mfu
+        + eff_unfused.overhead_breakdown["occupancy_loss"]
+        + eff_unfused.overhead_breakdown["memory_stall"]
+    ) == pytest.approx(1.0)
+
+    # B2: ResponsibleEngineeringModel Gaussian mechanism noise multiplier
+    dp = ResponsibleEngineeringModel().solve(
+        base_training_time=Q_("5 day"), epsilon=2.0, delta=1e-5, sample_rate=0.01, steps=10000
+    )
+    expected_sigma = 0.01 * math.sqrt(2.0 * 10000.0 * math.log(1.25 / 1e-5)) / 2.0
+    assert dp.noise_multiplier == pytest.approx(expected_sigma)
+
+    # B4: Optional quadratic attention FLOPs in Engine.solve
+    base_p = Engine.solve(llama8, Hardware.Cloud.H100, batch_size=4, seq_len=4096, is_training=True)
+    attn_p = Engine.solve(
+        llama8, Hardware.Cloud.H100, batch_size=4, seq_len=4096, is_training=True, include_attention_flops=True
+    )
+    expected_extra = (
+        4 * 3 * (calc_attention_matmul_flops(llama8.layers, llama8.hidden_dim, 4096, 4096, 1).m_as("flop") / 2.0)
+    )
+    assert attn_p.latency_compute.m_as("s") - base_p.latency_compute.m_as("s") == pytest.approx(
+        expected_extra / (Hardware.Cloud.H100.compute.peak_flops.m_as("flop/s") * 0.5),
+        rel=1e-9,
+    )
+
+    # B5: Continuous spilled-bytes offload bandwidth (no cliff jump at tiny spill)
+    small_hbm = Hardware.Cloud.H100.model_copy(
+        update={
+            "memory": Hardware.Cloud.H100.memory.model_copy(
+                update={"capacity": Q_(16.05, "GB")}  # Llama3_8B weights + tiny act = ~16.060066 GB
+            )
+        }
+    )
+    off = Engine.solve(llama8, small_hbm, batch_size=1, seq_len=1)
+    assert off.feasible is False
+    assert off.offload_spill_bytes is not None and off.offload_spill_bytes.m_as("GB") < 0.02
+    # Effective bandwidth stays close to HBM (> 2000 GB/s), NOT collapsing to link bw (~450 GB/s)!
+    assert off.offload_effective_bw.m_as("GB/s") > 2000.0
+

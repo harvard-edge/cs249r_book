@@ -17,8 +17,6 @@ from ..results import (
     SynthesisResult,
 )
 from ...core.units import ureg, Q_, resolve_precision
-from ...literature.registry import Literature
-from .. import calibration as cal
 from ...core.types import Quantity
 from ...models.types import Workload
 from ...hardware.types import HardwareNode
@@ -97,9 +95,10 @@ class SingleNodeModel(ForwardModel):
         This wrapper delegates the workload lowering, memory accounting, and
         constraint traces to ``Engine.solve``.
 
-        Assumptions: the generic engine's activation-traffic convention and
-        one forward step unless additional engine options select training.
-        Efficiency scales compute capacity, not peak memory bandwidth.
+        Assumptions: architecture-derived activation traffic from
+        ``Workload.activation_traffic_bytes`` and one forward step unless
+        additional engine options select training. Efficiency scales compute
+        capacity, not peak memory bandwidth.
         Excludes: explicit KV-aware serving and distributed collectives.
 
         References
@@ -309,48 +308,65 @@ class EfficiencyModel(ForwardModel):
         use_flash_attention: bool = False,
         precision: str = "fp16",
         efficiency: float = 0.5,
+        seq_len: int = 2048,
+        batch_size: int = 1,
     ) -> EfficiencyResult:
-        """Estimate achievable MFU and FLOPS for a given workload type.
+        """Estimate achievable MFU and FLOPS from kernel IO-complexity and Roofline bounds.
 
         Parameters
         ----------
         model : Workload
-            The model architecture to simulate.
+            Workload supplying hidden geometry or lowered graph work/bytes.
         hardware : HardwareNode
-            The target hardware node.
-        workload_type : str
-            The dominant kernel type ('attention', 'ffn', 'conv').
-        use_flash_attention : bool
-            Whether FlashAttention is enabled (only applies to 'attention').
-        precision : str
-            Numerical precision ('fp16', 'fp32', 'int8', 'int4').
-        efficiency : float
-            Base compute efficiency factor (0.0 to 1.0).
+            Target accelerator supplying precision peak FLOP/s and HBM bandwidth.
+        workload_type : str, default: 'ffn'
+            Dominant kernel family: ``'attention'``, ``'ffn'``, or ``'conv'``.
+        use_flash_attention : bool, default: False
+            Tile attention in SRAM so HBM traffic avoids ``O(S^2)`` score/softmax
+            materialization (applies when ``workload_type == 'attention'``).
+        precision : str, default: 'fp16'
+            Registered numerical format controlling element byte width and peak FLOP/s.
+        efficiency : float, default: 0.5
+            Compute-pipe / SM occupancy ceiling ``eta_comp`` (clamped to ``[0, 1]``).
+        seq_len : int, default: 2048
+            Positive sequence length ``S`` for attention and FFN kernel intensity.
+        batch_size : int, default: 1
+            Positive batch size ``B`` scaling token count or image batch reuse.
 
         Returns
         -------
         EfficiencyResult
-            MFU estimate, achievable FLOPS, and overhead breakdown.
+            Roofline-bounded MFU, achievable FLOP/s, peak FLOP/s, and an exact
+            partition of unity ``mfu + occupancy_loss + memory_stall == 1``.
 
         Notes
         -----
-        Equation: achieved_rate = peak_rate * eta, where eta is a workload
-        lookup scaled by efficiency / 0.5 and clipped by the configured cap.
-        FFN uses the literature registry's upper MFU; ordinary attention uses
-        its lower MFU; convolution uses their average. Flash attention uses
-        its own declared coefficient and cap.
+        Equation: with ``eta_comp = clamp(efficiency, 0, 1)`` and peak ridge
+        point ``I_peak = F_peak / BW_HBM``, ``mfu = min(eta_comp, I_kernel / I_peak)``,
+        ``occupancy_loss = 1 - eta_comp``, and ``memory_stall = eta_comp - mfu``.
+        Kernel arithmetic intensity ``I_kernel`` at byte width ``b`` is:
+        unfused causal attention ``2 * S^2 * d_h / ((4 * S * d_h + 4 * S^2) * b)``;
+        FlashAttention ``2 * S^2 * d_h / (4 * S * d_h * b) = S / (2 * b)``;
+        two-projection ``H x 4H`` FFN over ``T = B * S`` tokens
+        ``16 * T * H^2 / ((8 * H^2 + 4 * T * H) * b)``;
+        convolution/generic ``(B * F_sample) / (W + B * A_sample)``.
 
-        Assumptions: these are illustrative workload-class efficiency factors,
-        not a kernel-level occupancy or memory-access simulation.
-        Excludes: model shape, context length, actual kernel selection, and
-        memory feasibility. The returned occupancy/stall split is heuristic;
-        its components need not sum to the clipped utilization loss.
+        Assumptions: HBM bandwidth is evaluated at peak device rate; ``eta_comp``
+        caps compute throughput; missing Transformer geometry defaults to
+        ``H = 4096`` and ``d_h = 128`` when evaluating attention or FFN kernels
+        on non-Transformer workloads.
+
+        Excludes: SRAM tile-size capacity spills for huge head dimensions,
+        kernel launch latency, and multi-device communication.
 
         References
         ----------
-        Derivation: throughput is the supplied peak multiplied by an assumed
-        utilization fraction. Coefficients are in ``engine.calibration`` and
-        ``Literature.Training``; this function does not estimate them from traces.
+        Williams, Waterman, and Patterson (2009), "Roofline: An Insightful
+        Visual Performance Model for Multicore Architectures."
+        https://doi.org/10.1145/1498765.1498785 (bibliography key: williams2009).
+        Dao et al. (2022), "FlashAttention: Fast and Memory-Efficient Exact
+        Attention with IO-Awareness."
+        https://arxiv.org/abs/2205.14135 (bibliography key: dao2022).
 
         Examples
         --------
@@ -360,40 +376,56 @@ class EfficiencyModel(ForwardModel):
         >>> bool(0 <= r.mfu <= 1 and r.achievable_flops <= r.peak_flops)
         True
         """
-        peak_flops = hardware.compute.precision_flops.get(precision, hardware.compute.peak_flops)
+        from ...core._validation import validate_at_least
 
-        # Base MFU range from Literature.Training (training regime)
-        mfu_low = Literature.Training.MfuLow
-        mfu_high = Literature.Training.MfuHigh
+        validate_at_least(seq_len, 1, "seq_len")
+        validate_at_least(batch_size, 1, "batch_size")
+        precision_key, bpp_qty = resolve_precision(precision)
+        bpp = bpp_qty.to("byte").magnitude
 
-        # Workload-type MFU adjustment (heuristic calibrations — see core/calibration.py)
-        # All values scale linearly with the efficiency parameter relative to 0.5.
-        scale = efficiency / 0.5
+        peak_flops = hardware.compute.precision_flops.get(precision_key, hardware.compute.peak_flops)
+        bw_bytes_s = hardware.memory.bandwidth.to("byte/second").magnitude
+        peak_flops_s = peak_flops.to("flop/second").magnitude
+
+        eta_comp = max(0.0, min(float(efficiency), 1.0))
+
+        h_dim = getattr(model, "hidden_dim", None) or 4096
+        n_heads = getattr(model, "heads", None) or 32
+        d_head = getattr(model, "head_dim", None) or (h_dim // n_heads)
+
         if workload_type == "attention":
             if use_flash_attention:
-                eta = min(cal.MFU_FLASH_ATTENTION * scale, cal.MFU_FLASH_ATTENTION_CAP)
+                # Dao et al. (2022): single HBM pass over Q, K, V, O (4 * S * d_h * b)
+                # for causal self-attention FLOPs (2 * S^2 * d_h).
+                kernel_intensity = seq_len / (2.0 * bpp)
             else:
-                # Standard attention is memory-bound due to O(S²) reads
-                eta = mfu_low * scale
+                # Standard unfused attention materializes S x S score and softmax
+                # matrices in HBM: (4 * S * d_h + 4 * S^2) * b bytes per head.
+                flops_head = 2.0 * (seq_len ** 2) * d_head
+                bytes_head = (4.0 * seq_len * d_head + 4.0 * (seq_len ** 2)) * bpp
+                kernel_intensity = flops_head / bytes_head
         elif workload_type == "ffn":
-            # FFN layers are compute-dense GEMM — best MFU
-            eta = min(mfu_high * scale, cal.MFU_FFN_CAP)
-        elif workload_type == "conv":
-            # Convolutions via im2col + GEMM — moderate MFU
-            eta = min((mfu_low + mfu_high) / 2.0 * scale, cal.MFU_CONV_CAP)
+            tokens = float(batch_size * seq_len)
+            flops_ffn = 16.0 * tokens * (h_dim ** 2)
+            bytes_ffn = (8.0 * (h_dim ** 2) + 4.0 * tokens * h_dim) * bpp
+            kernel_intensity = flops_ffn / bytes_ffn
         else:
-            eta = mfu_low * scale
+            graph = model.lower(bpp_qty)
+            act_bytes = model.activation_traffic_bytes(bpp_qty) * batch_size
+            total_bytes = (graph.weight_bytes + act_bytes).to("byte").magnitude
+            total_flops = (graph.total_ops * batch_size).to("flop").magnitude
+            kernel_intensity = (total_flops / total_bytes) if total_bytes > 0 else 0.0
 
-        eta = max(0.0, min(eta, 1.0))  # Clamp to [0, 1]
+        if peak_flops_s > 0 and bw_bytes_s > 0:
+            peak_ridge = peak_flops_s / bw_bytes_s
+            eta = min(eta_comp, kernel_intensity / peak_ridge)
+        else:
+            eta = 0.0
+        eta = max(0.0, min(eta, 1.0))
 
         achievable_flops = peak_flops * eta
-
-        # Overhead breakdown: decompose (1 - eta) into meaningful components.
-        # Total overhead = 1 - eta, split into occupancy loss and memory stall.
-        total_overhead = 1.0 - eta
-        occupancy_loss = 1.0 - min(efficiency * cal.SM_OCCUPANCY_HEADROOM, 1.0)  # SM occupancy overhead
-        # Memory stall absorbs the remainder: time spent waiting on data movement.
-        memory_stall = max(0.0, total_overhead - occupancy_loss)
+        occupancy_loss = 1.0 - eta_comp
+        memory_stall = max(0.0, eta_comp - eta)
 
         return EfficiencyResult(
             mfu=eta,
@@ -715,11 +747,12 @@ class DecodeBoundModel(ForwardModel):
 
         Notes
         -----
-        Equation: F = ``2P*B/TP``, W = ``P*b/TP``; T_compute = F/peak and
-        T_memory = W/BW. Attainable rate is min(peak, ``BW*F/W)``.
+        Equation: F = ``2 * P_active * B / TP``, W = ``P_total * b / TP``;
+        T_compute = F/peak and T_memory = W/BW. Attainable rate is
+        min(peak, ``BW * F / W``).
 
         Assumptions: equal sharding, one weight read shared across the batch,
-        full use of supplied peak rates, and parameter-dominated forward work.
+        full use of supplied peak rates, and active-parameter forward work.
         Excludes: KV-cache reads, attention over context, communication,
         activations, runtime overhead, and memory-capacity checks.
 
@@ -743,9 +776,10 @@ class DecodeBoundModel(ForwardModel):
         from ...physics.transformer import calc_transformer_decode_flops
 
         precision, _ = resolve_precision(precision)
-        # tp_size (added 2026-10-20): each device holds and multiplies a 1/tp_size weight shard.
+        # tp_size (added 2026-10-20): each device holds a 1/tp_size resident weight
+        # shard while arithmetic executes effective_compute_parameters (active MoE params).
         weights = model.size_in_bytes(precision) / tp_size
-        flops = calc_transformer_decode_flops(model.parameters) * batch_size / tp_size
+        flops = calc_transformer_decode_flops(model.effective_compute_parameters) * batch_size / tp_size
         peak = peak_flops if peak_flops is not None else hardware.compute.peak_flops
         bw = hardware.memory.bandwidth
         b = calc_bottleneck(flops, weights, peak, bw)

@@ -6,6 +6,7 @@ path, derived from ``engine.solvers.__init__``); kept per-domain so the logic st
 
 from __future__ import annotations
 
+import math
 from typing import Any, List, Optional
 
 from ..results import (
@@ -91,17 +92,19 @@ class SustainabilityModel(ForwardModel):
 
         Notes
         -----
-        Equation: P = TDP * (idle_fraction + dynamic_fraction * MFU); E_IT = P * devices * duration; E_facility = PUE * E_IT. Carbon is E_facility * grid intensity plus the full supplied embodied amount. Water uses facility energy in this solver, unlike WaterUseModel, whose explicit boundary is IT energy.
+        Equation: P = TDP * (idle_fraction + dynamic_fraction * MFU); E_IT = P * devices * duration;
+        E_facility = PUE * E_IT. Carbon is E_facility * grid intensity plus the full supplied
+        embodied amount. Water is ``E_IT * WUE`` (The Green Grid standard: liters per kWh of IT
+        equipment energy, matching ``WaterUseModel``).
 
         Assumptions: Constant utilization, PUE, and regional intensities over the run. Embodied carbon is charged fully rather than amortized.
-        Excludes: Measured power traces, host power beyond the assumed accelerator-based account, and lifetime allocation of embodied carbon.
+        Excludes: Measured power traces, host power beyond the assumed accelerator-based account, off-site source-electricity water (EWIF), and lifetime allocation of embodied carbon.
 
         References
         ----------
         Derivation: Integrate the assumed idle-plus-utilization power over the fleet
-        duration, apply PUE once, and multiply facility energy by regional carbon and
-        water intensities. This is an energy-accounting convention rather than a meter
-        measurement.
+        duration, apply PUE to facility electricity/carbon, and multiply IT energy by
+        the regional on-site WUE (L / kWh_IT).
 
         Examples
         --------
@@ -161,7 +164,7 @@ class SustainabilityModel(ForwardModel):
             else total_energy_kwh.magnitude * (region.carbon_intensity_g_kwh / 1000.0)
         )
 
-        # 5. Water Usage
+        # 5. Water Usage (The Green Grid WUE standard: L / kWh of IT equipment energy)
         # Resolve WUE from dc.grid, dc, or region
         if hasattr(dc, "grid") and dc.grid:
             wue = dc.grid.wue
@@ -170,7 +173,7 @@ class SustainabilityModel(ForwardModel):
         else:
             wue = region.wue
 
-        water_liters = total_energy_kwh.magnitude * wue
+        water_liters = it_energy_kwh.magnitude * wue
 
         # 6. Embodied Carbon (manufacturing, shipping, end-of-life)
         # Source: Gupta et al. (2022), "ACT: Designing Sustainable Computer Systems
@@ -354,64 +357,97 @@ class ResponsibleEngineeringModel(ForwardModel):
         epsilon: float = 1.0,
         delta: float = 1e-5,
         min_subgroup_prevalence: float = 0.01,
+        sample_rate: float = 0.001,
+        steps: int = 10000,
+        clipping_step_overhead: float = 0.0,
     ) -> ResponsibleEngineeringResult:
-        """Calculate the compute and data overhead of responsible-AI guarantees.
-
-        Two first-order cost models:
-
-        - **Privacy (DP-SGD slowdown)**:
-          ``slowdown = 1 + coefficient / epsilon`` — tighter privacy budgets
-          (smaller epsilon) require more noise and per-sample clipping work,
-          so training time grows hyperbolically as epsilon -> 0. The
-          coefficient is a pedagogical calibration constant
-          (``DP_SGD_SLOWDOWN_COEFFICIENT`` in ``engine/calibration.py``).
-        - **Fairness (data requirement)**:
-          ``additional_data = 1 / min_subgroup_prevalence`` — to collect N
-          samples of a subgroup seen at prevalence p, you must collect ~N/p
-          samples overall.
+        """Calculate DP-SGD Gaussian noise scale, step overhead, and subgroup sampling multiplier.
 
         Parameters
         ----------
         base_training_time : Quantity
-            Training time without privacy guarantees (any time unit; the
-            result keeps the same unit).
-        epsilon : float
-            Differential-privacy budget (> 0); smaller is stricter. Clamped
-            below at 0.01 to avoid a singular slowdown.
-        delta : float
-            DP failure probability (reported, not used in the slowdown model).
-        min_subgroup_prevalence : float
-            Prevalence in (0, 1] of the rarest subgroup that must be
-            adequately represented.
+            Positive training duration without DP-SGD per-example clipping (any time unit;
+            the returned ``effective_training_time`` preserves this unit).
+        epsilon : float, default: 1.0
+            Positive differential-privacy budget ``epsilon``; smaller values require a
+            larger Gaussian noise multiplier ``sigma``.
+        delta : float, default: 1e-5
+            Differential-privacy failure probability in ``(0, 1)``.
+        min_subgroup_prevalence : float, default: 0.01
+            Population prevalence ``p`` in ``(0, 1]`` of the rarest subgroup.
+        sample_rate : float, default: 0.001
+            Poisson subsampling rate ``q = L / N`` in ``(0, 1]`` per DP-SGD step.
+        steps : int, default: 10000
+            Positive count ``T`` of DP-SGD optimization steps.
+        clipping_step_overhead : float, default: 0.0
+            Nonnegative fractional per-step compute/memory overhead from per-example
+            gradient clipping (e.g., ``0.25`` for a 1.25x step-time multiplier; ``0.0``
+            when unmeasured). Note that privacy budget ``epsilon`` governs ``sigma``,
+            whereas per-step wall-clock overhead comes from per-example clipping kernels.
 
         Returns
         -------
         ResponsibleEngineeringResult
-            DP slowdown factor (dimensionless), effective training time, and
-            the data-collection multiplier.
+            Gaussian mechanism noise multiplier ``noise_multiplier``, step-time multiplier
+            ``dp_slowdown_factor``, ``effective_training_time``, and subgroup sampling
+            multiplier ``additional_data_requirement``.
 
         Notes
         -----
-        Equation: slowdown = 1 + c / max(epsilon, 0.01); effective_time = base_time * slowdown; data_factor = 1 / max(prevalence, 1e-6). The coefficient c is the declared pedagogical default in calibration.py, not a measured DP-SGD law.
+        Equation: ``sigma = q * sqrt(2 * T * ln(1.25 / delta)) / epsilon``;
+        ``dp_slowdown_factor = 1 + clipping_step_overhead``;
+        ``effective_training_time = base_training_time * dp_slowdown_factor``;
+        ``additional_data_requirement = 1 / min_subgroup_prevalence``.
 
-        Assumptions: Fixed illustrative coefficient and inverse-prevalence sampling account. Delta is reported but does not affect the slowdown.
-        Excludes: Privacy accounting, proof of differential privacy, actual clipping/noise implementation, and fairness certification.
+        Assumptions: Subsampled Gaussian mechanism under moments-accountant / Gaussian
+        composition scaling with subsampling ratio ``q`` and ``T`` steps; independent
+        random sampling from a population where the target subgroup has prevalence ``p``.
+
+        Excludes: Tight numerical Renyi-DP / PRV accountant constants, convergence-step
+        increases needed to recover utility at high ``sigma``, and measured kernel traces.
 
         References
         ----------
-        Derivation: The inverse-epsilon slowdown is a pedagogical assumption. Inverse
-        prevalence follows the expected sample count needed to observe a subgroup;
-        neither expression proves privacy or fairness.
+        Dwork and Roth (2014), "The Algorithmic Foundations of Differential Privacy,"
+        Theorem A.1. https://doi.org/10.1561/0400000042 (bibliography key: dwork2014).
+        Abadi et al. (2016), "Deep Learning with Differential Privacy," Theorem 1.
+        https://doi.org/10.1145/2976749.2978318 (bibliography key: abadi2016).
 
         Examples
         --------
-        >>> from mlsysim import Q_, Systems
-        >>> result = ResponsibleEngineeringModel().solve(Q_("1 hour"), epsilon=1)
-        >>> result.effective_training_time > Q_("1 hour")
+        >>> from mlsysim import Q_
+        >>> result = ResponsibleEngineeringModel().solve(
+        ...     Q_("1 hour"), epsilon=1.0, clipping_step_overhead=0.25
+        ... )
+        >>> result.effective_training_time > Q_("1 hour") and result.noise_multiplier > 0
         True
         """
-        dp_slowdown = 1.0 + (cal.DP_SGD_SLOWDOWN_COEFFICIENT / max(epsilon, 0.01))
-        additional_data_factor = 1.0 / max(min_subgroup_prevalence, 1e-6)
+        from ...core._validation import (
+            validate_at_least,
+            validate_nonnegative,
+            validate_positive,
+            validate_range,
+        )
+
+        validate_positive(base_training_time, "base_training_time")
+        validate_positive(epsilon, "epsilon")
+        if not (0.0 < delta < 1.0):
+            raise ValueError(f"delta must be in (0, 1), got {delta}")
+        if not (0.0 < min_subgroup_prevalence <= 1.0):
+            raise ValueError(
+                f"min_subgroup_prevalence must be in (0, 1], got {min_subgroup_prevalence}"
+            )
+        if not (0.0 < sample_rate <= 1.0):
+            raise ValueError(f"sample_rate must be in (0, 1], got {sample_rate}")
+        validate_at_least(steps, 1, "steps")
+        validate_nonnegative(clipping_step_overhead, "clipping_step_overhead")
+        validate_range(sample_rate, 1e-12, 1.0, "sample_rate")
+
+        noise_multiplier = (
+            sample_rate * math.sqrt(2.0 * steps * math.log(1.25 / delta)) / epsilon
+        )
+        dp_slowdown = 1.0 + clipping_step_overhead
+        additional_data_factor = 1.0 / min_subgroup_prevalence
         effective_time = base_training_time * dp_slowdown
 
         return ResponsibleEngineeringResult(
@@ -423,6 +459,7 @@ class ResponsibleEngineeringModel(ForwardModel):
             min_subgroup_prevalence=min_subgroup_prevalence,
             privacy_cost_ratio=dp_slowdown,
             fairness_data_ratio=additional_data_factor,
+            noise_multiplier=noise_multiplier,
         )
 
 

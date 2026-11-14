@@ -6,7 +6,6 @@ path, derived from ``engine.solvers.__init__``); kept per-domain so the logic st
 
 from __future__ import annotations
 
-import math
 from typing import Any, Dict, List, Optional
 
 from ..results import (
@@ -19,7 +18,6 @@ from ...physics import (
 )
 from ...core.types import Quantity
 from ...core.units import BITS_PER_BYTE, resolve_precision
-from .. import calibration as cal
 from ...models.types import Workload
 from ...hardware.types import HardwareNode
 from .base import ForwardModel
@@ -45,9 +43,11 @@ class CompressionModel(ForwardModel):
     def solve(self, model: Workload, hardware: HardwareNode, method: str = "quantization",
               target_bitwidth: int = 8, sparsity: float = 0.0,
               sparsity_type: str = "unstructured",
-              baseline_precision: str = "fp32") -> CompressionResult:
-        """
-        Estimate compression storage, speed, and assumed quality trade-offs.
+              baseline_precision: str = "fp32",
+              group_size: Optional[int] = None,
+              scale_bits: int = 16,
+              accuracy_delta: float = 0.0) -> CompressionResult:
+        """Estimate physical compression footprint, Roofline speedup, and supplied quality delta.
 
         Parameters
         ----------
@@ -55,31 +55,36 @@ class CompressionModel(ForwardModel):
             The model to be compressed.
         hardware : HardwareNode
             The target execution hardware.
-        method : str
-            The compression method ('quantization', 'pruning', 'distillation').
-        target_bitwidth : int
-            Target numerical precision in bits (e.g., 8 for INT8/FP8, 4 for INT4).
-            At 8-bit, accuracy delta uses the FP8 estimate (near-lossless) by default.
-        sparsity : float
-            Target sparsity ratio (0.0 to 1.0) for pruning.
-        sparsity_type : str
-            Type of sparsity pattern: 'unstructured', 'structured', or 'n_m' (2:4).
-            - unstructured: storage savings only, no inference speedup
-            - structured: both storage and compute savings
-            - n_m: hardware 2:4 sparsity with 2x speedup at 50% sparsity (Ampere+)
-        baseline_precision : str
-            Configurable precision of the uncompressed model that ratios and
-            sizes are measured against, resolved through
-            ``core.units.PRECISION_MAP``. Defaults to ``"fp32"`` (INT8 is 4x,
-            INT4 is 8x). Pass ``"fp16"`` for models trained and served from
-            FP16/BF16 weights, such as most LLMs, where INT4 is quoted as 4x.
+        method : str, default: 'quantization'
+            Compression method (``'quantization'``, ``'pruning'``, or ``'distillation'``).
+        target_bitwidth : int, default: 8
+            Positive quantized bits per weight (e.g., 8 for INT8/FP8, 4 for INT4).
+        sparsity : float, default: 0.0
+            Removed-weight fraction in ``[0, 1]`` for pruning.
+        sparsity_type : str, default: 'unstructured'
+            Sparsity pattern: ``'unstructured'`` (storage savings only), ``'structured'``
+            (storage and compute savings), or ``'n_m'`` (Ampere+ 2:4 hardware sparsity,
+            2x speedup at 50% sparsity).
+        baseline_precision : str, default: 'fp32'
+            Uncompressed precision resolved through ``core.units.PRECISION_MAP``
+            (e.g., ``'fp32'`` or ``'fp16'``).
+        group_size : int, optional
+            Positive quantization block size ``g`` sharing one scale metadata element.
+            When ``None``, scale metadata overhead is omitted (per-tensor / channel limit).
+        scale_bits : int, default: 16
+            Positive bitwidth ``b_scale`` of each quantization group's scale metadata
+            when ``group_size`` is set.
+        accuracy_delta : float, default: 0.0
+            Caller-supplied empirical task quality change (e.g., ``-0.01`` for a 1%
+            drop). Task accuracy depends on model, calibration data, and evaluation
+            benchmark rather than bitwidth or sparsity alone, so no synthetic accuracy
+            curve is invented when omitted.
 
         Returns
         -------
         CompressionResult
-            Compression metrics including memory savings, inference speedup,
-            and estimated accuracy delta, plus the ``baseline_precision`` they
-            are relative to.
+            Original and compressed sizes in GB, compression ratio, memory savings
+            percentage, Roofline inference speedup, and the supplied ``accuracy_delta``.
 
         See Also
         --------
@@ -87,44 +92,26 @@ class CompressionModel(ForwardModel):
 
         Notes
         -----
-        Equation: quantization ratio = baseline_bits/target_bitwidth;
-        pruning ratio = 1/(1-sparsity); compressed_bytes = original_bytes/ratio.
-        Fully sparse pruning uses a finite 100x convention instead of infinity.
+        Equation: for quantization, effective bits per weight are
+        ``b_eff = target_bitwidth + (scale_bits / group_size if group_size else 0)``
+        and ``compression_ratio = baseline_bits / b_eff``. For pruning,
+        ``compression_ratio = 1 / (1 - sparsity)`` (capped at 100x at ``sparsity == 1``).
+        ``compressed_bytes = original_bytes / compression_ratio``.
 
-        Assumptions: quality deltas are model-independent defaults. The baseline
-        weight-only Roofline regime determines the quantization speed branch;
-        structured sparsity is assumed to translate storage savings into speed.
+        Assumptions: baseline weight-only Roofline regime determines whether quantization
+        speedup follows bandwidth savings (``compression_ratio``) or low-precision Tensor
+        Core peak ratios; structured and 2:4 ``n_m`` pruning convert sparsity into compute
+        speedup while unstructured pruning saves storage only. ``estimated_accuracy_delta``
+        echoes the caller's ``accuracy_delta`` input directly.
 
-        Excludes: measured task accuracy, retraining, sparse index storage,
-        dequantization overhead, and kernel/allocator effects. ``distillation``
-        is documented as an accepted name but currently follows the no-op branch.
-
-        Conventions and branch logic:
-
-        - Sizes are measured against the configurable ``baseline_precision``
-          (FP32 by default, 4 bytes/param), so quantization's
-          ``compression_ratio = b_base / target_bitwidth`` (32/4 = 8x for INT4
-          by default; 16/4 = 4x with ``baseline_precision="fp16"``). A target
-          wider than the baseline is an upcast and yields a ratio < 1.
-        - ``estimated_accuracy_delta`` is a signed fraction (e.g. -0.005 =
-          -0.5 percentage points top-1), selected from illustrative defaults in
-          ``engine/calibration.py``. These are not a measurement of this
-          workload. The pruning branch uses an exponential penalty beyond
-          its declared sparsity threshold.
-        - ``inference_speedup`` depends on the Roofline regime: memory-bound
-          workloads gain the full compression ratio (less data to move);
-          compute-bound workloads gain only what the hardware's low-precision
-          path provides (1.0 when unsupported). For pruning, only structured
-          and 2:4 N:M sparsity translate into compute speedup; unstructured
-          sparsity saves storage only.
-        - Unknown ``method`` values fall through to a no-op result
-          (ratio 1.0, delta 0.0).
+        Excludes: sparse index metadata (CSR/bitmask overhead), dequantization kernel
+        overhead, activation quantization, and task-accuracy prediction.
 
         References
         ----------
-        Derivation: storage changes in proportion to bits per element or the
-        surviving weight fraction. Speed and quality branches are declared
-        implementation assumptions, not consequences of that storage identity.
+        Derivation: bit-packing storage divides element count by effective bits per
+        weight including ``scale_bits / group_size`` block scales; Roofline speedup
+        compares weight-bandwidth savings against precision FLOP/s ceilings.
 
         Examples
         --------
@@ -137,35 +124,23 @@ class CompressionModel(ForwardModel):
         from ...core._validation import validate_at_least, validate_range
         validate_at_least(target_bitwidth, 1, "target_bitwidth")
         validate_range(sparsity, 0.0, 1.0, "sparsity")
-        # Ratios are relative to a configurable baseline precision (2026-09-15).
-        # The FP32 default keeps every existing result unchanged; the former
-        # hard-code offered no way to measure FP16/BF16-served LLMs, where
-        # practice and the paper quote INT4 as 4x (baseline_precision="fp16").
+        validate_at_least(scale_bits, 1, "scale_bits")
+        if group_size is not None:
+            validate_at_least(group_size, 1, "group_size")
+
         baseline_precision, baseline_bytes = resolve_precision(baseline_precision)
         baseline_bits = baseline_bytes.to("byte").magnitude * BITS_PER_BYTE
         original_size = model.size_in_bytes(baseline_bytes)
         inference_speedup = 1.0
+        reported_delta = float(accuracy_delta)
 
         if method == "quantization":
-            compression_ratio = baseline_bits / target_bitwidth
-            # Source: Gholami et al. (2021), "A Survey of Quantization Methods"
-            # Conservative estimates: <1% for FP8, <1% for INT8, 2-5% for INT4
-            if target_bitwidth >= 16:
-                # FP16/BF16/FP32 targets: float formats with no quantization
-                # error (ratio 1x at the baseline width, < 1x for an upcast).
-                accuracy_delta = 0.0
-            elif target_bitwidth == 8:
-                # FP8/INT8: use FP8 accuracy delta (near-lossless, -0.2%)
-                accuracy_delta = cal.QUANT_ACCURACY_DELTA_FP8
-            elif target_bitwidth >= 4:
-                accuracy_delta = cal.QUANT_ACCURACY_DELTA_INT4
-            else:
-                accuracy_delta = cal.QUANT_ACCURACY_DELTA_SUB_INT4   # Sub-INT4: significant degradation
+            effective_bits = float(target_bitwidth) + (
+                float(scale_bits) / float(group_size) if group_size is not None else 0.0
+            )
+            compression_ratio = baseline_bits / effective_bits
 
-            # Inference speedup depends on compute vs memory boundedness
-            # Memory-bound workloads: speedup ≈ compression_ratio (less data to move)
-            # Compute-bound workloads: speedup depends on hardware low-precision support
-            graph = model.lower(baseline_bytes)  # baseline-precision graph
+            graph = model.lower(baseline_bytes)
             roofline = calc_bottleneck(
                 graph.total_ops, graph.weight_bytes,
                 hardware.compute.peak_flops, hardware.memory.bandwidth
@@ -173,7 +148,6 @@ class CompressionModel(ForwardModel):
             if roofline["bottleneck"] == "Memory":
                 inference_speedup = compression_ratio
             else:
-                # Compute-bound: check if hardware has accelerated low-precision paths
                 prec_key = f"int{target_bitwidth}" if target_bitwidth <= 8 else f"fp{target_bitwidth}"
                 if prec_key in hardware.compute.precision_flops:
                     hw_speedup = (
@@ -181,34 +155,22 @@ class CompressionModel(ForwardModel):
                     ).to_base_units().magnitude
                     inference_speedup = min(hw_speedup, compression_ratio)
                 else:
-                    inference_speedup = 1.0  # No hardware support → no compute speedup
+                    inference_speedup = 1.0
 
         elif method == "pruning":
             compression_ratio = 1.0 / (1.0 - sparsity) if sparsity < 1.0 else 100.0
-            # Source: Blalock et al. (2020), "What is the State of Neural Network Pruning?"
-            # Log-linear degradation accelerates after 50% sparsity
-            if sparsity <= cal.PRUNING_ACCURACY_THRESHOLD:
-                accuracy_delta = cal.PRUNING_MILD_DELTA
-            else:
-                accuracy_delta = -cal.PRUNING_STEEP_COEFFICIENT * math.exp(sparsity * cal.PRUNING_STEEP_EXPONENT)
-
-            # Inference speedup depends on sparsity type
             if sparsity_type == "structured":
-                # Structured pruning removes entire rows/columns → direct compute savings
                 inference_speedup = compression_ratio
             elif sparsity_type == "n_m":
-                # N:M sparsity (2:4): hardware-accelerated 2x speedup at exactly 50% sparsity
-                # Source: NVIDIA Ampere Architecture Whitepaper (2020)
                 if abs(sparsity - 0.5) < 0.05:
                     inference_speedup = 2.0
                 else:
-                    inference_speedup = 1.0  # N:M only works at 50%
+                    inference_speedup = 1.0
             else:
-                # Unstructured: irregular access patterns → storage savings only
                 inference_speedup = 1.0
         else:
             compression_ratio = 1.0
-            accuracy_delta = 0.0
+            reported_delta = float(accuracy_delta)
 
         compressed_size = original_size / compression_ratio
 
@@ -217,8 +179,8 @@ class CompressionModel(ForwardModel):
             original_size_gb=original_size.to("GB"),
             compressed_size_gb=compressed_size.to("GB"),
             compression_ratio=compression_ratio,
-            estimated_accuracy_delta=accuracy_delta,
-            memory_savings_pct=(1.0 - 1.0/compression_ratio) * 100,
+            estimated_accuracy_delta=reported_delta,
+            memory_savings_pct=(1.0 - 1.0 / compression_ratio) * 100,
             inference_speedup=inference_speedup,
         )
 
@@ -237,6 +199,9 @@ class CompressionModel(ForwardModel):
         min_speedup: Optional[float] = None,
         require_hardware_support: bool = False,
         baseline_precision: str = "fp32",
+        group_size: Optional[int] = None,
+        scale_bits: int = 16,
+        accuracy_delta: float = 0.0,
     ) -> CompressionCandidate:
         """Apply declared size, quality, speed, and support constraints to a candidate.
 
@@ -267,11 +232,17 @@ class CompressionModel(ForwardModel):
             Require the registry's precision/sparsity support heuristic; default False.
         baseline_precision : str, optional
             Uncompressed precision key; default fp32. All ratios use this baseline.
+        group_size : int, optional
+            Positive quantization block size sharing one scale metadata element.
+        scale_bits : int, default: 16
+            Bitwidth of each quantization group's scale metadata when ``group_size`` is set.
+        accuracy_delta : float, default: 0.0
+            Caller-supplied empirical task quality change passed to ``solve``.
 
         Returns
         -------
         CompressionCandidate
-            Sizes in GB, speed/storage ratios, assumed quality delta, support status,
+            Sizes in GB, speed/storage ratios, supplied quality delta, support status,
             and constraint violations. Feasible means these requested gates pass;
             it does not certify runtime memory residency or deployment performance.
 
@@ -318,6 +289,9 @@ class CompressionModel(ForwardModel):
             sparsity=sparsity,
             sparsity_type=normalized_sparsity_type,
             baseline_precision=baseline_precision,
+            group_size=group_size,
+            scale_bits=scale_bits,
+            accuracy_delta=accuracy_delta,
         )
         hardware_supported = self._hardware_supported(
             hardware,

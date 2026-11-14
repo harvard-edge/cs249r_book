@@ -74,24 +74,24 @@ class ReliabilityModel(ForwardModel):
         Notes
         -----
         Equation: lambda_node = n_gpu / MTBF_gpu + n_nic / MTBF_nic + n_psu / MTBF_psu; M = 1 /
-        (fleet.count * lambda_node); P(failure) = 1-exp(-job_duration/M); tau = sqrt(2
-        checkpoint_time M). The reported goodput is max(0,
-        1-checkpoint_time/tau-recovery_time/M).
+        (fleet.count * lambda_node); P(failure) = 1 - exp(-job_duration / M);
+        ``tau = sqrt(2 * checkpoint_time * M)``. Steady-state Young-Daly goodput is
+        ``max(0, 1 - checkpoint_time / tau - tau / (2 * M) - recovery_time / M)``.
 
         Assumptions: Independent exponential component failures and a synchronous series system.
         Nonredundant PSU counts come from the node; component lifetimes come from the
-        Reliability registry.
+        Reliability registry. At the optimal Young-Daly interval ``tau = sqrt(2 * C * M)``,
+        expected rework loss ``tau / (2 * M)`` equals checkpoint write overhead ``C / tau``.
 
-        Excludes: Correlated failures, repair contention, and explicit re-execution loss in the
-        reported goodput. The goodput expression charges checkpoint writes and recovery only,
-        even though the checkpoint interval balances write and rework costs.
+        Excludes: Correlated failures, repair contention, asynchronous background checkpointing,
+        and higher-order ``O((C / M))`` Daly correction terms.
 
         References
         ----------
-        Derivation: Series-system hazard rates add. The no-failure survival function is
-        exponential. The checkpoint helper minimizes the first-order write-plus-rework
-        approximation; the goodput subtraction is the implementation's separate overhead
-        convention.
+        Young (1974), "A First Order Approximation to the Optimum Checkpoint Interval."
+        https://doi.org/10.1145/361147.361115 (bibliography key: young1974).
+        Daly (2006), "A Higher Order Estimate of the Optimum Checkpoint Interval for Restart
+        Dumps." https://doi.org/10.1016/j.future.2004.11.016 (bibliography key: daly2006).
 
         Examples
         --------
@@ -117,17 +117,16 @@ class ReliabilityModel(ForwardModel):
         ckpt_time_q = Q_(checkpoint_time_s, "second")
         optimal_interval = calc_young_daly_interval(ckpt_time_q, fleet_mtbf.to("second"))
 
-        # Goodput ratio: fraction of rawput that produces useful training progress.
-        # Lost compute = P(failure) * (avg_recovery_time / checkpoint_interval)
-        # Steady-state goodput: fraction of time spent on useful training.
-        # Overhead = checkpoint_write_time / interval + recovery_time / MTBF
-        # Source: Daly (2006), Young (1974)
+        # First-order Young-Daly steady-state goodput: subtract checkpoint write
+        # overhead (C / tau), expected lost rework since the last checkpoint
+        # (tau / (2 * M)), and restart recovery overhead (R / M).
         interval_s = optimal_interval.m_as(ureg.second)
         cluster_mtbf_s = fleet_mtbf.m_as(ureg.second)
         if interval_s > 0 and cluster_mtbf_s > 0:
             checkpoint_overhead = ckpt_time_q.m_as(ureg.second) / interval_s
+            rework_overhead = interval_s / (2.0 * cluster_mtbf_s)
             recovery_overhead = avg_recovery_time_s / cluster_mtbf_s
-            goodput_ratio = max(0.0, 1.0 - checkpoint_overhead - recovery_overhead)
+            goodput_ratio = max(0.0, 1.0 - checkpoint_overhead - rework_overhead - recovery_overhead)
         else:
             goodput_ratio = 0.0
 

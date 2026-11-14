@@ -266,7 +266,9 @@ class TrainingMemoryModel(ForwardModel):
         Notes
         -----
         Equation: total = weights + gradients + optimizer + activations +
-        communication_buffers. Parameter state first divides by TP * PP * EP;
+        communication_buffers. Parameter state first shards via
+        ``model.sharded_parameter_count(tp_size, pp_size, ep_size)`` (splitting
+        shared MoE parameters by ``TP * PP`` and routed experts by ``TP * PP * EP``);
         ZeRO then divides selected terms by DP. Local microbatch is
         max(1, ceil(global_batch / (DP * accumulation_steps))). Layers per stage
         are max(1, ceil(layers / PP)). Activation bytes follow
@@ -322,11 +324,13 @@ class TrainingMemoryModel(ForwardModel):
             raise ValueError("zero_stage must be 0, 1, 2, or 3")
 
         # Step 1: shard model state across model-parallel dimensions before
-        # applying ZeRO's data-parallel sharding rules.
+        # applying ZeRO's data-parallel sharding rules. Shared MoE parameters
+        # are replicated across EP and sharded only by TP * PP; routed experts
+        # are sharded across TP * PP * EP.
         bpp = precision_bytes.to(ureg.byte).magnitude
-        total_params = model.parameters.to(ureg.count).magnitude
-        model_parallel_shards = tp_size * pp_size * ep_size
-        params_per_rank = total_params / model_parallel_shards
+        params_per_rank = model.sharded_parameter_count(
+            tp_size=tp_size, pp_size=pp_size, ep_size=ep_size
+        ).to(ureg.count).magnitude
         trainable_params_per_rank = params_per_rank * trainable_fraction
 
         weights = params_per_rank * bpp * ureg.byte
@@ -394,8 +398,8 @@ class TrainingMemoryModel(ForwardModel):
             trace.append(f"ZeRO-{zero_stage}: data-parallel state sharding applied across {dp_size} ranks.")
         if isinstance(model, SparseTransformerWorkload) and ep_size > 1:
             trace.append(
-                "MoE memory approximation: total expert parameters are evenly sharded by expert parallelism; "
-                "routing imbalance is modeled separately by MoERoutingModel."
+                "MoE memory sharding: shared parameters shard by TP * PP while routed experts shard by "
+                "TP * PP * EP; routing imbalance is modeled separately by MoERoutingModel."
             )
 
         return TrainingMemoryResult(

@@ -240,6 +240,166 @@ class Workload(BaseModel):
             return self.model_size
         raise NotImplementedError("Workload must define either parameters or model_size to calculate size in bytes.")
 
+    @property
+    def effective_compute_parameters(self) -> Quantity:
+        """Return the parameter count active in one forward evaluation.
+
+        Returns
+        -------
+        Quantity
+            Active parameter count in ``count``-family units.
+
+        Notes
+        -----
+        Equation: ``P_compute = P`` for dense workloads whose full parameter
+        inventory participates in every forward pass.
+
+        Assumptions: dense models execute all declared parameters per sample or
+        token. Workloads without ``parameters`` raise ``NotImplementedError``.
+
+        Excludes: activation-dependent dynamic sparsity, early exit, and MoE
+        expert routing (overridden on ``SparseTransformerWorkload``).
+
+        References
+        ----------
+        Derivation: a dense workload touches every stored parameter once per
+        forward pass, so active compute parameters equal total parameters.
+
+        Examples
+        --------
+        >>> from mlsysim import Models
+        >>> model = Models.Language.Llama3_8B
+        >>> model.effective_compute_parameters == model.parameters
+        True
+        """
+        if self.parameters is None:
+            raise NotImplementedError(
+                f"{type(self).__name__} has no 'parameters'; cannot determine effective_compute_parameters."
+            )
+        return self.parameters
+
+    def sharded_parameter_count(
+        self,
+        tp_size: int = 1,
+        pp_size: int = 1,
+        ep_size: int = 1,
+    ) -> Quantity:
+        """Calculate resident parameters per rank under model parallelism.
+
+        Parameters
+        ----------
+        tp_size : int, default: 1
+            Positive tensor-parallel degree splitting layers within a stage.
+        pp_size : int, default: 1
+            Positive pipeline-parallel degree partitioning layers across stages.
+        ep_size : int, default: 1
+            Positive expert-parallel degree; must be 1 for dense workloads.
+
+        Returns
+        -------
+        Quantity
+            Parameters stored on one ``(tp_size, pp_size, ep_size)`` rank in
+            ``count`` units.
+
+        Notes
+        -----
+        Equation: ``P_rank = P / (tp_size * pp_size)`` when ``ep_size == 1``.
+
+        Assumptions: tensor and pipeline parallelism partition dense parameters
+        uniformly across ``tp_size * pp_size`` shards. Passing ``ep_size > 1``
+        on a non-MoE workload raises ``ValueError``.
+
+        Excludes: untied embedding imbalance across pipeline stages, padding to
+        tensor-core alignment multiples, and ZeRO data-parallel sharding.
+
+        References
+        ----------
+        Shoeybi et al. (2019), "Megatron-LM: Training Multi-Billion Parameter
+        Language Models Using Model Parallelism." https://arxiv.org/abs/1909.08053
+        (bibliography key: shoeybi2019megatron).
+
+        Examples
+        --------
+        >>> from mlsysim import Models
+        >>> model = Models.Language.Llama3_8B
+        >>> model.sharded_parameter_count(tp_size=4, pp_size=2) == model.parameters / 8
+        True
+        """
+        from ..core._validation import validate_at_least
+
+        validate_at_least(tp_size, 1, "tp_size")
+        validate_at_least(pp_size, 1, "pp_size")
+        validate_at_least(ep_size, 1, "ep_size")
+        if ep_size > 1:
+            raise ValueError(
+                f"{self.name}: ep_size > 1 requires a SparseTransformerWorkload (MoE model), "
+                f"got {type(self).__name__} with ep_size={ep_size}."
+            )
+        if self.parameters is None:
+            raise NotImplementedError(
+                f"{type(self).__name__} has no 'parameters'; cannot shard parameter count."
+            )
+        return (self.parameters / (tp_size * pp_size)).to(ureg.count)
+
+    def activation_traffic_bytes(
+        self,
+        precision: Quantity | str = BYTES_FP16,
+        tokens_per_sample: int = 1,
+        ops_multiplier: int = 1,
+    ) -> Quantity:
+        """Calculate per-sample off-chip activation read/write traffic.
+
+        Parameters
+        ----------
+        precision : Quantity or str, default: BYTES_FP16
+            Bytes per activation element, or a registered format such as 'fp16'.
+        tokens_per_sample : int, default: 1
+            Positive token count per sample for sequence architectures.
+        ops_multiplier : int, default: 1
+            Positive pass multiplier (1 for inference, 3 for training, 4 with
+            full activation recomputation).
+
+        Returns
+        -------
+        Quantity
+            Activation bytes transferred per sample in ``byte`` units.
+
+        Notes
+        -----
+        Equation: ``A_sample = 0 byte`` on the generic base workload when no
+        feature-map or hidden-state geometry is declared.
+
+        Assumptions: architectural subclasses override this method using their
+        declared tensor dimensions; generic workloads with only parameter counts
+        report zero rather than inventing a fraction of weight bytes.
+
+        Excludes: weight traffic, KV-cache reads/writes, and temporary workspace
+        spills; callers with measured activation I/O can pass an explicit override
+        to ``Engine.solve``.
+
+        References
+        ----------
+        Derivation: without layer activation dimensions, off-chip feature-map
+        traffic is undetermined and defaults to zero until a subclass or caller
+        supplies tensor geometry.
+
+        Examples
+        --------
+        >>> from mlsysim.models.types import Workload
+        >>> from mlsysim.core.units import Q_
+        >>> w = Workload(name='Generic', architecture='mlp', parameters=Q_(1000, 'count'))
+        >>> w.activation_traffic_bytes('fp16') == Q_(0, 'byte')
+        True
+        """
+        from ..core._validation import validate_at_least
+        from ..core.units import resolve_precision
+
+        validate_at_least(tokens_per_sample, 1, "tokens_per_sample")
+        validate_at_least(ops_multiplier, 1, "ops_multiplier")
+        if isinstance(precision, str):
+            resolve_precision(precision)
+        return 0.0 * ureg.byte
+
 class TransformerWorkload(Workload):
     """Workload representation of an autoregressive Transformer (e.g., LLMs)."""
     parameters: Quantity
@@ -688,6 +848,69 @@ class TransformerWorkload(Workload):
             layers=self.layers
         )
 
+    def activation_traffic_bytes(
+        self,
+        precision: Quantity | str = BYTES_FP16,
+        tokens_per_sample: int = 1,
+        ops_multiplier: int = 1,
+    ) -> Quantity:
+        """Calculate per-sample residual-stream activation HBM traffic.
+
+        Parameters
+        ----------
+        precision : Quantity or str, default: BYTES_FP16
+            Bytes per activation element, or a registered format such as 'fp16'.
+        tokens_per_sample : int, default: 1
+            Positive sequence length per sample (1 for single-token step, ``S``
+            for prefill or training sequences).
+        ops_multiplier : int, default: 1
+            Positive pass multiplier (1 for forward inference, 3 for standard
+            training, 4 with full activation recomputation).
+
+        Returns
+        -------
+        Quantity
+            Off-chip activation read+write bytes per sample in ``byte`` units.
+
+        Notes
+        -----
+        Equation: ``A_sample = 4 * L * S * H * b * ops_multiplier`` when
+        ``hidden_dim`` is populated, else ``0 byte``. Each of the ``L`` layers
+        contains two residual sublayers (attention and FFN), each reading a
+        ``(S, H)`` input tensor and writing a ``(S, H)`` output tensor of width ``b``.
+
+        Assumptions: normalization and residual add are fused with sublayer
+        boundaries while attention softmax intermediates stay in SRAM (FlashAttention
+        regime). Workloads without ``hidden_dim`` return zero.
+
+        Excludes: KV-cache reads/writes (modeled in ``ServingModel``), unfused
+        ``S^2`` attention score matrices, and FFN intermediate-projection spills.
+
+        References
+        ----------
+        Derivation: count one ``(S, H)`` read and one ``(S, H)`` write for each
+        of the two residual sublayers in every Transformer block, multiplied by
+        bytes per element and pass count.
+
+        Examples
+        --------
+        >>> from mlsysim import Models
+        >>> m = Models.Language.Llama3_8B
+        >>> m.activation_traffic_bytes('fp16', tokens_per_sample=128) == 128 * m.activation_traffic_bytes('fp16', tokens_per_sample=1)
+        True
+        """
+        from ..core._validation import validate_at_least
+        from ..core.units import resolve_precision
+
+        validate_at_least(tokens_per_sample, 1, "tokens_per_sample")
+        validate_at_least(ops_multiplier, 1, "ops_multiplier")
+        prec_qty = resolve_precision(precision)[1] if isinstance(precision, str) else precision
+        if self.hidden_dim is None:
+            return 0.0 * ureg.byte
+        bpp = prec_qty.to(ureg.byte).magnitude
+        total_bytes = 4.0 * self.layers * tokens_per_sample * self.hidden_dim * bpp * ops_multiplier
+        return (total_bytes * ureg.byte).to(ureg.byte)
+
 class SparseTransformerWorkload(TransformerWorkload):
     """Workload representation of a Mixture-of-Experts (MoE) Transformer."""
     active_parameters: Quantity
@@ -698,6 +921,119 @@ class SparseTransformerWorkload(TransformerWorkload):
     @classmethod
     def _validate_active_parameters(cls, v):
         return require_unit_family(v, ureg.count, "active_parameters", "count")
+
+    @property
+    def effective_compute_parameters(self) -> Quantity:
+        """Return the active parameter count executed per token in an MoE model.
+
+        Returns
+        -------
+        Quantity
+            Active parameters per token in ``count``-family units.
+
+        Notes
+        -----
+        Equation: ``P_compute = active_parameters``.
+
+        Assumptions: each token activates shared layers plus ``active_experts_per_token``
+        routed experts as captured by ``active_parameters``.
+
+        Excludes: token-dropping or expert capacity-factor overflow (modeled
+        separately in ``MoERoutingModel``).
+
+        References
+        ----------
+        Fedus et al. (2022), "Switch Transformers: Scaling to Trillion Parameter
+        Models with Simple and Efficient Sparsity." https://arxiv.org/abs/2101.03961
+        (bibliography key: fedus2022switch).
+
+        Examples
+        --------
+        >>> from mlsysim import Models
+        >>> moe = Models.Language.Mixtral_8x7B
+        >>> moe.effective_compute_parameters == moe.active_parameters
+        True
+        """
+        return self.active_parameters
+
+    def sharded_parameter_count(
+        self,
+        tp_size: int = 1,
+        pp_size: int = 1,
+        ep_size: int = 1,
+    ) -> Quantity:
+        """Calculate per-rank MoE parameters separating shared and routed weights.
+
+        Parameters
+        ----------
+        tp_size : int, default: 1
+            Positive tensor-parallel degree splitting shared and expert layers.
+        pp_size : int, default: 1
+            Positive pipeline-parallel degree partitioning layers across stages.
+        ep_size : int, default: 1
+            Positive expert-parallel degree partitioning routed experts only.
+
+        Returns
+        -------
+        Quantity
+            Resident parameter count per ``(tp_size, pp_size, ep_size)`` rank in
+            ``count`` units.
+
+        Notes
+        -----
+        Equation: with ``E = experts`` and ``k = active_experts_per_token``,
+        ``P_shared = max(0, (E * P_active - k * P_total) / (E - k))`` when ``E > k``
+        (else ``P_total``), ``P_routed = P_total - P_shared``, and
+        ``P_rank = P_shared / (tp_size * pp_size) + P_routed / (tp_size * pp_size * ep_size)``.
+
+        Assumptions: ``P_total = P_shared + P_routed`` and
+        ``P_active = P_shared + (k / E) * P_routed``. Shared attention, norms,
+        embeddings, and any always-active shared experts are replicated across
+        ``ep_size`` and sharded only by ``tp_size * pp_size``; routed experts are
+        partitioned across ``tp_size * pp_size * ep_size``. Synthetic workloads
+        with ``P_active / P_total < k / E`` clamp ``P_shared`` at zero while
+        conserving ``P_shared + P_routed = P_total``.
+
+        Excludes: uneven expert counts when ``ep_size`` does not divide ``E``
+        and untied embedding stage imbalance.
+
+        References
+        ----------
+        Lepikhin et al. (2021), "GShard: Scaling Giant Models with Conditional
+        Computation and Automatic Sharding." https://arxiv.org/abs/2006.16668
+        (bibliography key: lepikhin2021gshard).
+
+        Examples
+        --------
+        >>> from mlsysim import Models
+        >>> moe = Models.Language.Mixtral_8x7B
+        >>> moe.sharded_parameter_count(ep_size=1) == moe.parameters
+        True
+        >>> moe.sharded_parameter_count(ep_size=8) > moe.parameters / 8
+        True
+        """
+        from ..core._validation import validate_at_least
+
+        validate_at_least(tp_size, 1, "tp_size")
+        validate_at_least(pp_size, 1, "pp_size")
+        validate_at_least(ep_size, 1, "ep_size")
+
+        p_total = self.parameters.to(ureg.count).magnitude
+        p_active = self.active_parameters.to(ureg.count).magnitude
+        n_experts = self.experts
+        top_k = self.active_experts_per_token
+
+        if n_experts > top_k:
+            p_shared = max(0.0, (n_experts * p_active - top_k * p_total) / (n_experts - top_k))
+            p_shared = min(p_shared, p_total)
+        else:
+            p_shared = p_total
+        p_routed = p_total - p_shared
+
+        dense_shards = tp_size * pp_size
+        expert_shards = tp_size * pp_size * ep_size
+        p_rank = (p_shared / dense_shards) + (p_routed / expert_shards)
+        return p_rank * ureg.count
 
     def lower(self, precision: Quantity | str = BYTES_FP16) -> ComputationGraph:
         # For MoE, total parameters define the memory footprint,
@@ -762,6 +1098,76 @@ class CNNWorkload(Workload):
     # Optional (added 2026-10-20): the channel-width multiplier of a scalable
     # family (MobileNet's alpha), relative to the family's base network.
     width_multiplier: Optional[float] = None
+    # Sum of input and per-layer output feature-map tensor elements at the
+    # declared input resolution (sum_l C_l * H_l * W_l). Used for exact
+    # unfused layer-by-layer activation HBM traffic.
+    feature_map_elements: Optional[Quantity] = None
+
+    @field_validator("feature_map_elements", mode="after")
+    @classmethod
+    def _validate_feature_map_elements(cls, v):
+        return require_unit_family(v, ureg.count, "feature_map_elements", "count")
+
+    def activation_traffic_bytes(
+        self,
+        precision: Quantity | str = BYTES_FP16,
+        tokens_per_sample: int = 1,
+        ops_multiplier: int = 1,
+    ) -> Quantity:
+        """Calculate per-image feature-map read/write traffic across CNN layers.
+
+        Parameters
+        ----------
+        precision : Quantity or str, default: BYTES_FP16
+            Bytes per feature-map element, or a registered format such as 'fp16'.
+        tokens_per_sample : int, default: 1
+            Positive sample token count (unused for fixed-resolution CNN images;
+            validated for interface uniformity).
+        ops_multiplier : int, default: 1
+            Positive pass multiplier (1 for forward inference, 3 for standard
+            training, 4 with full activation recomputation).
+
+        Returns
+        -------
+        Quantity
+            Off-chip feature-map bytes read and written per image in ``byte`` units.
+
+        Notes
+        -----
+        Equation: ``A_sample = 2 * feature_map_elements * b * ops_multiplier``
+        when ``feature_map_elements`` is populated, else ``0 byte``.
+
+        Assumptions: unfused layer-by-layer execution writes each layer output
+        feature map once and reads it once as the next layer's input (factor of 2
+        over summed feature-map elements). Conv+BN+ReLU fusion is assumed within
+        each counted layer boundary.
+
+        Excludes: cross-layer operator fusion into SRAM tiles, im2col workspace
+        materialization, and residual-branch extra reads beyond sequential flow.
+
+        References
+        ----------
+        Derivation: in unfused layer-by-layer execution, each feature map in
+        ``sum_l C_l * H_l * W_l`` is written once and read once at byte width ``b``.
+
+        Examples
+        --------
+        >>> from mlsysim import Models
+        >>> resnet = Models.Vision.ResNet50
+        >>> resnet.activation_traffic_bytes('fp16') == 2 * resnet.activation_traffic_bytes('int8')
+        True
+        """
+        from ..core._validation import validate_at_least
+        from ..core.units import resolve_precision
+
+        validate_at_least(tokens_per_sample, 1, "tokens_per_sample")
+        validate_at_least(ops_multiplier, 1, "ops_multiplier")
+        prec_qty = resolve_precision(precision)[1] if isinstance(precision, str) else precision
+        if self.feature_map_elements is None:
+            return 0.0 * ureg.byte
+        elems = self.feature_map_elements.to(ureg.count).magnitude
+        bpp = prec_qty.to(ureg.byte).magnitude
+        return (2.0 * elems * bpp * ops_multiplier * ureg.byte).to(ureg.byte)
 
     def lower(self, precision: Quantity | str = BYTES_FP16) -> ComputationGraph:
         """Lower the declared convolutional forward-pass work.
@@ -918,6 +1324,63 @@ class SSMWorkload(Workload):
             arithmetic_intensity=(ops / weights).to("flop/byte"),
             layers=self.layers
         )
+
+    def activation_traffic_bytes(
+        self,
+        precision: Quantity | str = BYTES_FP16,
+        tokens_per_sample: int = 1,
+        ops_multiplier: int = 1,
+    ) -> Quantity:
+        """Calculate per-sample residual-stream activation traffic for an SSM.
+
+        Parameters
+        ----------
+        precision : Quantity or str, default: BYTES_FP16
+            Bytes per activation element, or a registered format such as 'fp16'.
+        tokens_per_sample : int, default: 1
+            Positive token count per sample.
+        ops_multiplier : int, default: 1
+            Positive pass multiplier (1 for inference, 3 for training, 4 with
+            full activation recomputation).
+
+        Returns
+        -------
+        Quantity
+            Off-chip activation read+write bytes per sample in ``byte`` units.
+
+        Notes
+        -----
+        Equation: ``A_sample = 2 * layers * tokens_per_sample * hidden_dim * b * ops_multiplier``.
+
+        Assumptions: each Mamba-style block fuses selective scan in SRAM, reading
+        one ``(tokens_per_sample, hidden_dim)`` residual input and writing one
+        ``(tokens_per_sample, hidden_dim)`` output to HBM per layer.
+
+        Excludes: recurrent-state cache I/O across separate decode calls and
+        unfused expanded inner-projection spills.
+
+        References
+        ----------
+        Gu and Dao (2023), "Mamba: Linear-Time Sequence Modeling with Selective
+        State Spaces." https://arxiv.org/abs/2312.00752 (bibliography key: gu2023mamba).
+
+        Examples
+        --------
+        >>> from mlsysim.models.types import SSMWorkload
+        >>> from mlsysim.core.units import Q_
+        >>> ssm = SSMWorkload(name='SSM', architecture='ssm', parameters=Q_(100, 'count'), layers=2, hidden_dim=8, state_size=4)
+        >>> ssm.activation_traffic_bytes('fp16', tokens_per_sample=10) == Q_(640, 'byte')
+        True
+        """
+        from ..core._validation import validate_at_least
+        from ..core.units import resolve_precision
+
+        validate_at_least(tokens_per_sample, 1, "tokens_per_sample")
+        validate_at_least(ops_multiplier, 1, "ops_multiplier")
+        prec_qty = resolve_precision(precision)[1] if isinstance(precision, str) else precision
+        bpp = prec_qty.to(ureg.byte).magnitude
+        total_bytes = 2.0 * self.layers * tokens_per_sample * self.hidden_dim * bpp * ops_multiplier
+        return (total_bytes * ureg.byte).to(ureg.byte)
 
 
 class DiffusionWorkload(Workload):

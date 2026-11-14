@@ -55,7 +55,7 @@ A7_REPORTED_PP = 16
 
 # ── Configurations ──────────────────────────────────────────────────────────
 A1_GPUS = 8
-A1_CONFIG = dict(batch_size=256, precision="fp16", efficiency=0.19, is_training=True)
+A1_CONFIG = dict(batch_size=256, precision="fp16", efficiency=0.18, is_training=True)
 A2_TP_DEGREE = 4  # Match the Argonne request-latency configuration, not minimum capacity.
 # A2 decode reference: NVIDIA NIM benchmarks report ITL with TTFT excluded at concurrency 1
 # (paper/data/nim-llama-70b-concurrency1.csv). The primary row matches A2's FP16, TP=4, four-H100

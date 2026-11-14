@@ -490,7 +490,7 @@ class SingleNodeInferenceScenario(BaseScenario):
     Assumptions: The generic SingleNodeModel controls work, traffic, and feasibility;
     optional precision and efficiency override its defaults.
 
-    Excludes: The generic activation-traffic heuristic is not a KV-aware serving trace.
+    Excludes: Generic forward activation traffic is not a KV-aware serving trace.
 
     References
     ----------
@@ -533,8 +533,8 @@ class SingleNodeInferenceScenario(BaseScenario):
     @property
     def traffic(self) -> Quantity:
         """Memory bytes implied by the generic roofline profile. Equation: ``result.latency_memory
-        * result.peak_bw_actual``. Units: bytes; this inherits the engine's activation-traffic
-        heuristic rather than a KV trace.
+        * result.peak_bw_actual``. Units: bytes; this inherits the workload's forward activation
+        traffic rather than a KV trace.
         """
         p = self.result
         return (p.latency_memory * p.peak_bw_actual).to("byte")

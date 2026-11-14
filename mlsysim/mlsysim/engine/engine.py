@@ -4,7 +4,8 @@ from ..core.units import ureg, Q_, resolve_precision
 from . import calibration as cal
 from ..physics import calc_bottleneck
 from ..core.exceptions import OOMError
-from ..core._validation import validate_range, validate_at_least
+from ..core._validation import validate_range, validate_at_least, validate_nonnegative
+from ..core.types import require_unit_family
 from ..models.types import Workload, TransformerWorkload
 from ..hardware.types import HardwareNode, Quantity
 
@@ -123,7 +124,10 @@ class Engine:
               precision: str = "fp16", efficiency: float = 0.5,
               raise_errors: bool = False, is_training: bool = False,
               seq_len: int = 2048, zero_stage: int = 0, dp_size: int = 1,
-              is_lora: bool = False, activation_recomputation: bool = False) -> PerformanceProfile:
+              is_lora: bool = False, activation_recomputation: bool = False,
+              activation_bytes_per_sample: Optional[Quantity] = None,
+              layer_overhead_ms: float = cal.FRAMEWORK_LAYER_TAX_MS,
+              include_attention_flops: bool = False) -> PerformanceProfile:
         """Estimate one device's compute, memory, and capacity limits.
 
         Parameters
@@ -166,6 +170,16 @@ class Engine:
         activation_recomputation : bool, default: False
             Recompute a forward pass during training: four rather than three
             forward-equivalent work units, paired with full activation recompute.
+        activation_bytes_per_sample : Quantity, optional
+            Explicit per-sample forward activation read+write bytes, overriding
+            ``model.activation_traffic_bytes``. Scaled by pass count in training.
+        layer_overhead_ms : float, default: cal.FRAMEWORK_LAYER_TAX_MS
+            Nonnegative per-layer host launch overhead in milliseconds (0.0 by
+            default for graph-captured/compiled execution).
+        include_attention_flops : bool, default: False
+            When true during Transformer training, add the quadratic causal
+            self-attention FLOPs ``2 * L * H_q * d_head * S^2`` per sequence
+            forward pass on top of the linear ``2 * P * S`` term.
 
         Returns
         -------
@@ -183,19 +197,19 @@ class Engine:
 
         Notes
         -----
-        Equation: T = max(F_batch / (eta * F_peak), W * (1 + 0.1 * B) / BW)
-        + T_dispatch + L * T_layer * launch_multiplier. Here W is weight bytes,
-        B is batch size, and launch_multiplier is three for training and one
-        for inference. Training work is three forward passes, or four with full
-        recomputation. Throughput is B / T; energy is average_power * T.
+        Equation: ``T = max(F_batch / (eta * F_peak), T_mem) + T_dispatch + L * T_layer * launch_multiplier``.
+        Total traffic is ``M_traffic = W + B * A_sample``, where ``A_sample`` comes
+        from ``model.activation_traffic_bytes`` (or ``activation_bytes_per_sample``).
+        When ``M_footprint <= M_cap``, ``T_mem = M_traffic / BW``. When ``M_footprint > M_cap``,
+        resident fraction ``f_res = M_cap / M_footprint`` uses HBM bandwidth and
+        spilled fraction ``1 - f_res`` uses ``min(BW_HBM, BW_PCIe)``, giving
+        ``T_mem = M_traffic * (f_res / BW_HBM + (1 - f_res) / BW_offload)``.
 
-        Assumptions: activation traffic is the declared 0.1 * W per-sample
-        heuristic, not an architecture trace. Compute and memory bounds overlap
-        ideally. The bandwidth path selects host offload, resident SRAM, flash,
-        or primary memory. Offload charges all traffic at the limiting link
-        rate, not only the spilled fraction. Power is TDP times an idle-plus-HFU
-        model with fractions in engine.calibration; missing TDP yields zero
-        estimated energy. Fixed dispatch and layer taxes are modeling defaults.
+        Assumptions: architecture-derived activation traffic follows
+        ``Workload.activation_traffic_bytes`` (feature-map read+write for CNNs,
+        residual-stream sublayer traffic for Transformers/SSMs). Compute and memory
+        bounds overlap ideally. Power is TDP times an idle-plus-HFU model with
+        fractions in ``engine.calibration``; missing TDP yields zero energy.
 
         Excludes: KV-cache capacity, attention-context work in generic inference,
         allocator reserve, kernel workspaces, queueing, serving concurrency,
@@ -208,8 +222,6 @@ class Engine:
         Williams et al. (2009), "Roofline: An Insightful Visual Performance Model
         for Multicore Architectures."
         https://doi.org/10.1145/1498765.1498785 (bibliography key: williams2009).
-        The activation traffic, layer tax, and power coefficients are separate
-        implementation assumptions, not constants established by Roofline.
 
         Examples
         --------
@@ -224,6 +236,12 @@ class Engine:
         validate_range(efficiency, 1e-9, 1.0, "efficiency")  # >0 to prevent division by zero
         validate_at_least(batch_size, 1, "batch_size")
         validate_at_least(seq_len, 1, "seq_len")
+        validate_nonnegative(layer_overhead_ms, "layer_overhead_ms")
+        if activation_bytes_per_sample is not None:
+            require_unit_family(
+                activation_bytes_per_sample, ureg.byte, "activation_bytes_per_sample", "data"
+            )
+            validate_nonnegative(activation_bytes_per_sample.to("byte").magnitude, "activation_bytes_per_sample")
 
         # 1. Canonicalize precision and map it to bytes per parameter. Unknown
         # precision names fail here instead of falling back to FP16 storage.
@@ -249,6 +267,14 @@ class Engine:
         # CNN and other workload graphs already describe one complete sample.
         tokens_per_sample = seq_len if is_training and isinstance(model, TransformerWorkload) else 1
         sample_ops = graph.total_ops * tokens_per_sample
+        if is_training and include_attention_flops and isinstance(model, TransformerWorkload):
+            from ..physics.transformer import calc_attention_matmul_flops
+            n_heads = model.heads or 32
+            head_dim = model.head_dim or (model.hidden_dim or 4096) // n_heads
+            attn_fwd_ops = calc_attention_matmul_flops(
+                model.layers, n_heads * head_dim, seq_len, seq_len, 1
+            ) / 2
+            sample_ops = sample_ops + attn_fwd_ops
 
         # 4. Resolve memory footprint and FLOPs based on training vs inference
         if is_training:
@@ -283,6 +309,7 @@ class Engine:
                     opt_state = n_params * Q_(cal.TRAINING_OPTIMIZER_BYTES_ADAM, "byte")
                     memory_footprint = graph.weight_bytes * 2 + opt_state
         else:
+            ops_multiplier = 1
             base_ops = graph.total_ops
             memory_footprint = graph.weight_bytes
 
@@ -307,16 +334,30 @@ class Engine:
             )
 
         # 6. Roofline bottleneck analysis
-        # Scale compute by batch_size: processing B samples requires B × ops_per_sample.
-        # Note: if is_training, base_ops already represents the full training step cost per sample.
         effective_flops = peak_flops * efficiency
+        batch_ops = base_ops * batch_size
+
+        # Guard against zero ops
+        if batch_ops.magnitude == 0:
+            compute_time = Q_("0 ms")
+        else:
+            compute_time = (batch_ops / effective_flops).to("ms")
+
+        # Memory traffic for batched workloads: weights are loaded once from HBM,
+        # while architecture-derived activation read/write traffic scales with batch_size.
+        if activation_bytes_per_sample is not None:
+            per_sample_activation_bytes = activation_bytes_per_sample.to(ureg.byte) * ops_multiplier
+        else:
+            per_sample_activation_bytes = model.activation_traffic_bytes(
+                bpp, tokens_per_sample=tokens_per_sample, ops_multiplier=ops_multiplier
+            )
+        activation_bytes = per_sample_activation_bytes * batch_size
+        actual_memory_traffic = graph.weight_bytes + activation_bytes
 
         if not feasible:
-            # Offload path: model spills beyond primary memory → bandwidth degrades
+            # Spilled-bytes offload path: resident capacity fraction streams at HBM
+            # bandwidth while the spilled fraction streams across PCIe/host link.
             offload_spill = memory_footprint - hardware.memory.capacity
-            # Whole-traffic convention: ALL memory traffic is charged at the
-            # offload-limited bandwidth, not just the spilled fraction — a
-            # deliberate pessimistic simplification of host-offload paging.
             pcie_fallback = Q_(cal.FALLBACK_PCIE_BANDWIDTH_GB_S, "GB/s")
             pcie_bw = (
                 getattr(
@@ -326,43 +367,38 @@ class Engine:
                 )
                 if hardware.interconnect else pcie_fallback
             )
-            effective_bw = min(hardware.memory.bandwidth, pcie_bw)
-            offload_bw = effective_bw
-        elif (hardware.memory.sram_capacity is not None
-              and hardware.memory.sram_bandwidth is not None
-              and graph.weight_bytes <= hardware.memory.sram_capacity):
-            # SRAM-resident path: working set fits in on-chip SRAM.
-            # For GPUs: captures FlashAttention-style tiled execution.
-            # For TinyML: small models that fit entirely in SRAM bypass flash.
-            effective_bw = hardware.memory.sram_bandwidth
-        elif hardware.memory.flash_bandwidth is not None:
-            # TinyML flash path: weights live in flash, activations in SRAM.
-            # Use flash bandwidth for weight loading (the typical bottleneck
-            # when the model is too large for SRAM).
-            effective_bw = hardware.memory.flash_bandwidth
+            hbm_bw = hardware.memory.bandwidth
+            offload_bw = min(hbm_bw, pcie_bw)
+            cap_b = hardware.memory.capacity.to("byte").magnitude
+            foot_b = memory_footprint.to("byte").magnitude
+            resident_frac = max(0.0, min(1.0, cap_b / foot_b)) if foot_b > 0 else 0.0
+            spilled_frac = 1.0 - resident_frac
+            if actual_memory_traffic.magnitude == 0 or hbm_bw.magnitude == 0 or offload_bw.magnitude == 0:
+                memory_time = Q_("0 ms")
+                effective_bw = offload_bw
+            else:
+                memory_time = (
+                    actual_memory_traffic * resident_frac / hbm_bw
+                    + actual_memory_traffic * spilled_frac / offload_bw
+                ).to("ms")
+                effective_bw = (
+                    (actual_memory_traffic / memory_time).to(hbm_bw.units)
+                    if memory_time.magnitude > 0
+                    else offload_bw
+                )
         else:
-            effective_bw = hardware.memory.bandwidth
-        batch_ops = base_ops * batch_size
-
-        # Guard against zero ops or zero bandwidth
-        if batch_ops.magnitude == 0:
-            compute_time = Q_("0 ms")
-        else:
-            compute_time = (batch_ops / effective_flops).to("ms")
-
-        # Memory traffic for batched workloads: weights are loaded once from HBM,
-        # but activations scale with batch_size. For batch=1, traffic ≈ weight_bytes.
-        # For larger batches, activation I/O becomes significant.
-        # This captures the Roofline regime transition as batch_size grows.
-        # Computed ONCE and shared by the latency term and the bottleneck
-        # classifier so the two can never silently diverge.
-        activation_bytes = graph.weight_bytes * 0.1 * batch_size  # ~10% of weights per sample (heuristic)
-        actual_memory_traffic = graph.weight_bytes + activation_bytes
-
-        if effective_bw.magnitude == 0:
-            memory_time = Q_("0 ms")
-        else:
-            memory_time = (actual_memory_traffic / effective_bw).to("ms")
+            if (hardware.memory.sram_capacity is not None
+                    and hardware.memory.sram_bandwidth is not None
+                    and graph.weight_bytes <= hardware.memory.sram_capacity):
+                effective_bw = hardware.memory.sram_bandwidth
+            elif hardware.memory.flash_bandwidth is not None:
+                effective_bw = hardware.memory.flash_bandwidth
+            else:
+                effective_bw = hardware.memory.bandwidth
+            if effective_bw.magnitude == 0:
+                memory_time = Q_("0 ms")
+            else:
+                memory_time = (actual_memory_traffic / effective_bw).to("ms")
 
         roofline = calc_bottleneck(
             batch_ops, actual_memory_traffic, effective_flops, effective_bw
@@ -371,13 +407,9 @@ class Engine:
 
         # 6. Latency = max(compute, memory) + dispatch overhead + layer tax
         dispatch_tax = hardware.dispatch_tax
-        
-        # Calculate layer-wise software tax
-        # Source: Reddi et al. (2025), Wall 7 (Framework Overhead)
         num_layers = getattr(model, 'layers', 1) or 1
-        # Training has ~3x the launches of inference (Fwd, GradW, GradA)
         launch_multiplier = 3 if is_training else 1
-        layer_tax = Q_(num_layers * cal.FRAMEWORK_LAYER_TAX_MS * launch_multiplier, "ms")
+        layer_tax = Q_(num_layers * layer_overhead_ms * launch_multiplier, "ms")
         
         latency = max(compute_time.to("ms").magnitude, memory_time.to("ms").magnitude) * ureg.ms + dispatch_tax + layer_tax
 
@@ -437,7 +469,7 @@ class Engine:
             feasible=feasible,
             constraint_trace=constraint_trace,
             offload_spill_bytes=offload_spill,
-            offload_effective_bw=offload_bw,
+            offload_effective_bw=effective_bw if not feasible else None,
             overhead_dominated=(
                 (dispatch_tax + layer_tax).to("ms").magnitude
                 > max(compute_time.to("ms").magnitude, memory_time.to("ms").magnitude)

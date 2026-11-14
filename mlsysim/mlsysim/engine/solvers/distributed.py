@@ -48,34 +48,10 @@ def _replica_profile(model: Workload, fleet: Fleet, *, batch_size: int,
                      seq_len: int, tp_size: int, pp_size: int, ep_size: int,
                      dp_size: int, zero_stage: int, is_lora: bool,
                      activation_recomputation: bool, microbatch_count: int,
-                     gradient_accumulation_steps: int) -> PerformanceProfile:
-    """Roofline profile of ONE model-parallel replica for one training step.
-
-    A replica is the TP x PP x EP group of accelerators that holds one copy of
-    the model and processes one data-parallel shard (``local_batch`` samples)
-    of the global batch.
-
-    - Compute: a training step costs 3x the forward FLOPs (4x with activation
-      recomputation). Transformer registry FLOPs are per token, so a sample of
-      ``seq_len`` tokens costs ``inference_flops * seq_len``; other workloads
-      count FLOPs per sample. The replica's accelerators share the work, so
-      step compute time is ``step FLOPs / (tp * pp * ep * peak * efficiency)``.
-    - Memory: per-accelerator training state for transformers comes from
-      ``TrainingMemoryModel`` with the same TP/PP/EP/ZeRO sharding, selective
-      activation recomputation (full when ``activation_recomputation``), and
-      the microbatches a pipeline stage holds in flight under 1F1B.
-    - If that state does not fit, the replica is marked infeasible and its
-      memory traffic is priced at the offload bandwidth, the same convention
-      ``Engine.solve`` uses for a single device.
-
-    (Fixed 2026-09-15: DistributedModel previously called ``Engine.solve`` on
-    the whole, unsharded model on one accelerator, counted one token per
-    sequence, and so priced every multi-billion-parameter training step at
-    the PCIe offload bandwidth regardless of efficiency.)
-
-    Non-transformer workloads with no model parallelism keep the single-device
-    ``Engine.solve`` path unchanged.
-    """
+                     gradient_accumulation_steps: int,
+                     layer_overhead_ms: float = cal.FRAMEWORK_LAYER_TAX_MS,
+                     include_attention_flops: bool = False) -> PerformanceProfile:
+    """Roofline profile of ONE model-parallel replica for one training step."""
     accelerator = fleet.node.accelerator
     replica_accelerators = tp_size * pp_size * ep_size
     is_transformer = isinstance(model, TransformerWorkload)
@@ -86,6 +62,8 @@ def _replica_profile(model: Workload, fleet: Fleet, *, batch_size: int,
             is_training=True, seq_len=seq_len, zero_stage=zero_stage,
             dp_size=dp_size, is_lora=is_lora,
             activation_recomputation=activation_recomputation,
+            layer_overhead_ms=layer_overhead_ms,
+            include_attention_flops=include_attention_flops,
         )
 
     precision, bpp = resolve_precision(precision)
@@ -95,12 +73,26 @@ def _replica_profile(model: Workload, fleet: Fleet, *, batch_size: int,
     # 1. Step compute shared across the replica's accelerators.
     tokens_per_sample = seq_len if is_transformer else 1
     sample_ops = graph.total_ops * tokens_per_sample
+    if include_attention_flops and is_transformer:
+        from ...physics.transformer import calc_attention_matmul_flops
+        n_heads = model.heads or 32
+        head_dim = model.head_dim or (model.hidden_dim or 4096) // n_heads
+        attn_fwd_ops = calc_attention_matmul_flops(
+            model.layers, n_heads * head_dim, seq_len, seq_len, 1
+        ) / 2
+        sample_ops = sample_ops + attn_fwd_ops
+    ops_multiplier = 4 if activation_recomputation else 3
     model_ops = sample_ops * 3 * local_batch
-    hardware_ops = sample_ops * (4 if activation_recomputation else 3) * local_batch
+    hardware_ops = sample_ops * ops_multiplier * local_batch
     effective_flops = peak_flops * efficiency
     compute_time = (hardware_ops / (effective_flops * replica_accelerators)).to("ms")
 
-    # 2. Per-accelerator training state.
+    # 2. Per-accelerator training state (validates ep_size > 1 on non-MoE workloads).
+    sharded_params = (
+        model.sharded_parameter_count(tp_size=tp_size, pp_size=pp_size, ep_size=ep_size)
+        if model.parameters is not None
+        else None
+    )
     if is_transformer:
         trainable_fraction = 1.0
         if is_lora:
@@ -121,17 +113,32 @@ def _replica_profile(model: Workload, fleet: Fleet, *, batch_size: int,
         memory_footprint = memory.total_memory
         memory_trace = list(memory.constraint_trace or [])
     else:
-        n_params = (graph.weight_bytes / bpp).to_base_units()
-        optimizer_state = n_params * Q_(cal.TRAINING_OPTIMIZER_BYTES_ADAM, "byte")
-        memory_footprint = ((graph.weight_bytes * 2 + optimizer_state) / replica_accelerators).to("GB")
+        if sharded_params is not None:
+            shard_weight_bytes = sharded_params.to(ureg.count).magnitude * bpp.to(ureg.byte).magnitude * ureg.byte
+            optimizer_state = sharded_params.to(ureg.count).magnitude * Q_(cal.TRAINING_OPTIMIZER_BYTES_ADAM, "byte")
+            memory_footprint = (shard_weight_bytes * 2 + optimizer_state).to("GB")
+        else:
+            memory_footprint = ((graph.weight_bytes * 2) / replica_accelerators).to("GB")
         memory_trace = []
     feasible = memory_footprint <= accelerator.memory.capacity
 
     # 3. Memory ceiling on one accelerator of the replica.
+    if sharded_params is not None:
+        weight_shard = sharded_params.to(ureg.count).magnitude * bpp.to(ureg.byte).magnitude * ureg.byte
+    else:
+        weight_shard = graph.weight_bytes / replica_accelerators
+    act_traffic = (
+        model.activation_traffic_bytes(bpp, tokens_per_sample=tokens_per_sample, ops_multiplier=ops_multiplier)
+        * local_batch
+        / replica_accelerators
+    )
+    memory_traffic = weight_shard + act_traffic
+
     offload_spill = None
     offload_bw = None
     if feasible:
         effective_bw = accelerator.memory.bandwidth
+        memory_time = (memory_traffic / effective_bw).to("ms") if effective_bw.magnitude > 0 else Q_("0 ms")
     else:
         offload_spill = memory_footprint - accelerator.memory.capacity
         pcie_fallback = Q_(cal.FALLBACK_PCIE_BANDWIDTH_GB_S, "GB/s")
@@ -143,18 +150,32 @@ def _replica_profile(model: Workload, fleet: Fleet, *, batch_size: int,
             )
             if accelerator.interconnect else pcie_fallback
         )
-        effective_bw = min(accelerator.memory.bandwidth, pcie_bw)
-        offload_bw = effective_bw
-    weight_shard = graph.weight_bytes / replica_accelerators
-    memory_traffic = weight_shard + weight_shard * 0.1 * local_batch  # Engine.solve's heuristic
-    memory_time = (memory_traffic / effective_bw).to("ms")
+        hbm_bw = accelerator.memory.bandwidth
+        offload_bw = min(hbm_bw, pcie_bw)
+        cap_b = accelerator.memory.capacity.to("byte").magnitude
+        foot_b = memory_footprint.to("byte").magnitude
+        resident_frac = max(0.0, min(1.0, cap_b / foot_b)) if foot_b > 0 else 0.0
+        spilled_frac = 1.0 - resident_frac
+        if memory_traffic.magnitude == 0 or hbm_bw.magnitude == 0 or offload_bw.magnitude == 0:
+            memory_time = Q_("0 ms")
+            effective_bw = offload_bw
+        else:
+            memory_time = (
+                memory_traffic * resident_frac / hbm_bw
+                + memory_traffic * spilled_frac / offload_bw
+            ).to("ms")
+            effective_bw = (
+                (memory_traffic / memory_time).to(hbm_bw.units)
+                if memory_time.magnitude > 0
+                else offload_bw
+            )
     roofline = calc_bottleneck(
         hardware_ops / replica_accelerators, memory_traffic, effective_flops, effective_bw
     )
 
     # 4. Latency, utilization, and energy for the replica step.
     dispatch_tax = accelerator.dispatch_tax
-    layer_tax = Q_((getattr(model, "layers", 1) or 1) * cal.FRAMEWORK_LAYER_TAX_MS * 3, "ms")
+    layer_tax = Q_((getattr(model, "layers", 1) or 1) * layer_overhead_ms * 3, "ms")
     latency = max(compute_time.magnitude, memory_time.magnitude) * ureg.ms + dispatch_tax + layer_tax
     latency_s = latency.to("s")
     replica_peak = peak_flops * replica_accelerators
@@ -191,7 +212,7 @@ def _replica_profile(model: Workload, fleet: Fleet, *, batch_size: int,
         feasible=feasible,
         constraint_trace=trace,
         offload_spill_bytes=offload_spill,
-        offload_effective_bw=offload_bw,
+        offload_effective_bw=effective_bw if not feasible else None,
         overhead_dominated=(
             (dispatch_tax + layer_tax).to("ms").magnitude
             > max(compute_time.magnitude, memory_time.magnitude)
@@ -257,7 +278,9 @@ class DistributedModel(ForwardModel):
               straggler_factor: float = 1.0,
               moe_routing_imbalance_factor: float = 1.0,
               gradient_accumulation_steps: int = 1,
-              seq_len: int = 2048) -> DistributedResult:
+              seq_len: int = 2048,
+              layer_overhead_ms: float = cal.FRAMEWORK_LAYER_TAX_MS,
+              include_attention_flops: bool = False) -> DistributedResult:
         """Calculate distributed training performance using the 3D/4D Parallelism model.
 
         Parameters
@@ -312,6 +335,11 @@ class DistributedModel(ForwardModel):
             Positive count of microsteps per DP synchronization.
         seq_len : int
             Sequence length for memory calculation.
+        layer_overhead_ms : float, default: cal.FRAMEWORK_LAYER_TAX_MS
+            Nonnegative per-layer host launch overhead in milliseconds (0.0 by default).
+        include_attention_flops : bool, default: False
+            When true during Transformer training, add the quadratic causal
+            self-attention FLOPs ``2 * L * H_q * d_head * S^2`` per sequence forward pass.
 
         Returns
         -------
@@ -350,7 +378,7 @@ class DistributedModel(ForwardModel):
         True
         """
         # 0. Input validation
-        from ...core._validation import validate_at_least, validate_range
+        from ...core._validation import validate_at_least, validate_range, validate_nonnegative
         validate_at_least(tp_size, 1, "tp_size")
         validate_at_least(pp_size, 1, "pp_size")
         validate_at_least(ep_size, 1, "ep_size")
@@ -359,6 +387,7 @@ class DistributedModel(ForwardModel):
         validate_range(efficiency, 1e-9, 1.0, "efficiency")
         validate_range(overlap_efficiency, 0.0, 1.0, "overlap_efficiency")
         validate_at_least(moe_routing_imbalance_factor, 1.0, "moe_routing_imbalance_factor")
+        validate_nonnegative(layer_overhead_ms, "layer_overhead_ms")
 
         # 1. 3D/4D Parallelism Decomposition
         n_accelerators = fleet.total_accelerators
@@ -393,20 +422,24 @@ class DistributedModel(ForwardModel):
             activation_recomputation=activation_recomputation,
             microbatch_count=microbatch_count,
             gradient_accumulation_steps=gradient_accumulation_steps,
+            layer_overhead_ms=layer_overhead_ms,
+            include_attention_flops=include_attention_flops,
         )
 
         # 3. Communication Overhead (Network)
-        # DP AllReduce exchanges gradients, which equal model size in the active precision.
-        # With TP, each rank holds 1/tp_size of the model, so gradient buffer is smaller.
-        # With ZeRO-1/2, AllReduce is replaced by Reduce-Scatter and All-Gather (same total volume but different patterns).
-        # Resolve the precision after Engine.solve so communication uses the
-        # same canonical key and byte width as the local compute pass.
         precision, precision_bytes = resolve_precision(precision)
-        # Each DP rank holds one TP x PP shard of the model, so a DP group's
-        # gradient buffer is the model divided by TP * PP. The TP * PP groups
-        # run their DP collectives concurrently on separate links, so the step
-        # waits for one group. (Fixed 2026-09-15: the buffer ignored PP.)
-        gradient_size = model.size_in_bytes(precision_bytes) / (tp_size * pp_size)
+        # Each rank holds sharded_parameter_count(tp_size, pp_size, ep_size)
+        # parameters (shared MoE weights divide by TP * PP, routed experts by
+        # TP * PP * EP).
+        if model.parameters is not None:
+            sharded_p = model.sharded_parameter_count(tp_size=tp_size, pp_size=pp_size, ep_size=ep_size)
+            gradient_size = (
+                sharded_p.to(ureg.count).magnitude
+                * precision_bytes.to(ureg.byte).magnitude
+                * ureg.byte
+            )
+        else:
+            gradient_size = model.size_in_bytes(precision_bytes) / (tp_size * pp_size)
         if is_lora:
             gradient_size = gradient_size * 0.01
 
