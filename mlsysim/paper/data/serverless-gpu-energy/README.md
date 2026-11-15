@@ -45,22 +45,33 @@ the script builds.
 | `failed_runs.csv` | 10 | failed, preempted or quarantined call, with the logged error |
 | `runs_manifest.csv` | 254 | raw run behind any row above, with its device, software and file hashes |
 
-**What can be reproduced from this repository.** The committed per-run
-tables are reproducible into the package table. The original raw samples
-are not independently replayable from this repository. The raw 100 ms NVML
-and 1 s nvidia-smi samples and each run's `meta.json` (about 90 MB) are kept
-with the study and are not published yet. `runs_manifest.csv` records, for
-every run:
+**Where the raw data is.** The committed per-run tables are reproducible into
+the package table from this repository. The raw files behind them are
+published separately, so they don't add 38 MB to the source tree:
+
+- archive: `serverless-gpu-energy-raw-v1.tar.gz`, 20.2 MB, released at
+  https://github.com/prawalpokharel/mlsysim-serverless-gpu-energy-raw/releases/tag/v1
+- SHA-256: `cfb040e9dcc13c536e5eb54b5f964f585595a4fe65b1750777e3d003b050f363`
+- contents: each run's `meta.json` (with the counter readings at every phase
+  boundary), the 100 ms NVML samples, the 1 s nvidia-smi samples, the
+  work-unit log and the container's own summary, for all 254 runs in
+  `runs_manifest.csv`
+
+The archive's `replay.py` checks every raw file against the SHA-256 in
+`runs_manifest.csv`. It then recomputes the measured columns of the four run
+tables from the counter readings: 956 values, with 0 mismatches. The `hfu`,
+`bwu` and `engine_power_w` columns come from MLSys·im's roofline predictions,
+so it does not recompute them.
+
+`runs_manifest.csv` also records, for every run:
 
 - the GPU class requested from Modal, and the GPU name, UUID, enforced power
   limit and driver version NVML reported;
 - the torch and transformers versions and the Modal image id;
-- the model revision and the sampling intervals;
-- the SHA-256 of each raw file.
+- the model revision and the sampling intervals.
 
-Once the archive is published, each raw file can be checked against these
-hashes. Every row in the other tables has `meta_sha256`, the hash of the
-`meta.json` that has the counter readings at each phase boundary.
+Every row in the other tables has `meta_sha256`, the hash of that run's
+`meta.json`.
 
 The 250 runs used span 4 (T4) to 20 (B200) physical boards per GPU type,
 identified by NVML UUID. Within each type, every board had the same enforced
