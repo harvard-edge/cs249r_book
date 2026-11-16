@@ -167,6 +167,7 @@
     if (zoomMode === "initial") setZoom(initialZoom(f), "initial");
     else if (zoomMode === "fit") setZoom(document.body.classList.contains("embedded-map") ? f.width : f.contain, "fit");
     else setZoom(zoom, "manual");
+    if (pendingFocus) focusNodes(...pendingFocus);
   }
   function saveSelection() {
     const url = new URL(location.href);
@@ -305,25 +306,90 @@
   panFrame.addEventListener("pointerup", endPan);
   panFrame.addEventListener("pointercancel", endPan);
   panFrame.addEventListener("lostpointercapture", endPan);
-  function focusNodes(ids) {
-    const elements = ids.map(nodeElement).filter(Boolean);
-    if (!elements.length) return;
-    const bounds = elements.map((el) => el.getBBox());
-    const left = Math.min(...bounds.map((b) => b.x)),
-      top = Math.min(...bounds.map((b) => b.y));
-    const right = Math.max(...bounds.map((b) => b.x + b.width)),
-      bottom = Math.max(...bounds.map((b) => b.y + b.height));
+  // Concept labels stay between these rendered sizes when the view focuses on
+  // a set of concepts. The zoom percentage alone cannot promise this: the
+  // volume maps are laid out at different scales, so 500% gave 14 px labels in
+  // one volume and 22 px in another (measured 2026-11-16).
+  const LABEL_MIN_PX = 12,
+    LABEL_MAX_PX = 15;
+  let pendingFocus = null;
+  // Show the concepts in `ids`. When they all fit with readable labels, fit
+  // them. When they do not, stay at the smallest readable size and open on the
+  // part of the map holding the most `priority` concepts (a chapter's taught
+  // ones), counting the rest of `ids` as a tiebreaker. Centering on the whole
+  // set instead can land between two clusters and show none of them.
+  // With keepZoom, only pan: used to locate one concept at the current size.
+  function focusNodes(ids, priority = null, keepZoom = false) {
     const svg = $("concept-map").querySelector("svg"),
       frame = document.querySelector(".map-frame");
+    if (!svg || !frame) return;
+    // A folded chapter box has no size yet; focus once the reader opens it.
+    if (!frame.clientWidth || !svg.getBoundingClientRect().width) {
+      pendingFocus = [ids, priority, keepZoom];
+      return;
+    }
+    pendingFocus = null;
+    const nodes = ids
+      .map((id) => ({ id, el: nodeElement(id) }))
+      .filter((n) => n.el)
+      .map((n) => ({ ...n, b: n.el.getBBox() }));
+    if (!nodes.length) return;
+    // Rendered pixels per SVG unit at zoom 1, and the label size those give.
     const view = svg.viewBox.baseVal;
-    const target = Math.min(
-      5,
-      Math.max(1.5, view.width / Math.max(300, right - left + 180)),
-    );
-    // Fit the focused concepts (zooming out if needed). On the standalone page,
-    // never go below the readable opening scale; embeds keep the original fit.
-    const floor = document.body.classList.contains("embedded-map") ? 0 : 0.62;
-    setZoom(Math.max(floor, fits().width * target));
+    const unitPx = svg.getBoundingClientRect().width / view.width / zoom;
+    const fontUnits = parseFloat(svg.querySelector("g.node text")?.getAttribute("font-size")) || 16;
+    const lo = LABEL_MIN_PX / (fontUnits * unitPx),
+      hi = LABEL_MAX_PX / (fontUnits * unitPx);
+    const availW = frame.clientWidth - 24,
+      availH = frame.clientHeight - 24;
+    const pad = 32 / (unitPx * lo); // about 32 px of margin at the readable floor
+    const boundsAll = (list) => ({
+      left: Math.min(...list.map((n) => n.b.x)),
+      top: Math.min(...list.map((n) => n.b.y)),
+      right: Math.max(...list.map((n) => n.b.x + n.b.width)),
+      bottom: Math.max(...list.map((n) => n.b.y + n.b.height)),
+    });
+    const fitOf = (b) =>
+      Math.min(
+        availW / ((b.right - b.left + 2 * pad) * unitPx),
+        availH / ((b.bottom - b.top + 2 * pad) * unitPx),
+      );
+    let box = boundsAll(nodes);
+    const fit = fitOf(box);
+    if (keepZoom) {
+      // pan only
+    } else if (fit >= lo) {
+      setZoom(Math.min(hi, fit));
+    } else {
+      setZoom(lo);
+      // The window the frame shows at this zoom, in SVG units.
+      const winW = availW / (unitPx * zoom) - 2 * pad,
+        winH = availH / (unitPx * zoom) - 2 * pad;
+      const first = new Set(priority?.length ? priority : ids);
+      const inside = (n, cx, cy) =>
+        n.b.x >= cx - winW / 2 && n.b.x + n.b.width <= cx + winW / 2 &&
+        n.b.y >= cy - winH / 2 && n.b.y + n.b.height <= cy + winH / 2;
+      let best = null;
+      // Try windows anchored on each concept, at its center and with it at
+      // each corner, so a cluster can sit wholly inside one window.
+      for (const n of nodes) {
+        const cx0 = n.b.x + n.b.width / 2,
+          cy0 = n.b.y + n.b.height / 2;
+        const dx = winW / 2 - n.b.width / 2,
+          dy = winH / 2 - n.b.height / 2;
+        for (const [cx, cy] of [[cx0, cy0], [cx0 + dx, cy0 + dy], [cx0 - dx, cy0 + dy], [cx0 + dx, cy0 - dy], [cx0 - dx, cy0 - dy]]) {
+          const shown = nodes.filter((m) => inside(m, cx, cy));
+          const score = shown.reduce((s, m) => s + (first.has(m.id) ? 1000 : 1), 0);
+          if (!best || score > best.score) best = { score, shown };
+        }
+      }
+      // Center on the priority concepts in that window, not on everything in
+      // it, so they open mid-frame rather than at an edge.
+      const core = best.shown.filter((m) => first.has(m.id));
+      box = boundsAll(core.length ? core : best.shown.length ? best.shown : nodes);
+    }
+    const { left, top, right, bottom } = box;
+    const elements = nodes.map((n) => n.el);
     const frameBox = frame.getBoundingClientRect();
     const matrix = elements[0].getScreenCTM();
     const point = svg.createSVGPoint();
