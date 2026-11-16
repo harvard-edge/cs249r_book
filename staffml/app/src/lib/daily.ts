@@ -1,4 +1,5 @@
 import { getQuestions, Question } from "@/lib/corpus";
+import { localDateKey } from "@/lib/dates";
 
 function hashString(s: string): number {
   let hash = 0;
@@ -11,7 +12,7 @@ function hashString(s: string): number {
 }
 
 export function getDailyQuestions(): Question[] {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localDateKey();
   const seed = hashString(today);
   const pool = getQuestions();
   if (pool.length === 0) return [];
@@ -28,7 +29,7 @@ export function getDailyQuestions(): Question[] {
 }
 
 export function getTodayKey(): string {
-  return new Date().toISOString().slice(0, 10);
+  return localDateKey();
 }
 
 export function isDailyCompleted(): boolean {
