@@ -1,0 +1,83 @@
+# Napkin Math sheets
+
+One two-page, US Letter landscape reference sheet per volume: the numbers a
+student should know by heart and the quantities they should be able to
+calculate, in the book's own notation. The name matches the book's "Napkin
+Math" callouts.
+
+| Volume | Module | Scope | Page 1 question | Page 2 question |
+|---|---|---|---|---|
+| I | `vol1.py` | One Node | Will it run? | Will it meet its target? |
+| II | `vol2.py` | The Fleet | Will it scale? | Will it survive and serve? |
+| III | `vol3.py` | The Trajectory | Will it finish within budget? | Is it worth running? |
+| IV | `vol4.py` | The Action | Can it stop in time? | Has it earned permission? |
+
+## Build
+
+From `books/shared`, in two steps (the first needs mlsysim, the second a
+headless browser):
+
+```sh
+PYTHONPATH=../../mlsysim python3 -m napkin_math html vol1 vol2 vol3 vol4 --out _build/napkin-math
+python3 -m napkin_math pdf vol1 vol2 vol3 vol4 --out _build/napkin-math   # needs playwright + Chromium
+```
+
+The `pdf` step prints a layout report and exits 1 if any item runs past its
+page or any equation is wider than its column.
+
+## Series conventions
+
+Every sheet follows these, so the four read as one series.
+
+**Numbers.** Every number is computed in the volume module from the mlsysim
+registry or the volume's own scenarios. An input chosen only for an example
+is tagged `assumed()` on the page. Constants from outside the registry go in
+`EXTERNAL` with their source and should be rare. A printed example must
+reproduce from the numbers printed on the sheet. Bounds round in the safe
+direction.
+
+**Notation.** Core quantities use the book's notation registry
+(`mlsysim/mlsysim/notation/data/`), which all four volumes share, so a symbol
+means the same thing on every sheet:
+
+| Quantity | Symbol | Quantity | Symbol |
+|---|---|---|---|
+| parameters | *P* | bytes moved | *D*<sub>vol</sub> |
+| training tokens (dataset size) | *D* | FLOPs (operations) | *O* |
+| layers | *N*<sub>L</sub> | arithmetic intensity | *I* = *O* / *D*<sub>vol</sub> |
+| hidden width | *d* | bandwidth | BW |
+| KV heads | *H*<sub>KV</sub> | peak rate | *R*<sub>peak</sub> |
+| head dimension | *d*<sub>head</sub> | fraction of peak sustained | *η*<sub>hw</sub> (MFU when counting model FLOPs) |
+| sequence length / context | *S* | fixed overhead | *L*<sub>lat</sub> |
+| batch | *B* | time | *T* |
+| KV memory | *M*<sub>KV</sub> | accelerators | *N*<sub>GPU</sub> |
+| arrival rate | *λ* | service time | *t*<sub>s</sub> |
+| server utilization | *ρ* = *λ* *t*<sub>s</sub> | time in system | *T*<sub>lat</sub> |
+| requests in system | *Q*<sub>req</sub> | quantization bits, scale | *b*, *s* |
+
+A symbol has one meaning on a page. Quantities outside this table use the
+registry's symbol when one exists; otherwise define them in the card that
+uses them. The notation strip lists only symbols used on more than one card.
+
+**Numbers to know.** The strip holds anchors a student memorizes and reuses
+(specs, unit conversions, rules of thumb, physical constants), not results of
+the sheet's own examples. About seven per sheet.
+
+**Reference row.** Each sheet stands alone: its reference table carries the
+model dimensions and hardware specs its cards rely on, so no sheet requires
+another volume.
+
+**Examples.** One worked example per card, as short as possible: inputs, then
+result. Print every input needed to reproduce the result.
+
+**Headings.** Page titles are questions. Column titles are questions. Page 1's
+subtitle says how to read the page.
+
+**Shared conventions.** M/M/1: *T*<sub>lat</sub> = *t*<sub>s</sub> / (1 − *ρ*),
+p99 of time in system ≈ ln(100) · *T*<sub>lat</sub>. GB = 10<sup>9</sup> B,
+GiB = 2<sup>30</sup> B. Footer: units, the assumed legend, and the source of
+the values.
+
+**Layout.** Two pages; every column ends 0–30 px above the footer. Charts
+where a picture teaches more than the formula; no chart that is only a
+straight line.
