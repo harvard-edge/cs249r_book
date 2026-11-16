@@ -1645,9 +1645,57 @@ Consider a hypothetical task that spends `{python} IntroTimeBudget.movement_str`
 
 Accounting for that data-movement term requires distinguishing how data enters @eq-intro-dam-iron-law and @eq-intro-iron-law in two distinct ways: logical samples versus physical bytes. In @eq-intro-dam-iron-law, the Data factor counts how many examples or tokens the task processes (such as the dataset size $\DatasetSize$ in the $6 \cdot \Parameters \cdot \DatasetSize$ training estimate), which multiplies $\text{FLOPs/Sample}$ to fix total arithmetic work $\Operations$. In @eq-intro-iron-law, by contrast, $\DataVolume$ counts the physical bytes moved across a memory or interconnect bus, including model weights ($\Parameters$) and intermediate results alongside the raw inputs. A language model answering a single request illustrates the difference. It produces its reply one token at a time, so each step processes one token ($\text{Samples/Task} = 1$), yet each step must read every model weight from memory, so $\DataVolume$ spans gigabytes.
 
+```{python}
+#| echo: false
+#| label: intro-iron-law-coupling
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ IRON LAW COUPLING: SECONDS PER FLOP ON ONE ACCELERATOR
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Perspective callout "The iron law analogy"
+# │          (psp-introduction-iron-law-analogy).
+# │
+# │ Goal:    Show that the Machine factor depends on the workload, not only on
+# │          the machine.
+# │ Show:    How many times more seconds per FLOP batch-one token generation
+# │          takes than large-batch training on the same H100.
+# │ How:     Training runs near the compute term, 1/(peak * MFU). Batch-one
+# │          decode with 16-bit weights performs 2 FLOPs per parameter while
+# │          reading 2 bytes per parameter, so it runs at 1/(bandwidth * I).
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Hardware, Literature
+from mlsysim.core.units import BYTES_FP16, flop, byte, second
+from mlsysim.fmt import fmt_multiple, check
+
+class IronLawCoupling:
+    """The same accelerator's realized seconds per FLOP under two workloads."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    accelerator = Hardware.Cloud.H100
+    peak = accelerator.compute.peak_flops
+    bandwidth = accelerator.memory.bandwidth
+    training_utilization = Literature.Training.MfuHigh.value
+    decode_flops_per_param = 2 * flop  # one multiply and one add per weight per token
+    decode_bytes_per_param = BYTES_FP16  # each 16-bit weight read once per token
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    decode_intensity = decode_flops_per_param / decode_bytes_per_param
+    training_s_per_flop = 1 / (peak * training_utilization)
+    decode_s_per_flop = 1 / (bandwidth * decode_intensity)
+    ratio = (decode_s_per_flop / training_s_per_flop).m_as("")
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(decode_intensity.m_as(flop / byte) == 1, f"Expected 1 FLOP/byte, got {decode_intensity}")
+    check(100 < ratio < 200, f"Prose says the gap exceeds a hundredfold; got {ratio:.0f}")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    ratio_mult_str = fmt_multiple(round(ratio, -1), precision=0)
+```
+
 ::: {#psp-introduction-iron-law-analogy .callout-perspective title="The iron law analogy"}
 
-The name "iron law" follows the processor performance equation of Patterson and Hennessy [-@patterson2017hardware], $\text{Time/Program} = (\text{Instructions/Program}) \times (\text{Cycles/Instruction}) \times (\text{Seconds/Cycle})$. @Eq-intro-dam-iron-law is the direct ML counterpart: the Data ($\text{Samples/Task}$) and Algorithm ($\text{FLOPs/Sample}$) factors multiply to set total operations $\Operations$ just as program path length and instruction set determine instruction count. The Machine factor ($\text{Seconds/FLOP}$) mirrors cycles per instruction times clock period. Reducing $\text{FLOPs/Sample}$ (for example, by removing individual weights scattered across the model) can still slow down execution if the resulting irregular memory accesses inflate $\text{Seconds/FLOP}$, just as complex CPU instructions that cut instruction count can lose performance by inflating cycles per instruction. @Eq-intro-iron-law then takes the same second step that computer architects take when decomposing processor time into compute cycles, memory-stall cycles, and pipeline overhead.
+The name "iron law" follows the processor performance equation of Patterson and Hennessy [-@patterson2017hardware], $\text{Time/Program} = (\text{Instructions/Program}) \times (\text{Cycles/Instruction}) \times (\text{Seconds/Cycle})$. @Eq-intro-dam-iron-law is the direct ML counterpart: the Data ($\text{Samples/Task}$) and Algorithm ($\text{FLOPs/Sample}$) factors multiply to set total operations $\Operations$ just as program path length and instruction set determine instruction count. The Machine factor ($\text{Seconds/FLOP}$) mirrors cycles per instruction times clock period. @Eq-intro-iron-law then takes the same second step that computer architects take when decomposing processor time into compute cycles, memory-stall cycles, and pipeline overhead.
+
+In both laws the three factors are coupled. Cycles per instruction depends on a program's instruction mix as well as on the processor, and realized $\text{Seconds/FLOP}$ depends on how a workload uses the machine as well as on the machine itself. Reducing $\text{FLOPs/Sample}$ (for example, by removing individual weights scattered across the model) can therefore still slow down execution if the resulting irregular memory accesses inflate $\text{Seconds/FLOP}$, just as complex CPU instructions that cut instruction count can lose performance by inflating cycles per instruction. The coupling matters more in ML because the swing is so large. On one accelerator, a language model generating its reply one token at a time takes about `{python} IronLawCoupling.ratio_mult_str` the seconds per FLOP of large-batch training, because each 16-bit weight it reads from memory serves only two arithmetic operations instead of being reused across a batch. That gap comes from the workload, so the remedy lies there too, in batching requests rather than in faster arithmetic units.
 
 :::
 
