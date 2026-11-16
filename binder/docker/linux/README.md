@@ -17,10 +17,10 @@ docker/quarto-build/
 
 ## Container Contents
 
-- **Base**: Ubuntu 22.04
+- **Base**: Ubuntu 24.04
 - **TeX Live**: Full distribution (texlive-full)
 - **R**: R-base with all required packages
-- **Python**: Python 3.13 with all requirements
+- **Python**: Python 3.12 (Ubuntu's), packages in a venv at `/opt/venv`
 - **Quarto**: Version 1.9.27
 - **Tools**: Inkscape, Ghostscript, fonts
 - **Dependencies**: All from `tools/dependencies/`
