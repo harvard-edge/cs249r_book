@@ -487,7 +487,7 @@ Large language model (LLM) serving then follows a GPT-2 XL chat service, the ban
 
 : **Chapter Map**: Each section answers one serving decision on one of the running cases and names the iron law term or resource that decision most affects. After placement fixes when and where predictions run, the next four rows follow a single ResNet-50 replica from its architecture to batching; the remaining rows change what the replica executes, how it starts, what it produces, and what it costs. {#tbl-model-serving-chapter-spine tbl-colwidths="[22,32,22,24]"}
 
-Once temporal and spatial placement fix the operating regime in @tbl-model-serving-chapter-spine, the next four sections follow a single ResNet-50 replica from its internal request path through single-request latency, multi-request queuing, and batching; the remaining five change the runtime engine, host-to-device execution path, replica startup, output modality, and fleet economics.
+Across @tbl-model-serving-chapter-spine, every serving decision trades hardware utilization, memory residency, or host overhead against the request's latency deadline. Meeting an online SLO therefore depends on the entire request path, from where the prediction runs to how each replica schedules, executes, and prices its work.
 
 ## Serving Modes and Placement {#sec-model-serving-modes-placement-7c41}
 
@@ -1517,9 +1517,9 @@ plt.close()
 
 :::
 
-The capacity plan in @sec-model-serving-tail-latency-5376 uses the reference profile as the service time, the batching sweep in @sec-model-serving-batching-helps-f1dc starts from it at batch one, and the cold-start timeline in @sec-model-serving-model-loading-initialization-cc5a assumes its warm steady state. The runtime and precision comparisons in @sec-model-serving-inference-runtime-selection-5eef change one term of the same model at a time, so the effect of each change is visible.
+Once the tensor crosses PCIe in @fig-model-serving-request-timeline, the GPU's batch-one ResNet-50 forward pass becomes the reference profile that later sections vary one mechanism at a time. The capacity plan in @sec-model-serving-tail-latency-5376 uses that forward pass as the worker service time, the batching sweep in @sec-model-serving-batching-helps-f1dc starts from it at batch one, and the cold-start timeline in @sec-model-serving-model-loading-initialization-cc5a assumes its warm steady state. The runtime and precision comparisons in @sec-model-serving-inference-runtime-selection-5eef then change one term of that latency profile at a time, so the effect of each optimization stays visible.
 
-In the ResNet-50 scenario, dense convolutional arithmetic dominates the model stage's work. That does not make the stage compute bound at every batch size. At batch size one on the reference H100, issuing the kernels takes `{python} ResNetH100Profile.eager_issue_ms_str`, `{python} ResNetH100Profile.overhead_share_pct_str` of the forward pass, so the stage is overhead-bound and runs far below peak arithmetic throughput. Reading the weights, the other fixed cost named in the chapter's opening, costs far less in this eager profile than issuing the kernels. Batching amortizes both fixed costs and fills the machine (@sec-model-serving-batching-helps-f1dc). Changing the model architecture can move the dominant cost out of dense arithmetic entirely, and recommendation systems make this shift concrete.
+Inside that ResNet-50 forward pass, dense convolutional arithmetic dominates the model stage's work. That does not make the stage compute bound at every batch size. At batch size one on the reference H100, issuing the kernels takes `{python} ResNetH100Profile.eager_issue_ms_str`, `{python} ResNetH100Profile.overhead_share_pct_str` of the forward pass, so the stage is overhead-bound and runs far below peak arithmetic throughput. Reading the weights, the other fixed cost named in the chapter's opening, costs far less in this eager profile than issuing the kernels. Batching amortizes both fixed costs and fills the machine (@sec-model-serving-batching-helps-f1dc). Changing the model architecture can move the dominant cost out of dense arithmetic entirely, and recommendation systems make this shift concrete.
 
 ```{python}
 #| echo: false
@@ -3702,6 +3702,8 @@ class BatchDispatchCalc:
     arrivals_ms_str = MarkdownStr(", ".join(_arrival_ms[:-1]) + f", and {_arrival_ms[-1]} ms")
 ```
 
+@Tbl-practical-batching-config screens the candidate window and batch cap under an idle-worker calendar model, whereas a live server runs a dual-trigger batcher whose ready batch can still wait behind an executing request. Tracing one batch from its oldest arrival through timeout, worker backlog, and response egress shows how those candidate settings govern an actual dispatch decision (example \ref{exmp-model-serving-batch-dispatch-decision}).
+
 ::: {#exmp-model-serving-batch-dispatch-decision .callout-example title="From a batching window to a dispatch decision"}
 
 **Problem**: In a hypothetical trace of the selected dual-trigger configuration, four requests arrive at `{python} BatchDispatchCalc.arrivals_ms_str`. No further requests arrive before dispatch. The worker becomes available at `{python} BatchDispatchCalc.dispatch_ms_str`, and the remaining response path takes `{python} BatchDispatchCalc.outside_ms_str`. Does the oldest request meet the `{python} BatchDispatchCalc.deadline_ms_str` deadline under the planning service-time model?
@@ -3858,7 +3860,7 @@ These physical constraints make edge serving optimization different from data-ce
 
 #### Traffic pattern summary {#sec-model-serving-traffic-pattern-summary}
 
-Traffic-adaptive batching\index{Traffic-adaptive batching!window tuning} adjusts the batching window as queue depth and request rate change. The four MLPerf inference scenarios that @sec-benchmarking-mlperf-execution-scenarios-89f0 defines map onto these traffic shapes and the batching strategy each favors (@tbl-traffic-patterns-summary). These scenarios are benchmark abstractions rather than deployment prescriptions, so the operative batching policy must still follow the service's current concurrency, deadline, and power constraints.
+Traffic-adaptive batching\index{Traffic-adaptive batching!window tuning} adjusts the batching window as queue depth and request rate change. The four MLPerf inference scenarios that @sec-benchmarking-mlperf-execution-scenarios-89f0 defines map onto these traffic shapes and the batching strategy each favors (@tbl-traffic-patterns-summary).
 
 | **Scenario**     | **Context**                      | **Strategy**                  | **Focus**                                |
 |:-----------------|:---------------------------------|:------------------------------|:-----------------------------------------|
@@ -3868,6 +3870,8 @@ Traffic-adaptive batching\index{Traffic-adaptive batching!window tuning} adjusts
 | **Offline**      | Batch processing, data pipelines | Maximum batch size            | Throughput, hardware utilization         |
 
 : **Traffic Patterns and Batching Strategies**: The four MLPerf inference scenarios approximate distinct deployment contexts. Server traffic (cloud APIs) uses dynamic batching with a timeout; MultiStream evaluates grouped queries under its version-specific latency rules, while a production sensor deadline requires separate validation; SingleStream processes requests individually; Offline uses large batches subject to memory capacity to maximize throughput. {#tbl-traffic-patterns-summary tbl-colwidths="[13,29,28,30]"}
+
+Because the four rows of @tbl-traffic-patterns-summary are benchmark abstractions rather than deployment prescriptions, the operative batching policy must still follow the service's current concurrency, deadline, and power constraints.
 
 ::: {#chk-model-serving-batching-traffic-patterns .callout-checkpoint title="Batching and traffic patterns"}
 
