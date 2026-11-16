@@ -34,6 +34,7 @@ def build() -> Sheet:
     TDP = H.tdp.to("W").magnitude
     LAUNCH_US = H.dispatch_tax.to("microsecond").magnitude
 
+    L70 = M.Language.Llama3_70B
     LL = M.Language.Llama3_8B
     N = LL.parameters.magnitude
     NL, D, NH, NKV = LL.layers, LL.hidden_dim, LL.heads, LL.kv_heads
@@ -106,6 +107,7 @@ def build() -> Sheet:
     int4_cut = 1 - (w["INT4"] + bmax * kv_seq) / (w["FP16"] + bmax * kv_seq)
     sparse_ratio = H.compute.precision_flops["fp16_sparse"].magnitude / H.compute.peak_flops.magnitude
     e_byte = E_DRAM_WORD / 4
+    w16 = w['FP16']
     usd_b1, usd_bmax = f"${rows[0]['usd']:.2f}", f"${rows[-1]['usd']:.2f}"
 
     def gb(x, d=1):
@@ -123,8 +125,8 @@ def build() -> Sheet:
     rp.parts.append(f'<line x1="{rp.X(rg):.1f}" x2="{rp.X(rg):.1f}" y1="{rp.Y(PEAK["fp16"] / 1e12):.1f}" y2="{rp.H - rp.b}" class="ridge"/>')
     rp.text(rp.X(rg) + 3, rp.H - rp.b - 5, f"ridge {fmt(rg)}")
     att = lambda i: min(PEAK["fp16"], BW * i) / 1e12
-    rp.point(rows[0]["I"], att(rows[0]["I"]), f"decode b={rows[0]['b']}")
-    rp.point(rows[2]["I"], att(rows[2]["I"]), f"b={rows[2]['b']}", "end", -5, -3)
+    rp.point(rows[0]["I"], att(rows[0]["I"]), f"decode B={rows[0]['b']}")
+    rp.point(rows[2]["I"], att(rows[2]["I"]), f"B={rows[2]['b']}", "end", -5, -3)
     rp.point(4096 / 3, att(4096 / 3), "GEMM n=4096", "start", -28, 26)
     rp.text(rp.X(0.12), rp.Y(400), "bandwidth-bound", cls="lab ital")
     rp.axes("arithmetic intensity I (FLOP/byte)", "TFLOP/s")
@@ -166,72 +168,72 @@ def build() -> Sheet:
 <line x1="92" y1="64" x2="92" y2="71" class="flow" marker-end="url(#ar)"/></svg>'''
 
     # ---------------------------------------------------------------- page 1
-    band = (f'<div class="eqbig">{v("t")} = {frac("samples", "task")} × {frac("FLOPs", "sample")} × {frac("seconds", "FLOP")}'
+    band = (f'<div class="eqbig">{v("T")} = {frac("samples", "task")} × {frac("FLOPs", "sample")} × {frac("seconds", "FLOP")}'
             f'<span class="lbl">Data × Algorithm × Machine</span></div>'
-            f'<div class="txt"><div><b>The iron law (Ch 1).</b> {v("t")} = {v("D")}/{v("B")} + {v("O")}/({v("R")}·{v("η")}) + {v("L")}; per FLOP, 1/({v("I")}·{v("B")}) + 1/({v("R")}·{v("η")}) + {v("L")}/{v("O")}. '
+            f'<div class="txt"><div><b>The iron law (Ch 1).</b> {v("T")} = {v("D", "vol")}/{"BW"} + {v("O")}/({v("R", "peak")}·{v("η", "hw")}) + {v("L", "lat")}; per FLOP, 1/({v("I")}·{"BW"}) + 1/({v("R", "peak")}·{v("η", "hw")}) + {v("L", "lat")}/{v("O")}. '
             f'So seconds per FLOP depends on the workload: bandwidth-bound batch-1 decode on one H100 takes ≈ {n(fmt(round(coupling, -1)) + "×")} that of training at {fmt(TR.efficiency * 100)}% MFU. '
-            f'{v("L")} is fixed overhead; a kernel launch adds ≈ {fmt(LAUNCH_US)} µs.</div>'
-            f'<div><b>Levers:</b> fewer samples · fewer FLOPs or bytes per sample · fewer seconds per FLOP (batch; raise {v("B")}, {v("R")}, {v("η")}).</div></div>'
-            f'<div class="side"><div><b>Amdahl (Ch 11)</b> &nbsp;speedup = 1 / ((1 − {v("p")}) + {v("p")} / {v("a")})</div>'
-            f'<div>{A}{v("p")} = {fmt(S["amd_p"] * 100)}% sped up {v("a")} = {fmt(S["amd_a"])}×: {n(f"{amd:.1f}×")}, cap {n(fmt(1 / (1 - S["amd_p"])) + "×")}</div></div>')
+            f'{v("L", "lat")} is fixed overhead; a kernel launch adds ≈ {fmt(LAUNCH_US)} µs.</div>'
+            f'<div><b>Levers:</b> fewer samples · fewer FLOPs or bytes per sample · fewer seconds per FLOP (batch; raise {"BW"}, {v("R", "peak")}, {v("η", "hw")}).</div></div>'
+            f'<div class="side"><div><b>Amdahl (Ch 11)</b> &nbsp;speedup = 1 / ((1 − {v("f")}) + {v("f")} / {v("G")})</div>'
+            f'<div>{A}{v("f")} = {fmt(S["amd_p"] * 100)}% sped up {v("G")} = {fmt(S["amd_a"])}×: {n(f"{amd:.1f}×")}, cap {n(fmt(1 / (1 - S["amd_p"])) + "×")}</div></div>')
 
     p1 = Page(
         question="Will it run?",
         sub="Read left to right: what is in the model, whether it fits in memory, and how fast it goes on one accelerator.",
         meta="reference node: NVIDIA H100",
         notation=[
-            ("Model", f'{v("N")} parameters · {v("ℓ")} layers · {v("d")} width · {v("h", "kv")} KV heads · {v("d", "h")} head dim'),
-            ("Workload", f'{v("S")} tokens of context · {v("b")} batch · {v("D")} bytes moved · {v("O")} FLOPs · {A}= example input'),
-            ("Machine", f'{v("R")} peak FLOP/s · {v("B")} bandwidth (bytes/s) · {v("η")} fraction of peak sustained · {v("I")} = {v("O")}/{v("D")} FLOP/byte'),
+            ("Model", f'{v("P")} parameters · {v("N", "L")} layers · {v("d")} width · {v("H", "KV")} KV heads · {v("d", "head")} head dim'),
+            ("Workload", f'{v("S")} tokens of context · {v("B")} batch · {v("D", "vol")} bytes moved · {v("O")} FLOPs · {A}= example input'),
+            ("Machine", f'{v("R", "peak")} peak FLOP/s · {"BW"} bandwidth (bytes/s) · {v("η", "hw")} fraction of peak sustained · {v("I")} = {v("O")}/{v("D", "vol")} FLOP/byte'),
         ],
         know=[
             Know("2 B / 16 B", "per parameter: FP16 weights / Adam training state"),
-            Know("2N / 6N", "FLOPs per token: inference / training"),
+            Know("2P / 6P", "FLOPs per token: inference / training"),
             Know(f"{fmt(PEAK['fp16'] / 1e12)} TFLOP/s", "H100 FP16 dense peak"),
             Know(f"{BW / 1e12:.2f} TB/s", "H100 HBM bandwidth"),
             Know(f"{fmt(ridge['fp16'])} FLOP/B", "H100 ridge point: below it, bandwidth-bound"),
-            Know(f"{fmt(e_byte / E_FP16)}×", "energy of a DRAM byte vs an FP16 multiply"),
-            Know("4.6", "p99 ÷ mean in an M/M/1 queue (ln 100)"),
+            Know(f"{fmt(int(E_DRAM_WORD / E_FP16))}×", "energy: 32-bit DRAM read vs FP16 multiply (45 nm)"),
+            Know("4.6 = ln 100", "p99 ÷ mean time in an M/M/1 queue"),
         ],
         band=band,
         cols=[
             Col("1 What is in the model?", [
-                Chart(anatomy),
-                Card("Parameters from the architecture", f'{v("N")} ≈ 12 · {v("ℓ")} · {v("d", sup="2")} + 2 · vocab · {v("d")}',
-                     ex=f'Llama 3 8B ({v("ℓ")} = {NL}, {v("d")} = {fmt(D)}, vocab {fmt(EXTERNAL["llama3_vocab"])}): {est_layers / 1e9:.2f}B + {est_embed / 1e9:.2f}B = '
+                Card("Parameters from the architecture", f'{v("P")} ≈ 12 · {v("N", "L")} · {v("d", sup="2")} + 2 · vocab · {v("d")}',
+                     ex=f'Llama 3 8B, vocab {fmt(EXTERNAL["llama3_vocab"])}: {est_layers / 1e9:.2f}B + {est_embed / 1e9:.2f}B = '
                         f'{n(f"{(est_layers + est_embed) / 1e9:.2f}B")} vs {N / 1e9:.2f}B actual. Within {fmt(est_err)}%: shared KV heads and a wider gated MLP shift the 12.'),
-                Card("FLOPs per token", f'forward ≈ 2{v("N")} &nbsp;·&nbsp; training ≈ 6{v("N")} = 2{v("N")} fwd + 4{v("N")} bwd',
-                     holds="One multiply-add (2 FLOPs) per parameter forward; backward costs about twice the forward."),
-                Card("Attention adds a term that grows with context", f'{v("O", "attn")} ≈ 4 · {v("ℓ")} · {v("S", sup="2")} · {v("d")} &nbsp;per sequence',
-                     holds=f'Small next to 2{v("N")}·{v("S")} until {v("S")} nears {v("N")} / (2{v("ℓ")}{v("d")}); causal masking halves it.'),
-                Card("Training time", f'{v("t", "train")} ≈ 6 · {v("N")} · tokens / ({v("R")} · {v("η")})', chapter="Ch 8",
-                     ex=f'The Ch 8 run: GPT-2 XL ({G2 / 1e9:.1f}B) on {fmt(TR.training_tokens.magnitude / 1e9)}B tokens at {v("η")} = {fmt(TR.efficiency * 100)}% → '
+                Card(f'Weights: {v("M", "w")} = {v("P")} × bytes per parameter',
+                     holds="FP32 4 · FP16 2 · INT8 1 · INT4 ½ bytes. Serving adds the KV cache; training adds 16P state and activations (column 2)."),
+                Table(["Reference model", f'{v("P")}', f'{v("N", "L")}', f'{v("d")}', f'{v("H", "KV")}', f'{v("d", "head")}', "FP16 weights"],
+                      [[m.name.replace("Llama-3.1-", "Llama 3 "), f"{m.parameters.magnitude / 1e9:.1f}B", str(m.layers), fmt(m.hidden_dim), str(m.kv_heads), str(m.hidden_dim // m.heads), gb(2 * m.parameters.magnitude)] for m in (LL, L70)]),
+                Card("FLOPs per token", [f'forward ≈ 2{v("P")} &nbsp;·&nbsp; training ≈ 6{v("P")} = 2{v("P")} fwd + 4{v("P")} bwd',
+                                         f'attention adds {v("O", "attn")} ≈ 4 · {v("N", "L")} · {v("S", sup="2")} · {v("d")} per sequence'],
+                     holds=f'One multiply-add (2 FLOPs) per parameter forward; backward ≈ 2× forward. Attention is small until {v("S")} nears {v("P")} / (2{v("N", "L")}{v("d")}); causal masking halves it.'),
+                Card("Training time", f'{v("T", "train")} ≈ 6 · {v("P")} · {v("D")} / ({v("R", "peak")} · {v("η", "hw")}), &nbsp;{v("D")} = training tokens', chapter="Ch 8",
+                     ex=f'The Ch 8 run: GPT-2 XL ({G2 / 1e9:.1f}B) on {fmt(TR.training_tokens.magnitude / 1e9)}B tokens at {v("η", "hw")} = {fmt(TR.efficiency * 100)}% → '
                         f'{n("≈ " + fmt(TR.training_time.to("day").magnitude) + " days")} on one H100, {fmt(TR.energy.to("kWh").magnitude)} kWh, ${fmt(TR.rental_cost.to("USD").magnitude)} at ${USD_HR:.2f}/h.'),
             ], "Ch 6, App. Algorithm"),
             Col("2 Will it fit?", [
-                Card(f'Weights: {v("M", "w")} = {v("N")} × bytes per parameter'),
-                Table(["Llama 3 8B", "FP32 (4 B)", "FP16 (2 B)", "INT8 (1 B)", "INT4 (½ B)"], [["weights", gb(w["FP32"]), gb(w["FP16"]), gb(w["INT8"]), gb(w["INT4"])]]),
-                Card("KV cache (inference)", f'{v("M", "KV")}({v("S")}) = 2 · {v("ℓ")} · {v("h", "kv")} · {v("d", "h")} · bytes · {v("S")} &nbsp;per sequence',
-                     ex=f'Llama 3 8B FP16 ({v("h", "kv")} = {NKV}, {v("d", "h")} = {DH}): {n(fmt(kv_tok / 1024) + " KiB per token")}; {A}{v("S")} = {fmt(S["ctx"])} → '
-                        f'{n(fmt(kv_seq / 2**20) + " MiB per sequence")}. With a K and V for all {NH} heads it would be {fmt(kv_mha / 1024)} KiB.'),
-                Card("Largest batch that fits", f'{v("b", "max")} = {frac("capacity − " + v("M", "w") + " − overhead", v("M", "KV") + "(" + v("S") + ")")}',
-                     ex=f'({CAP / 1e9:.1f} GB − {gb(w["FP16"])}) ÷ {kv_seq / 1e9:.3f} GB = {n(fmt(bmax) + " sequences")} at {v("S")} = {fmt(S["ctx"])}, an upper bound (no activations or allocator waste). Decode table →'),
-                Card("Training state (mixed-precision Adam)", f'{v("M", "train")} ≈ (2 + 2 + 4 + 8) {v("N")} = 16{v("N")} bytes',
-                     ex=f'FP16 weights, FP16 gradients, FP32 master copy, two FP32 Adam moments. Llama 3 8B: {n(fmt(16 * N / 1e9) + " GB", True)} &gt; {CAP / 1e9:.1f} GB before any activation.'),
-                Card("Activations (training)", f'{v("M", "act")} ≈ 34 · {v("b")} · {v("S")} · {v("d")} bytes per layer',
-                     holds="Ch 8's GPT-style FP16 constant, fused attention; an estimate for Llama.",
-                     ex=f'Llama 3 8B, {v("b")} = 1, {v("S")} = {fmt(S["ctx"])}: {fmt(act_layer / 2**20)} MiB × {NL} layers = {n(f"{act_layer * NL / 1e9:.1f} GB")}.'),
+                Card("KV cache per sequence (inference)", f'{v("M", "KV")}({v("S")}) = 2 · {v("N", "L")} · {v("H", "KV")} · {v("d", "head")} · bytes · {v("S")}',
+                     ex=f'Llama 3 8B FP16 ({v("H", "KV")} = {NKV}, {v("d", "head")} = {DH}): {n(fmt(kv_tok / 1024) + " KiB per token")}; {A}{v("S")} = {fmt(S["ctx"])} → '
+                        f'{n(fmt(kv_seq / 2**20) + " MiB per sequence")}. All {NH} heads would need {fmt(kv_mha / 1024)} KiB.'),
+                Card("Largest batch that fits", f'{v("B", "max")} = {frac("capacity − " + v("M", "w") + " − overhead", v("M", "KV") + "(" + v("S") + ")")}',
+                     ex=f'({CAP / 1e9:.1f} GB − {gb(w["FP16"])}) ÷ {kv_seq / 1e9:.3f} GB = {n(fmt(bmax) + " sequences")} at {v("S")} = {fmt(S["ctx"])}, an upper bound before activations. Decode table →'),
+                Card("Training state (mixed-precision Adam)", f'{v("M", "train")} ≈ (2 + 2 + 4 + 8) {v("P")} = 16{v("P")} bytes',
+                     ex=f'FP16 weights + gradients, FP32 master copy + two Adam moments. Llama 3 8B: {n(fmt(16 * N / 1e9) + " GB", True)} &gt; {CAP / 1e9:.1f} GB before any activation.'),
+                Card("Activations (training)", f'{v("M", "act")} ≈ 34 · {v("B")} · {v("S")} · {v("d")} bytes per layer',
+                     holds="Ch 8's GPT-style constant; an estimate for Llama.",
+                     ex=f'Llama 3 8B, {v("B")} = 1, {v("S")} = {fmt(S["ctx"])}: {fmt(act_layer / 2**20)} MiB × {NL} layers = {n(f"{act_layer * NL / 1e9:.1f} GB")}.'),
             ], f"Ch 8, 10, 13 · H100 {fmt(CAP_GIB)} GiB = {CAP / 1e9:.1f} GB"),
             Col("3 How fast?", [
                 Chart(rp.svg("H100 roofline")),
-                Card(f'Roofline: attainable = min({v("R")}, {v("B")} · {v("I")}), ridge = {v("R")} / {v("B")}',
+                Card(f'Roofline: attainable = min({v("R", "peak")}, {"BW"} · {v("I")}), ridge = {v("R", "peak")} / {"BW"}',
                      holds=f'Matrix multiply: {v("I")} = 2{v("MNK")} / bytes moved; {v("n")}/3 for square FP16 ({v("n")} = 4096 → {fmt(4096 / 3)}).'),
                 Table(["H100 dense", "FP32", "TF32", "FP16", "FP8", "INT8"], [
                     ["peak (TFLOP/s, TOPS)", fmt(PEAK["fp32"] / 1e12), f"{PEAK['tf32'] / 1e12:.1f}", fmt(PEAK["fp16"] / 1e12), fmt(PEAK["fp8"] / 1e12), fmt(PEAK["int8"] / 1e12)],
                     ["ridge (FLOP/B)"] + [fmt(ridge[k]) for k in ("fp32", "tf32", "fp16", "fp8", "int8")]]),
                 Card("Decode: every step reads the weights and the KV cache",
-                     f'{v("t", "step")} ≈ {frac(v("M", "w") + " + " + v("b") + " · " + v("M", "KV") + "(" + v("S") + ")", v("B"))}, &nbsp; tokens/s = {v("b")} / {v("t", "step")}'),
-                Table(["batch <i>b</i>", "ms/step", "tokens/s", "<i>I</i>", "$ / M tok"],
+                     f'{v("T", "step")} ≈ {frac(v("M", "w") + " + " + v("B") + " · " + v("M", "KV") + "(" + v("S") + ")", "BW")}, &nbsp; tokens/s = {v("B")} / {v("T", "step")}'),
+                Table(["batch <i>B</i>", "ms/step", "tokens/s", "<i>I</i>", "$ / M tok"],
                       [[fmt(r["b"]), f"{r['ms']:.1f}", fmt(r["tps"]), fmt(r["I"]), f"${r['usd']:.2f}"] for r in rows],
                       caption=f'Llama 3 8B FP16, {v("S")} = {fmt(S["ctx"])}, ${USD_HR:.2f}/GPU-hour. {v("I")} stays below the ridge: batching buys throughput, not speed per token.'),
             ], f"Ch 8, 11, 13 · H100 {BW / 1e12:.2f} TB/s"),
@@ -244,41 +246,41 @@ def build() -> Sheet:
         sub="Serving under load, deadlines on edge and tiny devices, and what shrinking the model buys.",
         meta="H100 · Jetson Orin Nano · STM32F4",
         notation=[
-            ("Queues", f'{v("D")}, {v("O")}, {v("I")}, {v("L")} as on page 1 · {v("λ")} arrivals/s · {v("t", "s")} service time · {v("ρ")} = {v("λ")}{v("t", "s")} busy fraction · {v("W")} time in system · {v("Q")} requests in system'),
-            ("Shrinking", f'{v("k")} bits per value · {v("Δ")} quantization step · {v("σ")} fraction of weights pruned'),
-            ("Not the same “utilization”", f'{v("η")} (MFU) = useful FLOP/s ÷ peak · {v("ρ")} = fraction of time the server is busy · nvidia-smi “GPU-Util” = time any kernel was running'),
+            ("Queues", f'{v("D", "vol")}, {v("O")}, {v("I")}, {v("L", "lat")} as on page 1 · {v("λ")} arrivals/s · {v("t", "s")} service time · {v("ρ")} = {v("λ")}{v("t", "s")} busy fraction · {v("T", "lat")} time in system · {v("Q", "req")} requests in system'),
+            ("Shrinking", f'{v("b")} bits per value · {v("s")} quantization step · {v("σ")} fraction of weights pruned'),
+            ("Not the same “utilization”", f'{v("η", "hw")} (MFU) = useful FLOP/s ÷ peak · {v("ρ")} = fraction of time the server is busy · nvidia-smi “GPU-Util” = time any kernel was running'),
         ],
         cols=[
             Col("4 Can it serve the load?", [
                 Card("Prefill (time to first token): compute-bound",
-                     f'{v("t", "prefill")} ≈ (2{v("N")} · {v("S")} + 4{v("ℓ")}{v("S", sup="2")}{v("d")}) / ({v("R")} · {v("η")})',
-                     ex=f'{fmt(S["prompt"])}-token prompt: {prefill_flop / 1e12:.1f} TFLOP at {A}{v("η")} = {fmt(S["eta_prefill"] * 100)}% → {n("≈ " + fmt(prefill_ms) + " ms")} (no causal saving).'),
+                     f'{v("T", "prefill")} ≈ (2{v("P")} · {v("S")} + 4{v("N", "L")}{v("S", sup="2")}{v("d")}) / ({v("R", "peak")} · {v("η", "hw")})',
+                     ex=f'{fmt(S["prompt"])}-token prompt: {prefill_flop / 1e12:.1f} TFLOP at {A}{v("η", "hw")} = {fmt(S["eta_prefill"] * 100)}% → {n("≈ " + fmt(prefill_ms) + " ms")} (no causal saving).'),
                 Card("Queueing (M/M/1: random arrivals, one server)",
-                     f'{v("ρ")} = {v("λ")} · {v("t", "s")}, &nbsp; {v("W")} = {frac(v("t", "s"), "1 − " + v("ρ"))}, &nbsp; p99 ≈ {frac("4.6 · " + v("t", "s"), "1 − " + v("ρ"))}',
+                     f'{v("ρ")} = {v("λ")} · {v("t", "s")}, &nbsp; {v("T", "lat")} = {frac(v("t", "s"), "1 − " + v("ρ"))}, &nbsp; p99 ≈ {frac("4.6 · " + v("t", "s"), "1 − " + v("ρ"))}',
                      holds=f'4.6 = ln 100. Latency explodes as {v("ρ")} → 1; keep headroom for a tail target.'),
                 Chart(qp.svg("Latency versus utilization")),
-                f'<p class="ex">{A}{v("λ")} = {fmt(S["lam"])}/s, {v("t", "s")} = {fmt(ts)} ms → {v("ρ")} = {rho:.1f}: {v("W")} = {n(fmt(W_ms) + " ms")}, p99 = {n(fmt(p99_ms) + " ms")}. At {v("ρ")} = 0.5 the p99 is {fmt(p99_half)} ms.</p>',
-                Card("Little's law", f'{v("Q")} = {v("λ")} · {v("W")}',
+                f'<p class="ex">{A}{v("λ")} = {fmt(S["lam"])}/s, {v("t", "s")} = {fmt(ts)} ms → {v("ρ")} = {rho:.1f}: {v("T", "lat")} = {n(fmt(W_ms) + " ms")}, p99 = {n(fmt(p99_ms) + " ms")}. At {v("ρ")} = 0.5 the p99 is {fmt(p99_half)} ms.</p>',
+                Card("Little's law", f'{v("Q", "req")} = {v("λ")} · {v("T", "lat")}',
                      ex=f'{fmt(S["lam"])}/s × {fmt(W_ms)} ms = {n(fmt(inflight) + " requests")} in the system on average, {rho:.1f} in service and the rest waiting. '
-                        f'Size queues with {v("Q")}; a batching server holds a KV cache per running request.'),
+                        f'Size queues with {v("Q", "req")}; a batching server holds a KV cache per running request.'),
                 Card("Cost per token", f'$ per token = {frac("$ per hour", "tokens/s × 3600")}',
-                     ex=f'From the decode table: {n(usd_b1)} per million tokens at {v("b")} = 1, '
-                        f'{n(usd_bmax)} at {v("b", "max")}. Batching is the cost lever.'),
+                     ex=f'From the decode table: {n(usd_b1)} per million tokens at {v("B")} = 1, '
+                        f'{n(usd_bmax)} at {v("B", "max")}. Batching is the cost lever.'),
             ], "Ch 13, 11"),
             Col("5 Does it meet the deadline?", [
-                Card("Real-time frame budget", f'{v("t", "frame")} = 1 / fps &nbsp; ≥ &nbsp; Σ stage times (worst case)',
+                Card("Real-time frame budget", f'{v("T", "frame")} = 1 / fps &nbsp; ≥ &nbsp; Σ stage times (worst case)',
                      ex=f'{fmt(S["fps"])} fps → {n(f"{frame_ms:.1f} ms")} for capture, preprocessing, inference, and post-processing together.'),
-                Card("Inference on an edge GPU", f'{v("t")} ≈ max( {frac(v("O"), v("R") + " · " + v("η"))}, {frac("weights + activations", v("B"))} ) + {v("L")}',
-                     ex=f'YOLOv8-Nano ({Y_FLOP / 1e9:.1f} GFLOP, {Y_N / 1e6:.1f}M params) on Jetson Orin Nano ({fmt(J_PEAK / 1e12)} TFLOP/s FP16-equiv., {fmt(J_BW / 1e9)} GB/s) at {A}{v("η")} = {fmt(S["eta_edge"] * 100)}%: '
+                Card("Inference on an edge GPU", f'{v("T")} ≈ max( {frac(v("O"), v("R", "peak") + " · " + v("η", "hw"))}, {frac("weights + activations", "BW")} ) + {v("L", "lat")}',
+                     ex=f'YOLOv8-Nano ({Y_FLOP / 1e9:.1f} GFLOP, {Y_N / 1e6:.1f}M params) on Jetson Orin Nano ({fmt(J_PEAK / 1e12)} TFLOP/s FP16-equiv., {fmt(J_BW / 1e9)} GB/s) at {A}{v("η", "hw")} = {fmt(S["eta_edge"] * 100)}%: '
                         f'compute {n(f"{yolo_ms:.1f} ms")}; FP16 weights alone read in {yolo_w_ms:.2f} ms. Launches cost {J_LAUNCH_MS:g} ms each: run one compiled engine. '
-                        f'Energy {v("E")} = {v("P")} · {v("t")} ≤ {fmt(J_TDP)} W × {yolo_ms:.1f} ms ≈ {n(fmt(J_TDP * yolo_ms) + " mJ")} per frame.'),
+                        f'Energy {v("E")} = {v("P", "board")} · {v("T")} ≤ {fmt(J_TDP)} W × {yolo_ms:.1f} ms ≈ {n(fmt(J_TDP * yolo_ms) + " mJ")} per frame.'),
                 Card("Will it fit on a microcontroller?", ["flash ≥ weights + code", "SRAM ≥ largest layer's (input + output) + runtime"],
                      ex=f'DS-CNN keyword spotter ({fmt(K_N / 1e3)}K params, INT8) on STM32F4: {n(fmt(K_N / 1024) + " KiB")} of {fmt(MCU_FLASH)} KiB flash; SRAM is {fmt(MCU_SRAM)} KiB, so the largest layer\'s activations decide.'),
-                Card("Microcontroller time", f'{v("t")} ≈ {v("O")} / (FLOP per cycle × clock)',
+                Card("Microcontroller time", f'{v("T")} ≈ {v("O")} / (FLOP per cycle × clock)',
                      ex=f'{fmt(K_FLOP / 1e6)} MFLOP at 1 FLOP/cycle ({fmt(MCU_CLK)} MHz) ≈ {n(fmt(kws_ms) + " ms")}; INT8 SIMD kernels at {A}{S["mcu_macs_per_cycle"]} MACs/cycle ≈ {n(fmt(kws_simd) + " ms")}.'),
-                Card("Can the data pipeline keep up?", f'samples/s ≤ min(accel., CPU, {frac(v("B", "disk") + " (1 − loss)", "bytes/sample")})',
+                Card("Can the data pipeline keep up?", f'samples/s ≤ min(accel., CPU, {frac("BW<sub>disk</sub>" + " (1 − loss)", "bytes/sample")})',
                      ex=f'{A}{fmt(S["ssd"] / 1e6)} MB/s SSD, {fmt(S["f_loss"] * 100)}% loss, {fmt(S["sample"] / 1e3)} KB images → disk supplies {n(fmt(supply) + " samples/s")}. CPU = workers × decode rate per worker. '
-                        f'Loading {gb(w["FP16"])} of weights over PCIe ({fmt(PCIE / 1e9)} GB/s) takes ≥ {w["FP16"] / PCIE:.2f} s.'),
+                        f'Loading {gb(w16)} of weights over PCIe ({fmt(PCIE / 1e9)} GB/s) takes ≥ {w16 / PCIE:.2f} s.'),
             ], "Ch 2, 4, 13"),
             Col("6 What does shrinking buy?", [
                 Card("Convolution, standard vs depthwise-separable",
@@ -286,13 +288,13 @@ def build() -> Sheet:
                       f'separable: MACs = {v("H", "o")}{v("W", "o")} · {v("C", "in")} · ({v("K", sup="2")} + {v("C", "out")})'],
                      holds=f'Per image, per layer; {v("H", "o")}×{v("W", "o")} output size. Savings ≈ 1 / (1/{v("C", "out")} + 1/{v("K", sup="2")}).',
                      ex=f'{hw_}×{hw_}, {v("K")} = {k_}, {ci}→{co} channels: {fmt(conv_std / 1e6)}M → {fmt(conv_dw / 1e6)}M MACs, {n(f"{conv_std / conv_dw:.1f}× fewer")}.'),
-                Card("Quantization", f'bytes × {frac(v("k"), "16")} from FP16, &nbsp; {v("Δ")} = {frac("max − min", "2" + "<sup>" + v("k") + "</sup> − 1")}',
-                     ex=f'Only quantized tensors shrink: INT4 weights cut decode bytes at {v("b", "max")} by just {fmt(int4_cut * 100)}%, since the FP16 KV cache dominates. '
-                        f'Range [{lo:g}, {hi:g}]: {v("Δ")} = {n(f"{d8:.3f}")} at INT8, {n(f"{d4:.2f}")} at INT4. Error per value ≤ {v("Δ")}/2.'),
-                Card("Pruning", f'bytes ≈ (1 − {v("σ")}) · {v("N")} · (value + index bytes)',
+                Card("Quantization", f'bytes × {frac(v("b"), "16")} from FP16, &nbsp; {v("s")} = {frac("max − min", "2" + "<sup>" + v("b") + "</sup> − 1")}',
+                     ex=f'Only quantized tensors shrink: INT4 weights cut decode bytes at {v("B", "max")} by just {fmt(int4_cut * 100)}%, since the FP16 KV cache dominates. '
+                        f'Range [{lo:g}, {hi:g}]: {v("s")} = {n(f"{d8:.3f}")} at INT8, {n(f"{d4:.2f}")} at INT4. Error per value ≤ {v("s")}/2.'),
+                Card("Pruning", f'bytes ≈ (1 − {v("σ")}) · {v("P")} · (value + index bytes)',
                      ex=f'{A}{v("σ")} = {fmt(S["prune"] * 100)}%, FP16: a {S["idx_bytes"]}-byte relative index per value gives {n(gb(prune_idx), True)}, no saving; a 1-bit mask gives {gb(prune_mask)}. '
                         f'2:4 sparsity doubles H100 peak math ({fmt(sparse_ratio)}×); bandwidth-bound decode gains only the fewer bytes.'),
-                Card("Movement costs more than math", f'{v("E")} ≈ {v("D")} · {v("e", "byte")} + {v("O")} · {v("e", "op")}', chapter="Ch 1"),
+                Card("Movement costs more than math", f'{v("E")} ≈ {v("D", "vol")} · {v("e", "byte")} + {v("O")} · {v("e", "op")}', chapter="Ch 1"),
                 Table(["45 nm (Horowitz)", "INT8 mult", "FP16 mult", "FP32 mult", "DRAM, per byte"],
                       [["pJ", f"{E_INT8:g}", f"{E_FP16:g}", f"{E_FP32:g}", fmt(e_byte)]]),
                 f'<p class="holds">A DRAM byte ≈ {fmt(e_byte / E_FP16)}× an FP16 multiply. At {v("I")} ≈ 1 (batch-1 decode), energy is almost all movement.</p>',
