@@ -7,17 +7,17 @@ Single-page reference for the ISCA tutorial.
 ## The Iron Law of ML Training
 
 ```
-Time = FLOPs / (N x Peak_FLOPS x MFU x eta_scaling x Goodput)
+Time = FLOPs / (N x Peak_FLOP/s x MFU x eta_scaling x Goodput)
 ```
 
 | Symbol | Meaning | Typical Range |
 |--------|---------|---------------|
 | FLOPs | Total operations for the workload | 6PD for training (Chinchilla) |
 | N | Number of accelerators | 1 to 100,000+ |
-| Peak_FLOPS | Hardware peak (per device) | 312 TFLOP/s (A100 FP16), 989 TFLOP/s (H100 FP16) |
-| MFU | Model FLOPs Utilization | 0.30 - 0.55 |
+| Peak_FLOP/s | Hardware peak (per device) | 312 TFLOP/s (A100 FP16), 989 TFLOP/s (H100 FP16) |
+| MFU | Model FLOPs Utilization | 0.30 - 0.50 |
 | eta_scaling | Scaling efficiency (communication overhead) | 0.70 - 0.95 |
-| Goodput | Fraction of time doing useful work (1 - failures - checkpoints) | 0.85 - 0.98 |
+| Goodput | Fraction of time doing useful work (`1 - waste`, Young-Daly ~ `delta/tau + tau/(2M)`) | 0.85 - 0.98 |
 
 ---
 
@@ -29,17 +29,17 @@ Time = FLOPs / (N x Peak_FLOPS x MFU x eta_scaling x Goodput)
 T = max(FLOPs / Peak_effective, Bytes / BW_effective)
 ```
 
-If compute time > memory time, the workload is **compute-bound** (increase FLOPS).
+If compute time > memory time, the workload is **compute-bound** (increase FLOP/s).
 If memory time > compute time, the workload is **memory-bound** (increase bandwidth).
 
-### 2. KV-Cache Memory (PagedAttention)
+### 2. Dense KV-Cache Footprint
 
 ```
-KV_bytes = 2 x L x H_kv x D_head x S x B x bytes_per_param
+KV_bytes = 2 x L x H_kv x D_head x S x B x bytes_per_elem
 ```
 
-L = layers, H_kv = KV heads, D_head = head dimension, S = sequence length, B = batch size.
-Factor of 2 accounts for both Key and Value tensors.
+L = layers, H_kv = KV heads, D_head = head dimension, S = sequence length, B = batch size, `bytes_per_elem` = activation element bytes (`2` for FP16/BF16, `1` for FP8/INT8).
+Factor of 2 accounts for both Key and Value tensors (PagedAttention eliminates contiguous over-reservation waste across variable-length sequences).
 
 ### 3. Ring AllReduce Communication
 
@@ -60,14 +60,16 @@ P* = sqrt(C/120)  (optimal parameter count for budget C)
 P = parameters, D = tokens, C = total FLOPs. Training is compute-optimal when
 D ~ 20P (20 tokens per parameter).
 
-### 5. Carbon Footprint
+### 5. Carbon & Water Footprint
 
 ```
-CO2_kg = Energy_kWh x PUE x Carbon_Intensity_gCO2/kWh / 1000
+CO2_kg  = IT_Energy_kWh x PUE x Carbon_Intensity_gCO2/kWh / 1000
+Water_L = IT_Energy_kWh x WUE_site
 ```
 
-PUE = Power Usage Effectiveness (1.0 = perfect, 1.1 = typical hyperscale).
-Carbon intensity varies 100x by region (1 gCO2/kWh hydro vs. 800 gCO2/kWh coal).
+PUE = Power Usage Effectiveness (1.0 = ideal, 1.12 = typical hyperscale).
+WUE_site = on-site Water Usage Effectiveness (L / kWh_IT, applied to pre-PUE IT equipment energy).
+Carbon intensity varies by 41x–82x across registry grids (10 gCO2/kWh hydro in Norway and 20 gCO2/kWh in Quebec vs. 820 gCO2/kWh coal in Poland).
 
 ---
 
@@ -75,11 +77,11 @@ Carbon intensity varies 100x by region (1 gCO2/kWh hydro vs. 800 gCO2/kWh coal).
 
 | Parameter | Description | Low | Typical | High |
 |-----------|-------------|-----|---------|------|
-| `efficiency` | MFU (fraction of peak FLOPS achieved) | 0.10 | 0.30-0.50 | 0.65 |
-| `mfu` | Same as efficiency, used in fleet solvers | 0.10 | 0.35 | 0.55 |
+| `efficiency` | MFU (fraction of peak FLOP/s achieved) | 0.10 | 0.30-0.50 | 0.55 |
+| `mfu` | Same as efficiency, used in fleet solvers | 0.10 | 0.35 | 0.50 |
 | Batch=1 inference | LLM decode (memory-bound) | 0.01 | 0.05 | 0.15 |
-| Batched inference | LLM prefill / CNN inference | 0.20 | 0.40 | 0.60 |
-| Training (single node) | Typical training loop | 0.20 | 0.40 | 0.55 |
+| Batched inference | LLM prefill / CNN inference | 0.20 | 0.35 | 0.45 |
+| Training (single node) | Typical training loop | 0.20 | 0.40 | 0.50 |
 | Training (distributed) | Large cluster with comms | 0.15 | 0.30 | 0.45 |
 | FlashAttention | Fused attention kernel | 0.50 | 0.60 | 0.70 |
 | TinyML (MCU) | Microcontroller inference | 0.05 | 0.15 | 0.30 |
@@ -151,8 +153,11 @@ from mlsysim.solvers import CompressionModel
 result = CompressionModel().solve(
     model=Models.Language.Llama3_8B,
     hardware=Hardware.Cloud.H100,
-    method="quantization",  # "quantization", "pruning", "distillation"
-    target_bitwidth=4,      # 4, 8, 16
+    method="quantization",      # "quantization", "pruning", "distillation"
+    target_bitwidth=4,          # 4, 8, 16
+    baseline_precision="fp16",  # defaults to "fp32" if omitted
+    group_size=128,             # optional FP16 group-scale overhead (4.125 b/w -> 3.88x)
+    accuracy_delta=-0.015,      # caller-supplied empirical quality delta (-1.5%)
 )
 # Returns: CompressionResult with .compression_ratio, .compressed_size_gb,
 #          .memory_savings_pct, .inference_speedup, .estimated_accuracy_delta
@@ -177,13 +182,15 @@ tco = EconomicsModel().solve(fleet, duration_days=365, mfu=0.4)
 
 ---
 
-## The 22 Walls at a Glance
+## The 20 Walls + 2 Analysis Solvers at a Glance
 
-| # | Wall | One-Liner |
-|---|------|-----------|
-| 1 | Compute | Peak FLOPS ceiling of a single accelerator |
+`mlsysim.engine.walls.ALL_WALLS` contains 22 entries: 20 physical/operational walls (rows 1–20) plus 2 cross-cutting sensitivity and inverse-synthesis solvers (rows 21–22).
+
+| # | Wall / Solver | One-Liner |
+|---|---------------|-----------|
+| 1 | Compute | Peak FLOP/s ceiling of a single accelerator |
 | 2 | Memory | HBM capacity and bandwidth ceilings |
-| 3 | Software | Gap between peak and achieved FLOPS (MFU) |
+| 3 | Software | Gap between peak and achieved FLOP/s (MFU) |
 | 4 | Serving | LLM inference: compute-bound prefill vs. memory-bound decode |
 | 5 | Batching | Static batching wastes memory through KV-cache fragmentation |
 | 6 | Streaming | Wafer-scale shifts bottleneck from HBM to injection interconnect |
@@ -208,16 +215,14 @@ tco = EconomicsModel().solve(fleet, duration_days=365, mfu=0.4)
 
 ## Hardware Quick Reference
 
-| Accelerator | Peak FP16 (TFLOPS) | HBM (GiB) | BW (TB/s) | TDP (W) |
-|-------------|-------------------|------------|-----------|---------|
-| V100 | 125 | 32 | 0.9 | 300 |
-| A100 | 312 | 80 | 2.0 | 400 |
-| H100 | 989 | 80 | 3.35 | 700 |
-| H200 | 989 | 141* | 4.8 | 700 |
-| B200 | 2,250 | 180 | 8.0 | 1,000 |
-| nRF52840 | 0.000064 | 0.001 (1 MB flash) | 0.000064 | 0.015 |
-
-*H200 capacity listed as 141 GB in registry (non-binary).
+| Accelerator | Peak FP16 (TFLOP/s) | Memory | BW (TB/s) | TDP (W) |
+|-------------|---------------------|--------|-----------|---------|
+| V100 | 125 | 32 GiB | 0.90 | 300 |
+| A100 | 312 | 80 GiB | 2.04 | 400 |
+| H100 | 989 | 80 GiB | 3.35 | 700 |
+| H200 | 989 | 141 GiB | 4.80 | 700 |
+| B200 | 2,250 | 180 GiB | 8.00 | 1,000 |
+| nRF52840 | 0.000064 | 1 MiB | 0.000064 | 0.015 |
 
 Access via: `Hardware.Cloud.A100`, `Hardware.Cloud.H100`, `Hardware.Tiny.nRF52840`, etc.
 
@@ -231,5 +236,11 @@ Access via: `Hardware.Cloud.A100`, `Hardware.Cloud.H100`, `Hardware.Tiny.nRF5284
 | Llama-3-8B | 8.03B | Transformer | `Models.Language.Llama3_8B` |
 | Llama-3-70B | 70.6B | Transformer | `Models.Language.Llama3_70B` |
 | GPT-3 | 175B | Transformer | `Models.Language.GPT3` |
-| DS-CNN (KWS) | 26K | CNN | `Models.Tiny.DS_CNN` |
-| MobileNetV2 | 3.4M | CNN | `Models.Vision.MobileNetV2` |
+| DS-CNN (KWS) | 200K | CNN | `Models.Tiny.DS_CNN` |
+| MobileNetV2 | 3.5M | CNN | `Models.Vision.MobileNetV2` |
+
+---
+
+## Textbook & Curriculum Cross-Links
+
+See <https://mlsysbook.ai/mlsysim/curriculum-map.html> for direct links from every equation, wall, and solver to the corresponding *Machine Learning Systems* textbook chapter, interactive Marimo lab, and lecture slides.

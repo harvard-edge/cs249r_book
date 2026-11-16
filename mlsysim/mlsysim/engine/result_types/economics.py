@@ -400,7 +400,7 @@ class EconomicsResult(SolverResult):
 
 
 class ResponsibleEngineeringResult(SolverResult):
-    """Result from ResponsibleEngineeringModel: ethics tax quantification."""
+    """Result from ResponsibleEngineeringModel: DP-SGD noise and subgroup sampling."""
 
     __module__ = "mlsysim.engine.results"
 
@@ -412,6 +412,7 @@ class ResponsibleEngineeringResult(SolverResult):
     min_subgroup_prevalence: float
     privacy_cost_ratio: float
     fairness_data_ratio: float
+    noise_multiplier: float = 0.0
 
 
 class CohortAttemptCostResult(SolverResult):

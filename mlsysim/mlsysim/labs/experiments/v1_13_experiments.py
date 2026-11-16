@@ -1323,6 +1323,7 @@ __all__ = [
     "language_batching_reference",
     "language_scheduling_reference",
     "language_scheduling_to_snapshot",
+    "latency_stage_summary",
     "RecommendationStateBreakdown",
     "LanguageScheduleSlice",
     "LanguageSchedulingReference",

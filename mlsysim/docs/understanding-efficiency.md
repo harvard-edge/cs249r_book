@@ -1,18 +1,23 @@
-# Understanding the Efficiency Parameter
+---
+title: "Understanding the Efficiency Parameter"
+subtitle: "Why compute-bound solvers expose an empirical utilization factor (η) alongside exact Roofline bounds."
+---
 
-> Every equation in mlsysim needs one number it cannot derive from first
-> principles. That number is **efficiency**.
+> Compute-bound latency equations in `mlsysim` take one empirical parameter they
+> do not invent from microarchitectural heuristics: **efficiency** ($\eta$).
 
 ---
 
 ## What Efficiency Is
 
-The efficiency parameter, written as **eta** in equations and `efficiency` in code,
-is the ratio of achieved FLOPS to peak FLOPS. MLSys·im exposes it on every
-solver where the compute term depends on achieved FLOP/s, including
-`Engine.solve()`, `SingleNodeModel`, `ServingModel`, `DistributedModel`,
-`ContinuousBatchingModel`, `ServingCapacityModel`, and the optimizers that call
-those models.
+The efficiency parameter, written as $\eta$ (`eta`) in equations and `efficiency` in code,
+is the ratio of achieved Tensor Core/ALU throughput to peak datasheet FLOP/s during
+compute-bound execution. Exact byte-accounting, memory capacity, TCO, carbon/water,
+reliability, and kinematic safety equations do **not** depend on $\eta$; MLSys·im
+exposes `efficiency` specifically on solvers whose compute term depends on achieved
+FLOP/s, including `Engine.solve()`, `SingleNodeModel`, `ServingModel`,
+`DistributedModel`, `ContinuousBatchingModel`, `ServingCapacityModel`, and the
+optimizers that call those models.
 
 ```
 eta = Achieved_FLOPS / Peak_FLOPS
@@ -53,7 +58,7 @@ eta actually absorbs:
 | **Pipeline bubbles** | In pipeline-parallel training, micro-batch scheduling leaves some stages idle while others compute. The bubble fraction depends on the number of micro-batches relative to pipeline stages. |
 | **Communication overlap** | Modern training overlaps AllReduce with backward computation. How well this overlap works depends on network bandwidth, gradient sizes, and scheduling. |
 | **Framework overhead** | Python GIL contention, graph compilation time (for torch.compile or XLA), operator dispatch overhead, and autograd bookkeeping all steal cycles from useful compute. |
-| **Attention implementation** | FlashAttention achieves 2-4x the throughput of naive attention by fusing operations and reducing HBM reads. The choice of attention kernel alone can shift eta by 0.15-0.25. |
+| **Attention implementation** | FlashAttention achieves 2–4× the throughput of materialized attention by tiling $Q, K, V$ in SRAM and avoiding $\mathcal{O}(S^2)$ HBM reads/writes (`EfficiencyModel` in `mlsysim.solvers` computes the exact Dao et al. SRAM IO-complexity ceiling for attention, while $\eta$ captures residual kernel efficiency). |
 | **Quantization runtime overhead** | INT8/INT4 kernels may not achieve the same fraction of peak as FP16 GEMM, especially for non-standard shapes or when dequantization is on the critical path. |
 | **Data loader stalls** | If the CPU cannot tokenize, augment, and transfer data to the GPU fast enough, the GPU sits idle between batches. |
 | **Garbage collection pauses** | Python's GC and CUDA's memory allocator can cause periodic stalls, especially with large batch sizes and frequent tensor allocation. |
@@ -109,7 +114,7 @@ Use these empirically-grounded ranges as starting points:
 |----------|-----------|-----------|
 | Training (Megatron-LM, large Transformer) | 0.40-0.55 | Well-optimized GEMM + FlashAttention |
 | Training (PyTorch eager, small model) | 0.08-0.15 | Kernel launch overhead dominates |
-| Inference decode, batch=1 | 0.01-0.05 | Memory-bound; compute nearly idle |
+| Inference decode, batch=1 (overall MFU) | 0.01-0.05 | Memory-bound; pass compute-kernel eta (0.35-0.55) to `ServingModel` |
 | Inference decode, batch=32+ | 0.15-0.35 | Batch amortizes weight loading |
 | Inference prefill, long context | 0.30-0.50 | Compute-bound GEMM + attention |
 | TinyML (TFLite Micro on ESP32) | 0.05-0.15 | Interpreter overhead, no tensor cores |
@@ -143,18 +148,18 @@ warmup, excluding the first few batches.
 ### Step 3: Back-Calculate Efficiency
 
 ```python
-# Your measurements
-measured_throughput = 1200  # tokens/sec (from step 2)
+# Your measurements (e.g., dense 70B inference pass at ~2 * P FLOPs/token)
+measured_throughput = 2980  # tokens/sec (from step 2)
 
 # Known quantities
-model_flops_per_token = 1.4e12    # FLOPs per token for your model
-peak_flops = 989e12               # H100 SXM FP16 peak
+model_flops_per_token = 1.4e11    # ~2 * 70B FLOPs per token in forward pass
+peak_flops = 989e12               # H100 SXM FP16 dense peak
 
 # Back-calculate
 theoretical_max_throughput = peak_flops / model_flops_per_token
 eta = measured_throughput / theoretical_max_throughput
 
-print(f"eta = {eta:.3f}")  # e.g., eta = 0.423
+print(f"eta = {eta:.3f}")  # eta = 0.422
 ```
 
 ### Step 4: Use Calibrated Efficiency for What-If Analysis
@@ -168,7 +173,7 @@ result = Engine.solve(
     hardware=Hardware.Cloud.B200,
     batch_size=32,
     precision="fp16",
-    efficiency=0.423  # calibrated from H100 measurement
+    efficiency=0.422  # calibrated from H100 measurement above
 )
 ```
 
@@ -190,8 +195,11 @@ the workload:
 - Optimized large-batch training: eta ~ 0.40-0.55
 - Small model in eager mode: eta ~ 0.08-0.15
 
-Using eta = 0.5 for decode-phase inference will overestimate throughput by
-10-50x. Always match the efficiency to the workload regime.
+Using eta = 0.5 in a pure FLOP-count equation (`Time = FLOPs / (Peak_FLOPS * eta)`)
+for decode-phase inference will overestimate throughput by 10-50x because decode is
+HBM-bandwidth-bound. Note that `ServingModel` and `SingleNodeModel` already apply
+the Roofline memory-bandwidth ceiling explicitly (`max(t_compute, t_memory)`), so
+on those mechanistic solvers `efficiency` derates only the compute roof (0.35-0.55).
 
 ### Fallacy: "Higher eta is always better"
 
@@ -243,7 +251,7 @@ the domain of ML systems engineering.
 - **Megatron-LM** (Shoeybi et al., 2020): The reference implementation for
   efficient large model training. Published efficiency numbers across model
   sizes and parallelism configurations.
-- **MLPerf Training** (mattson et al., 2020): Standardized benchmarks that
+- **MLPerf Training** (Mattson et al., 2020): Standardized benchmarks that
   provide comparable efficiency measurements across hardware platforms.
 - **Computer Architecture: A Quantitative Approach** (Hennessy & Patterson):
   Chapter 1's treatment of CPI and the CPU performance equation is the direct

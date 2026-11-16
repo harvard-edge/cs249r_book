@@ -17,7 +17,16 @@ from mlsysim.hardware.registry import (
     TinyHardware,
     WorkstationHardware,
 )
-from mlsysim.hardware.tech import Interconnect, Memory, Op, Storage as TechStorage
+from mlsysim.hardware.tech import (
+    Battery,
+    EffectiveCompute,
+    Interconnect,
+    Lithography,
+    Memory,
+    Movement,
+    Op,
+    Storage as TechStorage,
+)
 from mlsysim.infrastructure.registry import Datacenters, FacilityCooling, Grids, Racks
 from mlsysim.infrastructure.pricing import Cloud, Storage, Labeling, Fleet, Capital, OnPremises
 from mlsysim.infrastructure.capacity import Capacity
@@ -150,7 +159,7 @@ def audit_platforms() -> list[str]:
 
 def audit_sensors() -> list[str]:
     issues: list[str] = []
-    for sub in ("Camera", "LiDAR", "IMU", "SafetyScanner"):
+    for sub in ("Camera", "LiDAR", "IMU", "SafetyScanner", "SafetyLightCurtain"):
         reg = getattr(Sensors, sub)
         for node in _registry_nodes(reg):
             name = getattr(node, "name", type(node).__name__)
@@ -160,7 +169,7 @@ def audit_sensors() -> list[str]:
 
 def audit_actuators() -> list[str]:
     issues: list[str] = []
-    for sub in ("HarmonicDrive", "QuasiDirectDrive", "Servo", "FramelessMotor", "PandaClassJoint", "HubMotor"):
+    for sub in ("HarmonicDrive", "QuasiDirectDrive", "Servo", "FramelessMotor", "PandaClassJoint", "HubMotor", "SafetyRelay"):
         reg = getattr(Actuators, sub)
         for node in _registry_nodes(reg):
             name = getattr(node, "name", type(node).__name__)
@@ -194,7 +203,11 @@ def audit_hardware_tech() -> list[str]:
         ("Hardware.Tech.Memory", Memory),
         ("Hardware.Tech.Storage", TechStorage),
         ("Hardware.Tech.Op", Op),
+        ("Hardware.Tech.EffectiveCompute", EffectiveCompute),
+        ("Hardware.Tech.Movement", Movement),
         ("Hardware.Tech.Interconnect", Interconnect),
+        ("Hardware.Tech.Lithography", Lithography),
+        ("Hardware.Tech.Battery", Battery),
     ):
         for node in _registry_nodes(reg):
             name = getattr(node, "name", type(node).__name__)

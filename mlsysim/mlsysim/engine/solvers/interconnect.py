@@ -263,7 +263,7 @@ class CommunicationIntensityModel(ForwardModel):
         peak_flops : object
             Positive arithmetic rate in FLOP/s.
         precision : str
-            Weight or KV precision name; gradient synchronization also accepts bytes per element.
+            Weight precision name used to size one gradient replica.
 
         Returns
         -------
@@ -511,9 +511,14 @@ class IncastModel(ForwardModel):
         """
         offered = n_senders * sender_bandwidth
         net = offered - egress_bandwidth
+        overflow = (
+            (buffer / net).to("microsecond")
+            if net.to("byte/second").magnitude > 0
+            else float("inf") * Q_("microsecond")
+        )
         return IncastResult(
             offered_load=offered, oversubscription=(offered / egress_bandwidth).to("").magnitude,
-            net_fill_rate=net, overflow_time=(buffer / net).to("microsecond"),
+            net_fill_rate=net, overflow_time=overflow,
             drain_time=(buffer / egress_bandwidth).to("microsecond"),
             bandwidth_delay_product=(egress_bandwidth * feedback_rtt).to("KB"),
         )

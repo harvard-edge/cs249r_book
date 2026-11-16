@@ -133,9 +133,10 @@ def test_lease_budget_reserves_every_nonlease_prebrake_stage():
 
 
 def test_collection_ledger_keeps_failed_attempt_costs_and_coverage_gaps():
-    nominal=studies.study(5,'C','nominal')
-    recovery=studies.study(5,'C','recovery')
-    a=values(nominal); b=values(recovery)
+    nominal = studies.study(5, 'C', 'nominal')
+    recovery = studies.study(5, 'C', 'recovery')
+    a = values(nominal)
+    b = values(recovery)
     assert a['attempted episodes']==b['attempted episodes']
     assert a['retained episodes']>b['retained episodes']
     assert len(a['supported cells'])<len(b['supported cells'])

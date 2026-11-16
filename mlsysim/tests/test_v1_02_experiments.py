@@ -347,7 +347,8 @@ def _placement(track="mobile", **changes):
 def test_ideal_remote_arithmetic_preserves_irreducible_trip_and_does_not_validate_readiness(track):
     profile=study_profile(track)
     args=dict(payload_mb=profile["payload_options_mb"][-1],connection_mbps=profile["connection_options_mbps"][0])
-    normal=locality_study(track,**args); ideal=locality_study(track,**args,ideal_compute=True)
+    normal = locality_study(track, **args)
+    ideal = locality_study(track, **args, ideal_compute=True)
     assert ideal["lower_bound_ms"] == pytest.approx(normal["lower_bound_ms"]-normal["remote_execution_ms"])
     for key in ("request_upload_ms","propagation_rtt_ms","response_download_ms"):
         assert ideal[key] == normal[key]
@@ -362,8 +363,10 @@ def test_tiny_flash_cannot_repair_sram_and_resource_changes_do_not_imply_bandwid
     assert overflow["pools"][1]["required_mb"] <= overflow["pools"][1]["capacity_mb"]
     fixed=resource_study("tinyml",workload_case="large_working_set",intervention="capacity")
     assert fixed["feasible"]
-    base=resource_study("mobile");capacity=resource_study("mobile",intervention="capacity")
-    compute=resource_study("mobile",intervention="compute");bandwidth=resource_study("mobile",intervention="bandwidth")
+    base = resource_study("mobile")
+    capacity = resource_study("mobile", intervention="capacity")
+    compute = resource_study("mobile", intervention="compute")
+    bandwidth = resource_study("mobile", intervention="bandwidth")
     assert capacity["movement_ms"] == compute["movement_ms"] == base["movement_ms"]
     assert bandwidth["movement_ms"] < base["movement_ms"]
     assert capacity["compute_ms"] == bandwidth["compute_ms"] == base["compute_ms"]
@@ -407,7 +410,8 @@ def test_constraints_survive_composition_and_exclusions_precede_cost(track):
 
 
 def test_remote_worker_is_not_upgraded_by_local_capacity_and_workload_cost_is_not_reset():
-    base=_placement();capacity=_placement(intervention="capacity")
+    base = _placement()
+    capacity = _placement(intervention="capacity")
     for key in FILTERING_ALTERNATIVES:
         assert base["candidates"][key]["latency_ms"] == capacity["candidates"][key]["latency_ms"]
     larger=_placement(workload_case="arithmetic_heavy")

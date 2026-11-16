@@ -2,9 +2,9 @@
 
 Domain implementations behind ``mlsysim.solvers``. Each model is arithmetic on
 stated rates and episode counts: how often a task meets attacker text given
-how much untrusted content it reads, the same exposure counted in turns, and
-attack success against benign acceptance for two policies run on equal
-cohorts. None models an adaptive attacker or correlated payloads.
+how much untrusted content it reads, and attack success against benign
+acceptance for two policies run on equal cohorts. None models an adaptive
+attacker or correlated payloads.
 """
 
 from __future__ import annotations
@@ -164,6 +164,11 @@ class PolicyComparisonModel(ForwardModel):
         True
         """
 
+        import math
+
+        if attacked <= 0 or benign <= 0:
+            raise ValueError(f"attacked and benign cohort sizes must be positive; got {attacked}, {benign}")
+
         def rates(p):
             return (
                 p["confirmed"] / attacked,
@@ -174,19 +179,27 @@ class PolicyComparisonModel(ForwardModel):
         b_lo, b_hi, b_acc = rates(baseline)
         c_lo, c_hi, c_acc = rates(candidate)
         priced = attempt_cost is not None
+        red_obs = (0.0 if c_lo == 0 else -math.inf) if b_lo == 0 else 1 - c_lo / b_lo
+        red_up = (0.0 if c_hi == 0 else -math.inf) if b_hi == 0 else 1 - c_hi / b_hi
+        red_lf = (0.0 if c_hi == 0 else -math.inf) if b_lo == 0 else 1 - c_hi / b_lo
+        cost_rise = (0.0 if b_acc == 0 else math.inf) if c_acc == 0 else b_acc / c_acc - 1
         return PolicyComparisonResult(
             baseline_lower=b_lo,
             candidate_lower=c_lo,
             baseline_upper=b_hi,
             candidate_upper=c_hi,
-            reduction_observed=1 - c_lo / b_lo,
-            reduction_upper=1 - c_hi / b_hi,
-            reduction_least_favorable=1 - c_hi / b_lo,
+            reduction_observed=red_obs,
+            reduction_upper=red_up,
+            reduction_least_favorable=red_lf,
             baseline_acceptance=b_acc,
             candidate_acceptance=c_acc,
             lost_benign=baseline["accepted_benign"] - candidate["accepted_benign"],
             extra_false_blocks=candidate["false_block"] - baseline["false_block"],
-            cost_rise=b_acc / c_acc - 1,
-            baseline_cost_per_accepted=calc_cost_per_accepted(attempt_cost, b_acc) if priced else None,
-            candidate_cost_per_accepted=calc_cost_per_accepted(attempt_cost, c_acc) if priced else None,
+            cost_rise=cost_rise,
+            baseline_cost_per_accepted=(
+                (math.inf if b_acc == 0 else calc_cost_per_accepted(attempt_cost, b_acc)) if priced else None
+            ),
+            candidate_cost_per_accepted=(
+                (math.inf if c_acc == 0 else calc_cost_per_accepted(attempt_cost, c_acc)) if priced else None
+            ),
         )

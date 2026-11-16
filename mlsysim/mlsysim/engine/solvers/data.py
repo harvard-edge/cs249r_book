@@ -29,7 +29,7 @@ class DataModel(ForwardModel):
     2. Beitzel et al. (2024), "The Data Wall: Scaling Laws for Data Ingestion in AI."
     3. Mohan et al. (2022), "Analyzing and Mitigating Data Bottlenecks in Deep Learning Training."
     """
-    requires = ("workload", "hardware")
+    requires = ("workload_data_rate", "hardware")
     produces = DataResult
 
     def solve(self, workload_data_rate: Quantity, hardware: HardwareNode) -> DataResult:
@@ -122,7 +122,7 @@ class TransformationModel(ForwardModel):
        Framework." (Pipeline stall analysis.)
     3. NVIDIA DALI Documentation (2024). (GPU-accelerated preprocessing.)
     """
-    requires = ("hardware",)
+    requires = ("batch_size", "sample_size_bytes", "cpu_throughput", "accelerator_step_time")
     produces = TransformationResult
 
     def solve(self, batch_size: int, sample_size_bytes: Quantity,

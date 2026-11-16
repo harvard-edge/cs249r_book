@@ -5,9 +5,9 @@ model is arithmetic on stated probabilities, counts, and prices: duplicate
 effects under one blind retry with independent request and reply loss, a raw
 log against the shaped view later calls carry, the status calls a model makes
 while a job is pending, descriptor tokens staged per call with and without
-selection, cost per accepted task for structured tools against one shell
-tool, and adapters with and without a shared protocol. None models delayed
-packets, a tokenizer, cache eviction, or a provider's price schedule.
+selection, and cost per accepted task for structured tools against one shell
+tool. None models delayed packets, a tokenizer, cache eviction, or a
+provider's price schedule.
 """
 
 from __future__ import annotations
@@ -248,7 +248,7 @@ class ModelPollingModel(ForwardModel):
 
         References
         ----------
-        Derivation: Count positive interval multiples strictly below completion,
+        Derivation: Count positive interval multiples below completion,
         then multiply by the token counts and weighted token prices.
         physics.tool_calls.calc_pending_polls implements the endpoint convention.
 

@@ -3,6 +3,7 @@
 import math
 
 from ...core.units import ureg
+from ...core._validation import validate_nonnegative, validate_positive
 
 
 def calc_two_link_singular_values(upper_arm, forearm, elbow_angle):
@@ -52,19 +53,19 @@ def calc_two_link_singular_values(upper_arm, forearm, elbow_angle):
     >>> bool(largest > smallest and smallest == 0 * ureg.meter)
     True
     """
+    validate_positive(upper_arm, "upper_arm")
+    validate_positive(forearm, "forearm")
     l1 = upper_arm.to(ureg.meter).magnitude
     l2 = forearm.to(ureg.meter).magnitude
     q2 = elbow_angle.to(ureg.radian).magnitude
-    j11, j12 = -l2 * math.sin(q2), -l2 * math.sin(q2)
-    j21, j22 = l1 + l2 * math.cos(q2), l2 * math.cos(q2)
-    # Singular values of a 2x2 from the eigenvalues of J^T J.
-    a = j11 * j11 + j21 * j21
-    b = j11 * j12 + j21 * j22
-    d = j12 * j12 + j22 * j22
-    half_trace, det = (a + d) / 2, a * d - b * b
-    disc = math.sqrt(max(half_trace * half_trace - det, 0.0))
-    s_max = math.sqrt(half_trace + disc)
-    s_min = math.sqrt(max(half_trace - disc, 0.0))
+    # Singular values of a 2x2 Jacobian without det(J^T J) cancellation:
+    # tr(J^T J) = l1^2 + 2 l2^2 + 2 l1 l2 cos(q2), |det J| = |l1 l2 sin(q2)|,
+    # (s_max + s_min)^2 = tr + 2|det J|, (s_max - s_min)^2 = tr - 2|det J|,
+    # and s_min = |det J| / s_max avoids catastrophic subtraction near q2 = 0.
+    tr = l1 * l1 + 2.0 * l2 * l2 + 2.0 * l1 * l2 * math.cos(q2)
+    abs_det = abs(l1 * l2 * math.sin(q2))
+    s_max = 0.5 * (math.sqrt(tr + 2.0 * abs_det) + math.sqrt(max(tr - 2.0 * abs_det, 0.0)))
+    s_min = (abs_det / s_max) if s_max > 0.0 else 0.0
     return s_max * ureg.meter, s_min * ureg.meter
 
 
@@ -116,8 +117,13 @@ def calc_dls_joint_rate(tool_speed, singular_value, damping):
     >>> bool(rate.to("radian/second").magnitude == share)
     True
     """
+    validate_nonnegative(singular_value, "singular_value")
+    validate_nonnegative(damping, "damping")
     s = singular_value.to(ureg.meter).magnitude
     lam = damping.to(ureg.meter).magnitude
+    denom = s * s + lam * lam
+    if denom == 0.0:
+        raise ValueError("singular_value and damping cannot both be zero.")
     v = tool_speed.to(ureg.meter / ureg.second).magnitude
-    gain = s / (s * s + lam * lam)
-    return v * gain * ureg.radian / ureg.second, s * s / (s * s + lam * lam)
+    gain = s / denom
+    return v * gain * ureg.radian / ureg.second, (s * s) / denom

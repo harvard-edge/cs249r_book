@@ -56,16 +56,14 @@ class GravityBiasedJointStopScenario(BaseScenario):
     def torque_limit(self) -> Quantity:
         """Configured joint peak torque in N m.
 
-        Equation:
-            return self.machine.arm.max_torque.to('``N*m``')"""
+        Equation: ``return self.machine.arm.max_torque.to('N*m')``."""
         return self.machine.arm.max_torque.to("N*m")
 
     @property
     def bias(self) -> Quantity:
         """Constant gravitational bias torque in N m, specified fraction of peak torque.
 
-        Equation:
-            return (self.torque_limit * self.bias_fraction).to('``N*m``')"""
+        Equation: ``return (self.torque_limit * self.bias_fraction).to('N*m')``."""
         return (self.torque_limit * self.bias_fraction).to("N*m")
 
     @property
@@ -74,8 +72,7 @@ class GravityBiasedJointStopScenario(BaseScenario):
 
         Torque left for braking when gravity acts along the motion.
 
-        Equation:
-            return (self.torque_limit - self.bias).to('``N*m``')"""
+        Equation: ``return (self.torque_limit - self.bias).to('N*m')``."""
         return (self.torque_limit - self.bias).to("N*m")
 
     @property
@@ -84,11 +81,12 @@ class GravityBiasedJointStopScenario(BaseScenario):
 
         Torque available for braking when gravity helps.
 
-        Equation:
-            return (self.torque_limit + self.bias).to('``N*m``')"""
+        Equation: ``return (self.torque_limit + self.bias).to('N*m')``."""
         return (self.torque_limit + self.bias).to("N*m")
 
     def _alpha(self, torque) -> Quantity:
+        if torque.to("N*m").magnitude <= 0:
+            raise ValueError(f"Net braking torque must be positive; got {torque}")
         return (torque / self.inertia).to("1/s**2")
 
     @property
@@ -195,10 +193,7 @@ class GravityBiasedJointStopScenario(BaseScenario):
 
         Braking torque the barrier demands at a tool clearance (the bound's negative).
 
-        Equation:
-            h = self.barrier_margin(clearance)
-            bound = (-self.bias + self.inertia * self.alpha_descending * (self.barrier_gain * h / self.joint_speed - 1)).to('``N*m``')
-            return (-bound).to('``N*m``')"""
+        Equation: ``h = self.barrier_margin(clearance); bound = (-self.bias + self.inertia * self.alpha_descending * (self.barrier_gain * h / self.joint_speed - 1)).to('N*m'); return (-bound).to('N*m')``."""
         h = self.barrier_margin(clearance)
         bound = (-self.bias + self.inertia * self.alpha_descending * (self.barrier_gain * h / self.joint_speed - 1)).to(
             "N*m"

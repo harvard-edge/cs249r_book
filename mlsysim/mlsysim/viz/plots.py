@@ -79,9 +79,12 @@ def plot_roofline(
     - Optional efficiency derate, batch_size, and precision forwarded to SingleNodeModel
     """
     # 1. PARAMETERS
-    peak_flops = hardware_node.compute.peak_flops.to("TFLOPs/s").magnitude * efficiency
+    raw_peak_flops_q = hardware_node.ridge_point(precision) * hardware_node.memory.bandwidth
+    peak_flops = raw_peak_flops_q.to("TFLOPs/s").magnitude * efficiency
     peak_bw = hardware_node.memory.bandwidth.to("GB/s").magnitude
-    ridge_point = peak_flops / (peak_bw / 1000)  # FLOP/Byte
+    ridge_point = (
+        (raw_peak_flops_q * efficiency) / hardware_node.memory.bandwidth
+    ).to("flop / byte").magnitude  # FLOP/Byte
 
     # 2. AXIS RANGE
     x_min = 0.1
@@ -150,7 +153,7 @@ def plot_roofline(
                 precision=precision,
                 efficiency=efficiency,
             )
-            ai = profile.arithmetic_intensity.magnitude
+            ai = profile.arithmetic_intensity.to("flop / byte").magnitude
             perf = min(peak_bw * ai / 1000, peak_flops)
             resolved_workloads.append((model, ai, perf))
 
@@ -308,12 +311,21 @@ def plot_distributed_roofline(fleet_system, workloads=None):
     synchronization exceeds the fleet's bisection bandwidth.
     """
     # 1. PARAMETERS (Fleet Specs)
+    total_accels = fleet_system.total_accelerators
     peak_flops = (
         fleet_system.node.accelerator.compute.peak_flops.to("TFLOPs/s").magnitude
-        * fleet_system.count
+        * total_accels
     )
-    # Bisection Bandwidth (total network capacity for All-Reduce)
-    peak_network_bw = fleet_system.fabric.bandwidth.to("GB/s").magnitude
+    # Unidirectional bisection bandwidth across a balanced fleet cut
+    bisection_ports = (
+        (fleet_system.count * fleet_system.node.nics_per_node) / 2.0
+        if fleet_system.count > 1
+        else float(fleet_system.node.nics_per_node)
+    )
+    oversub = max(float(fleet_system.fabric.oversubscription_ratio), 1e-9)
+    peak_network_bw = (
+        fleet_system.fabric.bandwidth.to("GB/s").magnitude * bisection_ports / oversub
+    )
     ridge_point = peak_flops / (peak_network_bw / 1000)  # FLOP/Byte
 
     # 2. AXIS RANGE
@@ -362,9 +374,30 @@ def plot_distributed_roofline(fleet_system, workloads=None):
     ax.set_xlim(x_min, x_max)
     ax.set_ylim(y_min, y_max)
 
+    resolved_workloads = []
+    if workloads:
+        from ..engine.solvers import SingleNodeModel
+
+        for item in workloads:
+            if isinstance(item, tuple) and len(item) == 2:
+                w_name, ci = str(item[0]), float(item[1])
+            else:
+                w_name = getattr(item, "name", str(item))
+                prof = SingleNodeModel().solve(
+                    item, fleet_system.node.accelerator, efficiency=1.0
+                )
+                fwd_flops = (prof.latency_compute * prof.peak_flops_actual).to("flop").magnitude
+                step_flops = 3.0 * fwd_flops * total_accels
+                grad_bytes = max(2.0 * prof.memory_footprint.to("byte").magnitude, 1.0)
+                ci = step_flops / grad_bytes
+            perf = min(peak_network_bw * ci / 1000.0, peak_flops)
+            resolved_workloads.append((w_name, ci, perf))
+
     # Network bandwidth ceiling label
     x_slope_start = max(x_min, y_min * 1000.0 / peak_network_bw)
-    slope_x = _pick_slope_label_x(x_slope_start, ridge_point, [])
+    slope_x = _pick_slope_label_x(
+        x_slope_start, ridge_point, [ci for _, ci, _ in resolved_workloads]
+    )
     slope_y = peak_network_bw * slope_x / 1000
     slope_angle = _slope_screen_angle(
         ax, x_slope_start, peak_network_bw * x_slope_start / 1000, ridge_point, peak_flops
@@ -441,10 +474,34 @@ def plot_distributed_roofline(fleet_system, workloads=None):
         va="center",
     )
 
+    if resolved_workloads:
+        workload_colors = [
+            colors["primary"],
+            colors["GreenLine"],
+            colors["VioletLine"],
+            colors["BrownLine"],
+        ]
+        for i, (w_name, ci, perf) in enumerate(resolved_workloads):
+            c = workload_colors[i % len(workload_colors)]
+            bound = "network" if ci < ridge_point else "compute"
+            ax.plot(ci, perf, "o", color=c, markersize=8.5, zorder=11)
+            ax.annotate(
+                f"{w_name}\n({bound}-bound)",
+                xy=(ci, perf),
+                xytext=(ci * 0.7, perf * (0.45 * (0.65**i))),
+                fontsize=MIN_FONT_PT,
+                fontweight="bold",
+                color=c,
+                ha="center",
+                va="top",
+                arrowprops=dict(arrowstyle="->", color=c, lw=1.1, shrinkB=5),
+                zorder=12,
+            )
+
     ax.set_xlabel("Communication Intensity (FLOP/Byte)")
     ax.set_ylabel("Fleet Performance (TFLOP/s)")
     ax.set_title(
-        f"Distributed Roofline: {fleet_system.count}x {fleet_system.node.accelerator.name}"
+        f"Distributed Roofline: {total_accels}x {fleet_system.node.accelerator.name}"
     )
     ax.legend(loc="lower right", fontsize=MIN_FONT_PT, framealpha=0.9)
     return _finalize_web_figure(fig), ax

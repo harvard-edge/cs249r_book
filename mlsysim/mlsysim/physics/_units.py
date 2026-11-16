@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import numbers
+
 import pint
 
 from mlsysim.core.units import ureg
@@ -17,7 +19,9 @@ def _ensure_unit(val, expected_unit, param_name="Value"):
     safe: a caller that passes ``Q_("120 1/minute")`` where Hz is expected now
     yields magnitude 2.0, not a silent 60x misread.
     """
-    if isinstance(val, (int, float)):
+    if isinstance(val, bool):
+        raise TypeError(f"Expected a numeric scalar or Pint Quantity for {param_name}, got bool")
+    if isinstance(val, numbers.Real):
         return val * expected_unit
     if isinstance(val, ureg.Quantity):
         if not val.check(expected_unit):

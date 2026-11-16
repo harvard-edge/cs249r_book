@@ -23,13 +23,17 @@ def MetricRow(label, value, sub_value=""):
 
 def ComparisonRow(label, current, target, unit=""):
     """Calculates the ratio between two values for quantitative intuition."""
-    # Convert Pint quantities to magnitude if needed
-    val_c = current.m if hasattr(current, 'm') else current
-    val_t = target.m if hasattr(target, 'm') else target
-    
+    # Convert Pint quantities to common units before comparing magnitudes
+    if hasattr(current, "to") and hasattr(target, "to"):
+        val_c = current.magnitude
+        val_t = target.to(current.units).magnitude
+    else:
+        val_c = current.m if hasattr(current, "m") else current
+        val_t = target.m if hasattr(target, "m") else target
+
     ratio = val_t / val_c if val_c > 0 else 0
     ratio_str = f"{ratio:,.0f}x" if ratio >= 1 else f"{ratio:.4f}x"
-    
+
     return f"""
     <div class="metric-row" style="border-bottom: 1px dashed #eee;">
         <span class="metric-label">{label} ({unit})</span>
@@ -88,7 +92,7 @@ def RooflineVisualizer(system, profile):
         fillcolor='rgba(189, 195, 199, 0.1)'
     ))
     # Model Point
-    model_ai = profile.arithmetic_intensity.magnitude
+    model_ai = profile.arithmetic_intensity.to('flop / byte').magnitude
     model_perf = min(model_ai * bw_gbs, peak_gflops)
     fig.add_trace(go.Scatter(
         x=[model_ai], y=[model_perf], mode='markers', name='Design Point',
@@ -96,8 +100,8 @@ def RooflineVisualizer(system, profile):
     ))
     
     fig.update_layout(
-        xaxis=dict(title="Arithmetic Intensity (Ops/Byte)", type='log'),
-        yaxis=dict(title="Throughput (GFLOPS)", type='log'),
+        xaxis=dict(title="Arithmetic Intensity (FLOP/Byte)", type='log'),
+        yaxis=dict(title="Throughput (GFLOP/s)", type='log'),
         height=300, showlegend=False
     )
     
@@ -342,8 +346,8 @@ def HardwareTetrisDashboard(eval_obj):
     
     # 2. Memory Footprint Gauge
     mem_used = feas.get('memory_used_gb', 0)
-    # Estimate total available if not provided directly
-    mem_total = mem_used * 1.5 if mem_used > 0 else 80 
+    # Prefer evaluated hardware capacity; estimate only if omitted
+    mem_total = feas.get('memory_capacity_gb') or (mem_used * 1.5 if mem_used > 0 else 80)
     
     fig.add_trace(go.Indicator(
         mode = "gauge+number",

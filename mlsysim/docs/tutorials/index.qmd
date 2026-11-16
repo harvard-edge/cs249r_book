@@ -49,7 +49,9 @@ _dgx = Systems.Nodes.DGX_H100
 _ib = Systems.Fabrics.InfiniBand_NDR
 _fl1024 = Fleet(name="1024-GPU", node=_dgx, count=128, fabric=_ib)
 _t6_dist = DistributedModel().solve(model=_m70b, fleet=_fl1024, batch_size=1024, precision="fp16", tp_size=8, pp_size=1)
-_t6_rel = ReliabilityModel().solve(fleet=_fl1024, job_duration_hours=30 * 24, checkpoint_time_s=60.0)
+_t6_ckpt0 = CheckpointModel().solve(model=_m70b, hardware=_dgx.accelerator, optimizer="adam", checkpoint_interval_hours=1.0)
+_t6_write_s = _t6_ckpt0.write_time_seconds.to("second").magnitude
+_t6_rel = ReliabilityModel().solve(fleet=_fl1024, job_duration_hours=30 * 24, checkpoint_time_s=_t6_write_s)
 _t6_mtbf_h = _t6_rel.fleet_mtbf.to("hour").magnitude
 _t6_ckpt = CheckpointModel().solve(
     model=_m70b, hardware=_dgx.accelerator, optimizer="adam",
@@ -57,8 +59,7 @@ _t6_ckpt = CheckpointModel().solve(
 )
 _t6_comm_loss_h = (1.0 - _t6_dist.scaling_efficiency) * (30 * 24)
 _t6_ckpt_int_h = _t6_rel.optimal_checkpoint_interval.to("hour").magnitude
-_t6_ckpt_loss_h = ((30 * 24) / _t6_ckpt_int_h) * (_t6_ckpt.write_time_seconds.to("second").magnitude / 3600.0) + _t6_rel.expected_failures * (_t6_ckpt_int_h / 2.0)
-_t6_ckpt_comm_ratio = _t6_ckpt_loss_h / _t6_comm_loss_h
+_t6_ckpt_loss_h = (1.0 - _t6_rel.goodput_ratio) * (30 * 24)
 
 # Tutorial 7: Geography
 _fl256 = Fleet(name="256-GPU", node=_dgx, count=32, fabric=_ib)
@@ -110,8 +111,7 @@ These tutorials teach quantitative reasoning about ML infrastructure using
 *Machine Learning Systems* textbook. They are organized by the six domains of the
 [22 Systems Walls taxonomy](../architecture.qmd).
 
-**Each tutorial answers one question.** Start at the beginning for a guided path, or
-jump to any domain of interest.
+**Each tutorial answers one question.** Start at the beginning for a guided path, jump to any domain of interest, or open the [Textbook & Chapter Map](../curriculum-map.qmd) to browse tutorials by textbook chapter, Marimo lab, and lecture deck.
 
 ::: {.callout-tip}
 ## How to Use These Tutorials
@@ -148,11 +148,11 @@ Five lines of code give one answer. Every later tutorial builds on it.
 
 ---
 
-## Cluster 1: Node (Walls 1–3) {#sec-node}
+## Cluster 1: Node (Walls 1–7) {#sec-node}
 
 *One accelerator, one model. Where is the ceiling?*
 
-These tutorials explore the three walls that constrain a single accelerator: **compute throughput** (Wall 1), **memory capacity** (Wall 2), and **memory bandwidth** (Wall 3). Understanding which wall binds, and why, is the most fundamental skill in ML systems reasoning.
+These tutorials explore the walls that constrain a single accelerator: **compute throughput** (Wall 1), **memory bandwidth** (Wall 2), **software efficiency** (Wall 3), **two-phase serving** (Wall 4), **KV-cache batching** (Wall 5), **weight streaming** (Wall 6), and **tail-latency queueing** (Wall 7). Understanding which wall binds, and why, is the most fundamental skill in ML systems reasoning.
 
 ::: {.sim-grid .sim-grid-2}
 
@@ -203,7 +203,7 @@ At 128K context length, a single user's GQA KV-cache takes `{python} f"{_t3_kv_1
 
 *The GPU is fast. Is the pipeline faster?*
 
-Even the fastest accelerator sits idle if the data pipeline cannot keep up. These walls cover **ingestion** (Wall 8), **transformation** (Wall 9), and **storage bandwidth** (Wall 10).
+Even the fastest accelerator sits idle if the data pipeline cannot keep up. These walls cover **ingestion** (Wall 8), **transformation** (Wall 9), and **network locality & topology** (Wall 10).
 
 ::: {.sim-grid .sim-grid-2}
 
@@ -228,7 +228,7 @@ A100 compute takes `{python} f"{_t4_gpu_ms:.1f} ms"` per step, but the CPU augme
 
 *Can I make the model smaller or the training cheaper?*
 
-These walls govern **scaling laws** (Wall 11), **compression and quantization** (Wall 12), and **architecture efficiency** (Wall 13).
+These walls govern **scaling laws** (Wall 11), **inference-time reasoning** (Wall 12), and **compression and quantization fidelity** (Wall 13).
 
 ::: {.sim-grid .sim-grid-2}
 
@@ -239,7 +239,7 @@ These walls govern **scaling laws** (Wall 11), **compression and quantization** 
 
 **Question:** *Does INT4 always give 4× speedup?*
 
-For memory-bound decode: nearly 4×. For compute-bound training: 0×. The *regime* determines whether quantization helps, and the roofline identifies which regime applies.
+For memory-bound decode: up to 4× (3.88× with group-128 scales). For compute-bound weight-only GEMMs: 1.0× (no speedup). The *regime* determines whether quantization accelerates execution, and the roofline identifies which regime applies.
 ⏱ ~20 min
 
 [Start Tutorial →](05_quantization.qmd)
@@ -253,9 +253,22 @@ For memory-bound decode: nearly 4×. For compute-bound training: 0×. The *regim
 
 *Scaling past one machine. Where does efficiency go?*
 
-Distributed training introduces three new walls: **communication overhead** (Wall 14), **synchronization cost** (Wall 15), and **reliability** (Wall 16).
+Distributed training introduces three fleet-level walls: **collective communication** (Wall 14), **hardware fragility and reliability** (Wall 15), and **multi-tenant queueing** (Wall 16).
 
 ::: {.sim-grid .sim-grid-2}
+
+::: {.sim-card .sim-card-link}
+[Intermediate]{.sim-level .sim-level-intermediate}
+
+### Distributed Training: 3D Parallelism
+
+**Question:** *How do data, tensor, and pipeline parallelism divide memory and communication?*
+
+Compare DP, TP, and PP side by side on a multi-node cluster, diagnose pipeline bubbles, and let `ParallelismOptimizer` find the optimal 3D split.
+⏱ ~20 min
+
+[Start Tutorial →](distributed.qmd)
+:::
 
 ::: {.sim-card .sim-card-link}
 [Advanced]{.sim-level .sim-level-advanced}
@@ -264,7 +277,7 @@ Distributed training introduces three new walls: **communication overhead** (Wal
 
 **Question:** *Where does my training efficiency disappear at scale?*
 
-At 1024 GPUs, AllReduce communication overhead erodes scaling efficiency. The real hidden cost, however, is reliability: cluster MTBF drops to `{python} f"{_t6_mtbf_h:.1f} hours"`, forcing frequent checkpoints that consume `{python} f"{_t6_ckpt_comm_ratio:.1f}×"` more wall-clock time than communication itself.
+At 1024 GPUs over a 30-day run, AllReduce communication consumes `{python} f"{_t6_comm_loss_h:.0f} hours"` of wall-clock capacity while cluster MTBF drops to `{python} f"{_t6_mtbf_h:.1f} hours"`, costing another `{python} f"{_t6_ckpt_loss_h:.0f} hours"` in Young-Daly checkpoint writes and rollback recovery.
 ⏱ ~20 min
 
 [Start Tutorial →](06_scaling_1000_gpus.qmd)
@@ -278,7 +291,7 @@ At 1024 GPUs, AllReduce communication overhead erodes scaling efficiency. The re
 
 *What does it cost, in dollars, carbon, and water?*
 
-Operational walls cover **energy** (Wall 17), **sustainability** (Wall 18), **economic cost** (Wall 19), and **safety** (Wall 20). These are the walls that determine whether a technically feasible system is actually deployable.
+Operational walls cover **capital TCO** (Wall 17), **sustainability** (Wall 18), **checkpoint I/O** (Wall 19), and **privacy & safety** (Wall 20). These are the walls that determine whether a technically feasible system is actually deployable.
 
 ::: {.sim-grid .sim-grid-2}
 
@@ -421,7 +434,7 @@ Learn to use the Differential Explainer to compare two configurations and genera
 
 ### Custom Solvers & Hardware
 
-Learn to contribute new hardware specifications to the Silicon Zoo or build custom analytical solvers using the 5-layer architecture.
+Learn to contribute new hardware specifications to the Silicon Zoo or build custom analytical solvers using the 6-layer architecture.
 ⏱ ~15 min
 
 [Start Guide →](../contributing.qmd)
@@ -449,23 +462,22 @@ Choose a path by role:
 ### Path A: First-Time Learner (~ 2 hours)
 > *"I'm new to ML systems and want to build intuition from scratch."*
 
-0 → 1 → 2 → 3 → 4 → 5 → 7 → 12
+0 → 1 → 2 → 3 → 4 → 5 → 7 → 13
 
 *Why this order:* Start with single-node physics (roofline, memory wall, two phases),
 understand the KV-cache memory constraint that dominates LLM serving, see the data pipeline
 bottleneck, understand quantization regimes, learn that geography matters, then compose it
-all in the capstone. Tutorial 6 (distributed reliability) is deferred until
-after the capstone.
+all in the Full-Stack Audit capstone (13). Distributed parallelism and Tutorial 6 (reliability) can be explored next.
 
 ### Path B: ML Engineer (~ 2.5 hours)
 > *"I deploy models in production and need to make hardware decisions."*
 
-0 → 1 → 2 → 3 → 8 → 9 → 12
+0 → 1 → 2 → 3 → 8 → 9 → 12 → 13
 
-### Path C: Researcher (~ 2 hours)
+### Path C: Researcher (~ 2.5 hours)
 > *"I evaluate hardware architectures and need quantitative tools."*
 
-0 → 1 → 5 → 9 → 10 → 6 → 11 → 12
+0 → 1 → 5 → 9 → 10 → Distributed → 6 → 11 → 12 → 13
 
 ### Path D: Conference Tutorial (90 min)
 > *"I'm attending a live tutorial at ISCA / MLSys / ASPLOS."*
@@ -476,8 +488,8 @@ after the capstone.
 | 15–35 min | **1. The Memory Wall** | Why `{python} f"{_t1_flops_ratio:.1f}×"` FLOPS ≠ `{python} f"{_t1_flops_ratio:.1f}×"` speedup | Live coding, audience verifies |
 | 35–45 min | **Break + Q&A** | | |
 | 45–60 min | **9. Sensitivity** | Bandwidth dominates compute in decode | Live coding + derivation |
-| 60–75 min | **6. Scaling to 1000 GPUs** | Reliability dominates communication | Pre-computed results, discussion |
-| 75–85 min | **12. Full-Stack Audit** | Composing all six domains | Summary table walkthrough |
+| 60–75 min | **6. Scaling to 1000 GPUs** | Communication and Young-Daly reliability compound | Pre-computed results, discussion |
+| 75–85 min | **13. Full-Stack Audit** | Composing all six domains | Summary table walkthrough |
 | 85–90 min | **Where to learn more** | Follow-up walkthroughs and resources | |
 
 *Why 5 tutorials, not 8:* Each tutorial needs enough time for the
@@ -487,8 +499,8 @@ self-paced follow-up walkthroughs after the session.
 ### Path D+: Half-Day Workshop (3 hours)
 > *"I'm attending a half-day conference tutorial."*
 
-The full 12-tutorial sequence with live code walkthroughs. All 8 tutorials from the
-original conference path plus Tutorials 3 (KV-Cache) and 10 (Wafer-Scale), with
+The full numbered tutorial sequence with live code walkthroughs, combining the
+conference path with Tutorials 2, 3 (KV-Cache), 5, 7, 10 (Wafer-Scale), and 12 (DSE), with
 15-minute breaks between clusters.
 
 ---

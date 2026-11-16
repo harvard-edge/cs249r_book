@@ -83,9 +83,9 @@ class DifferentialExplainer:
                 return "\n".join(lines)
 
             if b_is_mem and p_is_mem:
-                lines.append("Analysis: The workload remained Memory Bound. The speedup is constrained strictly by the ratio of HBM bandwidth between the two configurations. Any additional compute capacity (FLOP/s) in the proposal was left unutilized.")
+                lines.append("Analysis: The workload remained Memory Bound. The speedup is constrained by the ratio of HBM bandwidth between the two configurations. Any additional compute capacity (FLOP/s) in the proposal was left unutilized.")
             elif not b_is_mem and not p_is_mem:
-                lines.append("Analysis: The workload remained Compute Bound. The speedup is constrained strictly by the ratio of peak arithmetic throughput (FLOP/s) between the two configurations. Additional memory bandwidth was not the limiting factor.")
+                lines.append("Analysis: The workload remained Compute Bound. The speedup is constrained by the ratio of peak arithmetic throughput (FLOP/s) between the two configurations. Additional memory bandwidth was not the limiting factor.")
             elif b_is_mem and not p_is_mem:
                 lines.append("Analysis: Regime Shift. The proposed hardware provided enough memory bandwidth to lift the memory wall, shifting the bottleneck to compute. The speedup is a blended result of higher bandwidth and the new compute ceiling.")
             elif not b_is_mem and p_is_mem:

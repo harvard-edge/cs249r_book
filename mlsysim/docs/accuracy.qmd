@@ -77,9 +77,9 @@ _ref_mfu_sust = REFERENCE_MFU_SUSTAINED
 ::: {.callout-note}
 ## What "first-order" means
 
-A first-order model captures the **dominant** system behavior without modeling second-order effects such as cache hierarchy dynamics, memory fragmentation, NIC DMA contention, or driver overhead. Trust MLSys·im for bottleneck classification and relative comparisons. Absolute latency is workload-dependent; well-calibrated cases are often within **15--30%**, while production serving can be 1.5--2× slower than idealized roofline bounds. Use MLSys·im to reason about bottlenecks and compare configurations, not to produce production SLA estimates.
+A first-order model captures the **dominant** system behavior without modeling second-order effects such as cache hierarchy dynamics, memory fragmentation, NIC DMA contention, or driver overhead. Trust MLSys·im for bottleneck classification and relative comparisons. Absolute latency scales linearly with the caller-supplied efficiency $\eta$ (see the calibrated benchmark anchors below), while production serving adds scheduler and paging overhead above idealized roofline bounds. Use MLSys·im to reason about bottlenecks and compare configurations, not to sign production SLA contracts.
 
-For the formal treatment of roofline modeling and arithmetic intensity, see the [Hardware Acceleration slides (Vol I, Ch 11)]({{< var slides_latest >}}/vol1_11_hw_acceleration.pdf){target="_blank"}.
+For the formal treatment of roofline modeling and arithmetic intensity, see [Vol I · Ch 11: Hardware Acceleration](https://mlsysbook.ai/vol1/11_hw_acceleration/11_hw_acceleration.html) ([Lab](https://mlsysbook.ai/labs/vol1/lab_11_hw_accel/) · [Slides](https://mlsysbook.ai/slides/vol1.html#ch-11)).
 :::
 
 ---
@@ -131,20 +131,20 @@ safety:
 
 MLSys·im predictions differ in how far they can be trusted. The table below ranks prediction types from most to least accurate.
 
-| Prediction Type | Typical Accuracy | Why |
+| Prediction Type | Fidelity Scope | Why |
 |:---|:---:|:---|
-| **KV-cache sizing** | Exact | Definitional formula, not approximated |
-| **Checkpoint sizing** | Exact | Direct calculation: $N \times \text{bytes\_per\_param}$ |
-| **Training memory components** | Exact for state tensors; approximate for activations | Weights, gradients, and optimizer states are direct byte counts; activation memory follows checkpointing coefficients |
-| **Bottleneck classification** (compute vs. memory) | >95% correct | The roofline ridge point is a structural property of the hardware |
-| **Relative configuration ranking** (which config is faster?) | >90% correct | Errors cancel when comparing two configurations on the same hardware |
-| **Scaling efficiency direction** (how does MFU change with DP/TP/PP?) | ±10% on MFU | Communication models are bandwidth-optimal lower bounds |
-| **Single-node throughput** (absolute latency) | ±15--30% | Sensitive to the efficiency parameter η |
-| **Serving replica count** | Directionally useful | Composes roofline, batching capacity, and M/M/c queueing; validate final SLAs empirically |
-| **TCO and carbon estimates** | ±20% | Dominated by PUE and grid carbon intensity assumptions |
-| **ITL in production serving** | −25% to −50% | Missing KV-cache paging, batch scheduling, and quantization kernel overhead |
+| **KV-cache sizing** | Exact (definitional) | Definitional tensor byte formula, not approximated |
+| **Checkpoint sizing** | Exact (definitional) | Direct calculation: $N \times \text{bytes\_per\_param}$ |
+| **Training memory components** | Exact for state tensors; analytical for activations | Weights, gradients, and optimizer states are direct byte counts; activation memory follows checkpointing coefficients |
+| **Bottleneck classification** (compute vs. memory) | Structural (away from $I^*_{\text{eff}}$) | Determined by workload arithmetic intensity vs. the effective hardware ridge point $\eta \cdot \text{Peak} / \text{BW}$ |
+| **Relative configuration ranking** (which config is faster?) | Order-preserving on shared hardware | Shared constant-factor overheads cancel when comparing configurations on the same device |
+| **Scaling efficiency direction** (how does MFU change with DP/TP/PP?) | Analytical lower-bound cost | Collective and pipeline models bound communication/bubble time; overlap and congestion shift absolute MFU |
+| **Single-node throughput** (absolute latency) | Linear in supplied $\eta$ (see calibrated anchors below) | Directly proportional to the caller-supplied efficiency parameter $\eta$ |
+| **Serving replica count** | Analytical capacity + M/M/c bound | Composes roofline, paged KV capacity, and M/M/c queueing; validate production SLAs empirically |
+| **TCO and carbon estimates** | Linear in supplied PUE, grid CI, and tariff | Dominated by facility PUE, regional carbon intensity, and hardware depreciation inputs |
+| **ITL in production serving** | Optimistic roofline floor | Omits KV-cache page-table indirection, scheduler jitter, and dequantization kernel overhead |
 
-: {tbl-colwidths="[28,15,57]"}
+: {tbl-colwidths="[28,22,50]"}
 
 ::: {.callout-tip}
 ## The golden rule
@@ -159,11 +159,10 @@ The table below compares MLSys·im solver predictions against the published benc
 
 | Workload | Hardware | Predicted | Measured | Error | Source |
 |:---|:---|:---:|:---:|:---:|:---|
-| ResNet-50 Train (BS=256) | `{python} f"{_a100.name}"` | `{python} f"{_pred_a100_tr:,.0f} img/s"` | `{python} f"{_meas_a100_tr:,.0f} img/s"` | `{python} f"{_err_a100_tr:+.1f}%"` | MLPerf Training v3.0 / NVIDIA DLE |
+| ResNet-50 Train (BS=256) | `{python} f"{_a100.name}"` | `{python} f"{_pred_a100_tr:,.0f} img/s"` | `{python} f"{_meas_a100_tr:,.0f} img/s"` | `{python} f"{_err_a100_tr:+.1f}%"` | NVIDIA DeepLearningExamples |
 | ResNet-50 Train (BS=256) | `{python} f"{_h100.name}"` | `{python} f"{_pred_h100_tr:,.0f} img/s"` | `{python} f"{_meas_h100_tr:,.0f} img/s"` | `{python} f"{_err_h100_tr:+.1f}%"` | MLPerf Training v3.1 |
 | ResNet-50 Inf (INT8, BS=256) | `{python} f"{_h100.name}"` | `{python} f"{_pred_h100_inf:,.0f} img/s"` | `{python} f"{_meas_h100_inf:,.0f} img/s"` | `{python} f"{_err_h100_inf:+.1f}%"` | MLPerf Inference v5.0 |
 | Llama-3 8B ITL (BS=1, 2K ctx) | `{python} f"{_h100.name}"` | `{python} f"{_pred_l8_b1_itl:.1f} ms/tok"` | `{python} f"{_itl_lo:.0f}--{_itl_hi:.0f} ms/tok"` | within band | NVIDIA NIM / TensorRT-LLM |
-| Llama-3 8B ITL (BS=32, 2K ctx) | `{python} f"{_h100.name}"` | `{python} f"{_pred_l8_b32_itl:.1f} ms/tok"` | `{python} f"{_itl_lo:.0f}--{_itl_hi:.0f} ms/tok"` | within band | vLLM / TensorRT-LLM |
 | GPT-3 175B Training FLOPs | 6PD rule | `{python} f"{_pred_gpt3_flops:.2e}"` | `{python} f"{_meas_gpt3_flops:.2e}"` | `{python} f"{_err_gpt3_flops:+.1f}%"` | Brown et al. (2020) |
 
 : {tbl-colwidths="[22,14,14,14,10,26]"}
@@ -171,9 +170,9 @@ The table below compares MLSys·im solver predictions against the published benc
 ::: {.callout-warning}
 ## ITL underprediction is expected
 
-MLSys·im predicts the **roofline lower bound** for inter-token latency. It does not model quantization kernel overhead, KV-cache paging latency (PagedAttention), or batch scheduling overhead in production serving systems. Real ITL is typically 1.5--2× the roofline bound. Use ITL predictions as the theoretical floor, not as a production estimate.
+MLSys·im predicts the **roofline lower bound** for inter-token latency (for example `{python} f"{_pred_l8_b1_itl:.1f} ms/tok"` at batch 1 and `{python} f"{_pred_l8_b32_itl:.1f} ms/tok"` at batch 32 on H100). It does not model quantization kernel overhead, KV-cache paging latency (PagedAttention), or batch scheduling overhead in production serving systems. Real ITL is typically 1.5--2× the roofline bound. Use ITL predictions as the theoretical floor, not as a production estimate.
 
-For the full treatment of serving-system overheads (continuous batching, PagedAttention, SLO compliance), see the [Inference at Scale slides (Vol II, Ch 10)]({{< var slides_latest >}}/vol2_10_inference.pdf){target="_blank"}.
+For the full treatment of serving-system overheads (continuous batching, PagedAttention, SLO compliance), see [Vol II · Ch 10: Serving at Scale](https://mlsysbook.ai/vol2/10_inference/10_inference.html) ([Lab](https://mlsysbook.ai/labs/vol2/lab_10_inference/) · [Slides](https://mlsysbook.ai/slides/vol2.html#ch-10)).
 :::
 
 ### Interpreting the error column
@@ -186,13 +185,13 @@ All errors are relative to the measured value: $\text{Error} = (\text{Predicted}
 
 ### Bottleneck classification (roofline)
 
-The model is most reliable for determining *which resource* limits performance. If MLSys·im predicts a memory bottleneck, the actual workload will almost always be memory-bound too, even if the exact latency differs. This classification is typically >95% correct across documented workloads because the roofline ridge point is a structural property of the hardware that does not depend on software efficiency.
+The model is most reliable for determining *which resource* limits performance. When a workload sits well away from the effective crossover intensity $I^*_{\text{eff}}(\eta) = \eta \cdot \text{Peak} / \text{BW}$, classifying it as memory-bound vs. compute-bound is structurally robust even if exact latency differs.
 
-The underlying roofline model is documented in the [Hardware Acceleration slides (Vol I, Ch 11)]({{< var slides_latest >}}/vol1_11_hw_acceleration.pdf){target="_blank"} and applied to real H100 workloads in the [Compute Infrastructure slides (Vol II, Ch 2)]({{< var slides_latest >}}/vol2_02_compute_infrastructure.pdf){target="_blank"}.
+The underlying roofline model is documented in the [Hardware Acceleration slides (Vol I, Ch 11)]({{< var slides_latest >}}/vol1_11_hw_acceleration.pdf){target="_blank"} and applied to H100 workloads in the [Compute Infrastructure slides (Vol II, Ch 2)]({{< var slides_latest >}}/vol2_02_compute_infrastructure.pdf){target="_blank"}.
 
 ### Scaling efficiency direction (distributed training)
 
-The model correctly predicts how scaling efficiency changes as the DP/TP/PP configuration varies. The *relative* ranking of configurations is reliable even when absolute MFU values are off by ±10%. This is because the communication cost models (Ring AllReduce, Tree AllReduce, Hierarchical AllReduce) implement bandwidth-optimal lower bounds from Patarasuk & Mueller (2009), so the relative costs scale correctly.
+The model predicts how scaling efficiency shifts as the DP/TP/PP configuration varies. Relative configuration rankings remain informative even when overlap or congestion shifts absolute MFU, because Ring AllReduce implements the bandwidth-optimal collective lower bound of Patarasuk & Yuan (2009) while Tree AllReduce captures the logarithmic-startup regime for small messages.
 
 See the [Distributed Training slides (Vol II, Ch 6)]({{< var slides_latest >}}/vol2_06_distributed_training.pdf){target="_blank"} for the 3D parallelism framework and scaling efficiency analysis.
 
@@ -220,29 +219,29 @@ Sustainability and economics estimates are usually dominated by a few explicit a
 
 ## Where MLSys·im Diverges From Measurement {#sec-divergence}
 
-| Source of Error | Typical Impact | When It Matters |
-|:---|:---:|:---|
-| `efficiency=0.5` default | ±20% on latency | Any roofline prediction |
-| No cache hierarchy model | 5--30% on small batches | Batch size 1--4, small models |
-| No NVLink contention model | 5--15% on TP overhead | Tensor parallel with TP > 4 |
-| No pipeline schedule optimization | 10--20% on PP efficiency | Interleaved 1F1B schedules |
-| No quantization kernel overhead | −30% on INT8 ITL | Quantized serving |
-| No external-fragmentation model | ~37--42% of KV memory | Comparing paging against exact-size or power-of-two contiguous allocators [@kwon2023] |
+| Source of Divergence | Direction / Mechanism | When It Matters |
+|:---|:---|:---|
+| `efficiency=0.5` default | Scales compute time as $1/\eta$ | Any compute-bound roofline prediction |
+| No general L1/L2 cache model | Absorbed into $\eta$ (except FlashAttention SRAM IO) | Small batches (`1`--`4`) and cache-resident models |
+| No NVLink contention model | Optimistic collective bandwidth | Cross-switch tensor parallelism (`TP > 4`) |
+| Standard GPipe / 1F1B bubble | Conservative vs. zero-bubble schedules | Interleaved or zero-bubble pipeline runtimes |
+| No dequantization kernel tax | Optimistic W4A16 / INT8 latency floor | Weight-only quantized serving |
+| Contiguous vs. paged KV waste | 61.8--79.6% unused reservation in contiguous pre-allocation [@kwon2023] | Comparing static reservation against PagedAttention |
 
-: {tbl-colwidths="[30,18,52]"}
+: {tbl-colwidths="[28,32,40]"}
 
 ### The efficiency parameter (η)
 
-MLSys·im uses `efficiency` (η, default `{python} f"{_def_eff:.1f}"`) as a single scalar representing the sustained fraction of peak hardware throughput. This is the largest source of absolute error. The table below provides calibrated ranges from published benchmarks.
+MLSys·im uses `efficiency` (η, default `{python} f"{_def_eff:.1f}"`) as a single scalar representing the sustained fraction of peak hardware throughput. This is the primary caller-controlled input for absolute latency. The table below summarizes starting-point bands used in modeling examples.
 
-| Workload Type | Recommended η | Reference |
+| Workload Type | Starting-Point η Band | Provenance / Scope |
 |:---|:---:|:---|
-| Training (fp16/bf16, Megatron-LM / PaLM) | `{python} f"{_mfu_lo:.2f}--{_mfu_hi:.2f}"` | Shoeybi et al. (2019), Chowdhery et al. (2022) |
-| Inference (fp16, vLLM/TRT-LLM) | `{python} f"0.25--{_mfu_inf_batched:.2f}"` | MLPerf Inference, Pope et al. (2023) |
-| Inference (int8, quantized) | 0.20--0.40 | Community benchmarks |
-| Edge inference (TFLite, ONNX RT) | 0.15--0.30 | MLPerf Tiny |
+| Training (fp16/bf16, Megatron-LM / PaLM) | `{python} f"{_mfu_lo:.2f}--{_mfu_hi:.2f}"` | Cited in `Literature.Training` (`MfuLow`--`MfuHigh`): Shoeybi et al. (2019), Chowdhery et al. (2022) |
+| Inference (fp16, batched serving) | `{python} f"0.25--{_mfu_inf_batched:.2f}"` | Upper bound from `Literature.Training.MfuInferenceBatched` (Pope et al., 2023) |
+| Inference (int8, quantized) | 0.20--0.40 | Illustrative modeling range (measure on target kernel) |
+| Edge inference (TFLite, ONNX RT) | 0.15--0.30 | Illustrative MCU/edge modeling range (measure on target runtime) |
 
-: {tbl-colwidths="[35,20,45]"}
+: {tbl-colwidths="[33,18,49]"}
 
 The default `efficiency=0.5` (`{python} f"{_def_eff:.1f}"`) models a well-optimized training job on datacenter hardware (sustained reference MFU is `{python} f"{_ref_mfu_sust:.2f}"`). For inference, pass `efficiency=0.35` for more conservative estimates. For edge devices, use `efficiency=0.2`. All solvers whose compute term depends on η expose it as a parameter; defaults are starting points from the literature and benchmarks, not hidden constants.
 
@@ -254,13 +253,13 @@ For a rigorous treatment of precision engineering and its impact on performance,
 
 MLSys·im deliberately omits the following effects. Each omission is a design decision, not an oversight:
 
-1. **Cache hierarchy behavior.** L1/L2/SRAM tiling effects can swing latency by 5--30% for small batch sizes. Modeling them would require operator-level simulation, which conflicts with the goal of millisecond solve times.
+1. **General L1/L2 cache hierarchy behavior.** While `EfficiencyModel` explicitly computes the Dao et al. (2022) SRAM tiling IO-complexity ceiling for FlashAttention, general L1/L2 cache hit dynamics across arbitrary non-attention kernels can materially shift small-batch latency and remain absorbed into $\eta$.
 
-2. **NVLink contention under tensor parallelism.** For TP ≤ 4 (within a single NVSwitch domain), contention is negligible. For TP > 4 (cross-switch), contention can add 5--15% overhead that MLSys·im does not capture.
+2. **NVLink contention under tensor parallelism.** Within a single NVSwitch domain, point-to-point bandwidth is symmetric; across multi-switch or inter-node boundaries, fabric contention adds overhead that idealized link bandwidth does not capture.
 
-3. **Pipeline schedule variants.** MLSys·im implements the standard GPipe bubble formula: $\text{bubble} = (P - 1) / (V \cdot M + P - 1)$. Advanced schedules (zero-bubble, interleaved 1F1B with $V > 1$) can reduce bubbles by 10--20% beyond what the formula predicts.
+3. **Pipeline schedule variants.** MLSys·im implements the standard GPipe / 1F1B bubble formula: $\text{bubble} = (P - 1) / (V \cdot M + P - 1)$. Zero-bubble schedules can reduce pipeline stalls beyond what the standard formula predicts.
 
-4. **Quantization kernel efficiency.** INT8/INT4 kernels achieve a lower fraction of peak throughput than FP16 Tensor Core kernels because of dequantization overhead and less mature compiler support. MLSys·im treats precision as a pure ops-per-byte ratio.
+4. **Weight-only dequantization kernel overhead.** `HardwareNode.compute.precision_flops` models distinct Tensor Core peak throughput per precision (FP32, TF32, FP16, FP8, INT8) and `CompressionModel` accounts for group-quantization scale metadata (e.g., 4.125 bits/weight at `group_size=128`). However, software dequantization overhead in weight-only W4A16 kernels (where weights load in INT4 but matmuls run in FP16) remains absorbed into $\eta$.
 
 5. **KV allocation dynamics.** `ServingModel` sizes the KV cache densely for a known sequence length. `ContinuousBatchingModel` compares max-length reservation with paged allocation under an assumed exponential request-length distribution, sized at peak occupancy. It does not model how reserved slots fill over a request's lifetime, external fragmentation in exact-size or power-of-two contiguous allocators, preemption and swapping, or paged-attention kernel latency. Kwon et al. measure 96.3% of vLLM's KV memory holding token states, against 20.4% to 38.2% for contiguous pre-allocation [@kwon2023].
 
@@ -268,16 +267,16 @@ MLSys·im deliberately omits the following effects. Each omission is a design de
 
 ## Comparison to Related Tools
 
-| Tool | Type | Accuracy | Solve Time | Best For |
+| Tool | Type | Fidelity Profile | Solve Time | Best For |
 |:---|:---|:---:|:---:|:---|
-| **MLSys·im** | First-order analytical | ±15--30% | Milliseconds | Bottleneck analysis, HW comparison, education |
-| **MLPerf** | Empirical benchmark | Ground truth | Days--weeks | Published industry comparisons |
-| **vLLM benchmark_serving.py** | Empirical profiling | Exact (that config) | Hours | Production serving tuning |
-| **PyTorch Profiler** | Empirical profiling | Exact (that run) | Minutes | Kernel-level optimization |
-| **Megatron estimator** | Heuristic model | ±5--10% | Seconds | Megatron-specific training configs |
-| **gem5** | Cycle-accurate simulation | ±1--5% | Days | Hardware research (100--1000× slower) |
+| **MLSys·im** | First-order analytical | Closed-form bounds (calibrated anchors above) | Milliseconds | Bottleneck analysis, HW comparison, education |
+| **MLPerf** | Empirical benchmark | Measured end-to-end | Days--weeks | Published industry comparisons |
+| **vLLM benchmark_serving.py** | Empirical profiling | Measured (that config) | Hours | Production serving tuning |
+| **PyTorch Profiler** | Empirical profiling | Measured (that run) | Minutes | Kernel-level optimization |
+| **Megatron estimator** | Framework analytical model | Megatron-specific cost model | Seconds | Megatron-specific training configs |
+| **gem5** | Cycle-level microarchitectural sim | Instruction/cycle timing | Days | Hardware architecture research |
 
-: {tbl-colwidths="[18,17,13,13,39]"}
+: {tbl-colwidths="[18,19,21,11,31]"}
 
 MLSys·im covers the full stack (single-node roofline through fleet-scale TCO) in one composable framework. Use it to **compare options before running experiments**: "Will the H100 or MI300X be better for this serving workload?" or "Does PP=4 or PP=8 give better scaling efficiency?" For production SLAs, validate with empirical benchmarks.
 
@@ -303,36 +302,36 @@ For the full benchmarking methodology taxonomy (system, model, and data benchmar
 - **Production SLA guarantees** (use empirical benchmarks instead)
 - **Kernel-level optimization** (use PyTorch Profiler or NSight Compute)
 - **Quantized model accuracy** (MLSys·im models throughput, not model quality)
-- **Exact latency targets** where ±30% error is unacceptable
+- **Exact millisecond SLA contracts** without empirical validation on target hardware
 - **Novel hardware** with no published specs in the [Silicon Zoo](zoo/hardware.qmd)
 
 :::
 
 ---
 
-## Slide Deck Reference
+## Curriculum Reference
 
-The theory behind MLSys·im's analytical models is covered across several lecture decks. Use this table to find the right slides for each validation domain.
+The theory behind MLSys·im's analytical models is covered across canonical textbook chapters, interactive labs, and lecture decks (see the [Cross-Volume Textbook Map](curriculum-map.qmd) for all chapters).
 
-| Validation Domain | MLSys·im Solver | Companion Slides |
+| Validation Domain | MLSys·im Solver | Textbook · Lab · Slides |
 |:---|:---|:---|
-| Roofline model, arithmetic intensity, bottleneck classification | SingleNodeModel | [Hardware Acceleration (Vol I, Ch 11)]({{< var slides_latest >}}/vol1_11_hw_acceleration.pdf){target="_blank"} |
-| Statistical rigor, MLPerf methodology, benchmark anti-patterns | All solvers | [Benchmarking (Vol I, Ch 12)]({{< var slides_latest >}}/vol1_12_benchmarking.pdf){target="_blank"} |
-| H100 roofline landscape, GPU specs, TCO analysis | SingleNodeModel, EconomicsModel | [Compute Infrastructure (Vol II, Ch 2)]({{< var slides_latest >}}/vol2_02_compute_infrastructure.pdf){target="_blank"} |
-| 3D parallelism, scaling efficiency, communication overhead | DistributedModel | [Distributed Training (Vol II, Ch 6)]({{< var slides_latest >}}/vol2_06_distributed_training.pdf){target="_blank"} |
-| Serving latency, KV-cache, continuous batching, SLO compliance | ServingModel | [Inference at Scale (Vol II, Ch 10)]({{< var slides_latest >}}/vol2_10_inference.pdf){target="_blank"} |
-| Precision engineering, operator fusion, profiling methodology | SingleNodeModel | [Performance Engineering (Vol II, Ch 9)]({{< var slides_latest >}}/vol2_09_performance_engineering.pdf){target="_blank"} |
-| Energy, carbon lifecycle, PUE, energy roofline | SustainabilityModel | [Sustainable AI (Vol II, Ch 15)]({{< var slides_latest >}}/vol2_15_sustainable_ai.pdf){target="_blank"} |
+| Roofline model, arithmetic intensity, bottleneck classification | `SingleNodeModel` | [Vol I · Ch 11: Hardware Acceleration](https://mlsysbook.ai/vol1/11_hw_acceleration/11_hw_acceleration.html) ([Lab](https://mlsysbook.ai/labs/vol1/lab_11_hw_accel/) · [Slides](https://mlsysbook.ai/slides/vol1.html#ch-11)) |
+| Statistical rigor, MLPerf methodology, benchmark anti-patterns | All solvers | [Vol I · Ch 12: Benchmarking](https://mlsysbook.ai/vol1/12_benchmarking/12_benchmarking.html) ([Lab](https://mlsysbook.ai/labs/vol1/lab_12_perf_bench/) · [Slides](https://mlsysbook.ai/slides/vol1.html#ch-12)) |
+| H100 roofline landscape, GPU specs, TCO analysis | `SingleNodeModel`, `EconomicsModel` | [Vol II · Ch 2: Compute Infrastructure](https://mlsysbook.ai/vol2/02_compute_infrastructure/02_compute_infrastructure.html) ([Lab](https://mlsysbook.ai/labs/vol2/lab_02_compute_infra/) · [Slides](https://mlsysbook.ai/slides/vol2.html#ch-02)) |
+| 4D parallelism, scaling efficiency, communication overhead | `DistributedModel` | [Vol II · Ch 6: Distributed Training](https://mlsysbook.ai/vol2/06_distributed_training/06_distributed_training.html) ([Lab](https://mlsysbook.ai/labs/vol2/lab_06_dist_train/) · [Slides](https://mlsysbook.ai/slides/vol2.html#ch-06)) |
+| Serving latency, KV-cache, continuous batching, SLO compliance | `ServingModel`, `ServingCapacityModel` | [Vol II · Ch 10: Serving at Scale](https://mlsysbook.ai/vol2/10_inference/10_inference.html) ([Lab](https://mlsysbook.ai/labs/vol2/lab_10_inference/) · [Slides](https://mlsysbook.ai/slides/vol2.html#ch-10)) |
+| Precision engineering, operator fusion, FlashAttention SRAM IO | `SingleNodeModel`, `EfficiencyModel` | [Vol II · Ch 9: Fleet Efficiency](https://mlsysbook.ai/vol2/09_performance_engineering/09_performance_engineering.html) ([Lab](https://mlsysbook.ai/labs/vol2/lab_09_perf_engineering/) · [Slides](https://mlsysbook.ai/slides/vol2.html#ch-09)) |
+| Energy, carbon lifecycle, PUE, WUE | `SustainabilityModel` | [Vol II · Ch 15: Sustainable AI](https://mlsysbook.ai/vol2/15_sustainable_ai/15_sustainable_ai.html) ([Lab](https://mlsysbook.ai/labs/vol2/lab_15_sustainable_ai/) · [Slides](https://mlsysbook.ai/slides/vol2.html#ch-15)) |
 
-: {tbl-colwidths="[30,20,50]"}
+: {tbl-colwidths="[30,22,48]"}
 
 ---
 
 ## Citing Sources
 
-The hardware specifications in the [Silicon Zoo](zoo/hardware.qmd) are sourced from official manufacturer datasheets. See `metadata.provenance` (and `last_verified` when set) on each entry in `mlsysim/hardware/registry.py` for the document and verification date.
+The hardware specifications in the [Silicon Zoo](zoo/hardware.qmd) are sourced from official manufacturer datasheets. See `metadata.provenance` on each YAML entry under `mlsysim/hardware/data/*/*.yaml` (and shared citations in `mlsysim/core/provenance_catalog.py`) for the primary source document and verification date.
 
-For the MLPerf comparison data on this page, see [MLPerf Inference v4.0 Results](https://mlcommons.org/benchmarks/inference-datacenter/) (MLCommons, July 2024).
+For the MLPerf comparison data on this page, see `Literature.Benchmarks` (`mlsysim/literature/data/benchmarks.yaml`), citing MLPerf Training v3.1 and [MLPerf Inference v5.0 Datacenter Results](https://mlcommons.org/benchmarks/inference-datacenter/) (MLCommons).
 
 ---
 

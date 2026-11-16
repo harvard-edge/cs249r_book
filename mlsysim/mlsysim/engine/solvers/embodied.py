@@ -193,9 +193,12 @@ class StoppingBudgetModel(ForwardModel):
             if jerk is not None and approach_speed is None and speed_at_delay_end is None:
                 ceiling = ((room - braking - ramp) / speed).to(ureg.millisecond)
                 out.update(delay_ceiling=ceiling, delay_spare=(ceiling - delay).to(ureg.millisecond))
-            elif jerk is None and approach_speed is None and speed_at_delay_end is None and room > braking:
-                ceiling = calc_watchdog_lease_bound(room, speed, deceleration)["t_total_delay_max"]
-                out.update(delay_ceiling=ceiling.to(ureg.millisecond),
+            elif jerk is None and approach_speed is None and speed_at_delay_end is None:
+                if room > braking:
+                    ceiling = calc_watchdog_lease_bound(room, speed, deceleration)["t_total_delay_max"].to(ureg.millisecond)
+                else:
+                    ceiling = ((room - braking) / speed).to(ureg.millisecond)
+                out.update(delay_ceiling=ceiling,
                            delay_spare=(ceiling - delay).to(ureg.millisecond))
             if jerk is not None and approach_speed is None and speed_at_delay_end is None:
                 # Weakest deceleration whose S-curve stop still fits (added 2026-10-20), jerk
@@ -225,7 +228,7 @@ class TractionLossModel(ForwardModel):
     holds only while the lower friction still supplies it
     (``calc_required_friction``).
     """
-    requires = ("friction",)
+    requires = ("mu_before", "mu_after", "deceleration")
     produces = TractionLossResult
 
     def solve(self, mu_before: float, mu_after: float, deceleration: Quantity,
@@ -591,7 +594,7 @@ class ShieldCoverageBillModel(ForwardModel):
         hours_per_day : Quantity
             Logging rate in hours/day; positive.
         coverage : float
-            Hazard rejection fraction, strictly between zero and one.
+            Hazard rejection fraction in the open interval (0, 1).
         common_cause_rate : Quantity
             Nonnegative common-cause hazard rate in 1/hour.
         target_rate : Quantity

@@ -20,6 +20,7 @@
 #   --text-muted    #94a3b8           labels, captions
 
 import marimo as mo
+from .. import __version__
 
 # ── PALETTE ──────────────────────────────────────────────────────────────────
 
@@ -213,7 +214,7 @@ div[style*="linear-gradient(135deg, rgb(15, 23, 42)"] span {{
 
 div[style*="linear-gradient(135deg, #0f172a"]::after,
 div[style*="linear-gradient(135deg, rgb(15, 23, 42)"]::after {{
-    content: "MLSysBook Labs v1.0.0 · MLSysIM 0.3.0 · Browser lab";
+    content: "MLSysIM {__version__} · Interactive Lab";
     display: block;
     margin-top: 16px;
     padding-top: 12px;

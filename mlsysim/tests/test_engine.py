@@ -69,15 +69,23 @@ def test_engine_hfu_mfu_ratio_under_full_recomputation():
 
 
 def test_engine_overhead_dominated_flag():
-    """Small model at batch 1: dispatch + layer tax dominates both roofline
-    terms; the profile must say so instead of mislabeling the cause as the
-    larger of two negligible ceilings. (Audit finding B5, 2026-06-10.)"""
-    perf = Engine.solve(Models.Vision.ResNet50, Hardware.Cloud.A100, batch_size=1)
-    overhead_ms = perf.latency_overhead.to("ms").magnitude
-    roofline_ms = max(perf.latency_compute.to("ms").magnitude,
-                      perf.latency_memory.to("ms").magnitude)
-    assert perf.overhead_dominated == (overhead_ms > roofline_ms)
-    assert perf.overhead_dominated is True  # ResNet-50/A100/b1 is the known case
+    """Tiny model at batch 1 or explicit per-layer launch tax: overhead exceeds
+    both roofline terms, so the profile flags overhead_dominated instead of
+    mislabeling the cause as compute or memory. (Audit B5 / 2026-11-14 B3.)"""
+    tiny = Engine.solve(Models.Vision.LeNet1, Hardware.Cloud.A100, batch_size=1)
+    assert tiny.overhead_dominated is True  # 15 us dispatch > sub-us Roofline
+
+    perf_default = Engine.solve(Models.Vision.ResNet50, Hardware.Cloud.A100, batch_size=1)
+    assert perf_default.overhead_dominated is False  # 15 us dispatch < 52.6 us compute
+
+    perf_eager = Engine.solve(
+        Models.Vision.ResNet50, Hardware.Cloud.A100, batch_size=1, layer_overhead_ms=0.01
+    )
+    overhead_ms = perf_eager.latency_overhead.to("ms").magnitude
+    roofline_ms = max(perf_eager.latency_compute.to("ms").magnitude,
+                      perf_eager.latency_memory.to("ms").magnitude)
+    assert perf_eager.overhead_dominated == (overhead_ms > roofline_ms)
+    assert perf_eager.overhead_dominated is True
 
 
 def test_engine_energy_per_inference_property():

@@ -9,6 +9,7 @@ from mlsysim.core._validation import (
     validate_positive,
     validate_nonnegative,
     validate_at_least,
+    validate_range,
 )
 
 from ._units import _ensure_unit
@@ -458,9 +459,12 @@ def calc_step_event_probability(rate_per_device_hour, n_devices, step_time):
     >>> calc_step_event_probability(0.01, 2, 3600) > calc_step_event_probability(0.01, 1, 3600)
     True
     """
+    validate_range(rate_per_device_hour, 0.0, 1.0, "rate_per_device_hour")
+    validate_nonnegative(n_devices, "n_devices")
     step = _ensure_unit(step_time, ureg.second, "step_time")
+    validate_nonnegative(step, "step_time")
     exposure = n_devices * step.m_as(ureg.hour)
-    return 1 - (1 - float(rate_per_device_hour)) ** exposure
+    return 1.0 - (1.0 - float(rate_per_device_hour)) ** exposure
 
 
 def calc_probe_detection_window(interval, timeout, failure_threshold):

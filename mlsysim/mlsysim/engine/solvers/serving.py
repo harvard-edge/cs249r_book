@@ -27,7 +27,12 @@ from ...physics.memory import calc_kv_cache_size
 from ...hardware.types import HardwareNode
 from .base import BaseOptimizer, ForwardModel
 from ._decode import decode_step as _decode_step
-from ...core._validation import validate_at_least, validate_positive, validate_range
+from ...core._validation import (
+    validate_at_least,
+    validate_nonnegative,
+    validate_positive,
+    validate_range,
+)
 
 
 class ServingModel(ForwardModel):
@@ -71,6 +76,8 @@ class ServingModel(ForwardModel):
         draft_acceptance_rate: float = 0.7,
         cached_prefix_len: int = 0,
         prefill_chunk_tokens: Optional[int] = None,
+        causal: bool = True,
+        layer_overhead_ms: float = cal.FRAMEWORK_LAYER_TAX_MS,
     ) -> ServingResult:
         """Solve for LLM serving performance.
 
@@ -108,6 +115,13 @@ class ServingModel(ForwardModel):
             work plus one dispatch tax per chunk, while decode_stall_bound reports the slowest
             single chunk that can interfere with ongoing decode iterations. It is not a full
             scheduler simulation.
+        causal : bool, default: True
+            Apply causal triangular self-attention masking during prefill
+            (``2 * L * d_attn * B * S^2`` at zero cached prefix) rather than full
+            bidirectional ``S^2`` attention.
+        layer_overhead_ms : float, default: cal.FRAMEWORK_LAYER_TAX_MS
+            Nonnegative per-layer host launch overhead in milliseconds (0.0 by
+            default for graph-captured execution).
 
         Returns
         -------
@@ -172,6 +186,7 @@ class ServingModel(ForwardModel):
         validate_positive(network_bandwidth.to("B/s"), "network_bandwidth")
         validate_positive(hardware.memory.capacity, "prefill memory capacity")
         validate_positive((decode_hardware or hardware).memory.capacity, "decode memory capacity")
+        validate_nonnegative(layer_overhead_ms, "layer_overhead_ms")
 
         # 1. Pre-fill Phase (with optional prompt caching)
         # Prefer the precision-specific FLOP rate (e.g. FP16 tensor cores); fall back
@@ -181,20 +196,18 @@ class ServingModel(ForwardModel):
         # floor keeps the model well-defined even when nearly the whole prompt is
         # cached — at least one token must pass through prefill to produce output.
         new_tokens = max(1, seq_len - cached_prefix_len)
-        # Linear layer FLOPs: 2 * params * tokens * batch (standard 2P approximation)
-        linear_flops = calc_transformer_decode_flops(model.parameters, new_tokens) * batch_size
-        # Both attention matrix products visit the supplied context.
-        # This captures the O(S^2) self-attention cost, which dominates for long contexts.
-        # getattr-with-fallback tolerates plain Workloads that lack transformer
-        # geometry; the `or` guards convert an explicit None into the same default.
+        active_params = model.effective_compute_parameters
+        # Linear layer FLOPs: 2 * P_active * tokens * batch
+        linear_flops = calc_transformer_decode_flops(active_params, new_tokens) * batch_size
+        # Attention matrix products over the attended context (causal masking
+        # halves uncached self-attention work to 2 * L * d_attn * B * S^2).
         n_layers = getattr(model, "layers", 1) or 1
         n_heads = getattr(model, "heads", 32) or 32
         head_dim = getattr(model, "head_dim", None) or (getattr(model, "hidden_dim", 4096) or 4096) // n_heads
-        # Upper-bound approximation: each new token attends over the final context.
-        # The leading 4 = 2 FLOPs/MAC x 2 attention matmuls (QK^T scores and
-        # attention-weighted V). When cached_prefix_len=0, new_tokens == seq_len
-        # so this simplifies to S^2.
-        attention_flops = calc_attention_matmul_flops(n_layers, n_heads * head_dim, new_tokens, seq_len, batch_size)
+        effective_kv_len = (cached_prefix_len + new_tokens / 2.0) if causal else float(seq_len)
+        attention_flops = calc_attention_matmul_flops(
+            n_layers, n_heads * head_dim, new_tokens, effective_kv_len, batch_size
+        )
         prefill_ops = linear_flops + attention_flops
         t_prefill_compute = (prefill_ops / (peak_flops_prefill * efficiency)).to("ms")
         prefill_chunks = 1
@@ -202,23 +215,25 @@ class ServingModel(ForwardModel):
         decode_stall_bound: Optional[Quantity] = None
         if prefill_chunk_tokens is not None:
             # Chunked prefill (Sarathi-Serve): split the prompt into bounded chunks
-            # so prefill work can interleave with ongoing decode iterations. Total
-            # compute is unchanged; what we gain is a bound on how long any single
-            # chunk can stall a decode step.
+            # so prefill work can interleave with ongoing decode iterations. Under
+            # causal masking, chunk j attends to cached_prefix_len + prior chunk
+            # tokens + chunk_tokens / 2, conserving total prefill FLOPs identically
+            # while the final full chunk sets the worst-case decode stall bound.
             prefill_chunks = max(1, math.ceil(new_tokens / prefill_chunk_tokens))
             chunk_times = []
             tokens_remaining = new_tokens
+            chunk_offset = cached_prefix_len
             while tokens_remaining > 0:
                 chunk_tokens = min(prefill_chunk_tokens, tokens_remaining)
-                chunk_linear = calc_transformer_decode_flops(model.parameters, chunk_tokens) * batch_size
-                # Conservative: every chunk's tokens attend over the full final
-                # context (seq_len), matching the upper-bound convention above.
+                chunk_linear = calc_transformer_decode_flops(active_params, chunk_tokens) * batch_size
+                chunk_kv_len = (chunk_offset + chunk_tokens / 2.0) if causal else float(seq_len)
                 chunk_attention = calc_attention_matmul_flops(
-                    n_layers, n_heads * head_dim, chunk_tokens, seq_len, batch_size
+                    n_layers, n_heads * head_dim, chunk_tokens, chunk_kv_len, batch_size
                 )
                 chunk_ops = chunk_linear + chunk_attention
                 chunk_time = (chunk_ops / (peak_flops_prefill * efficiency)).to("ms") + hardware.dispatch_tax
                 chunk_times.append(chunk_time)
+                chunk_offset += chunk_tokens
                 tokens_remaining -= chunk_tokens
             # The slowest chunk is the worst-case decode interference window.
             prefill_chunk_time = max(chunk_times, key=lambda t: t.to("ms").magnitude)
@@ -256,6 +271,7 @@ class ServingModel(ForwardModel):
             bytes_per_element=bpp,
             kv_bytes=kv_cache_bytes,
             efficiency=efficiency,
+            layer_overhead_ms=layer_overhead_ms,
         )
         t_decode_per_token = step.latency
         draft_kv_cache = Q_("0 byte")
@@ -276,6 +292,7 @@ class ServingModel(ForwardModel):
                 bytes_per_element=bpp,
                 kv_bytes=draft_kv_cache,
                 efficiency=efficiency,
+                layer_overhead_ms=layer_overhead_ms,
             ).latency
 
             # Speculative decoding batches K draft tokens (e.g., K=4)
@@ -295,6 +312,7 @@ class ServingModel(ForwardModel):
                 kv_bytes=kv_cache_bytes,
                 efficiency=efficiency,
                 query_tokens=K + 1,
+                layer_overhead_ms=layer_overhead_ms,
             ).latency
 
             # Expected tokens per step via geometric series (Leviathan et al., 2023):
@@ -667,6 +685,8 @@ class ContinuousBatchingModel(ForwardModel):
         page_size: int = 16,
         precision: str = "fp16",
         efficiency: float = 0.5,
+        causal: bool = True,
+        layer_overhead_ms: float = cal.FRAMEWORK_LAYER_TAX_MS,
     ) -> ContinuousBatchingResult:
         """Compare static max-length KV reservation with paged allocation.
 
@@ -690,7 +710,8 @@ class ContinuousBatchingModel(ForwardModel):
           throughput gain can saturate at the compute ceiling.
         - **TTFT** is the worst-case prefill of a full scheduler batch
           (``max_batch_size`` prompts of ``max_seq_len`` tokens): linear
-          ``2*P*S`` plus attention ``4*L*H*d*S^2`` FLOPs, plus the dispatch tax.
+          ``2*P_active*S`` plus causal attention ``2*L*H*d*S^2`` FLOPs (or
+          ``4*L*H*d*S^2`` when ``causal=False``), plus the dispatch tax.
 
         Parameters
         ----------
@@ -715,6 +736,10 @@ class ContinuousBatchingModel(ForwardModel):
             Numerical precision for weights and KV cache.
         efficiency : float
             Software efficiency factor in (0, 1] applied to prefill and decode FLOPS.
+        causal : bool, default: True
+            Apply causal triangular self-attention masking during prefill.
+        layer_overhead_ms : float, default: cal.FRAMEWORK_LAYER_TAX_MS
+            Nonnegative per-layer host launch overhead in milliseconds (0.0 by default).
 
         Returns
         -------
@@ -765,6 +790,7 @@ class ContinuousBatchingModel(ForwardModel):
         validate_at_least(max_batch_size, 1, "max_batch_size")
         validate_at_least(page_size, 1, "page_size")
         validate_range(efficiency, 1e-9, 1.0, "efficiency")
+        validate_nonnegative(layer_overhead_ms, "layer_overhead_ms")
         if mean_request_tokens is None:
             mean_request_tokens = max_seq_len
         if not 0 < mean_request_tokens <= max_seq_len:
@@ -774,14 +800,15 @@ class ContinuousBatchingModel(ForwardModel):
         precision, bpp = resolve_precision(precision)
         peak_flops = hardware.compute.precision_flops.get(precision, hardware.compute.peak_flops)
 
-        # Worst-case TTFT: a full scheduler batch of max-length prompts (linear
-        # term plus the attention O(S²) term).
+        # Worst-case TTFT: a full scheduler batch of max-length prompts (active
+        # linear term plus the causal O(S^2) attention term).
         n_layers = getattr(model, "layers", 1) or 1
         n_heads = getattr(model, "heads", 32) or 32
         head_dim = getattr(model, "head_dim", None) or (getattr(model, "hidden_dim", 4096) or 4096) // n_heads
-        linear_flops = calc_transformer_decode_flops(model.parameters, max_seq_len) * max_batch_size
+        linear_flops = calc_transformer_decode_flops(model.effective_compute_parameters, max_seq_len) * max_batch_size
+        effective_kv_len = max_seq_len / 2.0 if causal else float(max_seq_len)
         attention_flops = calc_attention_matmul_flops(
-            n_layers, n_heads * head_dim, max_seq_len, max_seq_len, max_batch_size
+            n_layers, n_heads * head_dim, max_seq_len, effective_kv_len, max_batch_size
         )
         prefill_ops = linear_flops + attention_flops
         t_prefill = (prefill_ops / (peak_flops * efficiency)).to("ms") + hardware.dispatch_tax
@@ -846,6 +873,7 @@ class ContinuousBatchingModel(ForwardModel):
                 bytes_per_element=bpp,
                 kv_bytes=filled_kv,
                 efficiency=efficiency,
+                layer_overhead_ms=layer_overhead_ms,
             ).latency
 
         # One step emits one token per active request, so tokens/s is the batch
@@ -977,8 +1005,7 @@ class WeightStreamingModel(ForwardModel):
         Assumptions: uniform layers and complete injection/compute overlap.
         The optimal-batch estimate equates injection and linear compute time.
         Excludes: decode attention work, runtime workspace, detailed communication
-        scheduling, and measured injection efficiency. Prefill uses the causal half-square attention approximation; ServingModel
-        uses a rectangular upper bound over the final context.
+        scheduling, and measured injection efficiency. Prefill uses the causal half-square attention convention matching ``ServingModel(causal=True)``.
 
         References
         ----------
@@ -1033,7 +1060,10 @@ class WeightStreamingModel(ForwardModel):
             )
 
         # 2. Injection Bottleneck vs Compute Bottleneck per Layer
+        # Weight streaming injects all layer parameters across the wafer link,
+        # while arithmetic executes only active parameters per token (for MoE).
         layer_params = model.parameters / model.layers
+        layer_active_params = model.effective_compute_parameters / model.layers
         layer_weight_bytes = layer_params.to(ureg.count).magnitude * bpp.magnitude * ureg.byte
 
         # Injection time (MemoryX -> WSE). Fall back to a calibrated default when
@@ -1053,14 +1083,14 @@ class WeightStreamingModel(ForwardModel):
         if phase == "prefill":
             # Causal attention counts half the full square; query heads govern
             # compute even when GQA shares a smaller set of K/V heads.
-            layer_linear_flops = calc_transformer_decode_flops(layer_params, seq_len) * batch_size
+            layer_linear_flops = calc_transformer_decode_flops(layer_active_params, seq_len) * batch_size
             layer_attention_flops = (
                 calc_attention_matmul_flops(1, (model.heads or 32) * head_dim, seq_len, seq_len, batch_size) / 2
             )
             layer_decode_flops = layer_linear_flops + layer_attention_flops
         else:
             # This weight-streaming approximation excludes decode attention.
-            layer_decode_flops = calc_transformer_decode_flops(layer_params) * batch_size
+            layer_decode_flops = calc_transformer_decode_flops(layer_active_params) * batch_size
         layer_compute_time = (layer_decode_flops / (peak_flops * efficiency)).to("ms") + hardware.dispatch_tax
 
         # True layer time is bounded by the slowest process: weight streaming
@@ -1079,10 +1109,10 @@ class WeightStreamingModel(ForwardModel):
 
         # 3. Optimal Batch Size Analysis
         # What batch size perfectly overlaps injection and compute?
-        # Solve: t_inject = (2 * layer_params * B) / (peak_flops * efficiency)
-        # => B = t_inject * peak_flops * efficiency / (2 * layer_params)
+        # Solve: t_inject = (2 * layer_active_params * B) / (peak_flops * efficiency)
+        # => B = t_inject * peak_flops * efficiency / (2 * layer_active_params)
         optimal_batch = (layer_injection_time * peak_flops * efficiency) / (
-            2 * layer_params.to(ureg.count).magnitude * ureg.flop
+            2 * layer_active_params.to(ureg.count).magnitude * ureg.flop
         )
         optimal_batch_int = max(1, int(optimal_batch.to_base_units().magnitude))
 
@@ -1121,7 +1151,7 @@ class TailLatencyModel(ForwardModel):
     1. Dean & Barroso (2013), "The Tail at Scale."
     """
 
-    requires = ("hardware",)
+    requires = ("arrival_rate_qps", "service_latency_ms")
     produces = TailLatencyResult
 
     def solve(

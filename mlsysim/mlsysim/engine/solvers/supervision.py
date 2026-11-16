@@ -52,7 +52,7 @@ class DetectionShortfallModel(ForwardModel):
         reference : float
             Reference per-frame detection probability, between zero and one.
         groups : sequence of float
-            Per-frame detection probabilities strictly between zero and one and no
+            Per-frame detection probabilities in the open interval (0, 1) and no
             greater than reference. Higher-than-reference detection is outside
             the late-stop model.
         delay : Quantity, optional

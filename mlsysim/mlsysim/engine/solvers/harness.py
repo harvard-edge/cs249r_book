@@ -3,9 +3,8 @@
 Domain implementations behind ``mlsysim.solvers``. Each model is arithmetic on
 stated inputs: approval escrow sized by Little's law, weighted deficit
 round-robin between request classes, bounded-liability admission of the next
-model call, one trajectory metered against its budget vector, and call or
-step ceilings read from public agent runs. None models a particular serving
-engine, provider quota, or queueing burst.
+model call, and one trajectory metered against its budget vector. None models
+a particular serving engine, provider quota, or queueing burst.
 """
 
 from __future__ import annotations

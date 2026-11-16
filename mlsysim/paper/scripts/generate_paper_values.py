@@ -682,13 +682,18 @@ def section_walls(V: Values) -> None:
 
     # Wall 4: attention share of prefill FLOPs, recovered from ServingModel's TTFT.
     peak16 = H100.compute.precision_flops.get("fp16", H100.compute.peak_flops)
-    for seq, word in ((8192, "EightK"), (32768, "ThirtyTwoK")):
+    for m_obj, m_id, m_tag, seq, word, nd in (
+        (llama70, "Llama3_70B", "SeventyB", 1024, "OneK", 1),
+        (llama8, "Llama3_8B", "EightB", 1024, "OneK", 1),
+        (llama70, "Llama3_70B", "", 8192, "EightK", 0),
+        (llama70, "Llama3_70B", "", 32768, "ThirtyTwoK", 0),
+    ):
         eta = 0.5
-        sv = ServingModel().solve(llama70, H100, seq_len=seq, batch_size=1, precision="fp16", efficiency=eta)
+        sv = ServingModel().solve(m_obj, H100, seq_len=seq, batch_size=1, precision="fp16", efficiency=eta)
         ops = ((sv.ttft - H100.dispatch_tax) * peak16 * eta).m_as("flop")
-        share = 1.0 - 2 * llama70.parameters.m_as("count") * seq / ops
-        V.pct(f"WallFourAttnShare{word}Pct", share,
-              f"1 - 2PS / prefill_ops, prefill_ops = (ServingModel().solve(Llama3_70B, H100, seq_len={seq}).ttft - dispatch_tax) x FP16 peak x 0.5", nd=0)
+        share = 1.0 - 2 * m_obj.parameters.m_as("count") * seq / ops
+        V.pct(f"WallFourAttnShare{word}{m_tag}Pct", share,
+              f"1 - 2PS / prefill_ops, prefill_ops = (ServingModel().solve({m_id}, H100, seq_len={seq}).ttft - dispatch_tax) x FP16 peak x 0.5", nd=nd)
     V.num("WallFourAttnSeqShort", 8192, "scenario input")
     V.num("WallFourAttnSeqLong", 32768, "scenario input")
 
@@ -730,7 +735,7 @@ def section_walls(V: Values) -> None:
     V.num("WallTenDragonflyBeta", df.bisection_bw_fraction, "TopologyModel().solve(InfiniBand_NDR, 'dragonfly').bisection_bw_fraction", nd=2)
     V.num("WallTenFatTreeAdvantageSmall", ft.bisection_bw_fraction / small.bisection_bw_fraction, "fat-tree beta / 27-node torus beta", nd=1)
 
-    # Wall 13: INT4 (follows current code; a CompressionModel fix is in progress elsewhere).
+    # Wall 13: INT4 compression ratios.
     comp = CompressionModel().solve(llama70, H100, method="quantization", target_bitwidth=4)
     src = "CompressionModel().solve(Models.Language.Llama3_70B, Hardware.Cloud.H100, method='quantization', target_bitwidth=4)"
     V.num("WallThirteenIntFourCompressionRatio", comp.compression_ratio, src + ".compression_ratio", nd=1)
@@ -1038,7 +1043,6 @@ def section_researchers(V: Values) -> None:
           src + " exposed DP communication / .step_latency_total")
     V.pct("FallacyCommCommFractionPct", 1 - d.scaling_efficiency, "1 - " + src + ".scaling_efficiency")
     V.pct("FallacyCommGoodputLossPct", 1 - rel.goodput_ratio, "1 - ReliabilityModel().solve(Training_512_H100, 720).goodput_ratio")
-    V.pct("FallacyCommReworkLossPct", 2 * (1 - rel.goodput_ratio), "2 * (1 - ReliabilityModel().solve(Training_512_H100, 720).goodput_ratio)")
 
     V.section("Case R4: parallelism search for GPT-3 on Production_2K")
     gpt3, f2k = Models.Language.GPT3, Systems.Clusters.Production_2K
@@ -1364,7 +1368,13 @@ def figure_roofline(ctx: dict) -> list[Path]:
     ax.annotate(f"peak ridge {ridge_peak:,.0f}", (ridge_peak, peak_t), xytext=(0, 6), textcoords="offset points",
                 ha="center", va="bottom", fontsize=6.6, color=INK_2)
 
-    label_offsets = {128: ((6, -6), "left", "top"), 256: ((6, 6), "left", "bottom")}
+    label_offsets = {
+        1: ((0, -7), "center", "top", False),
+        8: ((-4, -12), "right", "top", True),
+        32: ((3, -21), "center", "top", True),
+        128: ((18, -11), "left", "top", True),
+        256: ((18, 5), "left", "bottom", True),
+    }
     for b, p, att in zip(batches, profiles, attained):
         ai = p.arithmetic_intensity.m_as("flop/byte")
         roof = min(bw * ai, eta * peak_t)
@@ -1372,9 +1382,10 @@ def figure_roofline(ctx: dict) -> list[Path]:
         ax.plot([ai, ai], [att, roof], color=INK_2, lw=0.6, ls=":", zorder=4)
         ax.plot([ai], [att], marker="o" if mem else "s", ms=5.5, mfc=MEM_COLOR if mem else COMP_COLOR,
                 mec="white", mew=0.8, zorder=7)
-        offset, ha, va = label_offsets.get(b, ((0, -7), "center", "top"))
+        offset, ha, va, leader = label_offsets.get(b, ((0, -7), "center", "top", False))
+        arrow = dict(arrowstyle="-", color=INK_2, lw=0.45, shrinkA=1, shrinkB=3) if leader else None
         ax.annotate(f"B={b}", (ai, att), xytext=offset, textcoords="offset points", ha=ha, va=va,
-                    fontsize=6.5, color=INK)
+                    fontsize=6.5, color=INK, arrowprops=arrow)
 
     ax.set_xlabel("Arithmetic intensity (FLOP/byte)")
     ax.set_ylabel("Attained performance (TFLOP/s)")
@@ -1384,7 +1395,7 @@ def figure_roofline(ctx: dict) -> list[Path]:
         Line2D([], [], color=COMP_COLOR, lw=2.0, label=f"compute ceiling at η = {eta:g}"),
         Line2D([], [], marker="s", ls="", ms=5, mfc=COMP_COLOR, mec="white", label="compute-bound batch"),
         Line2D([], [], color=INK_2, lw=0.9, ls=(0, (4, 2)), label=f"datasheet FP16 peak ({peak_t:,.0f})"),
-        Line2D([], [], color=INK_2, lw=0.6, ls=":", label="gap to roof (framework tax)"),
+        Line2D([], [], color=INK_2, lw=0.6, ls=":", label="gap to roof (dispatch tax)"),
     ]
     fig.legend(handles=handles, loc="lower center", ncol=2, frameon=False, bbox_to_anchor=(0.54, 0.0),
                handlelength=1.8, handletextpad=0.4, columnspacing=1.0, fontsize=6.6, labelcolor=INK)

@@ -11,7 +11,7 @@
 ```bash
 pip install mlsysim
 python3 -c "import mlsysim; print(mlsysim.__version__)"
-# Should print: 0.1.0
+# Should print: 0.3.1
 ```
 
 ### Minute 3–8: Your First Live Demo
@@ -28,9 +28,9 @@ profile = mlsysim.Engine.solve(
     batch_size=1,
 )
 
-print(f"Bottleneck: {profile.bottleneck}")  # → Memory
-print(f"MFU:        {profile.mfu:.3f}")     # → 0.003 (nearly idle compute!)
-print(f"Latency:    {profile.latency:.2f}") # → 5.60 ms
+print(f"Bottleneck: {profile.bottleneck}")              # → Memory
+print(f"MFU:        {profile.mfu:.3f}")                 # → 0.003 (nearly idle compute!)
+print(f"Latency:    {profile.latency.to('ms'):~P.2f}")  # → 4.80 ms
 
 # Now change batch_size to 256 and watch the bottleneck shift...
 ```
@@ -41,13 +41,11 @@ it with the Roofline model. That's the entire first lecture.
 
 ### Minute 8–12: Your First Homework Problem
 
-> **Problem:** The H100 has 6.3× more FLOPS than the A100 (989 vs 156 TFLOPS FP16 dense).
+> **Problem:** The H100 has 3.17× more FP16 Tensor Core throughput than the A100 (`989` vs. `312` TFLOP/s FP16 dense).
 > Use `Engine.solve()` to compare Llama-3-8B inference at batch=1 on both.
-> How much faster is H100? Why isn't it 6.3×?
+> How much faster is H100? Why isn't it 3.17×?
 
-**Expected answer:** ~1.7× faster. Memory-bound workload scales with bandwidth
-ratio (3.35/2.04 ≈ 1.64×), not FLOPS ratio. Students learn that advertising
-FLOPS means nothing for memory-bound workloads.
+**Expected answer:** `1.64×` faster (`7.89 ms` on A100 vs. `4.80 ms` on H100). Memory-bound decode scales with HBM bandwidth ratio (`3.35 / 2.04 = 1.64×`), not FLOP/s ratio. Students learn that peak FLOP/s does not govern memory-bound workloads.
 
 ### Minute 12–15: Plan Your Semester
 
@@ -88,6 +86,11 @@ Each exercise takes 20–30 minutes of class time. Solutions are in
 mlsysim returns typed Pydantic objects. You can auto-grade by checking:
 
 ```python
+# Setup fixture + student's chosen batch size
+model = mlsysim.Models.Language.Llama3_8B
+hardware = mlsysim.Hardware.Cloud.H100
+student_batch = 1
+
 # Student submits their analysis
 result = mlsysim.Engine.solve(model, hardware, batch_size=student_batch)
 
@@ -113,10 +116,10 @@ Time = FLOPs / (N × Peak × MFU × η_scaling × Goodput)
 
 Every concept in your course maps to one term in this equation. Every homework
 problem is about understanding which term is the bottleneck and how to improve it.
-The 22-wall taxonomy provides the vocabulary; the Iron Law provides the structure.
+The 20-wall taxonomy (plus sensitivity and inverse-synthesis solvers) provides the vocabulary; the Iron Law provides the structure.
 
 See [laws-explained.qmd](../docs/laws-explained.qmd) for plain-English explanations
-of all 22 constraints.
+of all 20 constraints and [curriculum-map.qmd](../docs/curriculum-map.qmd) for direct chapter, lab, and slide deck pairings across the *Machine Learning Systems* textbook.
 
 ## Getting Help
 

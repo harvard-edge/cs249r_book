@@ -179,8 +179,7 @@ def calc_preference_pair(
     Assumptions: Inputs are log-probability sums for the same pair under policy and
         reference models, with a supplied preference ordering.
 
-    Excludes: Model training, preference-label validity, sequence normalization, and
-        overflow protection for extreme margins.
+    Excludes: Model training, preference-label validity, and sequence-length normalization.
 
     References
     ----------
@@ -199,7 +198,14 @@ def calc_preference_pair(
     score_w = policy_preferred - reference_preferred
     score_l = policy_dispreferred - reference_dispreferred
     margin = beta * (score_w - score_l)
-    preference_score = 1 / (1 + math.exp(-margin))
-    loss = math.log1p(math.exp(-margin))
-    saturation = 1 / (1 + math.exp(margin))
+    if margin >= 0.0:
+        exp_neg = math.exp(-margin)
+        preference_score = 1.0 / (1.0 + exp_neg)
+        saturation = exp_neg / (1.0 + exp_neg)
+        loss = math.log1p(exp_neg)
+    else:
+        exp_pos = math.exp(margin)
+        preference_score = exp_pos / (1.0 + exp_pos)
+        saturation = 1.0 / (1.0 + exp_pos)
+        loss = -margin + math.log1p(exp_pos)
     return score_w, score_l, margin, preference_score, loss, saturation, beta * saturation

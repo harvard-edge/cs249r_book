@@ -47,7 +47,9 @@ def dTime(total_ops, num_devices, peak_flops_per_device, efficiency_eta):
     >>> dTime(Q_(8, "flop"), 2, Q_(4, "flop/s"), 0.5) == Q_(2, "s")
     True
     """
+    validate_nonnegative(total_ops, "total_ops")
     validate_at_least(num_devices, 1, "num_devices")
+    validate_positive(peak_flops_per_device, "peak_flops_per_device")
     validate_range(efficiency_eta, 0.0, 1.0, "efficiency_eta")
     validate_positive(efficiency_eta, "efficiency_eta")
     effective_throughput = num_devices * peak_flops_per_device * efficiency_eta
@@ -362,24 +364,33 @@ def calc_bottleneck(ops, model_bytes, device_flops, device_bw):
     >>> result["bottleneck"]
     'Memory'
     """
-    # Arithmetic intensity is an intrinsic property of the workload (FLOP / Byte)
-    # independent of device performance:
-    ops_val = ops.m_as(ureg.flop) if hasattr(ops, "m_as") else float(ops)
-    bytes_val = model_bytes.m_as(ureg.byte) if hasattr(model_bytes, "m_as") else float(model_bytes)
+    from ._units import _ensure_unit
+
+    ops_q = _ensure_unit(ops, ureg.flop, "ops")
+    bytes_q = _ensure_unit(model_bytes, ureg.byte, "model_bytes")
+    flops_q = _ensure_unit(device_flops, ureg.flop / ureg.second, "device_flops")
+    bw_q = _ensure_unit(device_bw, ureg.byte / ureg.second, "device_bw")
+
+    ops_val = ops_q.magnitude
+    bytes_val = bytes_q.magnitude
+    if ops_val < 0 or math.isnan(ops_val):
+        raise ValueError(f"ops must be non-negative, got {ops}")
+    if bytes_val < 0 or math.isnan(bytes_val):
+        raise ValueError(f"model_bytes must be non-negative, got {model_bytes}")
+    if flops_q.magnitude <= 0 or math.isnan(flops_q.magnitude):
+        raise ValueError(f"device_flops must be positive, got {device_flops}")
+    if bw_q.magnitude <= 0 or math.isnan(bw_q.magnitude):
+        raise ValueError(f"device_bw must be positive, got {device_bw}")
 
     if bytes_val < 1e-15:
         intensity_val = float("inf") if ops_val >= 1e-15 else 0.0
     elif ops_val < 1e-15:
         intensity_val = 0.0
-    elif hasattr(ops, "to") and hasattr(model_bytes, "to"):
-        # Normalize before extracting magnitude so scaled inputs such as
-        # 1 TFLOP / 1 GB report 1000 flop/byte rather than Pint's raw magnitude.
-        intensity_val = (ops / model_bytes).to("flop/byte").magnitude
     else:
-        intensity_val = float(ops / model_bytes)
+        intensity_val = (ops_q / bytes_q).to("flop/byte").magnitude
 
-    compute_time = ops / device_flops
-    memory_time = model_bytes / device_bw
+    compute_time = ops_q / flops_q
+    memory_time = bytes_q / bw_q
     t_comp_ms = compute_time.m_as(ureg.millisecond)
     t_mem_ms = memory_time.m_as(ureg.millisecond)
 
@@ -470,6 +481,11 @@ def calc_pipeline_bubble(n_stages, n_microbatches, v_stages=1):
     validate_at_least(n_stages, 1, "n_stages")
     validate_at_least(n_microbatches, 1, "n_microbatches")
     validate_at_least(v_stages, 1, "v_stages")
+    if n_stages > 1 and v_stages > 1 and n_microbatches < n_stages:
+        raise ValueError(
+            f"Interleaved 1F1B schedule (v_stages={v_stages} > 1) requires "
+            f"n_microbatches ({n_microbatches}) >= n_stages ({n_stages})."
+        )
     # Fill + drain idle the pipeline for (p-1) microbatch slots out of a total
     # of (m + p - 1) slots per step. Interleaving v virtual stages per device
     # subdivides the work, which acts like having v*m microbatches: the bubble

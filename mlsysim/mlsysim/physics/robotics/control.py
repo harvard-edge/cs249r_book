@@ -142,8 +142,9 @@ def calc_chunk_renewal_schedule(
         n_overlap  = floor(H / n)                   (chunks that cover one step)
 
     T_open is the worst sampling-phase wait plus inference, before transport
-    and admission delays. n_overlap is the number of predictions a temporal
-    ensemble blends at a step in steady state.
+    and admission delays. n_overlap = floor(H / n) is the guaranteed steady-state
+    count of overlapping chunks at every grid step (when H is not a multiple of
+    n, up to ceil(H / n) chunks overlap on the first H mod n steps of each renewal).
 
     Assumptions: Periodic renewal aligned with the setpoint grid and inference finishing before the next renewal.
 
@@ -853,9 +854,22 @@ def calc_cbf_qp_orthogonal_projection(u_nom, a_vec, b_scalar):
     >>> result["u_projected"] == [1.0, 0.0]
     True
     """
+    if hasattr(u_nom, "units") or hasattr(a_vec, "units") or hasattr(b_scalar, "units"):
+        raise TypeError(
+            "calc_cbf_qp_orthogonal_projection requires dimensionless numeric values; "
+            "convert Pint Quantity inputs explicitly."
+        )
+
     u_n = np.asarray(u_nom, dtype=float)
     a = np.asarray(a_vec, dtype=float)
     b = float(b_scalar)
+
+    if u_n.ndim != 1 or a.ndim != 1 or u_n.size == 0 or u_n.shape != a.shape:
+        raise ValueError(
+            f"u_nom and a_vec must be nonempty 1-D vectors of equal length; got shapes {u_n.shape} and {a.shape}."
+        )
+    if not (np.all(np.isfinite(u_n)) and np.all(np.isfinite(a)) and math.isfinite(b)):
+        raise ValueError("u_nom, a_vec, and b_scalar must be finite.")
 
     breach = float(np.dot(a, u_n) - b)
     if breach <= 0.0:
@@ -867,6 +881,10 @@ def calc_cbf_qp_orthogonal_projection(u_nom, a_vec, b_scalar):
         }
 
     norm_sq = float(np.dot(a, a))
+    if norm_sq == 0.0:
+        raise ValueError(
+            "Active barrier constraint has zero normal vector (a_vec == 0); half-space projection is infeasible."
+        )
     lam = breach / norm_sq
     u_star = u_n - lam * a
     correction = float(np.linalg.norm(u_star - u_n))

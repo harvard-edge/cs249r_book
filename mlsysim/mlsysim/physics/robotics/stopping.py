@@ -419,7 +419,7 @@ def calc_scurve_max_permitted_velocity(
     where d_S and T_S are the S-curve stop distance and time
     (calc_scurve_stop_distance, calc_scurve_stop_time) and v_h is an optional
     obstacle approach speed (zero for a static obstacle). The left side is
-    continuous and strictly increasing in v, so bisection finds the root.
+    continuous and monotonically increasing in v, so bisection finds the root.
     Because d_S is not a single quadratic in v, no one closed form covers both
     stop regimes; for v_h = 0 in the trapezoidal regime the result equals
     calc_max_permitted_velocity with delay tau + a / (2 j).
@@ -941,15 +941,38 @@ def calc_blend_reserve_use(entry_velocity, deceleration, max_jerk, window, tick)
     >>> calc_blend_reserve_use(ureg('1 m/s'), ureg('1 m/s**2'), ureg('1 m/s**3'), ureg('0.1 s'), ureg('0.01 s')).check('[length]')
     True
     """
+    validate_positive(window, "window")
+    validate_positive(tick, "tick")
     d_start = calc_scurve_stop_distance(entry_velocity, deceleration, max_jerk)
+    dv_full = (deceleration * window).to(ureg.meter / ureg.second)
+    v0 = entry_velocity.to(ureg.meter / ureg.second)
+    a1_stop = (v0 / dv_full).to("").magnitude
+
+    u_stop = None
+    x_stop = None
+    if a1_stop < 0.5:
+        lo, hi = 0.0, 1.0
+        for _ in range(60):
+            mid = 0.5 * (lo + hi)
+            if mid**6 - 3.0 * mid**5 + 2.5 * mid**4 < a1_stop:
+                lo = mid
+            else:
+                hi = mid
+        u_stop = hi
+        a2_stop = u_stop**7 / 7.0 - u_stop**6 / 2.0 + u_stop**5 / 2.0
+        x_stop = (v0 * window * u_stop - deceleration * window**2 * a2_stop).to(ureg.meter)
+
     n = math.ceil((window / tick).to("").magnitude - 1e-9)
     worst = 0.0
     for i in range(n + 1):
         u = min((i * tick / window).to("").magnitude, 1.0)
-        a1 = u**6 - 3 * u**5 + 2.5 * u**4
-        a2 = u**7 / 7 - u**6 / 2 + u**5 / 2
-        v = (entry_velocity - deceleration * window * a1).to(ureg.meter / ureg.second)
-        x = entry_velocity * window * u - deceleration * window**2 * a2
-        grow = x + calc_scurve_stop_distance(v, deceleration, max_jerk) - d_start
+        if u_stop is not None and u >= u_stop:
+            grow = x_stop - d_start
+        else:
+            a1 = u**6 - 3 * u**5 + 2.5 * u**4
+            a2 = u**7 / 7 - u**6 / 2 + u**5 / 2
+            v = max(0.0, (v0 - dv_full * a1).magnitude) * (ureg.meter / ureg.second)
+            x = entry_velocity * window * u - deceleration * window**2 * a2
+            grow = x + calc_scurve_stop_distance(v, deceleration, max_jerk) - d_start
         worst = max(worst, grow.to(ureg.millimeter).magnitude)
     return worst * ureg.millimeter

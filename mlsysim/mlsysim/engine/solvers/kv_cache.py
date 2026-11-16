@@ -83,7 +83,7 @@ class KvAttentionDesignModel(ForwardModel):
         mla : object
             MLA comparison workload included in models.
         precision : str
-            Weight or KV precision name; gradient synchronization also accepts bytes per element.
+            KV-cache element precision name (for example, 'fp16', 'bf16', or 'fp8').
         session_tokens : int
             Nonnegative session length in tokens.
 
@@ -240,7 +240,7 @@ class PrefixRebuildModel(ForwardModel):
         node : object
             System node containing accelerator count and specifications.
         precision : str
-            Weight or KV precision name; gradient synchronization also accepts bytes per element.
+            KV-cache element precision name (for example, 'fp16', 'bf16', or 'fp8').
         prefix_tokens : int
             Positive cached-prefix token count.
         suffix_tokens : int

@@ -1,16 +1,15 @@
-"""Serving-at-scale solvers: request traces, measured frontiers, KV admission, routing.
+"""Serving-at-scale solvers: KV-cache admission and quantization capacity dividends.
 
 Domain implementations behind ``mlsysim.solvers`` (the public import path,
-derived from ``engine.solvers.__init__``). The equations live in
-``physics.serving`` (Little's law, the batching knee, padding waste,
-speculative rounds) and ``physics.memory`` (KV-cache size); these models
-apply them to a published trace, a benchmark table, or one stated replica
-(added 2026-10-20).
+derived from ``engine.solvers.__init__``). The KV-cache byte accounting lives
+in ``physics.memory`` (``calc_kv_cache_size``); these models size admitted
+request concurrency and precision dividends on one stated replica (added
+2026-10-20).
 """
 
 from __future__ import annotations
 
-
+import math
 
 from ..results import (
     KvAdmissionResult,
@@ -19,18 +18,6 @@ from ..results import (
 from ...core.types import Quantity
 from ...physics.memory import calc_kv_cache_size
 from .base import ForwardModel
-
-_TRACE_TIME = "%Y-%m-%d %H:%M:%S.%f"
-_BIN_TIME = "%Y-%m-%d %H:%M"
-_WEEKDAYS = 5                       # Monday to Friday: datetime.weekday() below 5
-
-
-
-
-
-
-
-
 
 
 class KvAdmissionModel(ForwardModel):
@@ -112,10 +99,11 @@ class KvAdmissionModel(ForwardModel):
         weights = model.size_in_bytes(weight_bytes_per_param)
         total = accelerators * hbm_per_accelerator
         budget = total - weights - reserve
+        max_req = max(0, math.floor((budget / per_request).to("").magnitude)) if budget.to("byte").magnitude > 0 else 0
         return KvAdmissionResult(
             head_dim=head_dim, weights=weights.to("GB"), hbm_total=total, kv_budget=budget.to("GB"),
             kv_per_token=per_token, kv_per_request=per_request.to("GB"),
-            max_requests=int((budget / per_request).to("").magnitude),
+            max_requests=max_req,
         )
 
 
@@ -199,15 +187,23 @@ class PrecisionDividendModel(ForwardModel):
         kv = calc_kv_cache_size(model.layers, kv_heads, head_dim, context_tokens, 1, kv_bytes)
         kv_low = calc_kv_cache_size(model.layers, kv_heads, head_dim, context_tokens, 1, kv_bytes_low)
         budget, budget_low = hbm_per_accelerator - w, hbm_per_accelerator - w_low
-        b = int((budget / (kv / tp_size)).to("").magnitude)
-        b_low = int((budget_low / (kv_low / tp_size)).to("").magnitude)
+        b = max(0, math.floor((budget / (kv / tp_size)).to("").magnitude)) if budget.to("byte").magnitude > 0 else 0
+        b_low = (
+            max(0, math.floor((budget_low / (kv_low / tp_size)).to("").magnitude))
+            if budget_low.to("byte").magnitude > 0
+            else 0
+        )
+        dividend = (b_low / b) if b > 0 else (float("inf") if b_low > 0 else 0.0)
+        b_bytes = budget.to("byte").magnitude
+        bl_bytes = budget_low.to("byte").magnitude
+        budget_gain = (budget_low / budget).to("").magnitude if b_bytes > 0 else (float("inf") if bl_bytes > 0 else 0.0)
         return PrecisionDividendResult(
             weights_per_device=w, weights_per_device_low=w_low,
             kv_budget_per_device=budget, kv_budget_per_device_low=budget_low,
             kv_per_request=kv, kv_per_request_low=kv_low,
             kv_per_request_per_device=kv / tp_size, kv_per_request_per_device_low=kv_low / tp_size,
-            max_batch=b, max_batch_low=b_low, dividend=b_low / b,
-            budget_gain=(budget_low / budget).to("").magnitude,
+            max_batch=b, max_batch_low=b_low, dividend=dividend,
+            budget_gain=budget_gain,
         )
 
 

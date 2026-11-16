@@ -295,7 +295,7 @@ def calc_target_evidence_horizon(
     r_tol = tolerance_radius.to(ureg.meter)
     sig = sensor_noise.to(ureg.meter)
     if sig >= r_tol:
-        raise ValueError("sensor_noise must be strictly less than tolerance_radius.")
+        raise ValueError("sensor_noise must be less than tolerance_radius.")
 
     v_drift = drift_velocity.to(ureg.meter / ureg.second)
     tau = (r_tol - sig) / v_drift
@@ -361,7 +361,7 @@ def calc_tracked_evidence_horizon(tolerance_radius, initial_error, slip_accelera
 
     margin = (tolerance_radius - initial_error).to(ureg.meter)
     if margin.magnitude <= 0:
-        raise ValueError("initial_error must be strictly less than tolerance_radius.")
+        raise ValueError("initial_error must be less than tolerance_radius.")
     a = slip_acceleration.to(ureg.meter / ureg.second**2)
     return ((2 * margin / a) ** 0.5).to(ureg.millisecond)
 

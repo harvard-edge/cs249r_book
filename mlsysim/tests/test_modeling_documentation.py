@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pytest
 
+pytest.importorskip("numpydoc")
+
 CHECKER = runpy.run_path(str(Path(__file__).parents[1] / "scripts" / "check_modeling_docs.py"))
 CONFIG = CHECKER["configuration"]()
 

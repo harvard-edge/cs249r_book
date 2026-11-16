@@ -196,6 +196,19 @@ def load_sourced_registry(yaml_file, *, name: str, doc: str = "", module: str | 
     return type(name, (Registry,), attrs)
 
 
+def load_yaml_entry(
+    yaml_file,
+    *,
+    model_cls=None,
+    tech_root: Any = None,
+    type_map: dict | None = None,
+):
+    """Load and validate a single standalone YAML entry with ``@tech:`` and ``@prov:`` resolution."""
+    raw = _load_mapping(yaml_file)
+    raw.pop("__key__", None)
+    return _instantiate(raw, model_cls=model_cls, type_map=type_map, tech_root=tech_root)
+
+
 def load_collection(yaml_file, model_cls=None, *, name: str, doc: str = "",
                     tech_root: Any = None, type_map: dict | None = None,
                     module: str | None = None) -> type:
