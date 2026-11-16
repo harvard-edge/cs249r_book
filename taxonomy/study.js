@@ -133,7 +133,11 @@
   const subjectHref = (row) => `#subject=${encodeURIComponent(row.id)}`;
   const conceptHref = (id) => `#concept=${encodeURIComponent(id)}`;
   const conceptLink = (id) => `<a href="${conceptHref(id)}"${concepts.get(id)?.scope === 'background' ? ' class="is-background"' : ''}>${esc(concepts.get(id)?.label || id)}</a>`;
-  const subjectLink = (row) => `<a href="${subjectHref(row)}">${code(row.code)}${esc(row.label)}</a>`;
+  // One name per entry: the short display name everywhere; the full name appears
+  // once, as a subtitle on the entry's own page, when it differs.
+  const nm = (x) => x?.display_label || x?.label || '';
+  const fullName = (x) => (x?.display_label && x.label && x.display_label !== x.label ? `<p class="bok-fullname">${esc(x.label)}</p>` : '');
+  const subjectLink = (row) => `<a href="${subjectHref(row)}">${code(row.code)}${esc(nm(row))}</a>`;
   // Preserve the reviewed proposition; a relation category can be broader.
   const verb = (rel) => rel.predicate || relations.get(rel.relation)?.forward || rel.relation || '';
   const verbMeasure = document.createElement('canvas').getContext('2d');
@@ -416,7 +420,7 @@
       const row = rows.get(id);
       if (row) return subjectLink(row);
       const area = areas.find((a) => a.id === id);
-      return area ? `<a href="#area=${esc(area.id)}">${code(area.code)}${esc(area.label)}</a>` : esc(id);
+      return area ? `<a href="#area=${esc(area.id)}">${code(area.code)}${esc(nm(area))}</a>` : esc(id);
     });
   }
 
@@ -430,13 +434,13 @@
     const area = areas.find((a) => a.id === state.area);
     const group = groupOf(area);
     renderTree(area.id, null);
-    crumbs([`<span>${esc(group.label)}</span>`, `<span aria-current="page">${esc(area.code || '')} ${esc(area.label)}</span>`]);
+    crumbs([`<span>${esc(group.label)}</span>`, `<span aria-current="page">${esc(area.code || '')} ${esc(nm(area))}</span>`]);
     $('bok-entry-body').innerHTML = `<div class="bok-entry-head">
-        <div><h2>${code(area.code)}${esc(area.label)}</h2><p class="bok-lead">${esc(area.question)}</p><p class="bok-text">${esc(area.scope)}</p></div>
+        <div><h2>${code(area.code)}${esc(nm(area))}</h2>${fullName(area)}<p class="bok-lead">${esc(area.question)}</p><p class="bok-text">${esc(area.scope)}</p></div>
         ${facts([['Code', esc(area.code)], ['Group', esc(group.label)], ['Subjects', String(area.rows.length)], ['Concepts', String(conceptCount(area))]])}
       </div>
       <h3 class="bok-section">Subjects</h3><table class="bok-table"><thead><tr><th>Code</th><th>Subject</th><th>Definition</th><th class="bok-num">Concepts</th></tr></thead><tbody>${area.rows.map((row) =>
-        `<tr><td class="bok-mono">${esc(row.code || '')}</td><td><a href="${subjectHref(row)}">${esc(row.label)}</a></td><td>${esc(row.definition)}</td><td class="bok-num">${row.concepts.length}</td></tr>`).join('')}</tbody></table>`;
+        `<tr><td class="bok-mono">${esc(row.code || '')}</td><td><a href="${subjectHref(row)}">${esc(nm(row))}</a></td><td>${esc(row.definition)}</td><td class="bok-num">${row.concepts.length}</td></tr>`).join('')}</tbody></table>`;
   }
 
   function renderSubject() {
@@ -444,16 +448,16 @@
     const area = areaOf.get(row.id);
     const group = groupOf(area);
     renderTree(area.id, row.id);
-    crumbs([`<a href="#area=${esc(area.id)}">${esc(area.code || '')} ${esc(area.label)}</a>`, `<span aria-current="page">${esc(row.code || '')}</span>`]);
+    crumbs([`<a href="#area=${esc(area.id)}">${esc(area.code || '')} ${esc(nm(area))}</a>`, `<span aria-current="page">${esc(row.code || '')}</span>`]);
     const contexts = (row.contexts || []).map((id) => lenses.find(([l]) => l === id)?.[1]).filter(Boolean).join(', ');
     const chapters = (row.book_chapters || []).map((c) => `<a href="${esc(c.url)}">${esc(VOLUME[c.volume] || c.volume)}: ${esc(c.title)}</a>`).join('<br>');
     const elsewhere = (row.excludes || []).map((t) => `<li>${scopeNote(t)}</li>`).join('');
     const covers = (row.includes || []).map((t) => `<li>${scopeNote(t)}</li>`).join('');
     const gaps = (gapsOf.get(row.id) || []).map((g) => `<li><b>${esc(g.topic || g.label)}.</b> ${esc(g.reason.replace(/^Known gap for v[\d.]+\.\s*/, ''))}</li>`).join('');
     $('bok-entry-body').innerHTML = `<div class="bok-entry-head">
-        <div><h2>${code(row.code)}${esc(row.label)}</h2><p class="bok-lead">${esc(row.definition)}</p>
+        <div><h2>${code(row.code)}${esc(nm(row))}</h2>${fullName(row)}<p class="bok-lead">${esc(row.definition)}</p>
           ${covers ? `<p class="bok-text-label">Covers</p><ul class="bok-list">${covers}</ul>` : ''}</div>
-        ${facts([['Code', esc(row.code)], ['Area', `<a href="#area=${esc(area.id)}">${esc(area.code || '')} ${esc(area.label)}</a>`], ['Group', esc(group.label)],
+        ${facts([['Code', esc(row.code)], ['Area', `<a href="#area=${esc(area.id)}">${esc(area.code || '')} ${esc(nm(area))}</a>`], ['Group', esc(group.label)],
           ['Concepts', String(row.concepts.length)], ['Systems', esc(contexts)], ['Taught in', chapters]])}
       </div>
       ${conceptTable(row.concepts, 'Concepts')}
@@ -726,11 +730,11 @@
     const area = row && areaOf.get(row.id);
     if (visited[visited.length - 1] !== id) visited.push(id);
     renderTree(area?.id, row?.id);
-    crumbs(area ? [`<a href="#view=concept">Concept map</a>`, `<a href="#area=${esc(area.id)}">${esc(area.code || '')} ${esc(area.label)}</a>`, `<a href="${subjectHref(row)}">${esc(row.code || '')} ${esc(row.label)}</a>`, `<span aria-current="page">${esc(c.label)}</span>`]
+    crumbs(area ? [`<a href="#view=concept">Concept map</a>`, `<a href="#area=${esc(area.id)}">${esc(area.code || '')} ${esc(nm(area))}</a>`, `<a href="${subjectHref(row)}">${esc(row.code || '')} ${esc(nm(row))}</a>`, `<span aria-current="page">${esc(c.label)}</span>`]
       : [`<a href="#view=concept">Concept map</a>`, `<span aria-current="page">${esc(c.label)}</span>`]);
     const also = (secondaryOf.get(id) || []).map((r) => subjectLink(r)).join('<br>');
     const passages = (linksOf.get(id) || []).map((l) => `<tr><td>${esc(VOLUME[l.volume] || l.volume)}</td><td><a href="${esc(l.url)}">${esc(l.chapter_title)}</a></td><td>${esc(l.label)}</td></tr>`).join('');
-    const chapters = (row?.book_chapters || []).map((ch) => `<tr><td>${esc(VOLUME[ch.volume] || ch.volume)}</td><td><a href="${esc(ch.url)}">${esc(ch.title)}</a></td><td>Teaches ${esc(row.label)}</td></tr>`).join('');
+    const chapters = (row?.book_chapters || []).map((ch) => `<tr><td>${esc(VOLUME[ch.volume] || ch.volume)}</td><td><a href="${esc(ch.url)}">${esc(ch.title)}</a></td><td>Teaches ${esc(nm(row))}</td></tr>`).join('');
     const links = (outgoing.get(id)?.length || 0) + (incoming.get(id)?.length || 0);
     const feedback = new URL('https://github.com/harvard-edge/cs249r_book/issues/new');
     feedback.search = new URLSearchParams({ template: 'taxonomy_feedback.yml', title: `[Taxonomy] ${c.label}`, target: `${id} (version ${data.framework.version})` }).toString();
@@ -745,7 +749,7 @@
           </div>
           <p class="bok-action-status" id="bok-action-status" role="status"></p>
           ${c.scope === 'background' ? '<p class="bok-text">A background concept, from an adjacent discipline that ML systems build on.</p>' : ''}</div>
-        ${facts([['Identifier', `<code>${esc(id)}</code>`], ['Subject', row ? subjectLink(row) : ''], ['Area', area ? `<a href="#area=${esc(area.id)}">${esc(area.code || '')} ${esc(area.label)}</a>` : ''],
+        ${facts([['Identifier', `<code>${esc(id)}</code>`], ['Subject', row ? subjectLink(row) : ''], ['Area', area ? `<a href="#area=${esc(area.id)}">${esc(area.code || '')} ${esc(nm(area))}</a>` : ''],
           ['Also part of', also], ['Relationships', String(links)]])}
       </div>
       <figure class="bok-mapbox"><div class="bok-canvas" id="bok-canvas" role="img" aria-label="Concept map of ${esc(c.label)}; the relationships table lists the same links as text"></div>
@@ -1460,8 +1464,8 @@
           ${expandBtn('bok-coupling-figure')}
         </div>
         <div class="bok-area-pickers">
-          <label><span id="bok-explore-label">Focus area</span><select id="bok-explore-area"><option value="">All areas</option>${areas.map((a) => `<option value="${esc(a.id)}">${esc(a.code)} · ${esc(a.label)}</option>`).join('')}</select></label>
-          <label id="bok-explore-target-wrap" hidden>To area<select id="bok-explore-target" disabled><option value="">All connections</option>${areas.map((a) => `<option value="${esc(a.id)}">${esc(a.code)} · ${esc(a.label)}</option>`).join('')}</select></label>
+          <label><span id="bok-explore-label">Focus area</span><select id="bok-explore-area"><option value="">All areas</option>${areas.map((a) => `<option value="${esc(a.id)}">${esc(a.code)} · ${esc(nm(a))}</option>`).join('')}</select></label>
+          <label id="bok-explore-target-wrap" hidden>To area<select id="bok-explore-target" disabled><option value="">All connections</option>${areas.map((a) => `<option value="${esc(a.id)}">${esc(a.code)} · ${esc(nm(a))}</option>`).join('')}</select></label>
         </div>
         <div class="bok-viz-split">
           <div class="bok-viz-stage" id="bok-coupling-stage"></div>
@@ -1478,7 +1482,7 @@
     const sorted = [...concepts.values()].sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' }));
     const byLetter = new Map();
     for (const c of sorted) push(byLetter, /[a-z]/i.test(c.label[0]) ? c.label[0].toUpperCase() : '#', c);
-    const options = areas.map((a) => `<option value="${esc(a.id)}">${esc(a.code ? `${a.code} ` : '')}${esc(a.label)}</option>`).join('');
+    const options = areas.map((a) => `<option value="${esc(a.id)}">${esc(a.code ? `${a.code} ` : '')}${esc(nm(a))}</option>`).join('');
     $('bok-glossary').innerHTML = `<div class="bok-entry-head"><div><h2>Glossary</h2><p class="bok-lead">Every concept in the taxonomy with its definition and the subject it belongs to.</p></div></div>
       <div class="bok-gloss-bar">
         <label class="bok-sr" for="bok-gloss-filter">Filter the glossary</label>
@@ -2082,9 +2086,15 @@
     if (!state.activeSymptom && g.symptoms?.length) state.activeSymptom = g.symptoms[0].id;
     const subj = (id) => (rows.has(id) ? `<a class="bok-guide-subject" href="${subjectHref(rows.get(id))}">${code(rows.get(id).code)}${esc(rows.get(id).display_label || rows.get(id).label)}</a>` : esc(id));
     const list = (ids, f) => (ids && ids.length ? `<ul class="bok-guide-list">${ids.map((id) => `<li>${f(id)}</li>`).join('')}</ul>` : '<span class="bok-muted">—</span>');
+    // Each role's subjects read in taxonomy order (group, then code), so the color
+    // swatches run in bands instead of jumping; the authored role order stays.
+    const byGroupCode = (ids) => [...(ids || [])].sort((x, y) => {
+      const gx = BAND_ORDER.indexOf(groupOfSubject(x)), gy = BAND_ORDER.indexOf(groupOfSubject(y));
+      return (gx - gy) || String(rows.get(x)?.code || x).localeCompare(String(rows.get(y)?.code || y), undefined, { numeric: true });
+    });
     const roles = g.roles.map((r) => `<tr id="guide-role-${esc(r.id)}"><td><strong>${esc(r.label)}</strong><span class="bok-alias">${esc(r.summary)}</span>
         <span style="display:block;margin-top:4px;font-size:0.76rem"><button type="button" class="bok-viz-clear" data-pick-role="${esc(r.id)}" style="margin-right:10px">Show in diagram &uarr;</button><a href="#overlay=role:${esc(r.id)}" class="bok-viz-clear">Highlight on Matrix &nearr;</a></span></td>
-        <td>${list(r.core, subj)}</td><td>${list(r.working, subj)}</td></tr>`).join('');
+        <td>${list(byGroupCode(r.core), subj)}</td><td>${list(byGroupCode(r.working), subj)}</td></tr>`).join('');
     const symptoms = g.symptoms.map((s) => `<tr id="guide-symptom-${esc(s.id)}"><td><strong>${esc(s.label)}</strong><span class="bok-alias">${esc(s.signal)}</span>
         <span style="display:block;margin-top:4px;font-size:0.76rem"><button type="button" class="bok-viz-clear" data-symptom-pick="${esc(s.id)}">Open in triage diagram &uarr;</button></span>
         ${s.quantities && s.quantities.length ? `<span class="bok-alias" style="display:block;margin-top:4px">Measured by: ${s.quantities.map((id) => conceptLink(id)).join(', ')}</span>` : ''}</td>
