@@ -373,7 +373,7 @@ def build() -> Sheet:
         meta=f"H100 fleet · {nm(wl)} serving replica",
         notation=[
             ("Reliability", f'MTTF of one part · MTBF of the whole system · {v("T", "write")} checkpoint write time · {v("T", "ckpt")} checkpoint interval · {v("W")} fraction of time wasted · {v("T")} time'),
-            ("Serving", f'{v("M", "KV")} KV bytes per request · {v("S")} context tokens · {v("B")} slots per replica · {v("N", "TP")} tensor-parallel GPUs · BW HBM bandwidth · {v("λ")} requests/s · {v("t", "s")} service time · {v("ρ")} utilization'),
+            ("Serving", f'{v("M", "KV")} KV bytes per request · {v("S")} context tokens · {v("B")} slots per replica · {v("N", "TP")} tensor-parallel GPUs · BW HBM bandwidth · {v("λ")} requests/s · {v("t", "s")} slot-hold (service) time · {v("ρ")} fraction of slots busy'),
             ("Facility", f'{v("P", "IT")} IT power · PUE = {v("P", "facility")}/{v("P", "IT")} · {v("E")} energy · CI grid g CO₂/kWh · {A}= example input'),
         ],
         cols=[
