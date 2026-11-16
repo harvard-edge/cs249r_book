@@ -223,6 +223,7 @@ def build() -> Sheet:
                 Card("Activations (training)", f'{v("M", "act")} ≈ 34 · {v("B")} · {v("S")} · {v("d")} bytes per layer',
                      holds="Ch 8's GPT-style constant; an estimate for Llama.",
                      ex=f'Llama 3 8B, {v("B")} = 1, {v("S")} = {fmt(S["ctx"])}: {fmt(act_layer / 2**20)} MiB × {NL} layers = {n(f"{act_layer * NL / 1e9:.1f} GB")}.'),
+                Note("Before you trust the number:", f'every term in seconds or bytes? GB vs GiB? Compute-bound only if {v("I")} &gt; ridge? Memory counted with KV cache and activations? {v("ρ")} below about 0.7 for a tail target?'),
             ], f"Ch 8, 10, 13 · H100 {fmt(CAP_GIB)} GiB = {CAP / 1e9:.1f} GB"),
             Col("3 How fast?", [
                 Chart(rp.svg("H100 roofline")),
@@ -291,14 +292,13 @@ def build() -> Sheet:
                 Card("Quantization", f'bytes × {frac(v("b"), "16")} from FP16, &nbsp; {v("s")} = {frac("max − min", "2" + "<sup>" + v("b") + "</sup> − 1")}',
                      ex=f'Only quantized tensors shrink: INT4 weights cut decode bytes at {v("B", "max")} by just {fmt(int4_cut * 100)}%, since the FP16 KV cache dominates. '
                         f'Range [{lo:g}, {hi:g}]: {v("s")} = {n(f"{d8:.3f}")} at INT8, {n(f"{d4:.2f}")} at INT4. Error per value ≤ {v("s")}/2.'),
-                Card("Pruning", f'bytes ≈ (1 − {v("σ")}) · {v("P")} · (value + index bytes)',
+                Card("Pruning", [f'with index: (1 − {v("σ")}) · {v("P")} · (value + index) bytes', f'with mask: (1 − {v("σ")}) · {v("P")} · value + {v("P")}/8 bytes'],
                      ex=f'{A}{v("σ")} = {fmt(S["prune"] * 100)}%, FP16: a {S["idx_bytes"]}-byte relative index per value gives {n(gb(prune_idx), True)}, no saving; a 1-bit mask gives {gb(prune_mask)}. '
                         f'2:4 sparsity doubles H100 peak math ({fmt(sparse_ratio)}×); bandwidth-bound decode gains only the fewer bytes.'),
                 Card("Movement costs more than math", f'{v("E")} ≈ {v("D", "vol")} · {v("e", "byte")} + {v("O")} · {v("e", "op")}', chapter="Ch 1"),
                 Table(["45 nm (Horowitz)", "INT8 mult", "FP16 mult", "FP32 mult", "DRAM, per byte"],
                       [["pJ", f"{E_INT8:g}", f"{E_FP16:g}", f"{E_FP32:g}", fmt(e_byte)]]),
                 f'<p class="holds">A DRAM byte ≈ {fmt(e_byte / E_FP16)}× an FP16 multiply. At {v("I")} ≈ 1 (batch-1 decode), energy is almost all movement.</p>',
-                Note("Before you trust the number:", f'every term in seconds or bytes? GB vs GiB? Compute-bound only if {v("I")} &gt; ridge? Memory counted with KV cache and activations? {v("ρ")} below about 0.7 for a tail target?'),
             ], "Ch 6, 10, 11"),
         ],
         bottom=Table(["Reference node", "peak", "memory bandwidth", "memory", "ridge (FLOP/B)", "launch", "power"], [
