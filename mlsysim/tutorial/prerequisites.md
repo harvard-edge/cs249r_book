@@ -80,7 +80,7 @@ Expected output:
 ```
 mlsysim v0.3.1
 ResNet-50 on A100: 0.07 ms, bottleneck=Compute
-Hardware: 52 accelerators
+Hardware: 54 accelerators
 Models:   44 workloads
 All checks passed.
 ```
