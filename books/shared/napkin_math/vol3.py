@@ -465,6 +465,7 @@ def build() -> Sheet:
     ep_r = ep.result
     ep_model, ep_total = ep_r.model_time.to("s").magnitude, ep_r.total_time.to("s").magnitude
     ep_bound = _check(1 / (1 - ep_model / ep_total), sd_r.episode_speedup_bound, "episode bound")
+    ep_at_hi = _check(ep_total / (ep_total - ep_model + ep_model / sd_hi), sd_r.episode_speedup_high, "episode at high speedup")
 
     cw = SC.RepairCompactionWatermarks
     cw_r = cw.result
@@ -523,6 +524,9 @@ def build() -> Sheet:
     sq_fail = _check(math.log((1 - sq.p_degraded) / (1 - sq.p_base)), sq_r.failure_step, "SPRT failure step")
     sq_succ = _check(math.log(sq.p_degraded / sq.p_base), sq_r.success_step, "SPRT success step")
     sq_rate = sq.arrival_rate.to("1/hour").magnitude * sq.fraction
+    sq_B = math.log(sq.beta / (1 - sq.alpha))
+    sq_drift = _check((1 - sq.p_degraded) * sq_fail + sq.p_degraded * sq_succ, sq_r.drift, "SPRT drift")
+    sq_EN = _check(((1 - sq.beta) * sq_A + sq.beta * sq_B) / sq_drift, sq_r.expected_samples, "SPRT E[N]")
     sq_hours = _check(sq_r.expected_samples / sq_rate + sq.label_delay.to("hour").magnitude, sq_r.decision_time.to("hour").magnitude, "SPRT decision time")
     sq2_hours = SC.AcceptanceCanaryMonitorDoubled.result.decision_time.to("hour").magnitude
 
@@ -545,6 +549,7 @@ def build() -> Sheet:
             reach *= pp
         return tot
 
+    ao_names = {"record": "record", "use": "use", "process": "audit", "outcome": "tests", "target": "target review"}
     ao_t = [_check(check_time(o), ao_r.time_per_attempted[k].to("s").magnitude, f"admission order {k}") for k, o in enumerate(ao.orders)]
 
     cd = SC.CurationCohortDispositions
@@ -682,13 +687,13 @@ def build() -> Sheet:
             Col("2 Will the context fit, and at what price?", [
                 Card("Context budget", 'fixed + evidence ≤ window − output reserve', chapter="Ch 4",
                      ex=f'{fmt(cb.window)} window − {A}{fmt(cb.output_reserve)} output reserve − {fmt(fixed)} fixed (instructions, tools, state) = {n(fmt(obs_budget))} for evidence.',
-                     so=f'appending {A}{fmt(cb.observation_per_turn)} per turn fills it at turn {turns_fit + 1} of {cb.turns}; select evidence instead.'),
+                     so=f'appending {A}{fmt(cb.observation_per_turn)} per turn fills it at {n(f"turn {turns_fit + 1} of {cb.turns}", True)}; select evidence instead.'),
                 Card("Prefix caching prices the resend",
                      f'$/turn = {v("c", "cache")}({v("S")} − Δ{v("S", "turn")}) + {v("c", "in")}Δ{v("S", "turn")} + {v("c", "out")}{v("K")}', chapter="Ch 4, 19",
                      holds="From turn 2, when the prior request is a byte-identical prefix.",
                      ex=f'Summed over the {H_rs} turns of card 1·2, {v("K")} = {K_rs}, at {A}{usd_m(bill.input_price)}/{usd_m(bill.input_price * bill.cached_fraction)}/{usd_m(bill.output_price)} per M: '
                         f'${bill_fresh:.2f} fresh, {n(f"${bill_cached:.2f}")} cached.',
-                     so=f'{bill_fresh / bill_cached:.1f}× cheaper: keep stable content first so the prefix stays identical.'),
+                     so=f'{round(bill_fresh, 2) / round(bill_cached, 2):.1f}× cheaper: keep stable content first so the prefix stays identical.'),
                 Card("KV state of one trajectory",
                      f'{v("M", "KV")} = 2 · {v("N", "L")} · {v("H", "KV")} · {v("d", "head")} · {v("s", "elem")} · {v("S")}', chapter="Ch 5",
                      holds=f'{v("N", "L")} layers, {v("H", "KV")} KV heads, {v("d", "head")} head dimension.',
@@ -700,7 +705,7 @@ def build() -> Sheet:
                 Card("Blind retry duplicates effects",
                      f'{v("p", "dup")} = (1 − {v("q", "req")})<sup>2</sup> · {v("q", "rep")}',
                      chapter="Ch 7", holds=f'{v("q", "req")}, {v("q", "rep")} request, reply loss; {v("p", "dup")} chance a retry repeats the effect.',
-                     ex=f'{A}0.98² · 0.02 = {_pct(p_dup, 2)} × {fmt(br_calls)} calls/day = {n(fmt(dups_day))}.',
+                     ex=f'{A}both {qreq:g}: {1 - qreq:g}² · {qrep:g} = {_pct(p_dup, 2)} × {fmt(br_calls)}/day = {n(fmt(dups_day))}.',
                      so='settle before retrying: an idempotency key or a status probe.'),
                 Card("Sandbox pool: mean leases plus a ready reserve",
                      [f'{v("N", "active")} = {v("λ")} · {v("T", "hold")} &nbsp;(mean)',
@@ -711,8 +716,8 @@ def build() -> Sheet:
                      so='size for the mean plus a small reserve for the tail.'),
                 Card("Injection exposure grows with reads", f'Pr(exposed) = 1 − (1 − {v("q", "inj")})<sup>{v("n", "read")}</sup>', chapter="Ch 9",
                      holds=f'{v("q", "inj")} payload share of read items; {v("n", "read")} untrusted reads per task.',
-                     ex=f'{A}{v("q", "inj")} = {_pct(q_pay)}: 1 − 0.99<sup>{inj.reads["repair"]}</sup> = {n(_pct(expo["repair"]))}; 1 − 0.99<sup>{inj.reads["research"]}</sup> = {n(_pct(expo["research"]))} ({_pct(expo_scr, 1)} screened).',
-                     so='screens lower the rate; only containment bounds the effect.'),
+                     ex=f'{A}{v("q", "inj")} = {_pct(q_pay)}: 1 − 0.99<sup>{inj.reads["repair"]}</sup> = {n(_pct(expo["repair"]))}; 1 − 0.99<sup>{inj.reads["research"]}</sup> = {n(_pct(expo["research"]))}; screened to {_pct(q_pay)} × {_pct(inj.miss_rate)} = {_pct(q_pay * inj.miss_rate, 2)}: {_pct(expo_scr, 1)}.',
+                     so='screens lower the rate; containment bounds the effect.'),
             ], "Ch 7–9"),
         ],
         bottom=Table(["Llama 3 70B", f"{v('P')} = {P / 1e9:.1f}B", f"{v('N', 'L')} = {NL}", f"{v('H', 'KV')} = {HKV}", f"{v('d', 'head')} = {DH}", f"context {fmt(S_ctx)}"], [
@@ -751,7 +756,7 @@ def build() -> Sheet:
                      chapter="Ch 12",
                      holds=f'{v("p", "fix")} success; {v("C", "fix")}, {v("C", "fallback")} repair, unwind-and-rebuild cost.',
                      ex=f'{A}{v("C", "fix")} = {rv.startup_time.to("s").magnitude:g} + {rv.repair_output}/{rv_rate:g} + {rv.validation_time.to("s").magnitude:g} = {t_rep:.2f} s; '
-                        f'{v("C", "fallback")} = {rv.unwind_time.to("s").magnitude:g} + {rv.rebuild_time.to("s").magnitude:g} = {t_fb:.1f} s; break-even {v("p", "fix")} = {t_rep:.2f}/{t_fb:.1f} = {n(_pct_up(pstar_t, 2))}.',
+                        f'{v("C", "fallback")} = {rv.unwind_time.to("s").magnitude:g} + {rv.rebuild_time.to("s").magnitude:g} = {t_fb:.1f} s; break-even {v("p", "fix")} = {t_rep:.2f}/{t_fb:.1f} = {n(_pct(pstar_t, 2))}.',
                      so='repair first whenever it succeeds more often.'),
                 Card("Expected irreversible loss", f'{v("L", "A")} = Σ<sub><i>a</i></sub> Pr(bad <i>a</i>) · impact(<i>a</i>) · (1 − recovered(<i>a</i>))', chapter="Ch 12",
                      ex=f'{A}{_pct(wk.wrong_change_probability)} × ${fmt(impact)} = ${fmt(l0)}; canary catches {_pct(wk.canary_catch_rate)}, reverts {_pct(wk.canary_recovery_fraction)}: '
@@ -832,12 +837,11 @@ def build() -> Sheet:
                      ex=f'{A}API per output token, {de.input_per_output:g} input tokens each ({_pct(de.cached_fraction)} cached): {de.input_per_output:g} × ${p_in_w * 1e6:.2f} + ${_per_tok(de.output_price) * 1e6:g} = ${api_out * 1e6:.2f}/M. '
                         f'${fixed_h:g} / (3600 · {fmt(rate)} · (${api_out * 1e6:.2f} − ${_per_tok(de.variable_price) * 1e6:g})/M) = {n(_pct_up(u_star, 1))}.',
                      so='below that load, renting is cheaper.'),
-                Card("Speculative decoding", f'speedup = {frac(v("a") + " + 1", v("γ") + v("c", "d") + " + 1")}', chapter="Ch 19",
-                     holds=f'{v("γ")} drafted tokens per round, {v("c", "d")} draft cost per target step, {v("a")} drafts kept per round.',
-                     ex=f'{A}{v("γ")} = {sd.draft_length}, {v("c", "d")} = {sd.draft_cost_ratio:g}: {v("a")} = {sd.accepted_high:g} → {n(f"{sd_hi:.2f}×")}; {v("a")} = {sd.accepted_low:g} → {sd_lo:.2f}× (slower). '
-                        f'Model calls are {ep_model:.1f} of {ep_total:.1f} s, so the episode gains ≤ {ep_bound:.2f}×.',
+                Card("Speculative decoding", f'speedup = {frac(v("a") + " + 1", v("γ") + v("φ") + " + 1")}', chapter="Ch 19",
+                     holds=f'{v("γ")} drafted tokens per round, {v("φ")} draft cost per target step, {v("a")} drafts kept per round.',
+                     ex=f'{A}{v("γ")} = {sd.draft_length}, {v("φ")} = {sd.draft_cost_ratio:g}: {v("a")} = {sd.accepted_high:g} → {n(f"{sd_hi:.2f}×")}; {v("a")} = {sd.accepted_low:g} → {sd_lo:.2f}× (slower). '
+                        f'A {ep_total:.1f} s episode with {ep_model:.2f} s of model calls: at {sd_hi:.2f}×, {ep_total:.1f} / ({ep_total - ep_model:.2f} + {ep_model:.2f}/{sd_hi:.2f}) = {ep_at_hi:.2f}×; even free model calls give {ep_total:.1f}/{ep_total - ep_model:.2f} = {ep_bound:.2f}×.',
                      so='speed up the term that dominates; here it is the tests.'),
-                Note("Price and latency are different accounts.", 'batching evens out input and output work, but a trajectory still waits on each output token (Ch 2).'),
             ], "Ch 19"),
             Col("8 Can the context shrink?", [
                 Chart(cwp.svg("Request length over turns with compaction at a high watermark"), caption=f"Dashed: {cw.trigger / 1000:g}K trigger. Accent: target {cw.target / 1000:g}K, a pass every {cyc} turns. Brown: target {cw.alternate_target / 1000:g}K, every {cyc_alt}."),
@@ -848,13 +852,13 @@ def build() -> Sheet:
                      ex=f'{A}{tcat.registered} × {tcat.descriptor_tokens} = {fmt(tc_full)} tokens vs {tcat.selected} × {tcat.descriptor_tokens} + {tcat.selection_overhead} = {fmt(tc_sel)}.',
                      so=f'{fmt(tc_full - tc_sel)} fewer input tokens on every call.'),
                 Card("Shape observations before they enter context", 'carried tokens = shaped tokens × later calls', chapter="Ch 7",
-                     ex=f'{A}{ob.raw_bytes.to("MB").magnitude:g} MB log / {ob.bytes_per_token.magnitude:g} B per token = {fmt(raw_tok / 1e6)}M tokens = {raw_win:g} windows; '
+                     ex=f'{A}{ob.raw_bytes.to("MB").magnitude:g} MB log / {ob.bytes_per_token.magnitude:g} B per token = {fmt(raw_tok / 1e6)}M tokens / {fmt(ob.window)}-token window = {n(f"{raw_win:g} windows", True)}; '
                         f'a {fmt(ob.shaped_tokens)}-token view × {ob.carry_calls} calls = {fmt(carried)} tokens × {usd_m(ob.input_price)}/M = {n(f"${carried_usd:.2f}")}.',
                      so='the raw log never fits; even the shaped view is paid on every later call.'),
                 Card("Vector index memory", 'bytes = vectors × bytes per vector', chapter="Ch 6",
                      holds='HNSW adds neighbor links per vector; IVF-PQ keeps one byte per subvector.',
                      ex=f'{A}{fmt(an.vectors / 1e6)}M × {an.dimension} × 2 B = {an_raw / 1e9:.2f} GB raw; + {an.links_per_node} links × 8 B = {an_graph / 1e9:.2f} GB (HNSW); '
-                        f'{an.subvectors} one-byte codes = {n(f"{an_codes / 1e9:.2f} GB")} (IVF-PQ). An exact scan of the raw vectors at {fmt(cpu_bw / 1e9)} GB/s: {fmt(vs_t * 1e3)} ms.',
+                        f'{an.subvectors} one-byte codes = {n(f"{an_codes / 1e9:.2f} GB")} (IVF-PQ).',
                      so=f'PQ codes are {an_raw / an_codes:.0f}× smaller than raw vectors and fit in RAM; the graph adds memory.'),
             ], "Ch 4, 6, 7"),
             Col("9 Can it finish sooner?", [
@@ -862,10 +866,10 @@ def build() -> Sheet:
                      ex=f'{A}Nodes ' + ", ".join(f"{dg_d[k]:g}" for k in sorted(dg_d)) + f' s on {dg.slots} slots: work {dg_work:g} / {dg.slots} = {dg_work / dg.slots:.1f} s; '
                         f'path ' + " → ".join(str(k) for k in path) + ' = ' + " + ".join(f"{dg_d[k]:g}" for k in path) + f' = {n(f"{dg_cp:g} s")}.',
                      so=f'only shortening the critical path helps; {dg_work / dg_cp:.2f}× over serial.'),
-                Chart(kp.svg("Mean queue wait against utilization, Poisson against bursty traffic"), caption=f"Solid: bursty, (c²ₐ + c²ₛ)/2 = {kq_v:g}. Dashed: M/M/1. {v('t', 's')} = {t_s1:g} s."),
-                Card("Queueing with bursty traffic (Kingman)", f'E[wait] ≈ {frac("c²ₐ + c²ₛ", "2")} · {frac(v("ρ"), "1 − " + v("ρ"))} · {v("t", "s")}', chapter="Ch 19",
-                     holds='c²ₐ, c²ₛ squared variation of arrivals and service (1 for M/M/1).',
-                     ex=f'{A}c²ₐ = {kq.arrival_scv:g}, c²ₛ = {kq.service_scv:g}, {v("t", "s")} = {t_s1:g} s: {kq_v:g} × {kq.low_utilization:g}/{1 - kq.low_utilization:.1f} = {n(f"{fmt(kq_lo)} s")} at {v("ρ")} = {kq.low_utilization:g}; '
+                Chart(kp.svg("Mean queue wait against utilization, Poisson against bursty traffic"), caption=f"Solid: bursty, ({v('v', 'a')} + {v('v', 's')})/2 = {kq_v:g}. Dashed: M/M/1. {v('t', 's')} = {t_s1:g} s."),
+                Card("Queueing with bursty traffic (Kingman)", f'E[wait] ≈ {frac(v("v", "a") + " + " + v("v", "s"), "2")} · {frac(v("ρ"), "1 − " + v("ρ"))} · {v("t", "s")}', chapter="Ch 19",
+                     holds=f'{v("v", "a")}, {v("v", "s")} squared CV of interarrival, service times (1: M/M/1).',
+                     ex=f'{A}{v("v", "a")} = {kq.arrival_scv:g}, {v("v", "s")} = {kq.service_scv:g}, {v("t", "s")} = {t_s1:g} s: {kq_v:g} × {kq.low_utilization:g}/{1 - kq.low_utilization:.1f} = {n(f"{fmt(kq_lo)} s")} at {v("ρ")} = {kq.low_utilization:g}; '
                         f'{kq_v:g} × {kq.high_utilization:g}/{1 - kq.high_utilization:.1f} = {fmt(kq_hi)} s at {kq.high_utilization:g}.',
                      so=f'bursts multiply the M/M/1 wait by {kq_v:g}; keep {v("ρ")} low.'),
                 Card("Stop an undetected loop", f'cost = {v("c", "in")}[{v("H")}{v("S", "base")} + Δ{v("S", "turn")}{frac(v("H") + "(" + v("H") + " − 1)", "2")}] + {v("c", "out")}{v("H")}{v("K")}', chapter="Ch 12",
@@ -874,7 +878,7 @@ def build() -> Sheet:
                         f'{v("H")} = {lp.ceiling} → {n(f"${lp_ceiling:.2f}")}; {v("H")} = {lp.stop_after} → ${lp_stop:.2f}.',
                      so=f'a detector at turn {lp.stop_after} saves {lp_ceiling / lp_stop:.0f}×.'),
                 Card("Retry storms", 'calls = (tries per layer)<sup>layers</sup>', chapter="Ch 12",
-                     ex=f'{A}{ra.attempts_per_layer}<sup>{layers}</sup> = {n(fmt(amp))} calls per failure. Rate = retries / window: {jt.retries} in {jt.burst_window.to("ms").magnitude:g} ms = {fmt(jt_burst)}/s; jittered over {jt.jitter_span.to("s").magnitude:g} s, {fmt(jt_spread)}/s.',
+                     ex=f'{A}{ra.attempts_per_layer}<sup>{layers}</sup> = {n(fmt(amp))} calls per failure. {jt.retries} retries released at once in {jt.burst_window.to("ms").magnitude:g} ms = {fmt(jt_burst)}/s; jittered over {jt.jitter_span.to("s").magnitude:g} s, {fmt(jt_spread)}/s.',
                      so='retry in one layer only, with jitter.'),
             ], "Ch 12, 18, 19"),
         ],
@@ -886,45 +890,48 @@ def build() -> Sheet:
         sub="Read left to right: release evidence, a clean training signal, then what training on trajectories costs.",
         meta="evidence, data, and training",
         notation=[
-            ("Symbols", f'{v("N")} tasks or pairs · {v("p")} pass rate of one rollout · {v("z")} = 1.96 (95%, two-sided) · {v("α")}, {v("β")} false-hold, missed-degradation rates'),
+            ("Symbols", f'{v("N")} tasks or pairs · {v("p")} pass rate of one rollout · {v("z")} = 1.96 (95%, two-sided) · rates are per attempt'),
         ],
         cols=[
             Col("10 Is the release safe?", [
                 Card("Zero failures is not zero risk", f'rate ≤ 1 − 0.05<sup>1/{v("n")}</sup> ≈ {fmt(rule)}/{v("n")}', chapter="Ch 9",
                      holds=f'95% one-sided bound after {v("n")} trials with no failure.',
-                     ex=f'{A}{v("n")} = {za.trials}: 1 − 0.05<sup>1/{za.trials}</sup> = {n(_pct_up(za_up, 2))} ({fmt(rule)}/{za.trials} = {_pct_up(rule / za.trials, 1)}). ≤ {_pct(za.target_rate)} needs {fmt(za_need)} clean runs.',
-                     so='a clean suite of 50 only rules out rates above 6%.'),
-                Card("Paired comparison", f'Δ = {frac(v("b") + " − " + v("c"), v("N"))} ± {v("z")}√({frac("(" + v("b") + " + " + v("c") + ")/" + v("N") + " − Δ²", v("N"))})', chapter="Ch 13",
-                     holds=f'{v("b")}, {v("c")} tasks only the candidate, only the baseline accepts.',
-                     ex=f'{A}{v("N")} = {pc_n}, {v("b")} = {pc.candidate_only}, {v("c")} = {pc.baseline_only}: Δ = {pc_d * 100:.1f} ± {math.ceil(pc_hw * 1000) / 10:.1f} points.',
-                     so='the interval spans 0: inconclusive; only the b + c split tasks carry signal.'),
-                Card("Sequential canary (SPRT)", [f'hold when Σ log-ratios ≥ ln{frac("1 − " + v("β"), v("α"))}',
-                                                  'time ≈ E[samples] / canary task rate + label delay'], chapter="Ch 14",
-                     ex=f'{A}{v("α")} = {sq.alpha:g}, {v("β")} = {sq.beta:g}: bound {sq_A:.2f}; a failure adds ln(0.25/0.10) = {sq_fail:.2f}, a pass {sq_succ:.2f}. '
-                        f'{sq_r.expected_samples:.0f} samples at {_pct(sq.fraction)} of {sq.arrival_rate.to("1/hour").magnitude:g}/h + {sq.label_delay.to("hour").magnitude:g} h = {n(f"{sq_hours:.1f} h")}.',
+                     ex=f'{A}{v("n")} = {za.trials}: 1 − 0.05<sup>1/{za.trials}</sup> = {n(_pct_up(za_up, 2), True)} ({fmt(rule)}/{za.trials} = {_pct_up(rule / za.trials, 1)}), above a {_pct(za.target_rate)} target, which needs {fmt(za_need)} clean runs.',
+                     so=f'a clean suite of {za.trials} only rules out rates above {_pct_up(za_up, 2)}.'),
+                Card("Paired comparison", f'Δ = {frac(v("n", "+") + " − " + v("n", "−"), v("N"))} ± {v("z")}√({frac("(" + v("n", "+") + " + " + v("n", "−") + ")/" + v("N") + " − Δ²", v("N"))})', chapter="Ch 13",
+                     holds=f'{v("n", "+")}, {v("n", "−")} tasks only the candidate, only the baseline accepts.',
+                     ex=f'{A}{v("N")} = {pc_n}, {v("n", "+")} = {pc.candidate_only}, {v("n", "−")} = {pc.baseline_only}: Δ = {pc_d * 100:.1f} ± {pc_hw * 100:.1f} points.',
+                     so='the interval spans 0: inconclusive; only the split tasks carry signal.'),
+                Card("Sequential canary (SPRT)", [f'hold at Σ log-ratios ≥ <i>A</i> = ln((1 − {v("α", "m")})/{v("α", "h")})',
+                                                  f'clear at Σ ≤ <i>B</i> = ln({v("α", "m")}/(1 − {v("α", "h")}))',
+                                                  f'E[<i>N</i><sub>s</sub>] ≈ ((1 − {v("α", "m")})<i>A</i> + {v("α", "m")}<i>B</i>) / mean log-ratio'], chapter="Ch 14",
+                     holds=f'{v("α", "h")} false-hold, {v("α", "m")} missed-degradation rate; <i>N</i><sub>s</sub> samples to decide.',
+                     ex=f'{A}acceptance {_pct(sq.p_base)} vs {_pct(sq.p_degraded)}, {v("α", "h")} = {sq.alpha:g}, {v("α", "m")} = {sq.beta:g}: <i>A</i> = {sq_A:.2f}, <i>B</i> = {sq_B:.2f}; a failure adds ln({1 - sq.p_degraded:.2f}/{1 - sq.p_base:.2f}) = {sq_fail:.2f}, a pass ln({sq.p_degraded:.2f}/{sq.p_base:.2f}) = {sq_succ:.2f}; '
+                        f'mean {sq_drift:.3f} → E[<i>N</i><sub>s</sub>] = {sq_EN:.1f}. At {_pct(sq.fraction)} of {sq.arrival_rate.to("1/hour").magnitude:g}/h: {sq_EN:.1f}/{sq_rate:g} + {sq.label_delay.to("hour").magnitude:g} h = {n(f"{sq_EN / sq_rate + sq.label_delay.to('hour').magnitude:.1f} h")}.',
                      so=f'doubling the canary share cuts it to {sq2_hours:.1f} h; evidence takes calendar time.'),
                 Card("Head sampling misses rare failures", f'Pr(no trace kept) = (1 − {v("θ")})<sup>{v("n", "f")}</sup>', chapter="Ch 14",
                      holds=f'{v("θ")} share of traces kept at random; {v("n", "f")} occurrences.',
                      ex=f'{A}{v("θ")} = {_pct(hs.retention_probability)}, {v("n", "f")} = {hs.occurrences}: 0.9<sup>5</sup> = {n(_pct(hs_miss))}.',
                      so='keep traces by verdict, not at random.'),
-                Note("Before you ship on a number:", f'is its interval narrower than the change? Were runs split by task? Are rare passes verified? Is a clean suite big enough ({fmt(rule)}/<i>n</i>)?'),
+                Note("Before you ship:", 'is the interval narrower than the change? Were runs split by task? Are rare passes verified?'),
             ], "Ch 9, 13, 14"),
             Col("11 Is the training signal clean?", [
                 Card("Split by task, not by run", f'Pr(all {v("k")} runs on one side) = {v("f", "tr", v("k"))} + (1 − {v("f", "tr")})<sup>{v("k")}</sup>', chapter="Ch 15",
                      holds=f'{v("f", "tr")} chance a run goes to training; {v("k")} runs per task.',
                      ex=f'{A}{v("f", "tr")} = {rs_.train_fraction:g}, {v("k")} = {rs_.attempts}: 0.8<sup>8</sup> + 0.2<sup>8</sup> = {_pct(rs_whole, 1)}.',
                      so=f'{n(_pct(1 - rs_whole))} of tasks leak across the split.'),
-                Card("MinHash near-duplicate screen", f'Pr(candidate) = 1 − (1 − {v("J", sup=v("r"))})<sup>{v("b")}</sup>', chapter="Ch 15",
-                     holds=f'{v("J")} Jaccard similarity; {v("b")} bands of {v("r")} rows.',
-                     ex=f'{A}{v("b")} = {mh.bands}, {v("r")} = {mh.rows}: {v("J")} = 0.5 → {_pct(mh_p[0.5])}; {v("J")} = 0.8 → {n(_pct_dn(mh_p[0.8], 1))}. '
+                Card("MinHash near-duplicate screen", f'Pr(candidate) = 1 − (1 − {v("J", sup=v("n", "row"))})<sup>{v("n", "band")}</sup>', chapter="Ch 15",
+                     holds=f'{v("J")} Jaccard similarity; {v("n", "band")} bands of {v("n", "row")} rows.',
+                     ex=f'{A}{v("n", "band")} = {mh.bands}, {v("n", "row")} = {mh.rows}: {v("J")} = 0.5 → {_pct(mh_p[0.5])}; {v("J")} = 0.8 → {n("&gt; 99.9999%" if mh_p[0.8] > 0.999999 else _pct_dn(mh_p[0.8], 4))}. '
                         f'Index: {mh.bands * mh.rows} × {mh.hash_bytes.magnitude:g} B × {fmt(mh.records)} = {mh_bytes / 1e6:.1f} MB.',
-                     so='near-duplicates are caught almost surely; raise r to pass loose pairs.'),
+                     so=f'near-duplicates are caught almost surely; more rows per band let loose pairs through.'),
                 Card("Order admission checks", 'E[time] = Σ<sub><i>i</i></sub> <i>t</i><sub><i>i</i></sub> Π<sub><i>j</i>&lt;<i>i</i></sub> <i>p</i><sub><i>j</i></sub>; run lower <i>t</i>/(1 − <i>p</i>) first', chapter="Ch 15",
                      holds='<i>t</i> slot time and <i>p</i> pass rate of each check.',
-                     ex=f'{A}' + ", ".join(f"{k} {tt.to('s').magnitude:g} s/{_pct(pp)}" for k, (pp, tt) in ao.checks.items()) +
-                        f'. Audit before tests: {n(f"{ao_t[0]:.2f} s")}; after: {ao_t[1]:.2f} s.',
-                     so='cheap, selective checks go first.'),
+                     ex=f'{A}' + ", ".join(f"{ao_names[k]} {tt.to('s').magnitude:g} s/{_pct(pp)}" for k, (pp, tt) in ao.checks.items()) +
+                        f'. Target review reads the test results, so it stays last. Audit before tests: {n(f"{ao_t[0]:.2f} s")}; after: {ao_t[1]:.2f} s.',
+                     so='cheap, selective checks go first, within the order their inputs allow.'),
                 Card("Cost per emitted artifact", 'cost = cohort cost / artifacts emitted', chapter="Ch 15",
+                     holds='The cohort cost counts every attempt, emitted or not.',
                      ex=f'{A}${_usd(cd.cohort_cost):g} for {cd_total} attempts, {cd_emit} emitted: {n(money(cd_cost))} each.',
                      so='yield, not generation, sets the price of data.'),
                 Card("False accepts in the reward", f'share = {frac("(1 − " + v("p") + ")" + v("ε", "FA"), v("p") + " + (1 − " + v("p") + ")" + v("ε", "FA"))}', chapter="Ch 17",
@@ -940,12 +947,12 @@ def build() -> Sheet:
                      so=f'{pk_r.position_ratio:g}× fewer positions; mask attention per example.'),
                 Card("Low-rank adapters", f'trained parameters = {v("r")}({v("d", "in")} + {v("d", "out")}) per matrix', chapter="Ch 16",
                      holds=f'{v("r")} adapter rank; {v("d", "in")}, {v("d", "out")} input, output width of an adapted matrix.',
-                     ex=f'{A}{v("r")} = {lo.adapter_rank}, {lo.adapted_matrices} {fmt(lo.adapter_in_dim)}² matrices × {lo.workload.layers} layers: {lo.adapter_rank} · {fmt(lo.adapter_in_dim * 2)} · {lo.adapted_matrices * lo.workload.layers} = {fmt(lo_n / 1e6, 1)}M; '
-                        f'× {b_train:g} B = {n(f"{lo_state / 1e6:.0f} MB")} vs {full_state / 1e9:.0f} GB full.',
-                     so=f'adapters remove the optimizer state; the {frozen / 1e9:.0f} GB of FP16 weights stay.'),
+                     ex=f'{A}8B model, {v("r")} = {lo.adapter_rank}, {lo.adapted_matrices} {fmt(lo.adapter_in_dim)}² matrices × {lo.workload.layers} layers: {lo.adapter_rank} · {fmt(lo.adapter_in_dim * 2)} · {lo.adapted_matrices * lo.workload.layers} = {fmt(lo_n / 1e6, 1)}M; '
+                        f'× {b_train:g} B per trained parameter = {n(f"{lo_state / 1e6:.0f} MB")}; full: {lo_P / 1e9:g}B × {b_train:g} B = {full_state / 1e9:.0f} GB.',
+                     so=f'adapters remove the optimizer state; the {lo_P / 1e9:g}B × 2 B = {frozen / 1e9:.0f} GB of FP16 weights stay.'),
                 Card("DPO: how hard one pair pulls", f'margin = {v("β")}[(log π − log π<sub>ref</sub>)<sub>w</sub> − (…)<sub>l</sub>]',
                      chapter="Ch 16", holds=f'w, l preferred, dispreferred; gradient weight = {v("β")} σ(−margin), σ logistic.',
-                     ex=f'{A}{v("β")} = {dp.beta:g}: {dp.beta:g} × ({dp_w:g} − ({dp_l:g})) = {dp_m:.1f}; weight {n(f"{dp_g:.3f}")} vs 0.1 at margin 0.',
+                     ex=f'{A}log-ratios w: {dp.policy_preferred:g} − ({dp.reference_preferred:g}) = {dp_w:g}, l: {dp.policy_dispreferred:g} − ({dp.reference_dispreferred:g}) = {dp_l:g}; {v("β")} = {dp.beta:g}: {dp.beta:g} × ({dp_w:g} − ({dp_l:g})) = {dp_m:.1f}; weight {n(f"{dp_g:.3f}")} vs {dp.beta / 2:g} at margin 0.',
                      so='a pair the policy already prefers pulls less.'),
                 Card("Group-relative advantage", 'Â = (reward − group mean) / group std', chapter="Ch 17",
                      holds=f'{v("G")} rollouts per task; Pr(mixed group) = 1 − {v("p", sup=v("G"))} − (1 − {v("p")})<sup>{v("G")}</sup>.',
@@ -953,7 +960,7 @@ def build() -> Sheet:
                      so='target tasks near 50% pass; verify rare passes well.'),
                 Card("Adaptation payback", 'break-even tasks = investment / saving per task', chapter="Ch 19",
                      holds='Saving per task = model cost per task before − after adapting.',
-                     ex=f'{A}${fmt(invest)} / (${c_base:.4f} − ${c_adapt:.4f}) = {n(fmt(n_be) + " tasks")}, {months:.1f} months at {fmt(ap.monthly_volume)}/month.',
+                     ex=f'{A}{ap.base["steps"]} × ({fmt(ap.base["input_tokens"])} in, {ap.base["output_tokens"]} out) at {usd_m(ap.base["input_price"])}/{usd_m(ap.base["output_price"])} per M = ${c_base:.4f}; adapted {ap.adapted["steps"]} × ({fmt(ap.adapted["input_tokens"])}, {ap.adapted["output_tokens"]}) at {usd_m(ap.adapted["input_price"])}/{usd_m(ap.adapted["output_price"])} = ${c_adapt:.4f}. ${fmt(invest)} / (${c_base:.4f} − ${c_adapt:.4f}) = {n(fmt(n_be) + " tasks")}, {months:.1f} months at {fmt(ap.monthly_volume)}/month.',
                      so='adapt only for steady, high-volume work.'),
             ], "Ch 16–17, 19"),
         ],
