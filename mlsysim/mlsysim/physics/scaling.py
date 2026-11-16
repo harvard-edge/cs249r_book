@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import math
 
+from mlsysim.core.units import ureg
 from mlsysim.core._validation import validate_positive
+
+from ._units import _ensure_unit
 
 
 def calc_halving_multiple(exponent):
@@ -46,8 +49,8 @@ def calc_compute_optimal_allocation(budget_flops, tokens_per_param, flops_per_pa
 
     Parameters
     ----------
-    budget_flops : float
-        Positive training-work budget C, in FLOPs as a plain number.
+    budget_flops : Quantity or float
+        Positive training-work budget C, in FLOPs or as a plain number.
     tokens_per_param : float
         Positive ratio r of training tokens to model parameters.
     flops_per_param_token : float
@@ -80,8 +83,11 @@ def calc_compute_optimal_allocation(budget_flops, tokens_per_param, flops_per_pa
     >>> calc_compute_optimal_allocation(600, 1, 6)
     (10.0, 10.0)
     """
-    validate_positive(budget_flops, "budget_flops")
-    n = math.sqrt(budget_flops / (flops_per_param_token * tokens_per_param))
+    budget = _ensure_unit(budget_flops, ureg.flop, "budget_flops").magnitude
+    validate_positive(budget, "budget_flops")
+    validate_positive(tokens_per_param, "tokens_per_param")
+    validate_positive(flops_per_param_token, "flops_per_param_token")
+    n = math.sqrt(budget / (flops_per_param_token * tokens_per_param))
     return n, tokens_per_param * n
 
 

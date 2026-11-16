@@ -746,6 +746,7 @@ __all__ = [
     "MODEL_ID",
     "TRACKS",
     "ClientRecord",
+    "MethodProfile",
     "TrackProfile",
     "client_records",
     "compare_architectures",

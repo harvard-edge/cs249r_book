@@ -111,7 +111,8 @@ def work_seconds(plan: dict, config: dict, phase: str) -> float:
     counted as the package counts them: training from ``SingleNodeModel``'s
     hardware utilization (HFU x modeled step time), prefill and decode from the
     decode-step helper ServingModel uses (with ``query_tokens = prompt_tokens``
-    it reproduces ServingModel's prefill FLOPs exactly, which a test checks).
+    and causal ``context_tokens = prompt_tokens / 2`` it reproduces
+    ServingModel's prefill FLOPs, which a test checks).
     """
     from mlsysim import Q_
     from mlsysim.core.units import resolve_precision
@@ -130,7 +131,7 @@ def work_seconds(plan: dict, config: dict, phase: str) -> float:
         return profile.hfu * profile.latency.m_as("s")
     precision, bytes_per_element = resolve_precision(workload["precision"])
     if phase == "prefill":
-        query, context = config["prompt_tokens"], config["prompt_tokens"]
+        query, context = config["prompt_tokens"], config["prompt_tokens"] / 2.0
     else:
         query = 1
         context = protocol.model_seq_len(workload["model_seq_len"], config["prompt_tokens"], config["output_tokens"])

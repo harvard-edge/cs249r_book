@@ -89,6 +89,14 @@ class ContextAdmissionModel(ForwardModel):
         >>> result.admitted
         False
         """
+        if window <= 0:
+            raise ValueError(f"window must be positive; got {window}")
+        if output_reserve < 0 or output_reserve > window:
+            raise ValueError(f"output_reserve must be in [0, window]; got {output_reserve} for window={window}")
+        if text_tokens < 0 or image_tokens < 0:
+            raise ValueError(
+                f"text_tokens and image_tokens must be nonnegative; got {text_tokens}, {image_tokens}"
+            )
         ceiling = window - output_reserve
         demand = text_tokens + image_tokens + output_reserve
         return ContextAdmissionResult(
@@ -165,13 +173,19 @@ class SamplingModel(ForwardModel):
         sharp = calc_tempered_softmax(logits, sharp_temperature)
         kept, mass, renorm = calc_nucleus(base, top_p)
         base_tail, sharp_tail = 1 - max(base), 1 - max(sharp)
+        scaled = [z / base_temperature for z in logits]
+        partition_sum = math.inf if max(scaled) > 709.0 else sum(math.exp(s) for s in scaled)
+        if sharp_tail == 0.0:
+            tail_ratio = math.inf if base_tail > 0.0 else 1.0
+        else:
+            tail_ratio = base_tail / sharp_tail
         return SamplingResult(
-            partition_sum=sum(math.exp(z / base_temperature) for z in logits),
+            partition_sum=partition_sum,
             base_probabilities=base,
             sharp_probabilities=sharp,
             base_tail=base_tail,
             sharp_tail=sharp_tail,
-            tail_ratio=base_tail / sharp_tail,
+            tail_ratio=tail_ratio,
             nucleus_size=kept,
             nucleus_mass=mass,
             nucleus_probabilities=renorm,

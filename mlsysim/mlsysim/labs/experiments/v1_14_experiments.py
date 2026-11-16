@@ -252,7 +252,7 @@ def _validate_retraining_scenario(scenario: RetrainingScenario) -> tuple[float, 
         raise ValueError("event_times must not be empty")
     times = tuple(float(value.to("hour").magnitude) for value in scenario.event_times)
     if any(later <= earlier for earlier, later in zip(times, times[1:])):
-        raise ValueError("event_times must be strictly increasing")
+        raise ValueError("event_times must be monotonically increasing without ties")
     expected = len(times)
     traces = (scenario.baseline_outcomes,) + scenario.candidate_outcome_traces
     if any(len(trace) != expected for trace in traces):

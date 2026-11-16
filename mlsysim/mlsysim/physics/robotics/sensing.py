@@ -353,5 +353,10 @@ def calc_thermal_expansion(coefficient, length, temperature_rise):
     >>> change = calc_thermal_expansion(1e-5 / ureg.kelvin, 1 * ureg.meter, 10 * ureg.kelvin)
     >>> assert change.to("millimeter").magnitude > 0
     """
+    if isinstance(temperature_rise, ureg.Quantity) and not temperature_rise._ok_for_muldiv():
+        raise ValueError(
+            "temperature_rise must be a temperature difference (e.g., kelvin or delta_degC), "
+            "not an offset temperature such as degC."
+        )
     validate_positive(length, "length")
     return (coefficient * length * temperature_rise).to(ureg.millimeter)

@@ -435,7 +435,10 @@ class EvidenceHorizonModel(ForwardModel):
     (renewal period plus inference), the setpoints one renewal needs, and the
     span one chunk supplies; drift over an age ``T`` is ``a_slip T^2 / 2``.
     """
-    requires = ("target", "schedule")
+    requires = (
+        "tolerance", "initial_error", "target_speed", "slip_acceleration",
+        "chunk_rate", "chunk_step", "chunk_horizon", "inference_latency",
+    )
     produces = EvidenceHorizonResult
 
     def solve(self, tolerance: Quantity, initial_error: Quantity, target_speed: Quantity,

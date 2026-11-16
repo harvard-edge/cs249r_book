@@ -1,6 +1,21 @@
 """Sensor subsystem package."""
 
-from .types import Sensor, CameraSensor, LiDARSensor, IMUSensor
 from .registry import Sensors
+from .types import (
+    CameraSensor,
+    IMUSensor,
+    LiDARSensor,
+    SafetyLaserScanner,
+    SafetyLightCurtain,
+    Sensor,
+)
 
-__all__ = ["Sensor", "CameraSensor", "LiDARSensor", "IMUSensor", "Sensors"]
+__all__ = [
+    "CameraSensor",
+    "IMUSensor",
+    "LiDARSensor",
+    "SafetyLaserScanner",
+    "SafetyLightCurtain",
+    "Sensor",
+    "Sensors",
+]

@@ -9,9 +9,9 @@ establish an accuracy percentage for unseen workloads.
 
 | Anchor | Evidence category | Analytical output | Reference | Difference |
 |---|---|---|---|---|
-| `resnet50_a100_train_bs256` | Calibrated regression | 3234.44 1/s | 3200 1/s | +1.08% |
-| `resnet50_h100_train_bs256` | Calibrated regression | 5070.12 1/s | 5000 1/s | +1.40% |
-| `llama3_8b_h100_bs1_itl` | Family sanity range | 5.19416 ms | 3–10 ms | within range |
+| `resnet50_a100_train_bs256` | Calibrated regression | 3296.92 1/s | 3200 1/s | +3.03% |
+| `resnet50_h100_train_bs256` | Calibrated regression | 5225.36 1/s | 5000 1/s | +4.51% |
+| `llama3_8b_h100_bs1_itl` | Family sanity range | 4.87416 ms | 3–10 ms | within range |
 | `gpt3_175b_training_flops` | Formula accounting | 3.15e+23 flop | 3.14e+23 flop | +0.32% |
 
 ## Executed configurations

@@ -40,7 +40,7 @@ and a map from public imports to implementation. Specifications, equations,
 solvers, and presentation remain separate; all textbook volumes use this same
 package.
 
-## 🏗 The 5-Layer Analytical Stack
+## 🏗 The 6-Layer Analytical Stack
 
 `mlsysim` implements a "Progressive Lowering" architecture, separating high-level workloads from the physical infrastructure that executes them.
 
@@ -127,8 +127,8 @@ ops:
   duration_days: 14.0
 constraints:
   assert:
-    - metric: "performance.latency"
-      max: 50.0
+    - metric: "performance.step_latency"
+      max: 150000.0
 ```
 
 Then compile and evaluate the 3-lens scorecard (Feasibility, Performance, Macro):
@@ -248,7 +248,7 @@ print(evaluation.scorecard())
 
 ### Efficiency Parameter Guide
 
-The `efficiency` parameter (0.0–1.0) captures the gap between peak hardware performance and what your software stack actually achieves. Use these guidelines:
+The `efficiency` parameter (0.0–1.0) derates peak compute throughput (`Peak_FLOP/s * efficiency`). For generic compute-only sizing, use overall achieved MFU; for mechanistic memory-aware solvers such as `ServingModel` (which already bound decode on HBM bandwidth), pass **compute-kernel efficiency** (`0.35–0.55`) rather than overall batch-1 MFU so memory-bound decode is not double-penalized:
 
 <table width="100%" style="width:100%">
   <thead>
@@ -261,7 +261,7 @@ The `efficiency` parameter (0.0–1.0) captures the gap between peak hardware pe
   <tbody>
     <tr><td>Training (Megatron-LM, large Transformer)</td><td align="center">0.40–0.55</td><td>Well-optimized GEMM + FlashAttention</td></tr>
     <tr><td>Training (PyTorch eager, small model)</td><td align="center">0.08–0.15</td><td>Kernel launch overhead dominates</td></tr>
-    <tr><td>Inference decode, batch=1</td><td align="center">0.01–0.05</td><td>Memory-bound; compute nearly idle</td></tr>
+    <tr><td>Inference decode, batch=1 (overall MFU)</td><td align="center">0.01–0.05</td><td>Memory-bound; use 0.35–0.55 for <code>ServingModel</code> compute kernel</td></tr>
     <tr><td>Inference decode, batch=32+</td><td align="center">0.15–0.35</td><td>Batch amortizes weight loading</td></tr>
     <tr><td>Inference prefill, long context</td><td align="center">0.30–0.50</td><td>Compute-bound GEMM + attention</td></tr>
     <tr><td>TinyML (TFLite Micro on ESP32)</td><td align="center">0.05–0.15</td><td>Interpreter overhead, no tensor cores</td></tr>

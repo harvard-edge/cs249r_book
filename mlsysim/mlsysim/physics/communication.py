@@ -260,8 +260,8 @@ def calc_ring_attention_min_chunk(element_bytes, sustained_flops, link_bandwidth
 
     Parameters
     ----------
-    element_bytes : float
-        Positive byte count per key/value element s.
+    element_bytes : Quantity or float
+        Positive byte count per key/value element s; bare values are bytes.
     sustained_flops : Quantity or float
         Positive sustained attention compute rate R; bare values are FLOP/second.
     link_bandwidth : Quantity or float
@@ -297,10 +297,13 @@ def calc_ring_attention_min_chunk(element_bytes, sustained_flops, link_bandwidth
     >>> calc_ring_attention_min_chunk(2, Q_("2 TFLOP/s"), Q_("1 GB/s")) == 2 * base
     True
     """
+    elem = _ensure_unit(element_bytes, ureg.byte, "element_bytes")
     rate = _ensure_unit(sustained_flops, ureg.flop / ureg.second, "sustained_flops")
     bw = _ensure_unit(link_bandwidth, ureg.byte / ureg.second, "link_bandwidth")
+    validate_positive(elem, "element_bytes")
+    validate_positive(rate, "sustained_flops")
     validate_positive(bw, "link_bandwidth")
-    return (float(element_bytes) * rate / (2 * bw)).to(ureg.flop / ureg.byte).magnitude
+    return float((elem * rate / (2 * bw)).to(ureg.flop).magnitude)
 
 
 def calc_alpha_beta_crossover(alpha_s, bandwidth_bytes_s):

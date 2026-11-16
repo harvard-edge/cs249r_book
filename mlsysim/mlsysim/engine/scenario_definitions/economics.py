@@ -218,9 +218,9 @@ class SpotEffectiveCostScenario(BaseScenario):
         must be positive.
 
         Equation: ``interval = retained_interval.to('minute').magnitude; return (interval
-        + lost_per_interruption.magnitude) / interval``."""
+        + lost_per_interruption.to('minute').magnitude) / interval``."""
         interval = self.retained_interval.to("minute").magnitude
-        return (interval + self.lost_per_interruption.magnitude) / interval
+        return (interval + self.lost_per_interruption.to("minute").magnitude) / interval
 
     @property
     def effective_rate(self) -> float:
@@ -1600,12 +1600,12 @@ class ServingInstanceCostScenario(BaseScenario):
 
     @property
     def small_within_large_price(self) -> int:
-        """Largest integer small fleet costing strictly less than one large instance.
+        """Largest integer small fleet costing less than one large instance.
 
         Most small instances that cost less than one large instance.
 
-        Equation: ``_math.ceil(price_ratio) - 1``."""
-        return _math.ceil(self.price_ratio) - 1
+        Equation: ``_math.ceil(price_ratio - 1e-12) - 1``."""
+        return _math.ceil(self.price_ratio - 1e-12) - 1
 
     @property
     def small_fleet_rate(self) -> Quantity:

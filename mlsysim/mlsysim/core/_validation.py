@@ -16,7 +16,7 @@ def _finite_magnitude(val, name: str):
 
 
 def validate_positive(val, name: str):
-    """Ensure a numeric value is strictly positive (> 0)."""
+    """Ensure a numeric value is positive (> 0)."""
     mag = _finite_magnitude(val, name)
     if mag <= 0:
         raise ValueError(f"{name} must be positive, got {val}")
@@ -31,6 +31,9 @@ def validate_nonnegative(val, name: str):
 
 def validate_range(val, lo, hi, name: str):
     """Ensure a numeric value is within [lo, hi]."""
+    units = getattr(val, "units", None)
+    if units is not None and "percent" in getattr(units, "_units", {}) and lo >= 0 and hi <= 1.0:
+        val = val.to("dimensionless")
     mag = _finite_magnitude(val, name)
     if mag < lo or mag > hi:
         raise ValueError(f"{name} must be in [{lo}, {hi}], got {val}")

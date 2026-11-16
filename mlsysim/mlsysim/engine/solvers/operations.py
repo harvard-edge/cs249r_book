@@ -238,13 +238,13 @@ class SequentialCanaryModel(ForwardModel):
         Parameters
         ----------
         p_base : float
-            Baseline acceptance probability strictly between zero and one.
+            Baseline acceptance probability in the open interval (0, 1).
         p_degraded : float
-            Degraded acceptance probability strictly between zero and p_base.
+            Degraded acceptance probability in the open interval (0, p_base).
         alpha : float
-            False-hold probability target strictly between zero and one.
+            False-hold probability target in the open interval (0, 1).
         beta : float
-            Missed-degradation probability target strictly between zero and one; alpha + beta
+            Missed-degradation probability target in the open interval (0, 1); alpha + beta
             should be below one.
         arrival_rate : Quantity
             Positive eligible-task arrival rate in inverse time.

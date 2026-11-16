@@ -44,14 +44,13 @@ over measured energy per unit of work.
   TDP overstates energy by up to 1.68×.
 - **Training** (ResNet-50) draws 89% of TDP on the H100 and 94% on the A100. TDP
   over the measured time gives 1.07–1.13, and the proportional rule 0.43–0.47.
-- **Time model.** `ServingModel`'s decode step is 0.62–0.70 of the measured one.
-  Its TTFT at batch 16 or with 2,048-token prompts is 1.07–1.75 of measured,
+- **Time model.** `ServingModel`'s decode step is 0.58–0.67 of the measured one.
+  Its TTFT at batch 16 or with 2,048-token prompts is 1.07–1.69 of measured,
   because these prefills run at a higher utilization than the declared 0.5
-  efficiency (the utilization counts attention over the full context, an upper
-  bound).
-- **Errors that cancel.** TDP over the modeled time gives 0.79–0.97 for decode
-  only because a step time 30–38% too short meets a power 18–44% too high. The
-  proportional rule over the modeled time gives 0.27–0.31.
+  efficiency.
+- **Errors that cancel.** TDP over the modeled time gives 0.77–0.91 for decode
+  only because a step time 33–42% too short meets a power 18–44% too high. The
+  proportional rule over the modeled time gives 0.26–0.30.
 - **Device choice.** The H100 uses less energy per prefill (by 43–47% above one
   128-token prompt) and per training step (by 11%). The A100 uses less per
   decode step in five of six configurations (by 4–10%). In 10 of 13
@@ -60,7 +59,7 @@ over measured energy per unit of work.
   measured time pick the meter's device every time. Each fully analytical
   estimate picks the wrong device once. TDP over the modeled time chooses the
   A100 for training, where the H100 uses 11% less energy per step, because the
-  modeled A100 step is 20% shorter than measured against 6% on the H100. The
+  modeled A100 step is 21% shorter than measured against 8% on the H100. The
   proportional rule over the modeled time chooses the H100 for decode at batch 16
   with 128-token prompts, where the A100 uses 7.8% less.
 - **Boards of one model differ.** The two A100-SXM4-80GB boards report the same

@@ -25,6 +25,8 @@ _UI_EXPORTS = {
     "MathPeek",
     "DecisionLog",
     "FailureBanner",
+    "MapDashboard",
+    "HardwareTetrisDashboard",
 }
 
 try:
@@ -47,6 +49,8 @@ try:
         MathPeek,
         DecisionLog,
         FailureBanner,
+        MapDashboard,
+        HardwareTetrisDashboard,
     )
     _UI_AVAILABLE = True
 except ImportError:

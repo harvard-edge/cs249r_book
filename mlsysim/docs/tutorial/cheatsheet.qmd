@@ -20,17 +20,17 @@ _ci_ratio = _poland_ci / _quebec_ci
 ## The Iron Law of ML Training
 
 ```text
-Time = FLOPs / (N x Peak_FLOPS x MFU x eta_scaling x Goodput)
+Time = FLOPs / (N x Peak_FLOP/s x MFU x eta_scaling x Goodput)
 ```
 
 | Symbol | Meaning | Typical Range |
 |--------|---------|---------------|
 | `FLOPs` | Total operations for the workload | 6PD for training (Chinchilla) |
 | `N` | Number of accelerators | 1 to 100,000+ |
-| `Peak_FLOPS` | Hardware peak (per device) | `{python} f"{_a100_peak:.0f}"` TFLOP/s (A100 FP16), `{python} f"{_h100_peak:.0f}"` TFLOP/s (H100 FP16) |
-| `MFU` | Model FLOPs Utilization | 0.30 - 0.55 |
+| `Peak_FLOP/s` | Hardware peak (per device) | `{python} f"{_a100_peak:.0f}"` TFLOP/s (A100 FP16), `{python} f"{_h100_peak:.0f}"` TFLOP/s (H100 FP16) |
+| `MFU` | Model FLOPs Utilization | 0.30 - 0.50 |
 | `eta_scaling` | Scaling efficiency (communication overhead) | 0.70 - 0.95 |
-| `Goodput` | Fraction of time doing useful work (1 - failures - checkpoints) | 0.85 - 0.98 |
+| `Goodput` | Fraction of time doing useful work (`1 - waste`, Young-Daly $\approx \delta/\tau + \tau/(2M)$) | 0.85 - 0.98 |
 
 ---
 
@@ -42,17 +42,17 @@ Time = FLOPs / (N x Peak_FLOPS x MFU x eta_scaling x Goodput)
 T = max(FLOPs / Peak_effective, Bytes / BW_effective)
 ```
 
-If compute time > memory time, the workload is **compute-bound** (increase FLOPS).
+If compute time > memory time, the workload is **compute-bound** (increase FLOP/s).
 If memory time > compute time, the workload is **memory-bound** (increase bandwidth).
 
-### 2. KV-Cache Memory (PagedAttention)
+### 2. Dense KV-Cache Footprint
 
 ```text
-KV_bytes = 2 x L x H_kv x D_head x S x B x bytes_per_param
+KV_bytes = 2 x L x H_kv x D_head x S x B x bytes_per_elem
 ```
 
-`L` = layers, `H_kv` = KV heads, `D_head` = head dimension, `S` = sequence length, `B` = batch size.
-Factor of 2 accounts for both Key and Value tensors.
+`L` = layers, `H_kv` = KV heads, `D_head` = head dimension, `S` = sequence length, `B` = batch size, `bytes_per_elem` = activation element bytes (`2` for FP16/BF16, `1` for FP8/INT8).
+Factor of 2 accounts for both Key and Value tensors (PagedAttention eliminates contiguous over-reservation waste across variable-length sequences).
 
 ### 3. Ring AllReduce Communication
 
@@ -73,14 +73,15 @@ P* = sqrt(C/120)  (optimal parameter count for budget C)
 `P` = parameters, `D` = tokens, `C` = total FLOPs. Training is compute-optimal when
 `D ~ `{python} f"{_chinchilla_ratio}"`P` (`{python} f"{_chinchilla_ratio}"` tokens per parameter).
 
-### 5. Carbon Footprint
+### 5. Carbon & Water Footprint
 
 ```text
-CO2_kg = Energy_kWh x PUE x Carbon_Intensity_gCO2/kWh / 1000
+CO2_kg  = IT_Energy_kWh x PUE x Carbon_Intensity_gCO2/kWh / 1000
+Water_L = IT_Energy_kWh x WUE_site
 ```
 
-`PUE` = Power Usage Effectiveness (1.0 = ideal, 1.1 = typical hyperscale).
-Carbon intensity varies by `{python} f"{_ci_ratio:.0f}x"` across grids in the registry (`{python} f"{_quebec_ci:.0f}"` gCO₂/kWh hydro in Quebec vs. `{python} f"{_poland_ci:.0f}"` gCO₂/kWh coal in Poland).
+`PUE` = Power Usage Effectiveness (`1.0` = ideal, `1.12` = typical hyperscale). `WUE_site` = on-site Water Usage Effectiveness (`L / kWh_IT`, applied to pre-PUE IT equipment energy).
+Carbon intensity varies by `{python} f"{_ci_ratio:.0f}x"` between Quebec (`{python} f"{_quebec_ci:.0f}"` gCO₂/kWh hydro) and Poland (`{python} f"{_poland_ci:.0f}"` gCO₂/kWh coal) — and up to `{python} f"{_poland_ci / mlsysim.Infrastructure.Grids.Norway.carbon_intensity_g_kwh:.0f}x"` against Norway (`{python} f"{mlsysim.Infrastructure.Grids.Norway.carbon_intensity_g_kwh:.0f}"` gCO₂/kWh).
 
 ---
 
@@ -88,11 +89,11 @@ Carbon intensity varies by `{python} f"{_ci_ratio:.0f}x"` across grids in the re
 
 | Parameter | Description | Low | Typical | High |
 |-----------|-------------|-----|---------|------|
-| `efficiency` | MFU (fraction of peak FLOPS achieved) | 0.10 | 0.30-0.50 | 0.65 |
-| `mfu` | Same as efficiency, used in fleet solvers | 0.10 | 0.35 | 0.55 |
+| `efficiency` | MFU (fraction of peak FLOP/s achieved) | 0.10 | 0.30-0.50 | 0.55 |
+| `mfu` | Same as efficiency, used in fleet solvers | 0.10 | 0.35 | 0.50 |
 | Batch=1 inference | LLM decode (memory-bound) | 0.01 | 0.05 | 0.15 |
-| Batched inference | LLM prefill / CNN inference | 0.20 | 0.40 | 0.60 |
-| Training (single node) | Typical training loop | 0.20 | 0.40 | 0.55 |
+| Batched inference | LLM prefill / CNN inference | 0.20 | 0.35 | 0.45 |
+| Training (single node) | Typical training loop | 0.20 | 0.40 | 0.50 |
 | Training (distributed) | Large cluster with comms | 0.15 | 0.30 | 0.45 |
 | FlashAttention | Fused attention kernel | 0.50 | 0.60 | 0.70 |
 | TinyML (MCU) | Microcontroller inference | 0.05 | 0.15 | 0.30 |
@@ -164,8 +165,11 @@ from mlsysim.solvers import CompressionModel
 result = CompressionModel().solve(
     model=Models.Language.Llama3_8B,
     hardware=Hardware.Cloud.H100,
-    method="quantization",  # "quantization", "pruning", "distillation"
-    target_bitwidth=4,      # 4, 8, 16
+    method="quantization",      # "quantization", "pruning", "distillation"
+    target_bitwidth=4,          # 4, 8, 16
+    baseline_precision="fp16",  # defaults to "fp32" if omitted
+    group_size=128,             # optional FP16 group-scale overhead (4.125 b/w -> 3.88x)
+    accuracy_delta=-0.015,      # caller-supplied empirical quality delta (-1.5%)
 )
 # Returns: CompressionResult with .compression_ratio, .compressed_size_gb,
 #          .memory_savings_pct, .inference_speedup, .estimated_accuracy_delta
@@ -190,13 +194,15 @@ tco = EconomicsModel().solve(fleet, duration_days=365, mfu=0.4)
 
 ---
 
-## The 22 Walls at a Glance
+## The 20 Walls + 2 Analysis Solvers at a Glance
 
-| # | Wall | One-Liner |
-|---|------|-----------|
-| 1 | Compute | Peak FLOPS ceiling of a single accelerator |
+`mlsysim.engine.walls.ALL_WALLS` contains 22 entries: 20 physical and operational walls across four tiers (rows 1–20) plus 2 cross-cutting sensitivity and inverse-synthesis solvers (rows 21–22).
+
+| # | Wall / Solver | One-Liner |
+|---|---------------|-----------|
+| 1 | Compute | Peak FLOP/s ceiling of a single accelerator |
 | 2 | Memory | HBM capacity and bandwidth ceilings |
-| 3 | Software | Gap between peak and achieved FLOPS (MFU) |
+| 3 | Software | Gap between peak and achieved FLOP/s (MFU) |
 | 4 | Serving | LLM inference: compute-bound prefill vs. memory-bound decode |
 | 5 | Batching | Static batching wastes memory through KV-cache fragmentation |
 | 6 | Streaming | Wafer-scale shifts bottleneck from HBM to injection interconnect |
@@ -235,9 +241,9 @@ for hw, access in [
     peak = hw.compute.peak_flops.to("TFLOPs/s").magnitude
     peak_str = f"{peak:,.0f}" if peak >= 1 else f"{peak:.6f}"
     cap_str = (
-        f"{round(hw.memory.capacity.to('GB').magnitude)} GB"
-        if hw is mlsysim.Hardware.Cloud.H200
-        else str(mlsysim.fmt_memory_capacity(hw.memory.capacity, precision=0))
+        f"{hw.memory.capacity.to('GiB').magnitude:.0f} GiB"
+        if hw.memory.capacity.to("GiB").magnitude >= 1
+        else f"{hw.memory.capacity.to('MiB').magnitude:.0f} MiB"
     )
     bw_tbs = hw.memory.bandwidth.to("TB/s").magnitude
     bw_str = f"{bw_tbs:.2f} TB/s" if bw_tbs >= 0.01 else f"{hw.memory.bandwidth.to('MB/s').magnitude:.1f} MB/s"
@@ -275,3 +281,9 @@ for m, access in [
 
 table(["Model", "Parameters", "Architecture", "Access"], model_rows)
 ```
+
+---
+
+## Textbook & Curriculum Cross-Links
+
+See the [Cross-Volume Physics & Chapter Map](../curriculum-map.qmd) and [The 20 Laws Explained](../laws-explained.qmd) for direct links from every equation, wall, and solver above to its corresponding textbook chapter, interactive Marimo lab, and lecture slide deck.

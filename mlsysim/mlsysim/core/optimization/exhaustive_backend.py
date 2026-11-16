@@ -98,22 +98,22 @@ class ExhaustiveBackend(OptimizerProtocol):
         if len(self.ranges) == 1:
             lo, hi = self.ranges[0]
             grid = np.linspace(lo, hi, self.grid_size)
-            values = np.array([self.objective_fn(np.array([x])) for x in grid])
-            best_idx = int(np.argmin(values))
+            values = np.array([self.objective_fn(np.array([x])) for x in grid], dtype=float)
+            best_idx = 0 if bool(np.all(np.isnan(values))) else int(np.nanargmin(values))
             best_val = float(grid[best_idx])
             optimal_obj = float(values[best_idx])
         else:
             axes = [np.linspace(lo, hi, self.grid_size) for lo, hi in self.ranges]
             mesh = np.meshgrid(*axes, indexing="ij")
             flat_points = np.column_stack([m.ravel() for m in mesh])
-            values = np.array([self.objective_fn(pt) for pt in flat_points])
-            best_idx = int(np.argmin(values))
+            values = np.array([self.objective_fn(pt) for pt in flat_points], dtype=float)
+            best_idx = 0 if bool(np.all(np.isnan(values))) else int(np.nanargmin(values))
             best_val = [float(v) for v in flat_points[best_idx]]
             optimal_obj = float(values[best_idx])
 
         solve_time_ms = (time.time() - start_time) * 1000
 
-        feasible = optimal_obj < 1e10
+        feasible = bool(np.isfinite(optimal_obj) and optimal_obj < 1e10)
 
         total_points = self.grid_size ** len(self.ranges)
 

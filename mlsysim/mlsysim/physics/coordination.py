@@ -328,9 +328,33 @@ def calc_binomial_tail(trials: int, probability: float, at_least: int) -> float:
     >>> calc_binomial_tail(2, 0.5, 1)
     0.75
     """
-    return sum(
-        math.comb(trials, k) * probability**k * (1 - probability) ** (trials - k) for k in range(at_least, trials + 1)
-    )
+    if trials < 0:
+        raise ValueError(f"trials must be nonnegative, got {trials}")
+    if not 0.0 <= probability <= 1.0:
+        raise ValueError(f"probability must be in [0, 1], got {probability}")
+    if at_least <= 0:
+        return 1.0
+    if at_least > trials:
+        return 0.0
+    if probability == 0.0:
+        return 0.0
+    if probability == 1.0:
+        return 1.0
+    if trials <= 1020:
+        q = 1.0 - probability
+        total = math.fsum(
+            math.comb(trials, k) * (probability ** k) * (q ** (trials - k))
+            for k in range(at_least, trials + 1)
+        )
+    else:
+        log_p = math.log(probability)
+        log_q = math.log1p(-probability)
+        log_n = math.lgamma(trials + 1)
+        total = math.fsum(
+            math.exp(log_n - math.lgamma(k + 1) - math.lgamma(trials - k + 1) + k * log_p + (trials - k) * log_q)
+            for k in range(at_least, trials + 1)
+        )
+    return min(1.0, total)
 
 
 def calc_beta_mixture_shape(mean: float, correlation: float):
@@ -371,6 +395,10 @@ def calc_beta_mixture_shape(mean: float, correlation: float):
     >>> calc_beta_mixture_shape(0.5, 0.5)
     (0.5, 0.5)
     """
+    if not 0.0 < mean < 1.0:
+        raise ValueError(f"mean must be in (0, 1), got {mean}")
+    if not 0.0 < correlation < 1.0:
+        raise ValueError(f"correlation must be in (0, 1), got {correlation}")
     scale = 1 / correlation - 1
     return mean * scale, (1 - mean) * scale
 
@@ -414,10 +442,24 @@ def calc_beta_binomial_pmf(trials: int, mean: float, correlation: float) -> list
     >>> [round(p, 6) for p in calc_beta_binomial_pmf(2, 0.5, 0.5)]
     [0.375, 0.25, 0.375]
     """
+    if trials < 0:
+        raise ValueError(f"trials must be nonnegative, got {trials}")
     a, b = calc_beta_mixture_shape(mean, correlation)
-    log_norm = math.lgamma(a + b) - math.lgamma(a) - math.lgamma(b) - math.lgamma(trials + a + b)
+    log_norm = (
+        math.lgamma(trials + 1)
+        + math.lgamma(a + b)
+        - math.lgamma(a)
+        - math.lgamma(b)
+        - math.lgamma(trials + a + b)
+    )
     return [
-        math.comb(trials, k) * math.exp(math.lgamma(k + a) + math.lgamma(trials - k + b) + log_norm)
+        math.exp(
+            math.lgamma(k + a)
+            + math.lgamma(trials - k + b)
+            - math.lgamma(k + 1)
+            - math.lgamma(trials - k + 1)
+            + log_norm
+        )
         for k in range(trials + 1)
     ]
 

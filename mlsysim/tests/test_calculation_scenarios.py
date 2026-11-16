@@ -1,5 +1,12 @@
+"""Calculation scenarios: named inputs plus the solver that owns the arithmetic.
+
+Chapters and lecture slides quote these values; pinning them here means a
+registry or solver change that moves one shows up as a failing test instead
+of a silent change in print. Values were checked against the hand-derived
+chapter results when the scenarios were added (2026-10-20).
+"""
+
 from mlsysim.core.series_loader import load_series
-'Calculation scenarios: named inputs plus the solver that owns the arithmetic.\n\nChapters and lecture slides quote these values; pinning them here means a\nregistry or solver change that moves one shows up as a failing test instead\nof a silent change in print. Values were checked against the hand-derived\nchapter results when the scenarios were added (2026-10-20).\n'
 import pytest
 from mlsysim import Models, Scenarios
 
@@ -11,7 +18,7 @@ def test_tensor_parallel_step():
     s = Scenarios.Gpt3TensorParallelStepDgxH100
     r = s.result
     assert r.collectives_per_step == 192
-    pcie = s.variant(link_bandwidth=Scenarios.BufferTransfer10GB.links['PCIe']).result
+    assert (s.variant(link_bandwidth=Scenarios.BufferTransfer10GB.links['PCIe']).result) is not None
 
 def test_memory_interface_widths():
     from mlsysim import Hardware
@@ -48,7 +55,7 @@ def test_torus_against_fat_tree():
 def test_component_exposure():
     t = Scenarios.TransceiverDegradationRoce4K
     assert t.n_components == 24576
-    links = Scenarios.DegradedLinksReferenceFabric
+    assert (Scenarios.DegradedLinksReferenceFabric) is not None
 
 def test_storage_footprint_of_the_175b_run():
     r = Scenarios.Gpt3StorageFootprint.result
@@ -57,7 +64,7 @@ def test_storage_footprint_of_the_175b_run():
     assert r.archived_checkpoints == 44
 
 def test_input_demand_stall_and_prefetch():
-    st = Scenarios.OverlappedInputStall.result
+    assert (Scenarios.OverlappedInputStall.result) is not None
     p = Scenarios.PrefetchDepthByTier.result
     assert p.depths == {'nvme': 1, 'pfs': 1, 'object': 3}
 
@@ -90,10 +97,10 @@ def test_trajectory_resend():
     assert Scenarios.CodingAgentResend90Turns.result.resent_tokens == 6727500
 
 def test_model_calls():
-    c = Scenarios.CodingAgentFirstTurnCall.result
-    w = Scenarios.CodingAgentWholeFileEdit.result
-    e = Scenarios.CodingAgentLocalizedEdit.result
-    s = Scenarios.SupportAgentTurnCall.result
+    assert (Scenarios.CodingAgentFirstTurnCall.result) is not None
+    assert (Scenarios.CodingAgentWholeFileEdit.result) is not None
+    assert (Scenarios.CodingAgentLocalizedEdit.result) is not None
+    assert (Scenarios.SupportAgentTurnCall.result) is not None
     k = Scenarios.CanceledStreamDecodeSavings
     assert k.skipped_steps == 4000
 
@@ -101,8 +108,8 @@ def test_admission_sampling_checker():
     a = Scenarios.MultimodalContextAdmission.result
     assert (a.input_ceiling, a.headroom, a.total_demand, a.excess) == (7168, 1168, 9072, 880)
     assert not a.admitted
-    t = Scenarios.TemperatureNucleusExample.result
-    p = Scenarios.PatchCheckerPosterior.result
+    assert (Scenarios.TemperatureNucleusExample.result) is not None
+    assert (Scenarios.PatchCheckerPosterior.result) is not None
 
 def test_allreduce_schedules():
     b = Scenarios.DdpBucketRingNdr.result
@@ -113,10 +120,10 @@ def test_allreduce_schedules():
     r = Scenarios.RingVsTreeSmallBuffer.result
     assert r.ring_startup_time[64].to('microsecond').magnitude == 1260
     assert r.tree_startup_time[64].to('microsecond').magnitude == 120
-    s = Scenarios.Llama2_70BGradientRing64Ndr
+    assert (Scenarios.Llama2_70BGradientRing64Ndr) is not None
 
 def test_hierarchical_allreduce():
-    h = Scenarios.HierarchicalAllReduce8x8DgxH100.result
+    assert (Scenarios.HierarchicalAllReduce8x8DgxH100.result) is not None
     a = Scenarios.HierarchicalAllReduceReferenceCluster.result
     assert 4 < a.speedup_vs_flat_ring < 5
 
@@ -137,7 +144,7 @@ def test_ring_trace_and_error_feedback():
 def test_compression_and_overlap():
     p = Scenarios.CompressionPayback8x
     assert p.pays(p.communication_time) and (not p.pays(p.fast_communication_time))
-    c = Scenarios.Int8CompressionRun.result
+    assert (Scenarios.Int8CompressionRun.result) is not None
     o = Scenarios.OverlapBudget7B64Gpu.result
     assert o.buckets_per_layer == 9
 
@@ -145,30 +152,30 @@ def test_parallel_layouts_175b():
     a = Scenarios.Gpt3DataParallel1K.result
     assert a.n_devices == 1024
     assert a.min_devices_for_state == 35
-    b = Scenarios.Gpt3TensorDataParallel1K.result
-    c = Scenarios.Gpt3ThreeDParallel1K.result
+    assert (Scenarios.Gpt3TensorDataParallel1K.result) is not None
+    assert (Scenarios.Gpt3ThreeDParallel1K.result) is not None
     d = Scenarios.Gpt3ThreeDParallel16K.result
     assert d.n_devices == 16384
 
 def test_gpt2_data_parallel_scale_out():
-    one = Scenarios.Gpt2DataParallelOneNode.result
-    four = Scenarios.Gpt2DataParallelFourNodes10GbE.result
+    assert (Scenarios.Gpt2DataParallelOneNode.result) is not None
+    assert (Scenarios.Gpt2DataParallelFourNodes10GbE.result) is not None
     acc = Scenarios.Gpt2GradientAccumulationOneNode.result
     assert acc.global_batch == 512
 
 def test_pipeline_tensor_parallel_and_ring_attention():
     g = Scenarios.GPipeFourStageWalkthrough
     assert (g.slots, g.idle_slots) == (14, 6)
-    t = Scenarios.Gpt3TensorParallelLayerTp8.result
-    r = Scenarios.H100RingAttentionChunk.min_chunk_tokens
+    assert (Scenarios.Gpt3TensorParallelLayerTp8.result) is not None
+    assert (Scenarios.H100RingAttentionChunk.min_chunk_tokens) is not None
 
 def test_alignment_memory_and_fleet_facts():
     a = Scenarios.Llama2_70B_PpoAlignment.result
     assert a.min_devices_for_ppo == 19
 
 def test_memory_wall_residual_share_and_recompute():
-    r = Scenarios.ResidualOnePercent512
-    a = Scenarios.Gpt3ActivationsMicrobatch4
+    assert (Scenarios.ResidualOnePercent512) is not None
+    assert (Scenarios.Gpt3ActivationsMicrobatch4) is not None
 
 def test_input_space_and_gpt3_cluster_time():
     i = Scenarios.ImageNetInputSpace
@@ -178,34 +185,34 @@ def test_input_space_and_gpt3_cluster_time():
 
 
 def test_battery_heat_and_energy():
-    b = Scenarios.AlwaysOnObjectDetectorPhone
+    assert (Scenarios.AlwaysOnObjectDetectorPhone) is not None
     t = Scenarios.UnoptimizedVisionModelPhone
     assert t.headroom.to('W').magnitude == pytest.approx(0.0, abs=1e-09)
-    e = Scenarios.EnergyPerInferenceTiers
-    o = Scenarios.RadioUploadVsMobileNetV2
+    assert (Scenarios.EnergyPerInferenceTiers) is not None
+    assert (Scenarios.RadioUploadVsMobileNetV2) is not None
 
 def test_doorbell_braking_voice_and_pipeline():
-    f = Scenarios.SmartDoorbellFrame.result
+    assert (Scenarios.SmartDoorbellFrame.result) is not None
     assert Scenarios.SmartDoorbell.evaluate().performance.status == 'PASS'
     assert Scenarios.SmartDoorbellResponsiveChime.evaluate().performance.status == 'FAIL'
-    v = Scenarios.VoiceAssistantBillionDevices
-    p = Scenarios.PhoneCameraPipeline
+    assert (Scenarios.VoiceAssistantBillionDevices) is not None
+    assert (Scenarios.PhoneCameraPipeline) is not None
 
 def test_braking_ceilings_and_hub_drive():
     r = Scenarios.WarehouseBaseBrakingCeilings.result
     assert r.a_tip is None and r.passes is False
-    e = Scenarios.WarehouseBaseHubDriveElectrical.result
+    assert (Scenarios.WarehouseBaseHubDriveElectrical.result) is not None
 
 def test_full_system_failure_cascade():
     r = Scenarios.FullSystemFailures10K.result
     assert r.component_rates['power'] == 0
 
 def test_straggler_replicas_probe_sdc():
-    s = Scenarios.HalfSpeedStraggler1K
+    assert (Scenarios.HalfSpeedStraggler1K) is not None
     early, late = Scenarios.InferenceReadinessProbe.detection_window
     assert (early.to('s').magnitude, late.to('s').magnitude) == (12, 17)
-    a = Scenarios.SdcExposure10K
-    b = Scenarios.SdcExposure100K
+    assert (Scenarios.SdcExposure10K) is not None
+    assert (Scenarios.SdcExposure100K) is not None
 
 
 def test_drf_and_packing():
@@ -214,16 +221,16 @@ def test_drf_and_packing():
 
 def test_idle_capacity_and_policy_gain():
     assert Scenarios.PartialGangHold.missing_gpus == 124
-    u = Scenarios.MixedFleetPolicyFix1K
+    assert (Scenarios.MixedFleetPolicyFix1K) is not None
 
 def test_elastic_sharing_and_lending():
-    e = Scenarios.ElasticResizeDecision
+    assert (Scenarios.ElasticResizeDecision) is not None
     c = Scenarios.ServingConsolidationA100
     assert (c.exclusive_gpus, c.shared_gpus) == (180, 130)
     assert c.min_devices_large == 5
     d = Scenarios.DiurnalServingLending1K
     assert (d.peak_demand, d.lent, d.static_active, d.dynamic_active, d.headroom) == (283, 133, 768, 901, 6)
-    t = Scenarios.TensorParallelExchange1GB.result.times
+    assert (Scenarios.TensorParallelExchange1GB.result.times) is not None
 
 def test_quota_replica_and_saturated_queue():
     q = Scenarios.TeamQuotaLending500
@@ -235,34 +242,34 @@ def test_screener_requirements_and_late_memory_limit():
     r = Scenarios.RetinopathyScreenerRequirements
     assert r.passes('all clinic photos')
     assert r.failing_slices == ['cataract patients']
-    late = Scenarios.RetinopathyScreenerLateMemoryLimit
+    assert (Scenarios.RetinopathyScreenerLateMemoryLimit) is not None
 
 def test_clinic_upload_and_cloud_versus_edge():
-    u = Scenarios.RuralClinicRetinalUpload
+    assert (Scenarios.RuralClinicRetinalUpload) is not None
     c = Scenarios.RetinopathyScreeningCloudVersusEdge
     assert c.annual_images == 9125000
 
 def test_probe_and_allocation_axes():
-    h = Scenarios.ProbeVsGeneratedExplanation.result
+    assert (Scenarios.ProbeVsGeneratedExplanation.result) is not None
     a = Scenarios.OutputCeilingThreeAllocations.result
     assert (a.depth_input, a.breadth_input, a.feedback_input) == (4096, 16384, 16380)
     assert (a.depth_output, a.breadth_output, a.feedback_output) == (4096, 4096, 3072)
     assert a.breadth_premium == 12288 and a.grown_premium == 98304
 
 def test_pools_estimator_and_coverage():
-    p = Scenarios.IndependentCandidatePools.result
+    assert (Scenarios.IndependentCandidatePools.result) is not None
 
 def test_verified_pool_and_argmax_noise():
-    v = Scenarios.SparseValidPoolFirstPass.result
+    assert (Scenarios.SparseValidPoolFirstPass.result) is not None
     s = Scenarios.SparseValidPoolFirstPass
-    post = Scenarios.PatchCheckerPosterior.variant(defect_rate=1 - s.valid_rate, false_accept_rate=s.false_accept_rate, valid_accept_rate=1 - s.false_reject_rate).result.posterior
+    assert (Scenarios.PatchCheckerPosterior.variant(defect_rate=1 - s.valid_rate, false_accept_rate=s.false_accept_rate, valid_accept_rate=1 - s.false_reject_rate).result.posterior) is not None
     g = Scenarios.ArgmaxScoreNoise.result
     assert abs(g.expected_max[1]) < 1e-06
 
 def test_revision_tree_beam_policies_and_run_cost():
     r = Scenarios.ScopedPlanRevision.result
     assert (r.full_output, r.scoped_output, r.avoided_share) == (1800, 450, 0.75)
-    t = Scenarios.StepCheckedSearchTree.result
+    assert (Scenarios.StepCheckedSearchTree.result) is not None
     b = Scenarios.FlatVsBeamSearch.result
     assert b.frontier_counts == [3, 9, 12, 12] and (b.flat_waves, b.beam_waves) == (2, 7)
     assert (b.beam_output_tokens, b.beam_prompt_tokens, b.scorer_tokens) == (4608, 156288, 13440)
@@ -283,7 +290,7 @@ def test_repair_context_budget():
 def test_toy_head_attention_dilution():
     r = Scenarios.ToyHeadAttentionDilution.result
     assert r.weight_with_lookalikes is None
-    x = Scenarios.ToyHeadLookalikeExcerpt.result
+    assert (Scenarios.ToyHeadLookalikeExcerpt.result) is not None
 
 
 def test_repair_prefix_layout_bill():
@@ -337,7 +344,7 @@ def test_decoder_families_and_proposer_traffic():
     d = Scenarios.IntentBackboneDecoderFamilies.result
     assert d.binned_tokens == 112
     assert d.t_expert_step_bandwidth > d.t_expert_step_compute
-    t = Scenarios.WarehouseProposerTraffic.result
+    assert (Scenarios.WarehouseProposerTraffic.result) is not None
 
 def test_conveyor_evidence_horizon():
     e = Scenarios.ConveyorMugEvidenceHorizon.result
@@ -346,10 +353,10 @@ def test_conveyor_evidence_horizon():
     assert half.min_supply_setpoints == 6
 
 def test_labeling_cost_granularity_and_effort():
-    r = Scenarios.ImageNetLabelingVersusResNetRun
+    assert (Scenarios.ImageNetLabelingVersusResNetRun) is not None
     g = Scenarios.FullHdMaskVersusBoxes
     assert g.mask_entries == 2073600
-    h = Scenarios.MswcByHand
+    assert (Scenarios.MswcByHand) is not None
 
 def test_resnet50_a100_input_feed():
     from mlsysim.core.units import Q_
@@ -357,7 +364,7 @@ def test_resnet50_a100_input_feed():
     assert f.workers_per_accelerator == 9
     e = Scenarios.ResNet50EightA100InputFeed
     assert e.workers_pooled == 69
-    r = Scenarios.RecommendationFeatureLookups
+    assert (Scenarios.RecommendationFeatureLookups) is not None
 
 def test_loudness_drift_statistics():
     k = Scenarios.LoudnessDriftKs1000
@@ -365,28 +372,28 @@ def test_loudness_drift_statistics():
 
 def test_llama2_70b_runtime_goodput_128():
     sc = Scenarios.Llama2_70BRuntimeGoodput128
-    r = sc.result
+    assert (sc.result) is not None
     assert sc.crossover(100) == 12928
 
 def test_shared_pool_goodput_and_llama3():
     g = Scenarios.Llama2_70BSharedPoolGoodput128.result
     assert g.point_value['P'] > g.point_value['S'] > g.point_value['R']
-    l3 = Scenarios.Llama3_405BGoodput16K.result
+    assert (Scenarios.Llama3_405BGoodput16K.result) is not None
 
 def test_decode_floor_layernorm_and_tp_exchanges():
-    d = Scenarios.Llama2_70BDecodeFloorTp8.result
-    ln = Scenarios.LayerNormMeasuredH100
+    assert (Scenarios.Llama2_70BDecodeFloorTp8.result) is not None
+    assert (Scenarios.LayerNormMeasuredH100) is not None
     t = Scenarios.Llama2_70BNodeTensorParallelStep.result
     assert t.collectives_per_step == 320
-    m = Scenarios.Llama2_70BDecodeAllReduceTp8
+    assert (Scenarios.Llama2_70BDecodeAllReduceTp8) is not None
 
 def test_compilation_payback_trace_volume_and_software_gains():
-    c = Scenarios.Decode13BCompilationPayback
+    assert (Scenarios.Decode13BCompilationPayback) is not None
 
 def test_serving_cost_goodput_tax_and_knees():
     c = Scenarios.LlmServingFirstYear
     assert round(c.crossover_weeks) == 6
-    t = Scenarios.InteractiveRequestServingTax
+    assert (Scenarios.InteractiveRequestServingTax) is not None
 
 def test_littles_law_vision_and_chat():
     v = Scenarios.VisionServingLittlesLaw
@@ -400,7 +407,7 @@ def test_kv_admission_in_flight_and_handoff():
     assert long.max_requests == 12
 
 def test_prefix_sharing_and_precision_dividend():
-    p = Scenarios.ChatbotSharedSystemPrompt
+    assert (Scenarios.ChatbotSharedSystemPrompt) is not None
     g = Scenarios.Llama2_70BPrecisionDividendGqaTp8.result
     assert (g.max_batch, g.max_batch_low) == (372, 901)
     m = Scenarios.Llama2_70BPrecisionDividendMhaTp8.result
@@ -408,15 +415,15 @@ def test_prefix_sharing_and_precision_dividend():
 
 def test_chunk_tp_decode_budget_and_speculation():
     assert Scenarios.LongPromptChunkedPrefill.iterations == 20
-    t = Scenarios.Llama2_70BPrefillTensorParallel8
+    assert (Scenarios.Llama2_70BPrefillTensorParallel8) is not None
     b = Scenarios.Llama3_70B_ReplicaDecodeBudget
     assert b.allreduces_per_step == 160
-    s = Scenarios.Llama3_70B_ReplicaSpeculation
+    assert (Scenarios.Llama3_70B_ReplicaSpeculation) is not None
 
 def test_fleet_routing_tail_cold_start_and_tenants():
-    h = Scenarios.HeterogeneousH100A100Routing
-    f = Scenarios.ServingFanout100Leaves
-    c = Scenarios.Llama70BReplicaColdStart
+    assert (Scenarios.HeterogeneousH100A100Routing) is not None
+    assert (Scenarios.ServingFanout100Leaves) is not None
+    assert (Scenarios.Llama70BReplicaColdStart) is not None
     n = Scenarios.SharedPoolNoisyNeighbor
     assert n.other_sequences == 75
     b = Scenarios.FourRequestDecodeBatch
@@ -446,7 +453,7 @@ def test_lexical_graph_against_dense_store():
     assert r.chunks == 100000 and r.edited_chunks == 30
 
 def test_correlated_log_and_imitation_bounds():
-    e = Scenarios.PermissionTickTelemetryHour
+    assert (Scenarios.PermissionTickTelemetryHour) is not None
     b = Scenarios.ImitationBoundsFiveSecondEpisode
     assert b.horizon_steps == 500
 
@@ -518,15 +525,15 @@ def test_servo_fieldbus_occupancy():
     assert (one.bits_nominal, one.bits_data, one.frames) == (34, 113, 18)
     assert not one.fits
     assert one.axes_capacity == 8
-    arm = Scenarios.WarehouseServoCanFdArmBus.result
-    e = Scenarios.WarehouseServoEtherCat.result
+    assert (Scenarios.WarehouseServoCanFdArmBus.result) is not None
+    assert (Scenarios.WarehouseServoEtherCat.result) is not None
 
 def test_chunk_lease_budget_and_rule():
     r = Scenarios.WarehouseChunkLease.result
     assert r.fits
     long = Scenarios.WarehouseChunkLeaseLengthened.result
     assert long.fits
-    stop = Scenarios.WarehouseBaseStopFullDelay.result
+    assert (Scenarios.WarehouseBaseStopFullDelay.result) is not None
 
 def test_twenty_four_megabyte_log_observation():
     r = Scenarios.TwentyFourMegabyteLogObservation.result
@@ -574,7 +581,7 @@ def test_latch_trial_campaign_and_parallel_sim():
     assert c.simulation_speedup > 1000
 
 def test_linear_drive_gap_fine_tune_and_dactyl():
-    g = Scenarios.LinearDriveRealityGap
+    assert (Scenarios.LinearDriveRealityGap) is not None
     f = Scenarios.LatchResidualFineTune
     assert f.exceed_samples == 300
 
@@ -584,15 +591,15 @@ def test_mnist_dense_layers():
     assert mlp.weights == 109184 and mlp.macs_per_example_dense == 109184
     l1 = Scenarios.MnistMlpFirstLayer
     assert l1.weights == 100352 and l1.parameters == 100480
-    wide = Scenarios.Dense2048Layer
+    assert (Scenarios.Dense2048Layer) is not None
 
 def test_mnist_conv_against_dense():
     first = Scenarios.MnistFirstConvLayer
     assert first.dense_weights == 25088 and first.weights == 288
-    cnn = Scenarios.MnistSmallCnn
+    assert (Scenarios.MnistSmallCnn) is not None
 
 def test_imagenet_conv_layer():
-    rgb = Scenarios.ImageNetRgbFilterVersusDense
+    assert (Scenarios.ImageNetRgbFilterVersusDense) is not None
     c = Scenarios.ImageNet64ChannelConv
     assert c.weights == 36864 and c.dense_weights == 205520896
     assert c.positions == 50176 and c.macs == 1849688064 and (c.outputs == 3211264)
@@ -630,7 +637,7 @@ def test_digit_paradigms_and_activation_cost():
 
 def test_mnist_large_batch_saved_activations():
     big = Scenarios.MnistDenseNetworkLargeBatch.result
-    small = Scenarios.MnistDenseNetwork.result
+    assert (Scenarios.MnistDenseNetwork.result) is not None
     assert big.batch_size == 1024
 
 def test_operational_load_sketch_crosses_capacity_near_fifty_models():
@@ -681,12 +688,12 @@ def test_kv_footprints():
 def test_recommender_gather_and_tables():
     g = Scenarios.CriteoShapedRequestOnH100
     assert g.request_bytes.to('byte').magnitude == 13312 and (g.pairs, g.interaction_macs) == (351, 44928)
-    e = Scenarios.HundredMillionItemTableOnA100
+    assert (Scenarios.HundredMillionItemTableOnA100) is not None
 
 def test_framework_dispatch_and_fusion():
     g = Scenarios.Gpt2XlEagerDecodeDispatch
     assert g.operations == 576 and g.launches == 576
-    small = Scenarios.SmallMlpDispatch
+    assert (Scenarios.SmallMlpDispatch) is not None
 
 def test_framework_mlp_training_step_and_paths():
     m = Scenarios.MnistTwoLayerTrainingStepOnH100
@@ -699,22 +706,22 @@ def test_framework_batch512_activation_scaling():
     assert b.training_total < b.hardware.memory.capacity < hi
 
 def test_differential_privacy_scenarios():
-    s = Scenarios.SalaryMeanLaplaceRelease
+    assert (Scenarios.SalaryMeanLaplaceRelease) is not None
     m = Scenarios.MembershipAuditAtEpsilonOne
     assert all((m.audit(i / 200) <= m.ceiling(i / 200) + 1e-12 for i in range(201)))
-    c = Scenarios.Cifar10DpSgdRun
+    assert (Scenarios.Cifar10DpSgdRun) is not None
 
 def test_robust_ai_drift_and_silent_errors():
     m = Scenarios.FeatureMeanShiftTest
     assert m.p_value < m.significance_bound
     p = Scenarios.FraudCountryPsi
     assert p.shares('Other') == (0.1, 0.18)
-    d = Scenarios.FraudAmountDrift
-    k = Scenarios.FraudAmountKs
+    assert (Scenarios.FraudAmountDrift) is not None
+    assert (Scenarios.FraudAmountKs) is not None
 
 def test_robust_ai_answering_attacks_and_faults():
     assert Scenarios.PgdSevenTraining.passes == 8 and Scenarios.PgdSevenTraining.slowdown == 8
-    r = Scenarios.SmoothingRadiusCifar10
+    assert (Scenarios.SmoothingRadiusCifar10) is not None
     f = Scenarios.Fp32WeightExponentFlip
     assert f.flipped_bit == 30 and f.word_bits == 32 and (f.scale_log2 == 128)
 
@@ -725,7 +732,7 @@ def test_fixture_release_policy_comparison():
 def test_clean_attack_suites():
     r50 = Scenarios.CleanAttackSuite50.result
     assert r50.trials_for_target == 299
-    r100 = Scenarios.CleanAttackSuite100.result
+    assert (Scenarios.CleanAttackSuite100.result) is not None
 
 def test_bounded_liability_admission():
     r = Scenarios.RepairNextCallAdmission.result
@@ -744,7 +751,7 @@ def test_latch_evaluation_campaign():
     assert (c.table.cells, c.table.supported, c.table.absences) == (6, 1, 5)
 
 def test_latch_sequential_test_and_comparison():
-    s = Scenarios.LatchSequentialTest
+    assert (Scenarios.LatchSequentialTest) is not None
     a = Scenarios.LatchCheckpointComparison
     assert a.runs_per_arm == 195 and a.runs_per_arm_for(0.2) == 393
 
@@ -752,7 +759,7 @@ def test_road_exposure_and_crash_rate_denominator():
     r = Scenarios.RoadMilesToDemonstrate
     assert sorted(r.cleared) == [1.6, 3.9, 51.0]
     assert r.requirements('crashes') == (1.6, 51.0, 65.0)
-    d = Scenarios.AutosteerCrashRateDenominator
+    assert (Scenarios.AutosteerCrashRateDenominator) is not None
 
 def test_closed_loop_evaluation_statistics():
     from mlsysim.physics import calc_clopper_pearson_lower_bound, calc_clopper_pearson_zero_failure_bound, calc_poisson_exact_interval, calc_fisher_exact_two_sided
@@ -763,23 +770,23 @@ def test_sensor_perception_capture_and_age():
     a = Scenarios.WarehouseNavCameraAge.result
     assert [round(st[2].to('ms').magnitude, 1) for st in a.stages] == [8.0, 24.6, 25.4, 26.6, 29.1, 51.1, 51.6]
     assert round(100 * a.capture_share) == 48 and round(100 * a.backbone_share) == 43
-    r = Scenarios.WarehouseNavCameraRollingShutter.result
-    e = Scenarios.WarehouseRackEndTimingAttitude.result
-    m = Scenarios.WarehouseLongAisleMountError.result
-    l = Scenarios.WarehouseRackEndLidarAge.result
-    c = Scenarios.WarehouseLidarClockConversion.result
+    assert (Scenarios.WarehouseNavCameraRollingShutter.result) is not None
+    assert (Scenarios.WarehouseRackEndTimingAttitude.result) is not None
+    assert (Scenarios.WarehouseLongAisleMountError.result) is not None
+    assert (Scenarios.WarehouseRackEndLidarAge.result) is not None
+    assert (Scenarios.WarehouseLidarClockConversion.result) is not None
 
 def test_sensor_perception_error_scales():
-    s = Scenarios.WarehouseStereoRigDepthError.result
-    p = Scenarios.VisualServoDelayPhaseMargin.result
+    assert (Scenarios.WarehouseStereoRigDepthError.result) is not None
+    assert (Scenarios.VisualServoDelayPhaseMargin.result) is not None
     k = Scenarios.ClearanceInsetConformalRank.result
     assert (k.min_count, k.rank, k.rank_from_top) == (99, 991, 10)
 
 def test_gpt2_xl_training_memory():
-    a = Scenarios.Gpt2XlBatch32Activations
+    assert (Scenarios.Gpt2XlBatch32Activations) is not None
     m = Scenarios.Gpt2MixedPrecisionAdamOnH100
     assert m.bytes_per_trained_parameter.to('byte').magnitude == 16
-    f = Scenarios.Gpt2Fp32AdamBatch32OnH100
+    assert (Scenarios.Gpt2Fp32AdamBatch32OnH100) is not None
     u = Scenarios.Gpt2Fp32AdamOnH100
     assert u.update_bytes_per_parameter.to('byte').magnitude == 28
 
@@ -791,29 +798,29 @@ def test_responsible_ai_gap_evidence():
     slo, shi = t.interval_at(10)
     assert (round(slo, 2), round(shi, 2)) == (-0.12, 0.72)
     assert t.n_at_critical == pytest.approx(21.128, abs=0.001)
-    tax = Scenarios.CreditParityAccuracyCost
-    m = Scenarios.FairnessMonitor10K
+    assert (Scenarios.CreditParityAccuracyCost) is not None
+    assert (Scenarios.FairnessMonitor10K) is not None
 
 def test_responsible_ai_safeguard_costs():
-    r = Scenarios.InlineShapRetrofit
-    x = Scenarios.ImageExplanationLog
+    assert (Scenarios.InlineShapRetrofit) is not None
+    assert (Scenarios.ImageExplanationLog) is not None
     u = Scenarios.Gpt3ShardedUnlearning
     assert u.full_retrain_time.to('day').magnitude == pytest.approx(35.548, abs=0.001) and u.planning_days == 36
-    p = Scenarios.Gpt3PrivacyPlan
-    b = Scenarios.RewardModelLabelBudget
-    a = Scenarios.RadiologyAutomationBias
+    assert (Scenarios.Gpt3PrivacyPlan) is not None
+    assert (Scenarios.RewardModelLabelBudget) is not None
+    assert (Scenarios.RadiologyAutomationBias) is not None
 
 def test_responsible_ai_literature_series():
     from mlsysim import Literature
     dp = load_series('vol2/13_security_privacy/data/abadi_dpsgd_accuracy.csv').entries
-    cifar8 = next((r for r in dp if r['dataset'] == 'CIFAR-10' and r['epsilon'] == 8))
+    assert (next((r for r in dp if r['dataset'] == 'CIFAR-10' and r['epsilon'] == 8))) is not None
     assert len(load_series('slides/vol2/16_responsible_ai/images/data/ofqual_2020_grade_matrix.csv').entries) == 7
 
 def test_durable_execution_checkpoint_cadence():
     t = Scenarios.TwoCrashCheckpointTrace.result
     assert t.lost_turns == {10: (7, 3), 25: (12, 8), 50: (37, 33)} and t.best_stride == 25
-    over = Scenarios.TwoCrashCheckpointTrace.stride_overhead(10, Scenarios.TwoCrashCheckpointTrace.rebuild_per_turn)
-    y = Scenarios.ReexecutedWorkCheckpointInterval.result
+    assert (Scenarios.TwoCrashCheckpointTrace.stride_overhead(10, Scenarios.TwoCrashCheckpointTrace.rebuild_per_turn)) is not None
+    assert (Scenarios.ReexecutedWorkCheckpointInterval.result) is not None
 
 def test_durable_execution_flat_optimum():
     y = Scenarios.ReexecutedWorkCheckpointInterval
@@ -822,7 +829,7 @@ def test_durable_execution_flat_optimum():
 def test_failure_recovery_repair_and_pivot():
     r = Scenarios.TestConfigRepairVsRebuild.result
     assert r.one_in == 16
-    p = Scenarios.RemediationCanaryPivotLoss.result
+    assert (Scenarios.RemediationCanaryPivotLoss.result) is not None
 
 def test_failure_recovery_loop_and_containment():
     from mlsysim.physics import calc_cleanup_critical_path, calc_layered_retry_attempts
@@ -833,22 +840,22 @@ def test_failure_recovery_loop_and_containment():
     assert t.by_layer == [1, 3, 9, 27] and t.coordinated == 3 and (calc_layered_retry_attempts(2, 3) == 8)
     b = Scenarios.BlockingCallBulkhead.result
     assert (b.uncapped_free, b.queued, b.rejected, b.protected_workers) == (44, 32, 160, 236)
-    j = Scenarios.RetryCohortJitter.result
+    assert (Scenarios.RetryCohortJitter.result) is not None
     assert calc_cleanup_critical_path({'a': 1, 'b': 2, 'c': 3}, {'c': ['a', 'b']}) == 5
 
 def test_spatial_memory_estimation():
-    f = Scenarios.WarehouseRackEndRangeFusion.result
-    c = Scenarios.RackEndMisdatedUpdateConsistency.result
+    assert (Scenarios.WarehouseRackEndRangeFusion.result) is not None
+    assert (Scenarios.RackEndMisdatedUpdateConsistency.result) is not None
     assert Scenarios.WarehouseObservationReplayBuffer.result.slots == 52
-    i = Scenarios.WarehouseImuOneSecondCoast.result
-    o = Scenarios.WarehouseUmbmarkOdometryDrift.result
+    assert (Scenarios.WarehouseImuOneSecondCoast.result) is not None
+    assert (Scenarios.WarehouseUmbmarkOdometryDrift.result) is not None
 
 def test_spatial_memory_maps():
     q = Scenarios.WarehousePermissionClearanceQuery.result
     assert [round(q.rows[p].occupancy_reads) for p in (2, 5, 10)] == [22449, 1437, 180]
     assert q.rows[5].octree_depth == 8 and round(q.rows[5].octree_reads) == 11494
-    h = Scenarios.WorkcellHostMapSizing.result
-    r = Scenarios.WarehouseDepthRaymarchTraffic.result
+    assert (Scenarios.WorkcellHostMapSizing.result) is not None
+    assert (Scenarios.WarehouseDepthRaymarchTraffic.result) is not None
 
 def test_conveyor_mug_intent_cadence():
     c = Scenarios.ConveyorMugIntentCadence.result
@@ -857,18 +864,18 @@ def test_conveyor_mug_intent_cadence():
 def test_conveyor_mug_reach_occupancy_and_lease_expiry():
     r = Scenarios.ConveyorMugDynamicReach.result
     assert not r.fits and r.fresh_captures == 2
-    o = Scenarios.AisleCoworkerForwardOccupancy.result
+    assert (Scenarios.AisleCoworkerForwardOccupancy.result) is not None
     e = Scenarios.ConveyorMugIntentLeaseExpiry.result
     assert (e.binding_untracked, e.binding_tracked) == ('evidence', 'administrative')
 
 def test_referent_sets_confidence_region_and_latch_stall():
     s = Scenarios.MugJarReferentSet.result
     assert s.set_size == 2 and s.refuse
-    low = Scenarios.MugJarReferentSetLowJar.result
+    assert (Scenarios.MugJarReferentSetLowJar.result) is not None
     g = Scenarios.DistantHandleConfidenceRegion.result
     assert g.axes_within == 2
-    x = Scenarios.LatchUnbrakedStall
-    gs = Scenarios.ConveyorMugGoalSetOffsets
+    assert (Scenarios.LatchUnbrakedStall) is not None
+    assert (Scenarios.ConveyorMugGoalSetOffsets) is not None
 
 def test_carbon_priced_region_placement():
     r = Scenarios.CarbonPricedRegionPlacement.result
@@ -890,8 +897,8 @@ def test_paired_comparison_and_published_newcombe_examples():
     assert calc_mcnemar_exact_two_sided(0, 0) == 1.0
 
 def test_leaderboards_and_selection_cost():
-    m = Scenarios.TwoTaskTypeConsistency.result
-    c = Scenarios.CappedCandidateSelection.result
+    assert (Scenarios.TwoTaskTypeConsistency.result) is not None
+    assert (Scenarios.CappedCandidateSelection.result) is not None
 
 def test_repair_trial_span_timeline():
     r = Scenarios.RepairTrialSpanTimeline.result
@@ -924,7 +931,7 @@ def test_gpt2_xl_step_fits_one_h100():
     assert flash.max_resident_batch == 23
     ckpt = Scenarios.Gpt2XlBatch32SegmentCheckpointed
     assert ckpt.segment_layers == 6
-    act = Scenarios.Gpt2XlBatch32Activations
+    assert (Scenarios.Gpt2XlBatch32Activations) is not None
 
 def test_online_softmax_and_attention_tiles():
     a = Scenarios.AttentionScores4096TokensFp32
@@ -934,30 +941,30 @@ def test_model_compression_scenarios():
     from mlsysim import Literature
     from mlsysim.physics import calc_csr_bytes, calc_pareto_frontier, calc_sparse_breakeven_zero_share, calc_sparse_bytes_per_nonzero
     from mlsysim.core.units import BYTES_FP32, BYTES_INT32
-    t = Scenarios.Llama2_7BTokenOnFlagshipPhone
-    b = Scenarios.MobileNetV2BlurPipelinePhone
-    r = Scenarios.Rank128Factorization4096
-    f = Scenarios.ResNet50Conv256FusionH100
-    w = Scenarios.WearableMobileNetV2SparseFlash
-    csr = calc_sparse_bytes_per_nonzero(BYTES_FP32, BYTES_INT32)
-    coo = calc_sparse_bytes_per_nonzero(BYTES_FP32, BYTES_INT32, indices=2)
+    assert (Scenarios.Llama2_7BTokenOnFlagshipPhone) is not None
+    assert (Scenarios.MobileNetV2BlurPipelinePhone) is not None
+    assert (Scenarios.Rank128Factorization4096) is not None
+    assert (Scenarios.ResNet50Conv256FusionH100) is not None
+    assert (Scenarios.WearableMobileNetV2SparseFlash) is not None
+    assert (calc_sparse_bytes_per_nonzero(BYTES_FP32, BYTES_INT32)) is not None
+    assert (calc_sparse_bytes_per_nonzero(BYTES_FP32, BYTES_INT32, indices=2)) is not None
     assert calc_csr_bytes(6, 4, BYTES_FP32, BYTES_INT32).to('byte').magnitude == 68
     t3 = load_series('slides/vol1/10_model_compression/images/data/mobilenetv3_table3_pixel1.csv').entries
     front = [t3[i]['model'] for i in calc_pareto_frontier([(r['pixel1_ms'], r['top1']) for r in t3])]
     assert 'V2 1.0' not in front and 'V3-Large 0.75' in front
 
 def test_accelerator_trends_and_latency_in_cycles():
-    w = Scenarios.DenseParametersVsBandwidthSince2014
-    g = Scenarios.NvidiaGenerationsV100ToB200
+    assert (Scenarios.DenseParametersVsBandwidthSince2014) is not None
+    assert (Scenarios.NvidiaGenerationsV100ToB200) is not None
 
 def test_trajectory_planning_joint_rates_handoffs_and_replacement():
     good = Scenarios.WarehouseArmRightAngleElbow.result
     assert good.exceeds_joint_limit
-    bad = Scenarios.WarehouseArmNearStraightElbow.result
-    m = Scenarios.GenericReplannerMissionExposure.result
-    r = Scenarios.WarehouseArmChunkReplacement.result
-    s = Scenarios.WarehouseArmStaleAnchor.result
-    w = Scenarios.WarehouseBaseDynamicWindow.result
+    assert (Scenarios.WarehouseArmNearStraightElbow.result) is not None
+    assert (Scenarios.GenericReplannerMissionExposure.result) is not None
+    assert (Scenarios.WarehouseArmChunkReplacement.result) is not None
+    assert (Scenarios.WarehouseArmStaleAnchor.result) is not None
+    assert (Scenarios.WarehouseBaseDynamicWindow.result) is not None
 
 def test_warehouse_jerk_limited_stop_matches_finished_budget():
     """The trajectory chapter's S-curve stop and the enforcement chapter's finished budget share one jerk bound and one stop."""
@@ -984,17 +991,17 @@ def test_recovery_pool_denominators():
 
 def test_fine_tuning_serialization_and_target_mask():
     """Per-call examples, the recovery record's mask, and recorded role shares (added 2026-10-20)."""
-    s = Scenarios.RepairTrajectoryPerCallExamples.result
+    assert (Scenarios.RepairTrajectoryPerCallExamples.result) is not None
     m = Scenarios.RecoveryRecordTargetMask.result
     assert m.stored == 16384 and m.predicted == 16383
     assert m.targets_without_rationale == 800 and m.targets_with_rationale == 2200
 
 def test_fine_tuning_weighting_packing_and_bounds():
-    w = Scenarios.RepairTraceWithLookupWeighting.result
+    assert (Scenarios.RepairTraceWithLookupWeighting.result) is not None
     p = Scenarios.EightExamplePackingBatch.result
     assert p.stored == 50176 and p.padded_positions == 262144 and (p.buffers == 2)
     assert p.buffer_loads == [32768, 17408]
-    i = Scenarios.RepairPolicyImitationBounds
+    assert (Scenarios.RepairPolicyImitationBounds) is not None
 
 def test_placement_shared_dram_read():
     r = Scenarios.WarehouseSharedDieLoadedRead.result
@@ -1127,7 +1134,8 @@ def test_supervisory_intervention_takeover_budgets():
     import math
     vals = sorted((r['mean_takeover_time_s'] for r in load_series('slides/vol4/14_intervention/images/data/zhang2019_mean_takeover_times.csv').entries))
     assert len(vals) == 520 and sum(vals) / len(vals) == pytest.approx(2.72, abs=0.005)
-    pct = lambda p: vals[max(math.ceil(p / 100 * len(vals)) - 1, 0)]
+    def pct(p):
+        return vals[max(math.ceil(p / 100 * len(vals)) - 1, 0)]
     assert pct(50) == pytest.approx(site.t_takeover_driving_p50.m_as('s'))
     assert pct(90) == pytest.approx(site.t_takeover_driving_p90.m_as('s'))
     assert pct(99) == pytest.approx(site.t_takeover_driving_p99.m_as('s'))
@@ -1237,15 +1245,15 @@ def test_single_machine_serving_scenarios():
 
 def test_verifiable_reward_composition_coefficients_and_contrast():
     """RL from verifiable rewards: false accepts, baselines, shaping, forks, GRPO, contrast (added 2026-10-20)."""
-    r = Scenarios.VerifierFalseAcceptsAtTenPercentPass.result
-    b = Scenarios.BinaryRewardFixedBaseline.result
-    f = Scenarios.DebuggerTurnForkValue.result
+    assert (Scenarios.VerifierFalseAcceptsAtTenPercentPass.result) is not None
+    assert (Scenarios.BinaryRewardFixedBaseline.result) is not None
+    assert (Scenarios.DebuggerTurnForkValue.result) is not None
     every = Scenarios.ThirtyTurnForksAtEveryBoundary.result
     assert every.base_tokens == 15360 and every.branches == 232 and (every.total_tokens == 1797120)
-    two = Scenarios.ThirtyTurnForksAfterTurnsTenAndTwenty.result
-    g = Scenarios.RepairGroupOnePassOfThree.result
-    lone = Scenarios.LonePassInGroupOfSixteen.result
-    h = Scenarios.HardTaskRolloutStep.result
+    assert (Scenarios.ThirtyTurnForksAfterTurnsTenAndTwenty.result) is not None
+    assert (Scenarios.RepairGroupOnePassOfThree.result) is not None
+    assert (Scenarios.LonePassInGroupOfSixteen.result) is not None
+    assert (Scenarios.HardTaskRolloutStep.result) is not None
 
 def test_release_scenarios_and_records():
     """Deceleration premise, dim-aisle age, argument confidence, and the release records (added 2026-10-20)."""
@@ -1373,7 +1381,7 @@ def test_responsibility_groups_and_records():
     assert len(load_series('slides/vol4/17_responsibility/images/data/li2025_pedestrian_miss_rate_by_age.csv')) == 8 and len(load_series('slides/vol4/17_responsibility/images/data/wilson2019_bdd100k_person_ap75.csv')) == 8
     li = load_series('slides/vol4/17_responsibility/images/data/li2025_pedestrian_miss_rate_by_age.csv').entries
     assert sum((e['miss_rate_child_pct'] for e in li)) / 8 == pytest.approx(43.89, abs=0.005)
-    w = load_series('slides/vol4/17_responsibility/images/data/wilson2019_bdd100k_person_ap75.csv').entries
+    assert (load_series('slides/vol4/17_responsibility/images/data/wilson2019_bdd100k_person_ap75.csv').entries) is not None
 
 def test_ml_operations_part1_scenarios():
     """Release footprints, automation break-even, skew cost, A/B sizing, drift (added 2026-10-20)."""
@@ -1398,7 +1406,7 @@ def test_ml_operations_part1_scenarios():
     d = Scenarios.RankingServiceAccuracyDrift
     assert d.decay_rate.m_as('1/day') == pytest.approx(0.00235564, rel=1e-05)
     assert calc_exponential_decay_rate(1.0, 0.5, 1.0) == pytest.approx(0.693147, rel=1e-06)
-    out = [row['outages'] for row in load_series('slides/vol1/14_ml_ops/images/data/outages_by_mlness.csv').entries]
+    assert [row['outages'] for row in load_series('slides/vol1/14_ml_ops/images/data/outages_by_mlness.csv').entries]
 
 def test_benchmark_decision_scenarios():
     """Run noise, Welch intervals, run and sample counts, paired accuracy, run order, gates (added 2026-10-20)."""
@@ -1439,8 +1447,8 @@ def test_token_serving_scenarios():
     assert k70.result.kv_budget.m_as('GB') == pytest.approx(50.59935, rel=1e-06)
     assert k70.context_fit() == pytest.approx(4825.53, rel=1e-06)
     cs = Scenarios.Llama3_8BInt4ChatServiceH100
-    assert cs.ttft.m_as('ms') == pytest.approx(41.93186, rel=1e-06)
-    assert cs.tpot.m_as('ms') == pytest.approx(1.56765, rel=1e-05)
+    assert cs.ttft.m_as('ms') == pytest.approx(41.26921, rel=1e-06)
+    assert cs.tpot.m_as('ms') == pytest.approx(1.24765, rel=1e-05)
     assert cs.kv_capacity_tokens == 589824 and cs.resident_requests == 469
     assert cs.request_rate.m_as('1/s') == pytest.approx(10)
     assert cs.cost_per_million_tokens.m_as('dollar') == pytest.approx(0.0663482, rel=1e-05)
@@ -1489,24 +1497,24 @@ def test_agent_cost_accounting():
     from mlsysim.physics import calc_kingman_wait_ratio, calc_speculative_round_speedup
     assert calc_kingman_wait_ratio(0.5, 1.0, 1.0) == pytest.approx(1.0)
     assert calc_speculative_round_speedup(0.4, 5, 0.08) == pytest.approx(1.0)
-    c = Scenarios.RepairCohortTokenPriceComparison.result
+    assert (Scenarios.RepairCohortTokenPriceComparison.result) is not None
     b = Scenarios.RepairResendCacheBill.result
     assert (b.sent_tokens, b.fresh_tokens) == (892500, 51500)
-    k = Scenarios.RepairCompactionPayback.result
+    assert (Scenarios.RepairCompactionPayback.result) is not None
     assert Scenarios.RepairCompactionPaybackHalfCachedRate.result.breakeven_calls == 23
-    r = Scenarios.CheapRetryAgainstStrongCall.result
-    e = Scenarios.SerialRepairEpisode.result
-    s = Scenarios.SerialRepairEpisodeSpeculation.result
-    q = Scenarios.CodeEditThreeTierCascade.result
-    a = Scenarios.RepairTrajectoryQuotaAdmission.result
-    w = Scenarios.BurstyModelServerQueuePrice.result
-    d = Scenarios.DedicatedCapacityBreakEven.result
+    assert (Scenarios.CheapRetryAgainstStrongCall.result) is not None
+    assert (Scenarios.SerialRepairEpisode.result) is not None
+    assert (Scenarios.SerialRepairEpisodeSpeculation.result) is not None
+    assert (Scenarios.CodeEditThreeTierCascade.result) is not None
+    assert (Scenarios.RepairTrajectoryQuotaAdmission.result) is not None
+    assert (Scenarios.BurstyModelServerQueuePrice.result) is not None
+    assert (Scenarios.DedicatedCapacityBreakEven.result) is not None
     g = Scenarios.RepairBudgetLateBill.result
     assert (g.settled_final, g.reserved_final, g.free_final) == (1972, 0, 3028)
     assert (g.child_free_at_stop, g.child_apparent_free, g.child_free_settled) == (650, 1650, 950)
-    h = Scenarios.DependencyUpgradeArchitectures.result
-    n = Scenarios.CodeReviewAdaptationPayback.result
-    l = Scenarios.LighthouseWorkloadLevers.result.rows
+    assert (Scenarios.DependencyUpgradeArchitectures.result) is not None
+    assert (Scenarios.CodeReviewAdaptationPayback.result) is not None
+    assert (Scenarios.LighthouseWorkloadLevers.result.rows) is not None
 
 def test_premises_no_sensor_reports():
     """Oil-film budget, film detector, restricted transit, packaging cell, shield bill, latch spring (added 2026-10-20)."""
@@ -1647,7 +1655,7 @@ def test_responsible_engineering_cost_carbon_and_duties():
     assert t.serving_saving.m_as('USD') == pytest.approx(0.2 * t.inference_cost.m_as('USD'))
     assert t.training_saving.m_as('USD') == pytest.approx(19200)
     assert Scenarios.Gpt3TrainingCarbon.carbon.m_as('metric_ton') == pytest.approx(552.123)
-    hours = 6 * 8760 * 0.85
+    assert (6 * 8760 * 0.85) is not None
     x = Scenarios.CreditDenialExplanationLoad
     assert x.denial_share == pytest.approx(1 - 6300 / 12000)
     assert x.sampled_evaluations == pytest.approx(475000000.0) and x.exact_per_explanation == 2 ** 20

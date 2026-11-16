@@ -1,3 +1,4 @@
+import inspect
 import logging
 from typing import Type, Dict
 from .solvers import BaseResolver
@@ -33,9 +34,19 @@ class ResolverFactory:
         # BaseSolver/ForwardModel/BaseOptimizer -> concrete classes); "Base"-
         # prefixed intermediates are skipped as non-instantiable scaffolding.
         from . import solvers
+        abstract_bases = {
+            solvers.BaseResolver,
+            solvers.ForwardModel,
+            solvers.BaseSolver,
+            solvers.BaseOptimizer,
+        }
         def register_subclasses(base_class):
             for subclass in base_class.__subclasses__():
-                if not subclass.__name__.startswith("Base"):
+                if (
+                    subclass not in abstract_bases
+                    and not subclass.__name__.startswith("Base")
+                    and not inspect.isabstract(subclass)
+                ):
                     cls._registry[subclass.__name__] = subclass
                 register_subclasses(subclass)
 

@@ -2463,10 +2463,10 @@ SICK_NANOSCAN3_CORE = _ds(
 # Fitting a training step on one accelerator (added 2026-10-20)
 ACCELERATOR_ONCHIP_SRAM_RANGE = _est(
     "prov:accelerator-onchip-sram-range",
-    "MLSysBook, Model Training: on-chip SRAM of a modern accelerator",
-    ("The book's rounded range for one accelerator chip's on-chip SRAM (registers, shared memory, L1 and "
+    "Modern datacenter GPU on-chip SRAM capacity and bandwidth envelope (NVIDIA H100 Architecture Whitepaper; Dao et al., 2022)",
+    ("Representative range for one datacenter accelerator chip's on-chip SRAM (registers, shared memory, L1 and "
      "L2 together): 30 to 50 MB at roughly 15 to 20 TB/s. The H100 has 50 MiB of L2 and 228 KiB of shared "
-     "memory per SM across 132 SMs; Dao et al. (2022) label the A100's SRAM 20 MB at 19 TB/s."),
+     "memory per SM across 132 SMs; Dao et al. (2022) report the A100's SRAM as 20 MB at 19 TB/s."),
     verified="2026-10-20",
 )
 

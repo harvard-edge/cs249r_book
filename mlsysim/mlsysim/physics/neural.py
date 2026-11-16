@@ -457,7 +457,10 @@ def calc_sigmoid(x: float) -> float:
     >>> calc_sigmoid(0.0)
     0.5
     """
-    return 1.0 / (1.0 + math.exp(-x))
+    if x >= 0.0:
+        return 1.0 / (1.0 + math.exp(-x))
+    exp_x = math.exp(x)
+    return exp_x / (1.0 + exp_x)
 
 
 def calc_sigmoid_slope(x: float) -> float:

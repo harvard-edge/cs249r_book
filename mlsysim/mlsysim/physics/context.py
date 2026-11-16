@@ -103,9 +103,9 @@ def calc_softmax_target_weight(target_logit: float, competitors) -> float:
     -----
     Equation: a = exp(z_t) / (exp(z_t) + sum_j n_j exp(z_j)).
 
-    Assumptions: Competitor keys in each group share a fixed logit; there is one target key.
+    Assumptions: Competitor keys in each group share a fixed logit; there is one target key, and logits are shifted by the maximum score to prevent overflow.
 
-    Excludes: Learned changes to logits, multihead aggregation, and overflow-stable softmax.
+    Excludes: Learned changes to logits and multihead aggregation.
 
     Adding keys at fixed logits increases the normalizer and reduces target weight.
 
@@ -118,8 +118,15 @@ def calc_softmax_target_weight(target_logit: float, competitors) -> float:
     >>> calc_softmax_target_weight(0.0, [(1, 0.0)]) == 0.5
     True
     """
-    target = _math.exp(target_logit)
-    return target / (target + sum(n * _math.exp(z) for n, z in competitors))
+    groups = [(n, float(z)) for n, z in competitors]
+    if any(n < 0 for n, _ in groups):
+        raise ValueError("competitor key counts must be nonnegative")
+    t_val = float(target_logit)
+    active_logits = [t_val] + [z for n, z in groups if n > 0]
+    max_logit = max(active_logits)
+    target = _math.exp(t_val - max_logit)
+    comp_sum = sum(n * _math.exp(z - max_logit) for n, z in groups if n > 0)
+    return target / (target + comp_sum)
 
 
 def calc_equivalent_key_count(count: int, logit: float, reference_logit: float) -> float:
