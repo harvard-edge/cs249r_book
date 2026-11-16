@@ -35,8 +35,11 @@ def frac(num: str, den: str) -> str:
 
 
 def n(text: str, warn: bool = False) -> str:
-    """A result number, highlighted."""
-    return f'<span class="n{" warn" if warn else ""}">{text}</span>'
+    """A result number, highlighted. warn=True only for a result that fails a
+    limit; it gets the warning color and a ▲ so color is not the only cue."""
+    if warn:
+        return f'<span class="n warn">▲ {text}</span>'
+    return f'<span class="n">{text}</span>'
 
 
 def assumed() -> str:
@@ -64,8 +67,9 @@ class Card:
     title: str
     eq: str | list[str] | None = None      # one or more equation lines (HTML)
     holds: str | None = None               # when it holds / what the symbols mean
-    ex: str | None = None                  # worked example with computed numbers
+    ex: str | None = None                  # worked example: numbers substituted, then result
     chapter: str | None = None             # e.g. "Ch 8"
+    so: str | None = None                  # one-line takeaway: what the result means or which lever it points to
 
 
 @dataclass
@@ -126,6 +130,29 @@ class Sheet:
 # ---------------------------------------------------------------- rendering
 
 ROMAN = {1: "I", 2: "II", 3: "III", 4: "IV"}
+
+# Each sheet takes its volume's print accent (books/volN/tex/theme-colors.tex),
+# so a printed sheet matches its book. "warn" marks results that fail a limit
+# and must stay distinct from the accent hue.
+THEME = {
+    1: {"accent": "#A51C30", "warn": "#B45309"},   # Harvard crimson; amber warn
+    2: {"accent": "#1F407A", "warn": "#B4472F"},   # ETH blue
+    3: {"accent": "#581C87", "warn": "#B4472F"},   # Royal amethyst
+    4: {"accent": "#1A4D3E", "warn": "#B4472F"},   # Emerald pine
+}
+
+
+def _tint(hex_color: str, share: float) -> str:
+    """Mix a color with white; share is the fraction of the color kept."""
+    r, g, b = (int(hex_color[i:i + 2], 16) for i in (1, 3, 5))
+    mix = lambda c: round(255 - (255 - c) * share)
+    return "#{:02X}{:02X}{:02X}".format(mix(r), mix(g), mix(b))
+
+
+def theme_css(volume: int) -> str:
+    t = THEME[volume]
+    return (f":root {{ --accent: {t['accent']}; --accent-soft: {_tint(t['accent'], 0.09)}; "
+            f"--accent-mid: {_tint(t['accent'], 0.35)}; --warn: {t['warn']}; }}")
 FONTS = ("https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@500;600;700"
          "&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500"
          "&family=STIX+Two+Text:ital@0;1&display=swap")
@@ -142,6 +169,8 @@ def _item(it) -> str:
             out.append(f'<p class="holds">{it.holds}</p>')
         if it.ex:
             out.append(f'<p class="ex">{it.ex}</p>')
+        if it.so:
+            out.append(f'<p class="so"><b>So</b> {it.so}</p>')
         out.append("</div>")
         return "".join(out)
     if isinstance(it, Table):
@@ -169,7 +198,10 @@ def render(sheet: Sheet) -> str:
 <h1>Napkin Math: {sheet.scope} <span>· {pg.question}</span></h1>
 <div class="sub">{pg.sub}</div></div>
 <div class="meta">{sheet.book} · Volume {vol}<br>{pg.meta} · {k} / {len(sheet.pages)}</div></div>''']
-        notation = "".join(f"<span><b>{g}</b>{h}</span>" for g, h in pg.notation)
+        legend = ('<span class="legend"><b>How to read</b>each card: formula → numbers → result → '
+                  '<span class="so-key">So</span> what it means · <span class="tag">assumed</span>example input · '
+                  '<span class="n warn">▲</span> fails a limit</span>')
+        notation = "".join(f"<span><b>{g}</b>{h}</span>" for g, h in pg.notation) + legend
         parts.append(f'<div class="notation">{notation}</div>')
         if pg.know:
             rows.append("auto")
@@ -191,7 +223,7 @@ def render(sheet: Sheet) -> str:
             parts.append(f'<div class="foot"><span>{sheet.sources}</span><span>Machine Learning Systems · mlsysbook.ai</span></div>')
         pages.append(f'<section class="page" style="grid-template-rows:{" ".join(rows)}">' + "".join(parts) + "</section>")
     return (f'<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Napkin Math: {sheet.scope}</title>'
-            f'<link rel="stylesheet" href="{FONTS}"><style>{CSS_PATH.read_text()}</style></head><body>' + "".join(pages) + "</body></html>")
+            f'<link rel="stylesheet" href="{FONTS}"><style>{CSS_PATH.read_text()}{theme_css(sheet.volume)}</style></head><body>' + "".join(pages) + "</body></html>")
 
 
 LAYOUT_CHECK = """() => {

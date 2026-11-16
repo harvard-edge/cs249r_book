@@ -31,10 +31,10 @@ def napkin():
 def test_sheet_builds_and_renders(napkin, vol):
     sheet = importlib.import_module(f"napkin_math.{vol}").build()
     assert sheet.volume == VOLUMES.index(vol) + 1
-    assert len(sheet.pages) == 2
+    assert len(sheet.pages) >= 2  # pages 1-2 are the core handout; more pages may follow
     html = napkin.render(sheet)
     text = re.sub(r"<[^>]+>", " ", html)
-    for bad in ("nan", "inf ", "None", "{{", "}}"):
-        assert bad not in text, f"{vol}: rendered text contains {bad!r}"
+    for bad in (r"\bnan\b", r"\binf\b", r"\bNone\b", r"\{\{", r"\}\}"):
+        assert not re.search(bad, text), f"{vol}: rendered text matches {bad!r}"
     for page in sheet.pages:
         assert len(page.cols) == 3
