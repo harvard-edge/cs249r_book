@@ -1,6 +1,6 @@
 # Napkin Math sheets
 
-One two-page, US Letter landscape reference sheet per volume: the numbers a
+One US Letter landscape reference sheet per volume: the numbers a
 student should know by heart and the quantities they should be able to
 calculate, in the book's own notation. The name matches the book's "Napkin
 Math" callouts.
@@ -67,17 +67,31 @@ the sheet's own examples. About seven per sheet.
 model dimensions and hardware specs its cards rely on, so no sheet requires
 another volume.
 
-**Examples.** One worked example per card, as short as possible: inputs, then
-result. Print every input needed to reproduce the result.
+**Examples.** Every worked example follows one pattern so a student can trace
+it: formula, then the numbers substituted with units, then the result, then a
+"So" line (`Card.so`) saying what the result means or which lever it points
+to. Print every input needed to reproduce the result. Define each symbol on
+the page, near where it is used.
 
-**Headings.** Page titles are questions. Column titles are questions. Page 1's
-subtitle says how to read the page.
+**Length.** Usefulness comes first. Pages 1 and 2 are the core quick
+reference, sized to print front and back as one exam handout. Further pages
+add the cards a student needs that the core cannot hold, each page answering
+its own question. Prefer fewer, clearer cards to crowded ones.
+
+**Color.** The accent is the volume's print accent (`core.THEME`): page
+questions, results, equation panels, and the main chart line. The warning
+color marks only a result that fails a limit, and `n(..., warn=True)` adds a
+▲ so color is never the only cue. ASSUMED tags are neutral gray. Chart
+categories use the accent, gray, and `cat3`, never the warning color.
+
+**Headings.** Page titles are questions. Column titles are questions. Every page's
+subtitle says how to read it.
 
 **Shared conventions.** M/M/1: *T*<sub>lat</sub> = *t*<sub>s</sub> / (1 − *ρ*),
 p99 of time in system ≈ ln(100) · *T*<sub>lat</sub>. GB = 10<sup>9</sup> B,
 GiB = 2<sup>30</sup> B. Footer: units, the assumed legend, and the source of
 the values.
 
-**Layout.** Two pages; every column ends 0–30 px above the footer. Charts
+**Layout.** Every column ends 0–30 px above the footer. Charts
 where a picture teaches more than the formula; no chart that is only a
 straight line.

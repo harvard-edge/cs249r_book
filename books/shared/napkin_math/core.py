@@ -35,8 +35,11 @@ def frac(num: str, den: str) -> str:
 
 
 def n(text: str, warn: bool = False) -> str:
-    """A result number, highlighted."""
-    return f'<span class="n{" warn" if warn else ""}">{text}</span>'
+    """A result number, highlighted. warn=True only for a result that fails a
+    limit; it gets the warning color and a ▲ so color is not the only cue."""
+    if warn:
+        return f'<span class="n warn">▲ {text}</span>'
+    return f'<span class="n">{text}</span>'
 
 
 def assumed() -> str:
@@ -64,8 +67,9 @@ class Card:
     title: str
     eq: str | list[str] | None = None      # one or more equation lines (HTML)
     holds: str | None = None               # when it holds / what the symbols mean
-    ex: str | None = None                  # worked example with computed numbers
+    ex: str | None = None                  # worked example: numbers substituted, then result
     chapter: str | None = None             # e.g. "Ch 8"
+    so: str | None = None                  # one-line takeaway: what the result means or which lever it points to
 
 
 @dataclass
@@ -165,6 +169,8 @@ def _item(it) -> str:
             out.append(f'<p class="holds">{it.holds}</p>')
         if it.ex:
             out.append(f'<p class="ex">{it.ex}</p>')
+        if it.so:
+            out.append(f'<p class="so"><b>So</b> {it.so}</p>')
         out.append("</div>")
         return "".join(out)
     if isinstance(it, Table):
