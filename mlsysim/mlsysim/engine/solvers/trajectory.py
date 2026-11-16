@@ -70,7 +70,7 @@ class TwoLinkJointRateModel(ForwardModel):
     delivers the fraction sigma^2 / (sigma^2 + lambda^2) of the tool motion.
     """
 
-    requires = ("arm", "elbow_angle", "tool_speed")
+    requires = ("upper_arm", "forearm", "elbow_angle", "tool_speed", "joint_speed_limit", "damping")
     produces = TwoLinkJointRateResult
 
     def solve(self, upper_arm: Quantity, forearm: Quantity, elbow_angle: Quantity, tool_speed: Quantity,
@@ -456,7 +456,7 @@ class SpillLimitedStopModel(ForwardModel):
     the carry speed is the fastest entry speed whose delayed stop fits.
     """
 
-    requires = ("free_stop", "inner_radius", "freeboard")
+    requires = ("speed", "free_deceleration", "free_jerk", "delay", "clear_distance", "inner_radius", "freeboard")
     produces = SpillLimitedStopResult
 
     def solve(self, speed: Quantity, free_deceleration: Quantity, free_jerk: Quantity, delay: Quantity,
@@ -554,7 +554,11 @@ class TrajectoryDeadlinesModel(ForwardModel):
     the blend deadline to commitment is charged before the stop.
     """
 
-    requires = ("setpoint_period", "horizon", "commit", "stop")
+    requires = (
+        "setpoint_period", "horizon", "renewal_period", "request_delay",
+        "latency_target", "schedule_slack", "response", "blend", "commit",
+        "stop_time", "stop_distance", "speed", "clear_distance", "late_wait",
+    )
     produces = TrajectoryDeadlinesResult
 
     def solve(self, setpoint_period: Quantity, horizon: int, renewal_period: Quantity, request_delay: Quantity,
@@ -672,7 +676,10 @@ class SeamBridgeModel(ForwardModel):
     6 delta / T^2 at both ends, so torque falls as 1 / T and torque rate as 1 / T^2.
     """
 
-    requires = ("joint", "velocity_gap", "bridge_duration")
+    requires = (
+        "gear_ratio", "rotor_inertia", "rated_torque", "peak_torque",
+        "torque_rate_limit", "velocity_gap", "tick", "bridge_duration",
+    )
     produces = SeamBridgeResult
 
     def solve(self, gear_ratio: float, rotor_inertia: Quantity, rated_torque: Quantity, peak_torque: Quantity,
@@ -793,7 +800,10 @@ class ShoulderSwingModel(ForwardModel):
     (``calc_scurve_rest_to_rest_time``).
     """
 
-    requires = ("payload", "reach", "joint", "swing")
+    requires = (
+        "payload", "reach", "torque_limit", "reflected_inertia",
+        "swing", "acceleration_limit", "velocity_limit", "torque_rate_limit",
+    )
     produces = ShoulderSwingResult
 
     def solve(self, payload: Quantity, reach: Quantity, torque_limit: Quantity, reflected_inertia: Quantity,
@@ -874,6 +884,11 @@ class ShoulderSwingModel(ForwardModel):
         a_dn = ((torque_limit + tau_g) / j_eff).to(ureg.second ** -2).magnitude * _RAD_S2
         a = min(a_up, a_dn, acceleration_limit.to(_RAD_S2))
         d, am = swing.to(ureg.radian).magnitude, a.magnitude
+        if am <= 0:
+            raise ValueError(
+                f"torque_limit ({torque_limit}) does not exceed holding torque ({tau_g}) "
+                f"or acceleration_limit is nonpositive; binding acceleration is {a}."
+            )
         t_opt = (2 * math.sqrt(d / am)) * ureg.second
         v_peak = math.sqrt(am * d) * _RAD_S
         step = (2 * j_eff * a / ureg.radian).to(_NM)
@@ -929,7 +944,7 @@ class DynamicWindowModel(ForwardModel):
         -------
         DynamicWindowResult
             Reachable speed-window half-width and admissible speed in meters per second, plus
-            whether the admissible speed is strictly greater than the drive rating.
+            whether the admissible speed exceeds the drive rating.
 
         Notes
         -----

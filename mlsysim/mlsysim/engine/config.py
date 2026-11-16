@@ -42,15 +42,22 @@ class SimulationConfig(BaseModel):
 
         Notes
         -----
-        If getattr(Models, model) and getattr(Hardware, hardware) resolve, require
-        model.size_in_bytes() <= hardware.memory.capacity; otherwise return self unchanged.
+        Equation: When single-device (``fleet_size == 1``) and both ``model`` and
+        ``hardware`` resolve from the ``Models`` and ``Hardware`` registries,
+        require ``model.size_in_bytes(precision) <= hardware.memory.capacity``.
 
-        Names are direct attributes of the registry roots. The workload default precision is
-        used by size_in_bytes, independently of this configuration's precision field.
+        Assumptions: Registry identifiers match either top-level attributes, dotted
+        sub-registry paths, or leaf entry names under ``Models`` and ``Hardware``
+        (excluding ``Hardware.Tech``). Multi-device configurations defer memory
+        sharding checks to distributed solvers.
 
-        The method does not provide nested registry-path resolution, batch activations, KV cache, optimizer state,
-        distributed sharding, and full input validation. An unchanged result is not proof the
-        configuration fits.
+        Excludes: Batch activations, KV cache, optimizer state, and distributed
+        sharding; passing this check does not guarantee runtime memory fit.
+
+        References
+        ----------
+        Derivation: Weight bytes at the requested precision provide a necessary
+        lower bound on single-accelerator memory capacity.
 
         Examples
         --------
@@ -58,21 +65,38 @@ class SimulationConfig(BaseModel):
         >>> config.validate_physical_feasibility() is config
         True
         """
-        # 1. Resolve registry items
-        m_obj = getattr(Models, self.model, None)
-        h_obj = getattr(Hardware, self.hardware, None)
-        
-        if not m_obj or not h_obj:
-            return self # Let the solver handle missing objects with better errors
-            
-        # 2. Check basic OOM (Weights only)
-        weight_size = m_obj.size_in_bytes()
+        if self.fleet_size > 1:
+            return self
+
+        def _resolve(root: Any, name: str, skip_attrs: tuple[str, ...] = ()) -> Any:
+            cur = root
+            for part in name.split("."):
+                cur = getattr(cur, part, None)
+                if cur is None:
+                    break
+            if cur is not None:
+                return cur
+            for attr in dir(root):
+                if attr.startswith("_") or attr in skip_attrs:
+                    continue
+                sub = getattr(root, attr, None)
+                found = getattr(sub, name, None)
+                if found is not None:
+                    return found
+            return None
+
+        m_obj = _resolve(Models, self.model)
+        h_obj = _resolve(Hardware, self.hardware, skip_attrs=("Tech",))
+        if not m_obj or not h_obj or not hasattr(m_obj, "size_in_bytes") or not hasattr(h_obj, "memory"):
+            return self
+
+        weight_size = m_obj.size_in_bytes(self.precision)
         if weight_size > h_obj.memory.capacity:
-             raise ValueError(
-                 f"Configuration Infeasible: {self.model} weights ({weight_size.to('GB')}) "
-                 f"exceed {self.hardware} capacity ({h_obj.memory.capacity.to('GB')})."
-             )
-             
+            raise ValueError(
+                f"Configuration Infeasible: {self.model} weights ({weight_size.to('GB')}) "
+                f"exceed {self.hardware} capacity ({h_obj.memory.capacity.to('GB')})."
+            )
+
         return self
 
 def load_config(data: Dict[str, Any]) -> SimulationConfig:

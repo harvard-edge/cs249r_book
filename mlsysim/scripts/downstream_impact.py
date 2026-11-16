@@ -84,7 +84,12 @@ def encode(value, depth=0):
         return encode(value.tolist(), depth + 1)
     if (isinstance(value, type) and value.__module__ == "__downstream__") or (
         type(value).__module__ == "__downstream__"
-    ) or type(value).__module__.startswith("mlsysim.engine.results"):
+    ) or type(value).__module__.startswith((
+        "mlsysim.engine.results",
+        "mlsysim.engine.result_types",
+        "mlsysim.engine.engine",
+        "mlsysim.engine.scenario_definitions",
+    )):
         result = {}
         for name, item in sorted(vars(value).items()):
             if name.startswith("_") or callable(item):

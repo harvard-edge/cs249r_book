@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from mlsysim.core.units import ureg
+from mlsysim.core._validation import validate_at_least, validate_nonnegative
 from mlsysim.literature.registry import Literature
 
 from ._units import _ensure_unit
@@ -146,7 +147,15 @@ def calc_attention_matmul_flops(n_layers, hidden_dim, query_tokens, key_tokens, 
     >>> bool(whole == 2 * chunk)
     True
     """
-    return (4 * n_layers * hidden_dim * query_tokens * key_tokens * batch_size) * ureg.flop
+    validate_nonnegative(n_layers, "n_layers")
+    validate_nonnegative(hidden_dim, "hidden_dim")
+    q = _ensure_unit(query_tokens, ureg.count, "query_tokens").magnitude
+    k = _ensure_unit(key_tokens, ureg.count, "key_tokens").magnitude
+    b = _ensure_unit(batch_size, ureg.count, "batch_size").magnitude
+    validate_nonnegative(q, "query_tokens")
+    validate_nonnegative(k, "key_tokens")
+    validate_at_least(b, 1, "batch_size")
+    return (4 * n_layers * hidden_dim * q * k * b) * ureg.flop
 
 
 def calc_transformer_prefill_flops(
@@ -204,8 +213,12 @@ def calc_transformer_prefill_flops(
     >>> full - dense == 2 * (causal - dense)
     True
     """
+    if (n_layers is None) != (hidden_dim is None):
+        raise ValueError("n_layers and hidden_dim must both be provided or both be None.")
     p = _ensure_unit(n_params, ureg.param, "n_params").to(ureg.count).magnitude
     s = _ensure_unit(seq_len, ureg.count, "seq_len").magnitude
+    validate_nonnegative(p, "n_params")
+    validate_nonnegative(s, "seq_len")
 
     proj_flops = calc_transformer_decode_flops(p, s)
     if n_layers is not None and hidden_dim is not None:

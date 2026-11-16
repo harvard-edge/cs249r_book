@@ -13,14 +13,14 @@ for readings and deadlines.
 
 ## Lab Instructions
 
-- [Getting Started](labs/week-01-getting-started.md): Prepare the station and learn the operating rules.
-- [Lab 1: The Digital Twin](labs/lab-01-digital-twin.md): Measure the body and build a kinematic model.
-- [Lab 2: Simulation to Real Hardware](labs/lab-02-sim-to-real.md): Compare predicted and measured motion and timing.
-- [Lab 3: Learned Control](labs/lab-03-learned-control.md): Compare a learned policy with the nonlearned baseline.
-- [Lab 4: Real Data and Fine-Tuning](labs/lab-04-real-data-and-fine-tuning.md): Collect demonstrations, adapt the policy, and evaluate the loop.
-- [Lab 5: Stress-Testing](labs/lab-05-stress-testing.md): Test action horizons and disturbance recovery.
-- [Lab 6: Safety Governor](labs/lab-06-safety-governor.md): Build the governor and test its declared fault responses.
-- [Capstone Studio](labs/lab-capstone-studio.md): Defend a release decision with physical evidence.
+- [Lab 1: Forward Kinematics](labs/lab1.md): Derive the arm's kinematic model and track its pose on the microcontroller.
+- [Lab 2: The Safety Governor](labs/lab2.md): Build the stop mechanism and the governor that bounds every command.
+- [Lab 3: Inverse Kinematics](labs/lab3.md): Solve for joint angles, map singularities, and drive the arm to target poses.
+- [Lab 4: VLA Policies in Simulation](labs/lab4.md): Reproduce the workbench in simulation and benchmark a learned policy.
+- [Lab 5: The Sim2Real Gap](labs/lab5.md): Deploy the policy on the robot and measure how it differs from simulation.
+- [Lab 6: Real Data and Fine-Tuning](labs/lab6.md): Collect demonstrations and measure how much fine-tuning closes the gap.
+- [Lab 7: Robustness Testing](labs/lab7.md): Compare single-brain and dual-brain deployments under CPU stress.
+- [Lab 8: Capstone Project](labs/capstone.md): Defend a release decision with physical evidence.
 
 ## Shared Lab Resources
 

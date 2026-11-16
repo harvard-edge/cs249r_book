@@ -1,7 +1,6 @@
 """MLSysIM Notation Package.
 
-Canonical single source of truth for mathematical notations, symbols, and LaTeX macros
-across all volumes of MLSysBook.
+Canonical single source of truth for mathematical notations, symbols, and LaTeX macros.
 """
 from __future__ import annotations
 

@@ -119,7 +119,7 @@ SERVING = Wall(
     domain=Domain.NODE,
     resolver_name="ServingModel",
     constraint="LLM inference has two distinct regimes: compute-bound prefill and memory-bound decode.",
-    equation="TTFT = OPs_prefill / Peak; ITL = |W| / BW_HBM",
+    equation="TTFT = max(OPs_prefill / Peak, |W| / BW_HBM); ITL = max(OPs_decode / Peak, (|W| + |KV|) / BW_HBM)",
     sources=[
         "Pope et al. (2023), Efficiently Scaling Transformer Inference",
         "Agrawal et al. (2024), Sarathi-Serve",
@@ -282,7 +282,7 @@ SUSTAINABILITY = Wall(
     domain=Domain.OPERATIONS,
     resolver_name="SustainabilityModel",
     constraint="Energy consumption converts to carbon and water footprint.",
-    equation="CO₂ = E × PUE × CI",
+    equation="CO₂ = E_IT × PUE × CI / 1000; Water = E_IT × WUE",
     sources=["Patterson et al. (2022), Carbon Emissions"],
 )
 
@@ -302,7 +302,7 @@ SAFETY = Wall(
     domain=Domain.OPERATIONS,
     resolver_name="ResponsibleEngineeringModel",
     constraint="Privacy and fairness guarantees impose computational overhead.",
-    equation="σ ∝ 1/ε (DP-SGD slowdown)",
+    equation="σ ∝ 1/ε; slowdown = 1 + c_clip",
     sources=["Abadi et al. (2016), DP-SGD"],
 )
 
@@ -341,9 +341,10 @@ ALL_WALLS = [
 # Lookup helpers
 _BY_NUMBER = {w.number: w for w in ALL_WALLS}
 _BY_NAME = {w.name.lower(): w for w in ALL_WALLS}
-_BY_RESOLVER = {}
-for w in ALL_WALLS:
-    _BY_RESOLVER.setdefault(w.resolver_name, []).append(w)
+_BY_RESOLVER: dict[str, list[Wall]] = {}
+for _wall in ALL_WALLS:
+    _BY_RESOLVER.setdefault(_wall.resolver_name, []).append(_wall)
+del _wall
 
 # Composite/secondary resolvers map onto existing walls without changing the
 # canonical 22-wall taxonomy.

@@ -15,9 +15,9 @@ Building a real system requires searching a vast grid of possibilities, evaluati
 ## Learning Objectives
 
 - **Define** a declarative `SearchSpace` of system parameters.
-- **Formulate** optimization objectives (e.g., `minimize: macro.tco_usd`).
+- **Formulate** optimization objectives (e.g., `minimize: EconomicsModel.tco_usd`).
 - **Execute** an exhaustive search using the `DSE` engine.
-- **Filter** configurations based on strict analytical constraints.
+- **Filter** configurations based on HBM feasibility and step-latency SLA constraints.
 :::
 
 ## 1. Setup
@@ -33,41 +33,44 @@ from mlsysim.engine.pipeline import Pipeline
 
 ## 2. Defining the Evaluation Function
 
-The search first needs a function that evaluates a given configuration point. It uses the `Pipeline` from the previous tutorial to chain performance and economics.
+The search first needs a function that evaluates a given configuration point. It uses the `Pipeline` from [Composable Pipelines & Callbacks](01_pipeline_callbacks.qmd) to chain distributed performance and economics, rejecting configurations whose per-GPU shard exceeds HBM capacity (`node_profile.feasible == False`).
 
 ```{python}
 #| warning: false
-# Fixed baseline constants
+# Fixed baseline constants: 1,024 H100 GPUs across 128 DGX H100 nodes on InfiniBand NDR
 model = mlsysim.Models.Language.Llama3_70B
-fleet = mlsysim.Systems.Clusters.Frontier_8K
+fleet = mlsysim.Systems.Clusters.Training_1K
 
 # The evaluation function accepts a dictionary of parameters and returns a structured object
 def evaluate_config(params):
     pipe = Pipeline([DistributedModel(), EconomicsModel()])
-
-    return pipe.run(
+    res = pipe.run(
         model=model,
         fleet=fleet,
         batch_size=params["batch_size"],
         tp_size=params["tp"],
         pp_size=params["pp"],
+        microbatch_count=16,
         precision="fp16",
         efficiency=0.45,
         duration_days=30
     )
+    if not res["DistributedModel"].node_profile.feasible:
+        raise ValueError("Model shard exceeds per-GPU HBM")
+    return res
 ```
 
 This baseline pairs `{python} model.name` (`{python} f"{model.parameters.to('Gparam').magnitude:.1f}B"` parameters) with `{python} fleet.name` (`{python} f"{fleet.total_accelerators:,}"` accelerators across `{python} f"{fleet.count:,}"` nodes).
 
 ## 3. The Declarative Search
 
-Rather than writing three nested `for` loops to test `batch_size`, `tp`, and `pp`, define the `DSE` engine declaratively to find the configuration that maximizes effective training throughput.
+Rather than writing three nested `for` loops to test `batch_size`, `tp`, and `pp`, define the `DSE` engine declaratively to find the HBM-feasible configuration that maximizes effective training throughput.
 
 ```{python}
 #| warning: false
-# 1. Define the dimensions of the search grid
+# 1. Define the dimensions of the search grid (global batch >= DP ranks)
 space = {
-    "batch_size": [16, 32, 64, 128],
+    "batch_size": [1024, 2048, 4096],
     "tp": [1, 2, 4, 8],
     "pp": [1, 2, 4]
 }
@@ -88,33 +91,56 @@ best_params = result["best_params"]
 best_throughput = result["best_objective"]
 
 print(f"\nBest Configuration: TP={best_params['tp']}, PP={best_params['pp']}, Batch={best_params['batch_size']}")
-print(f"Max Throughput: {best_throughput:,.0f} samples/sec")
+print(f"Max Throughput: {best_throughput:,.1f} samples/sec")
 ```
 
-Across all `{python} f"{_n_combinations}"` combinations (`{python} f"{len(space['batch_size'])} × {len(space['tp'])} × {len(space['pp'])}"`), `DSE` identifies TP=`{python} f"{best_params['tp']}"`, PP=`{python} f"{best_params['pp']}"`, Batch=`{python} f"{best_params['batch_size']}"` with a peak throughput of **`{python} f"{best_throughput:,.0f}"` samples/sec** and a 30-day TCO of **`{python} f"${result['best_result']['EconomicsModel'].tco_usd:,.0f}"`**.
+Across all `{python} f"{_n_combinations}"` combinations (`{python} f"{len(space['batch_size'])} × {len(space['tp'])} × {len(space['pp'])}"`), `DSE` skips unsharded OOM candidates and identifies TP=`{python} f"{best_params['tp']}"`, PP=`{python} f"{best_params['pp']}"`, Batch=`{python} f"{best_params['batch_size']}"` with a peak throughput of **`{python} f"{best_throughput:,.1f}"` samples/sec** (`{python} f"{result['best_result']['DistributedModel'].step_latency_total.to('ms').magnitude:,.0f} ms"` per step) and a 30-day TCO of **`{python} f"${result['best_result']['EconomicsModel'].tco_usd:,.0f}"`**.
 
 ## 4. Applying SLA Constraints
 
-Often, the configuration that maximizes throughput is completely unfeasible due to memory limits, or it causes latency to spike beyond acceptable limits.
-
-Analyzing the `result["top_candidates"]` makes it possible to enforce SLAs. (The DSE automatically ignores configurations where the Tier 1 models report `feasible = False` due to Out of Memory errors).
+Maximizing raw throughput selects `Batch=4096`, pushing per-step latency past 10 seconds. Passing declarative `constraints` to `DSE` enforces hard step-latency (`<= 6000 ms`) and scaling-efficiency (`>= 0.65`) bounds without changing the evaluator:
 
 ```{python}
-print("Top 3 Configurations:")
-print(f"{'TP':>4} | {'PP':>4} | {'Batch':>6} | {'Throughput':>12} | {'Latency':>10}")
-print("-" * 45)
+#| warning: false
+dse_sla = DSE(
+    space=space,
+    objective="maximize: DistributedModel.effective_throughput",
+    constraints=[
+        "DistributedModel.step_latency_total <= 6000.0",
+        "DistributedModel.scaling_efficiency >= 0.65",
+    ],
+)
+sla_result = dse_sla.search(evaluate_config)
 
-for candidate in result["top_candidates"][:3]:
+print("Top SLA-Compliant Configurations (Step <= 6,000 ms, Efficiency >= 65%):")
+print(f"{'TP':>4} | {'PP':>4} | {'Batch':>6} | {'Throughput':>12} | {'Step Time':>10} | {'Efficiency':>10}")
+print("-" * 62)
+
+for candidate in sla_result["top_candidates"][:3]:
     p = candidate["params"]
     dist_res = candidate["result"]["DistributedModel"]
 
     throughput = dist_res.effective_throughput.to("1/s").magnitude
     latency = dist_res.step_latency_total.to("ms").magnitude
 
-    print(f"{p['tp']:>4} | {p['pp']:>4} | {p['batch_size']:>6} | {throughput:>12,.0f} | {latency:>10.1f}ms")
+    print(f"{p['tp']:>4} | {p['pp']:>4} | {p['batch_size']:>6} | {throughput:>12,.1f} | {latency:>8,.1f}ms | {dist_res.scaling_efficiency:>9.1%}")
 ```
 
+Enforcing the 6-second step budget shifts the optimal choice to TP=`{python} f"{sla_result['best_params']['tp']}"`, PP=`{python} f"{sla_result['best_params']['pp']}"`, Batch=`{python} f"{sla_result['best_params']['batch_size']}"`, retaining **`{python} f"{sla_result['best_objective']:,.1f}"` samples/sec** while cutting step latency nearly in half.
+
 ---
+
+## Where This Clicks in the Textbook
+
+```{python}
+#| echo: false
+#| output: asis
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path("../scripts").resolve()))
+from curriculum_links import render_tutorial_links
+print(render_tutorial_links("12_design_space_exploration"))
+```
 
 ## Next Steps
 

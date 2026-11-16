@@ -47,7 +47,10 @@ class StorageFootprintModel(ForwardModel):
     checkpoint (and the final one when the count is not a multiple) plus the
     source and the tokenized corpus.
     """
-    requires = ("workload",)
+    requires = (
+        "parameters", "bytes_per_param", "corpus_bytes", "source_bytes",
+        "run_duration", "save_interval", "shard_bytes", "archive_every",
+    )
     produces = StorageFootprintResult
 
     def solve(self, parameters: Quantity, bytes_per_param: Quantity, corpus_bytes: Quantity,
@@ -137,7 +140,7 @@ class TieredCheckpointModel(ForwardModel):
     background at the shared tier's aggregate bandwidth, which is the same
     time as each node's shard at its per-node share of that bandwidth.
     """
-    requires = ("workload", "fleet")
+    requires = ("checkpoint_bytes", "nodes", "local_bandwidth", "durable_bandwidth", "save_interval")
     produces = TieredCheckpointResult
 
     def solve(self, checkpoint_bytes: Quantity, nodes: int, local_bandwidth: Quantity,
@@ -208,7 +211,7 @@ class CheckpointStormModel(ForwardModel):
     bandwidth; writing one logical copy, split across the ranks that own it,
     moves the state once. The ratio is the replica count.
     """
-    requires = ("workload",)
+    requires = ("state_bytes", "replicas", "ingest_bandwidth")
     produces = CheckpointStormResult
 
     def solve(self, state_bytes: Quantity, replicas: int, ingest_bandwidth: Quantity) -> CheckpointStormResult:
@@ -271,7 +274,7 @@ class InputDemandModel(ForwardModel):
     ``bytes_per_sample`` every ``step_time`` of compute; ``busy_fraction`` is
     the share of wall-clock time spent computing.
     """
-    requires = ("workload",)
+    requires = ("consumers", "samples_per_step", "bytes_per_sample", "step_time")
     produces = InputDemandResult
 
     def solve(self, consumers: int, samples_per_step: int, bytes_per_sample: Quantity,
@@ -336,7 +339,7 @@ class DataStallModel(ForwardModel):
     fetches the next batch during compute, so a step costs the longer of the
     two. The stall is the share of the step not spent computing.
     """
-    requires = ("workload",)
+    requires = ("compute_time", "io_time")
     produces = DataStallResult
 
     def solve(self, compute_time: Quantity, io_time: Quantity) -> DataStallResult:
@@ -397,7 +400,7 @@ class PrefetchDepthModel(ForwardModel):
     windows, so the queue needs the ceiling of that many ready batches. A
     deeper safety depth costs ``depth x batch`` of host memory per consumer.
     """
-    requires = ("workload",)
+    requires = ("compute_time", "tail_latencies", "batch_bytes", "safety_depth", "consumers_per_node")
     produces = PrefetchDepthResult
 
     def solve(self, compute_time: Quantity, tail_latencies: Dict[str, Quantity], batch_bytes: Quantity,
@@ -750,7 +753,7 @@ class UtilizationLossModel(ForwardModel):
     every day whether it computes or waits; a drop in the busy fraction wastes
     that share of the daily cost.
     """
-    requires = ("fleet",)
+    requires = ("n_devices", "device_hour_rate", "healthy_utilization", "degraded_utilization", "duration")
     produces = UtilizationLossResult
 
     def solve(self, n_devices: int, device_hour_rate: Quantity, healthy_utilization: float,

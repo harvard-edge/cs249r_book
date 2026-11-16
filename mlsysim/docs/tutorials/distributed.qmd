@@ -58,7 +58,7 @@ _r_opt = _solver.solve(
 ::: {.callout-note}
 ## Background: Why distributed training is needed
 
-Some models are too large to fit in a single GPU's memory, and some training jobs would take months on one GPU. **Distributed training** splits the work across many GPUs. This tutorial explores the three main ways to split work and the overhead each one introduces. Complete the Hello World and LLM Serving tutorials before this one.
+Some models are too large to fit in a single GPU's memory, and some training jobs would take months on one GPU. **Distributed training** splits the work across many GPUs. This tutorial explores the three main ways to split work and the overhead each one introduces. Complete [Hello, Roofline](00_hello_roofline.qmd) and [Two Phases, One Request](02_two_phases.qmd) before this one.
 :::
 
 Scaling a training job from 1 GPU to 1024 GPUs incurs overhead at every step.
@@ -102,8 +102,8 @@ from mlsysim.solvers import DistributedModel
 # Llama-3.1-70B: the model requires distributed training — too large for a single GPU
 model = mlsysim.Models.Language.Llama3_70B
 
-# A research-scale cluster: 32 DGX H100 nodes × 8 GPUs = 256 H100s
-# (DGX is NVIDIA's pre-built server containing 8 H100 GPUs connected via NVLink)
+# A research-scale cluster: 32 DGX A100 nodes × 8 GPUs = 256 A100s
+# (DGX is NVIDIA's pre-built server containing 8 GPUs connected via NVLink)
 cluster = mlsysim.Systems.Clusters.Research_256
 
 print(f"Model:   {model.name}  ({model.parameters.to('Gparam').magnitude:.1f}B params)")
@@ -155,7 +155,7 @@ flowchart LR
 
 Start with the simplest configuration: no model splitting, only the full model replicated
 on every GPU and the batch split across them. The per-GPU compute time is determined by the same
-roofline model used in the Hello World tutorial. The new element here is **communication
+roofline model used in [Hello, Roofline](00_hello_roofline.qmd). The new element here is **communication
 overhead**: after each training step, all GPUs must synchronize their gradients via the
 network before the next step can begin.
 
@@ -322,30 +322,29 @@ configs = [
     ("DP + TP=8 + PP=4, M=16",   8,  4, 16),
 ]
 
-print(f"{'Config':<26}  {'DP':>4} {'TP':>4} {'PP':>4}  {'Efficiency':>11}  {'Throughput':>14}")
-print("-" * 72)
+print(f"{'Config':<26}  {'DP':>4} {'TP':>4} {'PP':>4}  {'Fits HBM':>8}  {'Efficiency':>11}  {'Throughput':>14}")
+print("-" * 82)
 
 for desc, tp, pp, m in configs:
-    try:
-        r = solver.solve(
-            model=model,
-            fleet=cluster,
-            batch_size=256,
-            precision="fp16",
-            tp_size=tp,
-            pp_size=pp,
-            microbatch_count=m
-        )
-        print(
-            f"{desc:<26}  "
-            f"{r.parallelism['dp']:>4}  "
-            f"{r.parallelism['tp']:>4}  "
-            f"{r.parallelism['pp']:>4}  "
-            f"{r.scaling_efficiency:>11.1%}  "
-            f"{r.effective_throughput.magnitude:>14.1f}"
-        )
-    except ValueError as e:
-        print(f"{desc:<26}  {'INFEASIBLE':>44}  ({e})")
+    r = solver.solve(
+        model=model,
+        fleet=cluster,
+        batch_size=256,
+        precision="fp16",
+        tp_size=tp,
+        pp_size=pp,
+        microbatch_count=m
+    )
+    fits = "YES" if r.node_profile.feasible else "Spill"
+    print(
+        f"{desc:<26}  "
+        f"{r.parallelism['dp']:>4}  "
+        f"{r.parallelism['tp']:>4}  "
+        f"{r.parallelism['pp']:>4}  "
+        f"{fits:>8}  "
+        f"{r.scaling_efficiency:>11.1%}  "
+        f"{r.effective_throughput.magnitude:>14.1f}"
+    )
 ```
 
 Confining `TP=8` within each 8-GPU node over NVLink (`{python} f"{_cluster.node.intra_node_bw.to('GB/s'):~.0f}"`) and pairing `PP=4` ($M=16$) with DP=`{python} f"{_r_opt.parallelism['dp']}"` raises scaling efficiency from `{python} f"{_r_dp.scaling_efficiency:.1%}"` (`{python} f"{_r_dp.effective_throughput.magnitude:.1f}"` samples/s) under pure DP to **`{python} f"{_r_opt.scaling_efficiency:.1%}"`** (**`{python} f"{_r_opt.effective_throughput.magnitude:.1f}"` samples/s**)---both fitting the model shards inside per-GPU HBM and shrinking the cross-node DP gradient payload by $8 \times 4 = 32\times$.
@@ -366,8 +365,20 @@ hierarchical all-reduce model. Use the lower-level formulas in
 
 ---
 
+## Where This Clicks in the Textbook
+
+```{python}
+#| echo: false
+#| output: asis
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path("../scripts").resolve()))
+from curriculum_links import render_tutorial_links
+print(render_tutorial_links("distributed"))
+```
+
 ## Next Steps
 
-- **[Two Phases of Inference](02_two_phases.qmd)**: After training, learn how to model the serving cost of the same model
+- **[Two Phases, One Request](02_two_phases.qmd)**: After training, learn how to model the serving cost of the same model
 - **[Math Foundations](../math.qmd)**: Full derivations for ring all-reduce, pipeline bubble, and MFU
 - **[Fleet Zoo](../zoo/fleets.qmd)**: Browse the available cluster configurations and their network specs

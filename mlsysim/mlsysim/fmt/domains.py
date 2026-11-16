@@ -440,6 +440,48 @@ def fmt_ops_rate(
     )
 
 
+def _matching_unit_label(display_unit, *candidates):
+    """Return the prose label for a candidate unit of identical dimension and scale, else None."""
+    for candidate_unit, label in candidates:
+        try:
+            if (
+                (1 * display_unit).dimensionality == (1 * candidate_unit).dimensionality
+                and abs((1 * display_unit).to(candidate_unit).magnitude - 1.0) < 1e-12
+            ):
+                return label
+        except Exception:
+            continue
+    return None
+
+
+_INFORMATION_UNIT_NAMES = {
+    "B", "KB", "MB", "GB", "TB", "PB",
+    "KiB", "MiB", "GiB", "TiB",
+}
+
+
+def _is_information_unit_map(
+    unit_map: dict,
+    *,
+    dimensionless: bool,
+    allow_count_factors: bool = False,
+) -> bool:
+    from ..core.types import _COUNT_UNIT_NAMES
+
+    if not dimensionless or not unit_map:
+        return False
+    info_entries = []
+    for name, power in unit_map.items():
+        low = name.lower()
+        if name in _INFORMATION_UNIT_NAMES or "byte" in low or "bit" in low:
+            info_entries.append((name, power))
+        elif allow_count_factors and name in _COUNT_UNIT_NAMES:
+            continue
+        else:
+            return False
+    return len(info_entries) == 1 and info_entries[0][1] == 1
+
+
 def fmt_decibel(quantity, *, unit=None, precision=None, commas=False):
     """Format logarithmic level quantities as dB."""
     if not isinstance(quantity, ureg.Quantity):
@@ -448,12 +490,13 @@ def fmt_decibel(quantity, *, unit=None, precision=None, commas=False):
     q = quantity.to(display_unit)
     auto_precision = precision is None
     p = _resolve_display_precision(q.magnitude, precision)
+    unit_label = "dB" if display_unit == ureg.decibel else None
     return fmt_qty(
         q,
         display_unit,
         precision=p,
         commas=commas,
-        unit_label="dB",
+        unit_label=unit_label,
         trim_trailing_zeros=auto_precision,
     )
 
@@ -471,7 +514,7 @@ def fmt_illuminance(quantity, *, unit=None, precision=None, commas=False):
         display_unit,
         precision=p,
         commas=commas,
-        unit_label="lux",
+        unit_label=_matching_unit_label(display_unit, (ureg.lux, "lux")),
         trim_trailing_zeros=auto_precision,
     )
 
@@ -489,12 +532,21 @@ def _temperature_unit_label(display_unit):
 
 def _temperature_rate_unit_label(display_unit):
     unit_str = str(display_unit)
-    if "K" in unit_str or "kelvin" in unit_str:
-        return "K/s"
-    if "°C" in unit_str or "degC" in unit_str or "celsius" in unit_str.lower():
-        return "°C/s"
-    if "°F" in unit_str or "degF" in unit_str or "fahrenheit" in unit_str.lower():
-        return "°F/s"
+    try:
+        if "°C" in unit_str or "degC" in unit_str or "celsius" in unit_str.lower():
+            if abs((1 * display_unit).to(ureg.delta_degC / ureg.second).magnitude - 1.0) < 1e-12:
+                return "°C/s"
+            return None
+        if "°F" in unit_str or "degF" in unit_str or "fahrenheit" in unit_str.lower():
+            if abs((1 * display_unit).to(ureg.delta_degF / ureg.second).magnitude - 1.0) < 1e-12:
+                return "°F/s"
+            return None
+        if "K" in unit_str or "kelvin" in unit_str:
+            if abs((1 * display_unit).to(ureg.kelvin / ureg.second).magnitude - 1.0) < 1e-12:
+                return "K/s"
+            return None
+    except Exception:
+        return None
     return None
 
 
@@ -800,7 +852,11 @@ def fmt_specific_heat(quantity, *, unit=None, precision=None, commas=False):
         display_unit,
         precision=p,
         commas=commas,
-        unit_label="J/kg/K",
+        unit_label=_matching_unit_label(
+            display_unit,
+            (default_unit, "J/kg/K"),
+            (ureg.kilojoule / (kg * K), "kJ/kg/K"),
+        ),
         trim_trailing_zeros=auto_precision,
     )
 
@@ -820,9 +876,18 @@ def fmt_memory(
     """Auto-scale memory sizes for prose."""
     if not isinstance(quantity, ureg.Quantity):
         raise TypeError("fmt_memory() requires a Pint Quantity.")
+    if not _is_information_unit_map(
+        dict(quantity.units._units),
+        dimensionless=quantity.dimensionless,
+        allow_count_factors=True,
+    ):
+        raise ValueError(f"fmt_memory() expects a byte/bit information Quantity, got units {quantity.units}.")
     display_unit = (
         _coerce_unit(unit) if unit is not None else _pick_memory_unit(quantity, binary=binary)
     )
+    one_disp = 1 * display_unit
+    if not _is_information_unit_map(dict(display_unit._units), dimensionless=one_disp.dimensionless):
+        raise ValueError(f"fmt_memory() unit must be a byte/bit information unit, got {display_unit}.")
     q = quantity.to(display_unit)
     auto_precision = precision is None
     p = _resolve_display_precision(q.magnitude, precision)
@@ -871,9 +936,20 @@ def fmt_memory_capacity(
     """
     if not isinstance(quantity, ureg.Quantity):
         raise TypeError("fmt_memory_capacity() requires a Pint Quantity.")
+    if not _is_information_unit_map(
+        dict(quantity.units._units),
+        dimensionless=quantity.dimensionless,
+        allow_count_factors=True,
+    ):
+        raise ValueError(
+            f"fmt_memory_capacity() expects a byte/bit information Quantity, got units {quantity.units}."
+        )
     display_unit = (
         _coerce_unit(unit) if unit is not None else _pick_memory_unit(quantity, binary=True)
     )
+    one_disp = 1 * display_unit
+    if not _is_information_unit_map(dict(display_unit._units), dimensionless=one_disp.dimensionless):
+        raise ValueError(f"fmt_memory_capacity() unit must be a byte/bit information unit, got {display_unit}.")
     q = quantity.to(display_unit)
     auto_precision = precision is None
     p = _resolve_display_precision(q.magnitude, precision)
@@ -1075,7 +1151,12 @@ def fmt_torque(quantity, *, unit=None, precision=None, commas=False):
         display_unit,
         precision=p,
         commas=commas,
-        unit_label="N·m",
+        unit_label=_matching_unit_label(
+            display_unit,
+            (ureg.newton * ureg.meter, "N·m"),
+            (ureg.millinewton * ureg.meter, "mN·m"),
+            (ureg.kilonewton * ureg.meter, "kN·m"),
+        ),
         trim_trailing_zeros=auto_precision,
     )
 
@@ -1096,7 +1177,12 @@ def fmt_torque_rate(quantity, *, unit=None, precision=None, commas=False):
         display_unit,
         precision=p,
         commas=commas,
-        unit_label="N·m/s",
+        unit_label=_matching_unit_label(
+            display_unit,
+            (ureg.newton * ureg.meter / ureg.second, "N·m/s"),
+            (ureg.kilonewton * ureg.meter / ureg.second, "kN·m/s"),
+            (ureg.millinewton * ureg.meter / ureg.second, "mN·m/s"),
+        ),
         trim_trailing_zeros=auto_precision,
     )
 
@@ -1117,7 +1203,11 @@ def fmt_torque_constant(quantity, *, unit=None, precision=None, commas=False):
         display_unit,
         precision=p,
         commas=commas,
-        unit_label="N·m/A",
+        unit_label=_matching_unit_label(
+            display_unit,
+            (ureg.newton * ureg.meter / ureg.ampere, "N·m/A"),
+            (ureg.millinewton * ureg.meter / ureg.ampere, "mN·m/A"),
+        ),
         trim_trailing_zeros=auto_precision,
     )
 
@@ -1138,7 +1228,11 @@ def fmt_motor_constant(quantity, *, unit=None, precision=None, commas=False):
         display_unit,
         precision=p,
         commas=commas,
-        unit_label="N·m/√W",
+        unit_label=_matching_unit_label(
+            display_unit,
+            (km_unit, "N·m/√W"),
+            (ureg.millinewton * ureg.meter / ureg.watt**0.5, "mN·m/√W"),
+        ),
         trim_trailing_zeros=auto_precision,
     )
 
@@ -1350,7 +1444,12 @@ def fmt_jerk(quantity, *, unit=None, precision=None, commas=False):
     q = quantity.to(display_unit)
     auto_precision = precision is None
     p = _resolve_display_precision(q.magnitude, precision)
-    return fmt_qty(q, display_unit, precision=p, commas=commas, unit_label="m/s³", trim_trailing_zeros=auto_precision)
+    unit_label = _matching_unit_label(
+        display_unit,
+        (ureg.meter / ureg.second**3, "m/s³"),
+        (ureg.millimeter / ureg.second**3, "mm/s³"),
+    )
+    return fmt_qty(q, display_unit, precision=p, commas=commas, unit_label=unit_label, trim_trailing_zeros=auto_precision)
 
 
 def fmt_inertia(quantity, *, unit=None, precision=None, commas=False):
@@ -1364,7 +1463,13 @@ def fmt_inertia(quantity, *, unit=None, precision=None, commas=False):
     q = quantity.to(display_unit)
     auto_precision = precision is None
     p = _resolve_display_precision(q.magnitude, precision)
-    return fmt_qty(q, display_unit, precision=p, commas=commas, unit_label="kg·m²", trim_trailing_zeros=auto_precision)
+    unit_label = _matching_unit_label(
+        display_unit,
+        (ureg.kilogram * (ureg.meter**2), "kg·m²"),
+        (ureg.gram * (ureg.centimeter**2), "g·cm²"),
+        (ureg.gram * (ureg.millimeter**2), "g·mm²"),
+    )
+    return fmt_qty(q, display_unit, precision=p, commas=commas, unit_label=unit_label, trim_trailing_zeros=auto_precision)
 
 
 def fmt_voltage(quantity, *, unit=None, precision=None, commas=False):
@@ -1457,10 +1562,9 @@ def fmt_thermal_resistance(
     auto_precision = precision is None
     p = _resolve_display_precision(q.magnitude, precision)
     unit_str = str(display_unit)
-    if "°C" in unit_str or "degC" in unit_str:
-        unit_label = "°C/W"
-    else:
-        unit_label = "K/W"
+    unit_label = None
+    if abs((1 * display_unit).to(ureg.kelvin / ureg.watt).magnitude - 1.0) < 1e-12:
+        unit_label = "°C/W" if ("°C" in unit_str or "degC" in unit_str) else "K/W"
     return fmt_qty(
         q,
         display_unit,
@@ -1498,11 +1602,12 @@ def fmt_heat_capacity(
     q = quantity.to(display_unit)
     auto_precision = precision is None
     p = _resolve_display_precision(q.magnitude, precision)
-    unit_str = str(display_unit)
-    if "kilo" in unit_str or "kJ" in unit_str:
-        unit_label = "kJ/K"
-    else:
-        unit_label = "J/K"
+    unit_label = _matching_unit_label(
+        display_unit,
+        (ureg.joule / ureg.kelvin, "J/K"),
+        (ureg.kilojoule / ureg.kelvin, "kJ/K"),
+        (ureg.megajoule / ureg.kelvin, "MJ/K"),
+    )
     return fmt_qty(
         q,
         display_unit,
@@ -1648,15 +1753,12 @@ def fmt_charge(
     q = quantity.to(display_unit)
     auto_precision = precision is None
     p = _resolve_display_precision(q.magnitude, precision)
-    unit_str = str(display_unit)
-    if "milliampere_hour" in unit_str or "mAh" in unit_str:
-        unit_label = "mAh"
-    elif "ampere_hour" in unit_str or "Ah" in unit_str:
-        unit_label = "Ah"
-    elif "coulomb" in unit_str or "C" in unit_str:
-        unit_label = "C"
-    else:
-        unit_label = None
+    unit_label = _matching_unit_label(
+        display_unit,
+        (ureg.milliampere_hour, "mAh"),
+        (ureg.ampere_hour, "Ah"),
+        (ureg.coulomb, "C"),
+    )
     return fmt_qty(
         q,
         display_unit,
@@ -1745,15 +1847,14 @@ def fmt_inductance(
     q = quantity.to(display_unit)
     auto_precision = precision is None
     p = _resolve_display_precision(q.magnitude, precision)
-    unit_str = str(display_unit)
-    if "microhenry" in unit_str or "μH" in unit_str or "µH" in unit_str or "uH" in unit_str:
-        unit_label = "μH"
-    elif "millihenry" in unit_str or "mH" in unit_str:
-        unit_label = "mH"
-    elif "henry" in unit_str or unit_str == "H":
-        unit_label = "H"
-    else:
-        unit_label = None
+    unit_label = _matching_unit_label(
+        display_unit,
+        (ureg.picohenry, "pH"),
+        (ureg.nanohenry, "nH"),
+        (ureg.microhenry, "μH"),
+        (ureg.millihenry, "mH"),
+        (ureg.henry, "H"),
+    )
     return fmt_qty(
         q,
         display_unit,
@@ -1798,19 +1899,15 @@ def fmt_capacitance(
     q = quantity.to(display_unit)
     auto_precision = precision is None
     p = _resolve_display_precision(q.magnitude, precision)
-    unit_str = str(display_unit)
-    if "picofarad" in unit_str or "pF" in unit_str:
-        unit_label = "pF"
-    elif "nanofarad" in unit_str or "nF" in unit_str:
-        unit_label = "nF"
-    elif "microfarad" in unit_str or "μF" in unit_str or "µF" in unit_str or "uF" in unit_str:
-        unit_label = "μF"
-    elif "millifarad" in unit_str or "mF" in unit_str:
-        unit_label = "mF"
-    elif "farad" in unit_str or unit_str == "F":
-        unit_label = "F"
-    else:
-        unit_label = None
+    unit_label = _matching_unit_label(
+        display_unit,
+        (ureg.femtofarad, "fF"),
+        (ureg.picofarad, "pF"),
+        (ureg.nanofarad, "nF"),
+        (ureg.microfarad, "μF"),
+        (ureg.millifarad, "mF"),
+        (ureg.farad, "F"),
+    )
     return fmt_qty(
         q,
         display_unit,
@@ -1855,17 +1952,13 @@ def fmt_power_rate(
     q = quantity.to(display_unit)
     auto_precision = precision is None
     p = _resolve_display_precision(q.magnitude, precision)
-    unit_str = str(display_unit)
-    if "gigawatt" in unit_str or "GW" in unit_str:
-        unit_label = "GW/s"
-    elif "megawatt" in unit_str or "MW" in unit_str:
-        unit_label = "MW/s"
-    elif "kilowatt" in unit_str or "kW" in unit_str:
-        unit_label = "kW/s"
-    elif "watt" in unit_str or "W" in unit_str:
-        unit_label = "W/s"
-    else:
-        unit_label = None
+    unit_label = _matching_unit_label(
+        display_unit,
+        (ureg.gigawatt / ureg.second, "GW/s"),
+        (ureg.megawatt / ureg.second, "MW/s"),
+        (ureg.kilowatt / ureg.second, "kW/s"),
+        (ureg.watt / ureg.second, "W/s"),
+    )
     return fmt_qty(
         q,
         display_unit,
@@ -1896,21 +1989,23 @@ def fmt_stiffness(
     if (1 * quantity).dimensionality != stiff_dim:
         raise ValueError(f"fmt_stiffness unit must have stiffness dimensionality (force/length), got {quantity}.")
     display_unit = _coerce_unit(unit) if unit is not None else (ureg.newton / ureg.meter)
+    if (1 * display_unit).dimensionality != stiff_dim:
+        raise ValueError(f"fmt_stiffness unit must have stiffness dimensionality (force/length), got {display_unit}.")
     q = quantity.to(display_unit)
     auto_precision = precision is None
     p = _resolve_display_precision(q.magnitude, precision)
     # 2026-09-29: the label was chosen by substring, so kN/m values printed
-    # as "N/m". Build the label from the numerator and denominator prefixes.
-    force_prefixes = (("meganewton", "MN"), ("kilonewton", "kN"), ("millinewton", "mN"), ("newton", "N"))
-    length_prefixes = (("kilometer", "km"), ("millimeter", "mm"), ("micrometer", "µm"), ("centimeter", "cm"), ("meter", "m"))
+    # as "N/m". Build the label from exact numerator and denominator unit names,
+    # falling back to Pint's compact label for non-SI force/length overrides.
+    force_labels = {"meganewton": "MN", "kilonewton": "kN", "millinewton": "mN", "newton": "N"}
+    length_labels = {"kilometer": "km", "millimeter": "mm", "micrometer": "µm", "centimeter": "cm", "meter": "m"}
     parts = dict(display_unit._units)
-    num = " ".join(k for k, v in parts.items() if v > 0)
-    den = " ".join(k for k, v in parts.items() if v < 0)
-    f_lbl = next((lbl for name, lbl in force_prefixes if name in num), None)
-    l_lbl = next((lbl for name, lbl in length_prefixes if name in den), None)
-    if f_lbl is None or l_lbl is None:
-        raise ValueError(f"fmt_stiffness cannot label unit {display_unit}; pass a force/length unit.")
-    unit_label = f"{f_lbl}/{l_lbl}"
+    pos = [k for k, v in parts.items() if v == 1]
+    neg = [k for k, v in parts.items() if v == -1]
+    if len(parts) == 2 and len(pos) == 1 and len(neg) == 1 and pos[0] in force_labels and neg[0] in length_labels:
+        unit_label = f"{force_labels[pos[0]]}/{length_labels[neg[0]]}"
+    else:
+        unit_label = None
     return fmt_qty(
         q,
         display_unit,
@@ -1941,18 +2036,24 @@ def fmt_volume(
     if (1 * quantity).dimensionality != vol_dim:
         raise ValueError(f"fmt_volume unit must have volume dimensionality (length³), got {quantity}.")
     display_unit = _coerce_unit(unit) if unit is not None else (ureg.meter**3)
+    if (1 * display_unit).dimensionality != vol_dim:
+        raise ValueError(f"fmt_volume unit must have volume dimensionality (length³), got {display_unit}.")
     q = quantity.to(display_unit)
     auto_precision = precision is None
     p = _resolve_display_precision(q.magnitude, precision)
     unit_str = str(display_unit)
-    if "liter" in unit_str or unit_str == "L":
-        unit_label = "L"
-    elif "milliliter" in unit_str or "mL" in unit_str:
+    unit_lower = unit_str.lower()
+    if ("millilit" in unit_lower or unit_lower == "ml") and abs((1 * display_unit).to(ureg.milliliter).magnitude - 1.0) < 1e-12:
         unit_label = "mL"
-    elif "centimeter" in unit_str or "cm" in unit_str:
-        unit_label = "cm³"
+    elif ("lit" in unit_lower or unit_str == "L") and abs((1 * display_unit).to(ureg.liter).magnitude - 1.0) < 1e-12:
+        unit_label = "L"
     else:
-        unit_label = "m³"
+        unit_label = _matching_unit_label(
+            display_unit,
+            (ureg.meter**3, "m³"),
+            (ureg.centimeter**3, "cm³"),
+            (ureg.millimeter**3, "mm³"),
+        )
     return fmt_qty(
         q,
         display_unit,

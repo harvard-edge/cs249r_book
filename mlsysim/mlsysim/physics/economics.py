@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from mlsysim.core.units import ureg, DAYS_PER_YEAR
-from mlsysim.core._validation import validate_nonnegative
+from mlsysim.core._validation import validate_nonnegative, validate_positive
 
 from ._units import _ensure_unit
 
@@ -97,11 +97,15 @@ def calc_fleet_tco(unit_cost, power_w, quantity, years, kwh_price):
     validate_nonnegative(p_w, "power_w")
     validate_nonnegative(quantity, "quantity")
     price = _ensure_unit(kwh_price, ureg.dollar / ureg.kilowatt_hour, "kwh_price")
-    time = _ensure_unit(years, ureg.year, "years")
-    validate_nonnegative(time, "years")
-    # Explicit 365-day year (8,760 h), matching DAYS_PER_YEAR/HOURS_PER_YEAR
-    # and every book call site — NOT Pint's default Julian year (8,766 h).
-    hours = time.m_as(ureg.year) * float(DAYS_PER_YEAR) * 24.0 * ureg.hour
+    if isinstance(years, ureg.Quantity) and years.units != ureg.year:
+        hours = _ensure_unit(years, ureg.hour, "years")
+        validate_nonnegative(hours, "years")
+    else:
+        time = _ensure_unit(years, ureg.year, "years")
+        validate_nonnegative(time, "years")
+        # Explicit 365-day year (8,760 h), matching DAYS_PER_YEAR/HOURS_PER_YEAR
+        # and every book call site — NOT Pint's default Julian year (8,766 h).
+        hours = time.m_as(ureg.year) * float(DAYS_PER_YEAR) * 24.0 * ureg.hour
     fleet_capex = u_cost * quantity
     total_energy = p_w * quantity * hours
     power_opex = total_energy * price
@@ -431,4 +435,6 @@ def calc_optimal_retraining_interval(run_cost, staleness_slope):
     >>> calc_optimal_retraining_interval(4, 2)
     2.0
     """
+    validate_nonnegative(run_cost, "run_cost")
+    validate_positive(staleness_slope, "staleness_slope")
     return (2 * run_cost / staleness_slope) ** 0.5

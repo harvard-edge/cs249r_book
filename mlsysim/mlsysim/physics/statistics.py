@@ -164,7 +164,7 @@ def calc_monte_carlo_sample_size(failure_probability, relative_error):
     4.0
     """
     if not (0.0 < failure_probability < 1.0):
-        raise ValueError("failure_probability must be strictly between 0 and 1.")
+        raise ValueError("failure_probability must be in (0, 1).")
     if relative_error <= 0.0:
         raise ValueError("relative_error must be positive.")
     return (1.0 - failure_probability) / (failure_probability * relative_error**2)
@@ -344,7 +344,7 @@ def calc_cross_entropy_exponential_proposal(threshold, operational_mean, elite_s
     True
     """
     if not (0.0 < elite_share < 1.0):
-        raise ValueError("elite_share must be strictly between 0 and 1.")
+        raise ValueError("elite_share must be in (0, 1).")
     t_q, m_q = _same_units(threshold, operational_mean)
     gamma, m0 = float(getattr(t_q, "magnitude", t_q)), float(getattr(m_q, "magnitude", m_q))
     if gamma <= 0 or m0 <= 0:
@@ -396,7 +396,7 @@ def calc_conjunctive_confidence(premise_confidences):
         P(claim) = prod_i p_i
 
     The conjunction is no stronger than its weakest premise and, with more
-    than one premise below 1, strictly weaker.
+    than one premise below 1, weaker than every individual premise.
 
     Source: probability of the intersection of independent events, as applied
     to conjunctive assurance arguments in Bloomfield and Littlewood 2003,
@@ -790,6 +790,54 @@ def calc_dagger_cost_bound(horizon_steps, per_step_error, recoverability=1.0):
 
 
 # --- Poisson reserve sizing (added 2026-10-20) ---
+def _reg_gamma_pair(a: float, x: float) -> tuple[float, float]:
+    """Return regularized incomplete gamma (P(a, x), Q(a, x)) without overflow/underflow."""
+    if x <= 0.0:
+        return 0.0, 1.0
+    log_pref = -x + a * math.log(x) - math.lgamma(a)
+    if x < a + 1.0:
+        ap = a
+        term = 1.0 / a
+        total = term
+        for _ in range(10000):
+            ap += 1.0
+            term *= x / ap
+            total += term
+            if abs(term) <= abs(total) * 1e-15:
+                break
+        p_val = 0.0 if log_pref < -745.0 else min(1.0, total * math.exp(log_pref))
+        return p_val, 1.0 - p_val
+    tiny = 1e-300
+    b = x + 1.0 - a
+    c = 1.0 / tiny
+    d = 1.0 / (b if abs(b) >= tiny else tiny)
+    h = d
+    for i in range(1, 10000):
+        an = -i * (i - a)
+        b += 2.0
+        d = an * d + b
+        if abs(d) < tiny:
+            d = tiny
+        c = b + an / c
+        if abs(c) < tiny:
+            c = tiny
+        d = 1.0 / d
+        delta = d * c
+        h *= delta
+        if abs(delta - 1.0) <= 1e-15:
+            break
+    q_val = 0.0 if log_pref < -745.0 else min(1.0, h * math.exp(log_pref))
+    return 1.0 - q_val, q_val
+
+
+def _reg_gamma_p(a: float, x: float) -> float:
+    return _reg_gamma_pair(a, x)[0]
+
+
+def _reg_gamma_q(a: float, x: float) -> float:
+    return _reg_gamma_pair(a, x)[1]
+
+
 def calc_poisson_tail(mean, at_least):
     """Compute the probability of at least a specified event count.
 
@@ -827,9 +875,13 @@ def calc_poisson_tail(mean, at_least):
     >>> calc_poisson_tail(0.0, 1)
     0.0
     """
+    if mean < 0 or not math.isfinite(mean):
+        raise ValueError(f"mean must be finite and nonnegative, got {mean}")
     if at_least <= 0:
         return 1.0
-    return 1 - sum(math.exp(-mean) * mean**k / math.factorial(k) for k in range(at_least))
+    if mean == 0.0:
+        return 0.0
+    return _reg_gamma_p(float(at_least), float(mean))
 
 
 def calc_poisson_reserve(mean, target):
@@ -864,7 +916,13 @@ def calc_poisson_reserve(mean, target):
     >>> calc_poisson_reserve(0.0, 0.1)
     1
     """
-    reserve = 0
+    if mean < 0 or not math.isfinite(mean):
+        raise ValueError(f"mean must be finite and nonnegative, got {mean}")
+    if not 0.0 < target < 1.0:
+        raise ValueError(f"target must be in (0, 1), got {target}")
+    reserve = max(0, int(math.floor(mean)))
+    while reserve > 0 and calc_poisson_tail(mean, reserve - 1) < target:
+        reserve -= 1
     while calc_poisson_tail(mean, reserve) >= target:
         reserve += 1
     return reserve
@@ -907,7 +965,13 @@ def calc_poisson_mean_for_reserve(reserve, target, iterations=60):
     >>> abs(calc_poisson_tail(mean, 1) - 0.5) < 1e-12
     True
     """
-    lo, hi = 0.0, 1.0
+    if reserve < 1:
+        raise ValueError(f"reserve must be >= 1, got {reserve}")
+    if not 0.0 < target < 1.0:
+        raise ValueError(f"target must be in (0, 1), got {target}")
+    if iterations < 1:
+        raise ValueError(f"iterations must be >= 1, got {iterations}")
+    lo, hi = 0.0, max(1.0, float(reserve))
     while calc_poisson_tail(hi, reserve) < target:
         hi *= 2
     for _ in range(iterations):
@@ -1470,11 +1534,11 @@ def calc_arcsine_two_arm_sample_size(effect_h, alpha=0.05, power=0.80):
 
 def _poisson_cdf(k, mu):
     """P(N <= k) for N ~ Poisson(mu)."""
-    term, total = math.exp(-mu), math.exp(-mu)
-    for j in range(1, k + 1):
-        term *= mu / j
-        total += term
-    return total
+    if k < 0:
+        return 0.0
+    if mu <= 0.0:
+        return 1.0
+    return _reg_gamma_q(float(k) + 1.0, float(mu))
 
 
 def calc_poisson_exact_interval(events, alpha=0.05):
@@ -1511,17 +1575,37 @@ def calc_poisson_exact_interval(events, alpha=0.05):
     >>> lower == 0 and upper > 0
     True
     """
+    if events < 0:
+        raise ValueError(f"events must be nonnegative, got {events}")
+    if not 0.0 < alpha < 1.0:
+        raise ValueError(f"alpha must be in (0, 1), got {alpha}")
     k = int(events)
+    half_alpha = alpha / 2.0
 
-    def _solve(f):
-        lo, hi = 0.0, 10.0 * (k + 10)
+    if k == 0:
+        lower = 0.0
+    else:
+        lo, hi = 0.0, float(k)
+        while _reg_gamma_p(float(k), hi) < half_alpha:
+            hi *= 2.0
         for _ in range(200):
             mid = 0.5 * (lo + hi)
-            lo, hi = (mid, hi) if f(mid) > 0 else (lo, mid)
-        return 0.5 * (lo + hi)
+            if _reg_gamma_p(float(k), mid) < half_alpha:
+                lo = mid
+            else:
+                hi = mid
+        lower = 0.5 * (lo + hi)
 
-    lower = 0.0 if k == 0 else _solve(lambda mu: alpha / 2 - (1.0 - _poisson_cdf(k - 1, mu)))
-    upper = _solve(lambda mu: _poisson_cdf(k, mu) - alpha / 2)
+    lo, hi = float(k), max(10.0, 2.0 * (k + 1.0))
+    while _poisson_cdf(k, hi) > half_alpha:
+        hi *= 2.0
+    for _ in range(200):
+        mid = 0.5 * (lo + hi)
+        if _poisson_cdf(k, mid) > half_alpha:
+            lo = mid
+        else:
+            hi = mid
+    upper = 0.5 * (lo + hi)
     return lower, upper
 
 

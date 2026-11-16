@@ -78,9 +78,9 @@ def test_sweep_marks_dominated_and_frontier_candidates():
         Models.Vision.ResNet50,
         Hardware.Cloud.H100,
         [
-            {"label": "FP32 baseline", "method": "quantization", "target_bitwidth": 32},
-            {"label": "FP16 weights", "method": "quantization", "target_bitwidth": 16},
-            {"label": "INT8 weights", "method": "quantization", "target_bitwidth": 8},
+            {"label": "FP32 baseline", "method": "quantization", "target_bitwidth": 32, "accuracy_delta": 0.0},
+            {"label": "FP16 weights", "method": "quantization", "target_bitwidth": 16, "accuracy_delta": 0.0},
+            {"label": "INT8 weights", "method": "quantization", "target_bitwidth": 8, "accuracy_delta": -0.005},
         ],
     )
 

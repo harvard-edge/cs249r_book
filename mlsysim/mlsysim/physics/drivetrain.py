@@ -373,6 +373,8 @@ def calc_braking_limits(
     torque = calc_drive_torque_deceleration_limit(
         wheel_torque_max, wheel_radius, n_driven_wheels, mass, rotating_equivalent_mass
     )
+    if (cg_height is None) != (tip_arm is None):
+        raise ValueError("cg_height and tip_arm must both be provided or both be omitted.")
     a_tip = None
     if cg_height is not None and tip_arm is not None:
         a_tip = calc_tipover_deceleration_limit(cg_height, tip_arm)

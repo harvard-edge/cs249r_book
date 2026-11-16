@@ -3,13 +3,13 @@
 **Audience:** Postdoctoral Researcher (Andrea, ETH Zurich) & Lab Staff
 **Status:** Canonical Engineering Implementation Checklist & Qualification Plan
 **Target Platform:** Arduino UNO Q ("Unikue" QRB2210 Linux + STM32U585 MCU) · Seeed Studio SO-101 6-DoF Arm · Hugging Face LeRobot · SmolVLA & ACT Models
-**Reference Curriculum:** [Course Homepage](https://mlsysbook.ai/courses/physical-ai/eth-spring-2027/) · [Course Syllabus](https://mlsysbook.ai/courses/physical-ai/eth-spring-2027/syllabus.html) · [Staff Master Plan (Sep–Dec 2026)](staff-implementation-plan.md) · [12-Competency Matrix](../curriculum/student-competencies.md) · [Capstone Studio](../labs/lab-capstone-studio.md)
+**Reference Curriculum:** [Course Homepage](https://mlsysbook.ai/courses/physical-ai/eth-spring-2027/) · [Course Syllabus](https://mlsysbook.ai/courses/physical-ai/eth-spring-2027/syllabus.html) · [Staff Master Plan (Sep–Dec 2026)](staff-implementation-plan.md) · [12-Competency Matrix](../curriculum/student-competencies.md) · [Capstone Project](../labs/capstone.md)
 
 ---
 
 ## 1. Executive Mandate: Prove the Bench Before Teaching It
 
-Andrea, your primary mission before the semester begins is to **build, verify, and qualify one "Golden Reference Station"** from raw hardware to untethered physical AI execution. You must act as **"Student Zero"** across all 6 labs and the capstone, verifying that every exercise functions deterministically, producing the gold-standard artifacts, and isolating hardware failure modes before students arrive.
+Andrea, your primary mission before the semester begins is to **build, verify, and qualify one "Golden Reference Station"** from raw hardware to untethered physical AI execution. You must act as **"Student Zero"** across all 7 labs and the capstone, verifying that every exercise functions deterministically, producing the gold-standard artifacts, and isolating hardware failure modes before students arrive.
 
 Students should finish this course with an autonomous embodied system that **senses physical reality via vision, uses a learned model to propose multi-joint action chunks, delegates safety authority to an on-board microcontroller to permit or clamp motion, measures true kinematic outcomes, and revises its next decision from closed-loop feedback**.
 
@@ -114,32 +114,34 @@ Before publishing student labs or ordering additional stations, you must success
 
 ---
 
-## 4. Phase 2: "Student Zero" Lab Qualification Runs (Labs 1–6)
+## 4. Phase 2: "Student Zero" Lab Qualification Runs (Labs 1–7)
 
-For each lab in the 14-week curriculum, Andrea must execute the student protocol end-to-end, identify potential pitfalls, and prepare the "Gold Standard" starter assets. The labs follow the [lab template](../LAB_TEMPLATE.md): the instructor sets each lab's purpose, objectives, weekly parts, checkpoints, and deliverables; staff write the instructions and set the thresholds from the Student Zero run.
+For each lab in the 13-week curriculum, Andrea must execute the student protocol end-to-end, identify potential pitfalls, and prepare the "Gold Standard" starter assets. The [lab template](../LAB_TEMPLATE.md) describes the full lab structure. The current lab skeletons carry each lab's objectives, implementation steps, and deliverables; staff write the instructions and set the thresholds from the Student Zero run.
 
-![Fourteen-week student timeline: six labs, the capstone, and milestones M1 to M5.](../assets/images/vol4-course-timeline.svg)
+![Thirteen-week student timeline: seven labs, each due at the end of the following week, the Easter break after week 4, and the capstone in weeks 9–13.](../labs/labs_gantt.png)
 
 **Course assets the labs depend on.** These must exist before the lab that uses them, and several are needed from week 1:
 
 | Asset | First needed | Notes |
 |:---|:---|:---|
-| **Baseline governor firmware** (joint limits, speed clamp, watchdog) | Getting Started, week 1 | The arm runs under it in weeks 1–9; students replace it with their own in Lab 6. Builds on the Step 3 governed arm. |
-| **Pre-wired, pre-calibrated stations** | Getting Started, week 1 | Students trace the wiring in week 1 but do not build it. |
-| **Body-limits measurement procedure** | Part 1A, week 2 | Stopping distance, servo temperature under held load, supply sag on stall, joint-reading age. The STS3215 servos report temperature, voltage, and load. |
-| **Kinematics primer handout** | Part 1B, week 3 | The book does not teach DH parameters or inverse kinematics. |
-| **Digital twin** (URDF/MJCF matching the delivered SO-101) | Part 1B, week 3 | Used in every lab after Lab 1, and in Lab 3's simulation in Lab 3's simulation. |
-| **Sim-trained VLA checkpoint** (SmolVLA or ACT, trained on simulated demonstrations of the course arm) | Part 3A, week 5 | The simulated camera should match the real one. Fallback: a suitable public SO-101 checkpoint, if one exists. |
+| **Baseline governor firmware** (joint limits, speed clamp, watchdog) | Lab 1, week 1 | The arm runs under it in week 1; students replace it with their own in Lab 2. Builds on the Step 3 governed arm. |
+| **Pre-wired, pre-calibrated stations** | Lab 1, week 1 | Students trace the wiring in week 1 but do not build it. |
+| **Body-limits measurement procedure** | Lab 1, week 1 | Stopping distance, servo temperature under held load, supply sag on stall, joint-reading age. The STS3215 servos report temperature, voltage, and load. |
+| **Kinematics primer handout** | Lab 1, week 1 | The book does not teach DH parameters or inverse kinematics. |
+| **Digital twin** (URDF/MJCF matching the delivered SO-101) | Lab 1, week 1 | Lab 1 derives forward kinematics from the URDF; Lab 4 rebuilds the workbench in simulation. |
+| **Sim-trained VLA checkpoint** (SmolVLA or ACT, trained on simulated demonstrations of the course arm) | Lab 4, week 4 | The simulated camera should match the real one. Fallback: a suitable public SO-101 checkpoint, if one exists. |
 | **Fallback artifacts** for each lab | Each lab | A reference IK solver, reference IK firmware, reference checkpoints, and a reference governor, handed to a team that did not finish the previous lab. |
 
 | Lab & Parts | Pre-Flight Tasks for Andrea ("Student Zero") | Required Staff Deliverables for Students |
 |:---|:---|:---|
-| **[Lab 1: The Digital Twin](../labs/lab-01-digital-twin.md)** (Getting Started, then 1A measure the body, 1B build the twin) | • Run teleoperation, record and replay, and a motor-power cut under the baseline governor.<br>• Measure the body's limits on the reference station.<br>• Work the kinematics primer and the IK test in the twin. | • Baseline governor firmware<br>• Body-limits procedure<br>• Kinematics primer, digital twin, simulation starter notebook |
-| **[Lab 2: Simulation to Real Hardware](../labs/lab-02-sim-to-real.md)** (2A IK on the real arm) | • Run student IK on the STM32 against the Lab 1 targets.<br>• Benchmark inter-core RPC latency and timestamp alignment. | • IK-on-MCU path (student port or staff module)<br>• `test_bridge_latency.py`<br>• Reference IK solver (fallback) |
-| **[Lab 3: Learned Control with VLAs](../labs/lab-03-learned-control.md)** (3A sim, 3B hardware) | • Run the sim-trained checkpoint in simulation and compare with IK.<br>• Calibrate the camera; export and profile the model on the UNO Q.<br>• Run the simulation vs. hardware comparison. | • Sim-trained VLA checkpoint<br>• `calibrate_camera.py`, `camera_v4l2_config.sh`<br>• `export_onnx_quantized.py` |
-| **[Lab 4: Real-World Data & Fine-Tuning](../labs/lab-04-real-data-and-fine-tuning.md)** (4A data, 4B untethered) | • Record reference teleoperation episodes with all four action taps; validate the dataset schema.<br>• Fine-tune the sim-trained checkpoint offline; build the deterministic reach baseline.<br>• Run the untethered loop and record a four-tap trace. | • `teleop_record.py`, `inspect_dataset.py`, reference dataset<br>• Fine-tuning recipe, `heuristic_reach.py`<br>• `pai_edge_runtime.py`, `telemetry_logger.py` |
-| **[Lab 5: Stress-Testing](../labs/lab-05-stress-testing.md)** (5A) | • Benchmark chunk horizons.<br>• Test mid-reach target displacement and removal.<br>• Run one paired-prompt language check. | • `benchmark_chunking.py`<br>• `disturbance_eval.py` |
-| **[Lab 6: Safety Governor](../labs/lab-06-safety-governor.md)** (6A build, 6B break) | • Program the governor; run the MCU-vs-Linux placement test.<br>• Program the watchdog; inject freezes, dropouts, and corrupted packets.<br>• Prove zero stale-command execution on resume. | • Governor firmware project<br>• `fault_injection_suite.py`, `recovery_verification.py`<br>• Reference governor (fallback for the capstone) |
+| **[Lab 1: Forward Kinematics](../labs/lab1.md)** (week 1) | • Run teleoperation, record and replay, and a motor-power cut under the baseline governor.<br>• Measure the body's limits on the reference station.<br>• Derive forward kinematics from the URDF and track the pose on the MCU. | • Baseline governor firmware<br>• Body-limits procedure<br>• Kinematics primer, digital twin (URDF) |
+| **[Lab 2: The Safety Governor](../labs/lab2.md)** (week 2) | • Program the stop mechanism and measure its trigger latency.<br>• Program the governor; run the MCU-vs-Linux placement test.<br>• Program the watchdog; inject freezes, dropouts, and corrupted packets.<br>• Prove zero stale-command execution on resume. | • Governor firmware project<br>• `fault_injection_suite.py`, `recovery_verification.py`<br>• Reference governor (fallback) |
+| **[Lab 3: Inverse Kinematics](../labs/lab3.md)** (week 3) | • Run student IK on the STM32 against target poses.<br>• Compute the workspace map and its singularities. | • IK-on-MCU path (student port or staff module)<br>• Reference IK solver (fallback) |
+| **[Lab 4: VLA Policies in Simulation](../labs/lab4.md)** (week 4) | • Reproduce the workbench in simulation.<br>• Run the sim-trained checkpoint in simulation and record completion and collisions. | • Digital twin (MJCF), simulation starter notebook<br>• Sim-trained VLA checkpoint |
+| **[Lab 5: The Sim2Real Gap](../labs/lab5.md)** (week 5) | • Calibrate the camera; export and profile the model on the UNO Q.<br>• Benchmark inter-core RPC latency and timestamp alignment.<br>• Run the simulation vs. hardware comparison. | • `calibrate_camera.py`, `camera_v4l2_config.sh`<br>• `export_onnx_quantized.py`, `test_bridge_latency.py` |
+| **[Lab 6: Real Data and Fine-Tuning](../labs/lab6.md)** (weeks 6–7) | • Record reference teleoperation episodes with all four action taps; validate the dataset schema.<br>• Fine-tune the sim-trained checkpoint on the pooled dataset.<br>• Run the fine-tuned loop and record a four-tap trace. | • `teleop_record.py`, `inspect_dataset.py`, reference dataset<br>• Fine-tuning recipe, fine-tuned checkpoint<br>• `pai_edge_runtime.py`, `telemetry_logger.py` |
+| **[Lab 7: Robustness Testing](../labs/lab7.md)** (week 8) | • Run `stress-ng` CPU loads against the single-brain and dual-brain deployments.<br>• Benchmark chunk horizons and re-evaluation frequency. | • `benchmark_chunking.py`<br>• Stress scenarios and the VLA policies to compare |
+| **Not yet placed in a lab** (competencies A2, B2, C3) | • Build the deterministic reach baseline.<br>• Test mid-reach target displacement and removal.<br>• Run one paired-prompt language check. | • `heuristic_reach.py`<br>• `disturbance_eval.py` |
 
 ---
 

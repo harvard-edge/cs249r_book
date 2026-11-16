@@ -2,11 +2,11 @@
 
 Domain implementations behind ``mlsysim.solvers`` (added 2026-10-20). Each
 model is arithmetic on serialized token counts: a budget by role against the
-window, one attention head's softmax over fixed logits, a measured
-comprehension sweep, the input bill of a zoned layout under prefix reuse,
-compaction between two watermarks, the edits that retire a stale observation,
-and the cost per accepted task of a protected-field check. None models
-tokenization across joins, cache eviction, or a trained model's attention.
+window, one attention head's softmax over fixed logits, the input bill of a
+zoned layout under prefix reuse, compaction between two watermarks, the edits
+that retire a stale observation, and the cost per accepted task of a
+protected-field check. None models tokenization across joins, cache eviction,
+or a trained model's attention.
 """
 
 from __future__ import annotations
@@ -246,6 +246,10 @@ class AttentionDilutionModel(ForwardModel):
             long_weight=calc_softmax_target_weight(target_logit, [(long_keys - 1, background_logit)]),
         )
         if unrelated_keys is not None and lookalike_keys is not None:
+            if lookalike_logit is None:
+                raise ValueError(
+                    "lookalike_logit is required when unrelated_keys and lookalike_keys are supplied."
+                )
             look = (lookalike_keys, lookalike_logit)
             out.update(
                 weight_without_lookalikes=calc_softmax_target_weight(

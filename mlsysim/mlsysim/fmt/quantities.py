@@ -324,7 +324,7 @@ def fmt_time(
     if val < 0 and not allow_negative:
         raise ValueError(
             f"fmt_time expects a non-negative duration, got {val}. Pass "
-            f"allow_negative=True if a signed duration is genuinely intended."
+            f"allow_negative=True if a signed duration is explicitly intended."
         )
     if attributive:
         return fmt(

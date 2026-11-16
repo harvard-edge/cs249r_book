@@ -119,6 +119,8 @@ def calc_clopper_pearson_zero_failure_bound(n_trials: int, confidence: float = 0
     >>> assert 0 < low < high < 1
     """
     validate_at_least(n_trials, 1, "n_trials")
+    if not (0.0 < confidence < 1.0):
+        raise ValueError(f"confidence must be in (0, 1), got {confidence}")
     alpha = 1.0 - confidence
     return float(alpha ** (1.0 / n_trials))
 
@@ -164,9 +166,11 @@ def calc_zero_failure_sample_size(target_lower_bound: float, confidence: float =
     >>> assert isinstance(n, int) and n > 0
     """
     if not (0.0 < target_lower_bound < 1.0):
-        raise ValueError("target_lower_bound must be strictly between 0 and 1.")
+        raise ValueError("target_lower_bound must be in (0, 1).")
+    if not (0.0 < confidence < 1.0):
+        raise ValueError(f"confidence must be in (0, 1), got {confidence}")
     alpha = 1.0 - confidence
-    n = math.ceil(math.log(alpha) / math.log(target_lower_bound))
+    n = math.ceil(math.log(alpha) / math.log(target_lower_bound) - 1e-12)
     return int(n)
 
 
@@ -279,7 +283,20 @@ RULE_OF_THREE_NUMERATOR = 3.0  # -ln(0.05) = 2.996, rounded (Hanley and Lippman-
 
 def _binomial_upper_tail(successes: int, trials: int, p: float) -> float:
     """P(X >= successes) for X ~ Binomial(trials, p)."""
-    return sum(math.comb(trials, j) * p**j * (1.0 - p) ** (trials - j) for j in range(successes, trials + 1))
+    if successes <= 0:
+        return 1.0
+    if successes > trials or p <= 0.0:
+        return 0.0
+    if p >= 1.0:
+        return 1.0
+    log_p = math.log(p)
+    log_q = math.log1p(-p)
+    log_n = math.lgamma(trials + 1)
+    total = sum(
+        math.exp(log_n - math.lgamma(j + 1) - math.lgamma(trials - j + 1) + j * log_p + (trials - j) * log_q)
+        for j in range(successes, trials + 1)
+    )
+    return min(1.0, total)
 
 
 def calc_clopper_pearson_lower_bound(successes: int, trials: int, confidence: float = 0.95) -> float:
@@ -331,8 +348,12 @@ def calc_clopper_pearson_lower_bound(successes: int, trials: int, confidence: fl
     validate_at_least(trials, 1, "trials")
     if not 0 <= successes <= trials:
         raise ValueError("successes must lie between 0 and trials.")
+    if not (0.0 < confidence < 1.0):
+        raise ValueError(f"confidence must be in (0, 1), got {confidence}")
     if successes == 0:
         return 0.0
+    if successes == trials:
+        return float((1.0 - confidence) ** (1.0 / trials))
     alpha = 1.0 - confidence
     lo, hi = 0.0, 1.0
     for _ in range(200):
@@ -422,7 +443,7 @@ def calc_rule_of_three_trials(target_lower_bound: float) -> float:
     >>> assert hi == 2 * lo
     """
     if not (0.0 < target_lower_bound < 1.0):
-        raise ValueError("target_lower_bound must be strictly between 0 and 1.")
+        raise ValueError("target_lower_bound must lie in (0, 1).")
     return RULE_OF_THREE_NUMERATOR / (1.0 - target_lower_bound)
 
 
@@ -477,5 +498,5 @@ def calc_zero_failure_mission_count(target_hazard_rate, mission_time, confidence
         raise ValueError(f"confidence must be in (0, 1), got {confidence}")
     p_mission = (target_hazard_rate * mission_time).to("").magnitude
     if not (0.0 < p_mission < 1.0):
-        raise ValueError("target_hazard_rate * mission_time must be strictly between 0 and 1.")
+        raise ValueError("target_hazard_rate * mission_time must lie in (0, 1).")
     return math.log(1.0 - confidence) / math.log(1.0 - p_mission)

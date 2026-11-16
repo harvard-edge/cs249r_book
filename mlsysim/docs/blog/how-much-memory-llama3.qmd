@@ -1,6 +1,6 @@
 ---
 title: "How Much Memory Does Llama-3 70B Actually Need?"
-description: "A 3-minute calculation with mlsysim that answers the question every ML engineer asks."
+description: "A 30-second calculation with mlsysim that answers the question every ML engineer asks."
 date: 2026-04-01
 categories: [serving, memory, llm]
 ---
@@ -90,7 +90,7 @@ print(f"INT4 weights: {int4_size.to('GB'):~.1f}")
 
 **Result:** `{python} f"{_fp16_gb:.1f} GB"` in FP16, `{python} f"{_int8_gb:.1f} GB"` in INT8, and `{python} f"{_int4_gb:.1f} GB"` in INT4.
 
-An H100 or A100 has `{python} f"{_h100_gib:.0f} GiB"` (`{python} f"{_h100_gb:.1f} GB"`), so `{python} llama70b.name` in FP16 **does not fit on one GPU**.
+An H100 (`{python} f"{_h100_gib:.0f} GiB"`) or 80 GiB A100 (`{python} f"{_a100_gib:.0f} GiB"`, `{python} f"{_h100_gb:.1f} GB"`) cannot hold `{python} f"{_fp16_gb:.1f} GB"` of weights, so `{python} llama70b.name` in FP16 **does not fit on one GPU**.
 Serving it requires either tensor parallelism ($\text{TP}=2$) or quantization to INT8/INT4.
 
 ## The KV Cache
@@ -146,18 +146,23 @@ the KV cache can consume *more* memory than the weights.
 
 | Strategy | Memory Impact | Trade-off |
 |:---------|:--------------|:----------|
-| INT4 quantization | $4\times$ smaller weights (`{python} f"{_fp16_gb:.1f} GB"` $\to$ `{python} f"{_int4_gb:.1f} GB"`) | ~2--5% accuracy loss |
+| INT4 quantization | $4\times$ ideal weight reduction (`{python} f"{_fp16_gb:.1f} GB"` $\to$ `{python} f"{_int4_gb:.1f} GB"` raw; ~`3.88×` with FP16 scales per 128-weight group in `CompressionModel`) | Requires calibration; pass measured `accuracy_delta` to `CompressionModel` |
 | GQA (built into Llama-3) | $`{python} f"{_gqa_ratio}"`\times$ smaller KV cache (`{python} f"{_heads}"` $\to$ `{python} f"{_kv_heads}"` KV heads) | None (architectural) |
-| KV cache INT8 | $2\times$ smaller KV cache (`{python} f"{_kv_4k_gb:.2f} GB"` $\to$ `{python} f"{_kv_4k_gb / 2:.2f} GB"` at 4K) | Negligible quality loss |
-| Tensor parallelism ($\text{TP}=2$) | Split across 2 GPUs (`{python} f"{_fp16_gb / 2:.1f} GB"` weights/GPU) | Adds NVLink communication |
-| PagedAttention (vLLM) | Eliminates KV fragmentation | ~20--40% more concurrent requests |
+| KV cache INT8 | $2\times$ smaller KV cache (`{python} f"{_kv_4k_gb:.2f} GB"` $\to$ `{python} f"{_kv_4k_gb / 2:.2f} GB"` at 4K) | Small quality delta on long-context retrieval |
+| Tensor parallelism ($\text{TP}=2$) | Split across 2 GPUs (`{python} f"{_fp16_gb / 2:.1f} GB"` weights/GPU) | Adds NVLink AllReduce communication |
+| PagedAttention (vLLM) | Eliminates contiguous KV reservation waste | Near-zero internal fragmentation (`ContinuousBatchingModel`) |
 
 ## Reproducing the Calculation
 
 ```bash
 pip install mlsysim
+# Returns non-zero exit code (PHYSICS_FAIL) when FP16 exceeds 80 GiB HBM:
 mlsysim serve Llama3_70B H100 --seq-len 4096 --batch-size 1
+# Fits on 1x H100 at INT4:
+mlsysim serve Llama3_70B H100 --seq-len 4096 --batch-size 1 --precision int4
 ```
+
+For the full theory and interactive notebooks, see [Vol I · Ch 13: Model Serving](https://mlsysbook.ai/vol1/13_model_serving/13_model_serving.html) ([Lab](https://mlsysbook.ai/labs/vol1/lab_13_model_serving/) · [Slides](https://mlsysbook.ai/slides/vol1.html#ch-13)), [Vol II · Ch 10: Serving at Scale](https://mlsysbook.ai/vol2/10_inference/10_inference.html) ([Lab](https://mlsysbook.ai/labs/vol2/lab_10_inference/) · [Slides](https://mlsysbook.ai/slides/vol2.html#ch-10)), and [Tutorial 3: The KV-Cache Tax](../tutorials/03_kv_cache.qmd).
 
 ---
 

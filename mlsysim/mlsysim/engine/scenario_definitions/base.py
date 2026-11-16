@@ -53,7 +53,6 @@ def _usd_per_hour(rate) -> float:
     return rate.to("USD/hour").magnitude
 
 
-from pydantic import BaseModel, ConfigDict
 from typing import Optional, Union
 from ...core.units import Q_
 from ...core.types import Quantity
@@ -64,7 +63,7 @@ from ...core.exceptions import OOMError, SLAViolation
 from ..evaluation import SystemEvaluation, EvaluationLevel
 
 
-class Scenario(BaseModel):
+class Scenario(BaseScenario):
     """
     Concrete executable case: a workload on a system with constraints.
 

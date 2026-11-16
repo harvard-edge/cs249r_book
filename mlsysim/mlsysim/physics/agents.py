@@ -172,9 +172,9 @@ def calc_first_horizon_below(step_success: float, threshold: float) -> int:
     Parameters
     ----------
     step_success : float
-        Per-step success probability strictly between 0 and 1.
+        Per-step success probability in the open interval (0, 1).
     threshold : float
-        Task success threshold strictly between 0 and 1.
+        Task success threshold in the open interval (0, 1).
 
     Returns
     -------
@@ -185,13 +185,13 @@ def calc_first_horizon_below(step_success: float, threshold: float) -> int:
     -----
     Equation: n = floor(log(threshold) / log(step_success)) + 1.
 
-    Assumptions: Identical independent step success and an exact strict inequality.
+    Assumptions: Identical independent step success and exact open-interval inequality ``p**n < threshold``.
 
-    Excludes: Correlations and numerical ambiguity when logarithms lie near an integer.
+    Excludes: Step-to-step error correlations and adaptive recovery.
 
     References
     ----------
-    Derivation: Solve p ** n < threshold for n; log(p) is negative, so n must exceed the
+    Derivation: Solve ``p**n < threshold`` for n; log(p) is negative, so n must exceed the
     log ratio.
 
     Examples
@@ -200,7 +200,16 @@ def calc_first_horizon_below(step_success: float, threshold: float) -> int:
     >>> 0.5 ** n < 0.3 <= 0.5 ** (n - 1)
     True
     """
-    return math.floor(math.log(threshold) / math.log(step_success)) + 1
+    if not (0.0 < step_success < 1.0):
+        raise ValueError(f"step_success must be in (0, 1), got {step_success}")
+    if not (0.0 < threshold < 1.0):
+        raise ValueError(f"threshold must be in (0, 1), got {threshold}")
+    n = max(1, math.floor(math.log(threshold) / math.log(step_success)) + 1)
+    while n > 1 and step_success ** (n - 1) < threshold:
+        n -= 1
+    while step_success**n >= threshold:
+        n += 1
+    return n
 
 
 def calc_cost_per_accepted(attempt_cost, acceptance_probability: float):
@@ -392,22 +401,30 @@ def calc_tempered_softmax(logits, temperature: float = 1.0) -> list:
     -----
     Equation: p_i = exp(z_i / T) / sum_j exp(z_j / T).
 
-    Assumptions: Finite exponentials with a positive normalizer; this implementation
-    exponentiates directly.
+    Assumptions: Finite real logits and a positive softmax temperature; shifted by the maximum
+    scaled score to prevent overflow.
 
-    Excludes: Log-sum-exp stabilization, top-p truncation, and predictions of output
-    quality.
+    Excludes: Top-p truncation and predictions of output quality.
 
     References
     ----------
-    Derivation: Normalize the positive exponential weights by their sum.
+    Derivation: Shift scaled logits by their maximum and normalize the positive exponential weights by their sum.
 
     Examples
     --------
     >>> calc_tempered_softmax([0.0, 0.0]) == [0.5, 0.5]
     True
     """
-    exps = [_math.exp(z / temperature) for z in logits]
+    if temperature <= 0 or not _math.isfinite(temperature):
+        raise ValueError(f"temperature must be finite and > 0, got {temperature}")
+    vals = [float(z) for z in logits]
+    if not vals:
+        raise ValueError("logits must be nonempty")
+    if not all(_math.isfinite(z) for z in vals):
+        raise ValueError("logits must contain finite numbers")
+    scaled = [z / temperature for z in vals]
+    max_s = max(scaled)
+    exps = [_math.exp(s - max_s) for s in scaled]
     total = sum(exps)
     return [e / total for e in exps]
 
@@ -450,9 +467,20 @@ def calc_nucleus(probabilities, top_p: float):
     >>> (kept, mass, probs) == (1, 0.5, [1.0])
     True
     """
-    ordered = sorted(probabilities, reverse=True)
+    if not (0.0 < top_p <= 1.0):
+        raise ValueError(f"top_p must be in (0, 1], got {top_p}")
+    vals = [float(p) for p in probabilities]
+    if not vals:
+        raise ValueError("probabilities must be nonempty")
+    if any(p < 0.0 or not _math.isfinite(p) for p in vals):
+        raise ValueError("probabilities must be finite and >= 0")
+    ordered = sorted(vals, reverse=True)
+    if sum(ordered) <= 0.0:
+        raise ValueError("probabilities must have positive total mass")
     mass, kept = 0.0, 0
     for p in ordered:
+        if p == 0.0:
+            break
         mass += p
         kept += 1
         if mass >= top_p:
@@ -812,7 +840,7 @@ def calc_injection_read_budget(payload_fraction: float, target_exposure: float) 
     Parameters
     ----------
     payload_fraction : float
-        Per-read payload probability strictly between 0 and 1.
+        Per-read payload probability in the open interval (0, 1).
     target_exposure : float
         Maximum exposure probability in [0, 1).
 

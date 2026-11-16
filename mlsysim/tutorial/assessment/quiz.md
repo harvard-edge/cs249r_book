@@ -26,14 +26,14 @@ No names are collected on the quiz itself.
 
 ### Question 1: Bottleneck Identification (U1)
 
-**An H100 GPU has 1,979 TFLOPS (FP16) and 3.35 TB/s memory bandwidth. You are
+**An H100 GPU has 989 TFLOP/s (FP16 dense) and 3.35 TB/s memory bandwidth. You are
 running inference on a 16 GB model at batch_size=1, where each token requires
-32 GFLOP of compute and must read all 16 GB of weights from memory.**
+16 GFLOP of compute and must read all 16 GB of weights from memory.**
 
 **Is this workload compute-bound or memory-bound?**
 
-- (a) Compute-bound, because 1,979 TFLOPS is very high
-- (b) Memory-bound, because the time to read 16 GB exceeds the time to compute 32 GFLOP
+- (a) Compute-bound, because 989 TFLOP/s is very high
+- (b) Memory-bound, because the time to read 16 GB exceeds the time to compute 16 GFLOP
 - (c) Neither -- batch_size=1 means the GPU is idle most of the time
 - (d) It depends on the sequence length, not the batch size
 
@@ -45,7 +45,7 @@ running inference on a 16 GB model at batch_size=1, where each token requires
 
 | Answer | Misconception revealed |
 |--------|----------------------|
-| (a) | Believes high peak FLOPS guarantees compute-bound operation. Confuses capability with utilization. This is the most common pre-tutorial error -- "more FLOPS = faster." |
+| (a) | Believes high peak FLOP/s guarantees compute-bound operation. Confuses capability with utilization. This is the most common pre-tutorial error -- "more FLOP/s = faster." |
 | (c) | Confuses "small batch" with "idle GPU." The GPU is fully busy reading memory; it is just not doing much math per byte read. |
 | (d) | Partially correct intuition (sequence length does affect arithmetic intensity during prefill), but for decode at batch=1, the weights dominate regardless of sequence length. Reveals confusion between prefill and decode regimes. |
 
@@ -55,13 +55,13 @@ running inference on a 16 GB model at batch_size=1, where each token requires
 
 ### Question 2: Roofline Reasoning (U1)
 
-**You upgrade from an A100 (2.0 TB/s bandwidth, 624 TFLOPS FP16) to an H100
-(3.35 TB/s bandwidth, 1,979 TFLOPS FP16) for LLM inference at batch_size=1.
+**You upgrade from an A100 (2.04 TB/s bandwidth, 312 TFLOP/s FP16 dense) to an H100
+(3.35 TB/s bandwidth, 989 TFLOP/s FP16 dense) for LLM inference at batch_size=1.
 How much faster is the H100?**
 
-- (a) About 1.7x faster
+- (a) About 1.6x–1.7x faster
 - (b) About 3.2x faster
-- (c) About 2.5x faster (the geometric mean of the bandwidth and FLOPS ratios)
+- (c) About 2.3x faster (the geometric mean of the bandwidth and FLOP/s ratios)
 - (d) About 1.0x -- they are the same because both are bottlenecked by PCIe
 
 **Correct answer:** (a)
@@ -72,17 +72,17 @@ How much faster is the H100?**
 
 | Answer | Misconception revealed |
 |--------|----------------------|
-| (b) | Uses the FLOPS ratio (1979/624 = 3.2x) as the speedup. Classic error: applying the compute-bound mental model to a memory-bound workload. |
+| (b) | Uses the FLOP/s ratio (989/312 = 3.17x) as the speedup. Classic error: applying the compute-bound mental model to a memory-bound workload. |
 | (c) | Attempts to average the two ratios, suggesting awareness that both metrics matter but lacking the framework to determine which one dominates. |
 | (d) | Confuses HBM bandwidth with PCIe bandwidth. The weights are already in HBM; PCIe is not on the critical path for inference. |
 
-**Understanding goal:** U1 -- The Roofline model determines whether FLOPS or bandwidth limits performance.
+**Understanding goal:** U1 -- The Roofline model determines whether FLOP/s or bandwidth limits performance.
 
 ---
 
 ### Question 3: Iron Law Decomposition (U2)
 
-**A training run on 64 GPUs achieves only 35% MFU (Model FLOPS Utilization). Your
+**A training run on 64 GPUs achieves only 35% MFU (Model FLOPs Utilization). Your
 colleague suggests adding 64 more GPUs to make it faster. Using the Iron Law
 (`Time = FLOPs / (N * Peak * MFU * eta_scaling * Goodput)`), which is the best response?**
 
@@ -194,32 +194,32 @@ to the FP16 fleet (where each FP16 replica on 2 GPUs handles 20 QPS)?**
 
 ### Question 7: Carbon Geography (U5)
 
-**A training run consumes 500 MWh of electricity. The grid carbon intensity in
-Virginia is 390 gCO2/kWh. In Quebec, it is 1.2 gCO2/kWh. How many tonnes of CO2
+**A training run consumes 500 MWh of electricity. Suppose the grid carbon intensity in
+Virginia is 420 gCO2/kWh (near the ~429 gCO2/kWh `US_Avg` registry profile), while in Quebec it is 20 gCO2/kWh. How many tonnes of CO2
 does the run produce in each location?**
 
 *Short answer -- write two numbers: Virginia tonnes and Quebec tonnes.*
 
-**Correct answer:** Virginia: 195 tonnes. Quebec: 0.6 tonnes.
+**Correct answer:** Virginia: 210 tonnes. Quebec: 10 tonnes.
 
 **Scoring rubric:**
 
 | Score | Criteria |
 |-------|----------|
-| 2 | Both numbers correct (within 10%: Virginia 175--215, Quebec 0.5--0.7) |
+| 2 | Both numbers correct (within 10%: Virginia 189--231, Quebec 9--11) |
 | 1 | One number correct, or both show the right method (multiply MWh * gCO2/kWh / 1000) but arithmetic error |
 | 0 | Both wrong, blank, or wrong method |
 
 **Worked solution:**
-- Virginia: 500,000 kWh * 390 gCO2/kWh = 195,000,000 g = 195 tonnes
-- Quebec: 500,000 kWh * 1.2 gCO2/kWh = 600,000 g = 0.6 tonnes
+- Virginia: 500,000 kWh * 420 gCO2/kWh = 210,000,000 g = 210 tonnes
+- Quebec: 500,000 kWh * 20 gCO2/kWh = 10,000,000 g = 10 tonnes
 
 **Common errors:**
 - Unit confusion: forgetting to convert MWh to kWh or grams to tonnes
-- Writing "195,000" for Virginia (forgetting g-to-tonne conversion)
+- Writing "210,000" for Virginia (forgetting g-to-tonne conversion)
 - Applying a PUE factor when none was given (over-complicating)
 
-**Understanding goal:** U5 -- Geography is the highest-leverage sustainability decision (325x difference here).
+**Understanding goal:** U5 -- Geography is the highest-leverage sustainability decision (21x difference here; 41x against coal-heavy grids like Poland).
 
 ---
 
@@ -270,7 +270,7 @@ once per token. What is the minimum memory bandwidth required?**
 |--------|----------------------|
 | (b) | Possibly applying a safety factor or confusing bits and bytes. |
 | (c) | Using 10 ms instead of 40 ms (misreading the SLA) or applying a 4x overhead factor. |
-| (d) | Computing from FLOPS requirements rather than bandwidth requirements. Applying the compute-bound mental model to a memory-bound problem -- exactly the error the Roofline model corrects. |
+| (d) | Computing from FLOP/s requirements rather than bandwidth requirements. Applying the compute-bound mental model to a memory-bound problem -- exactly the error the Roofline model corrects. |
 
 **Worked solution:** Required bandwidth = 16 GB / 0.040 s = 400 GB/s.
 
@@ -374,7 +374,7 @@ misconception analysis across the cohort.
 
 | Misconception | Questions where it appears | Expected pre-test prevalence |
 |---------------|---------------------------|------------------------------|
-| "More FLOPS = faster" | Q1(a), Q2(b) | 40--50% |
+| "More FLOP/s = faster" | Q1(a), Q2(b) | 40--50% |
 | "Just add more GPUs" | Q3(a), Q4(c) | 30--40% |
 | "Quantization is just a latency trick" | Q5(b), Q6 (forgetting 2-GPU requirement) | 35--45% |
 | "Carbon = energy efficiency" | Q8(a) | 50--60% |

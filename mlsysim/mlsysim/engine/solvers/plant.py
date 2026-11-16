@@ -549,14 +549,24 @@ class ThermalBurstModel(ForwardModel):
         t_inf = (amb + p_burst * thermal_resistance).to(_K)
         cold = calc_first_order_time_to_temperature(amb, limit, t_inf, tau)
         hot = calc_first_order_time_to_temperature(t_eq, limit, t_inf, tau)
+        hot_cut = 0.0 if (cold is None or hot is None or cold.magnitude == 0) else 1 - _ratio(hot, cold)
         p_avg = ((ceiling.to(_K) - amb) / thermal_resistance).to(ureg.watt)
         duty = _ratio(p_avg, p_burst)
-        off = (burst_on * (1 - duty) / duty).to(ureg.second)
-        off_sched = math.ceil(off.magnitude * 10) / 10 * ureg.second   # screening value rounded up to 0.1 s
-        peak = (amb + calc_periodic_burst_peak_rise(p_burst, thermal_resistance, burst_on, burst_on + off_sched, tau)).to(_K)
+        if duty <= 0:
+            raise ValueError(f"Thermal ceiling {ceiling} must exceed ambient {ambient} for positive duty.")
+        if duty >= 1.0:
+            off = 0.0 * ureg.second
+            off_sched = 0.0 * ureg.second
+            peak = t_inf
+        else:
+            off = (burst_on * (1 - duty) / duty).to(ureg.second)
+            off_sched = math.ceil(off.magnitude * 10) / 10 * ureg.second  # screening value rounded up to 0.1 s
+            peak = (
+                amb + calc_periodic_burst_peak_rise(p_burst, thermal_resistance, burst_on, burst_on + off_sched, tau)
+            ).to(_K)
         return ThermalBurstResult(
             time_constant=tau, rated_loss=p_rated, rated_equilibrium=t_eq, burst_current=i_burst, burst_loss=p_burst,
-            asymptote=t_inf, horizon_cold=cold, horizon_hot=hot, hot_cut=1 - _ratio(hot, cold),
+            asymptote=t_inf, horizon_cold=cold, horizon_hot=hot, hot_cut=hot_cut,
             average_loss_max=p_avg, duty=duty, off_time=off, off_time_scheduled=off_sched, periodic_peak=peak,
         )
 
@@ -627,14 +637,19 @@ class StallDeratingModel(ForwardModel):
         base = (i ** 2 * loss_resistance * thermal_resistance).to(_K)
         const = (base * calc_copper_resistance_factor(ambient, alpha, t0)).to(_K)
         gain = float((base * alpha).to("").magnitude)
-        rise = (const / (1 - gain)).to(_K)
+        if gain >= 1.0:
+            rise = float("inf") * _K
+            winding_temp = float("inf") * _K
+        else:
+            rise = (const / (1 - gain)).to(_K)
+            winding_temp = (ambient.to(_K) + rise).to(_K)
         p_max = ((limit.to(_K) - ambient.to(_K)) / thermal_resistance).to(ureg.watt)
         r_hot = (loss_resistance * calc_copper_resistance_factor(limit, alpha, t0)).to(ureg.ohm)
         i_max = ((p_max / r_hot) ** 0.5).to(ureg.ampere)
         hold = (gear_efficiency * gear_ratio * torque_constant * i_max).to(ureg.newton * ureg.meter)
         return StallDeratingResult(
             motor_torque=tau_m, stall_current=i, cold_loss=p_cold, feedback_constant=const, feedback_gain=gain,
-            steady_rise=rise, winding_temperature=(ambient.to(_K) + rise).to(_K), sustainable_loss=p_max,
+            steady_rise=rise, winding_temperature=winding_temp, sustainable_loss=p_max,
             hot_resistance=r_hot, sustainable_current=i_max, sustainable_hold=hold, derating=1 - _ratio(hold, hold_torque),
         )
 

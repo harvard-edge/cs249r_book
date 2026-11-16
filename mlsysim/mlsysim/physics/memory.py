@@ -203,11 +203,12 @@ def calc_activation_memory(
     validate_at_least(seq_len, 1, "seq_len")
     validate_at_least(batch_size, 1, "batch_size")
     validate_at_least(hidden_dim, 1, "hidden_dim")
-    validate_positive(precision_bytes, "precision_bytes")
+    prec_b = _ensure_unit(precision_bytes, ureg.byte, "precision_bytes").magnitude
+    validate_positive(prec_b, "precision_bytes")
     if n_heads is not None:
         validate_at_least(n_heads, 1, "n_heads")
     s, b, h = seq_len, batch_size, hidden_dim
-    precision_scale = precision_bytes / 2  # Korthikanti constants are FP16 bytes
+    precision_scale = prec_b / 2  # Korthikanti constants are FP16 bytes
     if strategy == "full":
         bytes_per_layer = KORTHIKANTI_LAYER_INPUT_BYTES * s * b * h * precision_scale
     elif strategy == "selective":

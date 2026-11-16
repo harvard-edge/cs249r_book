@@ -16,12 +16,13 @@ every rendered figure against them.
 from __future__ import annotations
 
 import os
+import sys
 
 try:
     import matplotlib
 
-    if "MPLBACKEND" not in os.environ:
-        matplotlib.use("Agg", force=True)
+    if "MPLBACKEND" not in os.environ and "matplotlib.pyplot" not in sys.modules:
+        matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
     _MATPLOTLIB_AVAILABLE = True
@@ -95,7 +96,7 @@ def _register_bundled_fonts() -> None:
 
 
 def set_book_style() -> None:
-    """Apply the global MLSysBook matplotlib style."""
+    """Apply the publication matplotlib style."""
     if not _MATPLOTLIB_AVAILABLE:
         raise ImportError("matplotlib is required for plot generation.")
     _register_bundled_fonts()
@@ -131,14 +132,14 @@ def finalize_web_figure(fig):
 
 
 def setup_plot(figsize=BODY_FIGSIZE):
-    """Create a matplotlib figure/axis using the MLSysBook style."""
+    """Create a matplotlib figure/axis using the publication style."""
     set_book_style()
     fig, ax = plt.subplots(figsize=figsize)
     return fig, ax, COLORS, plt
 
 
 def bar_compare(labels, values, *, title=None, ylabel=None, figsize=(BODY_FIGSIZE[0], 3.4), color=None):
-    """Render a compact bar comparison with the MLSysBook style."""
+    """Render a compact bar comparison with the publication style."""
     fig, ax, colors, _ = setup_plot(figsize=figsize)
     bar_color = color or colors["BlueLine"]
     bars = ax.bar(labels, values, color=bar_color, alpha=0.8)

@@ -748,7 +748,7 @@ class CommandAuthenticationModel(ForwardModel):
     remote stop can act, so each millisecond is travel at ``speed`` against
     the finished budget's spare; a replay at the edge of the freshness window
     carries the machine v x tau_fresh. Verified serially, n forged signed
-    packets queued ahead of a genuine veto finish it at (n + 1) t_verify; the
+    packets queued ahead of a valid veto finish it at (n + 1) t_verify; the
     fewest that push it past the deadline is n = floor(T_latest / t_verify),
     sustained at n / ((n + 1) t_verify) packets per second (added 2026-10-20).
     """

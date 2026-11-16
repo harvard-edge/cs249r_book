@@ -20,7 +20,7 @@ _NOT_SYMBOL_FILES = {"exempt.yaml", "vocabulary.yaml"}
 
 
 class NotationRegistry:
-    """All canonical notation symbols of MLSysBook."""
+    """All canonical mathematical notation symbols registered in MLSysIM."""
 
     def __init__(self, data_dir: Path | None = None) -> None:
         self._symbols: Dict[str, NotationSymbol] = {}
