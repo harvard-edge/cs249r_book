@@ -70,7 +70,7 @@ another volume.
 **Examples.** Every worked example follows one pattern so a student can trace
 it: formula, then the numbers substituted with units, then the result, then a
 "So" line (`Card.so`) saying what the result means or which lever it points
-to. Print every input needed to reproduce the result. Define each symbol on
+to. Print every input needed to reproduce the result, and compute each printed result from the rounded values printed beside it, so a student who redoes the arithmetic gets the printed digits. Define each symbol on
 the page, near where it is used.
 
 **Length.** Usefulness comes first. Pages 1 and 2 are the core quick
