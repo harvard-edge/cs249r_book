@@ -199,12 +199,26 @@ class Matcher:
         # A name contained in several longer names ("Kyoto University" inside
         # "Kyoto University of Education") is too ambiguous for substring use.
         self.long_names = [n for n in names if len(n) >= 14 and joined.count(n) < 4]
+        # Hipo often appends the campus ("University of Virginia, Charlottesville")
+        # while profiles give the bare name. Accept the bare name for an exact
+        # match when it identifies exactly one school ("University of California"
+        # does not). Kept out of long_names: as a substring, "Washington
+        # University" would match inside "Western Washington University".
+        bases: dict[str, list[dict]] = {}
+        for u in hipo:
+            full = norm(u["name"])
+            if "," in full:
+                bases.setdefault(full.split(",")[0].strip(), []).append(u)
+        self.by_base = {b: us[0] for b, us in bases.items()
+                        if len({id(x) for x in us}) == 1 and b not in self.by_name and b not in DENY}
 
     def _domain_of(self, c: str) -> str | None:
         if c in ALIAS:
             return ALIAS[c]
         if c in self.by_name:
             return self.by_name[c]["domains"][0].lower()
+        if c in self.by_base:
+            return self.by_base[c]["domains"][0].lower()
         if c in self.by_domain:
             return c
         m = re.match(r"^(?:indian institute of technology|iit)[ ,-]*(.+)$", c)
