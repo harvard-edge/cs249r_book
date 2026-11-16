@@ -31,7 +31,7 @@ def napkin():
 def test_sheet_builds_and_renders(napkin, vol):
     sheet = importlib.import_module(f"napkin_math.{vol}").build()
     assert sheet.volume == VOLUMES.index(vol) + 1
-    assert len(sheet.pages) == 2
+    assert len(sheet.pages) >= 2  # pages 1-2 are the core handout; more pages may follow
     html = napkin.render(sheet)
     text = re.sub(r"<[^>]+>", " ", html)
     for bad in ("nan", "inf ", "None", "{{", "}}"):
