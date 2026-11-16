@@ -1,9 +1,9 @@
 # MLSysBook Quarto Build Container
-# Based on Ubuntu 22.04 with all dependencies pre-installed
+# Based on Ubuntu 24.04 (Python 3.12) with all dependencies pre-installed
 # This container eliminates the 30-45 minute setup time for Linux builds
 # RUN uses /bin/sh: inside double quotes, $$ is the shell PID, so $${VAR} and backticks, not $().
 
-FROM ubuntu:22.04
+FROM ubuntu:24.04
 
 # === PATH CONFIGURATION ===
 # Paths are hardcoded since they're stable and ARG scope causes issues in multi-layer builds
@@ -16,7 +16,10 @@ ENV PYTHONIOENCODING=utf-8
 ENV LANG=en_US.UTF-8
 ENV LC_ALL=en_US.UTF-8
 # Prepend TeX; keep a full system PATH (BuildKit can expand $PATH in RUN to nothing).
-ENV PATH="/usr/local/texlive/bin/x86_64-linux:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+# /opt/venv holds the Python packages: Ubuntu 24.04 marks its system Python as
+# externally managed (PEP 668), so pip installs go into a venv placed first on PATH.
+ENV VIRTUAL_ENV=/opt/venv
+ENV PATH="/opt/venv/bin:/usr/local/texlive/bin/x86_64-linux:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 # === PHASE 0: COPY DEPENDENCY FILES EARLY (for better cache efficiency) ===
 # Copy dependency files early for better cache efficiency
@@ -81,7 +84,7 @@ RUN echo "🚀 === STARTING SYSTEM DEPENDENCIES INSTALLATION ===" && \
     libxml2-dev \
     libcurl4-openssl-dev \
     libjpeg-dev \
-    libtiff5-dev \
+    libtiff-dev \
     libpng-dev \
     libharfbuzz-dev \
     libfribidi-dev \
@@ -301,7 +304,7 @@ RUN echo "🚀 === STARTING R INSTALLATION ===" && \
     echo "📦 Adding CRAN repository for R 4.5..." && \
     apt-get update && apt-get install -y --no-install-recommends software-properties-common dirmngr && \
     wget -qO- https://cloud.r-project.org/bin/linux/ubuntu/marutter_pubkey.asc | tee -a /etc/apt/trusted.gpg.d/cran_ubuntu_key.asc > /dev/null && \
-    add-apt-repository "deb https://cloud.r-project.org/bin/linux/ubuntu jammy-cran40/" && \
+    add-apt-repository "deb https://cloud.r-project.org/bin/linux/ubuntu noble-cran40/" && \
     apt-get update && \
     \
     echo "📦 Installing R and development packages..." && \
@@ -381,15 +384,20 @@ RUN echo "🚀 === STARTING PYTHON INSTALLATION ===" && \
     echo "  - python3" && \
     echo "  - python3-pip" && \
     echo "  - python3-dev" && \
+    echo "  - python3-venv" && \
     apt-get update && apt-get install -y \
     python3 \
     python3-pip \
-    python3-dev && \
+    python3-dev \
+    python3-venv && \
     if [ $$? -ne 0 ]; then \
         echo "❌ Failed to install Python packages"; \
         exit 1; \
     fi && \
     echo "📦 Python packages installed" && \
+    \
+    echo "🔧 Creating the venv at $${VIRTUAL_ENV}..." && \
+    /usr/bin/python3 -m venv "$${VIRTUAL_ENV}" && \
     \
     echo "🧹 Cleaning package cache..." && \
     rm -rf /var/lib/apt/lists/* && \
@@ -452,8 +460,8 @@ RUN echo "🚀 === STARTING PYTHON PACKAGE INSTALLATION ===" && \
     \
     echo "🧹 Cleaning Python installation caches..." && \
     pip3 cache purge && \
-    find /usr -name "*.pyc" -delete && \
-    find /usr -name "__pycache__" -type d -exec rm -rf {} + || true && \
+    find /usr /opt/venv -name "*.pyc" -delete && \
+    find /usr /opt/venv -name "__pycache__" -type d -exec rm -rf {} + || true && \
     \
     echo "📊 Installed Python packages:" && \
     pip3 list | head -10 && \
