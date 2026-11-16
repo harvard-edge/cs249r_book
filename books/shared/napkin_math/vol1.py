@@ -168,10 +168,10 @@ def build() -> Sheet:
     # ---------------------------------------------------------------- page 1
     band = (f'<div class="eqbig">{v("t")} = {frac("samples", "task")} × {frac("FLOPs", "sample")} × {frac("seconds", "FLOP")}'
             f'<span class="lbl">Data × Algorithm × Machine</span></div>'
-            f'<div class="txt"><div><b>The iron law (Ch 1).</b> Seconds per FLOP unpacks into {v("D")}/{v("B")} + {v("O")}/({v("R")}·{v("η")}) + {v("L")} per FLOP, so it depends on the workload: '
-            f'on one H100, batch-1 decode takes ≈ {n(fmt(round(coupling, -1)) + "×")} the seconds per FLOP of large-batch training. '
-            f'{v("L")} ≈ {fmt(LAUNCH_US)} µs per kernel launch.</div>'
-            f'<div><b>Pull the largest term\'s lever:</b> fewer samples · fewer FLOPs or bytes per sample (prune, quantize, fuse) · fewer seconds per FLOP (batch; raise {v("B")}, {v("R")}, {v("η")}).</div></div>'
+            f'<div class="txt"><div><b>The iron law (Ch 1).</b> {v("t")} = {v("D")}/{v("B")} + {v("O")}/({v("R")}·{v("η")}) + {v("L")}; per FLOP, 1/({v("I")}·{v("B")}) + 1/({v("R")}·{v("η")}) + {v("L")}/{v("O")}. '
+            f'So seconds per FLOP depends on the workload: bandwidth-bound batch-1 decode on one H100 takes ≈ {n(fmt(round(coupling, -1)) + "×")} that of training at {fmt(TR.efficiency * 100)}% MFU. '
+            f'{v("L")} is fixed overhead; a kernel launch adds ≈ {fmt(LAUNCH_US)} µs.</div>'
+            f'<div><b>Levers:</b> fewer samples · fewer FLOPs or bytes per sample · fewer seconds per FLOP (batch; raise {v("B")}, {v("R")}, {v("η")}).</div></div>'
             f'<div class="side"><div><b>Amdahl (Ch 11)</b> &nbsp;speedup = 1 / ((1 − {v("p")}) + {v("p")} / {v("a")})</div>'
             f'<div>{A}{v("p")} = {fmt(S["amd_p"] * 100)}% sped up {v("a")} = {fmt(S["amd_a"])}×: {n(f"{amd:.1f}×")}, cap {n(fmt(1 / (1 - S["amd_p"])) + "×")}</div></div>')
 
@@ -185,8 +185,8 @@ def build() -> Sheet:
             ("Machine", f'{v("R")} peak FLOP/s · {v("B")} bandwidth (bytes/s) · {v("η")} fraction of peak sustained · {v("I")} = {v("O")}/{v("D")} FLOP/byte'),
         ],
         know=[
-            Know("2 B · 16 B", "per parameter: FP16 weights · Adam training state"),
-            Know("2N · 6N", "FLOPs per token: inference · training"),
+            Know("2 B / 16 B", "per parameter: FP16 weights / Adam training state"),
+            Know("2N / 6N", "FLOPs per token: inference / training"),
             Know(f"{fmt(PEAK['fp16'] / 1e12)} TFLOP/s", "H100 FP16 dense peak"),
             Know(f"{BW / 1e12:.2f} TB/s", "H100 HBM bandwidth"),
             Know(f"{fmt(ridge['fp16'])} FLOP/B", "H100 ridge point: below it, bandwidth-bound"),
@@ -244,7 +244,7 @@ def build() -> Sheet:
         sub="Serving under load, deadlines on edge and tiny devices, and what shrinking the model buys.",
         meta="H100 · Jetson Orin Nano · STM32F4",
         notation=[
-            ("Queues", f'{v("λ")} arrivals/s · {v("t", "s")} service time · {v("ρ")} = {v("λ")} · {v("t", "s")} server busy fraction · {v("W")} time in system · {v("Q")} requests in system'),
+            ("Queues", f'{v("D")}, {v("O")}, {v("I")}, {v("L")} as on page 1 · {v("λ")} arrivals/s · {v("t", "s")} service time · {v("ρ")} = {v("λ")}{v("t", "s")} busy fraction · {v("W")} time in system · {v("Q")} requests in system'),
             ("Shrinking", f'{v("k")} bits per value · {v("Δ")} quantization step · {v("σ")} fraction of weights pruned'),
             ("Not the same “utilization”", f'{v("η")} (MFU) = useful FLOP/s ÷ peak · {v("ρ")} = fraction of time the server is busy · nvidia-smi “GPU-Util” = time any kernel was running'),
         ],
