@@ -396,8 +396,9 @@ RUN echo "🚀 === STARTING PYTHON INSTALLATION ===" && \
     fi && \
     echo "📦 Python packages installed" && \
     \
-    echo "🔧 Creating the venv at $${VIRTUAL_ENV}..." && \
-    /usr/bin/python3 -m venv "$${VIRTUAL_ENV}" && \
+    echo "🔧 Creating the venv at /opt/venv..." && \
+    /usr/bin/python3 -m venv /opt/venv && \
+    test -x /opt/venv/bin/pip3 && \
     \
     echo "🧹 Cleaning package cache..." && \
     rm -rf /var/lib/apt/lists/* && \
@@ -461,7 +462,7 @@ RUN echo "🚀 === STARTING PYTHON PACKAGE INSTALLATION ===" && \
     echo "🧹 Cleaning Python installation caches..." && \
     pip3 cache purge && \
     find /usr /opt/venv -name "*.pyc" -delete && \
-    find /usr /opt/venv -name "__pycache__" -type d -exec rm -rf {} + || true && \
+    { find /usr /opt/venv -name "__pycache__" -type d -exec rm -rf {} + || true; } && \
     \
     echo "📊 Installed Python packages:" && \
     pip3 list | head -10 && \
@@ -483,9 +484,9 @@ RUN echo "🚀 === STARTING COMPREHENSIVE CLEANUP ===" && \
     rm -rf /var/cache/apt/* && \
     \
     echo "🧹 Cleaning Python caches..." && \
-    find /usr -name "*.pyc" -delete && \
-    find /usr -name "__pycache__" -type d -exec rm -rf {} + || true && \
-    pip3 cache purge || true && \
+    find /usr /opt/venv -name "*.pyc" -delete && \
+    { find /usr /opt/venv -name "__pycache__" -type d -exec rm -rf {} + || true; } && \
+    { pip3 cache purge || true; } && \
     \
     echo "🧹 Cleaning R temporary files..." && \
     rm -rf /tmp/Rtmp* || true && \
