@@ -22,7 +22,6 @@ from __future__ import annotations
 from collections import Counter
 from copy import deepcopy
 import functools
-import html
 import json
 import math
 from pathlib import Path
@@ -498,12 +497,4 @@ def field_artifacts(root: Path, book_graph: dict) -> dict[Path, bytes]:
     from .framework_figures import framework_figures
     if field.get("framework"):
         artifacts.update(framework_figures(root, field["framework"]))
-    template = (site / "field.qmd").read_text().split("```{=html}\n", 1)[1].split("\n```", 1)[0]
-    safe_payload = payload.replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
-    page = ('<!doctype html><html lang="en"><head><meta charset="utf-8">'
-            '<meta name="viewport" content="width=device-width, initial-scale=1">'
-            '<title>' + html.escape(field["title"]) + '</title><link rel="stylesheet" href="field.css">'
-            '</head><body><script id="field-data" type="application/json">' + safe_payload + '</script>'
-            + template + '</body></html>')
-    artifacts[site / "field-preview.html"] = page.encode()
     return artifacts

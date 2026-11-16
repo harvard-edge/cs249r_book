@@ -1,10 +1,9 @@
 (async () => {
   "use strict";
   const $ = (id) => document.getElementById(id);
+  // Inside a chapter the taxonomy link must be absolute; on the site it stays as authored.
   const fieldEntry = document.querySelector(".field-entry");
-  if (fieldEntry) fieldEntry.href = window.parent !== window
-    ? "https://mlsysbook.ai/taxonomy/field.html"
-    : location.pathname.endsWith("/atlas.html") ? "field-preview.html" : "field.html";
+  if (fieldEntry && window.parent !== window) fieldEntry.href = "https://mlsysbook.ai/taxonomy/";
   if (window.parent !== window) {
     document.body.classList.add("embedded-map");
     // Inside a chapter, follow the book page's light/dark theme (same origin).
