@@ -126,6 +126,29 @@ class Sheet:
 # ---------------------------------------------------------------- rendering
 
 ROMAN = {1: "I", 2: "II", 3: "III", 4: "IV"}
+
+# Each sheet takes its volume's print accent (books/volN/tex/theme-colors.tex),
+# so a printed sheet matches its book. "warn" marks results that fail a limit
+# and must stay distinct from the accent hue.
+THEME = {
+    1: {"accent": "#A51C30", "warn": "#B45309"},   # Harvard crimson; amber warn
+    2: {"accent": "#1F407A", "warn": "#B4472F"},   # ETH blue
+    3: {"accent": "#581C87", "warn": "#B4472F"},   # Royal amethyst
+    4: {"accent": "#1A4D3E", "warn": "#B4472F"},   # Emerald pine
+}
+
+
+def _tint(hex_color: str, share: float) -> str:
+    """Mix a color with white; share is the fraction of the color kept."""
+    r, g, b = (int(hex_color[i:i + 2], 16) for i in (1, 3, 5))
+    mix = lambda c: round(255 - (255 - c) * share)
+    return "#{:02X}{:02X}{:02X}".format(mix(r), mix(g), mix(b))
+
+
+def theme_css(volume: int) -> str:
+    t = THEME[volume]
+    return (f":root {{ --accent: {t['accent']}; --accent-soft: {_tint(t['accent'], 0.09)}; "
+            f"--accent-mid: {_tint(t['accent'], 0.35)}; --warn: {t['warn']}; }}")
 FONTS = ("https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@500;600;700"
          "&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500"
          "&family=STIX+Two+Text:ital@0;1&display=swap")
@@ -191,7 +214,7 @@ def render(sheet: Sheet) -> str:
             parts.append(f'<div class="foot"><span>{sheet.sources}</span><span>Machine Learning Systems · mlsysbook.ai</span></div>')
         pages.append(f'<section class="page" style="grid-template-rows:{" ".join(rows)}">' + "".join(parts) + "</section>")
     return (f'<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Napkin Math: {sheet.scope}</title>'
-            f'<link rel="stylesheet" href="{FONTS}"><style>{CSS_PATH.read_text()}</style></head><body>' + "".join(pages) + "</body></html>")
+            f'<link rel="stylesheet" href="{FONTS}"><style>{CSS_PATH.read_text()}{theme_css(sheet.volume)}</style></head><body>' + "".join(pages) + "</body></html>")
 
 
 LAYOUT_CHECK = """() => {
