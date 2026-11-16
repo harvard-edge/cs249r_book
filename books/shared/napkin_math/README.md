@@ -5,12 +5,12 @@ student should know by heart and the quantities they should be able to
 calculate, in the book's own notation. The name matches the book's "Napkin
 Math" callouts.
 
-| Volume | Module | Scope | Page 1 question | Page 2 question |
-|---|---|---|---|---|
-| I | `vol1.py` | One Node | Will it run? | Will it meet its target? |
-| II | `vol2.py` | The Fleet | Will it scale? | Will it survive and serve? |
-| III | `vol3.py` | The Trajectory | Will it finish within budget? | Is it worth running? |
-| IV | `vol4.py` | The Action | Can it stop in time? | Has it earned permission? |
+| Volume | Module | Scope | Pages (each page answers one question) |
+|---|---|---|---|
+| I | `vol1.py` | One Node | Will it run? · Will it meet its target? · What does it cost? |
+| II | `vol2.py` | The Fleet | Will it scale? · Will it survive and serve? · Can the overhead shrink? · Can it serve responsibly? |
+| III | `vol3.py` | The Trajectory | Will it finish within budget? · Is it worth running? · Can it be cheaper and faster? · Can it be trusted and improved? |
+| IV | `vol4.py` | The Action | Can it stop in time? · Has it earned permission? · Will the hardware hold up? · Can the evidence be trusted? |
 
 ## Build
 

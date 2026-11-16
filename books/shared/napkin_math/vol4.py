@@ -467,6 +467,23 @@ def build() -> Sheet:
     p_all_ok = _check((1 - MI.late_probability) ** k_ho, mir.all_on_time, "all on time", rel=1e-6)
     eps_ho = _check(MI.mission_budget / k_ho, mir.per_handoff_budget, "per-handoff budget")
 
+    # audit-4 additions
+    a_oil_rated = mu_oil * G * phi
+    oil_req_rated = v_aisle * tau + _m(calc_scurve_stop_distance(v_aisle * ureg("m/s"), a_oil_rated * ureg("m/s**2"), j_br * ureg("m/s**3")), "m") + d_fixed
+    taud = _m(RM.arm.joint_torque_rate_limit, "N*m/s")
+    j_sw = _m(swr.effective_inertia, "kg*m**2")
+    jerk_sw = _check(taud / j_sw, _m(swr.jerk_bound, "rad/s**3"), "swing jerk bound")
+    i_cont, r_cont = _m(th.motor.rated_current, "A"), _m(th.joint.internal_resistance, "ohm")
+    _check(i_cont ** 2 * r_cont, p_rated, "rated loss")
+    p_cold_s = _m(stl.cold_loss, "W")
+    gain_s = _check(p_cold_s * alpha_cu * rth_s, stl.feedback_gain, "stall feedback gain")
+    const_s = _check(p_cold_s * rth_s * (1 + alpha_cu * (tamb_s - t0_cu)), _m(stl.feedback_constant, "K"), "stall feedback constant")
+    _check(tamb_s + const_s / (1 - gain_s), t_wind, "stall winding temperature")
+    hold_print = math.floor(tau_hold_s + 1e-9)
+    t_stop_total = tau + _m(fin_aisle.stop_time, "s")
+    tq_rated_wheel = _m(RM.drive_unit.rated_torque, "N*m")
+    _check(n_wheel * tq_rated_wheel / r_wheel / m_eff_base, a_torque_rated, "rated torque decel")
+    orders = math.log10(MI.late_probability / eps_ho)
     p_rail, t_hold = _m(RM.permission_rail_load, "W"), _m(RM.permission_rail_holdup, "s")
     PL = SC.LatchPairingLag
     pl_lag, pl_clr = _m(PL.lag, "s"), _m(PL.clearance, "m")
@@ -613,7 +630,7 @@ def build() -> Sheet:
                      ex=f'{v("M", "weights")} weight bytes, BW sustained, {v("S", "out")} tokens out. Sweep {fmt(w_int4 / 1e9, 1)} GB / {fmt(bw / 1e9, 1)} GB/s = {t_sweep * 1e3:.1f} ms; '
                         f'prefill {o_pre / 1e12:.3f} TFLOP / ({A}{v("η", "hw")} {eta_c:.0%} × {fmt(peak16 / 1e12)} TFLOP/s) = {fmt(t_pre * 1e3)} ms; '
                         f'{fmt(t_pre * 1e3)} + {s_out - 1} × {t_sweep * 1e3:.1f} = {n(fmt(t_eval * 1e3) + " ms")} ⇒ ≤ {_dn(f_max, 2)} Hz.',
-                     so=f'the book plans {fmt(f_intent)} Hz; FP16 would take {fmt(t_eval16 * 1e3)} ms.'),
+                     so=f'the book plans {fmt(f_intent)} Hz; FP16 ({fmt(w_fp16 / 1e9)} GB) would take {fmt(t_eval16 * 1e3)} ms.'),
                 Card("Lease rule (finished model)", f'{v("T", "chunk")} + {v("T", "jitter")} &lt; {v("T", "lease")} ≤ {v("τ", "max")} − {v("T", "rest")}', chapter="Ch 4",
                      ex=f'{v("T", "chunk")} renewal period {fmt(t_chunk * 1e3)} ms, jitter {fmt(jitter * 1e3)} ms; {v("τ", "max")} = ({v("D", "clear")} − δ − {v("d", "suffix")})/{v("v")}; '
                         f'{v("T", "rest")} = tick + bus + onset + age = {fmt(t_rest * 1e3, 1)} ms. At {fmt(v_aisle, 1)} m/s: {fmt(lease_floor * 1e3)} &lt; {v("T", "lease")} = {n(fmt(t_lease * 1e3) + " ms")} ≤ {_dn(lease_ceil_aisle * 1e3)} ms: fits. '
@@ -641,7 +658,7 @@ def build() -> Sheet:
                 Card("Physical trials take wall-clock time", f'{v("T", "wall")} = {v("N")} ({v("t", "rollout")} + {v("t", "reset")}) / rigs', chapter="Ch 6",
                      ex=f'{v("N")} trials of {v("t", "rollout")} each, reset {v("t", "reset")}. {A}{fmt(n_tr)} × ({fmt(t_roll)} + {fmt(t_auto)}) s = {n(fmt(wall_auto) + " days")}; '
                         f'manual {fmt(t_man)} s resets: {n(fmt(wall_man) + " days")}; {tc.farm_rigs} rigs: {fmt(wall_farm)} days.',
-                     so=f'resets, not rollouts, set the calendar; simulation runs the same trials in {fmt(sim_min)} min.'),
+                     so='resets, not rollouts, set the calendar: automate resets before adding rigs.'),
                 Card("A clean record bounds success", [f'{v("p")} ≥ {v("α", "sig")}<sup>1/{v("n")}</sup>', f'{v("n")} = ⌈ln {v("α", "sig")} / ln {v("p")}⌉ ≈ {ln_a:.0f} / (1 − {v("p")})'], chapter="Ch 7",
                      ex=f'{A}{n_clean} clean runs, {ec.confidence:.0%}: {alpha:.2f}<sup>1/{n_clean}</sup> ⇒ {v("p")} ≥ {n(_dn(p_low, 3))}. For {v("p")} = {ec.target:g}: '
                         f'⌈ln {alpha:.2f} / ln {ec.target:g}⌉ = {n(fmt(n_999) + " runs")} × {fmt(cyc)} s = {fmt(hours_999, 1)} h.',
@@ -656,12 +673,12 @@ def build() -> Sheet:
             ], "Ch 6, 7"),
             Col("5 Will the body hold?", [
                 Card("Stopping energy and the bus", [f'{v("E", "k")} = ½ {v("m")} {v("v", sup="2")}, &nbsp; Δ{v("V")} = {v("I")} {v("R", "bus")}', f'{v("V", "final")} = √({v("V", "initial", "2")} + 2{v("E", "regen")} / {v("C", "bus")})'], chapter="Ch 2, 15",
-                     ex=f'½ × {fmt(m_load)} kg × ({fmt(v_drive, 1)} m/s)² = {n(fmt(e_k) + " J")}. {A}{regen_frac:.0%} ({fmt(regen, 1)} J) into {fmt(c_link * 1e3)} mF from {fmt(v_full)} V: {n(fmt(v_cap) + " V", True)} &gt; {fmt(v_clamp)} V clamp. '
+                     ex=f'½ × {fmt(m_load)} kg × ({fmt(v_drive, 1)} m/s)² = {n(fmt(e_k) + " J")}. {A}{regen_frac:.0%} ({fmt(regen, 1)} J) into {fmt(c_link * 1e3)} mF from {fmt(v_full)} V: {n(_up(v_cap) + " V", True)} &gt; {fmt(v_clamp)} V clamp. '
                         f'{A}{fmt(i_tr)} A × {fmt(r_bus * 1e3)} mΩ = {n(fmt(sag, 1) + " V")}: {fmt(v_low)} → {fmt(v_low - sag, 1)} V, above the {fmt(v_uvlo)} V lockout.',
                      so='regeneration needs a brake resistor; sag is safe even on a depleted pack.'),
                 Card("Motor heating", [f'{v("T", "eq")} = {v("T", "amb")} + {v("P", "loss")} {v("R", "th")}, &nbsp; {v("τ", "th")} = {v("R", "th")} {v("C", "th")}'], chapter="Ch 2",
                      ex=f'{v("P", "loss")} = {v("I", sup="2")} × winding resistance; {v("R", "th")}, {v("C", "th")} thermal resistance, capacity. Joint: {r_th:g} K/W × {fmt(c_th)} J/K = {n(fmt(tau_th) + " s")}; '
-                        f'{fmt(t_amb)} °C + {p_rated:.1f} W × {r_th:g} K/W = {fmt(t_eq)} °C. {A}{th.burst_factor:g}× current → {th.burst_factor ** 2:g}× loss = {fmt(p_burst)} W: {fmt(t_limit)} °C in {n(fmt(hor_cold) + " s")} cold, {fmt(hor_hot)} s hot.',
+                        f'rated ({fmt(i_cont, 1)} A)² × {r_cont:g} Ω = {p_rated:.1f} W: {fmt(t_amb)} °C + {p_rated:.1f} × {r_th:g} = {t_eq:.1f} °C. {A}{th.burst_factor:g}× current → {th.burst_factor ** 2:g}× loss = {fmt(p_burst)} W: {fmt(t_limit)} °C in {n(_dn(hor_cold) + " s")} cold, {_dn(hor_hot)} s hot.',
                      so='bursts are budgets in seconds; resistance is taken constant here, though it rises with heat.'),
                 Card("Contact force on a person", [f'{v("F")} = {v("v")} √({v("k", "H")} {v("m", "red")}), &nbsp; {v("m", "red")} = (1/{v("m", "H")} + 1/{v("m", "arm")})<sup>−1</sup>'], chapter="Ch 12",
                      ex=f'Hand {v("m", "H")} = {m_hand:g} kg, {v("k", "H")} = {fmt(k_hand / 1e3)} N/mm, arm {v("m", "arm")} = {fmt(m_arm_eff)} kg: at {fmt(tcp, 1)} m/s, {n(fmt(f_tcp) + " N", True)}. '
@@ -672,10 +689,10 @@ def build() -> Sheet:
             Col("6 Who answers, and how fast?", [
                 Card("Human takeover latency", f'{v("T", "Σ")} = reaction + video + handshake', chapter="Ch 14",
                      ex=f'Slow reaction {fmt(t_perc * 1e3)} + {fmt(t_cog * 1e3)} + {fmt(t_mot * 1e3)} ms + video {fmt(t_vid * 1e3)} + handshake {fmt(t_hs * 1e3)} = {n(fmt(t_sig * 1e3) + " ms")}; '
-                        f'out of the loop: p90 {t_p90:g} s + {fmt(t_console * 1e3)} ms = {n(half_up(t_sig_out, 2) + " s")}. × {fmt(v_aisle, 1)} m/s = {n(mm_up(to_travel) + " mm", True)}.',
+                        f'out of the loop: p90 {t_p90:g} s + {fmt(t_console * 1e3)} ms = {n(half_up(t_sig_out, 2) + " s")}. Attending {fmt(t_sig * 1e3)} ms × {fmt(v_aisle, 1)} m/s = {n(mm_up(to_travel) + " mm", True)}.',
                      so=f'{to_over_spare:.0f}× the {fmt(fin_spare_aisle * 1e3)} mm finished spare: a human cannot be the brake.'),
                 Card("The speed a human buys (finished model)", f'in {v("v", "max")}: {v("τ", "delay")} → {v("τ", "delay")} + {v("Δ", "da")} + {v("T", "Σ")} + {v("a", "brake")}/2{v("j", "max")}', chapter="Ch 14",
-                     ex=f'{v("Δ", "da")} dispatch to admission = {fmt(t_da * 1e3, 1)} ms; room {v("D", "clear")} − δ = {fmt(d_clear - d_fixed, 2)} m ⇒ {n(_dn(v_human, 2) + " m/s", True)} &lt; {fmt(v_aisle, 1)} m/s aisle speed.',
+                     ex=f'{v("Δ", "da")} dispatch to admission (chunk inference, link, validation, tick) = {fmt(t_da * 1e3, 1)} ms; room {v("D", "clear")} − δ = {fmt(d_clear - d_fixed, 2)} m ⇒ {n(_dn(v_human, 2) + " m/s", True)} &lt; {fmt(v_aisle, 1)} m/s aisle speed.',
                      so='slow down before asking for help.'),
                 Card("One assistant, many machines (M/M/1)", [f'{v("ρ")} = machines × requests/h × {v("t", "s")}', f'{v("T", "lat")} = {v("t", "s")} / (1 − {v("ρ")}), &nbsp; p99 ≈ ln(100) · {v("T", "lat")}'], chapter="Ch 17",
                      ex=f'{A}{q.machines} × {lam_q:g}/h × {fmt(ts_min)} min = {rho:g}: {fmt(t_s * 3600)} s / (1 − {rho:g}) = {n(fmt(t_lat) + " s")}, p99 {fmt(p99_lat)} s. '
@@ -703,7 +720,7 @@ def build() -> Sheet:
 
     # ================================================================ page 3
     gear_tab = Table(["ratio N", "motor N·m", "copper loss", "reflected J"],
-                     [[f"{nr}:1", f"{tm:.2f}", f"{fmt(pl)} W", f"{jr:.3g} kg·m²"] for nr, tm, pl, jr in sorted(gear_rows)])
+                     [[f"{nr}:1", f"{tm:.2f}", f"{fmt(pl)} W", f"{jr:.4g} kg·m²"] for nr, tm, pl, jr in sorted(gear_rows)])
     p3 = Page(
         question="Will the hardware hold up?",
         sub="Left: what gears, held loads, and power cost. Middle: what limits speed. Right: frames, heat, and links against deadlines.",
@@ -721,8 +738,8 @@ def build() -> Sheet:
                 Card("Holding a load at stall", [f'{v("P", "max")} = ({v("T", "limit")} − {v("T", "amb")}) / {v("R", "th")}', f'{v("R", "hot")} = {v("R")}(1 + {v("α", "Cu")}({v("T", "limit")} − {fmt(t0_cu)} °C))',
                                                   f'{v("I", "max")} = √({v("P", "max")} / {v("R", "hot")}), &nbsp; hold = {v("I", "max")} {v("k", "t")} {v("η")} {v("N")}'], chapter="Ch 2",
                      ex=f'{A}{v("R", "th")} = {rth_s:g} K/W: ({fmt(tlim_s)} − {fmt(tamb_s)}) / {rth_s:g} = {p_max_s:.1f} W; {v("R", "hot")} = {r_hot:.3f} Ω ({v("α", "Cu")} = {alpha_cu * 100:.3f}%/K); '
-                        f'{v("I", "max")} = {i_max_s:.2f} A ⇒ {n(_dn(tau_hold_s) + " N·m")} of {fmt(tau_j)}. Holding {fmt(tau_j)} N·m ({i_stall:.1f} A) settles at {n(fmt(t_wind) + " °C", True)}.',
-                     so=f'a stalled joint derates {fmt((1 - tau_hold_s / tau_j) * 100)}%; hot copper resists more.'),
+                        f'{v("I", "max")} = {i_max_s:.2f} A ⇒ {n(fmt(hold_print) + " N·m")} of {fmt(tau_j)}. Holding {fmt(tau_j)} N·m ({i_stall:.1f} A, {fmt(p_cold_s, 1)} W cold): Δ{v("T")} = {const_s:.1f} / (1 − {gain_s:.3f}) ⇒ {n(fmt(t_wind) + " °C", True)} &gt; {fmt(tlim_s)}.',
+                     so=f'a stalled joint derates {fmt((1 - hold_print / tau_j) * 100)}%; hot copper resists more.'),
                 Card("Power draw and energy per proposal", ['P = Σ nominal draws, &nbsp; E = P<sub>SoC</sub> · t'], chapter="Ch 2, 3",
                      ex=f'{" + ".join(f"{nm} {fmt(x) if x >= 1 else f'{x:g}'}" for nm, x in p_parts)} = {n(fmt(p_total) + " W")}. One 7B proposal at full {fmt(p_tdp)} W TDP: {fmt(p_tdp)} × {t_eval:.3f} s ≤ {n(_up(e_prop, 1) + " J")}.',
                      so='motion, not inference, drains the pack. Battery runtime = pack Wh / draw; the registry gives no pack capacity.'),
@@ -732,38 +749,37 @@ def build() -> Sheet:
             Col("8 How fast may it move?", [
                 Card("Time-optimal swing of one joint", [f'{v("T", "swing")} = 2√(Δ{v("q")} / {v("α", "bind")}), &nbsp; {v("ω", "peak")} = {v("α", "bind")} {v("T", "swing")} / 2'], chapter="Ch 11",
                      ex=f'{v("α", "bind")}: the smallest of torque-limited ({a_up:.0f}, {a_dn:.0f}) and the joint\'s {a_bind:g} rad/s² limit. {A}Δ{v("q")} = {dq:g} rad: 2√({dq:g}/{a_bind:g}) = {n(fmt(t_bang * 1e3) + " ms")}; '
-                        f'{v("ω", "peak")} = {w_peak:.2f} &lt; {w_lim:g} rad/s. A jerk limit adds {fmt((t_jerk_sw - t_bang) * 1e3)} ms.',
+                        f'{v("ω", "peak")} = {w_peak:.2f} &lt; {w_lim:g} rad/s. The torque-rate limit {fmt(taud)} N·m/s ÷ {j_sw:.2f} kg·m² = {fmt(jerk_sw)} rad/s³ jerk adds {fmt((t_jerk_sw - t_bang) * 1e3)} ms.',
                      so='the datasheet acceleration limit, not the motor, binds this swing.'),
                 Card("The seam spike", [f'one tick: {v("τ")} = {v("J", "ref")} Δ{v("ω")} / {v("T", "tick")}', f'smooth bridge: {v("τ", "peak")} = 1.5 {v("J", "ref")} Δ{v("ω")} / {v("T", "blend")}'], chapter="Ch 11",
                      ex=f'{v("J", "ref")} = {v("N", sup="2")}{v("J", "in")} = {j_ref:.4g} kg·m² (rotor only). {A}Δ{v("ω")} = {dw:g} rad/s between chunks: in {fmt(t_tk * 1e3)} ms, {n(f"{tq_step:.1f} N·m")}; '
                         f'over {fmt(t_bl * 1e3)} ms, {tq_bridge:.2f} N·m.',
                      so=f'blending seams cuts the torque spike {tq_step / tq_bridge:.0f}×; never hand over a velocity step.'),
                 Card("Setpoints per chunk", [f'{v("h", "min")} = ⌈({v("T", "chunk")} + {v("t", "infer")}) / {v("Δt", "step")}⌉', f'{v("τ", "ev")} = √(2({v("r", "tol")} − {v("e", "0")}) / {v("a", "slip")})'], chapter="Ch 3",
-                     ex=f'{v("t", "infer")} chunk inference {fmt(t_inf_chunk * 1e3)} ms, step {fmt(dt_step * 1e3)} ms: ⌈({fmt(t_chunk * 1e3)} + {fmt(t_inf_chunk * 1e3)}) / {fmt(dt_step * 1e3)}⌉ = {n(str(h_min))}. '
-                        f'{A}Belt slip {v("a", "slip")} = {a_slip:g} m/s²: √(2 × {fmt(r_tol - e0)} mm / {a_slip:g}) = {n(_dn(tau_ev * 1e3) + " ms")} of evidence vs a {fmt(horizon * dt_step * 1e3)} ms chunk.',
-                     so='a chunk is a buffer, not permission: execute only the evidence-backed part.'),
+                     ex=f'{v("T", "chunk")} {fmt(t_chunk * 1e3)}, {v("t", "infer")} {fmt(t_inf_chunk * 1e3)}, step {fmt(dt_step * 1e3)} ms: ⌈({fmt(t_chunk * 1e3)} + {fmt(t_inf_chunk * 1e3)}) / {fmt(dt_step * 1e3)}⌉ = {n(str(h_min))}. '
+                        f'{A}Belt slip {v("a", "slip")} = {a_slip:g} m/s²: √(2 × {fmt(r_tol - e0)} mm / {a_slip:g}) = {n(_dn(tau_ev * 1e3) + " ms")} of evidence vs a {horizon} × {fmt(dt_step * 1e3)} = {fmt(horizon * dt_step * 1e3)} ms chunk.',
+                     so='a chunk is a buffer, not permission.'),
                 Card("Pairing lag: speed × clock error", [f'Δ{v("x")} = {v("v")} · Δ{v("t", "lag")} ≤ clearance'], chapter="Ch 5",
                      ex=f'Δ{v("t", "lag")}: time between a frame and the action logged with it. {A}{fmt(pl_lag * 1e3)} ms: transit {fmt(pl_vt, 1)} m/s → {n(fmt(pl_dt * 1e3, 1) + " mm", True)}; '
                         f'latch approach {pl_vf:g} m/s → {n(fmt(pl_df * 1e3, 1) + " mm", True)} vs a {fmt(pl_clr * 1e3)} mm clearance; {pl_vg:g} m/s → {fmt(pl_dg * 1e3, 2)} mm.',
                      so=f'the lag must stay under {fmt(pl_clr * 1e3)} mm / speed: {_dn(pl_clr / pl_vf * 1e3)} ms at {pl_vf:g} m/s.'),
-                Note("Arm limits (joint 2, datasheet):", f'{v("ω")} ≤ {w_lim:g} rad/s, acceleration ≤ {a_bind:g} rad/s², jerk ≤ {fmt(_m(RM.arm.joint_jerk_limits[1], "rad/s**3"))} rad/s³; '
-                     f'tool speed ≤ {fmt(tcp, 1)} m/s; {fmt(_m(RM.arm.control_frequency, "Hz"))} Hz control.'),
+                Note("Joint 2 limits:", f'{v("ω")} ≤ {w_lim:g} rad/s, acceleration ≤ {a_bind:g} rad/s², datasheet jerk ≤ {fmt(_m(RM.arm.joint_jerk_limits[1], "rad/s**3"))} rad/s³ (torque rate binds first); tool ≤ {fmt(tcp, 1)} m/s.'),
             ], "Ch 3, 5, 11"),
             Col("9 What breaks the deadlines?", [
                 Card("The thermal hangover", [f'{v("T", "j")} = {v("T", "amb")} + {v("P")} {v("R", "th")}, &nbsp; rise 1 − e<sup>−<i>t</i>/τ<sub>th</sub></sup>, fall e<sup>−<i>t</i>/τ<sub>th</sub></sup>'], chapter="Ch 13",
-                     ex=f'{A}Shared die, {v("R", "th")} = {th_theta:g} K/W, {v("τ", "th")} = {fmt(th_tau)} s: {fmt(th_amb)} + {fmt(p_loaded)} W × {th_theta:g} = {n(fmt(tj_loaded) + " °C", True)} &gt; {fmt(th_trip)} °C trip at {fmt(t_trip, 1)} s. '
-                        f'Half clock: {fmt(c_i)} → {fmt(exec_thr)} µs, response {n(fmt(resp_thr) + " µs", True)} &gt; {fmt(d_i)}. To {fmt(th_clear)} °C: {t_recov:.2f} s = {fmt(ticks_over)} late ticks.',
+                     ex=f'{A}Shared die, {v("R", "th")} = {th_theta:g} K/W, {v("τ", "th")} = {fmt(th_tau)} s. Idle {fmt(p_quiet)} W: {fmt(th_amb)} + {fmt(p_quiet)} × {th_theta:g} = {fmt(tj_quiet)} °C start; '
+                        f'loaded {fmt(p_loaded)} W: {n(fmt(tj_loaded) + " °C", True)} &gt; {fmt(th_trip)} °C, tripped at {fmt(th_tau)} ln({fmt(tj_loaded - tj_quiet)}/{fmt(tj_loaded - th_trip)}) = {t_trip:.1f} s. '
+                        f'Half clock: response {n(fmt(resp_thr) + " µs", True)} &gt; {fmt(d_i)}. Back to {fmt(th_clear)} °C: {fmt(th_tau)} ln({fmt(th_trip - tj_quiet)}/{fmt(th_clear - tj_quiet)}) = {t_recov:.3f} s = {fmt(ticks_over)} late ticks.',
                      so='keep the permission path off the inference die.'),
                 Chart(hp.svg("Junction temperature under load and after")),
                 Card("The board-link toll", [f'{v("t", "link")} = bytes × 8 / clock', f'{v("Δ", "da")} = {v("t", "infer")} + {v("t", "link")} + {v("t", "sw")} + {v("T", "tick")}'], chapter="Ch 13",
                      ex=f'{v("t", "sw")} = decode + validate + activate. {A}{fmt(chunk_b)} B over {fmt(f_link / 1e6)} MHz SPI = {t_link * 1e3:.2f} ms; {fmt(t_inf_chunk * 1e3)} + {t_link * 1e3:.2f} + {fmt(t_deser * 1e3)} + {fmt(t_val * 1e3)} + {fmt(t_actv * 1e3)} + {fmt(t_tick * 1e3)} = '
-                        f'{v("Δ", "da")} {fmt(t_da * 1e3, 1)} ms × {fmt(v_aisle, 1)} m/s → finished stop {_up(disp_req, 3)} m, {n(_dn(disp_spare * 1e3) + " mm")} spare.',
+                        f'{v("Δ", "da")} {fmt(t_da * 1e3, 1)} ms × {fmt(v_aisle, 1)} m/s → finished stop + {v("Δ", "da")} {_up(disp_req, 3)} m, {n(_dn(disp_spare * 1e3) + " mm")} spare.',
                      so='validation, not the wire, dominates the toll.'),
                 Card("Frame budget: throughput, not age", [f'frames/s ≤ 1 / slowest stage', f'stages in flight = ⌈{v("t", "stage")} / {v("T", "frame")}⌉', f'throttled: {v("t")}′ = {v("t")} / clock ratio'], chapter="Ch 2, 8",
                      ex=f'{v("T", "frame")} = 1/{fmt(cam_fps)} s = {1e3 / cam_fps:.1f} ms; backbone {fmt(t_backbone * 1e3)} ms: 1 / {t_backbone:g} s = {n(_dn(1 / t_backbone) + " frames/s", True)} &lt; {fmt(cam_fps)}; '
                         f'⌈{fmt(t_backbone * 1e3)} / {1e3 / cam_fps:.1f}⌉ = {math.ceil(t_backbone * cam_fps)} in flight. {A}At {TB.clock_ratio:.2f} clock: {fmt(t_bb_thr * 1e3)} ms, +{fmt((t_bb_thr - t_backbone) * 1e3)} ms × {_m(TB.speed, "m/s"):g} m/s = {mm_up(bb_travel)} mm blind.',
                      so='pipelining keeps up with the camera but does not shorten the observation age.'),
-                Note("Hold-up:", f'permission rail {fmt(p_rail)} W × {fmt(t_hold)} s = {fmt(p_rail * t_hold)} J after a bus collapse; {fmt(t_hold)} s outlasts the {_m(fin_aisle.stop_time, "s"):.2f} s finished stop at {fmt(v_aisle, 1)} m/s.'),
             ], "Ch 2, 8, 13"),
         ],
         bottom=Table(["Stand-in joint (Ch 2)", "gear ratio", "torque constant", "winding R", "input inertia", "rated / peak torque", "gear η"], [
@@ -792,47 +808,47 @@ def build() -> Sheet:
                 Card("Stereo depth error", f'{v("σ", "z")} = {v("Z", "c", "2")} {v("σ", "d")} / ({v("f")} {v("b")})', chapter="Ch 8",
                      ex=f'Range {v("Z", "c")}, baseline {v("b")}, focal {v("f")} (px), disparity noise {v("σ", "d")}. {A}{fmt(b_st * 100)} cm, {fmt(f_px)} px, {sd:g} px: {fmt(z_far)}² × {sd:g} / ({fmt(f_px)} × {b_st:g}) = '
                         f'{n(fmt(sig_z(z_far) * 1e3, 1) + " mm")} at {fmt(z_far)} m; it equals {v("δ", "loc")} at {_dn(z_loc, 1)} m.',
-                     so='five times the range costs 25 times the depth noise.'),
+                     so=f'{fmt(z_far / z_near)}× the range costs {fmt((z_far / z_near) ** 2)}× the depth noise.'),
                 Card("Frames to detect a person", [f'{v("N", "frames")} = ⌈ln {v("p", "miss")} / ln(1 − {v("p", "frame")})⌉', f'Δ{v("d")} = {v("v")} {v("T", "frame")} Δ{v("N", "frames")}, &nbsp; {v("v", "impact")} = √(2{v("a", "brake")} Δ{v("d")})'], chapter="Ch 17",
                      ex=f'{A}{v("p", "miss")} = {p_miss:g}: {v("p", "frame")} = {ds.reference:g} needs {k_ref} frames, {p_lo:g} needs {k_lo}. Δ{v("d")} = ({k_lo} − {k_ref}) × {1e3 / cam_fps:.1f} ms × {fmt(v_aisle, 1)} m/s = '
-                        f'{mm_up(lost)} mm ⇒ {v("v", "impact")} = {n(f"{v_imp:.2f} m/s", True)} ({fmt(e_imp)} J).',
+                        f'{mm_up(lost)} mm ⇒ {v("v", "impact")} = {n(f"{v_imp:.2f} m/s", True)} where the stop should end at rest; ½ × {fmt(m_load)} kg × {v_imp:.2f}² = {fmt(e_imp)} J.',
                      so='a group the detector sees less often is hit by a stop sized for others.'),
             ], "Ch 8, 9, 17"),
             Col("11 How do small errors add up?", [
                 Card("Every handoff on time", [f'P(all on time) = (1 − {v("p", "late")})<sup>{v("K")}</sup>', f'per-handoff {v("ε")} ≤ {v("ε", "mission")} / {v("K")}'], chapter="Ch 11",
                      ex=f'{A}{fmt(_m(MI.mission_time, "min"))} min at {fmt(_m(MI.replan_rate, "Hz"))} Hz = {fmt(k_ho)} handoffs; p99 budget, {v("p", "late")} = {MI.late_probability:g}: '
-                        f'{1 - MI.late_probability:g}<sup>{fmt(k_ho)}</sup> = {n(f"{p_all_ok:.0e}", True)}. Mission {v("ε", "mission")} = {MI.mission_budget:g}: {MI.mission_budget:g} / {fmt(k_ho)} = {n(f"{eps_ho:.1e}")}.',
-                     so='design each handoff four orders deeper than p99.'),
+                        f'{1 - MI.late_probability:g}<sup>{fmt(k_ho)}</sup> = {n(f"{p_all_ok:.0e}")}. Mission {v("ε", "mission")} = {MI.mission_budget:g}: {MI.mission_budget:g} / {fmt(k_ho)} = {n(f"{eps_ho:.1e}")}.',
+                     so=f'design each handoff {orders:.1f} orders of magnitude deeper than p99.'),
                 Chart(up.svg("Probability every handoff is on time versus handoff count")),
                 Card("Errors compound over an episode", [f'imitation: {v("J")} − {v("J")}* ≤ {v("S", sup="2")}{v("ε")}', f'with expert corrections (DAgger): ≤ {v("u")} {v("S")} {v("ε", "N")} + O(1)'], chapter="Ch 5",
                      ex=f'{v("J")} task cost, {v("S")} steps, {v("ε")} step error; {v("ε", "N")} loss on the learner\'s own states, {v("u")} cost of one wrong action. '
                         f'{fmt(t_roll)} s at {fmt(_m(tc.decision_step, "ms"))} ms: {v("S")} = {steps_trial}, so {v("S", sup="2")} = {n(fmt(s2))}.',
                      so='collect corrections where the policy goes, not more demos.'),
                 Card("Fault-injection count", ['coverage = 1 − target / raw rate', 'injections = ⌈ln(1/α<sub>sig</sub>) / −ln coverage⌉'], chapter="Ch 15",
-                     ex=f'FIT = failures per 10<sup>9</sup> h. {A}Raw {fmt(dc.raw_rate)} FIT, target {fmt(SC.WarehouseDiagnosticCoverageHundredFit.target)} FIT: coverage {_up(cov * 100, 1)}%; '
-                        f'⌈{ln_a:.2f} / {-math.log(cov):.4f}⌉ = {n(fmt(inj) + " zero-miss injections")}.',
+                     ex=f'FIT = failures per 10<sup>9</sup> h. {A}Raw {fmt(dc.raw_rate)} FIT, target {fmt(SC.WarehouseDiagnosticCoverageHundredFit.target)} FIT: coverage {cov * 100:.2f}%; '
+                        f'⌈{ln_a:.3f} / {-math.log(cov):.5f}⌉ = {n(fmt(inj) + " zero-miss injections")}.',
                      so='sample injections in proportion to the fault rates.'),
             ], "Ch 5, 11, 15"),
             Col("12 What can steal the deceleration?", [
                 Card("Traction caps deceleration", f'{v("a", "brake")} ≤ {v("μ")} {v("g")} {v("φ", "drive")}', chapter="Ch 2, 18",
-                     ex=f'{v("μ")} friction, {v("φ", "drive")} share of weight on driven wheels. {fmt(a_br, 1)} m/s² needs {v("μ")} ≥ {_up(mu_req, 3)} ({v("φ", "drive")} = 1) or {_up(mu_rated, 3)} ({v("φ", "drive")} = {phi:.3f}). '
-                        f'{A}Oil, {v("μ")} = {mu_oil:g}: {a_oil:.2f} m/s² ⇒ finished stop at {fmt(v_aisle, 1)} m/s = {n(_up(oil_req, 2) + " m", True)}.',
-                     so='a floor contaminant can double the stop; tip-over is a separate check.'),
+                     ex=f'{v("μ")} friction, {v("φ", "drive")} driven-wheel weight share. {fmt(a_br, 1)} m/s² needs {v("μ")} ≥ {_up(mu_req, 3)} ({v("φ", "drive")} = 1) or {_up(mu_rated, 3)} ({v("φ", "drive")} = {phi:.3f}). '
+                        f'{A}Oil, {v("μ")} = {mu_oil:g}, finished stop at {fmt(v_aisle, 1)} m/s: {v("φ", "drive")} = {phi:.3f}: {a_oil_rated:.2f} m/s² ⇒ {n(_up(oil_req_rated, 2) + " m", True)} ({v("φ", "drive")} = 1, optimistic: {a_oil:.2f} m/s², {_up(oil_req, 2)} m).',
+                     so='a floor contaminant more than doubles the stop; tip-over is separate.'),
                 Card("Can the drives deliver it?", f'{v("a", "brake")} ≤ wheel force / ({v("m")} + rotating mass)', chapter="Ch 2",
                      ex=f'{n_wheel} × {fmt(tq_peak)} N·m / {fmt(r_wheel * 1e3)} mm = {fmt(drive_force)} N; ({fmt(m_load)} + {fmt(rot_mass)} rotating) kg = {fmt(m_eff_base)} kg ⇒ {n(_dn(a_torque, 2) + " m/s²")}.',
-                     so=f'peak torque covers {fmt(a_br, 1)} m/s²; rated torque gives only {_dn(a_torque_rated, 2)}.'),
-                Card("Gravity steals braking torque", [f'{v("α")} = ({v("τ", "max")} − gravity bias) / {v("J")}', f'tool travel = {v("L")} {v("ω", sup="2")} / 2{v("α")}'], chapter="Ch 12",
-                     ex=f'{A}{v("J")} = {fmt(j_gs)} kg·m², lever {v("L")} = {lev:g} m, {v("ω")} = {w0:g} rad/s, gravity holds {GS.bias_fraction:.0%} of {fmt(tq_gs)} N·m. '
+                     so=f'peak torque covers {fmt(a_br, 1)} m/s²; rated {fmt(tq_rated_wheel)} N·m per wheel gives only {_dn(a_torque_rated, 2)}.'),
+                Card("Gravity steals braking torque", [f'deceleration = ({v("τ", "max")} − gravity bias) / inertia', f'tool travel = {v("L")} {v("ω", sup="2")} / (2 · deceleration)'], chapter="Ch 12",
+                     ex=f'{A}Inertia {fmt(j_gs)} kg·m², lever {v("L")} = {lev:g} m, {v("ω")} = {w0:g} rad/s, gravity holds {GS.bias_fraction:.0%} of {fmt(tq_gs)} N·m. '
                         f'Free: {fmt(tq_gs)}/{fmt(j_gs)} = {al_free:g} rad/s² → {mm_up(d_free)} mm. Descending: {al_down:g} rad/s² → {n(mm_up(d_down) + " mm")}.',
-                     so='a descending joint needs 4× the stopping room; budget the worst pose.'),
+                     so=f'descending needs {d_down / d_free:.0f}× the room; budget the worst pose.'),
                 Note("A stopping number:", 'is every delay multiplied by speed, the human included? Is the deceleration backed by friction, drive torque, and the worst pose? '
                      'Rigid or finished model, and the same one throughout? Allowances δ included?'),
-                Note("A timing number:", 'tail ages, not medians? Worst-case execution with blocking and interference bounded? A clock or thermal throttle that stretches it? A shared die or bus that adds queueing? '
+                Note("A timing number:", 'tail ages, not medians? Blocking and interference bounded? A throttle that stretches it? '
                      'A frame budget (throughput) confused with observation age (latency)?'),
             ], "Ch 2, 12, 18"),
         ],
     )
-    p4.bottom = Table(["Event timeline at the aisle speed (Ch 4, 13)", "interval", "ms", f"mm at {fmt(v_aisle, 1)} m/s"], [
+    p4.bottom = Table(["Event timeline at the aisle speed: finished stop + Δ<sub>da</sub> (Ch 4, 13)", "interval", "ms", f"mm at {fmt(v_aisle, 1)} m/s"], [
         ["capture → dispatch", "observation age t<sub>age</sub>", f"{t_age * 1e3:.1f}", mm_up(v_aisle * t_age)],
         ["dispatch → admission", "Δ<sub>da</sub>: inference, link, decode, validate, activate, tick", f"{t_da * 1e3:.1f}", mm_up(v_aisle * t_da)],
         ["admission → brake onset (stall)", "lease + tick + bus + onset", f"{(t_lease + t_tick + t_bus + t_act) * 1e3:.0f}", mm_up(v_aisle * (t_lease + t_tick + t_bus + t_act))],
