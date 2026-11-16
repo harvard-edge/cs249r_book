@@ -198,7 +198,10 @@ def render(sheet: Sheet) -> str:
 <h1>Napkin Math: {sheet.scope} <span>· {pg.question}</span></h1>
 <div class="sub">{pg.sub}</div></div>
 <div class="meta">{sheet.book} · Volume {vol}<br>{pg.meta} · {k} / {len(sheet.pages)}</div></div>''']
-        notation = "".join(f"<span><b>{g}</b>{h}</span>" for g, h in pg.notation)
+        legend = ('<span class="legend"><b>How to read</b>each card: formula → numbers → result → '
+                  '<span class="so-key">So</span> what it means · <span class="tag">assumed</span>example input · '
+                  '<span class="n warn">▲</span> fails a limit</span>')
+        notation = "".join(f"<span><b>{g}</b>{h}</span>" for g, h in pg.notation) + legend
         parts.append(f'<div class="notation">{notation}</div>')
         if pg.know:
             rows.append("auto")
