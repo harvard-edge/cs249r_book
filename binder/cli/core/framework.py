@@ -424,7 +424,9 @@ def framework_artifacts(root: Path, field: dict, framework: dict | None) -> dict
     sources_by_id = {source["id"]: source for source in framework["sources"]}
     writer = csv.DictWriter(stream, fieldnames=columns, lineterminator="\n")
     writer.writeheader()
-    lines = [f'# {_md(framework["title"])}', '', f'Version: `{framework["version"]}`. **Editorial draft.**', '',
+    # Quarto front matter: a real page title and an on-page TOC on the site; harmless in the download.
+    lines = ['---', 'title: "ML Systems Taxonomy: Framework reference"', f'subtitle: {json.dumps(framework["title"], ensure_ascii=False)}',
+             'toc: true', 'toc-location: right', '---', '', f'Version: `{framework["version"]}`. **Editorial draft.**', '',
              _md(framework["scope"]), '',
              'Each concept has one candidate home for editorial maintenance. All facet placements are candidate editorial synthesis; empty contexts mean relevance has not been assessed. This does not assert exclusive membership or a broader/narrower hierarchy. Passage links do not certify coverage, teaching depth, prerequisites, or competence.', '',
              '## Dimensions', '']

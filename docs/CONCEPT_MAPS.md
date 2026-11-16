@@ -447,17 +447,16 @@ from name similarity, adjacency, chapter order, or connectivity.
 The same `binder concepts check` and `build` pipeline validates the field model.
 `build --check` detects stale field data and diagrams as well as book maps.
 Generated `field-data.json`, `field-all.svg`, `field-overview.svg`, their DOT
-sources, and `field-preview.html` are ignored build artifacts. Invalid field
+sources are ignored build artifacts. Invalid field
 records fail before existing outputs are replaced. No external model or network
 request is needed during a build.
 
-The website page is `taxonomy/field.qmd`, linked from the book explorer.
-The standalone local preview is `taxonomy/field-preview.html`. Both use the
-same data and SVG geometry. The viewer supports background drag, wheel panning,
-modified-wheel zoom, keyboard pan/zoom, family focus, full-model search, book-link
-highlighting, and concept-to-concept exploration. HTML explanations and the
-concept directory provide a text alternative to SVG interaction. Downloaded SVGs
-are static field views; this does not enroll them into the PDF/EPUB books.
+The field data feeds the ML Systems Taxonomy page (`taxonomy/index.qmd`). The
+older field browser (`taxonomy/field.qmd`) was retired on 2026-11-16 and now
+forwards to the taxonomy, carrying `#concept=<id>` across; it keeps publishing
+`field-data.json`, the field SVGs, `taxonomy.ttl`, and `taxonomy-reference.md`
+so existing links to those files still work. Downloaded SVGs are static field
+views; this does not enroll them into the PDF/EPUB books.
 
 Focused concept views lay out an explicitly authored concept and its immediate
 neighbors separately for readable labels. The neighborhood contains only

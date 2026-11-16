@@ -119,7 +119,6 @@ def test_portable_view_and_svg_use_same_records_without_script_injection(landsca
     save(root, model)
     site = root / "taxonomy"
     site.mkdir(parents=True, exist_ok=True)
-    (site / "field.qmd").write_text('---\n---\n```{=html}\n<div>Field</div>\n```\n')
     artifacts = field_artifacts(root, {"nodes": {}, "chapters": {}})
     data = json.loads(artifacts[site / "field-data.json"])
     assert data["summary"]["concepts"] == 3
@@ -129,7 +128,6 @@ def test_portable_view_and_svg_use_same_records_without_script_injection(landsca
     assert data["neighborhoods"]["mlsys.unmapped"] == ["mlsys.unmapped"]
     assert "mlsys.unmapped" not in data["diagrams"]["focus-mlsys.state"]
     assert site / "field-focus/mlsys.state.svg" in artifacts
-    assert "<script>window.bad" not in artifacts[site / "field-preview.html"].decode()
     assert artifacts[site / "field-all.svg"].startswith(b"<?xml")
 
 

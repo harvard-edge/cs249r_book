@@ -133,7 +133,11 @@
   const subjectHref = (row) => `#subject=${encodeURIComponent(row.id)}`;
   const conceptHref = (id) => `#concept=${encodeURIComponent(id)}`;
   const conceptLink = (id) => `<a href="${conceptHref(id)}"${concepts.get(id)?.scope === 'background' ? ' class="is-background"' : ''}>${esc(concepts.get(id)?.label || id)}</a>`;
-  const subjectLink = (row) => `<a href="${subjectHref(row)}">${code(row.code)}${esc(row.label)}</a>`;
+  // One name per entry: the short display name everywhere; the full name appears
+  // once, as a subtitle on the entry's own page, when it differs.
+  const nm = (x) => x?.display_label || x?.label || '';
+  const fullName = (x) => (x?.display_label && x.label && x.display_label !== x.label ? `<p class="bok-fullname">${esc(x.label)}</p>` : '');
+  const subjectLink = (row) => `<a href="${subjectHref(row)}">${code(row.code)}${esc(nm(row))}</a>`;
   // Preserve the reviewed proposition; a relation category can be broader.
   const verb = (rel) => rel.predicate || relations.get(rel.relation)?.forward || rel.relation || '';
   const verbMeasure = document.createElement('canvas').getContext('2d');
@@ -144,6 +148,25 @@
     let shortened = text;
     while (shortened && verbMeasure.measureText(shortened + '…').width > width) shortened = shortened.slice(0, -1);
     return shortened.trimEnd() + '…';
+  };
+  // A map verb gets up to two lines of `width` px; only a verb longer than that is shortened.
+  const verbLabel = (rel, width) => {
+    verbMeasure.font = '500 10.5px Inter, -apple-system, BlinkMacSystemFont, sans-serif';
+    const full = verb(rel);
+    if (verbMeasure.measureText(full).width <= width) return { label: full, lw: width, two: false };
+    // A word wider than the line cannot wrap; keep the single shortened line.
+    if (full.split(/\s+/).some((wd) => verbMeasure.measureText(wd).width > width)) return { label: shortVerb(rel, width), lw: width, two: false };
+    // Break the lines here, word by word, so the map never shows a third line.
+    const fits = (t) => verbMeasure.measureText(t).width <= width;
+    const words = full.split(/\s+/);
+    let first = '';
+    while (words.length && fits(first ? `${first} ${words[0]}` : words[0])) first = first ? `${first} ${words.shift()}` : words.shift();
+    let second = words.join(' ');
+    if (!fits(second)) {
+      while (second && !fits(`${second}…`)) second = second.slice(0, -1);
+      second = `${second.trimEnd()}…`;
+    }
+    return { label: `${first}\n${second}`, lw: width + 40, two: true };
   };
   const crossStepRelationships = (stepIndex) => {
     const matches = [];
@@ -341,7 +364,7 @@
   function renderRelease() {
     const fw = data.framework;
     const citation = `Vijay Janapa Reddi. ML Systems Taxonomy, version ${fw.version}. Machine Learning Systems, 2026. ${data.url}`;
-    $('bok-cite-text').textContent = citation;
+    $('bok-cite-text').textContent = citation.replace(/(\d)-(draft)/g, '$1\u2011$2');
     $('bok-cite-meta').innerHTML = `Version ${esc(fw.version)} · Taxonomy data licensed <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a> · Editorial draft for expert review · <a href="https://github.com/harvard-edge/cs249r_book/issues/new?template=taxonomy_feedback.yml">Suggest a change on GitHub</a>`;
     $('bok-copy-cite').addEventListener('click', async () => {
       try { await navigator.clipboard.writeText(citation); $('bok-copy-cite').textContent = 'Copied'; } catch { $('bok-copy-cite').textContent = 'Select the text to copy'; }
@@ -371,10 +394,23 @@
         return `<li><a href="#area=${esc(area.id)}"${open && !activeSubject ? ' aria-current="page"' : ''}${open ? ' class="is-open"' : ''}>${code(area.code)}${esc(area.display_label || area.label)}</a>${subjects}</li>`;
       }).join('')}</ul>`;
     }).join('') + '</details>';
+    const tree = $('bok-tree');
+    const cur = tree.querySelector('[aria-current="page"]');
+    if (cur && tree.scrollHeight > tree.clientHeight) {
+      // Start the view at the current entry's group heading, so no row is cut at the top.
+      const head = cur.closest('.bok-tree-box > ul')?.previousElementSibling;
+      const fitsBelow = head && cur.offsetTop + cur.offsetHeight - head.offsetTop < tree.clientHeight - 32;
+      tree.scrollTop = Math.max(0, fitsBelow ? head.offsetTop - 4 : cur.offsetTop - tree.clientHeight / 3);
+    }
+    // The bottom fade shows only while there is more below.
+    const syncEnd = () => tree.classList.toggle('is-end', tree.scrollTop + tree.clientHeight >= tree.scrollHeight - 2);
+    if (!tree.dataset.endBound) { tree.addEventListener('scroll', syncEnd, { passive: true }); tree.dataset.endBound = '1'; }
+    syncEnd();
   }
 
   function crumbs(parts) {
-    $('bok-crumbs').innerHTML = [`<a href="#view=matrix">Matrix</a>`, ...parts].join('<span aria-hidden="true">›</span>');
+    const root = /Concept map/.test(parts[0] || '') ? [] : [`<a href="#view=matrix">Matrix</a>`];
+    $('bok-crumbs').innerHTML = [...root, ...parts].join('<span aria-hidden="true">›</span>');
   }
 
   const facts = (items) => `<div class="bok-facts" role="group" aria-label="Facts">${items.filter(([, v]) => v).map(([k, v]) => `<p><span class="bok-facts-label">${esc(k)}</span>${v}</p>`).join('')}</div>`;
@@ -384,13 +420,13 @@
       const row = rows.get(id);
       if (row) return subjectLink(row);
       const area = areas.find((a) => a.id === id);
-      return area ? `<a href="#area=${esc(area.id)}">${code(area.code)}${esc(area.label)}</a>` : esc(id);
+      return area ? `<a href="#area=${esc(area.id)}">${code(area.code)}${esc(nm(area))}</a>` : esc(id);
     });
   }
 
   function conceptTable(ids, caption) {
     if (!ids.length) return '';
-    return `<h3 class="bok-section">${esc(caption)}</h3><table class="bok-table"><thead><tr><th>Concept</th><th>Definition</th></tr></thead><tbody>${ids.map((id) =>
+    return `<h3 class="bok-section">${esc(caption)}</h3><table class="bok-table bok-concepts-table"><thead><tr><th>Concept</th><th>Definition</th></tr></thead><tbody>${ids.map((id) =>
       `<tr><td>${conceptLink(id)}${concepts.get(id)?.scope === 'background' ? ' <span class="bok-tag">background</span>' : ''}</td><td>${esc(concepts.get(id)?.definition)}</td></tr>`).join('')}</tbody></table>`;
   }
 
@@ -398,13 +434,13 @@
     const area = areas.find((a) => a.id === state.area);
     const group = groupOf(area);
     renderTree(area.id, null);
-    crumbs([`<span>${esc(group.label)}</span>`, `<span aria-current="page">${esc(area.code || '')} ${esc(area.label)}</span>`]);
+    crumbs([`<span>${esc(group.label)}</span>`, `<span aria-current="page">${esc(area.code || '')} ${esc(nm(area))}</span>`]);
     $('bok-entry-body').innerHTML = `<div class="bok-entry-head">
-        <div><h2>${code(area.code)}${esc(area.label)}</h2><p class="bok-lead">${esc(area.question)}</p><p class="bok-text">${esc(area.scope)}</p></div>
+        <div><h2>${code(area.code)}${esc(nm(area))}</h2>${fullName(area)}<p class="bok-lead">${esc(area.question)}</p><p class="bok-text">${esc(area.scope)}</p></div>
         ${facts([['Code', esc(area.code)], ['Group', esc(group.label)], ['Subjects', String(area.rows.length)], ['Concepts', String(conceptCount(area))]])}
       </div>
       <h3 class="bok-section">Subjects</h3><table class="bok-table"><thead><tr><th>Code</th><th>Subject</th><th>Definition</th><th class="bok-num">Concepts</th></tr></thead><tbody>${area.rows.map((row) =>
-        `<tr><td class="bok-mono">${esc(row.code || '')}</td><td><a href="${subjectHref(row)}">${esc(row.label)}</a></td><td>${esc(row.definition)}</td><td class="bok-num">${row.concepts.length}</td></tr>`).join('')}</tbody></table>`;
+        `<tr><td class="bok-mono">${esc(row.code || '')}</td><td><a href="${subjectHref(row)}">${esc(nm(row))}</a></td><td>${esc(row.definition)}</td><td class="bok-num">${row.concepts.length}</td></tr>`).join('')}</tbody></table>`;
   }
 
   function renderSubject() {
@@ -412,16 +448,16 @@
     const area = areaOf.get(row.id);
     const group = groupOf(area);
     renderTree(area.id, row.id);
-    crumbs([`<a href="#area=${esc(area.id)}">${esc(area.code || '')} ${esc(area.label)}</a>`, `<span aria-current="page">${esc(row.code || '')}</span>`]);
+    crumbs([`<a href="#area=${esc(area.id)}">${esc(area.code || '')} ${esc(nm(area))}</a>`, `<span aria-current="page">${esc(row.code || '')}</span>`]);
     const contexts = (row.contexts || []).map((id) => lenses.find(([l]) => l === id)?.[1]).filter(Boolean).join(', ');
     const chapters = (row.book_chapters || []).map((c) => `<a href="${esc(c.url)}">${esc(VOLUME[c.volume] || c.volume)}: ${esc(c.title)}</a>`).join('<br>');
     const elsewhere = (row.excludes || []).map((t) => `<li>${scopeNote(t)}</li>`).join('');
     const covers = (row.includes || []).map((t) => `<li>${scopeNote(t)}</li>`).join('');
     const gaps = (gapsOf.get(row.id) || []).map((g) => `<li><b>${esc(g.topic || g.label)}.</b> ${esc(g.reason.replace(/^Known gap for v[\d.]+\.\s*/, ''))}</li>`).join('');
     $('bok-entry-body').innerHTML = `<div class="bok-entry-head">
-        <div><h2>${code(row.code)}${esc(row.label)}</h2><p class="bok-lead">${esc(row.definition)}</p>
+        <div><h2>${code(row.code)}${esc(nm(row))}</h2>${fullName(row)}<p class="bok-lead">${esc(row.definition)}</p>
           ${covers ? `<p class="bok-text-label">Covers</p><ul class="bok-list">${covers}</ul>` : ''}</div>
-        ${facts([['Code', esc(row.code)], ['Area', `<a href="#area=${esc(area.id)}">${esc(area.code || '')} ${esc(area.label)}</a>`], ['Group', esc(group.label)],
+        ${facts([['Code', esc(row.code)], ['Area', `<a href="#area=${esc(area.id)}">${esc(area.code || '')} ${esc(nm(area))}</a>`], ['Group', esc(group.label)],
           ['Concepts', String(row.concepts.length)], ['Systems', esc(contexts)], ['Taught in', chapters]])}
       </div>
       ${conceptTable(row.concepts, 'Concepts')}
@@ -464,8 +500,10 @@
       // Desktop: each line carries its verb above its own segment, next to the
       // outer concept, so every link reads left to right as a sentence.
       { selector: 'edge.into, edge.from', style: { 'font-size': 10.5, 'font-weight': 500, color: c.muted, 'font-family': 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' } },
-      { selector: 'edge.into', style: { 'taxi-turn': (e) => e.data('turn'), 'source-label': 'data(label)', 'source-text-offset': (e) => e.data('offset'), 'source-text-margin-y': -8 } },
-      { selector: 'edge.from', style: { 'taxi-turn': (e) => e.data('turn'), 'target-label': 'data(label)', 'target-text-offset': (e) => e.data('offset'), 'target-text-margin-y': -8 } },
+      // Verbs wrap to a second line instead of being cut; a two-line verb sits higher so it clears its own line.
+      { selector: 'edge.into, edge.from', style: { 'text-wrap': 'wrap', 'text-max-width': (e) => `${e.data('lw')}px`, 'line-height': 1.15 } },
+      { selector: 'edge.into', style: { 'taxi-turn': (e) => e.data('turn'), 'source-label': 'data(label)', 'source-text-offset': (e) => e.data('offset'), 'source-text-margin-y': (e) => (e.data('two') ? -14 : -8) } },
+      { selector: 'edge.from', style: { 'taxi-turn': (e) => e.data('turn'), 'target-label': 'data(label)', 'target-text-offset': (e) => e.data('offset'), 'target-text-margin-y': (e) => (e.data('two') ? -14 : -8) } },
       { selector: 'node.hover', style: { 'border-color': c.accent, 'border-width': 2 } },
       { selector: 'edge.hover', style: { 'line-color': c.accent, 'target-arrow-color': c.accent, width: 2 } },
     ];
@@ -494,7 +532,8 @@
   // Incoming links on the left, outgoing links on the right, grouped by relation; at most
   // MAP_LIMIT per group, with every relationship in the table below. Text
   // stays at full size: the canvas grows to fit instead of zooming out.
-  const COLUMN = 360;
+  let COLUMN = 360;          // set per draw: wider when the container has room
+  const CHIP_MAX = 200;
   const SPINE = 150;
   function drawMap(id, container) {
     if (!ensureMap(container)) return;
@@ -503,6 +542,7 @@
     const box = container.closest('.bok-mapbox');
     box.hidden = false;
     if (container.clientWidth < 640) { box.hidden = true; return; }
+    COLUMN = Math.max(380, Math.min(470, Math.floor((container.clientWidth - 24 - CHIP_MAX - 20) / 2)));
     const isActionableKind = (relId) => {
       const k = relations.get(relId)?.kind;
       return k === 'constraint' || k === 'failure' || k === 'mechanism';
@@ -535,15 +575,19 @@
           if (seen.has(other)) continue;
           seen.add(other);
           const c = concepts.get(other);
-          const w = chipWidth(c.label, 200);
+          const w = chipWidth(c.label, CHIP_MAX);
+          const vl = verbLabel(rel, COLUMN - CHIP_MAX / 2 - SPINE - 24);
+          if (vl.two) y += 10;  // room above for the second line of the verb
           const gc = palette.grp?.[groupOfConcept(other)];
-          els.push({ group: 'nodes', position: { x, y }, data: { id: other, label: c.label, w, tw: 180, background: c.scope === 'background', ...(gc ? { gc } : {}) } });
+          // Chips align on the edge that faces the center, so each column reads as one ragged-outward list.
+          const cx = x < 0 ? x + (CHIP_MAX - w) / 2 : x - (CHIP_MAX - w) / 2;
+          els.push({ group: 'nodes', position: { x: cx, y }, data: { id: other, label: c.label, w, tw: 180, background: c.scope === 'background', ...(gc ? { gc } : {}) } });
           ys.push(y);
           const into = rel.target === id;
           // The outer segment runs from the concept to the spine; the verb sits on it.
-          const segment = COLUMN - w / 2 - SPINE;
+          const segment = COLUMN - CHIP_MAX / 2 - SPINE;
           els.push({ group: 'edges', classes: into ? 'into' : 'from', data: { id: rel.id, source: rel.source, target: rel.target,
-            label: shortVerb(rel, segment - 24), offset: segment / 2, turn: into ? segment : SPINE - centerHalf } });
+            ...vl, offset: segment / 2, turn: into ? segment : SPINE - centerHalf } });
           y += 44;
         }
         if (block.rels.length > MAP_LIMIT) {
@@ -686,11 +730,11 @@
     const area = row && areaOf.get(row.id);
     if (visited[visited.length - 1] !== id) visited.push(id);
     renderTree(area?.id, row?.id);
-    crumbs(area ? [`<a href="#view=concept">Concept map</a>`, `<a href="#area=${esc(area.id)}">${esc(area.code || '')} ${esc(area.label)}</a>`, `<a href="${subjectHref(row)}">${esc(row.code || '')} ${esc(row.label)}</a>`, `<span aria-current="page">${esc(c.label)}</span>`]
+    crumbs(area ? [`<a href="#view=concept">Concept map</a>`, `<a href="#area=${esc(area.id)}">${esc(area.code || '')} ${esc(nm(area))}</a>`, `<a href="${subjectHref(row)}">${esc(row.code || '')} ${esc(nm(row))}</a>`, `<span aria-current="page">${esc(c.label)}</span>`]
       : [`<a href="#view=concept">Concept map</a>`, `<span aria-current="page">${esc(c.label)}</span>`]);
     const also = (secondaryOf.get(id) || []).map((r) => subjectLink(r)).join('<br>');
     const passages = (linksOf.get(id) || []).map((l) => `<tr><td>${esc(VOLUME[l.volume] || l.volume)}</td><td><a href="${esc(l.url)}">${esc(l.chapter_title)}</a></td><td>${esc(l.label)}</td></tr>`).join('');
-    const chapters = (row?.book_chapters || []).map((ch) => `<tr><td>${esc(VOLUME[ch.volume] || ch.volume)}</td><td><a href="${esc(ch.url)}">${esc(ch.title)}</a></td><td>Teaches ${esc(row.label)}</td></tr>`).join('');
+    const chapters = (row?.book_chapters || []).map((ch) => `<tr><td>${esc(VOLUME[ch.volume] || ch.volume)}</td><td><a href="${esc(ch.url)}">${esc(ch.title)}</a></td><td>Teaches ${esc(nm(row))}</td></tr>`).join('');
     const links = (outgoing.get(id)?.length || 0) + (incoming.get(id)?.length || 0);
     const feedback = new URL('https://github.com/harvard-edge/cs249r_book/issues/new');
     feedback.search = new URLSearchParams({ template: 'taxonomy_feedback.yml', title: `[Taxonomy] ${c.label}`, target: `${id} (version ${data.framework.version})` }).toString();
@@ -705,7 +749,7 @@
           </div>
           <p class="bok-action-status" id="bok-action-status" role="status"></p>
           ${c.scope === 'background' ? '<p class="bok-text">A background concept, from an adjacent discipline that ML systems build on.</p>' : ''}</div>
-        ${facts([['Identifier', `<code>${esc(id)}</code>`], ['Subject', row ? subjectLink(row) : ''], ['Area', area ? `<a href="#area=${esc(area.id)}">${esc(area.code || '')} ${esc(area.label)}</a>` : ''],
+        ${facts([['Identifier', `<code>${esc(id)}</code>`], ['Subject', row ? subjectLink(row) : ''], ['Area', area ? `<a href="#area=${esc(area.id)}">${esc(area.code || '')} ${esc(nm(area))}</a>` : ''],
           ['Also part of', also], ['Relationships', String(links)]])}
       </div>
       <figure class="bok-mapbox"><div class="bok-canvas" id="bok-canvas" role="img" aria-label="Concept map of ${esc(c.label)}; the relationships table lists the same links as text"></div>
@@ -1045,6 +1089,8 @@
       <g class="viz-layer-nodes">${nodesHtml}</g>
       ${legendHtml}
     </svg>`;
+    // On phones the frame scrolls sideways; open centered on the circle.
+    if (stageEl.scrollWidth > stageEl.clientWidth + 4) stageEl.scrollLeft = (stageEl.scrollWidth - stageEl.clientWidth) / 2;
   }
 
   function drawCouplingDsm(stageEl) {
@@ -1373,7 +1419,7 @@
       if (capEl) capEl.innerHTML = `<strong>Relationships between the ${areas.length} areas (row acts on column).</strong> Each cell counts relationships from concepts in the row area to concepts in the column area; hatched diagonal cells count relationships within the same area. Bars on the right and bottom show each area's total outgoing and incoming links with other areas. Select any cell or area label to read the relationships on the right. With a cell focused, use arrow keys to move and Enter to select. Counts describe recorded links, not importance or completeness.`;
     } else {
       drawCouplingWheel(stageEl);
-      if (capEl) capEl.innerHTML = `<strong>Relationships across the ${groups.length} groups, ${areas.length} areas, and ${rows.size} subjects.</strong> Thicker curves show more relationships between two subjects. Select a subject or an area on the ring to show what it acts on (crimson) and what acts on it (ink), and to list the relationships on the right.`;
+      if (capEl) capEl.innerHTML = `<strong>Relationships across the ${groups.length} groups, ${areas.length} areas, and ${rows.size} subjects.</strong> Thicker curves show more relationships between two subjects. Select a subject or an area on the ring to show what it acts on (crimson) and what acts on it (ink), and to list those relationships in the panel.`;
     }
     const fromPicker = $('bok-explore-area');
     const toPicker = $('bok-explore-target');
@@ -1418,8 +1464,8 @@
           ${expandBtn('bok-coupling-figure')}
         </div>
         <div class="bok-area-pickers">
-          <label><span id="bok-explore-label">Focus area</span><select id="bok-explore-area"><option value="">All areas</option>${areas.map((a) => `<option value="${esc(a.id)}">${esc(a.code)} · ${esc(a.label)}</option>`).join('')}</select></label>
-          <label id="bok-explore-target-wrap" hidden>To area<select id="bok-explore-target" disabled><option value="">All connections</option>${areas.map((a) => `<option value="${esc(a.id)}">${esc(a.code)} · ${esc(a.label)}</option>`).join('')}</select></label>
+          <label><span id="bok-explore-label">Focus area</span><select id="bok-explore-area"><option value="">All areas</option>${areas.map((a) => `<option value="${esc(a.id)}">${esc(a.code)} · ${esc(nm(a))}</option>`).join('')}</select></label>
+          <label id="bok-explore-target-wrap" hidden>To area<select id="bok-explore-target" disabled><option value="">All connections</option>${areas.map((a) => `<option value="${esc(a.id)}">${esc(a.code)} · ${esc(nm(a))}</option>`).join('')}</select></label>
         </div>
         <div class="bok-viz-split">
           <div class="bok-viz-stage" id="bok-coupling-stage"></div>
@@ -1436,7 +1482,7 @@
     const sorted = [...concepts.values()].sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' }));
     const byLetter = new Map();
     for (const c of sorted) push(byLetter, /[a-z]/i.test(c.label[0]) ? c.label[0].toUpperCase() : '#', c);
-    const options = areas.map((a) => `<option value="${esc(a.id)}">${esc(a.code ? `${a.code} ` : '')}${esc(a.label)}</option>`).join('');
+    const options = areas.map((a) => `<option value="${esc(a.id)}">${esc(a.code ? `${a.code} ` : '')}${esc(nm(a))}</option>`).join('');
     $('bok-glossary').innerHTML = `<div class="bok-entry-head"><div><h2>Glossary</h2><p class="bok-lead">Every concept in the taxonomy with its definition and the subject it belongs to.</p></div></div>
       <div class="bok-gloss-bar">
         <label class="bok-sr" for="bok-gloss-filter">Filter the glossary</label>
@@ -1450,8 +1496,8 @@
       ${[...byLetter.entries()].map(([letter, list]) => `<tbody id="letter-${esc(letter)}"><tr class="bok-letter-row"><th colspan="3">${esc(letter)}</th></tr>${list.map((c) => {
         const row = homeOf.get(c.id);
         return `<tr class="bok-term" id="term-${esc(c.id)}" data-area="${esc(areaOf.get(row?.id)?.id || '')}" data-search="${esc([c.label, ...(c.aliases || []), c.definition].join(' ').toLowerCase())}">
-          <td>${conceptLink(c.id)}${c.aliases?.length ? `<span class="bok-alias">${c.aliases.map(esc).join(' · ')}</span>` : ''}</td>
-          <td>${esc(c.definition)}</td><td>${row ? `<a class="bok-mono" href="${subjectHref(row)}" title="${esc(row.label)}">${esc(row.code || row.label)}</a>` : ''}</td></tr>`;
+          <td>${conceptLink(c.id)}${c.scope === 'background' ? ' <span class="bok-tag" title="Background concept: assumed knowledge the taxonomy names but does not develop">background</span>' : ''}${c.aliases?.length ? `<span class="bok-alias">${c.aliases.map(esc).join(' · ')}</span>` : ''}</td>
+          <td>${esc(c.definition)}</td><td>${row ? `<a class="bok-gloss-subject" href="${subjectHref(row)}" title="${esc(row.label)}">${code(row.code || row.label)}</a>` : ''}</td></tr>`;
       }).join('')}</tbody>`).join('')}</table>`;
   }
 
@@ -1981,8 +2027,11 @@
       entry.rels.push(rel);
     }
 
-    const W = 960, H = 196;
+    // The canvas grows with the step count so labels keep their room; long paths
+    // stagger labels over three rows instead of two.
+    const rowsN = n > 10 ? 3 : 2;
     const padX = 72;
+    const W = Math.max(960, padX * 2 + (n - 1) * 70), H = 176 + rowsN * 20;
     const baseY = 118;
     const stepX = (i) => padX + (n > 1 ? (i / (n - 1)) * (W - padX * 2) : (W - padX * 2) / 2);
 
@@ -2007,8 +2056,7 @@
       const st = steps[i];
       const r = rows.get(st.subject);
       const x = stepX(i);
-      const stagger = i % 2 === 1;
-      const lblY = stagger ? baseY + 42 : baseY + 22;
+      const lblY = baseY + 22 + (i % rowsN) * 20;
       const shortName = r?.display_label || r?.label || st.subject;
       stationsHtml += `<g class="viz-path-station" style="--node:${gvar(r ? groupOfSubject(r.id) : undefined)}" data-path-id="${esc(lp.id)}" data-station-idx="${i}" role="button" tabindex="0" aria-label="Step ${i + 1}: ${esc(r?.code || '')} ${esc(r?.label || st.subject)}">
         <line x1="${x.toFixed(1)}" y1="${baseY + 7}" x2="${x.toFixed(1)}" y2="${lblY - 9}" stroke="var(--bok-line-strong)" stroke-width="0.8"/>
@@ -2038,9 +2086,15 @@
     if (!state.activeSymptom && g.symptoms?.length) state.activeSymptom = g.symptoms[0].id;
     const subj = (id) => (rows.has(id) ? `<a class="bok-guide-subject" href="${subjectHref(rows.get(id))}">${code(rows.get(id).code)}${esc(rows.get(id).display_label || rows.get(id).label)}</a>` : esc(id));
     const list = (ids, f) => (ids && ids.length ? `<ul class="bok-guide-list">${ids.map((id) => `<li>${f(id)}</li>`).join('')}</ul>` : '<span class="bok-muted">—</span>');
+    // Each role's subjects read in taxonomy order (group, then code), so the color
+    // swatches run in bands instead of jumping; the authored role order stays.
+    const byGroupCode = (ids) => [...(ids || [])].sort((x, y) => {
+      const gx = BAND_ORDER.indexOf(groupOfSubject(x)), gy = BAND_ORDER.indexOf(groupOfSubject(y));
+      return (gx - gy) || String(rows.get(x)?.code || x).localeCompare(String(rows.get(y)?.code || y), undefined, { numeric: true });
+    });
     const roles = g.roles.map((r) => `<tr id="guide-role-${esc(r.id)}"><td><strong>${esc(r.label)}</strong><span class="bok-alias">${esc(r.summary)}</span>
         <span style="display:block;margin-top:4px;font-size:0.76rem"><button type="button" class="bok-viz-clear" data-pick-role="${esc(r.id)}" style="margin-right:10px">Show in diagram &uarr;</button><a href="#overlay=role:${esc(r.id)}" class="bok-viz-clear">Highlight on Matrix &nearr;</a></span></td>
-        <td>${list(r.core, subj)}</td><td>${list(r.working, subj)}</td></tr>`).join('');
+        <td>${list(byGroupCode(r.core), subj)}</td><td>${list(byGroupCode(r.working), subj)}</td></tr>`).join('');
     const symptoms = g.symptoms.map((s) => `<tr id="guide-symptom-${esc(s.id)}"><td><strong>${esc(s.label)}</strong><span class="bok-alias">${esc(s.signal)}</span>
         <span style="display:block;margin-top:4px;font-size:0.76rem"><button type="button" class="bok-viz-clear" data-symptom-pick="${esc(s.id)}">Open in triage diagram &uarr;</button></span>
         ${s.quantities && s.quantities.length ? `<span class="bok-alias" style="display:block;margin-top:4px">Measured by: ${s.quantities.map((id) => conceptLink(id)).join(', ')}</span>` : ''}</td>
@@ -2318,6 +2372,20 @@
     return false;
   }
 
+  // Phones stack table cells; copying each header onto its cells keeps the
+  // column meaning (Core subjects, Working knowledge, Concepts) visible.
+  function labelTables(scope) {
+    for (const table of scope.querySelectorAll('table.bok-table')) {
+      const heads = [...table.querySelectorAll('thead th')].map((th) => th.textContent.trim());
+      if (!heads.length) continue;
+      for (const tr of table.querySelectorAll('tbody tr')) {
+        const cells = tr.querySelectorAll(':scope > td');
+        if (cells.length !== heads.length) continue;
+        cells.forEach((td, i) => { if (heads[i]) td.dataset.label = heads[i]; });
+      }
+    }
+  }
+
   function render() {
     const v = state.view;
     const entry = ['area', 'subject', 'concept', 'landing'].includes(v);
@@ -2344,6 +2412,7 @@
       else { drawRoleSankey(); drawSymptomFlow(); }
     }
     syncFull();
+    labelTables(document.querySelector('.bok') || document);
     const target = v === 'glossary' && state.term ? document.getElementById(`term-${state.term}`)
       : v === 'guides' && state.guide ? document.getElementById(`guide-${state.guide}`) : null;
     if (target) {
