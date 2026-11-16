@@ -41,6 +41,16 @@ def _m(q, unit: str) -> float:
     return float(q.to(unit).magnitude)
 
 
+def _dn(x: float, d: int = 0) -> str:
+    """Round an upper bound down (safe direction)."""
+    return f"{math.floor(x * 10 ** d + 1e-9) / 10 ** d:,.{d}f}"
+
+
+def _up(x: float, d: int = 0) -> str:
+    """Round a lower bound up (safe direction)."""
+    return f"{math.ceil(x * 10 ** d - 1e-9) / 10 ** d:,.{d}f}"
+
+
 def build() -> Sheet:
     S = SCENARIO
     A = TAG = assumed()
@@ -273,6 +283,8 @@ def build() -> Sheet:
     t_vid, t_hs = _m(SITE.t_video_glass_to_glass, "s"), _m(SITE.t_handshake, "s")
     t_sig = _check(t_perc + t_cog + t_mot + t_vid + t_hs, _m(SITE.t_takeover_in_loop, "s"), "T_sigma")
     t_sig_out = _m(SITE.t_takeover_out_of_loop, "s")
+    t_p90, t_console = _m(SITE.t_takeover_driving_p90, "s"), _m(SITE.t_takeover_transport, "s")
+    _check(t_p90 + t_console, t_sig_out, "out-of-loop takeover")
     to = SC.WarehouseInLoopTakeoverAtAisleSpeed.result
     to_travel = _check(v_aisle * t_sig, _m(to.takeover_travel, "m"), "takeover travel")
     to_over_spare = _check(to_travel / fin_spare_aisle, to.takeover_over_spare, "takeover over spare")
@@ -393,7 +405,7 @@ def build() -> Sheet:
             f'<div>At {fmt(v_drive, 1)} m/s: rigid {fmt(d_delay, 3)} + {fmt(d_brake, 4)} + {fmt(d_loc + d_mar, 2)} = {n(fmt(d_req, 3) + " m")}; finished {n(fmt(fin_req_drive, 3) + " m", True)}.</div></div>'
             f'<div class="side"><div><b>Speed ceiling</b> {v("v", "max")}, the positive root:</div>'
             f'<div>−{v("a", "brake")}{v("τ", "delay")} + √(({v("a", "brake")}{v("τ", "delay")})² + 2{v("a", "brake")}({v("D", "clear")} − {v("δ", "loc")} − {v("δ", "margin")}))</div>'
-            f'<div>rigid {n(f"{v_max_rigid:.2f} m/s")}; finished ({v("τ", "delay")} + {v("a", "brake")}/2{v("j", "max")}, δ) {n(f"{v_max_fin:.2f} m/s")}</div></div>')
+            f'<div>rigid {n(_dn(v_max_rigid, 2) + " m/s")}; finished ({v("τ", "delay")} + {v("a", "brake")}/2{v("j", "max")}, δ) {n(_dn(v_max_fin, 2) + " m/s")}</div></div>')
 
     stage_short = {"exposure midpoint": "exp/2", "readout": "readout", "link transport": "link", "DMA and queue": "DMA",
                    "ISP": "ISP", "vision backbone": "backbone", "dispatch": "dispatch"}
@@ -429,9 +441,9 @@ def build() -> Sheet:
                      ex=f'{fmt(t_age * 1e3, 1)} + {fmt(t_lease * 1e3)} + {fmt(t_tick * 1e3)} + {fmt(t_bus * 1e3)} + {fmt(t_act * 1e3)} = {n(fmt(tau * 1e3, 1) + " ms")} → {n(fmt(d_delay * 1e3) + " mm")} at {fmt(v_drive, 1)} m/s; '
                         f'vision backbone {fmt(t_backbone / tau * 100)}% of it.'),
                 Card("Jerk-limited stop", f'{v("d", "suffix")} = {frac(v("v", sup="2"), "2" + v("a", "brake"))} + {v("v")} {frac(v("a", "brake"), "2" + v("j", "max"))}', chapter="Ch 11, 12",
-                     ex=f'For {v("v")} ≥ {v("a", "brake", "2")}/{v("j", "max")}. {fmt(v_drive, 1)} m/s: {fmt(d_brake, 3)} + {fmt(v_drive * ramp, 3)} = {n(fmt(sfx_drive, 3) + " m")}; ramp ≈ {fmt(ramp * 1e3)} ms.'),
+                     ex=f'For {v("v")} ≥ {v("a", "brake", "2")}/{v("j", "max")}. {fmt(v_drive, 1)} m/s: {fmt(d_brake, 3)} + {fmt(v_drive * ramp, 3)} = {n(fmt(sfx_drive, 3) + " m")}; the ramp adds ≈ {fmt(ramp * 1e3)} ms of delay.'),
                 Card("Traction caps deceleration", f'{v("a", "brake")} ≤ {v("μ")} {v("g")} {v("φ", "drive")}', chapter="Ch 2, 18",
-                     ex=f'{v("μ")} friction, {v("φ", "drive")} driven-wheel weight share. {fmt(a_br, 1)} m/s²: {v("μ")} ≥ {mu_req:.3f} at {v("φ", "drive")} = 1, {mu_rated:.3f} at rated {phi:.3f}; tip-over is separate. '
+                     ex=f'{v("μ")} friction, {v("φ", "drive")} driven-wheel weight share. {fmt(a_br, 1)} m/s²: {v("μ")} ≥ {_up(mu_req, 3)} at {v("φ", "drive")} = 1, {_up(mu_rated, 3)} at rated {phi:.3f}; tip-over is separate. '
                         f'{A}Oil, {v("μ")} = {mu_oil:g}: {a_oil:.2f} m/s²; {fmt(v_aisle, 1)} m/s: rigid {fmt(oil_rigid, 2)}, finished {n(fmt(oil_req, 2) + " m", True)}.'),
             ], "Ch 1, 2, 12"),
             Col("2 How old is what it sees?", [
@@ -448,23 +460,23 @@ def build() -> Sheet:
                      ex=f'Nav camera, RGB: {cam.resolution_width}×{cam.resolution_height}×{ing.rgb_bytes_per_pixel}×{fmt(cam_fps)} = {n(f"{nav_rate / 1e9:.2f} GB/s")}. '
                         f'+ wrist {wrist_rate / 1e9:.2f} + two RGB-D {ext_rate / 1e9:.2f} GB/s = {tot_rate / 1e9:.2f} GB/s → {per_hour:.1f} TB/h.'),
                 Card("Free space expires", f'{v("T", "inv")} = ({v("d", "free")} − {v("δ", "loc")} − {v("δ", "margin")}) / {v("v", "h")}', chapter="Ch 9",
-                     ex=f'{v("d", "free")} seen-empty depth, {v("v", "h")} = {fmt(v_h, 1)} m/s. Ahead ({fmt(d_clear, 2)} m): {n(fmt(t_inv_ahead * 1e3) + " ms")}; '
+                     ex=f'{v("d", "free")} seen-empty depth, {v("v", "h")} = {fmt(v_h, 1)} m/s. Ahead ({fmt(d_clear, 2)} m): {n(_dn(t_inv_ahead * 1e3) + " ms")}; '
                         f'beside the rack end ({fmt(side * 1e3)} mm): {n(fmt(t_inv_side * 1e3) + " ms", True)}.'),
             ], "Ch 2, 5, 8, 9"),
             Col("3 Can the brain and nerves keep up?", [
                 Card("A proposer's memory wall", [f'weight sweeps/s ≤ BW / {v("M", "weights")}',
                                                   f'{v("t", "infer")} ≈ max({v("O")}/{v("η", "hw")}{v("R", "peak")}, sweep) + ({v("S", "out")} − 1) · sweep'], chapter="Ch 3",
-                     ex=f'BW = {fmt(bw_peak / 1e9)} × {eta_dram:.2f} = {fmt(bw / 1e9, 1)} GB/s; INT4 7B, {fmt(w_int4 / 1e9, 1)} GB: sweep {t_sweep * 1e3:.1f} ms. {o_pre / 1e12:.2f} TFLOP prefill, '
-                        f'{A}{v("η", "hw")} = {eta_c:.0%} of {fmt(peak16 / 1e12)} TFLOP/s: {fmt(t_pre * 1e3)} ms; {v("S", "out")} = {s_out}: {n(fmt(t_eval * 1e3) + " ms")}, ≤ {f_max:.2f} Hz (book: {fmt(f_intent)}).'),
+                     ex=f'BW = {fmt(bw_peak / 1e9)} × {eta_dram:.2f} = {fmt(bw / 1e9, 1)} GB/s; INT4 7B, {fmt(w_int4 / 1e9, 1)} GB: sweep {t_sweep * 1e3:.1f} ms. {o_pre / 1e12:.3f} TFLOP prefill, '
+                        f'{A}{v("η", "hw")} = {eta_c:.0%} of {fmt(peak16 / 1e12)} TFLOP/s: {fmt(t_pre * 1e3)} ms; {v("S", "out")} = {s_out}: {n(fmt(t_eval * 1e3) + " ms")}, ≤ {_dn(f_max, 2)} Hz (book: {fmt(f_intent)}).'),
                 Card("Setpoints per chunk", [f'{v("h", "min")} = ⌈({v("T", "chunk")} + {v("t", "infer")}) / {v("Δt", "step")}⌉', f'{v("τ", "ev")} = √(2({v("r", "tol")} − {v("e", "0")}) / {v("a", "slip")})'], chapter="Ch 3",
                      ex=f'Step {v("Δt", "step")} = {fmt(dt_step * 1e3)} ms: ⌈({fmt(t_chunk * 1e3)} + {fmt(t_inf_chunk * 1e3)}) / {fmt(dt_step * 1e3)}⌉ = {n(str(h_min))}. {A}Belt slip {v("a", "slip")} = {a_slip:g} m/s²: '
-                        f'{n(fmt(tau_ev * 1e3) + " ms")} of evidence, under a {horizon}-step chunk ({fmt(horizon * dt_step * 1e3)} ms).'),
+                        f'{n(_dn(tau_ev * 1e3) + " ms")} of evidence, under a {horizon}-step chunk ({fmt(horizon * dt_step * 1e3)} ms).'),
                 Card("Lease rule (finished model)", f'{v("T", "chunk")} + {v("T", "jitter")} &lt; {v("T", "lease")} ≤ {v("τ", "max")} − {v("T", "rest")}', chapter="Ch 4",
                      ex=f'{v("T", "rest")} = {v("T", "tick")} + {v("T", "bus")} + {v("T", "act")} + {v("t", "age")} = {fmt(t_rest * 1e3, 1)} ms; {v("τ", "max")} = ({v("D", "clear")} − δ − {v("d", "suffix")})/{v("v")}; jitter {fmt(jitter * 1e3)} ms. '
-                        f'{fmt(v_aisle, 1)} m/s: {fmt(lease_floor * 1e3)} &lt; {n(fmt(t_lease * 1e3) + " ms")} ≤ {fmt(lease_ceil_aisle * 1e3)} ms; {fmt(v_drive, 1)} m/s: {n(fmt(lease_ceil_drive * 1e3) + " ms", True)}, none fits.'),
+                        f'{fmt(v_aisle, 1)} m/s: {fmt(lease_floor * 1e3)} &lt; {n(fmt(t_lease * 1e3) + " ms")} ≤ {_dn(lease_ceil_aisle * 1e3)} ms; {fmt(v_drive, 1)} m/s: {n(_dn(lease_ceil_drive * 1e3) + " ms", True)}, none fits.'),
                 Card("Response time: execution + blocking + interference", f'{v("R", "i")} = {v("C", "i")} + {v("B", "i")} + {v("I", "i")} ≤ {v("D", "i")}', chapter="Ch 4",
                      ex=f'Tick: {A}{fmt(c_i)} + {fmt(b_i)} + {fmt(i_i)} = {n(fmt(r_i) + " µs")} ≤ {fmt(d_i)} µs deadline {v("D", "i")}. '
-                        f'{SC.WarehouseServoCanFdOneBus.num_axes} CAN FD axes: {n(fmt(occ) + " µs", True)} per {fmt(cycle_us)} µs.'),
+                        f'{SC.WarehouseServoCanFdOneBus.num_axes} CAN FD axes: {can.frames} frames × {frame_us:.1f} µs = {n(fmt(occ) + " µs", True)} per {fmt(cycle_us)} µs.'),
             ], "Ch 3, 4"),
         ],
     )
@@ -486,11 +498,11 @@ def build() -> Sheet:
                 Card("Errors compound over an episode", f'cloning ∝ {v("S", sup="2")}{v("ε")}; with corrections (DAgger) ∝ {v("S")}', chapter="Ch 5",
                      ex=f'{v("ε")} error per step, {v("S")} steps. {fmt(t_roll)} s at {fmt(_m(tc.decision_step, "ms"))} ms: {v("S")} = {steps_trial}, {v("S", sup="2")} = {n(fmt(s2), True)}.'),
                 Card("A clean record bounds success", [f'{v("p")} ≥ {v("α", "sig")}<sup>1/{v("n")}</sup>', f'{v("n")} = ⌈ln {v("α", "sig")} / ln {v("p")}⌉ ≈ {ln_a:.0f} / (1 − {v("p")})'], chapter="Ch 7",
-                     ex=f'Every run counts, aborts included. {A}{n_clean} clean, {ec.confidence:.0%}: {v("p")} ≥ {n(f"{p_low:.3f}")}. {v("p")} = {ec.target:g}: {n(fmt(n_999) + " runs")}, '
+                     ex=f'Every run counts, aborts included. {A}{n_clean} clean, {ec.confidence:.0%}: {v("p")} ≥ {n(_dn(p_low, 3))}. {v("p")} = {ec.target:g}: {n(fmt(n_999) + " runs")}, '
                         f'× {fmt(cyc)} s = {fmt(hours_999, 1)} h. Each extra nine costs ten times the runs.'),
                 Card("The exposure wall", f'failure-free hours ≥ ln(1/{v("α", "sig")}) / {v("λ")} ≈ {ln_a:.0f} / {v("λ")}', chapter="Ch 7",
                      ex=f'{v("λ")} hazard rate per hour. {A}10<sup>{str(round(math.log10(lam6))).replace("-", "−")}</sup>/h: {n(f"{t6 / 1e6:.1f}M h")} ({fmt(t6 / rig_h)} years). '
-                        f'One rig-year ({fmt(rig_h)} h): {v("λ")} ≤ {rig_rate / 10 ** rig_exp:.1f} × 10<sup>{str(rig_exp).replace("-", "−")}</sup>/h.'),
+                        f'One rig-year ({fmt(rig_h)} h): {v("λ")} ≤ {_up(rig_rate / 10 ** rig_exp, 1)} × 10<sup>{str(rig_exp).replace("-", "−")}</sup>/h.'),
                 Card("Fault-injection count", 'injections = ⌈ln(1/α<sub>sig</sub>) / −ln(coverage)⌉', chapter="Ch 15",
                      ex=f'Coverage = 1 − target / raw rate. {A}Raw {fmt(dc.raw_rate)} FIT, target {fmt(SC.WarehouseDiagnosticCoverageHundredFit.target)} FIT (1 FIT = 1 failure per 10<sup>9</sup> h): coverage {cov:.1%}, {n(fmt(inj) + " zero-miss injections")}.'),
             ], "Ch 5, 6, 7, 15"),
@@ -501,14 +513,14 @@ def build() -> Sheet:
                         f'{A}{fmt(i_tr)} A × {fmt(r_bus * 1e3)} mΩ = {n(fmt(sag, 1) + " V")}: {fmt(v_low)} → {fmt(v_low - sag, 1)} V, {fmt(v_low - sag - v_uvlo, 1)} V over the {fmt(v_uvlo)} V UVLO.'),
                 Card("Can the drives deliver it?", f'{v("a", "brake")} ≤ wheel force / ({v("m")} + rotating mass)', chapter="Ch 2",
                      ex=f'{n_wheel} × {fmt(tq_peak)} N·m / {fmt(r_wheel * 1e3)} mm = {fmt(drive_force)} N; {fmt(m_load)} + {fmt(rot_mass)} kg rotating = {fmt(m_eff_base)} kg: '
-                        f'{n(f"{a_torque:.2f} m/s²")}; rated {a_torque_rated:.2f}.'),
+                        f'{n(_dn(a_torque, 2) + " m/s²")}; rated {_dn(a_torque_rated, 2)}.'),
                 Card("Motor heating", [f'{v("T", "eq")} = {v("T", "amb")} + {v("P", "loss")} {v("R", "th")}, &nbsp; {v("τ", "th")} = {v("R", "th")} {v("C", "th")}'], chapter="Ch 2",
                      ex=f'{v("P", "loss")} = {v("I", sup="2")} × resistance (constant here; it rises with heat). '
                         f'Joint: {v("R", "th")} = {r_th:g} K/W, {v("C", "th")} = {fmt(c_th)} J/K: {n(fmt(tau_th) + " s")}; {fmt(t_amb)} °C + {p_rated:.1f} W × {r_th:g} = {fmt(t_eq)} °C. '
                         f'{A}{th.burst_factor:g}× current ({fmt(p_burst)} W): {fmt(t_limit)} °C in {n(fmt(hor_cold) + " s")} cold, {fmt(hor_hot)} s hot.'),
                 Card("Contact force on a person", [f'{v("F")} = {v("v")} √({v("k", "H")} {v("m", "red")}), &nbsp; {v("m", "red")} = (1/{v("m", "H")} + 1/{v("m", "arm")})<sup>−1</sup>'], chapter="Ch 12",
                      ex=f'Hand {v("m", "H")} = {m_hand:g} kg, {v("k", "H")} = {fmt(k_hand / 1e3)} N/mm, arm {v("m", "arm")} = {fmt(m_arm_eff)} kg: {n(fmt(f_tcp) + " N", True)} at {fmt(tcp, 1)} m/s; '
-                        f'{A}{fmt(f_crit)} N: {n(f"{v_free:.2f} m/s")}, clamped {n(f"{v_clamped:.2f} m/s")} ({v("m", "red")} → {v("m", "arm")}).'),
+                        f'{A}{fmt(f_crit)} N: {n(_dn(v_free, 2) + " m/s")}, clamped {n(_dn(v_clamped, 2) + " m/s")} ({v("m", "red")} → {v("m", "arm")}).'),
                 Card("Force when the brake command issues", f'{v("F", "cmd")} = {v("F", "trip")} + {v("k", "latch")} {v("v")} {v("T", "c")}', chapter="Ch 10, 12",
                      ex=f'Trip {fmt(f_trip)} N + {fmt(k_latch / 1e3)} N/mm × {A}{fmt(v_latch * 1e3)} mm/s × loop {v("T", "c")} = {fmt(t_c * 1e3)} ms = {n(fmt(f_cmd) + " N")} of {fmt(f_lim)} N; '
                         f'{n(fmt(f_cmd_hi) + " N", True)} at {fmt(v_latch_hi * 1e3)} mm/s.'),
@@ -516,12 +528,12 @@ def build() -> Sheet:
             Col("6 Who answers, and how fast?", [
                 Card("Human takeover latency", f'{v("T", "Σ")} = reaction + video + handshake', chapter="Ch 14",
                      ex=f'Slow reaction {fmt(t_perc * 1e3)} + {fmt(t_cog * 1e3)} + {fmt(t_mot * 1e3)} ms + video {fmt(t_vid * 1e3)} + handshake {fmt(t_hs * 1e3)} = {n(fmt(t_sig * 1e3) + " ms")}; '
-                        f'out of the loop {n(half_up(t_sig_out, 2) + " s", True)}. At {fmt(v_aisle, 1)} m/s: {n(fmt(to_travel * 1e3) + " mm", True)}, {to_over_spare:.0f}× the {fmt(fin_spare_aisle * 1e3)} mm finished spare.'),
+                        f'out of the loop, p90 {t_p90:g} + {fmt(t_console * 1e3)} ms = {n(half_up(t_sig_out, 2) + " s", True)}. At {fmt(v_aisle, 1)} m/s: {n(fmt(to_travel * 1e3) + " mm", True)}, {to_over_spare:.0f}× the {fmt(fin_spare_aisle * 1e3)} mm finished spare.'),
                 Card("The speed a human buys (finished model)", f'in {v("v", "max")}: {v("τ", "delay")} → {v("τ", "delay")} + {v("Δ", "da")} + {v("T", "Σ")} + {v("a", "brake")}/2{v("j", "max")}', chapter="Ch 14",
-                     ex=f'Dispatch to admission {v("Δ", "da")} = {fmt(t_da * 1e3, 1)} ms, room {v("D", "clear")} − δ: {n(f"{v_human:.2f} m/s")} &lt; {fmt(v_aisle, 1)} m/s aisle speed. Slow down before asking.'),
+                     ex=f'Dispatch to admission {v("Δ", "da")} = {fmt(t_da * 1e3, 1)} ms, room {v("D", "clear")} − δ: {n(_dn(v_human, 2) + " m/s")} &lt; {fmt(v_aisle, 1)} m/s aisle speed. Slow down before asking.'),
                 Card("One assistant, many machines (M/M/1)", [f'{v("ρ")} = machines × requests/h × {v("t", "s")}', f'{v("T", "lat")} = {v("t", "s")} / (1 − {v("ρ")}), &nbsp; p99 ≈ ln(100) · {v("T", "lat")}'], chapter="Ch 17",
-                     ex=f'{A}{q.machines} × {lam_q:g}/h × {fmt(ts_min)} min: {v("ρ")} = {rho:g}, {v("T", "lat")} = {n(fmt(t_lat) + " s")}, p99 {fmt(p99_lat)} s. '
-                        f'The book quotes the wait, {v("T", "lat")} − {v("t", "s")} = {fmt(w_q)} s.'),
+                     ex=f'{A}{q.machines} × {lam_q:g}/h × {fmt(ts_min)} min: {v("ρ")} = {rho:g}, {v("T", "lat")} = {n(fmt(t_lat) + " s")}, p99 {fmt(p99_lat)} s. Dots: {q32.machines} machines, {fmt(q_caps[1][1])} and {fmt(math.log(100) * q_caps[1][1])} min. '
+                        f'Book: wait {v("T", "lat")} − {v("t", "s")} = {fmt(w_q)} s.'),
                 Chart(qp.svg("Time in system versus machines per assistant")),
                 Card("Frames to detect a person", [f'{v("N", "frames")} = ⌈ln {v("p", "miss")} / ln(1 − {v("p", "frame")})⌉', f'Δ{v("d")} = {v("v")} {v("T", "frame")} Δ{v("N", "frames")}, &nbsp; {v("v", "impact")} = √(2{v("a", "brake")} Δ{v("d")})'], chapter="Ch 17",
                      ex=f'{A}{v("p", "miss")} = {p_miss:g}; {v("T", "frame")} = {1e3 / cam_fps:.1f} ms, {fmt(v_aisle, 1)} m/s. Detection per frame {v("p", "frame")} = {ds.reference:g}: {k_ref} frames; {p_lo:g}: {k_lo}. '
