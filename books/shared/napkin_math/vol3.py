@@ -409,15 +409,40 @@ def build() -> Sheet:
     tail_any = _check(1 - (1 - tail.tail_probability) ** tail.calls, tail.any_tail, "any p99 call")
 
 
-    # ---- printed inputs that let a reader reproduce each result
-    usd_m = lambda price: (lambda x: f"${x:.2f}" if x < 1 else f"${x:g}")(price.to('USD/Mtoken').magnitude)  # noqa: E731
-    rule_n = rule / za.trials
-    rule_need = math.ceil(rule / za.target_rate)
-    fb, al = tc.baseline, tc.alternative
-    rep_eff = rep["eff"]
-    rv_rate = rv.output_rate.to("token/s").magnitude
 
-    # ================================================================ chart
+    # ---- printed inputs that let a reader reproduce each result
+    def usd_m(price) -> str:
+        x = price.to("USD/Mtoken").magnitude
+        return f"${x:g}" if x == int(x) else f"${x:.2f}"
+
+    rep_eff = rep["eff"]
+    fb, al = tc.baseline, tc.alternative
+    rv_rate = rv.output_rate.to("token/s").magnitude
+    tok_in_s, tok_out_s = 1 / t_pre, 1 / t_dec
+    price_out_ratio = c_out / c_in
+    price_cache_ratio = c_cache / c_in
+    e_inv = math.exp(-1)
+    _check(succ[hz.long_horizon], e_inv, "0.99^100 ≈ 1/e", rel=0.01)
+    hbm_gib = kv.hbm_per_accelerator.to("GiB").magnitude
+    log_bpt = ob.bytes_per_token.to("B/token").magnitude
+    lw_att_cost = al.turns * (al.input_tokens_per_turn * _per_tok(al.input_price) + al.output_tokens_per_turn * _per_tok(al.output_price)
+                              + _usd(al.environment_per_turn)) + _usd(al.assessment_per_attempt)
+    _check(lw_att_cost, lw_att, "cheap-model attempt")
+
+    # ================================================================ charts
+    hp = Plot((1, 1000), (0, 1), xlog=True, W=300, H=92, left=30, right=10, top=8, bottom=21)
+    hp.grid([1, 10, 100, 1000], [0, 0.5, 1.0], yfmt=lambda y: f"{y * 100:g}%")
+    eps_lines = [(SC.ResidualViolationsFiftyTurns.step_violation, "line muted"), (eps, "line"),
+                 (1 - SC.CompactionConstraintRetention.step_success, "line warn")]
+    for e, cls in eps_lines:
+        hp.line([(10 ** (i / 40), (1 - e) ** (10 ** (i / 40))) for i in range(121)], cls)
+    hp.text(hp.X(250), hp.Y((1 - eps_lines[0][0]) ** 250) - 6, f"ε = {eps_lines[0][0] * 100:g}%", "start")
+    hp.text(hp.X(150), hp.Y(0.55), f"ε = {eps * 100:g}%", "start")
+    hp.text(hp.X(1.6), hp.Y(0.62), f"ε = {eps_lines[2][0] * 100:g}%", "start")
+    for h in (hz.short_horizon, hz.long_horizon):
+        hp.point(h, succ[h], _pct(succ[h]), "end", -5, 10)
+    hp.axes("turns H (log scale)", "Pr(success)")
+
     wmax = SCENARIO["chart_workers"]
     sp_plot = Plot((1, wmax), (1, 6), W=250, H=70, left=24, right=8, top=8, bottom=21)
     sp_plot.grid([1, 4, 8, 12, 16], [1, 3, 5], yfmt=lambda y: f"{y:g}×")
@@ -431,92 +456,90 @@ def build() -> Sheet:
     # ================================================================ page 1
     band = (f'<div class="eqbig">{v("C", "eff")} = {frac("E[" + v("C", "attempt") + "]", v("p", "acc"))}'
             f'<span class="lbl">cost per accepted task (Ch 1, 19)</span></div>'
-            f'<div class="txt"><div><b>Price the acceptance, not the token.</b> A repair attempt (table, p. 2): ${rep["model"]:.2f} tokens (the cached bill, col. 2) '
-            f'+ {A}${rep["env"]:.2f} sandbox + ${rep["assess"]:.2f} checks = ${rep["att"]:.2f}, accepted {_pct(rep["acc"])} → {v("C", "eff")} = {n(f"${rep_eff:.2f}")}. '
-            f'Half-price tokens: ${eff_half_tok:.2f}. +{fmt(lever_gain * 100)} points of acceptance: {n(f"${eff_more_acc:.2f}")}.</div></div>'
-            f'<div class="side"><div><b>Horizon compounding (Ch 1)</b> &nbsp;Pr(success) = (1 − {v("ε")})<sup>{v("H")}</sup> ≈ e<sup>−{v("ε")}{v("H")}</sup></div>'
-            f'<div>{A}{v("ε")} = {_pct(eps)}: {v("H")} = {hz.short_horizon} → {n(_pct(succ[hz.short_horizon]))}, {v("H")} = {hz.long_horizon} → {n(_pct(succ[hz.long_horizon]), True)}. '
-            f'{_pct(hz.target_success)} at {hz.long_horizon} turns needs {v("ε")} ≤ {_pct_dn(eps_req, 3)}.</div></div>')
+            f'<div class="txt"><div><b>Price the acceptance, not the token.</b> A repair attempt (table, p. 2): ${rep["model"]:.2f} tokens (cached bill, col. 2) '
+            f'+ {A}${rep["env"]:.2f} sandbox + ${rep["assess"]:.2f} checks = ${rep["att"]:.2f}; {v("p", "acc")} = {_pct(rep["acc"])} → {v("C", "eff")} = {n(f"${rep_eff:.2f}")}.</div>'
+            f'<div>Half-price tokens → ${eff_half_tok:.2f}. {v("p", "acc")} + {fmt(lever_gain * 100)} points → {n(f"${eff_more_acc:.2f}")}.</div>'
+            f'<div><b>Horizon compounding (Ch 1).</b> Pr(success) = (1 − {v("ε")})<sup>{v("H")}</sup> ≈ e<sup>−{v("ε")}{v("H")}</sup>. '
+            f'{A}{v("ε")} = {_pct(eps)}: 90% at {v("H")} = {hz.short_horizon}, {n(_pct(succ[hz.long_horizon]), True)} at {hz.long_horizon}. '
+            f'{_pct(hz.target_success)} at {hz.long_horizon} turns needs {v("ε")} ≤ {_pct_dn(eps_req, 3)}.</div></div>'
+            f'<div class="side" style="width:2.75in">{hp.svg("Probability of success against turns for three per-turn error rates")}</div>')
 
     p1 = Page(
-        question="What does one trajectory take?",
-        sub="The model call, the context and memory it carries, and the tools it touches: tokens, seconds, bytes, and exposure.",
+        question="Will it finish within budget?",
+        sub="Read left to right: where a model call's time and money go, what the context and memory hold, and what each tool call risks.",
         meta="reference: Llama 3 70B on NVIDIA H100",
         notation=[
             ("Trajectory", f'{v("H")} turns · {v("ε")} error per unchecked turn · {v("p", "acc")} acceptance per attempt · {v("C", "attempt")}, {v("C", "eff")} $ per attempt, per accepted task · '
-                           f'{v("k")} tries · {v("p")}, {v("p", "i")} pass rate of one try, of task <i>i</i>'),
-            ("Call", f'{v("P")} parameters · {v("S")}, {v("K")} input, output tokens · {v("K", "max")} output allowance · {v("R", "peak")} FLOP/s · BW bytes/s · {v("s", "elem")} bytes per value · '
-                     f'{v("S", "base")} first prompt · Δ{v("S", "turn")} appended per turn · {v("S", "sent")} tokens sent · {v("c", "in")}, {v("c", "out")}, {v("c", "cache")} $ per input, output, cached token'),
+                           f'{v("p")} pass rate of one try · {A}= example input'),
+            ("Tokens", f'{v("P")} parameters · {v("S")} input tokens (sequence length) · {v("K")} output tokens · Δ{v("S", "turn")} tokens appended per turn · '
+                       f'{v("s", "elem")} bytes per value · BW bytes/s · {v("c", "in")}, {v("c", "out")}, {v("c", "cache")} $ per input, output, cached-input token'),
         ],
         know=[
-            Know(_pct(succ[hz.long_horizon]), f"success of {hz.long_horizon} unchecked turns at {_pct(1 - eps)} each"),
-            Know(f"{fmt(dec_ratio)}×", "output vs input token time (70B 8-bit, H100, batch 1)"),
-            Know(f"{fmt(m_tok / 1024)} KiB", "KV state per token, Llama 3 70B, FP16 KV"),
+            Know(f"0.99<sup>100</sup> ≈ 1/e", f"(1 − ε)<sup>H</sup> ≈ e<sup>−εH</sup>: 100 turns at 99% ≈ {_pct(e_inv)}"),
             Know(f"{fmt(rule)} / n", "95% bound on a failure rate after n clean trials"),
-            Know(fmt(per_arm[pl.differences[-1]], 0), f"tasks/arm for {fmt(pl.differences[-1] * 100)} points (p = {_pct(pl.rate)}, 5% sig., 80% power)"),
-            Know(f"{fmt(amp)}", f"calls when {layers} retry layers each try {ra.attempts_per_layer} times"),
-            Know(_pct(tail_any), f"of {tail.calls}-call trajectories hit a per-call p99"),
+            Know(f"{fmt(m_tok / 1024)} KiB", "KV state per token, Llama 3 70B, FP16"),
+            Know(f"${c_in * 1e6:g} · ${c_out * 1e6:g}", f"$ per M in, out tokens (book's hypothetical); cached ${c_cache * 1e6:.2f}"),
+            Know(f"{fmt(price_out_ratio)}× · {price_cache_ratio:g}×", "output, cached-input price ÷ input price"),
+            Know(f"{fmt(tok_out_s)} · {fmt(round(tok_in_s, -3))}", "≈ tokens/s out, in: 70B 8-bit, one H100, batch 1 (floors)"),
+            Know(f"{H100.memory.bandwidth.to('TB/s').magnitude:.2f} · {fmt(R_PEAK / 1e12)}", "H100: HBM TB/s · FP8 peak TFLOP/s"),
         ],
         band=band,
         cols=[
-            Col("1 The model call", [
+            Col("1 Where do a call's time and money go?", [
                 Card("Call latency floor: output-bound",
-                     f'latency ≥ {v("S")} · {frac("2" + v("P"), v("R", "peak"))} + {v("K")} · {frac(v("P") + " · " + v("s", "elem"), "BW")}',
-                     chapter="Ch 2",
-                     holds="Batch 1, full peak; preparation and queueing add more.",
-                     ex=f'Llama 3 70B, 8-bit weights, H100 (FP8 peak): {t_pre * 1e3:.3f} ms per input token, {t_dec * 1e3:.1f} ms per output token. '
-                        f'{A}{fmt(call.prompt_tokens)} in, {call.output_tokens} out: ≥ {call_pre:.2f} s + {call_dec:.2f} s; '
-                        f'{_pct(call_tok_share, 1)} of the tokens, {n(_pct(call_out_share))} of the time.'),
+                     f'{v("T")} ≥ {v("S")} · {frac("2" + v("P"), v("R", "peak"))} + {v("K")} · {frac(v("P") + " · " + v("s", "elem"), "BW")}',
+                     chapter="Ch 2", holds=f'Batch 1 at peak FLOP/s {v("R", "peak")}; queueing and preparation add more.',
+                     ex=f'70B 8-bit on H100, {A}{v("S")} = {fmt(call.prompt_tokens)}, {v("K")} = {call.output_tokens} → {call_pre:.2f} s + {call_dec:.2f} s: '
+                        f'{n(_pct(call_out_share))} of the time on {_pct(call_tok_share, 1)} of the tokens.'),
                 Card("Append-only history is resent every turn",
                      f'{v("S", "sent")} = {v("H")} · {v("S", "base")} + Δ{v("S", "turn")} · {frac(v("H") + "(" + v("H") + " − 1)", "2")}',
-                     chapter="Ch 2",
-                     ex=f'{A}{v("S", "base")} = {fmt(S0)}, Δ{v("S", "turn")} = {fmt(dS)}, {v("H")} = {H_rs}: {n(fmt(sent30) + " tokens")} sent, {fmt(fresh30)} new. {2 * H_rs} turns: {sent60 / sent30:.1f}×.'),
+                     chapter="Ch 2", holds=f'{v("S", "base")} first prompt; {v("S", "sent")} input tokens sent over {v("H")} calls.',
+                     ex=f'{A}{v("S", "base")} = {fmt(S0)}, Δ{v("S", "turn")} = {fmt(dS)}, {v("H")} = {H_rs} → {n(fmt(sent30))} ({fmt(fresh30)} new); {v("H")} = {2 * H_rs} → {sent60 / sent30:.1f}×.'),
                 Card("pass@k: one of k independent tries passes", f'pass@{v("k")} = E<sub><i>i</i></sub>[1 − (1 − {v("p", "i")})<sup>{v("k")}</sup>]', chapter="Ch 3, 13",
-                     ex=f'{A}One task at {v("p")} = {_pct(pools.pass_rate)}: {v("k")} = ' + ", ".join(str(k) for k in pools.pool_sizes) + " → " + ", ".join(_pct(pass_at[k]) for k in pools.pool_sizes) +
-                        f'. Half at {_pct(pools.easy_pass_rate)}, half at 0 (same mean): pass@{k_max_pool} = {n(_pct(mixed), True)}.'),
-                Card("Verifier precision: share of passes that are valid",
-                     f'Π = {frac(v("p", "valid") + "(1 − " + v("ε", "FR") + ")", v("p", "valid") + "(1 − " + v("ε", "FR") + ") + (1 − " + v("p", "valid") + ")" + v("ε", "FA"))}',
-                     chapter="Ch 3",
-                     holds=f'{v("p", "valid")} valid share of candidates; {v("ε", "FA")}, {v("ε", "FR")} false-accept, false-reject rates of the check.',
-                     ex=f'{A}{v("p", "valid")} = {_pct(vp.valid_rate)}, {v("ε", "FR")} = {_pct(vp.false_reject_rate)}, {v("ε", "FA")} = {_pct(vp.false_accept_rate)}: Π = {n(_pct(prec))}; halving {v("ε", "FA")}: {_pct(prec_half)}.'),
+                     holds=f'{v("p", "i")} pass rate of task <i>i</i>; {v("k")} tries.',
+                     ex=f'{A}{v("p", "i")} = {_pct(pools.pass_rate)}, {v("k")} = ' + ", ".join(str(k) for k in pools.pool_sizes) + " → " + ", ".join(_pct(pass_at[k]) for k in pools.pool_sizes) +
+                        f'. Half at {_pct(pools.easy_pass_rate)}, half at 0 → pass@{k_max_pool} = {n(_pct(mixed), True)}: more samples cannot fix a task that never passes.'),
             ], "Ch 2–3"),
-            Col("2 Agent memory", [
-                Card("Context budget", f'fixed + evidence ≤ {v("S", "max")} − {v("K", "max")}', chapter="Ch 4",
-                     ex=f'Repair-harness window {v("S", "max")} = {fmt(cb.window)} − {A}{fmt(cb.output_reserve)} reserved − {fmt(fixed)} of instructions, tools, and state = {n(fmt(obs_budget))}. '
-                        f'{A}{fmt(cb.observation_per_turn)} appended per turn overflows at turn {turns_fit + 1} of {cb.turns}.'),
+            Col("2 Will the context fit, and at what price?", [
+                Card("Context budget", 'fixed + evidence ≤ window − output reserve', chapter="Ch 4",
+                     ex=f'{fmt(cb.window)} − {A}{fmt(cb.output_reserve)} − {fmt(fixed)} fixed → {n(fmt(obs_budget))}; {A}+{fmt(cb.observation_per_turn)} per turn → full at turn {turns_fit + 1} of {cb.turns}.'),
                 Card("Prefix caching prices the resend",
                      f'$/turn = {v("c", "cache")}({v("S")} − Δ{v("S", "turn")}) + {v("c", "in")}Δ{v("S", "turn")} + {v("c", "out")}{v("K")}', chapter="Ch 4, 19",
-                     holds="From turn 2 the prior request is a byte-identical prefix billed at the cached rate; keep stable content first.",
-                     ex=f'The 30-turn resend, {v("K")} = {K_rs}, at {A}{usd_m(bill.input_price)}, ${c_cache * 1e6:.2f}, {usd_m(bill.output_price)} per M: '
+                     holds="From turn 2, when the prior request is a byte-identical prefix.",
+                     ex=f'The 30-turn resend, {v("K")} = {K_rs}, {A}{usd_m(bill.input_price)}/{usd_m(bill.input_price * bill.cached_fraction)}/{usd_m(bill.output_price)} per M → '
                         f'${bill_fresh:.2f} fresh, {n(f"${bill_cached:.2f}")} cached ({bill_fresh / bill_cached:.1f}×).'),
                 Card("KV state of one trajectory",
-                     f'{v("M", "KV")} = {v("S")} · 2 · {v("N", "L")} · {v("N", "KV")} · {v("d", "head")} · {v("s", "elem")}', chapter="Ch 5",
-                     holds=f'{v("N", "L")} layers, {v("N", "KV")} KV heads, {v("d", "head")} head dimension.',
-                     ex=f'Llama 3 70B, FP16 KV ({NL}, {HKV}, {DH}): {fmt(m_tok / 1024)} KiB/token, {n(f"{m_req / 1e9:.1f} GB")} at its full {fmt(S_ctx)}-token context. '
-                        f'{kv.accelerators} H100s × {kv.hbm_per_accelerator.to("GiB").magnitude:g} GiB = {hbm / 1e9:.0f} GB, less {w_bytes / 1e9:.0f} GB of FP16 weights and a {A}{kv.reserve.to("GB").magnitude:g} GB reserve: '
-                        f'{n(f"{max_req} trajectories")}, waiting on tools or not.'),
-                Card("Exact vector scan is bandwidth-bound", f'time ≈ {v("n", "vec")} · {v("d")} · {v("s", "elem")} / BW', chapter="Ch 6",
-                     ex=f'{A}{v("n", "vec")} = {fmt(vs.vectors / 1e6)}M vectors of {v("d")} = {vs.dimension} FP16 values = {vs_bytes / 1e9:.1f} GB at {fmt(cpu_bw / 1e9)} GB/s: '
-                        f'{n(f"{fmt(vs_t * 1e3)} ms")} a search; filtered to {fmt(vs.filtered_vectors)}, {vs_filt * 1e3:.2f} ms.'),
+                     f'{v("M", "KV")} = 2 · {v("N", "L")} · {v("H", "KV")} · {v("d", "head")} · {v("s", "elem")} · {v("S")}', chapter="Ch 5",
+                     holds=f'{v("N", "L")} layers, {v("H", "KV")} KV heads, {v("d", "head")} head dimension.',
+                     ex=f'Llama 3 70B FP16, {v("S")} = {fmt(S_ctx)} → {fmt(m_tok / 1024)} KiB/token, {n(f"{m_req / 1e9:.1f} GB")}. '
+                        f'{kv.accelerators} × {hbm_gib:g} GiB − {w_bytes / 1e9:.0f} GB weights − {A}{kv.reserve.to("GB").magnitude:g} GB → {n(f"{max_req} contexts")}.'),
+                Card("Exact vector scan is bandwidth-bound", f'{v("T")} ≈ index bytes / BW', chapter="Ch 6",
+                     ex=f'{A}{fmt(vs.vectors / 1e6)}M × {vs.dimension} × {vs.bytes_per_value.to("B").magnitude:g} B = {vs_bytes / 1e9:.1f} GB at {fmt(cpu_bw / 1e9)} GB/s → {n(f"{fmt(vs_t * 1e3)} ms")}; {fmt(vs.filtered_vectors)} vectors → {vs_filt * 1e3:.2f} ms.'),
             ], "Ch 4–6"),
-            Col("3 Tool use", [
+            Col("3 What does a tool call risk?", [
                 Card("Blind retry duplicates effects: settle first",
                      [f'Pr(timeout) = 1 − (1 − {v("q", "req")})(1 − {v("q", "rep")})', f'{v("p", "dup")} = (1 − {v("q", "req")})<sup>2</sup> · {v("q", "rep")}'],
-                     chapter="Ch 7", holds=f'{v("q", "req")}, {v("q", "rep")}: chance the request, the reply is lost; {v("p", "dup")}: chance a retry repeats the effect.',
-                     ex=f'{A}{v("q", "req")} = {v("q", "rep")} = {_pct(qreq)}, {fmt(br_calls)} mutating calls a day: {n(fmt(dups_day) + " duplicated effects", True)}.'),
+                     chapter="Ch 7", holds=f'{v("q", "req")}, {v("q", "rep")} loss rates; {v("p", "dup")} chance a retry repeats the effect.',
+                     ex=f'{A}{v("q", "req")} = {v("q", "rep")} = {_pct(qreq)}, {fmt(br_calls)} calls/day → {n(fmt(dups_day) + " duplicates/day", True)}.'),
                 Card("Sandbox pool: mean leases plus a ready reserve",
                      [f'{v("N", "active")} = {v("λ")} · {v("T", "hold")} &nbsp;(mean)',
-                      f'Pr(Poisson({v("λ")}{v("T", "init")}) ≥ {v("N", "reserve")}) ≤ target'],
+                      f'Pr(Poisson({v("λ")}{v("T", "init")}) ≥ {v("N", "reserve")}) ≤ miss'],
                      chapter="Ch 8",
-                     holds=f'{v("λ")} arrivals/s, {v("T", "hold")} lease time, {v("T", "init")} restore time. The reserve covers restores in flight, the tail above the mean.',
-                     ex=f'{A}{v("λ")} = {lam:g}/s, {v("T", "hold")} = {fmt(t_hold)} s: {n(fmt(n_active) + " leases")} busy on average. {v("T", "init")} = {t_init * 1e3:g} ms: '
-                        f'{n(str(reserve) + " standby")} keep the chance an arrival finds none ≤ {_pct(sp.target_miss, 1)}.'),
+                     holds=f'{v("λ")} arrivals/s; {v("T", "hold")} lease, {v("T", "init")} restore; miss: no standby free.',
+                     ex=f'{A}{v("λ")} = {lam:g}/s, {v("T", "hold")} = {fmt(t_hold)} s → {n(fmt(n_active))} busy (mean); {v("T", "init")} = {t_init * 1e3:g} ms, miss ≤ {_pct(sp.target_miss, 1)} → {n(str(reserve) + " standby")} for the tail.'),
                 Card("Injection exposure grows with reads", f'Pr(exposed) = 1 − (1 − {v("q", "inj")})<sup>{v("n", "read")}</sup>', chapter="Ch 9",
-                     holds=f'{v("q", "inj")} share of read items carrying a payload; {v("n", "read")} untrusted reads per task.',
-                     ex=f'{A}{v("q", "inj")} = {_pct(q_pay)}: repair ({inj.reads["repair"]} reads) {n(_pct(expo["repair"]))}, research ({inj.reads["research"]}) {n(_pct(expo["research"]), True)}. '
-                        f'A screen missing {_pct(inj.miss_rate)}: {fmt(expo_scr * inj.cohort)} per {fmt(inj.cohort)} research tasks. Screens lower {v("q", "inj")}; only containment bounds the effect.'),
+                     holds=f'{v("q", "inj")} payload share of read items; {v("n", "read")} untrusted reads.',
+                     ex=f'{A}{v("q", "inj")} = {_pct(q_pay)}: {v("n", "read")} = {inj.reads["repair"]} → {n(_pct(expo["repair"]))}, {inj.reads["research"]} → {n(_pct(expo["research"]), True)}; '
+                        f'{_pct(inj.miss_rate)}-miss screen → {_pct(expo_scr, 1)}.'),
             ], "Ch 7–9"),
         ],
+        bottom=Table(["Llama 3 70B", f"{v('P')} = {P / 1e9:.1f}B", f"{v('N', 'L')} = {NL}", f"{v('H', 'KV')} = {HKV}", f"{v('d', 'head')} = {DH}", f"context {fmt(S_ctx)}"], [
+            ["NVIDIA H100", f"{v('R', 'peak')} = {fmt(R_PEAK / 1e12)} TFLOP/s FP8", f"BW = {BW / 1e12:.2f} TB/s", f"{hbm_gib:g} GiB HBM",
+             f"{t_pre * 1e3:.3f} ms per input token", f"{t_dec * 1e3:.1f} ms per output token"],
+            [f"{A}Prices per M tokens (book's)", f"{v('c', 'in')} = ${c_in * 1e6:g}", f"{v('c', 'cache')} = ${c_cache * 1e6:.2f} ({price_cache_ratio:g}×)",
+             f"{v('c', 'out')} = ${c_out * 1e6:g} ({fmt(price_out_ratio)}×)", f"{A}logs ≈ {log_bpt:g} B/token", "GB = 10<sup>9</sup> B, GiB = 2<sup>30</sup> B"],
+        ], caption=f'Per-token times: 70B 8-bit weights, batch 1, at the peak and bandwidth above (floors, no queueing). {TAG}= example input. '
+                   'Examples are the book\'s mlsysim scenarios: hypothetical inputs, not measurements.'),
     )
 
     # ================================================================ page 2
@@ -525,73 +548,76 @@ def build() -> Sheet:
         sub="Recovery, evidence, learning, and scale: what each costs, and how many accepted tasks it buys.",
         meta="the four lighthouse workloads",
         notation=[
-            ("Runtime", f'{v("c", "in")}, {v("c", "out")} $ per input, output token · {v("S")} input tokens · {v("K", "max")} output allowance · {A}= example input'),
-            ("Evidence", f'{v("N")} tasks · {v("X")} accepted · {v("z")} = 1.96 (95%, two-sided) · {v("z", "β")} = {pl.z_beta:g} (80% power) · {v("δ")} difference to detect · '
-                         f'{v("k")} runs · {v("p")}, {v("p", "i")} pass rate of one run, of task <i>i</i> · {v("G")} rollouts per group'),
-            ("Scale", f'{v("N", "w")} workers · {v("f")} parallel fraction · {v("h")} overhead per added worker · {v("p", "acc")} acceptance per attempt · {v("C", "eff")} $ per accepted task'),
+            ("Shared", f'{v("p")} pass rate of one run · {v("k")} runs · {v("N")} tasks · {v("p", "acc")} acceptance per attempt · {v("C", "eff")} $ per accepted task · '
+                       f'{v("c", "in")}, {v("c", "out")} $ per input, output token · {v("z")} = 1.96 (95%, two-sided) · {A}= example input'),
         ],
         cols=[
-            Col("4 The agent runtime", [
+            Col("4 Can the runtime contain a failure?", [
                 Card("Admit a call only if its worst case fits",
                      [f'committed + liability ≤ allowance', f'liability = {v("c", "in")} · {v("S")} + {v("c", "out")} · {v("K", "max")}'],
                      chapter="Ch 10",
-                     holds="Committed = settled spend + open reservations + a reserve for the final checks.",
-                     ex=f'{A}${settled:.2f} + ${reserved:.2f} + ${fin:.2f} committed. Next call {v("S")} = {fmt(ad.input_tokens)}, {v("K", "max")} = {fmt(ad.output_allowance)} at {usd_m(ad.input_price)}/{usd_m(ad.output_price)} per M: '
-                        f'${liab:.2f}. ${committed:.2f} &gt; ${allow:.2f}: {n("deny", True)}; a spend-only check admits it.'),
-                Card("Checkpoint interval (Young)", f'{v("T", sup="*")} ≈ √(2 · {v("T", "write")} · MTBF)', chapter="Ch 11",
+                     holds=f'Committed = settled + reserved + final reserve; {v("S")}, {v("K", "max")} input, output-cap tokens.',
+                     ex=f'{A}${settled:.2f} + ${reserved:.2f} + ${fin:.2f}; {v("S")} = {fmt(ad.input_tokens)}, {v("K", "max")} = {fmt(ad.output_allowance)} at {usd_m(ad.input_price)}/{usd_m(ad.output_price)} per M → '
+                        f'${liab:.2f}; ${committed:.2f} &gt; ${allow:.2f}: {n("deny", True)}.'),
+                Card("Checkpoint interval (Young)", f'{v("T", "ckpt", "*")} ≈ √(2 · {v("T", "write")} · MTBF)', chapter="Ch 11",
                      holds=f'{v("T", "write")} pause per checkpoint; MTBF mean time between work-losing failures.',
-                     ex=f'{A}{v("T", "write")} = {t_w:g} s, MTBF = {mtbf / 60:g} min: {n(f"{fmt(t_star)} s")}; pauses plus re-executed work waste ≈ {_pct(waste, 1)}.'),
+                     ex=f'{A}{v("T", "write")} = {t_w:g} s, MTBF = {mtbf / 60:g} min → {n(f"{fmt(t_star)} s")}; pauses plus rework ≈ {_pct(waste, 1)}.'),
                 Card("Repair first, or unwind?",
                      f'E[cost] = {v("C", "fix")} + (1 − {v("p", "fix")}) · {v("C", "fallback")}',
                      chapter="Ch 12",
-                     holds=f'{v("p", "fix")} repair success; {v("C", "fix")}, {v("C", "fallback")} cost of repairing, of unwinding and rebuilding. Repair pays when {v("p", "fix")} &gt; {v("C", "fix")}/{v("C", "fallback")}.',
-                     ex=f'{A}Repair {rv.startup_time.to("s").magnitude:g} s + {rv.repair_output} tokens at {rv_rate:g}/s + {rv.validation_time.to("s").magnitude:g} s = {t_rep:.2f} s; '
-                        f'unwind {rv.unwind_time.to("s").magnitude:g} s + rebuild {rv.rebuild_time.to("s").magnitude:g} s: pays above {n(_pct_up(pstar_t, 2))}. '
-                        f'In dollars ({fmt(rv.repair_input)} + {rv.repair_output} vs {fmt(rv.rebuild_input)} + {fmt(rv.rebuild_output)} tokens in + out, {usd_m(rv.input_price)}/{usd_m(rv.output_price)} per M): above {_pct_up(pstar_c, 2)}.'),
+                     holds=f'{v("p", "fix")} repair success; {v("C", "fix")}, {v("C", "fallback")} cost of repairing, of unwinding and rebuilding. Repair pays if {v("p", "fix")} &gt; {v("C", "fix")}/{v("C", "fallback")}.',
+                     ex=f'{A}{v("C", "fix")} = {rv.startup_time.to("s").magnitude:g} s + {rv.repair_output} tokens at {rv_rate:g}/s + {rv.validation_time.to("s").magnitude:g} s = {t_rep:.2f} s; '
+                        f'{v("C", "fallback")} = {rv.unwind_time.to("s").magnitude:g} + {rv.rebuild_time.to("s").magnitude:g} s → repair pays above {n(_pct_up(pstar_t, 2))}.'),
                 Card("Expected irreversible loss", f'{v("L", "A")} = Σ<sub><i>a</i></sub> Pr(bad <i>a</i>) · impact(<i>a</i>) · (1 − recovered(<i>a</i>))', chapter="Ch 12",
-                     ex=f'One remediation change: {A}{_pct(wk.wrong_change_probability)} × ${fmt(impact)} = {n(f"${fmt(l0)}", True)}. A canary catching {_pct(wk.canary_catch_rate)}, reverting {_pct(wk.canary_recovery_fraction)}: '
-                        f'{n(f"${l1:.0f}")}, {l1 / pv_att:.1f}× the ${pv_att:.2f} attempt.'),
+                     ex=f'One change, {A}Pr(bad) = {_pct(wk.wrong_change_probability)}, impact ${fmt(impact)} → {n(f"${fmt(l0)}", True)}; '
+                        f'canary catches {_pct(wk.canary_catch_rate)}, reverts {_pct(wk.canary_recovery_fraction)} → {n(f"${l1:.0f}")}.'),
+                Card("Head sampling misses rare failures", f'Pr(no trace kept) = (1 − {v("θ")})<sup>{v("n", "f")}</sup>', chapter="Ch 14",
+                     holds=f'{v("θ")} share of traces kept at random; {v("n", "f")} occurrences.',
+                     ex=f'{A}{v("θ")} = {_pct(hs.retention_probability)}, {v("n", "f")} = {hs.occurrences} → {n(_pct(hs_miss), True)}.'),
             ], "Ch 10–12"),
-            Col("5 Evaluation and learning", [
+            Col("5 Is the evidence strong enough?", [
                 Card("Wilson interval on an acceptance rate",
                      [f'{frac(v("X") + " + " + v("z", sup="2") + "/2", v("N") + " + " + v("z", sup="2"))} ± {frac(v("z"), v("N") + " + " + v("z", sup="2"))}√({frac(v("X") + "(" + v("N") + " − " + v("X") + ")", v("N"))} + {frac(v("z", sup="2"), "4")})'],
-                     chapter="Ch 13",
-                     ex=f'{A}{v("N")} = {Nt}: 0 accepted → [0, {_pct_up(wil[0][1])}]; 2 → [{_pct_dn(wil[2][0])}, {_pct_up(wil[2][1])}] (Wald: {_pct(wald_lo2, 1)}, impossible); '
+                     chapter="Ch 13", holds=f'{v("X")} accepted of {v("N")}.',
+                     ex=f'{A}{v("N")} = {Nt}: {v("X")} = 0 → [0, {_pct_up(wil[0][1])}]; 2 → [{_pct_dn(wil[2][0])}, {_pct_up(wil[2][1])}]; '
                         f'{wi.successes[2]} → {n(f"±{(wil[wi.successes[2]][1] - wil[wi.successes[2]][0]) / 2 * 100:.1f} points")}.'),
                 Card("Tasks to detect a change", f'{v("N", "arm")} ≈ {frac("2(" + v("z") + " + " + v("z", "β") + ")<sup>2</sup> " + v("p") + "(1 − " + v("p") + ")", v("δ", sup="2"))}',
                      chapter="Ch 13",
-                     holds=f'{v("N", "arm")} tasks per arm, independent arms, 5% significance. Pairing tasks needs fewer.',
-                     ex=f'At {v("p")} = {pl.rate:g}: {n(fmt(per_arm[pl.differences[0]]))} per arm for {fmt(pl.differences[0] * 100)} points, {n(fmt(per_arm[pl.differences[1]]), True)} for {fmt(pl.differences[1] * 100)}.'),
+                     holds=f'Per independent arm; {v("z", "β")} = {pl.z_beta:g} for 80% power; {v("δ")} difference to detect.',
+                     ex=f'{v("p")} = {pl.rate:g}, {A}{v("δ")} = {fmt(pl.differences[0] * 100)} points → {n(fmt(per_arm[pl.differences[0]]))}; {fmt(pl.differences[1] * 100)} points → {n(fmt(per_arm[pl.differences[1]]), True)}.'),
+                Card("Verifier precision: share of passes that are valid",
+                     f'Π = {frac(v("p", "valid") + "(1 − " + v("ε", "FR") + ")", v("p", "valid") + "(1 − " + v("ε", "FR") + ") + (1 − " + v("p", "valid") + ")" + v("ε", "FA"))}',
+                     chapter="Ch 3",
+                     holds=f'{v("p", "valid")} valid share of candidates; {v("ε", "FA")}, {v("ε", "FR")} false-accept, false-reject rates.',
+                     ex=f'{A}{v("p", "valid")} = {_pct(vp.valid_rate)}, {v("ε", "FR")} = {_pct(vp.false_reject_rate)}, {v("ε", "FA")} = {_pct(vp.false_accept_rate)} → Π = {n(_pct(prec))}; '
+                        f'{v("ε", "FA")} = {_pct(vp.false_accept_rate / 2)} → {_pct(prec_half)}.'),
                 Card("pass^k: all k runs pass", f'pass<sup>{v("k")}</sup> = E<sub><i>i</i></sub>[{v("p", "i", v("k"))}] &nbsp; vs &nbsp; pass@{v("k")} = 1 − E<sub><i>i</i></sub>[(1 − {v("p", "i")})<sup>{v("k")}</sup>]', chapter="Ch 13",
-                     ex=f'{A}{v("p")} = {_pct(rc.step_success)} on every task, {v("k")} = {rc.long_horizon}: {n(_pct(pk), True)}. Holding {_pct(rc.target_success)} over {rc.long_horizon} runs needs {v("p")} ≥ {_pct_up(p_need)}.'),
-                Card("Head sampling misses rare failures", f'Pr(no trace kept) = (1 − {v("θ")})<sup>{v("n", "f")}</sup>', chapter="Ch 14",
-                     holds=f'{v("θ")} share of traces kept at random; {v("n", "f")} occurrences of the failure.',
-                     ex=f'{A}{v("θ")} = {_pct(hs.retention_probability)}, {v("n", "f")} = {hs.occurrences}: probability {n(_pct(hs_miss), True)} that no trace is kept. Keep traces by verdict.'),
+                     holds=f'{v("p", "i")} pass rate of task <i>i</i>.',
+                     ex=f'{A}{v("p", "i")} = {_pct(rc.step_success)}, {v("k")} = {rc.long_horizon} → {n(_pct(pk), True)}; holding {_pct(rc.target_success)} over {rc.long_horizon} → {v("p", "i")} ≥ {_pct_up(p_need)}.'),
                 Card("Group contrast: which rollouts carry gradient", f'Pr(mixed group) = 1 − {v("p", sup=v("G"))} − (1 − {v("p")})<sup>{v("G")}</sup>', chapter="Ch 15, 17",
-                     holds="All-pass or all-fail groups have zero advantage, so zero gradient.",
-                     ex=f'{A}{v("G")} = {gr.group}, {v("p")} = {_pct(gr.pass_rate)}: {n(_pct(g_c))} of groups give a nonzero gradient, {g_per:.0f} rollouts per such group. '
-                        f'Tasks near {v("p")} = {_pct(tg.pass_rate)}: {_pct(g_c_t)}.'),
+                     holds=f'{v("G")} rollouts of one task; an all-pass or all-fail group has zero advantage, so zero gradient.',
+                     ex=f'{A}{v("G")} = {gr.group}: {v("p")} = {_pct(gr.pass_rate)} → {n(_pct(g_c))} ({g_per:.0f} rollouts per useful group); {v("p")} = {_pct(tg.pass_rate)} → {_pct(g_c_t)}.'),
             ], "Ch 13–17"),
-            Col("6 Agents at scale", [
+            Col("6 Does scale pay?", [
                 Chart(sp_plot.svg("Speedup against workers with and without coordination overhead")),
                 Card("Delegation speedup with coordination cost",
                      f'speedup = 1 / ((1 − {v("f")}) + {v("f")}/{v("N", "w")} + {v("h")}({v("N", "w")} − 1))',
-                     chapter="Ch 18",
-                     ex=f'{A}{v("f")} = {f_par:g}, {v("h")} = {h_w:g}: peak {n(f"{best_s:.2f}×")} at {best_n}. USL peak √((1 − {v("σ")})/{v("κ")}), research (contention {v("σ")} = {rf.contention:g}, coherency {v("κ")} = {rf.coherency:g}): ≈ {n_star_rf:.0f}.'),
+                     chapter="Ch 18", holds=f'{v("N", "w")} workers, {v("f")} parallel fraction, {v("h")} overhead per added worker.',
+                     ex=f'{A}{v("f")} = {f_par:g}, {v("h")} = {h_w:g} → peak {n(f"{best_s:.2f}×")} at {best_n} workers.'),
                 Card("A token multiple must buy acceptance",
                      f'{frac(v("C", "eff") + " multi", v("C", "eff") + " single")} = token multiple × {frac(v("p", "acc") + " single", v("p", "acc") + " multi")}', chapter="Ch 18",
                      holds="With cost proportional to tokens.",
-                     ex=f'Reported (Hadfield et al., 2025): {fmt(dl.multi_agent_tokens_vs_chat)}× vs {fmt(dl.agent_tokens_vs_chat)}× chat tokens, so acceptance must rise {m_tok_mult:.2f}× (impossible above {_pct_dn(max_single)}); '
-                        f'the reported {_pct(dl.reported_gain, 1)} gain, read as acceptance, costs {n(f"{ratio_at_gain:.2f}×")}.'),
+                     ex=f'{fmt(dl.multi_agent_tokens_vs_chat)}× vs {fmt(dl.agent_tokens_vs_chat)}× chat tokens (reported, Hadfield et al., 2025) → {v("p", "acc")} must rise {m_tok_mult:.2f}×; impossible above {_pct_dn(max_single)}.'),
                 Card("The token-price fallacy", f'{v("C", "eff")} = cohort cost / accepted tasks', chapter="Ch 19",
-                     ex=f'{A}100 repairs: {fb.turns} × ({fmt(fb.input_tokens_per_turn)} in + {fmt(fb.output_tokens_per_turn)} out at {usd_m(fb.input_price)}/{usd_m(fb.output_price)} per M + ${_usd(fb.environment_per_turn):.2f} tools) '
-                        f'+ ${_usd(fb.assessment_per_attempt):.2f} = ${fr_att:.2f}; {fb.accepted} accepted: ${fr_eff:.2f}. '
-                        f'{al.turns} × ({fmt(al.input_tokens_per_turn)} + {fmt(al.output_tokens_per_turn)} at {usd_m(al.input_price)}/{usd_m(al.output_price)}), {al.accepted} accepted: '
-                        f'${lw_eff:.2f}, {n(f"{lw_eff / fr_eff:.1f}×", True)}; {lw_tri / fr_tri:.1f}× with ${_usd(fb.triage_per_rejected):g} triage per reject.'),
-                Card("Adaptation payback", 'tasks to repay = investment / saving per task', chapter="Ch 19",
-                     ex=f'{A}${fmt(invest)}; {ap.base["steps"]} × ({fmt(ap.base["input_tokens"])} in + {ap.base["output_tokens"]} out) at {usd_m(ap.base["input_price"])}/{usd_m(ap.base["output_price"])} = ${c_base:.4f} → '
-                        f'{ap.adapted["steps"]} × ({fmt(ap.adapted["input_tokens"])} + {ap.adapted["output_tokens"]}) at {usd_m(ap.adapted["input_price"])}/{usd_m(ap.adapted["output_price"])} = ${c_adapt:.4f}: '
-                        f'{n(fmt(n_be) + " tasks")}, {months:.1f} months at {fmt(ap.monthly_volume)} a month.'),
+                     ex=f'{A}{fb.turns} turns × ({fmt(fb.input_tokens_per_turn)} in, {fmt(fb.output_tokens_per_turn)} out at {usd_m(fb.input_price)}/{usd_m(fb.output_price)} per M + ${_usd(fb.environment_per_turn):.2f} tools) '
+                        f'+ ${_usd(fb.assessment_per_attempt):.2f} check = ${fr_att:.2f}, {fb.accepted}/100 → ${fr_eff:.2f}. '
+                        f'{al.turns} × ({fmt(al.input_tokens_per_turn)}, {fmt(al.output_tokens_per_turn)} at {usd_m(al.input_price)}/{usd_m(al.output_price)} + ${_usd(al.environment_per_turn):.2f} tools) + ${_usd(al.assessment_per_attempt):.2f} = ${lw_att:.2f}, '
+                        f'{al.accepted}/100 → ${lw_eff:.2f} ({n(f"{lw_eff / fr_eff:.1f}×", True)}).'),
+                Card("Adaptation payback", f'{v("N", sup="*")} = investment / ({v("C", "base")} − {v("C", "adapted")})', chapter="Ch 19",
+                     holds=f'{v("N", sup="*")} break-even tasks; {v("C", "base")}, {v("C", "adapted")} cost per task before, after.',
+                     ex=f'{A}${fmt(invest)}; {ap.base["steps"]} × ({fmt(ap.base["input_tokens"])} in, {ap.base["output_tokens"]} out) at {usd_m(ap.base["input_price"])}/{usd_m(ap.base["output_price"])} = ${c_base:.4f} → '
+                        f'{ap.adapted["steps"]} × ({fmt(ap.adapted["input_tokens"])}, {ap.adapted["output_tokens"]}) at {usd_m(ap.adapted["input_price"])}/{usd_m(ap.adapted["output_price"])} = ${c_adapt:.4f} → '
+                        f'{n(fmt(n_be) + " tasks")}; {fmt(ap.monthly_volume)}/month → {months:.1f} months.'),
             ], "Ch 18–19"),
         ],
         bottom=Table(["Reference workloads (Ch 1, 19)", "turns", "untrusted reads", "Pr(exposed) at 1%", "C<sub>attempt</sub>", "p<sub>acc</sub>", "C<sub>eff</sub>", "largest cost term"], [
@@ -601,4 +627,4 @@ def build() -> Sheet:
             for k in ("repair", "research", "remediation", "support")]),
     )
     return Sheet(volume=3, book="Agentic Machine Learning Systems", scope="The Trajectory", pages=[p1, p2],
-                 sources=f'{TAG}= example input · examples are the book\'s mlsysim scenarios: hypothetical inputs, not measurements · prices are the book\'s hypothetical $3 / $0.30 / $15 per M tokens')
+                 sources=f'{TAG}= example input · GB = 10<sup>9</sup> B · examples are the book\'s mlsysim scenarios: hypothetical inputs, not measurements · prices are the book\'s hypothetical $3 / $0.30 / $15 per M tokens')

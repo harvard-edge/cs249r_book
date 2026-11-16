@@ -9,7 +9,7 @@ Math" callouts.
 |---|---|---|---|---|
 | I | `vol1.py` | One Node | Will it run? | Will it meet its target? |
 | II | `vol2.py` | The Fleet | Will it scale? | Will it survive and serve? |
-| III | `vol3.py` | The Trajectory | What does one trajectory cost? | Is it worth running? |
+| III | `vol3.py` | The Trajectory | Will it finish within budget? | Is it worth running? |
 | IV | `vol4.py` | The Action | Can it stop in time? | Has it earned permission? |
 
 ## Build
