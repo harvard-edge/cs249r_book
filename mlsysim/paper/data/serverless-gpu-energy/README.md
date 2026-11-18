@@ -195,7 +195,7 @@ definitions must be reconciled first.
 
 ## Findings the table encodes
 
-- Loaded idle power is 14% (A100-40GB) to 45% (L4) of TDP, against the 30%
+- Loaded idle power is 14% (A100-40GB) to 46% (L4) of TDP, against the 30%
   Engine.solve assumes. It is 17.5% on the H100. `../gpu-energy/` measured
   21% on H100 and A100-80GB boards, with vLLM's engine and its pre-allocated
   KV cache resident.
