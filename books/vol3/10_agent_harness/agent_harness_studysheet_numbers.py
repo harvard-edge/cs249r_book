@@ -8,6 +8,7 @@ A printed result is computed from the rounded values the sheet prints beside it,
 against the unrounded model value.
 Memory follows the registry: the workspace lease is MiB, so totals print as GiB (GB).
 """
+import math
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
@@ -105,7 +106,7 @@ def numbers() -> dict:
     pin = adm.input_price.to("USD / Mtoken").magnitude
     pout = adm.output_price.to("USD / Mtoken").magnitude
     c_in = r(inputtokens * pin / PER_MILLION, 2)
-    c_out = r(kout * pout / PER_MILLION, 4)
+    c_out = r(kout * pout / PER_MILLION, 5)
     liab = c_in + c_out
     near(liab, ares.liability, 5e-5)
     spend_head = r(allow - settled, 2)
@@ -121,8 +122,8 @@ def numbers() -> dict:
     near(resshare, ares.reservation_share, 1e-12)
     n.update(allow=fx(allow, 2), settled=fx(settled, 2), reserved=fx(reserved, 2), fin=fx(fin, 2),
              inputtokens=grp(inputtokens), kout=grp(kout), pin=fx(pin, 0), pout=fx(pout, 0), cin=fx(c_in, 2),
-             cout=fx(c_out, 4), liab=fx(liab, 4), spendhead=fx(spend_head, 2), head=fx(head, 2),
-             short=fx(short, 4), nmax=f"{round(nmax, -2):,.0f}",
+             cout=fx(c_out, 5), liab=fx(liab, 5), spendhead=fx(spend_head, 2), head=fx(head, 2),
+             short=fx(short, 5), nmax=f"{math.floor(nmax):,}",
              resshare=pct(resshare))
 
     # Bar picture: segments scaled to the allowance (pt per dollar chosen to fit the column)
@@ -135,7 +136,16 @@ def numbers() -> dict:
     assert liab <= head2
     nmax2 = (head2 - c_out) / pin * PER_MILLION
     n.update(tcharge=fx(t_charge, 2), settledtwo=fx(settled2, 2), headtwo=fx(head2, 2),
-             nmaxtwo=f"{round(nmax2, -2):,.0f}", spare=fx(head2 - liab, 4))
+             nmaxtwo=f"{math.floor(nmax2):,}", spare=fx(head2 - liab, 5))
+
+    # ---- Mistake: choosing a ceiling. ASSUMED: under a tight ceiling attempts average $1.00 (halted runs
+    #      spend the ceiling and count as unaccepted) and 50 percent are accepted; under a looser ceiling
+    #      attempts average $1.50 and 80 percent are accepted (chapter: eq-vol3-cost-per-accepted-task).
+    ca_cost, ca_acc, cb_cost, cb_acc = 1.00, 0.50, 1.50, 0.80
+    ca_eff, cb_eff = ca_cost / ca_acc, cb_cost / cb_acc
+    assert cb_eff < ca_eff and r(cb_eff, 2) < r(ca_eff, 2)
+    n.update(ceilacost=fx(ca_cost, 2), ceilaacc=pct(ca_acc), ceilaaccfrac=fx(ca_acc, 2), ceilaeff=fx(ca_eff, 2),
+             ceilbcost=fx(cb_cost, 2), ceilbacc=pct(cb_acc), ceilbaccfrac=fx(cb_acc, 2), ceilbeff=fx(cb_eff, 2))
 
     # ---- Check yourself
     # Q1 ASSUMED: 25 ms per output token, 6,000-token allowance, pause target 20 s.

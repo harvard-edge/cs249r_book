@@ -78,7 +78,7 @@ def numbers() -> dict:
              pause=fx(pause, 1), restore=fx(restore, 0), rebuild=fx(rebuild, 1), reexec=fx(reexec, 0),
              best=f"{best}", rate=fx(rate, 2), klog=fx(k_log, 0), kexec=fx(k_exec, 1), gain=fx(gain, 0),
              restoretwo=fx(len(crashes) * restore, 0), everyturn=fx(every[2] + every[3], 0),
-             balanceinside=fx(2 * pause / (rate * rebuild), 0))
+             balanceinside=fx(2 * pause / (rate * rebuild), 0), execinside=fx(2 * pause / (rate * reexec), 1))
 
     # ---- Your turn. ASSUMED: the capture pause rises to 2 s (four times); all else unchanged
     pause2 = 2.0
@@ -121,6 +121,12 @@ def numbers() -> dict:
     n.update(retcents=fx(cost_usd * 100, 1), retmonths=fx(rt.period.to("month").magnitude, 0),
              retattempt=fx(attempt, 2), retshare=pct(rres.attempt_share, 1),
              retlogshare=pct(rres.log_share, 2), retworkspace=pct(rres.workspace_share))
+
+    # ---- Resume budget: the cold prefill floor (chapter: ResumePrefill, Scenarios.ResumedContextColdPrefill)
+    cp = SC.ResumedContextColdPrefill
+    t_cold = cp.result.prefill_time.to("second").magnitude
+    assert 2.0 < t_cold < 2.7                                          # the chapter's guard: about 2.3 s
+    n.update(coldtokens=f"{cp.prompt_tokens:,}", coldprefill=fx(t_cold, 1))
     return n
 
 

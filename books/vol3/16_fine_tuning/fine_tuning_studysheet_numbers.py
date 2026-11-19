@@ -155,7 +155,8 @@ def numbers() -> dict:
     ex_split = pieces / (ns + pieces)
     n.update(batchlong=ci(lt), batchcount=f"{ns}", batchshort=ci(st), btotal=ci(lt + ns * st), bpieces=f"{pieces}",
              bpiece=ci(lt // pieces), btok=pct(tok, 1), bex=pct(ex, 1), bexn=f"{ns + 1}",
-             bexsplit=pct(ex_split, 1), bsplitn=f"{ns + pieces}")
+             bexsplit=pct(ex_split, 1), bsplitn=f"{ns + pieces}",
+             bpexp=fx((pieces + 1) / 2, 1))                          # per-call expansion (H+1)/2 at H = pieces
     return n
 
 

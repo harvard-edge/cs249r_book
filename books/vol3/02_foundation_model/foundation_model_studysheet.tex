@@ -10,7 +10,7 @@
 % ===================================================================== FRONT: LEARN
 \frontside
 \begin{bigidea}
-A model call returns a \hl{proposal}, not an action: text with no authority or side effects. The
+A model call returns a \hl{proposal}, not an action. The
 runtime sizes the request, reads \hl{how generation ended} before what it
 said, checks each property with its own evidence, and prices the call.
 \end{bigidea}
@@ -21,11 +21,10 @@ said, checks each property with its own evidence, and prices the call.
 \idea{A proposal is not an action.}{The model proposes; the inference service runs it and reports
   status; the runtime validates, authorizes and executes.}
 \idea{Count what the model receives.}{Tokenize the whole serialized request (roles, tool schemas,
-  wrappers, image positions) with the model's tokenizer; reserve reply room.}
-\idea{Sampling is not correctness.}{Lower temperature sharpens;
-  top-$\NucleusProbabilityMass$ keeps the likeliest tokens to mass $\NucleusProbabilityMass$ and renormalizes.
+  wrappers) with the model's tokenizer; reserve reply room.}
+\idea{Sampling is not correctness.}{Top-$\NucleusProbabilityMass$ keeps the likeliest tokens to mass $\NucleusProbabilityMass$ and renormalizes.
   Only a recorded response replays.}
-\idea{Status before payload.}{The quarantining rule: only a \texttt{COMPLETED} call enters the candidate
+\idea{Status before payload.}{Only a \texttt{COMPLETED} call enters the candidate
   path. A truncated prefix can still parse; log it, never run or ``repair'' it.}
 \idea{Each check proves one property.}{Self-review re-samples
   the same model; a fallible checker leaves defects among its passes.}
@@ -40,12 +39,18 @@ said, checks each property with its own evidence, and prices the call.
 Status \texttt{COMPLETED} & a whole candidate arrived & its content\\
 Schema or grammar mask & form and declared types & values, permission; a cut-off legal prefix\\
 Permission & operation and target are in the grant & that it serves the goal\\
-Static analysis & what it covers & run-time behavior\\
 Tests & outcomes on the inputs run & untested cases (races)\\
 \end{sheettable}
 \vspace{3pt}
 {\fontsize{8.4}{10.4}\selectfont\color{muted}Not \texttt{COMPLETED} (\texttt{TRUNCATED}, \texttt{REFUSED}, a timeout): quarantine. On
 truncation raise $\OutputLimit$ or emit less; a timeout leaves the remote outcome and bill unknown.\par}
+
+\vspace{10pt}
+\fcard{Temperature}%
+  {\Pr(\VocabularyToken) \propto \exp\!\left(\OutputLogit_{t,\VocabularyToken} / \SamplingTemperature\right)}%
+  {Logit $\OutputLogit_{t,\VocabularyToken}$ of token $\VocabularyToken$ over temperature $\SamplingTemperature$,
+   normalized. Halving $\SamplingTemperature$ squares each weight, then renormalizes: sharper, not shown correct.}%
+  {}{}
 \end{leftcol}%
 \begin{rightcol}
 \sheetsec{Formulas you will use}
@@ -58,9 +63,9 @@ truncation raise $\OutputLimit$ or emit less; a timeout leaves the remote outcom
   {\PerTokenPrefillTime \approx \frac{2\Parameters}{\PeakRate}, \qquad
    \PerTokenDecodeTime \ge \frac{\Parameters\,\ElementStorageSize}{\Bandwidth}}%
   {Peak rate $\PeakRate$, memory bandwidth $\Bandwidth$, $\ElementStorageSize$ bytes per parameter; decode
-   reads all weights per output token. Reference: $\Parameters = \val{params}$B in 8-bit, \val{peak} TFLOP/s, \val{bw} TB/s gives
+   reads all weights per output token. Reference: $\Parameters = \val{params}$B in 8-bit ($\ElementStorageSize$ = 1 B), \val{peak} TFLOP/s, \val{bw} TB/s gives
    \val{tpre}~$\mu$s and \val{tdec}~ms; one output token $\approx$ \val{ratio} prompt tokens.}%
-  {}{}
+  {Wall clock adds preparation, queueing and post-processing.}{}
 \fcard{Append-only history}%
   {\PromptTokensSent = \TurnHorizon\BasePromptLength + \TurnAppendLength\,\frac{\TurnHorizon(\TurnHorizon-1)}{2}}%
   {Over $\TurnHorizon$ turns: first prompt $\BasePromptLength$, $\TurnAppendLength$ appended per turn.
@@ -86,7 +91,7 @@ truncation raise $\OutputLimit$ or emit less; a timeout leaves the remote outcom
 \fcard{What a passing verdict leaves}%
   {\Pr(\text{defective}\mid\text{pass}) = \frac{\VerifierFalseAcceptanceRate\,\CandidateDefectRate}
    {\VerifierFalseAcceptanceRate\,\CandidateDefectRate + \Pr(\text{pass}\mid\text{valid})\,(1-\CandidateDefectRate)}}%
-  {Defect rate $\CandidateDefectRate$; false-accept rate $\VerifierFalseAcceptanceRate = \Pr(\text{pass}\mid\text{defective})$,
+  {Two different rates: defect rate $\CandidateDefectRate$; false-accept rate $\VerifierFalseAcceptanceRate = \Pr(\text{pass}\mid\text{defective})$,
    the lever.}%
   {Rerunning the same check is correlated: no new evidence.}{}
 \end{rightcol}
@@ -95,14 +100,15 @@ truncation raise $\OutputLimit$ or emit less; a timeout leaves the remote outcom
 \backside
 \begin{answers}
 \ans{Finish}{Whole file: \val{ytfullpre} + \val{fulldec} = \val{ytfulltot} s, misses. Local edit: \val{ytdiffprompt}
-  $\times$ \val{tpre}~$\mu$s = \val{ytdiffpre} s; + \val{diffdec} = \val{ytdifftot} s, fits with \val{ytmargin} s spare. Prefill now
-  dominates the local edit: cut the prompt (prefix reuse) to protect the margin.}
+  $\times$ \val{tpre}~$\mu$s = \val{ytdiffpre} s; + \val{diffdec} = \val{ytdifftot} s, fits at the floors, \val{ytmargin} s spare. Prefill now
+  dominates the local edit: reuse the prefix.}
 \ans{1}{(a) Ceiling \val{qwin} $-$ \val{qres} = \val{qceil}; turn \val{qlast} sends \val{qlastprompt}, turn \val{qnext}
   sends \val{qnextprompt}: fails at turn \val{qnext}. Half reserve (ceiling \val{qceilhalf}) buys one turn (fails at
   \val{qnexthalf}) and invites \texttt{TRUNCATED} replies. (b) \val{qsent} re-sent, \val{qfresh} fresh (append-only card).}
 \columnbreak
-\ans{2}{\val{qpa} $<$ \val{qtopp}, \val{qtwo} $<$ \val{qtopp}, \val{qmass} $\ge$ \val{qtopp}: keep three, renormalized
-  \val{qra}, \val{qrb}, \val{qrc}. No: temperature sets spread, not truth; choose by measured pass rate.}
+\ans{2}{(a) \val{qpa} $<$ \val{qtopp}, \val{qtwo} $<$ \val{qtopp}, \val{qmass} $\ge$ \val{qtopp}: keep three, renormalized
+  \val{qra}, \val{qrb}, \val{qrc}. (b) Weights squared: \val{qsqa} $\div$ \val{qsqsum} $\approx$ \val{qtopsharp}
+  (was \val{qpa}). Not shown: temperature sets spread, not truth; choose by measured pass rate (temperature card).}
 \ans{3}{(a) Status gate: quarantine, log, retry with a larger allowance or terser format; never close the
   fragment. (b) Schema passes; permission rejects a path outside the workspace. (c) No: a mask gives form
   only; both are legal strings.}
@@ -151,14 +157,12 @@ prompt token, \val{tdec}~ms per output token.\par\vspace{5pt}
   {It fixes the choice for given logits, but reduction order and serving changes alter
    the logits. Replay recorded responses.}{}
 \mistake{``If a call fails, send it again.''}%
-  {An identical whole-file retry spends another \val{fulltot} s and misses again (the first may still run and
-   bill); a truncated call truncates again. Route on status.}{}
+  {An identical whole-file retry spends another \val{fulltot} s and misses again; the same limit can truncate again. Route on status.}{}
 \end{leftcol}%
 \begin{rightcol}
 \sheetsec{Your turn: finish it}
 \begin{practicebox}\boxtitle{Same deadline, a \val{ytbase}-token prompt}
-\assumed{} the repository context grows to \val{ytbase} tokens; instructions, outputs, floors and the
-\val{deadline} s deadline stay the same.\par\vspace{4pt}
+\assumed{} the repository context grows to \val{ytbase} tokens; all else as above.\par\vspace{4pt}
 \textbf{Given:} whole-file prefill \val{ytfullprompt} $\times$ \val{tpre}~$\mu$s $=$ \val{ytfullpre} s.\par
 \textbf{You:} finish both totals. Which format still fits, and which term now dominates the local edit?\par\vspace{30pt}
 \end{practicebox}
@@ -169,9 +173,8 @@ prompt token, \val{tdec}~ms per output token.\par\vspace{5pt}
 \item \assumed{} the front curve's agent (\val{sbase} tokens, \val{delta} appended per turn), a \val{qwin}-token
   window, \val{qres} reserved. (a) At which turn does the prompt stop fitting? Does halving the reserve help
   much? (b) Over \val{qturns} turns, how many tokens are re-sent, and how many need fresh prefill with reuse?
-\item \assumed{} next-token probabilities \val{qpa}, \val{qpb}, \val{qpc}, \val{qpd}. Which tokens survive
-  top-$\NucleusProbabilityMass$ with $\NucleusProbabilityMass = \val{qtopp}$, at what probabilities? Does lower
-  temperature make the top token more likely correct?
+\item \assumed{} unit-temperature probabilities \val{qpa}, \val{qpb}, \val{qpc}, \val{qpd}. (a) Which tokens survive
+  top-$\NucleusProbabilityMass$ with $\NucleusProbabilityMass = \val{qtopp}$, at what probabilities? (b) At $\SamplingTemperature = \val{qtau}$, no truncation: top token's probability? More likely correct?
 \item Which check stops each, and what next? (a) A call hits its output limit; the fragment
   \mbox{\texttt{rm -rf /tmp/scratch}} parses. (b) A \texttt{COMPLETED} call, granted reads inside the workspace only, proposes
   \texttt{read\_file("../../etc/passwd")}. (c) Would a grammar mask have prevented either?

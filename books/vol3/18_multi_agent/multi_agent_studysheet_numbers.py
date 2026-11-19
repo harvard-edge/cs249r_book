@@ -88,7 +88,11 @@ def numbers() -> dict:
     # ---- Mistake: clean merge (WriteCollision, Scenarios.ThousandFileSharedWrites)
     ws = SC.ThousandFileSharedWrites
     n.update(files=f"{ws.files:,}", writes=f"{ws.writes_per_worker}",
-             disjointtwo=pct(1 - ws.collision[2], 1), evenodds=f"{ws.even_odds_fleet}")
+             evenodds=f"{ws.even_odds_fleet}")
+    # the sheet prints the front card's approximation exp(-N(N-1)w^2/(2n)) at N = 2, so a student can check it
+    disjoint_two = math.exp(-2 * 1 * ws.writes_per_worker ** 2 / (2 * ws.files))
+    near(disjoint_two, 1 - ws.collision[2], 0.002)
+    n.update(disjointtwo=pct(disjoint_two, 1))
 
     # ---- Mistake: reviewer agreement (ReviewCorrelation, ReviewFloor; Scenarios.FiveCorrelatedReviewers)
     pn = SC.FiveCorrelatedReviewers
@@ -112,16 +116,28 @@ def numbers() -> dict:
              qenough=pct(r(q_all, 3) + r(q_one_late, 3), 1))
     near(r(q_all, 3) + r(q_one_late, 3), q_enough, 0.001)
 
-    # ---- Q2 (shared writes). ASSUMED: 4,000 files, 20 writes per worker, uniform and independent
-    w_f, w_w = 4000, 20
+    # ---- Q2 (shared writes). ASSUMED: 2,000 files, 20 writes per worker, uniform and independent
+    # (w^2/n = 0.2, unlike the front card's 1,000 files and 10 writes, so the fleet answer must be computed)
+    w_f, w_w = 2000, 20
+    assert w_w ** 2 / w_f != ws.writes_per_worker ** 2 / ws.files
     expo = lambda m: m * (m - 1) * w_w ** 2 / (2 * w_f)
     q_three = 1 - math.exp(-expo(3))
     even = next(m for m in range(2, 50) if 1 - math.exp(-expo(m)) > 0.5)
-    assert even == 5
+    assert even == 4
     n.update(wfiles=f"{w_f:,}", wwrites=f"{w_w}", wexpthree=fx(expo(3), 1),
              wthree=pct(q_three, 0), weven=f"{even}", wexpeven=fx(expo(even), 1),
              wexpbelow=fx(expo(even - 1), 1), weventpct=pct(1 - math.exp(-expo(even)), 0),
              wbelow=f"{even - 1}", lntwo=fx(math.log(2), 2))
+
+    # ---- Q1(d) (makespan bound). ASSUMED: 8 tasks of 10 min, longest dependency chain 3 tasks, 4 then 5 slots
+    mk_tasks, mk_len, mk_chain, mk_slots = 8, 10, 3, 4
+    work, chain = mk_tasks * mk_len, mk_chain * mk_len
+    bound4 = max(work / mk_slots, chain)
+    bound5 = max(work / (mk_slots + 1), chain)
+    assert bound4 == bound5 == chain                                  # the chain binds: a fifth slot leaves the bound unchanged
+    n.update(mktasks=f"{mk_tasks}", mklen=f"{mk_len}", mkchain=f"{mk_chain}", mkslots=f"{mk_slots}",
+             mkslotsfive=f"{mk_slots + 1}", mkwork=f"{work}", mkpath=f"{chain}",
+             mkfour=fx(work / mk_slots, 0), mkfive=fx(work / (mk_slots + 1), 0), mkbound=fx(bound4, 0))
 
     # ---- Q3 (token multiple). ASSUMED: delegation uses 2.5x tokens per attempt; baselines 50 and 30 percent
     m_r, base_hi, base_lo = 2.5, 0.50, 0.30

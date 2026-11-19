@@ -126,6 +126,26 @@ def numbers() -> dict:
              rereadshare=pct(cr.reread_share), missdrop=pct(cb.miss_fraction), missrise=pct(cr.miss_share))
     near(r(usd(cr.total_uncached), 2) / r(usd(cr.total_cached), 2), cr.cache_ratio, 0.05)
 
+    # ---- Mistake: compaction always saves (chapter: PrefixCacheCost, Scenarios.RepairCompactionPayback,
+    # ...PaybackHalfCachedRate). U = c_out K_sum + c_in S_comp; s = c_cache (S - S_comp); N_min = 1 + ceil(U / s)
+    cp, cph = SC.RepairCompactionPayback, SC.RepairCompactionPaybackHalfCachedRate
+    c_in = cp.bill.input_price.to("USD / Mtoken").magnitude
+    c_out = cp.bill.output_price.to("USD / Mtoken").magnitude
+    c_cache = c_in * cp.bill.cached_fraction
+    ctx, comp, ksum = cp.result.context_at_compaction, cp.compact_to, cp.summary_tokens
+    up = (c_out * ksum + c_in * comp) / 1e6
+    save = c_cache * (ctx - comp) / 1e6
+    near(up, usd(cp.result.upfront), 1e-12)
+    near(save, usd(cp.result.per_call_saving), 1e-12)
+    pay = 1 + math.ceil(r(up, 4) / r(save, 5))                       # from the printed, rounded U and s
+    assert pay == cp.result.breakeven_calls <= cp.result.remaining_calls
+    save_half = c_in * cph.bill.cached_fraction * (ctx - comp) / 1e6
+    pay_half = 1 + math.ceil(r(up, 4) / r(save_half, 6))
+    assert pay_half == cph.result.breakeven_calls > cp.result.remaining_calls
+    n.update(cpin=fx(c_in, 0), cpout=fx(c_out, 0), cpcache=fx(c_cache, 2), cpctx=f"{ctx:,}", cpto=f"{comp:,}",
+             cpsum=f"{ksum:,}", cpup=fx(up, 4), cpsave=fx(save, 5), cpratio=fx(up / save, 1), cppay=f"{pay}",
+             cprest=f"{cp.result.remaining_calls}", cppayhalf=f"{pay_half}")
+
     # ---- Mistake: running hot (chapter: QueuePrice, Scenarios.BurstyModelServerQueuePrice)
     qp = SC.BurstyModelServerQueuePrice
     qr = qp.result

@@ -76,9 +76,9 @@ def numbers() -> dict:
     n.update(barbase=f"{dup_day:.1f}", barhalfreq=f"{calls * d_half_req:.1f}",
              barhalfrep=f"{calls * d_half_rep:.1f}")
 
-    # ---- Your turn. ASSUMED: a remediation fleet's restart endpoint, request loss 0.5 percent,
-    #      reply loss 4 percent, 25,000 mutating calls a day, one blind retry per timeout.
-    y_req, y_rep, y_calls = 0.005, 0.04, 25_000
+    # ---- Your turn. ASSUMED: the same 200,000 mutating calls a day with the loss split changed:
+    #      request loss 0.5 percent, reply loss 4 percent, one blind retry per timeout.
+    y_req, y_rep, y_calls = 0.005, 0.04, calls
     y_t = p_timeout(y_req, y_rep)
     y_d = p_duplicate(y_req, y_rep)
     y_d_half = p_duplicate(y_req, y_rep / 2)

@@ -138,6 +138,16 @@ def numbers() -> dict:
              qtopp=f"{topp:.2f}", qtwo=f"{probs[0] + probs[1]:.2f}", qmass=f"{mass:.2f}",
              qra=f"{probs[0] / mass:.2f}", qrb=f"{probs[1] / mass:.2f}", qrc=f"{probs[2] / mass:.2f}")
 
+    # Q2(b) ASSUMED: the same four tokens at temperature 0.5 (chapter's sharp case, eq-temperature-softmax).
+    # Pr is proportional to exp(z/tau) and probs are proportional to exp(z), so tau = 0.5 squares each weight.
+    tau_q = 0.5
+    sq = [q ** (1 / tau_q) for q in probs]
+    sq_r = [float(f"{w:.4f}") for w in sq]                  # printed weights, 4 places
+    sq_sum = sum(sq_r)
+    top_sharp = sq_r[0] / sq_sum                             # as the sheet computes it from printed values
+    near(top_sharp, sq[0] / sum(sq), 5e-4)
+    n.update(qtau=f"{tau_q:.1f}", qsqa=f"{sq_r[0]:.4f}", qsqsum=f"{sq_sum:.4f}", qtopsharp=f"{top_sharp:.2f}")
+
     # Q4 ASSUMED: 20 percent of patches defective; the check passes defective patches with 0.5, valid with 0.9.
     eps, fa, va = 0.20, 0.50, 0.90
     post = fa * eps / (fa * eps + va * (1 - eps))

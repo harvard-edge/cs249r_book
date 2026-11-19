@@ -73,10 +73,33 @@ def numbers() -> dict:
     near(tax, rs.result.residency_factor, 1e-12)
     n.update(gen=f"{gen:g}", wait=f"{wait:g}", cycle=f"{cycle:g}", keptrate=fx(kept, 2), freedrate=fx(freed, 1),
              tax=f"{tax:g}")
-    # chapter's own block-rounded fit with output allowance and headroom, for the residency card
+    # chapter's own fit (nbk-05-residency-tax, AgentCapacity): each request also holds its output allowance,
+    # the pool keeps headroom, and allocation is in whole blocks. Reproduced from the printed values.
     cr = rs.result
-    n.update(chapfit=f"{cr.fit_unshared}", chapkept=fx(cr.retained_rate.magnitude, 2),
-             chapfreed=fx(cr.released_rate.magnitude, 1))
+    req_tok = rs.context + rs.output
+    assert req_tok % rs.block_tokens == 0                              # whole blocks: rounding adds nothing
+    req_gb = r(req_tok * tok_bytes / 1e9, 2)
+    use_gb = r((1 - rs.headroom) * pool_gb, 1)
+    chapfit = math.floor(use_gb / req_gb)
+    assert chapfit == cr.fit_unshared == 41, chapfit
+    chapkept, chapfreed = chapfit / cycle, chapfit / gen
+    near(chapkept, cr.retained_rate.magnitude, 1e-9)
+    near(chapfreed, cr.released_rate.magnitude, 1e-9)
+    n.update(chapfit=f"{chapfit}", chapkept=fx(chapkept, 2), chapfreed=fx(chapfreed, 1),
+             outtok=f"{rs.output:,}", reqtok=f"{req_tok:,}", reqgb=fx(req_gb, 2), headpct=pct(rs.headroom),
+             headkeep=fx(1 - rs.headroom, 1), usegb=fx(use_gb, 1), blocktok=f"{rs.block_tokens}")
+
+    # ---- Chunked prefill (chapter: ChunkedIteration, Scenarios.ChunkedPrefillAmongDecodes, eq-kv-token-budget)
+    cp = SC.ChunkedPrefillAmongDecodes
+    budget = cp.chunk_tokens + cp.decodes                              # the chapter's iteration size
+    assert cp.prompt_tokens // cp.chunk_tokens == cp.result.chunks
+    q_dec = 2 * cp.decodes                                             # ASSUMED: twice the chapter's decodes
+    q_chunk = budget - q_dec
+    q_iters = math.ceil(cp.prompt_tokens / q_chunk)
+    n.update(cpbudget=f"{budget}", cpdecodes=f"{cp.decodes}", cpchunk=f"{cp.chunk_tokens}",
+             cpprompt=f"{cp.prompt_tokens:,}", cpchunks=f"{cp.result.chunks}",
+             cpqdec=f"{q_dec}", cpqchunk=f"{q_chunk}", cpqiters=f"{q_iters}",
+             cpqratio=fx(cp.prompt_tokens / q_chunk, 2))
 
     # ---- Your turn: support agent (chapter: ResidencyByArchetype, Scenarios.SupportAgentResidency)
     sp = SC.SupportAgentResidency
@@ -132,9 +155,7 @@ def numbers() -> dict:
     n.update(qin=f"{q_in:,}", qout=f"{q_out:,}", qblk=f"{q_blk}", qshared=f"{q_shared:,}",
              qtotblocks=f"{tot_blocks:,}", qshblocks=f"{sh_blocks:,}", qf=fx(f, 3), qgain=fx(gain, 1))
 
-    # ---- Q2 ASSUMED: a linter call that returns in 10 ms
-    n.update(qlint="10")
-    assert 10 < 2 * reload_ms
+    # ---- Q2: chunked prefill, computed above with the chapter's ChunkedIteration scenario
 
     # ---- Q3 ASSUMED: three 5,000-token requests, first 4,100 identical, full 64-token blocks only;
     #      in request three the harness replaces the stale log from token 3,000 onward

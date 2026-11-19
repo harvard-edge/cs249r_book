@@ -107,7 +107,7 @@ def numbers() -> dict:
     exc_full = (en_p + pend_full) * gapacc
     assert fx(exc_full, 1) == fx(sp.full_excess_failures, 1)
     n.update(pzero=fx(p0, 2), pone=fx(p1, 2), alpha=fx(a, 2), beta=fx(b, 2), betac=fx(1 - b, 2),
-             alphac=fx(1 - a, 2), arrivals=fx(lam, 0), rho=pct(rho), rhofrac=fx(rho, 2), delay=fx(d, 1),
+             alphac=fx(1 - a, 2), ponec=fx(1 - p1, 2), pzeroc=fx(1 - p0, 2), arrivals=fx(lam, 0), rho=pct(rho), rhofrac=fx(rho, 2), delay=fx(d, 1),
              upper=fx(u, 3), lower=fx(lo, 3), lowerabs=fx(-lo, 3), drift=fx(m1, 5), en=fx(en_p, 1),
              rate=fx(rate, 0), tdec=fx(t_dec, 1), pend=fx(pend, 1), gapacc=fx(gapacc, 2),
              excess=fx(exc, 1), pendfull=fx(pend_full, 0), excessfull=fx(exc_full, 1))

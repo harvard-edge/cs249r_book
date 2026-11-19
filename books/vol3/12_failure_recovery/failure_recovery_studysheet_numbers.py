@@ -128,7 +128,7 @@ def numbers() -> dict:
     n.update(loopfirst=comma(first), loopgrow=comma(grow), loopcap=f"{cap}", loopstop=f"{stop}",
              loopincap=comma(in_cap), loopinstop=comma(in_stop), loopinratio=fx(in_cap / in_stop, 0),
              loopusdcap=fx(usd_cap, 2), loopusdstop=fx(usd_stop, 4), loopratio=fx(ratio, 0),
-             loopcapk=fx(in_cap / 1e6, 1))                         # millions of tokens, curve label
+             loopcapk=fx(in_cap / 1e6, 1), loopout=comma(lp.output_per_turn))                         # millions of tokens, curve label
     # curve drawing values (thousands of tokens, scaled; pgfmath stays far below 16,384)
     n.update(curvefirst=fx(first / 1000, 1), curvegrow=fx(grow / 1000, 1),
              curvecap=fx(in_cap / 1000, 1), curvestop=fx(in_stop / 1000, 1))

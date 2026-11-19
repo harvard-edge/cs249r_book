@@ -90,8 +90,8 @@ def numbers() -> dict:
                 for k, w in enumerate(("zero", "one", "two", "three"))})
     assert [tree_nodes(gs.children, k) * gs.node_tokens + gs.envelope_tokens for k in range(4)] == gr.tokens_by_depth
 
-    # ---- Your turn. ASSUMED: a wider walk, 4 children per node, 120-token node records, same edges reserve
-    y_c, y_tok = 4, 120
+    # ---- Your turn. ASSUMED: a wider walk, 4 children per node; node records and edges reserve unchanged
+    y_c, y_tok = 4, gs.node_tokens
     y_two = tree_nodes(y_c, 2)
     y_three = tree_nodes(y_c, 3)
     y_two_need = y_two * y_tok + gs.envelope_tokens

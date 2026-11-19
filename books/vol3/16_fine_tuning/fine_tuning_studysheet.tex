@@ -26,8 +26,8 @@ Fine-tuning changes only what the model \hl{proposes}; the runtime bounds every 
   evidence; after compaction, one example per call.}
 \idea{Packing is only a memory layout.}{With block-diagonal attention and per-example labels and positions,
   each example's logits must match unpacked ones: test it.}
-\idea{Where error is measured matters.}{On recorded states the excess-cost bound grows with
-  $\TurnHorizon^2$; labeling the learner's own states (DAgger) makes it linear.}
+\idea{Where error is measured matters.}{A fixed corpus can miss states the learner reaches: inject
+  known faults; label the learner's states (DAgger) for the rest.}
 \idea{Release on closed-loop acceptance.}{Losses compare only under one mask and split;
   promote on paired acceptance, cost per accepted task $\CostPerAcceptedTask$, schema transfer.}
 \end{ideas}
@@ -46,17 +46,23 @@ Fine-tuning changes only what the model \hl{proposes}; the runtime bounds every 
 
 \vspace{12pt}
 \fcard{Adapter state}%
-  {\text{state} \approx \val{adfrozenb}\,\text{B}\times\text{frozen params} + \val{adtrainb}\,\text{B}\times\text{trained params}}%
-  {Rank $\AdapterRank$ adds $\AdapterRank(\LayerInputWidth+\LayerOutputWidth)$ parameters per matrix, each
+  {\text{bytes} \approx \val{adfrozenb}\times\text{frozen params} + \val{adtrainb}\times\text{trained params}}%
+  {Rank $\AdapterRank$ adds $\AdapterRank(\LayerInputWidth+\LayerOutputWidth)$ parameters per matrix (input, output widths), each
    with weight, gradient, master copy and two moments.}%
-  {The frozen base stays resident, so the cut is at most \val{adtrainb}\,B $\div$ \val{adfrozenb}\,B = \val{adbound}$\times$.}{}
+  {The frozen base stays resident, so the cut is at most \val{adtrainb} $\div$ \val{adfrozenb} = \val{adbound}$\times$.}{}
+\fcard{Per-call serialization}%
+  {\text{stored} \approx \TurnAppendLength\,\frac{\TurnHorizon(\TurnHorizon+1)}{2}
+   \quad\text{vs.}\quad \TurnHorizon\,\TurnAppendLength}%
+  {Each turn adds $\TurnAppendLength$ tokens; each call re-stores its prefix. Expansion
+   $(\TurnHorizon+1)/2$: \val{ptexp}$\times$ at \val{ptturns} turns.}%
+  {}{}
 \end{leftcol}%
 \begin{rightcol}
 \fcard{Masked loss and dilution}%
   {\MaskedFinetuningLoss = -\frac{1}{\ActiveTargetTokenCount}\sum_{t} \PositionLossMask_{t}\log\Policy(\SequenceToken_t\mid\TokenPrefix)}%
   {Target share $\ActiveTargetTokenCount/\SequenceLength$. Unmasked, the average runs over all
    $\SequenceLength-1$ predictions: dilution $(\SequenceLength-1)/\ActiveTargetTokenCount$.}%
-  {Masking saves almost no compute: every token still passes through attention.}{}
+  {}{}
 \fcard{Batch weight}%
   {\text{token avg: } \frac{\ActiveTargetTokenCount\ \text{(record)}}{\ActiveTargetTokenCount\ \text{(batch)}}
    \qquad \text{example avg: } \frac{1}{\BatchSize}}%
@@ -75,21 +81,22 @@ Fine-tuning changes only what the model \hl{proposes}; the runtime bounds every 
      \draw[gridline] (30,0) -- (30,62);
      \draw[dim, dashed] (30,0) -- ({30+\val{rh}*\xs},{\val{rh}*2}) node[small, anchor=west, xshift=3pt] {cap $\TurnHorizon$};
      \draw[accent, line width=1.1pt] plot[domain=0:\val{rh}, samples=60, smooth] ({30+\x*\xs},{2*\val{repsfrac}*\x*\x});
-     \draw[ink, line width=0.9pt] (30,0) -- ({30+\val{rh}*\xs},{2*\val{ru}*\val{repsfrac}*\val{rh}});
+     \draw[ink, line width=1.3pt] (30,0) -- ({30+\val{rh}*\xs},{2*\val{ru}*\val{repsfrac}*\val{rh}});
      \filldraw[fill=accent, draw=accent] ({30+\val{rh}*\xs},{2*\val{rref}}) circle (2pt);
      \filldraw[fill=ink, draw=ink] ({30+\val{rh}*\xs},{2*\val{rlrn}}) circle (1.6pt);
      \node[lab, anchor=west] at ({35+\val{rh}*\xs},{2*\val{rref}}) {recorded: \val{rref}};
-     \node[lab, anchor=west] at ({35+\val{rh}*\xs},{2*\val{rlrn}+2}) {learner: \val{rlrn}};
+     \node[lab, anchor=west] at ({35+\val{rh}*\xs},{2*\val{rlrn}+5}) {learner: \val{rlrn}};
      \node[small, anchor=east] at (27,0) {0};
      \node[small, anchor=south west] at (33,58) {excess-cost bound};
-     \node[note, anchor=north] at (110,-4) {\val{rh} steps, \val{reps}\% disagreement, $\DeviationDisadvantage=\val{ru}$};
+     \node[small, anchor=north east] at (185,-3) {horizon $\TurnHorizon$};
+     \node[note, anchor=north west] at (30,-3) {\val{rh} steps, \val{reps}\% disagreement, $\DeviationDisadvantage=\val{ru}$};
    \end{tikzpicture}}
 \fcard{Preference pair (DPO)}%
   {\PreferenceMargin = \PreferenceScale(\PreferredReferenceRelativeScore - \DispreferredReferenceRelativeScore),
    \quad \text{loss} = -\log\SigmoidFunction(\PreferenceMargin)}%
   {$\PreferredReferenceRelativeScore$, $\DispreferredReferenceRelativeScore$: policy-minus-reference
    log-probability sums over the selected spans, one shared context.}%
-  {Gradient weight $\PreferenceScale\SigmoidFunction(-\PreferenceMargin)$. $\SigmoidFunction(\PreferenceMargin)$ fits one comparison, never task success.}{}
+  {$\SigmoidFunction(\PreferenceMargin)$ fits one comparison, never task success.}{}
 \end{rightcol}
 
 % ===================================================================== BACK: PRACTICE
@@ -97,7 +104,7 @@ Fine-tuning changes only what the model \hl{proposes}; the runtime bounds every 
 \begin{answers}
 \ans{Finish}{\val{wk} $\div$ \val{ystored} = \val{yshare}\% target; dilution \val{ypred} $\div$ \val{wk} =
   \val{ydil}$\times$, up from \val{wdil}$\times$. No: all \val{ystored} tokens still run through attention, so
-  compute grows with the observations (masked loss card).}
+  compute grows with the observations (worked example).}
 \ans{Regret bounds}{(a) \val{qhsq} $\times$ \val{qefrac} = \val{qref}; \val{qu} $\times$ \val{qh} $\times$ \val{qefrac}
   = \val{qlrn}; gap \val{qgap}$\times$, which is $\TurnHorizon/\DeviationDisadvantage$. (b) \val{qlrn} $\div$ \val{qhsq} =
   \val{qmatch}\%. (c) It caps once $\TurnHorizon\ReferenceStateDisagreementRate$ reaches one: $\TurnHorizon$ = \val{qsat} steps; beyond it
@@ -107,10 +114,11 @@ Fine-tuning changes only what the model \hl{proposes}; the runtime bounds every 
 \columnbreak
 \ans{Batch weights}{(a) Token: \val{batchlong} $\div$ \val{btotal} = \val{btok}\%; example: one of \val{bexn} =
   \val{bex}\%. (b) Token: still \val{btok}\%, the targets are only partitioned; example: \val{bpieces} of
-  \val{bsplitn} = \val{bexsplit}\% (batch card).}
+  \val{bsplitn} = \val{bexsplit}\% (batch card). (c) About \val{bpexp}$\times$ the tokens: the expansion at
+  $\TurnHorizon$ = \val{bpieces}, each call re-storing its prefix (serialization card).}
 \ans{Lower loss}{Not shown: A averages mostly observation tokens, B only targets. Recompute both on one held-out
   split with the same mask and normalization, then decide on paired held-out acceptance,
-  $\CostPerAcceptedTask$, renamed schemas and retained skills under the serving runtime.}
+  $\CostPerAcceptedTask$, renamed schemas and retained skills.}
 \end{answers}
 
 \begin{leftcol}
@@ -157,7 +165,7 @@ Same record; the tool output grows to \val{yobs} tokens, all else unchanged.\par
   {Scores \val{dpdw} and $\val{dpdl}$ at $\PreferenceScale$ = \val{dpbeta} give $\PreferenceMargin$ = \val{dpz}, $\SigmoidFunction$ = \val{dpsig}; at
    $\PreferenceScale$ = \val{dpbetatwo} the same log-probabilities give \val{dpztwo} and \val{dpsigtwo}. It measures fit, not success.}{}
 \mistake{``Training \val{adfrac}\% of the parameters needs about \val{adfrac}\% of the memory.''}%
-  {An \val{adbase}B model with rank-\val{adrank} adapters keeps \val{adbasegb} GB of frozen base plus \val{adadaptgb} GB
+  {An \val{adbase}-billion-parameter model with rank-\val{adrank} adapters keeps \val{adbasegb} GB of frozen base plus \val{adadaptgb} GB
    of adapter state: \val{adlora} GB against \val{adfull} GB, still \val{adkept}\% of the parameter-state bytes.}{}
 
 \vspace{2pt}
@@ -170,7 +178,7 @@ Same record; the tool output grows to \val{yobs} tokens, all else unchanged.\par
   argument \texttt{target\_uri}, (iii) never write outside the workspace. Where does each live, and why?
 \item \assumed{} one repair trace with \val{batchlong} targets and \val{batchcount} lookups with \val{batchshort} each.
   (a) The trace's batch share under token and example averaging? (b) Split into \val{bpieces} per-call records
-  of \val{bpiece} targets?
+  of \val{bpiece} targets? (c) Stored tokens, if each call re-stores its growing prefix?
 \item Checkpoint A (all-token loss) shows a lower dashboard loss than B (masked). Is A better? What decides?
 \end{qs}
 \end{rightcol}

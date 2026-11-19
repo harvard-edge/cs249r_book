@@ -175,7 +175,19 @@ def numbers() -> dict:
              supcold=fx(s_cold, 1), supsnap=fx(s_snap, 1), supwork=fx(s_work, 1), supcoldcycle=fx(s_cold_cycle, 1),
              supsnapcycle=fx(s_snap_cycle, 1), supgain=fx(s_gain, 1), supshare=pct(s_share),
              repairshare=pct(repair_share))
+
+    # Q4(b) ASSUMED: the trainer steps every 30 s; rollouts admitted 45 s and 130 s after their first
+    # token; lag bound 2 (chapter: eq-vol3-rlvr-staleness, lag = floor(admission age / step time))
+    l_step, l_short, l_long, l_bound = 30, 45, 130, 2
+    lag_short, lag_long = math.floor(l_short / l_step), math.floor(l_long / l_step)
+    assert lag_short <= l_bound < lag_long
+    n.update(lagstep=f"{l_step}", lagshortage=f"{l_short}", laglongage=f"{l_long}", lagbound=f"{l_bound}",
+             lagshort=f"{lag_short}", laglong=f"{lag_long}")
+
+    # Front, key idea 4: the continuation standard error bound 1/(2 sqrt K) halves at 4x the continuations
+    n.update(mchalve=fx((1 / 0.5) ** 2, 0))
     return n
+
 
 
 if __name__ == "__main__":
