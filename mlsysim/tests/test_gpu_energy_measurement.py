@@ -6,6 +6,7 @@ round numbers, so each expected ratio can be checked by hand. They are not data.
 
 from __future__ import annotations
 
+import ast
 import copy
 import csv
 import importlib.util
@@ -23,6 +24,7 @@ import pytest
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "paper/scripts"
 PLAN_PATH = Path(__file__).resolve().parents[1] / "paper/data/gpu-energy/plan.json"
+WORKLOADS_PLAN_PATH = Path(__file__).resolve().parents[1] / "paper/data/gpu-energy-workloads/plan.json"
 sys.path.insert(0, str(SCRIPTS))
 
 
@@ -136,13 +138,59 @@ def test_committed_plan_is_valid_and_declares_every_efficiency():
         analysis.resolve(plan["workloads"][config["workload"]]["registry"])
 
 
+def test_workloads_plan_is_valid_and_holds_out_every_configuration():
+    plan = protocol.load_plan(WORKLOADS_PLAN_PATH)
+    assert {c["split"] for c in plan["configs"]} == {"heldout"}
+    for config in plan["configs"]:
+        assert 0 < protocol.efficiency_of(plan, config) <= 1
+        analysis.resolve(plan["devices"][config["device"]]["registry"])
+        analysis.resolve(plan["workloads"][config["workload"]]["registry"])
+    # The repeated workloads are declared exactly as in the first plan.
+    first = protocol.load_plan(PLAN_PATH)
+    for name in ("llama31_8b", "resnet50_train"):
+        assert plan["workloads"][name] == first["workloads"][name]
+
+
 def test_modal_launcher_requests_the_gpu_the_plan_names():
     source = (SCRIPTS / "modal_gpu_energy.py").read_text()
     requested = dict(re.findall(r'@app\.function\(gpu="([^"]+)".*\)\ndef measure_(\w+)', source))
+    launcher = {v.lower(): k for k, v in requested.items()}
+    named = {}
+    for path in (PLAN_PATH, WORKLOADS_PLAN_PATH):
+        plan = protocol.load_plan(path)
+        devices = {key.lower(): device["modal_gpu"] for key, device in plan["devices"].items()}
+        assert devices.items() <= launcher.items()
+        named.update(devices)
+    assert named == launcher
+
+
+def _launcher_function(name):
+    # The launcher imports modal at the top, so load the one pure helper on its own.
+    source = (SCRIPTS / "modal_gpu_energy.py").read_text()
+    node = next(n for n in ast.parse(source).body if isinstance(n, ast.FunctionDef) and n.name == name)
+    namespace = {}
+    exec(compile(ast.Module([node], type_ignores=[]), "modal_gpu_energy.py", "exec"), namespace)
+    return namespace[name]
+
+
+def test_launcher_keeps_one_run_per_device_for_one_language_model():
+    runs_for = _launcher_function("_runs_for")
     plan = protocol.load_plan(PLAN_PATH)
-    assert {v.lower(): k for k, v in requested.items()} == {
-        key.lower(): device["modal_gpu"] for key, device in plan["devices"].items()
-    }
+    mine = [c for c in plan["configs"] if c["device"] == "H100"]
+    runs = runs_for(plan, mine)
+    assert len(runs) == 1 and sorted(c["id"] for c in runs[0][1]) == sorted(c["id"] for c in mine)
+
+
+def test_launcher_gives_each_language_model_its_own_run():
+    runs_for = _launcher_function("_runs_for")
+    plan = protocol.load_plan(WORKLOADS_PLAN_PATH)
+    mine = [c for c in plan["configs"] if c["device"] == "H200"]
+    runs = runs_for(plan, mine)
+    assert [model for model, _ in runs] == ["llama31_8b", "llama2_7b", "llama2_13b", "mixtral_8x7b"]
+    for model, group in runs:
+        assert {c["workload"] for c in group} - {"resnet50_train"} == {model}
+    assert [c["workload"] for c in runs[0][1]][0] == "resnet50_train"
+    assert sum(len(group) for _, group in runs) == len(mine)
 
 
 @pytest.mark.parametrize("mutate, message", [

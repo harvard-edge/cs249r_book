@@ -55,6 +55,7 @@ publication-check: ## Verify displayed paper values, timing receipts, and benchm
 	PYTHONPATH=. $(PYTHON) paper/scripts/generate_paper_values.py --check
 	PYTHONPATH=. $(PYTHON) paper/scripts/validate_anchors.py
 	PYTHONPATH=. $(PYTHON) paper/scripts/analyze_gpu_energy.py --check
+	PYTHONPATH=. $(PYTHON) paper/scripts/analyze_gpu_energy.py --check --root paper/data/gpu-energy-workloads
 	PYTHONPATH=. $(PYTHON) paper/scripts/build_measured_gpu_energy.py --check
 
 check: lint test calibration-check modeling-docs-check ## Run package release checks

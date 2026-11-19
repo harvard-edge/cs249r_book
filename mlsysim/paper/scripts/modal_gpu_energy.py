@@ -1,13 +1,20 @@
-"""Run measure_gpu_energy.py on Modal and copy each run into paper/data/gpu-energy/runs/.
+"""Run measure_gpu_energy.py on Modal and copy each run into paper/data/<folder>/runs/.
 
 The measurement does not depend on Modal. The runner works the same on any
 single NVIDIA GPU. Requirements: ``pip install modal`` and
-``modal setup``. The plan's weights come from an ungated repository, so no
-Hugging Face token is needed.
+``modal setup``. The plan's weights come from ungated repositories, so no
+Hugging Face token is needed. ``GPU_ENERGY_DATA`` picks the folder under
+paper/data that holds the plan, and defaults to ``gpu-energy``.
 
     modal run paper/scripts/modal_gpu_energy.py                       # every device, twice
     modal run paper/scripts/modal_gpu_energy.py --devices H100 --repeats 1 \\
         --configs h100-llama-b16-p2048 --label pilot                  # a pilot
+    GPU_ENERGY_DATA=gpu-energy-workloads modal run paper/scripts/modal_gpu_energy.py
+
+A vLLM engine keeps its GPU memory until its process exits, so each run serves
+one language model. When a device has configurations for several language
+models, each model gets its own run and container, and the run folder names the
+model. Training configurations join the device's first language-model run.
 
 One command does the whole matrix without spending GPU time on anything but
 measurement. A CPU-only container first downloads the pinned weights into a
@@ -34,8 +41,9 @@ from pathlib import Path
 import modal
 
 HERE = Path(__file__).resolve().parent
-PLAN = HERE.parent / "data" / "gpu-energy" / "plan.json"
-RUNS = HERE.parent / "data" / "gpu-energy" / "runs"
+DATA = HERE.parent / "data" / os.environ.get("GPU_ENERGY_DATA", "gpu-energy")
+PLAN = DATA / "plan.json"
+RUNS = DATA / "runs"
 REMOTE = "/root/gpu-energy"
 CACHE = "/cache"
 
@@ -125,12 +133,36 @@ def measure_a100(configs: list[str]) -> dict[str, bytes]:
     return _measure("A100", configs)
 
 
-FUNCTIONS = {"H100": measure_h100, "A100": measure_a100}
+# More host memory for the H200: it is the one device that loads Mixtral-8x7B's 93 GB of weights.
+@app.function(gpu="H200", **{**GPU_OPTIONS, "memory": 65536})
+def measure_h200(configs: list[str]) -> dict[str, bytes]:
+    return _measure("H200", configs)
+
+
+FUNCTIONS = {"H100": measure_h100, "A100": measure_a100, "H200": measure_h200}
+
+
+def _runs_for(plan: dict, configs: list[dict]) -> list[tuple[str, list[dict]]]:
+    """Split one device's configurations into runs that each serve one language model.
+
+    Training configurations join the first run. With one language model this is a
+    single run with every configuration, as before.
+    """
+    kind = {name: w["kind"] for name, w in plan["workloads"].items()}
+    models = [w for w in plan["workloads"] if kind[w] == "generate" and any(c["workload"] == w for c in configs)]
+    training = [c for c in configs if kind[c["workload"]] != "generate"]
+    if not models:
+        return [("", training)]
+    runs = [(w, [c for c in configs if c["workload"] == w]) for w in models]
+    runs[0] = (runs[0][0], training + runs[0][1])
+    return runs
 
 
 @app.local_entrypoint()
-def main(devices: str = "H100,A100", repeats: int = 2, configs: str = "", label: str = ""):
+def main(devices: str = "", repeats: int = 2, configs: str = "", label: str = ""):
+    """Measure every requested device ``repeats`` times. ``devices`` defaults to every device in the plan."""
     plan = json.loads(PLAN.read_text())
+    devices = devices or ",".join(plan["devices"])
     selected = [c for c in configs.split(",") if c]
     unknown = sorted(set(selected) - {c["id"] for c in plan["configs"]})
     if unknown:
@@ -141,11 +173,16 @@ def main(devices: str = "H100,A100", repeats: int = 2, configs: str = "", label:
         mine = [c for c in plan["configs"] if c["device"] == key and (not selected or c["id"] in selected)]
         if not mine:
             continue
+        runs = _runs_for(plan, mine)
         for k in range(1, repeats + 1):
-            target = RUNS / "-".join(p for p in (label, key.lower(), stamp, str(k)) if p)
-            if target.exists():  # checked before any GPU time, so a name clash costs nothing
-                raise SystemExit(f"{target} already exists")
-            jobs.append((key, [c["id"] for c in mine] if selected else [], mine, target))
+            for model, group in runs:
+                name = model.replace("_", "-") if len(runs) > 1 else ""
+                target = RUNS / "-".join(p for p in (label, key.lower(), name, stamp, str(k)) if p)
+                if target.exists():  # checked before any GPU time, so a name clash costs nothing
+                    raise SystemExit(f"{target} already exists")
+                # An empty list lets the runner measure every configuration of the device.
+                ids = [c["id"] for c in group] if selected or len(runs) > 1 else []
+                jobs.append((key, ids, group, target))
     if not jobs:
         raise SystemExit("nothing to run")
     llm_workloads = {c["workload"] for _, _, mine, _ in jobs for c in mine
