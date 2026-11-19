@@ -65,6 +65,25 @@ describe("vaultFetchJson", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  test("retries a per-attempt timeout (TimeoutError) then succeeds", async () => {
+    // AbortSignal.timeout() rejects fetch with a TimeoutError DOMException.
+    fetchMock
+      .mockRejectedValueOnce(new DOMException("timed out", "TimeoutError"))
+      .mockResolvedValueOnce(jsonResponse({ ok: 3 }));
+    await expect(
+      vaultFetchJson("https://d.example/q", { retries: 2 }),
+    ).resolves.toEqual({ ok: 3 });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  test("gives up after exhausting retries on repeated timeouts", async () => {
+    fetchMock.mockRejectedValue(new DOMException("timed out", "TimeoutError"));
+    await expect(
+      vaultFetchJson("https://d.example/q", { retries: 2 }),
+    ).rejects.toThrow(/timed out/);
+    expect(fetchMock).toHaveBeenCalledTimes(3); // 1 initial + 2 retries
+  });
+
   test("opens the breaker after the failure threshold and then short-circuits", async () => {
     fetchMock.mockRejectedValue(networkError());
     const url = "https://e.example/q";
