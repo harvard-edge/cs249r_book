@@ -1,6 +1,7 @@
 // Curated study plans + custom learning paths
 import { getQuestionsByFilter, getCompetencyAreas, Question } from './corpus';
 import { getAttempts } from './progress';
+import { localDateKey } from './dates';
 
 export interface StudyPlan {
   id: string;
@@ -278,11 +279,11 @@ export function getPrepStats(path: CustomPath, questions: Question[]): PrepStats
   const daysRemaining = Math.max(0, Math.ceil(msRemaining / 86400000));
   const dailyTarget = daysRemaining > 0 ? Math.ceil(remaining / daysRemaining) : remaining;
 
-  const today = new Date().toISOString().split('T')[0];
+  const today = localDateKey();
   const attempts = getAttempts();
   const completedSet = new Set(progress.completedIds);
   const todayCompleted = attempts.filter(a =>
-    new Date(a.timestamp).toISOString().split('T')[0] === today &&
+    localDateKey(new Date(a.timestamp)) === today &&
     completedSet.has(a.questionId)
   ).length;
 

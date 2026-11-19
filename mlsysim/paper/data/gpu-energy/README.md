@@ -51,17 +51,18 @@ over measured energy per unit of work.
 - **Errors that cancel.** TDP over the modeled time gives 0.77–0.91 for decode
   only because a step time 33–42% too short meets a power 18–44% too high. The
   proportional rule over the modeled time gives 0.26–0.30.
-- **Device choice.** The H100 uses less energy per prefill (by 43–47% above one
-  128-token prompt) and per training step (by 11%). The A100 uses less per
-  decode step in five of six configurations (by 4–10%). In 10 of 13
+- **Device choice.** The H100 uses less energy per prefill above one 128-token
+  prompt (the A100 uses 43–47% more) and per training step (the A100 uses 11%
+  more). The A100 uses less per decode step in five of six configurations (the
+  H100 uses 4–10% more). In 10 of 13
   configurations the same device wins on every pairing of one H100 and one A100
   board (`measured_every_run_pair`). On those 10, both estimates that use the
   measured time pick the meter's device every time. Each fully analytical
   estimate picks the wrong device once. TDP over the modeled time chooses the
-  A100 for training, where the H100 uses 11% less energy per step, because the
+  A100 for training, where the A100 uses 11% more energy per step, because the
   modeled A100 step is 21% shorter than measured against 8% on the H100. The
   proportional rule over the modeled time chooses the H100 for decode at batch 16
-  with 128-token prompts, where the A100 uses 7.8% less.
+  with 128-token prompts, where the H100 uses 7.8% more.
 - **Boards of one model differ.** The two A100-SXM4-80GB boards report the same
   name with different power limits, 400 W and 500 W. On the 500 W board, large
   prefill ran 8% faster for 14% more energy and drew more than the registry's

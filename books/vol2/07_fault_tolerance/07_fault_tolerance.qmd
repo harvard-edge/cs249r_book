@@ -281,7 +281,7 @@ class NinesReliability:
     slow_availability_str = fmt_percent(slow_availability, precision=2, commas=False, style="prose")
 ```
 
-The same product governs instantaneous availability, a different quantity from the survival function $\ComponentReliability(\TimeInstant)$. Availability $\SteadyStateAvailability$ is the probability that a component is up at a randomly chosen instant, counting repairs, whereas $\ComponentReliability(\TimeInstant)$ is the probability that it has not yet failed by time $\TimeInstant$. If each GPU is independently up with probability $\GpuAvailability$, all $\RequiredComponentCount$ are up together with probability $(\GpuAvailability)^\RequiredComponentCount$, which is the reliability gap of @eq-reliability-gap, in which high per-device availability still yields low availability for a job that needs every device. For the chapter's `{python} NinesReliability.n_gpus_str`-GPU cluster, a per-GPU availability of `{python} NinesReliability.availability_str` (only `{python} NinesReliability.downtime_min_str` of downtime per year) leaves about a `{python} NinesReliability.cluster_pct_str` chance that every GPU is up at the same instant. This compounding erodes even highly reliable hardware once $\RequiredComponentCount$ reaches fleet scale, so software must handle failures automatically.
+The same product governs instantaneous availability, a different quantity from the survival function $\ComponentReliability(\TimeInstant)$. Availability $\SteadyStateAvailability$ is the probability that a component is up at a randomly chosen instant, counting repairs, whereas $\ComponentReliability(\TimeInstant)$ is the probability that it has not yet failed by time $\TimeInstant$. If each GPU is independently up with probability $\GpuAvailability$, all $\RequiredComponentCount$ are up together with probability $(\GpuAvailability)^{\RequiredComponentCount}$, which is the reliability gap of @eq-reliability-gap, in which high per-device availability still yields low availability for a job that needs every device. For the chapter's `{python} NinesReliability.n_gpus_str`-GPU cluster, a per-GPU availability of `{python} NinesReliability.availability_str` (only `{python} NinesReliability.downtime_min_str` of downtime per year) leaves about a `{python} NinesReliability.cluster_pct_str` chance that every GPU is up at the same instant. This compounding erodes even highly reliable hardware once $\RequiredComponentCount$ reaches fleet scale, so software must handle failures automatically.
 
 ::: {#psp-fault-tolerance-scale-transforms-failure .callout-perspective title="Scale transforms failure"}
 
@@ -2133,13 +2133,13 @@ where $\FailureDetectionTime$ is the time between the physical hardware fault an
 *Detection latency climbs from seconds (crash) to hours (silent corruption).*
 :::
 
-To the rest of the cluster, a dead rank and a rank busy flushing a multi-gigabyte checkpoint shard both look silent. Every failure detector must therefore balance two expensive mistakes: setting timeouts too short kills healthy workers during transient network or storage stalls, while setting them too long leaves thousands of peer GPUs idling at a collective barrier. Heartbeat monitoring\index{Heartbeat protocol!liveness signal}\index{Heartbeat protocol!failure detection}\index{Failure detection!heartbeat protocol} is the first detection layer and usually sets the floor on $\FailureDetectionTime$. Each GPU rank periodically signals liveness to a coordinator, and if no heartbeat arrives within the timeout period $\HandoverTimeout$, the coordinator declares the worker failed.
+To the rest of the cluster, a dead rank and a rank busy flushing a multi-gigabyte checkpoint shard both look silent. Every failure detector must therefore balance two expensive mistakes: setting timeouts too short kills healthy workers during transient network or storage stalls, while setting them too long leaves thousands of peer GPUs idling at a collective barrier. Heartbeat monitoring\index{Heartbeat protocol!liveness signal}\index{Heartbeat protocol!failure detection}\index{Failure detection!heartbeat protocol} is the first detection layer and usually sets the floor on $\FailureDetectionTime$. Each GPU rank periodically signals liveness to a coordinator, and if no heartbeat arrives within the timeout period $\HeartbeatTimeout$, the coordinator declares the worker failed.
 
 For a heartbeat interval of $\HeartbeatInterval$ seconds and network-delay standard deviation $\NetworkDelayStandardDeviation$ in seconds, @eq-timeout-calculation defines the timeout heuristic:
 
-$$ \HandoverTimeout = \HeartbeatInterval+ \TimeoutSafetyMultiplier\NetworkDelayStandardDeviation$$ {#eq-timeout-calculation}
+$$ \HeartbeatTimeout = \HeartbeatInterval+ \TimeoutSafetyMultiplier\NetworkDelayStandardDeviation$$ {#eq-timeout-calculation}
 
-The first term waits out one full heartbeat interval, because a healthy worker may have just sent its last beat, and the second adds a margin for heartbeats that the network delays longer than usual. Here, $\TimeoutSafetyMultiplier$ is a dimensionless safety multiplier; values from three to five illustrate a tuning range rather than a guaranteed false positive rate. The heuristic treats the normal heartbeat delivery delay as small relative to the heartbeat interval. A deployment with substantial baseline delay or a heavy delay tail must account for those measurements as well as $\NetworkDelayStandardDeviation$. Tuning $\HandoverTimeout$ too tightly causes legitimate checkpoint writes or long collectives to trigger false failure declarations; tuning it too loosely extends the window during which other ranks wait for the missing contribution.
+The first term waits out one full heartbeat interval, because a healthy worker may have just sent its last beat, and the second adds a margin for heartbeats that the network delays longer than usual. Here, $\TimeoutSafetyMultiplier$ is a dimensionless safety multiplier; values from three to five illustrate a tuning range rather than a guaranteed false positive rate. The heuristic treats the normal heartbeat delivery delay as small relative to the heartbeat interval. A deployment with substantial baseline delay or a heavy delay tail must account for those measurements as well as $\NetworkDelayStandardDeviation$. Tuning $\HeartbeatTimeout$ too tightly causes legitimate checkpoint writes or long collectives to trigger false failure declarations; tuning it too loosely extends the window during which other ranks wait for the missing contribution.
 
 Collective communication timeouts provide a second detection layer. During synchronous training, a collective required by the next step remains an incomplete critical-path dependency if a required rank disappears. AllReduce needs every rank's contribution before it can produce the reduced result; the progress and failure behavior of other collectives depends on the operation and runtime. Transport and process-group timeouts bound how long the job waits before declaring the operation failed and entering recovery. NCCL[^fn-nccl-collective-timeout] provides configurable transport and reliability, availability, and serviceability (RAS) timeout parameters for this purpose, while higher-level frameworks may impose process-group operation timeouts. These settings are often set conservatively to avoid crashing jobs during legitimate periods of slow communication, which unfortunately extends $\FailureDetectionTime$.
 
@@ -2580,7 +2580,7 @@ Replacing a slow node while maintaining the original GPU count requires availabl
 
 Verify your understanding of how detection latency and recovery strategy trade against one another:
 
-- [ ] **Timeout tuning**: given the heartbeat timeout rule $\HandoverTimeout = \HeartbeatInterval+ \TimeoutSafetyMultiplier\NetworkDelayStandardDeviation$, explain what failure mode is traded away when $\TimeoutSafetyMultiplier$ is lowered from 5 to 3, and which failure mode worsens.
+- [ ] **Timeout tuning**: given the heartbeat timeout rule $\HeartbeatTimeout = \HeartbeatInterval+ \TimeoutSafetyMultiplier\NetworkDelayStandardDeviation$, explain what failure mode is traded away when $\TimeoutSafetyMultiplier$ is lowered from 5 to 3, and which failure mode worsens.
 - [ ] **Warm vs. cold restart**: choose a warm restart or a cold restart for a single GPU failure in a 1,000-GPU job with surviving state intact, and identify two conditions that push recovery back toward the cold path.
 - [ ] **Hot spare cost**: explain why a hot spare cuts recovery latency relative to detect-then-restart, including the standing cost the cluster pays to keep that spare available.
 - [ ] **Straggler decision**: determine what governs whether to wait out a slowed node or kill it and recover onto healthy hardware.
@@ -2978,7 +2978,7 @@ class ReplicaAvailability:
 
 Serving redundancy is the parallel composition of @sec-fault-tolerance-reliability-quantitative-analysis applied to interchangeable replicas, with availability in place of survival probability. For a single replica with availability $\ReplicaAvailability$ (probability of being operational at any given time), @eq-availability-redundancy quantifies how multiple independent replicas achieve higher system availability:
 
-$$ \RedundantServiceAvailability= 1 - (1 - \ReplicaAvailability)^\RedundantReplicaCount$$ {#eq-availability-redundancy}
+$$ \RedundantServiceAvailability= 1 - (1 - \ReplicaAvailability)^{\RedundantReplicaCount}$$ {#eq-availability-redundancy}
 
 where $\RedundantReplicaCount$ is the number of replicas.
 
@@ -3609,7 +3609,7 @@ class YoungDalyIntuitionFallacy:
 
     # ┌── 4. OUTPUT (Formatting) ───────────────────
     tau_opt_fast_eq_math = fmt_display_math(
-        rf"T^\ast_{{\text{{ckpt}}}} = \sqrt{{2 \times {write_fast_min} \times {mtbf_min}}} = "
+        rf"\OptimalCheckpointInterval = \sqrt{{2 \times {write_fast_min} \times {mtbf_min}}} = "
         rf"\sqrt{{{arg_fast}}} \approx {fmt_int(round(tau_fast_min))} \text{{ minutes}}"
     )
     tau_opt_slow_min_str = fmt_time(round(tau_slow_min) * minute, minute, precision=0, commas=False, style="word")
