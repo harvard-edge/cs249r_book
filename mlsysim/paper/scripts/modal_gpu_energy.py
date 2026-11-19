@@ -16,6 +16,10 @@ one language model. When a device has configurations for several language
 models, each model gets its own run and container, and the run folder names the
 model. Training configurations join the device's first language-model run.
 
+Each run also saves its files in the volume under ``gpu-energy-results/<folder>/<run>/``.
+If the local client loses its connection, copy a run from there with
+``modal volume get mlsysim-hf-cache gpu-energy-results/<folder>/<run> <run folder>``.
+
 One command does the whole matrix without spending GPU time on anything but
 measurement. A CPU-only container first downloads the pinned weights into a
 Modal volume (a no-op once they are there) and checks every shard against the
@@ -46,6 +50,8 @@ PLAN = DATA / "plan.json"
 RUNS = DATA / "runs"
 REMOTE = "/root/gpu-energy"
 CACHE = "/cache"
+# Each run also saves its files here, so a lost connection to the local client does not lose a run.
+RESULTS = f"{CACHE}/gpu-energy-results"
 
 image = (
     modal.Image.debian_slim(python_version="3.11")
@@ -84,9 +90,10 @@ def prefetch(models: list[dict]) -> list[str]:
     paths = []
     for model in models:
         # *.json covers config, generation config, tokenizer, and the weight index.
+        # tokenizer.model is the SentencePiece tokenizer of repos without a tokenizer.json.
         # A consolidated original/ checkpoint, if the repo has one, is skipped.
         path = Path(snapshot_download(model["repo"], revision=model["revision"],
-                                      allow_patterns=["*.json", "*.safetensors"]))
+                                      allow_patterns=["*.json", "*.safetensors", "tokenizer.model"]))
         for name, expected in model["weights_sha256"].items():
             digest = hashlib.sha256()
             with open(path / name, "rb") as handle:
@@ -99,7 +106,7 @@ def prefetch(models: list[dict]) -> list[str]:
     return paths
 
 
-def _measure(device_key: str, configs: list[str]) -> dict[str, bytes]:
+def _measure(device_key: str, configs: list[str], name: str = "") -> dict[str, bytes]:
     out = Path("/tmp/run")
     command = ["python", f"{REMOTE}/measure_gpu_energy.py", "--plan", f"{REMOTE}/plan.json",
                "--device", device_key, "--out", str(out)]
@@ -120,23 +127,29 @@ def _measure(device_key: str, configs: list[str]) -> dict[str, bytes]:
     code = 0 if finished_at is not None else process.returncode
     files = {p.name: p.read_bytes() for p in sorted(out.iterdir()) if p.is_file()} if out.exists() else {}
     files["exit_code.txt"] = f"{code}\n".encode()
+    if name:
+        saved = Path(RESULTS) / name
+        saved.mkdir(parents=True, exist_ok=True)
+        for file_name, data in files.items():
+            (saved / file_name).write_bytes(data)
+        cache.commit()
     return files
 
 
 @app.function(gpu="H100!", **GPU_OPTIONS)
-def measure_h100(configs: list[str]) -> dict[str, bytes]:
-    return _measure("H100", configs)
+def measure_h100(configs: list[str], name: str = "") -> dict[str, bytes]:
+    return _measure("H100", configs, name)
 
 
 @app.function(gpu="A100-80GB", **GPU_OPTIONS)
-def measure_a100(configs: list[str]) -> dict[str, bytes]:
-    return _measure("A100", configs)
+def measure_a100(configs: list[str], name: str = "") -> dict[str, bytes]:
+    return _measure("A100", configs, name)
 
 
 # More host memory for the H200: it is the one device that loads Mixtral-8x7B's 93 GB of weights.
 @app.function(gpu="H200", **{**GPU_OPTIONS, "memory": 65536})
-def measure_h200(configs: list[str]) -> dict[str, bytes]:
-    return _measure("H200", configs)
+def measure_h200(configs: list[str], name: str = "") -> dict[str, bytes]:
+    return _measure("H200", configs, name)
 
 
 FUNCTIONS = {"H100": measure_h100, "A100": measure_a100, "H200": measure_h200}
@@ -193,7 +206,7 @@ def main(devices: str = "", repeats: int = 2, configs: str = "", label: str = ""
         print("weights in the volume:", prefetch.remote(models))
     for _, _, _, target in jobs:
         target.mkdir(parents=True)
-    calls = [(FUNCTIONS[key].spawn(ids), target) for key, ids, _, target in jobs]
+    calls = [(FUNCTIONS[key].spawn(ids, f"{DATA.name}/{target.name}"), target) for key, ids, _, target in jobs]
     print(f"started {len(calls)} runs:", ", ".join(target.name for _, target in calls))
     failed = 0
     for call, target in calls:
