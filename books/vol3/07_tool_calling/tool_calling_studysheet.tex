@@ -1,0 +1,185 @@
+% Study sheet: Volume III, Chapter 7, Tool Calling.
+% Numbers: \val{...} from tool_calling_studysheet_numbers.tex, written by tool_calling_studysheet_numbers.py.
+\documentclass{studysheet}
+\input{tool_calling_studysheet_numbers}
+\sheetvolume{3}
+\sheetchapter{7}{Tool Calling}
+\sheetsources{Numbers from the chapter's mlsysim scenarios (hypothetical loss rates, sizes and prices); questions marked assumed use new inputs.}
+
+\begin{document}
+% ===================================================================== FRONT: LEARN
+\frontside
+\begin{bigidea}
+A tool call is the first output that can \hl{change the world}. The model only proposes; the
+runtime authorizes against the task's grants and returns an observation
+that claims \hl{only what it measured}. When a reply is lost, the effect stays \hl{unknown} until settled.
+\end{bigidea}
+
+\begin{leftcol}
+\sheetsec{Key ideas}
+\begin{ideas}
+\idea{Complete mediation.}{The runtime validates, authorizes, dispatches and shapes every call, reads
+  included, into an observation tied to its call ID.}
+\idea{Schemas check shape; endpoints check state.}{A version or path precondition holds only if the
+  endpoint checks it with the write; an earlier check races.}
+\idea{Discovery grants nothing.}{Listings, descriptions and schema-valid calls add no authority; check the task's grants, not the credential (confused deputy).}
+\idea{Judge a toolkit per accepted task.}{Each staged descriptor costs every call; a deep task-level
+  tool saves turns; a shell's reach is bounded only by containment.}
+\idea{An observation proves only what it measured.}{It carries status, what was omitted and a
+  handle to the rest. Exit zero is not task success.}
+\idea{Acknowledged is not finished.}{A job handle means queued; the runtime, not the model, watches
+  for completion and wakes the model when needed.}
+\end{ideas}
+
+\vspace{18pt}
+\sheetsec{One mediated round trip}
+{\centering
+\begin{tikzpicture}[sheet]
+  \node[accbox, minimum width=236pt, minimum height=16pt] (m) at (118,92) {Model: proposes name, arguments, call ID};
+  \foreach \x/\t/\n in {30/validate/v, 90/authorize/a, 150/dispatch/d, 208/shape/s}{%
+    \node[nbox, minimum width=50pt, minimum height=15pt] (\n) at (\x,50) {\t};}
+  
+  \node[nbox, dashed, minimum width=110pt, minimum height=15pt] (env) at (179,6) {tool, environment};
+  \draw[arr] (30,84) -- (v.north);
+  \draw[arr] (v.east) -- (a.west);
+  \draw[arr] (a.east) -- (d.west);
+  \draw[arr] (d.south) -- (150,13.5);
+  \draw[arr] (208,13.5) -- (s.south);
+  \draw[arr] (s.north) -- (208,84) node[midway, left, note, xshift=-2pt] {observation};
+  \draw[arr, dashed, muted] (v.south) -- (30,20);
+  \draw[arr, dashed, muted] (a.south) -- (90,20);
+  \node[note, align=center] at (60,10) {rejected: an error\\observation, no effect};
+\end{tikzpicture}\par}
+\vspace{8pt}
+{\fontsize{8.6}{11}\selectfont A timeout (lost, late, running or done)
+returns as \mbox{\textit{effect unknown}}, never failure.\par}
+
+\end{leftcol}%
+\begin{rightcol}
+\sheetsec{After a mutation times out}
+{\centering
+\begin{tikzpicture}[sheet]
+  \node[hotbox, minimum width=150pt, minimum height=15pt] (t) at (78,124) {Mutation timed out: effect unknown};
+  \node[nbox, minimum width=150pt, minimum height=15pt] (q1) at (78,96) {Idempotent: repeat leaves state as one run?};
+  \node[nbox, minimum width=150pt, minimum height=15pt] (q2) at (78,68) {Endpoint deduplicates by operation ID?};
+  \node[nbox, minimum width=150pt, minimum height=15pt] (q3) at (78,40) {Pre-written probe and receipt settle it?};
+  \node[nbox, draw=muted, fill=rulegray!35, minimum width=150pt, minimum height=15pt] (u) at (78,10) {Unresolved: block dependents, escalate};
+  \node[accbox, minimum width=72pt, minimum height=15pt] (o1) at (210,96) {retry};
+  \node[accbox, minimum width=72pt, minimum height=15pt, align=center] (o2) at (210,68) {retry, same op ID};
+  \node[accbox, minimum width=72pt, minimum height=15pt] (o3) at (210,40) {act on evidence};
+  \draw[arr] (t) -- (q1);
+  \foreach \a/\b in {q1/q2, q2/q3, q3/u}{\draw[arr] (\a) -- (\b) node[midway, right, note, xshift=2pt] {no};}
+  \foreach \a/\b in {q1/o1, q2/o2, q3/o3}{\draw[arr] (\a) -- (\b) node[midway, above, note, yshift=1pt] {yes};}
+\end{tikzpicture}\par}
+\vspace{3pt}
+{\fontsize{8.6}{11}\selectfont An operation ID names one intended effect: retries keep it, a deliberate
+repeat gets a new one. A probe, unchanged or matching, cannot show what this attempt did or rule out
+one still in flight; a receipt can.\par}
+
+\vspace{8pt}
+\fcard{Blind retry duplicates}%
+  {\begin{gathered}\Pr(\text{timeout}) = 1-(1-\RequestLossProbability)(1-\ReplyLossProbability)\\
+   \DuplicateEffectProbability = (1-\RequestLossProbability)\,\ReplyLossProbability\,(1-\RequestLossProbability)\end{gathered}}%
+  {Requests lost with $\RequestLossProbability$, replies with $\ReplyLossProbability$. A duplicate needs the
+   original delivered, its reply lost, the retry delivered. Duplicates a day: calls $\times\,\DuplicateEffectProbability$.}%
+  {One blind retry, no late packets.}{}
+\fcard{Head and tail}%
+  {\ObservationByteBudget = \HeadByteAllocation + \NoticeByteAllocation + \TailByteAllocation}%
+  {The head fills once; a ring keeps the last $\TailByteAllocation$ bytes. A line survives only there or in the head.}%
+  {Notice: log size less $\HeadByteAllocation$ and $\TailByteAllocation$. A handle reads the rest.}{}
+\fcard{Model-directed polling}%
+  {\StatusPollCount = \left\lceil \JobDuration / \FiniteChange\TimeInstant \right\rceil - 1, \quad
+   \text{cost} = \StatusPollCount\,(\SequenceLength\,\BlendedInputTokenPrice + \OutputLength\,\OutputTokenPrice)}%
+  {Checks every $\FiniteChange\TimeInstant$ before a job of length $\JobDuration$ ends; each is a full call,
+   $\SequenceLength$ tokens in at cache-blended $\BlendedInputTokenPrice$, $\OutputLength$ out at $\OutputTokenPrice$.}%
+  {Worst detection delay is $\FiniteChange\TimeInstant$. Runtime polling costs no inference.}{}
+\end{rightcol}
+
+% ===================================================================== BACK: PRACTICE
+\backside
+\begin{answers}
+\ans{Finish}{$\val{ykeep} \times \val{yqrepfrac} \times \val{ykeep} = \val{ydup}$; $\times$ \val{ycalls} =
+  \res{\val{ydupday} a day}; halved, \val{yduphalf}, so \val{yduphalfday}. \val{ysharepct}\% of timeouts
+  end in a duplicate: nearly all are lost replies.}
+\ans{1}{(a) \val{qjob} $\div$ \val{qevery}, less the last: \val{qpolls} calls of \$\val{qinpart} + \$\val{qoutpart}
+  = \$\val{qpercall}: \res{\$\val{qcost}}. (b) \val{qpollstwo} calls, \$\val{qcosttwo}; completion waits up to
+  \val{qeverytwo}\,s unseen. Runtime polling decouples cost from delay.}
+\ans{2}{Set: retry is safe. Restart: retry, same operation ID, fresh
+  attempt ID; a deliberate later restart gets a new ID. Append: no retry; a matching state proves nothing. No receipt: unresolved (flow).}
+\columnbreak
+\ans{3}{(a) $\TailByteAllocation$ = \val{hobs} $-$ \val{hnotice} $-$ \val{hhead} = \val{htail}. The panic starts
+  \val{hreach} bytes from the end: in the tail. Notice: \val{hlog} $-$ \val{hhead} $-$ \val{htail} =
+  \val{homit} bytes omitted. (b) Starts \val{hreachlong} from the end: lost. A head of at most
+  \val{hheadmax} keeps it, or read the middle by handle.}
+\ans{4}{The description is untrusted and grants nothing; the host checks the task's grants. The
+  endpoint compares \texttt{expected\_version} in the same step as the write: version conflict, file
+  unchanged (a separate earlier check leaves a race). Returns: \texttt{r17} superseded.}
+\end{answers}
+
+\begin{leftcol}
+\sheetsec{Worked example}
+\begin{practicebox}\boxtitle{Better network, or operation IDs?}
+\val{workers} workers $\times$ \val{perworker} mutating calls a day = \val{wcalls}; requests and replies
+each lost with probability \val{wqreq}\%; one blind retry per timeout.\par\vspace{5pt}
+{\centering
+\begin{tikzpicture}[sheet]
+  \pgfmathsetmacro\sc{120/\val{barhalfreq}}
+  \foreach \lab/\v/\t/\y/\sty in {as is/\val{barbase}/\val{wdupday}/39/nbox, halve request loss/\val{barhalfreq}/\val{wduphalfreqday}/26/nbox,
+      halve reply loss/\val{barhalfrep}/\val{wduphalfrepday}/13/nbox}{
+    \node[lab, anchor=east] at (86,\y+5) {\lab};
+    \draw[\sty] (90,\y) rectangle ({90+\v*\sc},\y+10);
+    \node[note, anchor=west] at ({94+\v*\sc},\y+5) {\t};}
+  \node[lab, anchor=east] at (86,5) {operation IDs};
+  \draw[accent, line width=1.4pt] (90,0) -- (90,10);
+  \node[note, anchor=west, text=accent] at (94,5) {none};
+  \node[note, anchor=north] at (150,-4) {duplicate effects a day};
+\end{tikzpicture}\par}\vspace{4pt}
+\begin{steps}
+\item Timeouts: $1 - \val{wkeep} \times \val{wkeep}$ = \res{\val{wtimeout}\%}.
+\item Duplicates: $\val{wkeep} \times \val{wqrepfrac} \times \val{wkeep} = \val{wdup}$; $\times$ \val{wcalls} =
+  \res{\val{wdupday} a day}.
+\item Halve request loss: $\val{wkeephalf} \times \val{wqrepfrac} \times \val{wkeephalf} = \val{wduphalfreq}$, so
+  \res{\val{wduphalfreqday}}: more, since more retries arrive.
+\item Halve reply loss: $\val{wkeep} \times \val{whalfrep} \times \val{wkeep} = \val{wduphalfrep}$, so \res{\val{wduphalfrepday}}.
+  Deduplicating endpoint: \res{none}.
+\end{steps}
+\takeaway{A network fix shrinks the duplicate path; an endpoint contract removes it.}
+\end{practicebox}
+
+\vspace{10pt}
+\sheetsec{Your turn: finish it}
+\begin{practicebox}\boxtitle{Lossy replies}
+\assumed{} \val{ycalls} restarts a day; request loss \val{yqreq}\%, reply loss \val{yqrep}\%; one blind retry per timeout.\par\vspace{4pt}
+\textbf{Given:} timeouts $1 - \val{ykeep} \times \val{ykeeprep}$ = \val{ytimeout}\%.\par
+\textbf{You:} duplicates a day, then with reply loss halved. Why do most timeouts here duplicate?\par\vspace{30pt}
+\end{practicebox}
+\end{leftcol}%
+\begin{rightcol}
+\sheetsec{Common mistakes}
+\mistake{``Every call was schema-valid and the token allowed it, so it was safe.''}%
+  {In the GitHub tool-server leak, a planted issue steered private reads and a public pull request, all
+   within the token. Checking the task's grants refuses the first private read.}{}
+\mistake{``The tests exited with status zero, so the repair is done.''}%
+  {A runner that finds no tests, a pipeline without \texttt{pipefail}, a client printing its error:
+   all exit zero. One reproducer passing supports one case.}{}
+\mistake{``Each descriptor is short, so stage every tool.''}%
+  {\val{creg} tools of \val{cdesc} tokens fill \val{cfull} tokens of every call; \val{csel} selected plus
+   \val{cover} overhead take \val{cselected}: \val{creleased} freed each turn.}{}
+
+\vspace{2pt}
+\sheetsec{Check yourself}
+\begin{qs}
+\item \assumed{} a \val{qjob}\,s job; the model checks every \val{qevery}\,s, reading \val{pctx} tokens at
+  \$\val{pcin}/M (cache-blended), writing \val{pout} at \$\val{pcout}/M. (a) Calls and cost? (b) Every
+  \val{qeverytwo}\,s: cost, and what is lost?
+\item Three mutations time out: set a config value; restart a container at an endpoint that
+  deduplicates by operation ID; append a billing record, no deduplication. Retry each, and how?
+\item \assumed{} $\ObservationByteBudget$ = \val{hobs} bytes, $\NoticeByteAllocation$ = \val{hnotice},
+  $\HeadByteAllocation$ = \val{hhead}. A \val{hlog}-byte log ends with a \val{hpanic}-byte panic, then \val{hafter} bytes
+  of teardown. (a) Does the panic reach the model? What does the notice report? (b) With \val{hafterlong} bytes of teardown? What head keeps it?
+\item The repair agent read \texttt{src/pool.py} at \texttt{r17}; a teammate then commits. A tool
+  description says ``overwrite allowed everywhere''. The model proposes a schema-valid replace with
+  \texttt{expected\_version} \texttt{r17}. What stops it, where?
+\end{qs}
+\end{rightcol}
+\end{document}

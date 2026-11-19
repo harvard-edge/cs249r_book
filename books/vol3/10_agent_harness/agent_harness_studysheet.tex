@@ -1,0 +1,182 @@
+% Study sheet: Volume III, Chapter 10, The Agent Harness.
+% Numbers: \val{...} from agent_harness_studysheet_numbers.tex, written by agent_harness_studysheet_numbers.py.
+\documentclass{studysheet}
+\input{agent_harness_studysheet_numbers}
+\sheetvolume{3}
+\sheetchapter{10}{The Agent Harness}
+\sheetsources{Numbers from the chapter's mlsysim scenarios (hypothetical prices, rates and allowances); questions marked assumed use new inputs.}
+
+\begin{document}
+% ===================================================================== FRONT: LEARN
+\frontside
+\begin{bigidea}
+A model asked to pause, wait or stay in budget honors it on almost every turn; over a long
+\hl{horizon} that still fails. So the \hl{harness} decides each next step: it owns the trajectory's
+record, \hl{admits} every model call and tool dispatch, and keeps an owner for every effect in flight.
+\end{bigidea}
+
+\begin{leftcol}
+\sheetsec{Key ideas}
+\begin{ideas}
+\idea{Continuation lives outside the model.}{A rule kept independently on \val{follow}\% of turns holds
+  over all \val{ruleturns} turns in only \val{hold}\% of runs. Every reply is an untrusted proposal.}
+\idea{One record, one writer.}{The trajectory record (state, grants, reservations, operation table,
+  live plan) is written only by the harness; model text never moves a meter.}
+\idea{Guarded transitions; register before send.}{A legal edge is not enough: under the record
+  lock the check reserves and registers before the request leaves.}
+\idea{Eligibility is not settlement.}{A timeout or interrupt advances the epoch, so a late result skips
+  the current turn; its charge and owner stay until evidence settles them.}
+\idea{Control lands at turn boundaries.}{Before each model call and tool dispatch. Streaming
+  cancellation stops generation; canceled or truncated output never dispatches.}
+\idea{Waits release threads, not resources.}{Lease, cache, reservations and deadline stay. Escrow holds
+  the exact proposal; approval is a precondition, not an order.}
+\end{ideas}
+
+\vspace{10pt}
+\sheetsec{Trajectory states}
+{\centering
+\begin{tikzpicture}[sheet]
+  \node[nbox, minimum width=58pt] (P) at (32,124) {PAUSED};
+  \node[accbox, minimum width=58pt] (R) at (32,74) {READY};
+  \node[accbox, minimum width=72pt] (C) at (146,74) {CALLING\_MODEL};
+  \node[accbox, minimum width=64pt] (W) at (32,14) {WAITING\_TOOL};
+  \node[nbox, dashed, minimum width=84pt] (A) at (166,14) {AWAITING\_APPROVAL};
+  \node[hotbox, minimum width=52pt] (F) at (222,124) {FINALIZING};
+  \node[nbox, double, align=center] (T) at (229,66) {COMPLETED\\FAILED\\CANCELED};
+  \draw[arr, line width=0.9pt] (R) -- node[above, small, yshift=1pt] {admit call} (C);
+  \draw[arr, line width=0.9pt] ([xshift=10pt]C.south west) -- node[right, small, pos=0.45, xshift=2pt] {admit tool} (W.north east);
+  \draw[arr, line width=0.9pt] (W) -- node[left, small, xshift=-2pt] {wait met} (R);
+  \draw[arr] ([xshift=20pt]C.south) -- node[right, small, pos=0.4, xshift=2pt] {review} ([xshift=0pt]A.north);
+  \draw[arr] (A) -- node[below, small, align=center, yshift=-5pt] {approved,\\rechecked} (W);
+  \draw[arr] ([xshift=-8pt]R.north) -- ([xshift=-8pt]P.south);
+  \draw[arr] ([xshift=8pt]P.south) -- node[right, small, xshift=1pt] {pause / resume} ([xshift=8pt]R.north);
+  \draw[arr] ([xshift=-10pt]C.north east) -- node[left, small, xshift=-3pt] {stop or done} (F.south west);
+  \draw[arr] (F) -- node[left, small, align=right, xshift=-2pt] {settled or\\transferred} (T);
+\end{tikzpicture}\par}
+\vspace{3pt}
+{\fontsize{8.6}{11}\selectfont\color{muted}Any live state can stop into FINALIZING (cancel, kill, budget);
+denied or expired approvals return to READY. A mid-wait pause withdraws the wait and any
+held approval (late decisions become audit only), then steps through READY to PAUSED. Resume reruns
+admission; evidence covers only the revision it tested.\par}
+\end{leftcol}%
+\begin{rightcol}
+\fcard{Bounded-liability admission}%
+  {\begin{gathered}\text{actual} + \text{reserved} + \text{liability} + \text{final reserve} \le \text{allowance}\\[2pt]
+   \text{liability} = \InputTokenPrice\,\SequenceLength + \OutputTokenPrice\,\OutputLimit\end{gathered}}%
+  {Checked for turns, tokens, time and dollars. A call reserves $\SequenceLength$ input tokens at full price
+   $\InputTokenPrice$, cached or not, and its whole output allowance $\OutputLimit$ at $\OutputTokenPrice$; usage settles it.}%
+  {Ceiling: lowest cost per accepted task, halts counted.}{}
+\fcard{Turn-boundary delay}%
+  {\TurnBoundaryDelay \approx \OutputLimit \times \PerTokenDecodeTime}%
+  {Checked only when a reply ends, a pause waits out the call:
+   \val{kmax} tokens at \val{tdec} ms $\approx$ \val{twait} s, unqueued.}%
+  {Linear in $\OutputLimit$; streaming cancellation removes it.}{}
+\fcard{Held approvals (Little's law)}%
+  {\ApprovalHeldTrajectories = \ArrivalRate\,\ExternalWait}%
+  {Requests at $\ArrivalRate$ waiting $\ExternalWait$ on average. Repair: \val{lam}/h $\times$ \val{waith} h =
+   \val{held} held, each keeping a \val{lease} MiB lease: \val{retgib} GiB (\val{retgb} GB).}%
+  {Mean, not peak: size for bursts.}{}
+\fcard{Weighted deficit round-robin}%
+  {\text{calls per round} = \frac{\SchedulingClassWeight \times \text{quantum}}{\SequenceLength + \OutputLimit}}%
+  {A class\textquoteright s charge share is $\SchedulingClassWeight$ over the summed weights; a call costs input plus output
+   allowance. Weights \val{wint}:\val{wmnt}, calls of \val{chgint} vs.\ \val{chgmnt}: interactive gets
+   \val{shareint}\% of the charge, \val{callratio}$\times$ the calls.}%
+  {Credit cap $\ge$ largest charge. Quotas and budgets are separate gates.}{}
+\end{rightcol}
+
+% ===================================================================== BACK: PRACTICE
+\backside
+\begin{answers}
+\ans{Finish}{Settled \$\val{settledtwo}, reserved none: headroom \val{allow} $-$ \val{settledtwo} $-$ \val{fin} =
+  \$\val{headtwo} $\ge$ \$\val{liab}: admitted. Largest input (\val{headtwo} $-$ \val{cout}) $\div$ \$\val{pin}/M
+  $\approx$ \val{nmaxtwo} tokens (admission card).}
+\ans{1}{(a) \val{qk} $\times$ \val{qtdec} ms = \val{qwait} s. (b) \val{qtarget} s $\div$ \val{qtdec} ms = \val{qkmax}
+  tokens. (c) Cancellation removes the dependence on $\OutputLimit$; a small cap truncates long proposals,
+  which are never dispatched (key ideas).}
+\ans{2}{(a) \val{qlammin}/min $\times$ \val{qwmin} min = \val{qheld} held $\times$ \val{lease} MiB = \val{qgib} GiB
+  (\val{qgb} GB); twice as fast: \val{qheldfast}, \val{qgibfast} GiB. (b) Lease, cache, reservations, deadline;
+  only the worker thread is freed. (c) Bursts exceed the mean (Little card).}
+\columnbreak
+\ans{3}{(a) Charge \val{qshare}\% vs.\ \val{qsharebatch}\%. Support \val{qcreds} $\div$ \val{qcs} = \val{qcalls},
+  batch \val{qq} $\div$ \val{qcb} = \val{qcallsbatch} calls per round. (b) Batch: its \val{qcb} charge never
+  fits the \val{qcap} cap (DRR card).}
+\ans{4}{(a) The operation table: evidence recorded, charge settled. The stale epoch keeps it out of the
+  current turn; the state stays PAUSED. (b) A guarded resume with a fresh admission check; later turns
+  may cite it, for r21 only. (c) No: the request was withdrawn; the late decision is audit only.}
+\end{answers}
+
+\begin{leftcol}
+\sheetsec{Worked example}
+\begin{practicebox}\boxtitle{Does the next repair call fit?}
+Allowance \$\val{allow}; settled \$\val{settled}; an unsettled test job reserves \$\val{reserved}; finalization
+reserve \$\val{fin}. Next call: \val{inputtokens} input tokens, \val{kout}-token output allowance, at \$\val{pin} and
+\$\val{pout} per million input and output tokens.\par\vspace{5pt}
+{\centering
+\begin{tikzpicture}[sheet]
+  \pgfmathsetmacro\sc{165/\val{allow}}
+  \pgfmathsetmacro\xs{64+\val{barsettled}*\sc}
+  \pgfmathsetmacro\xr{\xs+\val{barreserved}*\sc}
+  \pgfmathsetmacro\xf{\xr+\val{barfin}*\sc}
+  \pgfmathsetmacro\xa{64+\val{allow}*\sc}
+  \node[lab, anchor=east] at (60,26) {spend check};
+  \draw[nbox] (64,20) rectangle (\xs,32);
+  \draw[hotbox] (\xs,20) rectangle ({\xs+\val{liab}*\sc},32);
+  \node[note, anchor=west] at ({\xs+\val{liab}*\sc+3},26) {next call};
+  \node[lab, anchor=east] at (60,6) {reservation test};
+  \draw[nbox] (64,0) rectangle (\xs,12);
+  \draw[accbox] (\xs,0) rectangle (\xr,12);
+  \draw[accbox, dashed] (\xr,0) rectangle (\xf,12);
+  \draw[hotbox] (\xf,0) rectangle ({\xf+\val{liab}*\sc},12);
+  \draw[dim, dashed] (\xa,-1) -- (\xa,40) node[above, small] {allowance};
+  \node[note, anchor=north] at ({(64+\xs)/2},-3) {settled};
+  \node[note, anchor=north] at ({(\xs+\xf)/2},-3) {reserved, final};
+\end{tikzpicture}\par}\vspace{8pt}
+\begin{steps}
+\item Liability: \val{inputtokens} $\times$ \$\val{pin}/M + \val{kout} $\times$ \$\val{pout}/M = \val{cin} + \val{cout}
+  = \res{\$\val{liab}}.
+\item Spend check: \val{allow} $-$ \val{settled} = \res{\$\val{spendhead}}: admits.
+\item Reservation test: \val{spendhead} $-$ \val{reserved} $-$ \val{fin} = \res{\$\val{head}} $<$ \$\val{liab}: refuses;
+  admitted, final checks would be \$\val{short} short.
+\item Fit: input $\le$ (\val{head} $-$ \val{cout}) $\div$ \$\val{pin}/M $\approx$ \res{\val{nmax} tokens}.
+\end{steps}
+\takeaway{Admission counts what is owed, not just billed.}
+\end{practicebox}
+
+\vspace{10pt}
+\sheetsec{Your turn: finish it}
+\begin{practicebox}\boxtitle{The test job settles first}
+\assumed{} same call; the test job settles with a \$\val{tcharge} charge, releasing its \$\val{reserved} reservation.\par\vspace{4pt}
+\textbf{Given:} settled \val{settled} + \val{tcharge} = \$\val{settledtwo}; nothing else reserved.\par
+\textbf{You:} is the call admitted? What is the largest input it could carry?\par\vspace{30pt}
+\end{practicebox}
+\end{leftcol}%
+\begin{rightcol}
+\sheetsec{Common mistakes}
+\mistake{``Our loop is async, so a pause takes effect at once.''}%
+  {Coroutines free threads, not control. Checking only when a reply ends, a pause waits \val{twait} s behind
+   a \val{kmax}-token allowance; record the pause and cancel the stream.}{}
+\mistake{``The test timed out, so its reservation is free again.''}%
+  {A timeout ends the wait, not the job. Releasing \$\val{reserved} hands \val{resshare}\% of the allowance
+   to later calls, which overshoot by up to that much when the bill arrives.}{}
+\mistake{``The reviewer approved it, so dispatch it.''}%
+  {Approval is one precondition. The branch, budget, grants or capacity may have changed: dispatch recomputes
+   the digest and reruns the full admission check.}{}
+
+\vspace{2pt}
+\sheetsec{Check yourself}
+\begin{qs}
+\item \assumed{} \val{qtdec} ms per output token, a \val{qk}-token allowance; controls checked only when a reply
+  ends. (a) Worst pause delay? (b) Largest allowance for a \val{qtarget} s target? (c) Why prefer streaming
+  cancellation?
+\item \assumed{} \val{qlam} review requests per hour, \val{qwmin}-minute mean decision, \val{lease} MiB leases.
+  (a) Held trajectories and memory? Twice-as-fast reviewers? (b) What do they still hold? (c) Why
+  is the mean not enough?
+\item \assumed{} weights \val{qws}:\val{qwb}, quantum \val{qq}; support calls \val{qsin} + \val{qsout} tokens,
+  batch calls \val{qbin} + \val{qbout}. (a) Charge shares, calls per round? (b) Credit is capped at
+  \val{qcap}. Which class stalls?
+\item A lint job on r21 runs when an operator interrupts, then pauses. The authenticated result arrives.
+  (a) What does it change? (b) What must happen before the model sees it? (c) A withdrawn approval
+  now arrives. Dispatch?
+\end{qs}
+\end{rightcol}
+\end{document}

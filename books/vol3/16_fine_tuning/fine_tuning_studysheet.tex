@@ -1,0 +1,177 @@
+% Study sheet: Volume III, Chapter 16, Trajectory Fine-Tuning.
+% Numbers: \val{...} from fine_tuning_studysheet_numbers.tex, written by fine_tuning_studysheet_numbers.py.
+\documentclass{studysheet}
+\input{fine_tuning_studysheet_numbers}
+\sheetvolume{3}
+\sheetchapter{16}{Trajectory Fine-Tuning}
+\sheetsources{Numbers from the chapter's mlsysim scenarios (hypothetical token counts, bounds and models); questions marked assumed use new inputs.}
+
+\begin{document}
+% ===================================================================== FRONT: LEARN
+\frontside
+\begin{bigidea}
+Fine-tuning changes only what the model \hl{proposes}; the runtime bounds every action. A trajectory has
+\hl{two authors}: train the right tokens on the prefixes the model saw, and release on
+\hl{closed-loop acceptance}, not loss.
+\end{bigidea}
+
+\begin{leftcol}
+\sheetsec{Key ideas}
+\begin{ideas}
+\idea{Three homes for behavior.}{Weights hold procedure, context holds contracts (schemas,
+  permissions), the runtime enforces what no weight can guarantee.}
+\idea{Train one author.}{Loss only on selected policy responses; the rest stays as context. Mask
+  $\PositionLossMask_{t}$ goes with the logit at $\TokenIndex-1$; a cut-off turn gets no stop token.}
+\idea{Rebuild what the model saw.}{Each prefix is the delivered input, in arrival order, with no later
+  evidence; after compaction, one example per call.}
+\idea{Packing is only a memory layout.}{With block-diagonal attention and per-example labels and positions,
+  each example's logits must match unpacked ones: test it.}
+\idea{Where error is measured matters.}{On recorded states the excess-cost bound grows with
+  $\TurnHorizon^2$; labeling the learner's own states (DAgger) makes it linear.}
+\idea{Release on closed-loop acceptance.}{Losses compare only under one mask and split;
+  promote on paired acceptance, cost per accepted task $\CostPerAcceptedTask$, schema transfer.}
+\end{ideas}
+
+\vspace{10pt}
+\sheetsec{Loss mask on a recovery record}
+{\centering
+\begin{tikzpicture}[sheet]
+  \foreach \i/\txt/\sty/\dsh/\m in {0/{prompt}/nbox/solid/0, 1/{refused\\edit}/nbox/dashed/0,
+      2/{refusal}/accbox/solid/0, 3/{schema\\query}/hotbox/solid/1, 4/{schema}/accbox/solid/0,
+      5/{fixed\\edit}/hotbox/solid/1, 6/{check}/accbox/solid/0, 7/{report}/hotbox/solid/1}{
+    \node[\sty, \dsh, minimum width=27pt, minimum height=22pt, align=center] at ({15+\i*31},30) {\txt};
+    \node[lab] at ({15+\i*31},10) {$\PositionLossMask=\m$};}
+  \node[note, anchor=west] at (0,-3) {solid: targets; the rest is attended context};
+\end{tikzpicture}\par}
+
+\vspace{12pt}
+\fcard{Adapter state}%
+  {\text{state} \approx \val{adfrozenb}\,\text{B}\times\text{frozen params} + \val{adtrainb}\,\text{B}\times\text{trained params}}%
+  {Rank $\AdapterRank$ adds $\AdapterRank(\LayerInputWidth+\LayerOutputWidth)$ parameters per matrix, each
+   with weight, gradient, master copy and two moments.}%
+  {The frozen base stays resident, so the cut is at most \val{adtrainb}\,B $\div$ \val{adfrozenb}\,B = \val{adbound}$\times$.}{}
+\end{leftcol}%
+\begin{rightcol}
+\fcard{Masked loss and dilution}%
+  {\MaskedFinetuningLoss = -\frac{1}{\ActiveTargetTokenCount}\sum_{t} \PositionLossMask_{t}\log\Policy(\SequenceToken_t\mid\TokenPrefix)}%
+  {Target share $\ActiveTargetTokenCount/\SequenceLength$. Unmasked, the average runs over all
+   $\SequenceLength-1$ predictions: dilution $(\SequenceLength-1)/\ActiveTargetTokenCount$.}%
+  {Masking saves almost no compute: every token still passes through attention.}{}
+\fcard{Batch weight}%
+  {\text{token avg: } \frac{\ActiveTargetTokenCount\ \text{(record)}}{\ActiveTargetTokenCount\ \text{(batch)}}
+   \qquad \text{example avg: } \frac{1}{\BatchSize}}%
+  {Split one of $\BatchSize$ records into $\TurnHorizon$ per-call records: its token share holds, its example
+   share becomes $\TurnHorizon/(\BatchSize-1+\TurnHorizon)$.}%
+  {}{}
+\fcard{Imitation regret}%
+  {\text{excess cost} \le \min\{\TurnHorizon,\ \TurnHorizon^2\ReferenceStateDisagreementRate\}
+   \ \text{vs.}\ \min\{\TurnHorizon,\ \DeviationDisadvantage\TurnHorizon\LearnerStateDisagreementRate\}}%
+  {Disagreement on recorded states ($\ReferenceStateDisagreementRate$) or the learner's
+   ($\LearnerStateDisagreementRate$; one slip costs at most $\DeviationDisadvantage$). Uncapped ratio: $\TurnHorizon/\DeviationDisadvantage$.}%
+  {The first hits its cap at $\TurnHorizon = 1/\ReferenceStateDisagreementRate$. If one slip spoils the task, $\DeviationDisadvantage \to \TurnHorizon$.}%
+  {\begin{tikzpicture}[sheet]
+     \pgfmathsetmacro\xs{150/\val{rh}}
+     \draw[gridline] (30,0) -- (185,0);
+     \draw[gridline] (30,0) -- (30,62);
+     \draw[dim, dashed] (30,0) -- ({30+\val{rh}*\xs},{\val{rh}*2}) node[small, anchor=west, xshift=3pt] {cap $\TurnHorizon$};
+     \draw[accent, line width=1.1pt] plot[domain=0:\val{rh}, samples=60, smooth] ({30+\x*\xs},{2*\val{repsfrac}*\x*\x});
+     \draw[ink, line width=0.9pt] (30,0) -- ({30+\val{rh}*\xs},{2*\val{ru}*\val{repsfrac}*\val{rh}});
+     \filldraw[fill=accent, draw=accent] ({30+\val{rh}*\xs},{2*\val{rref}}) circle (2pt);
+     \filldraw[fill=ink, draw=ink] ({30+\val{rh}*\xs},{2*\val{rlrn}}) circle (1.6pt);
+     \node[lab, anchor=west] at ({35+\val{rh}*\xs},{2*\val{rref}}) {recorded: \val{rref}};
+     \node[lab, anchor=west] at ({35+\val{rh}*\xs},{2*\val{rlrn}+2}) {learner: \val{rlrn}};
+     \node[small, anchor=east] at (27,0) {0};
+     \node[small, anchor=south west] at (33,58) {excess-cost bound};
+     \node[note, anchor=north] at (110,-4) {\val{rh} steps, \val{reps}\% disagreement, $\DeviationDisadvantage=\val{ru}$};
+   \end{tikzpicture}}
+\fcard{Preference pair (DPO)}%
+  {\PreferenceMargin = \PreferenceScale(\PreferredReferenceRelativeScore - \DispreferredReferenceRelativeScore),
+   \quad \text{loss} = -\log\SigmoidFunction(\PreferenceMargin)}%
+  {$\PreferredReferenceRelativeScore$, $\DispreferredReferenceRelativeScore$: policy-minus-reference
+   log-probability sums over the selected spans, one shared context.}%
+  {Gradient weight $\PreferenceScale\SigmoidFunction(-\PreferenceMargin)$. $\SigmoidFunction(\PreferenceMargin)$ fits one comparison, never task success.}{}
+\end{rightcol}
+
+% ===================================================================== BACK: PRACTICE
+\backside
+\begin{answers}
+\ans{Finish}{\val{wk} $\div$ \val{ystored} = \val{yshare}\% target; dilution \val{ypred} $\div$ \val{wk} =
+  \val{ydil}$\times$, up from \val{wdil}$\times$. No: all \val{ystored} tokens still run through attention, so
+  compute grows with the observations (masked loss card).}
+\ans{Regret bounds}{(a) \val{qhsq} $\times$ \val{qefrac} = \val{qref}; \val{qu} $\times$ \val{qh} $\times$ \val{qefrac}
+  = \val{qlrn}; gap \val{qgap}$\times$, which is $\TurnHorizon/\DeviationDisadvantage$. (b) \val{qlrn} $\div$ \val{qhsq} =
+  \val{qmatch}\%. (c) It caps once $\TurnHorizon\ReferenceStateDisagreementRate$ reaches one: $\TurnHorizon$ = \val{qsat} steps; beyond it
+  the bound says nothing (regret card).}
+\ans{Three homes}{(i) Stable procedure: weights. (ii) A contract: context, read every call. (iii) Enforcement:
+  runtime, since no weight guarantees an invariant (key ideas).}
+\columnbreak
+\ans{Batch weights}{(a) Token: \val{batchlong} $\div$ \val{btotal} = \val{btok}\%; example: one of \val{bexn} =
+  \val{bex}\%. (b) Token: still \val{btok}\%, the targets are only partitioned; example: \val{bpieces} of
+  \val{bsplitn} = \val{bexsplit}\% (batch card).}
+\ans{Lower loss}{Not shown: A averages mostly observation tokens, B only targets. Recompute both on one held-out
+  split with the same mask and normalization, then decide on paired held-out acceptance,
+  $\CostPerAcceptedTask$, renamed schemas and retained skills under the serving runtime.}
+\end{answers}
+
+\begin{leftcol}
+\sheetsec{Worked example}
+\begin{practicebox}\boxtitle{Where does the loss land in one recovery record?}
+A record stores \val{wprompt} prompt, \val{wtask} task, \val{wrat} rationale (kept as context),
+\val{wresp} response (\val{wrefused} of them a refused edit) and \val{wobs} observation tokens.\par\vspace{5pt}
+{\centering
+\begin{tikzpicture}[sheet]
+  \fill[accentsoft] (10,0) rectangle ({10+\val{barobs}},14);
+  \fill[white] ({10+\val{barobs}},0) rectangle ({10+\val{barobs}+\val{barctx}},14);
+  \fill[accent] ({10+\val{barobs}+\val{barctx}},0) rectangle (210,14);
+  \draw[accent, line width=0.5pt] (10,0) rectangle (210,14);
+  \draw[muted, line width=0.4pt] ({10+\val{barobs}},0) -- ({10+\val{barobs}},14);
+  \node[lab] at ({10+\val{barobs}/2},7) {observations \val{wobsshare}\%};
+  \node[small] at ({10+\val{barobs}+\val{barctx}/2},7) {context};
+  \node[lab, anchor=south east] at (210,17) {targets \val{wshare}\%};
+  \draw[dim] ({210-\val{bark}/2},14.5) -- ({210-\val{bark}/2},17);
+\end{tikzpicture}\par}\vspace{2pt}
+\begin{steps}
+\item Stored: \val{wprompt} + \val{wtask} + \val{wrat} + \val{wresp} + \val{wobs} = \val{wstored};
+  predictions $\SequenceLength-1$ = \res{\val{wpred}}.
+\item Targets: \val{wresp} $-$ \val{wrefused} refused = \res{$\ActiveTargetTokenCount$ = \val{wk}}.
+\item Share: \val{wk} $\div$ \val{wstored} = \res{\val{wshare}\%}; observations fill \val{wobsshare}\%.
+\item No mask: \val{wpred} $\div$ \val{wk} = \res{\val{wdil}$\times$} dilution of every target.
+\end{steps}
+\takeaway{The mask moves the gradient, not the compute: every token still runs through attention.}
+\end{practicebox}
+
+\vspace{10pt}
+\sheetsec{Your turn: finish it}
+\begin{practicebox}\boxtitle{What if the observations double?}
+Same record; the tool output grows to \val{yobs} tokens, all else unchanged.\par\vspace{4pt}
+\textbf{Given:} stored = \val{wstored} + \val{wobs} = \val{ystored}; predictions \val{ypred}.\par
+\textbf{You:} find the target share and the unmasked dilution. Does masking now save more compute? Why?\par\vspace{30pt}
+\end{practicebox}
+\end{leftcol}%
+\begin{rightcol}
+\sheetsec{Common mistakes}
+\mistake{``Packing is just a speedup; it does not change what is learned.''}%
+  {It lifts occupancy from \val{pkpad}\% to \val{pkpack}\% (\val{pkratio}$\times$ fewer positions), but under an
+   ordinary causal mask later examples read earlier ones: the learning problem changed.}{}
+\mistake{``A pair score of \val{dpsig} means the preferred repair succeeds \val{dpsigpct}\% of the time.''}%
+  {Scores \val{dpdw} and $\val{dpdl}$ at $\PreferenceScale$ = \val{dpbeta} give $\PreferenceMargin$ = \val{dpz}, $\SigmoidFunction$ = \val{dpsig}; at
+   $\PreferenceScale$ = \val{dpbetatwo} the same log-probabilities give \val{dpztwo} and \val{dpsigtwo}. It measures fit, not success.}{}
+\mistake{``Training \val{adfrac}\% of the parameters needs about \val{adfrac}\% of the memory.''}%
+  {An \val{adbase}B model with rank-\val{adrank} adapters keeps \val{adbasegb} GB of frozen base plus \val{adadaptgb} GB
+   of adapter state: \val{adlora} GB against \val{adfull} GB, still \val{adkept}\% of the parameter-state bytes.}{}
+
+\vspace{2pt}
+\sheetsec{Check yourself}
+\begin{qs}
+\item \assumed{} $\TurnHorizon$ = \val{qh} steps, \val{qe}\% disagreement on recorded states; after labeling rounds,
+  \val{qe}\% on learner states with $\DeviationDisadvantage$ = \val{qu}. (a) Both bounds and their gap?
+  (b) What recorded-state error would match the learner bound? (c) At what horizon does the recorded-state bound reach its cap?
+\item A repair agent should (i) inspect the failing test before editing, (ii) call \texttt{read\_file} with its renamed
+  argument \texttt{target\_uri}, (iii) never write outside the workspace. Where does each live, and why?
+\item \assumed{} one repair trace with \val{batchlong} targets and \val{batchcount} lookups with \val{batchshort} each.
+  (a) The trace's batch share under token and example averaging? (b) Split into \val{bpieces} per-call records
+  of \val{bpiece} targets?
+\item Checkpoint A (all-token loss) shows a lower dashboard loss than B (masked). Is A better? What decides?
+\end{qs}
+\end{rightcol}
+\end{document}
