@@ -1,0 +1,175 @@
+% Study sheet: Volume III, Chapter 8, Agent Sandboxes.
+% Numbers: \val{...} from sandboxes_studysheet_numbers.tex, written by sandboxes_studysheet_numbers.py.
+\documentclass{studysheet}
+\input{sandboxes_studysheet_numbers}
+\sheetvolume{3}
+\sheetchapter{8}{Agent Sandboxes}
+\sheetsources{Numbers from the chapter's mlsysim scenarios (an illustrative sandbox profile); questions marked assumed use new inputs.}
+
+\begin{document}
+% ===================================================================== FRONT: LEARN
+\frontside
+\begin{bigidea}
+A schema-valid tool call still starts code that reaches whatever its environment allows. The limit
+must be \hl{enforced beneath the process}, not requested of the model; confinement costs
+\hl{startup, memory and reset} per trajectory.
+\end{bigidea}
+
+\begin{leftcol}
+\sheetsec{Key ideas}
+\begin{ideas}
+\idea{Admission is not containment.}{A well-typed call can still read credentials or open a socket;
+  only a mechanism beneath the process bounds it.}
+\idea{Pruned names keep their authority.}{Code in the supervisor's interpreter reaches its objects by
+  reference; native libraries share its memory. Give code its own process or VM.}
+\idea{Capability, not identity.}{Default reach is empty: code holds only references its grant
+  handed it. A broker holds credentials outside the guest and acts only as granted.}
+\idea{An envelope is where a system call lands.}{Choose by the code, its authority and how long it holds
+  the envelope; audit mounts, devices and routes, not the label.}
+\idea{Egress is enforced outside the guest.}{A packet filter passes only the mediator, which checks
+  operation and fields and resolves exact hostnames. Permitted calls still carry data; so do
+  lookups, in unique labels.}
+\idea{Reuse only after a verified reset.}{Clear four domains: execution and memory (daemons, cron),
+  storage, network and broker authority (sockets, queued jobs), host devices. A clean scan proves nothing.}
+\end{ideas}
+
+\vspace{8pt}
+\fcard{Capability admission and attenuation}%
+  {\begin{gathered}\text{admit} \iff \text{authentic}(\CapabilityGrant) \land \ProposedAccess.\text{op}\in\GrantRights
+   \land \ProposedAccess.\text{target}\sqsubseteq\mathcal{O}_{\CapabilityGrant}\\
+   \land\ \GrantCondition(\ProposedAccess) \land \AccessAttemptTime < \GrantExpiryTime,
+   \qquad \ChildCapabilityGrant \sqsubseteq \ParentCapabilityGrant\end{gathered}}%
+  {Grant $\CapabilityGrant$: rights, objects, condition $\GrantCondition$, expiry. A child may only drop
+   rights, narrow objects, add conditions or expire earlier.}%
+  {Deriving a child leaves the parent usable; expiry blocks new opens, not live handles. Withdraw the
+   parent and close handles.}{}
+\end{leftcol}%
+\begin{rightcol}
+\sheetsec{Four envelopes}
+\begin{sheettable}{@{}l L l L@{}}
+\thead{Envelope} & \thead{A system call lands} & \thead{Start} & \thead{Fits}\\ \midrule
+Container & host kernel, after a filter & ms & reviewed code, no secrets\\
+User-space kernel & emulator: trap, emulate, switch & ms & untrusted, few calls\\
+MicroVM & own guest kernel; device I/O exits & ms (snapshot) & untrusted native code\\
+Bytecode & nowhere: host imports only & \textmu s--ms & parsers, per-call tools\\
+\end{sheettable}
+
+\vspace{8pt}
+\fcard{Setup: per call or per trajectory}%
+  {\begin{gathered}\text{fresh} = \EnvelopeCallCount(\EnvelopeSetupTime+\CallUsefulWorkTime), \qquad
+   \text{kept} = \EnvelopeSetupTime+\EnvelopeCallCount\,\CallUsefulWorkTime\\
+   \CallUsefulWorkTime \ge \EnvelopeSetupTime(1-\SetupShareCap)/\SetupShareCap\end{gathered}}%
+  {$\EnvelopeCallCount$ calls of work $\CallUsefulWorkTime$. Setup is $\EnvelopeSetupTime/(\EnvelopeSetupTime+\CallUsefulWorkTime)$
+   of a fresh call; the bound keeps it under the cap $\SetupShareCap$.}%
+  {Keeping carries state between calls: within one task only, never across tenants.}{}
+
+\fcard{Sizing a pool}%
+  {\begin{gathered}\ActiveLeaseCount = \ArrivalRate\,\LeaseHoldTime\\
+   \PoolResidentMemory = \TemplateSharedMemory + \ActiveLeaseCount\,\LeaseDirtyMemory + \StandbyReserveCount\,\StandbyInstanceMemory\\[2pt]
+   \Pr(\text{miss}) = 1-e^{-\ArrivalRate\InstanceReplenishTime}(1+\ArrivalRate\InstanceReplenishTime
+   +(\ArrivalRate\InstanceReplenishTime)^2/2+\cdots)\end{gathered}}%
+  {Mean leases: a lease lasts the trajectory, so horizon sets memory.
+   Arrivals per restore are Poisson, mean $\ArrivalRate\InstanceReplenishTime$. Keep the bracket's first
+   $\StandbyReserveCount$ terms (next: $(\ArrivalRate\InstanceReplenishTime)^3/6$); miss under target
+   $\StockoutProbabilityTarget$: restore time sets the reserve.}%
+  {}%
+  {\begin{tikzpicture}[sheet]
+     \node[accbox, minimum width=52pt, minimum height=15pt] (sb) at (36,66) {standby};
+     \node[accbox, minimum width=78pt, minimum height=15pt] (ls) at (124,66) {leased: one trajectory};
+     \node[nbox, dashed, minimum width=46pt, minimum height=15pt] (tn) at (215,66) {tainted};
+     \node[accbox, minimum width=150pt, minimum height=15pt] (rc) at (163,32) {fence, quiesce, export, restore};
+     \node[hotbox, minimum width=52pt, minimum height=15pt] (vf) at (36,32) {verify};
+     \node[nbox, minimum width=52pt, minimum height=13pt] (ds) at (125,0) {destroyed};
+     \draw[arr] (sb) -- (ls);
+     \draw[arr] (ls) -- (tn);
+     \draw[arr] (tn.south) -- (tn.south |- rc.north);
+     \draw[arr] (rc) -- (vf);
+     \draw[arr] (vf) -- (sb) node[midway, right, note, xshift=2pt] {checks pass};
+     \draw[arr] (vf.south) |- (ds.west) node[pos=0.75, above, note, yshift=1.5pt] {check fails};
+     \draw[arr] (rc.south -| ds) -- (ds.north) node[midway, right, note, xshift=2pt] {teardown unconfirmed};
+   \end{tikzpicture}}
+\end{rightcol}
+
+% ===================================================================== BACK: PRACTICE
+\backside
+\begin{answers}
+\ans{Finish}{Two: \val{stwo}\%; three: \val{sthree}\%, above \val{target}\%; four: \val{sfour}\%.
+  Reserve \val{reserveslow}. Memory adds only \val{addedmb}~MB (still \val{poolslowgb}~GB): restore time
+  moved the reserve, not the memory (pool card).}
+\ans{1}{(a) \val{qcalls} $\times$ \val{qstep}~ms = \val{qfresh}~s vs.\ \val{restore}~ms + \val{qusefulsec} s
+  = \val{qkept}~s (\val{qspeed}$\times$). (b) \val{restore} $\div$ \val{qstep} = \val{qshare}\%; needs
+  \val{restore} $\times$ \val{qcapleft} $\div$ \val{qcapfrac} = \val{qwcap}~ms per call. (c) Kept carries
+  state across pages. A fresh bytecode sandbox per page: tiny setup (table).}
+\ans{2}{(a) A: no, it adds execute. B: no, it outlives its parent. C: yes, all narrower.
+  (b) The kept parent until expiry, the open handle after it: withdraw the parent, close the handle (capability card).}
+\columnbreak
+\ans{3}{(a) Labels encode data the resolver carries to the domain's server. (b) An install repeats a
+  few fixed names. (c) No guest resolver: the host adapter resolves exact hostnames (egress idea).}
+\ans{4}{Execution (cron fires later), broker authority (the upload runs under the next lease), host
+  devices (leftover device memory). No: a clean scan proves nothing; destroy it (picture).}
+\end{answers}
+
+\begin{leftcol}
+\sheetsec{Worked example}
+\begin{practicebox}\boxtitle{How large a pool for steady repair traffic?}
+Trajectories arrive at \val{lam}/s, each holding a sandbox \val{hold}~s. Restore \val{restore}~ms;
+miss target \val{target}\%. Template \val{guestmib}~MiB (\val{guestgb}~GB); \val{dirty}~MB written
+per lease, \val{standby}~MB per standby.\par\vspace{2pt}
+\begin{steps}
+\item Active leases: \val{lam} $\times$ \val{hold} = \res{\val{active}}.
+\item Arrivals per restore: \val{lam} $\times$ \val{restoresec}~s = \val{mu}. One standby misses with
+  $1-e^{-\val{mu}}$ = \val{pone}\%, above target; two, $1-e^{-\val{mu}}(1+\val{mu})$ = \val{ptwo}\%.
+  Reserve \res{\val{reserve}}.
+\item Memory: \val{guestgb}~GB + \val{active} $\times$ \val{dirty}~MB + \val{reserve} $\times$ \val{standby} MB
+  = \res{\val{poolgb}~GB}.
+\item Private images: \val{active} $\times$ \val{guestmib}~MiB = \res{\val{privategb}~GB},
+  \val{memratio}$\times$ as much.
+\end{steps}\vspace{3pt}
+{\centering
+\begin{tikzpicture}[sheet]
+  \pgfmathsetmacro\sc{130/\val{privategb}}
+  \foreach \lab/\v/\y/\sty in {private images/\val{privategb}/16/nbox, copy-on-write/\val{poolgb}/0/hotbox}{
+    \node[lab, anchor=east] at (68,\y+6) {\lab};
+    \draw[\sty] (72,\y) rectangle ({72+\v*\sc},\y+12);
+    \node[note, anchor=west] at ({76+\v*\sc},\y+6) {\v{} GB};}
+\end{tikzpicture}\par}
+\takeaway{Horizon sets memory; restore time sets the reserve.}
+\end{practicebox}
+
+\vspace{10pt}
+\sheetsec{Your turn: finish it}
+\begin{practicebox}\boxtitle{Same pool, burst load}
+\assumed{} restores contend under the burst and take \val{slow}~ms; else unchanged.\par\vspace{4pt}
+\textbf{Given:} arrivals per restore \val{lam} $\times$ \val{slowsec}~s = \val{muslow}; one standby
+misses \val{sone}\%.\par
+\textbf{You:} the smallest reserve meeting \val{target}\%, and the memory change.\par\vspace{30pt}
+\end{practicebox}
+\end{leftcol}%
+\begin{rightcol}
+\sheetsec{Common mistakes}
+\mistake{``With empty \texttt{\_\_builtins\_\_} and one helper, the script reaches nothing else.''}%
+  {The helper's \texttt{\_\_globals\_\_} hands back the supervisor's namespace; a subclass walk
+   reaches every loaded class. A process or VM boundary bounds reach.}{}
+\mistake{``Copy-on-write is cheap, so a one-byte edit copies one byte.''}%
+  {A file-level overlay copies the whole file on first write: one byte in a \val{fixture}~GB fixture
+   across \val{ws} workspaces copies \val{filecopy}~GB, against \val{blockcopy}~KB in \val{block}~KB blocks.}{}
+
+\vspace{2pt}
+\sheetsec{Check yourself}
+\begin{qs}
+\item \assumed{} an agent parses \val{qcalls} pages, \val{qwork}~ms each; a microVM restore
+  costs \val{restore}~ms. (a) Elapsed time, fresh per page vs.\ kept for the task? (b) Setup's share of
+  a fresh call; work needed to hold it to \val{qcap}\%? (c) Each page is hostile, needs no system calls,
+  and must not see the last one's state. Which envelope?
+\item \assumed{} $\EditPhaseCapabilityGrant$ = (read, write; \texttt{repo/}; \val{gparent}~s). Children:
+  A (read, execute; \texttt{repo/tests/}; \val{gshort}~s), B (read; \texttt{repo/src/}; \val{glong}~s),
+  C (read; \texttt{repo/src/pool.py}; \val{gshort}~s). (a) Which are attenuations? (b) A worker derives
+  C but keeps the parent, and a writable handle past its expiry. What can write?
+\item A guest routes only to the mediator, but the resolver answers any name under the package
+  mirror's domain. A test sends thousands of lookups, each a new long label. (a) What is happening?
+  (b) How does it differ from an install? (c) The fix?
+\item A reclaimed instance passed a file scan, but its lease added a cron job, left an upload queued
+  in the host broker and skipped a device reset. Which domains failed? May it rejoin standby?
+\end{qs}
+\end{rightcol}
+\end{document}

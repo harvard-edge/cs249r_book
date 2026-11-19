@@ -1,0 +1,176 @@
+% Study sheet: Volume IV, Chapter 11, Trajectory Planning.
+% Numbers: \val{...} from planning_studysheet_numbers.tex, written by planning_studysheet_numbers.py.
+\documentclass{studysheet}
+\input{planning_studysheet_numbers}
+\sheetvolume{4}
+\sheetchapter{11}{Trajectory Planning}
+\sheetsources{Numbers from the chapter's mlsysim scenarios for the warehouse mobile manipulator and its Panda-class seam joint (illustrative profiles); questions marked assumed use new inputs.}
+
+\begin{document}
+% ===================================================================== FRONT: LEARN
+\frontside
+\begin{bigidea}
+A target is not a motion. Planning gives a proposal \hl{timing}, a smooth join to the motion under way,
+and a \hl{latched stop that runs without the proposer}. Work across the causal boundary cannot be
+recalled, so a plan is admitted only while that stop fits the clearance ahead.
+\end{bigidea}
+
+\begin{leftcol}
+\sheetsec{Key ideas}
+\begin{ideas}
+\idea{Generators only propose.}{Search, optimization and learned chunks hand over candidates; the safety
+  MCU decides.}
+\idea{Replacement outlasts renewal.}{Capture to admission takes longer than one renewal period, so
+  requests overlap. A mission's handoff count sets the tail to design for.}
+\idea{Tool limits are not joint limits.}{Near a straight elbow a modest tool speed needs huge joint
+  rates; damping caps the step by giving up tool accuracy.}
+\idea{Seams are C$^2$, planned from the projected state.}{An acceleration step times inertia is a torque
+  step. A pose sampled at request lags by joint speed times delay.}
+\idea{Smooth stops are longer.}{A jerk limit acts like extra reaction time; constant deceleration is
+  shorter only on paper.}
+\idea{Two deadlines, two stops.}{A lapsed lease stops the arm from its measured state; with no successor
+  admitted by the cutoff, the latched stop begins at commitment.}
+\end{ideas}
+
+\vspace{9pt}
+\sheetsec{The stall runway}
+\begin{sheettable}{@{}l l L@{}}
+\thead{Term} & \thead{Travel} & \thead{Set by}\\ \midrule
+Lease lapse & $\SpeedAtDetection\,\ChunkLease$ & last admitted chunk\\
+Tick, bus, onset & $\SpeedAtDetection\,\times$ delay & MCU and drive\\
+Jerk-limited stop & $\StoppingDistance(\SpeedAtDetection)$ & load's $\ProfileAccelerationBound$ and $\JerkLimit$\\
+Must hold & sum $\le \ClearDistance$ & admission check\\
+\end{sheettable}
+
+\vspace{9pt}
+\fcard{Replacement latency}%
+  {\ReplacementLatency = \DispatchObservationAge + \DispatchAdmissionInterval,
+   \qquad \HandoffExceedanceProbability \le \frac{\MissionExceedanceBudget}{\MissionHandoffCount}}%
+  {Capture to dispatch plus dispatch to admission. Requests in flight: $\ReplacementLatency$ over the
+   renewal period, rounded up. A mission target $\MissionExceedanceBudget$ over $\MissionHandoffCount$
+   handoffs sets the per-handoff tail $\HandoffExceedanceProbability$.}%
+  {}%
+  {\begin{tikzpicture}[sheet]
+     \draw[nbox] (0,0) rectangle (\val{pxage},12);
+     \draw[accbox] (\val{pxage},0) rectangle ({\val{pxage}+\val{pxadmit}},12);
+     \node[small] at ({\val{pxage}/2},6) {\val{agems}};
+     \node[small] at ({\val{pxage}+\val{pxadmit}/2},6) {\val{admitms}};
+     \node[note, anchor=west] at ({\val{pxage}+\val{pxadmit}+2},6) {\val{latms}\,ms};
+     \draw[dim, dashed] (\val{pxrenew},-4) -- (\val{pxrenew},20);
+     \node[small, anchor=south] at (\val{pxrenew},20) {renewal \val{renewms}\,ms};
+     \draw[dim, dashed] (\val{pxlease},-4) -- (\val{pxlease},20);
+     \node[small, anchor=north] at (\val{pxlease},-4) {lease \val{leasems}\,ms};
+     \node[note, anchor=north west] at (0,-4) {age};
+     \node[note, anchor=north east] at ({\val{pxage}+\val{pxadmit}},-4) {to admission};
+   \end{tikzpicture}}
+\end{leftcol}%
+\begin{rightcol}
+\fcard{Joint rate near a singularity}%
+  {\begin{gathered}\|\GeneralizedVelocities\| = \frac{\ToolSpeedLimit}{\SmallestJacobianSingularNumber}\\[2pt]
+   \text{damped: } \|\GeneralizedVelocities\| = \frac{\SmallestJacobianSingularNumber\,\ToolSpeedLimit}{\SmallestJacobianSingularNumber^2+\InverseKinematicsDamping^2}
+   \le \frac{\ToolSpeedLimit}{2\InverseKinematicsDamping}\end{gathered}}%
+  {$\ToolSpeedLimit$: tool speed in the weakest direction; $\SmallestJacobianSingularNumber$: smallest
+   singular value of the Jacobian. With two joints, one turns at least $\|\GeneralizedVelocities\|/\sqrt{2}$.}%
+  {Bounded is not feasible: the joints allow \val{qdmax}\,rad/s.}{}
+\fcard{Seam torque and the C$^2$ bridge}%
+  {\begin{gathered}\SeamStepTorque = \EffectiveJointInertia\,\frac{\FiniteChange\JointVelocity}{\SamplingPeriod}\\[2pt]
+   \JointAcceleration_{\text{peak}} = \frac{1.5\,\FiniteChange\JointVelocity}{\SeamBridgeDuration}, \qquad
+   |\JointJerk|_{\text{peak}} = \frac{6\,\FiniteChange\JointVelocity}{\SeamBridgeDuration^2}\end{gathered}}%
+  {C$^2$: position, velocity and acceleration all match. Gap $\FiniteChange\JointVelocity$ closed in one tick
+   $\SamplingPeriod$, or by a symmetric quintic bridge (zero end accelerations). Torque is $\EffectiveJointInertia$
+   times acceleration; torque rate $\CommandedJointTorqueSlew = \EffectiveJointInertia\JointJerk \le \TorqueRateLimit$.
+   Seam joint: $\EffectiveJointInertia$ = \val{jeff}\,kg$\cdot$m$^2$, rated \val{rated}\,N$\cdot$m,
+   $\TorqueRateLimit$ = \val{taudmax}\,N$\cdot$m/s.}%
+  {Torque grows as $1/\SeamBridgeDuration$, torque rate as $1/\SeamBridgeDuration^2$: recheck a compressed bridge.}{}
+\fcard{Jerk-limited stop (S-curve)}%
+  {\StoppingDistance = \frac{\SpeedAtDetection^2}{2\ProfileAccelerationBound} + \frac{\SpeedAtDetection\,\ProfileAccelerationBound}{2\JerkLimit}}%
+  {Constant braking plus cruise over half a jerk ramp; holds when
+   $\SpeedAtDetection \ge \ProfileAccelerationBound^2/\JerkLimit$. The load sets both bounds.}%
+  {}{}
+
+\end{rightcol}
+
+% ===================================================================== BACK: PRACTICE
+\backside
+\begin{answers}
+\ans{Finish}{Stop \val{mbrake} + \val{mramp} = \res{\val{mstop}\,mm}; plus \val{wtravel}\,mm, \res{\val{mtotal}\,mm},
+  \val{mover}\,mm past the \val{wclear}\,mm: refuse. Slow the carry to about \res{\val{mfit}\,m/s}.}
+\ans{1}{Acceleration \val{qacc}\,rad/s$^2$, torque \val{qpeak}\,N$\cdot$m, under \val{rated}: fine. Jerk \val{qjerk}\,rad/s$^3$, torque rate
+  \res{\val{qrate}\,N$\cdot$m/s}, \val{qratio}$\times$ the limit: reject. Shortest fitting bridge
+  \res{\val{qshortest}\,ms} (seam card).}
+\ans{2}{Undamped \val{qtool}\,m/s $\div$ \val{sigmabad}\,mm = \res{\val{qundamped}\,rad/s}; damped \res{\val{qdamped}\,rad/s}.
+  One joint then turns at least \val{qundone} or \val{qdampone}\,rad/s, both above \val{qdmax}: bounded, not
+  feasible. Slow the tool (singularity card).}
+\columnbreak
+\ans{3}{\val{qshiftmin}\,min $\times$ \val{qhz}\,Hz = \res{\val{qhandoffs}} handoffs, so
+  $\HandoffExceedanceProbability \le$ \res{$\val{qeps}$} each. \val{latms}\,ms over \val{renewms}\,ms
+  rounds up to \res{\val{inflight}} requests in flight (latency card).}
+\ans{4}{A: \val{lspeed}\,rad/s $\times$ \val{ldelay}\,ms = \val{lgap}\,rad: a stale anchor;
+  plan from the projected seam state. B: an acceleration step, so torque steps by \val{jeff} $\times$
+  \val{ljump} = \res{\val{ltorque}\,N$\cdot$m} at once; fit a C$^2$ bridge (seam card).}
+\end{answers}
+
+\begin{leftcol}
+\sheetsec{Worked example}
+\begin{practicebox}\boxtitle{Can the arm stop if the proposer stalls?}
+The arm moves at its \val{wv}\,m/s tool limit; no replacement arrives. Lease
+\val{leasems}\,ms; tick \val{wtick}\,ms, bus \val{wbus}\,ms, brake onset \val{wonset}\,ms. Stop bounds
+$\ProfileAccelerationBound$ = \val{wa}\,m/s$^2$, $\JerkLimit$ = \val{wj}\,m/s$^3$; clearance \val{wclear}\,mm.\par\vspace{5pt}
+{\centering
+\begin{tikzpicture}[sheet]
+  \draw[hotbox] (0,0) rectangle (\val{ptravel},12);
+  \draw[accbox] (\val{ptravel},0) rectangle ({\val{ptravel}+\val{pstop}},12);
+  \node[small, anchor=south] at ({\val{ptravel}/2},13) {response};
+  \node[small, anchor=south] at ({\val{ptravel}+\val{pstop}/2},13) {S-curve stop};
+  \draw[dim, dashed] (\val{pclear},-4) -- (\val{pclear},24);
+  \node[small, anchor=south] at (\val{pclear},24) {obstacle at \val{wclear}\,mm};
+  \node[note, anchor=north] at (93,-4) {to scale; spare \val{wmargin}\,mm};
+\end{tikzpicture}\par}\vspace{4pt}
+\begin{steps}
+\item Response: \val{leasems} + \val{wtick} + \val{wbus} + \val{wonset} = \val{wresp}\,ms, so \res{\val{wtravel}\,mm} at \val{wv}\,m/s.
+\item Branch: $\ProfileAccelerationBound^2/\JerkLimit$ = \val{wthresh}\,m/s, below \val{wv}\,m/s, so the stop reaches $\ProfileAccelerationBound$.
+\item Stop: $\val{wv}^2/(2\times\val{wa})$ + $\val{wv}\times\val{wa}/(2\times\val{wj})$ = \val{wbrake} + \val{wramp} = \res{\val{wstop}\,mm}.
+\item Total \res{\val{wtotal}\,mm} of \val{wclear}\,mm: admit, \val{wmargin}\,mm spare.
+\end{steps}
+\takeaway{Each millisecond of lease costs a millimeter of runway.}
+\end{practicebox}
+
+\vspace{10pt}
+\sheetsec{Your turn: finish it}
+\begin{practicebox}\boxtitle{Same stall, carrying an open mug}
+To keep the liquid in, the load allows only $\ProfileAccelerationBound$ = \val{ma}\,m/s$^2$ and
+$\JerkLimit$ = \val{mj}\,m/s$^3$; speed and response are unchanged.\par\vspace{4pt}
+\textbf{Given:} response travel \val{wtravel}\,mm; $\ProfileAccelerationBound^2/\JerkLimit$ = \val{mthresh}\,m/s,
+so the plateau formula holds.\par
+\textbf{You:} find the stop and total, admit or refuse, and what must change.\par\vspace{30pt}
+\end{practicebox}
+\end{leftcol}%
+\begin{rightcol}
+\sheetsec{Common mistakes}
+\mistake{``The one-tick step asks only \val{stepnm}\,N$\cdot$m, under the \val{rated}\,N$\cdot$m rating, so the seam is fine.''}%
+  {That torque must arrive within \val{tickms}\,ms: \val{steprate}\,N$\cdot$m/s, \val{stepratio}$\times$ the
+   \val{taudmax}\,N$\cdot$m/s limit.}{}
+\mistake{``Size the stop with constant deceleration; the S-curve is a detail.''}%
+  {Base at \val{bv}\,m/s and \val{ba}\,m/s$^2$: constant braking (\val{bbrake}\,mm) plus \val{bother}\,mm of response
+   and allowances is \val{bconst}\,mm, inside \val{bclear}\,m. The jerk limit (\val{bj}\,m/s$^3$) adds \val{bramp}\,mm: \val{bover}\,mm over.}{}
+\mistake{``Inference is nearly done; admit it just after the cutoff.''}%
+  {With braking due at a \val{commitms}\,ms commitment and \val{commitresp}\,ms to start it, admission closes at
+   \val{cutoffms}\,ms. Each millisecond of waiting is a millimeter of runway; the arm can enter an inevitable
+   collision state.}{}
+
+\vspace{2pt}
+\sheetsec{Check yourself}
+\begin{qs}
+\item \assumed{} late admission leaves a \val{qbridge}\,ms bridge for a \val{domega}\,rad/s gap on the seam
+  joint. Peak torque and torque rate? Admit? Shortest bridge?
+\item \assumed{} \val{qtool}\,m/s along the arm at the \val{elbowbad}\textdegree{} elbow
+  ($\SmallestJacobianSingularNumber$ = \val{sigmabad}\,mm). Joint rate undamped and damped
+  ($\InverseKinematicsDamping$ = \val{lambdamm}\,mm)? Any joint over its limit?
+\item \assumed{} a \val{qshiftmin}-minute shift at \val{qhz}\,Hz renewal, mission target
+  $\val{qmission}$. Handoffs, per-handoff tail, requests in flight?
+\item Two seam faults. A: each new chunk starts \val{lgap}\,rad behind the reference; the joint turns at
+  \val{lspeed}\,rad/s, compute takes \val{ldelay}\,ms. B (seam joint): position and velocity match; acceleration jumps
+  \val{ljump}\,rad/s$^2$. Cause and fix?
+\end{qs}
+\end{rightcol}
+\end{document}

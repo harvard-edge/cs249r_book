@@ -1,0 +1,195 @@
+% Study sheet: Volume II, Chapter 8, Fleet Orchestration.
+% Numbers: \val{...} from fleet_orchestration_studysheet_numbers.tex, written by fleet_orchestration_studysheet_numbers.py.
+\documentclass{studysheet}
+\input{fleet_orchestration_studysheet_numbers}
+\sheetvolume{2}
+\sheetchapter{8}{Fleet Orchestration}
+\sheetsources{Numbers from mlsysim and the chapter's scenarios; prices are scenario rates per GPU-hour; assumed inputs marked.}
+
+\begin{document}
+% ===================================================================== FRONT: LEARN
+\frontside
+\begin{bigidea}
+A shared fleet wastes money when jobs wait beside idle accelerators. The \hl{scheduler} decides which
+jobs run, where, and when one yields, and \hl{feasibility} comes before fairness. In C\textsuperscript{3}
+terms, orchestration spends coordination to turn compute and communication into useful progress.
+\end{bigidea}
+
+\begin{leftcol}
+\sheetsec{Key ideas}
+\begin{ideas}
+\idea{Feasibility before fairness.}{A share a job cannot run on delivers nothing: check gang, fit, topology
+  and memory first, then share fairly.}
+\idea{A rigid gang is all or nothing.}{Half a gang runs no steps; partial holds can deadlock. Grant
+  atomically, reserve for the queue head, backfill jobs that end in time.}
+\idea{Admit, place, reconcile.}{The scheduler's view is stale: reuse a lost node's GPUs only
+  after its lease lapses and old work is fenced.}
+\idea{Placement sets the communication term.}{Give the chattiest group the fastest tier; judge by
+  completion time, including the wait for a compact slot.}
+\idea{Every transition must repay itself.}{A preemption, resize or spot reclaim pays lost work, restart,
+  reload and warmup; move only if the gain outlasts them.}
+\idea{Count utilization in tiers.}{A full queue beside idle GPUs is usually a policy written for an
+  older fleet, not an algorithm bug.}
+\end{ideas}
+
+\vspace{10pt}
+\sheetsec{Where each group goes}
+\begin{sheettable}{@{}l l L@{}}
+\thead{Tier} & \thead{Per direction} & \thead{Put there}\\ \midrule
+Node (NVLink) & \val{nvlink} GB/s & tensor parallel: every layer\\
+One leaf switch & \val{ndr} GB/s & pipeline stage boundaries\\
+Spine (oversubscribed) & \val{spinelo}--\val{spinehi} GB/s & data parallel: once per step\\
+\end{sheettable}
+
+\vspace{10pt}
+\sheetsec{Which utilization tier is low?}
+{\centering
+\begin{tikzpicture}[sheet]
+  \pgfmathsetmacro\sc{120/\val{tieralloc}}
+  \foreach \v/\t/\y/\s in {\val{tieralloc}/allocated/28/nbox,\val{tieractive}/active/14/accbox,\val{tierprod}/productive/0/hotbox}{
+    \node[small, anchor=east] at (50,{\y+5}) {\t};
+    \draw[\s] (54,\y) rectangle ({54+\v*\sc},{\y+10});
+    \node[lab, anchor=west] at ({58+\v*\sc},{\y+5}) {\v};}
+  \node[note, anchor=west] at ({80+\val{tieralloc}*\sc},33) {one team,};
+  \node[note, anchor=west] at ({80+\val{tieralloc}*\sc},23) {GPU equivalents};
+\end{tikzpicture}\par}\vspace{4pt}
+\begin{sheettable}{@{}L L@{}}
+\thead{Tier counts} & \thead{If low, check}\\ \midrule
+Allocated: complete allocations & demand, quotas, health; requested vs. needed per pool\\
+Active: hardware busy & input supply, communication waits\\
+Productive: retained progress & replay, synchronization, overhead\\
+\end{sheettable}
+\end{leftcol}%
+\begin{rightcol}
+\sheetsec{Formulas you will use}
+\fcard{Queue wait (one server)}%
+  {\frac{\QueueWaitTime}{1/\ServiceRate} = \under{\frac{\ServingUtilization}{1-\ServingUtilization}}{load}
+   \cdot \under{\frac{1+\ServiceTimeVariationCoefficient^2}{2}}{variability}}%
+  {Mean wait $\QueueWaitTime$ in mean-job durations $1/\ServiceRate$, at offered load $\ServingUtilization$ and
+   job-length spread $\ServiceTimeVariationCoefficient$ (standard deviation over mean). Slowdown
+   $\JobSlowdown_{\JobIndex} = (\JobQueueWaitTime_{\JobIndex}+\IsolatedJobRunTime_{\JobIndex})/\IsolatedJobRunTime_{\JobIndex}$,
+   with isolated run $\IsolatedJobRunTime_{\JobIndex}$: a \val{slowrun}-hour job waiting \val{slowwait} hours has
+   $\JobSlowdown_{\JobIndex} = \val{slowdown}$.}%
+  {Poisson arrivals, one first-come server; ignores gangs and packing.}%
+  {\begin{tikzpicture}[sheet]
+     \draw[dim] (20,0) -- (230,0); \draw[dim] (20,0) -- (20,52);
+     \foreach \x/\t in {0/0,0.5/{0.5},0.8/{0.8},1/1}{
+       \draw[dim] ({20+\x*200},0) -- ({20+\x*200},-2.5);
+       \node[small, anchor=north] at ({20+\x*200},-4) {\t};}
+     \draw[accent, dashed, line width=0.5pt] (220,0) -- (220,52);
+     \draw[muted, line width=0.9pt] plot[domain=0:0.98, samples=60, smooth] ({20+\x*200},{\x/(1-\x)});
+     \draw[accent, line width=1.1pt] plot[domain=0:0.909, samples=60, smooth] ({20+\x*200},{\val{varmixed}*\x/(1-\x)});
+     \filldraw[fill=accent, draw=accent] (180,\val{waitmixed}) circle (2pt);
+     \filldraw[fill=white, draw=muted] (180,\val{waituniform}) circle (2pt);
+     \node[lab, anchor=east] at (176,{\val{waitmixed}+5}) {mixed, $\ServiceTimeVariationCoefficient = \val{cvmixed}$: \val{waitmixed}$\times$};
+     \node[note, anchor=west] at (24,46) {wait $\div$ mean job};
+     \node[note, anchor=west] at (24,36) {gray: $\ServiceTimeVariationCoefficient = \val{cvuniform}$, \val{waituniform}$\times$ at \val{loadref}};
+     \node[note, anchor=north] at (120,-12) {offered load};
+   \end{tikzpicture}}
+\fcard{Dominant share (DRF)}%
+  {\DominantShare_{\TenantIndex} = \max_{\ResourceTypeIndex}\frac{\TenantResourceAllocation}{\FleetResourceCapacity}}%
+  {A tenant's largest share of any resource: GPUs, CPU, memory, network. Progressive filling gives the
+   next bundle to the tenant with the smaller $\DominantShare$ until a resource runs out; it equalizes
+   $\DominantShare$, not every share.}%
+  {Only over bundles that pass the feasibility tests. Chapter: \val{drfabundles} one-GPU replicas and
+   \val{drfbbundles} two-GPU workers both reach $\DominantShare = \val{drfshare}$.}{}
+\fcard{Effective spot price}%
+  {\EffectiveSpotTrainingCost = \SpotHourlyPrice \times \frac{\BilledAllocationTime}{\RetainedProductiveTime}}%
+  {Price per hour of retained progress: billed time is progress kept plus checkpoints, restarts
+   and discarded work. Spot pays while it stays below the on-demand price.}%
+  {Scenario rates: \$\val{spotrate} spot, \$\val{ondemand} on demand, per GPU-hour.}{}
+\end{rightcol}
+
+% ===================================================================== BACK: PRACTICE
+\backside
+\begin{answers}
+\ans{Finish}{\val{ybilled} $\div$ \val{yint} = \val{yratio}; \$\val{spotrate} $\times$ \val{yratio} = \$\val{yeff},
+  \val{ysavepct}\% below on demand. Break-even: \$\val{spotrate}$(t+\val{ylosth})/t$ = \$\val{ondemand}
+  gives $t$ = \val{ylosth} $\times$ \val{spotrate} $\div$ \val{gap} $\approx$ \val{beh} h, about \val{bemin}
+  minutes (spot card).}
+\ans{1}{(a) Load factor \val{loadfactor} becomes \val{qloadfactor}; times variability \val{varmixed}: \val{waitmixed}
+  becomes \val{qwait} mean jobs. (b) $\IsolatedJobRunTime_{\JobIndex}$ is one mean job: \val{qwait} + one = \val{qslow}. (queue card).}
+\ans{2}{(a) A: \val{ashare} of every resource; C: cores, \val{ccores}/\val{capcores} = \val{cshare}. (b) Two A
+  bundles per C: A \val{abundles}, C \val{cbundles}, both $\DominantShare$ = \val{qdrfshare}. Cores fill
+  (\val{acorestotal} + \val{ccorestotal}), so \val{qgpusidle} GPUs sit idle behind them (DRF card).}
+\columnbreak
+\ans{3}{Allocated, in the older pools. Per-pool allocation plus requested vs. measured peak memory
+  shows templates asking for the newest pool, not demand. Fix the policy (capability matching,
+  backfill), not the algorithm (tier table).}
+\ans{4}{\val{tpgb} GB $\div$ \val{nvlink} GB/s = \val{tpnv} ms on NVLink; $\div$ \val{ndr} GB/s = \val{tpib} ms
+  across nodes, \val{tpslow}$\times$ slower, paid at every layer of every step. Keep tensor parallel
+  in a node; pipeline, leaf; data parallel, spine (placement table).}
+\end{answers}
+
+\begin{leftcol}
+\sheetsec{Worked example}
+\begin{practicebox}\boxtitle{Is spot cheaper for a \val{wdays}-day run on \val{wgpus} GPUs?}
+\val{wmodel} needs \val{whours} h of training: \$\val{ondemand} per GPU-hour on demand, or
+\$\val{spotrate} on spot with \val{ckptpct}\% checkpoint overhead and \val{perday} interruptions per training day
+(\val{wint} in all), each \val{restarth} h to restart.\par\vspace{5pt}
+{\centering
+\begin{tikzpicture}[sheet]
+  \pgfmathsetmacro\sc{140/\val{drawod}}
+  \node[note, anchor=west] at (0,26) {on demand};
+  \draw[nbox] (50,20) rectangle ({50+\val{drawod}*\sc},32);
+  \node[lab, anchor=west] at ({54+\val{drawod}*\sc},26) {\$\val{wodk}k};
+  \pgfmathsetmacro\a{50+\val{drawbase}*\sc} \pgfmathsetmacro\b{\a+\val{drawover}*\sc}
+  \node[note, anchor=west] at (0,6) {spot};
+  \draw[accbox] (50,0) rectangle (\a,12);
+  \draw[hotbox] (\a,0) rectangle (\b,12);
+  \node[lab, anchor=west] at ({\b+4},6) {\$\val{wspotk}k};
+  \node[note, anchor=north west] at (50,-3) {solid: checkpoints and restarts};
+\end{tikzpicture}\par}\vspace{6pt}
+\begin{steps}
+\item On demand: \val{wgpus} $\times$ \val{whours} h $\times$ \$\val{ondemand} = \res{\$\val{wodcost}}.
+\item Billed spot hours: \val{whours} + \val{ckpth} (\val{ckptpct}\% checkpoints) + \val{wint} $\times$ \val{restarth}
+  (restarts) = \val{wbilled} h.
+\item Effective price: \$\val{spotrate} $\times$ \val{wbilled} $\div$ \val{whours} = \$\val{spotrate} $\times$
+  \val{wratio} = \res{\$\val{weff}} per GPU-hour of progress.
+\item Bill \val{wgpus} $\times$ \val{wbilled} $\times$ \$\val{spotrate} = \$\val{wspotcost}: \res{\val{wsavepct}\% less},
+  but \val{wlongerpct}\% longer.
+\end{steps}
+\takeaway{The discount survives only while overhead stays small.}
+\end{practicebox}
+
+\vspace{10pt}
+\sheetsec{Your turn: finish it}
+\begin{practicebox}\boxtitle{Slow storage: does the discount survive?}
+Each interruption bills a \val{yckpt}-minute save and a \val{yrestart}-minute restart, once per
+\val{yint} h of progress kept.\par
+\textbf{Given:} each event bills \val{yint} + \val{ylosth} = \val{ybilled} h for \val{yint} h kept.\par
+\textbf{You:} find the effective price and saving against \$\val{ondemand}, then the progress per
+interruption at which spot stops paying.\par\vspace{34pt}
+\end{practicebox}
+\end{leftcol}%
+\begin{rightcol}
+\sheetsec{Common mistakes}
+\mistake{``Half a gang still makes half the progress.''}%
+  {A \val{gang}-GPU job holding \val{gangheld} runs no steps. Two
+   whole-cluster jobs each holding half deadlock: \val{cluster} GPUs $\times$ \$\val{ondemand} =
+   \$\val{clusterhour} an hour for nothing.}{}
+\mistake{``\val{assigned}\% of GPUs are assigned, so \val{assigned}\% are working.''}%
+  {\val{incomplete}\% sit in incomplete gangs and \val{inputwait}\% wait for input: \val{complete}\% is in
+   complete groups, at most \val{executing}\% training.}{}
+\mistake{``Size each team's quota to its peak.''}%
+  {Peaks of \val{peaka} and \val{peakb} need \val{peaksum} GPUs; \val{shared} shared cover either
+   peak (not both) if borrowed jobs yield in time. The extra \val{extra} (\val{extrapct}\%) idle
+   whenever peaks miss.}{}
+
+\vspace{4pt}
+\sheetsec{Check yourself}
+\begin{qs}
+\item \assumed{} a mixed queue ($\ServiceTimeVariationCoefficient = \val{cvmixed}$) rises from \val{loadref} to
+  \val{qload} offered load. (a) Mean wait, in mean jobs? (b) Slowdown of a mean-length job?
+\item \assumed{} the chapter's cluster: \val{capgpus} GPUs, \val{capcores} cores, \val{capmem} GB, \val{capnet}
+  Gb/s. A's replica: \val{agpu} GPU, \val{acores} cores, \val{amem} GB, \val{anet} Gb/s; C's preprocessing
+  job: \val{cgpu} GPU, \val{ccores} cores, \val{cmem} GB, \val{cnet} Gb/s. (a) Each bundle's dominant share?
+  (b) Fill progressively: bundles each, and how many GPUs sit idle, why?
+\item A cluster of A100-80 GB, A100-40 GB and V100 pools shows middling utilization; hundreds of jobs
+  wait, all for A100-80 GB. Which tier is low, where? What separates a request problem from a demand
+  problem? Fix?
+\item A tensor-parallel group is split across two nodes under one leaf. How much slower is a \val{tpgb} GB activation
+  exchange, how often is it paid, and where should each group sit?
+\end{qs}
+\end{rightcol}
+\end{document}

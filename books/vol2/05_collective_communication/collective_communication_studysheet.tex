@@ -1,0 +1,194 @@
+% Study sheet: Volume II, Chapter 5, Collective Communication.
+% Numbers: \val{...} from collective_communication_studysheet_numbers.tex, written by collective_communication_studysheet_numbers.py.
+\documentclass{studysheet}
+\input{collective_communication_studysheet_numbers}
+\sheetvolume{2}
+\sheetchapter{5}{Collective Communication}
+\sheetsources{Numbers from mlsysim and the chapter's scenarios; KB, MB, GB decimal; assumed inputs marked.}
+
+\begin{document}
+% ===================================================================== FRONT: LEARN
+\frontside
+\begin{bigidea}
+Every split of a model puts data on the wire. A \hl{collective} names what each rank holds; its
+\hl{schedule} sets the startup rounds and bytes paid. In C\textsuperscript{3} terms, this prices the
+Fleet Law's communication term.
+\end{bigidea}
+
+\begin{leftcol}
+\sheetsec{Key ideas}
+\begin{ideas}
+\idea{A collective is a contract on results.}{AllReduce is ReduceScatter then AllGather, each half its
+  bytes. Call the narrowest one the next step consumes.}
+\idea{Price every round on its chunk.}{Each step pays startup plus chunk over bandwidth: big
+  buckets on big groups can be latency bound.}
+\idea{Rings save bytes, trees save rounds.}{The simple tree uses few rounds but resends the whole
+  tensor each level.}
+\idea{Hierarchy buys parallel ports.}{Reduce in the node, cross nodes with one shard per GPU,
+  gather; it needs a port per GPU.}
+\idea{AllToAll ends at its active bound.}{Startup, injection, reception or the cut; under skew,
+  the hottest receiver sets the layer.}
+\idea{Shrink or hide, then judge by time to quality.}{Compression cuts only bytes; overlap hides network
+  time, not processor overhead.}
+\end{ideas}
+
+\vspace{10pt}
+\sheetsec{Which primitive moves it?}
+\begin{sheettable}{@{}L l@{}}
+\thead{Split (what moves)} & \thead{Primitive}\\ \midrule
+Data parallel (full gradient) & AllReduce\\
+Sharded, FSDP (shards) & AllGather, ReduceScatter\\
+Tensor parallel (partial activations) & AllReduce\\
+Pipeline (activations) & Send/Recv\\
+Experts, embeddings (tokens) & AllToAll\\
+\end{sheettable}
+
+\vspace{10pt}
+\fcard{Compression pays when}%
+  {\CodecOverheadTime < \CommunicationTime(\DeviceCount)\left(1-\frac{1}{\CompressionRatio}\right),
+   \qquad \ErrorFeedbackResidual_{\OptimizerStepIndex+1} = \LocalGradient_{\OptimizerStepIndex}
+   + \ErrorFeedbackResidual_{\OptimizerStepIndex} - \CompressedGradientUpdate_{\OptimizerStepIndex}}%
+  {Encoding must cost less than the transfer it removes. Error feedback sends $\CompressedGradientUpdate$
+   and keeps the unsent residual $\ErrorFeedbackResidual$ for the next gradient $\LocalGradient$.}{}{}
+\end{leftcol}%
+\begin{rightcol}
+\sheetsec{Formulas you will use}
+\fcard{Ring AllReduce, priced per round}%
+  {\RingAllReduceCompletionTime = \under{2(\DeviceCount-1)\MessageStartupLatency}{rounds}
+   + \under{2\frac{\DeviceCount-1}{\DeviceCount}\frac{\CollectivePayloadSize}{\LinkBandwidth}}{bytes}}%
+  {Each step sends a chunk $\CollectivePayloadSize/\DeviceCount$; below
+   $\LatencyBandwidthCrossoverSize = \MessageStartupLatency\LinkBandwidth$ it is latency bound. The byte term is
+   every AllReduce's floor.}%
+  {NDR port: $\MessageStartupLatency = \val{alpha}\,\MicroUnitPrefix$s, $\LinkBandwidth = \val{beta}$~GB/s
+   (\val{gbit}~Gb/s), so $\LatencyBandwidthCrossoverSize = \val{nstar}$~KB. Fit both on a benchmark
+   matching operation, size, ranks, algorithm and placement (GPU, NIC, rail).}{}
+\fcard{Simple tree and the crossover}%
+  {\TreeAllReduceCompletionTime \approx 2\log_2\DeviceCount\left(\MessageStartupLatency
+   + \frac{\CollectivePayloadSize}{\LinkBandwidth}\right), \qquad
+   \RingTreeCrossoverPayload \approx \frac{\DeviceCount\MessageStartupLatency\LinkBandwidth}{\log_2\DeviceCount}}%
+  {Roughly, ring wins above $\RingTreeCrossoverPayload$, the tree below. Double binary tree: tree rounds,
+   ring bytes, $2\log_2\DeviceCount\,\MessageStartupLatency + 2\CollectivePayloadSize/\LinkBandwidth$.}{}{}
+\fcard{Hierarchical AllReduce}%
+  {\text{cross-node} = 2(\ClusterNodeCount-1)\left(\MessageStartupLatency
+   + \frac{\CollectivePayloadSize}{\AcceleratorsPerNode\,\ClusterNodeCount\,\LinkBandwidth}\right)}%
+  {Per GPU, a ring over the $\ClusterNodeCount$ nodes on its own port.
+   Each NVLink phase moves $(\AcceleratorsPerNode-1)/\AcceleratorsPerNode$ of
+   $\CollectivePayloadSize$ per GPU. A flat ring runs at one port: $2\CollectivePayloadSize/\LinkBandwidth$.}{}%
+  {\begin{tikzpicture}[sheet]
+     \pgfmathsetmacro\sc{200/\val{drawflat}}
+     \node[note, anchor=west] at (0,40) {flat ring};
+     \draw[nbox] (44,34) rectangle ({44+\val{drawflat}*\sc},46);
+     \node[lab] at ({44+\val{drawflat}*\sc/2},40) {\val{flat} ms, one NDR port};
+     \pgfmathsetmacro\a{44+\val{drawrs}*\sc} \pgfmathsetmacro\b{\a+\val{drawinter}*\sc}
+     \pgfmathsetmacro\c{\b+\val{drawag}*\sc}
+     \node[note, anchor=west] at (0,16) {hierarchical};
+     \draw[accbox] (44,10) rectangle (\a,22);
+     \draw[hotbox] (\a,10) rectangle (\b,22);
+     \draw[accbox] (\b,10) rectangle (\c,22);
+     \node[lab, anchor=west] at ({\c+4},16) {\val{hiertotal} ms, \val{hiergain}$\times$ faster};
+     \node[small, anchor=north west] at (44,6) {NVLink \val{hierrs} + all ports \val{hierinter} + NVLink \val{hierag} ms};
+     \node[note, anchor=south west] at (44,50) {\val{hiergb} GB on \val{hiernodes} nodes of \val{hiergpus} GPUs};
+   \end{tikzpicture}}
+\fcard{Overlap leaves a tail}%
+  {\OverlappedBackwardCommunicationTime = \BackwardPassTime + \LayerAllReduceTime
+   + (\LayerCount-1)\,\LayerExposedCommunicationTime}%
+  {Over $\LayerCount$ layers, the last reduction is exposed and each excess
+   $\LayerExposedCommunicationTime = \max(0,\,\LayerAllReduceTime-\LayerBackwardTime)$ piles up.}{}{}
+\end{rightcol}
+
+% ===================================================================== BACK: PRACTICE
+\backside
+\begin{answers}
+\ans{Finish}{\val{treerounds} $\times$ \val{perround} = \val{treebytes} ms of bytes, \val{treetotal} ms in all:
+  \val{treevsring}$\times$ the ring, as \val{bucket} MB is above the \val{crossover} MB crossover. Tree rounds,
+  ring bytes: \val{treestartup} + \val{byteslarge} = \val{doubletree} ms, \val{doubletreegain}$\times$ faster
+  than the ring (tree card).}
+\ans{1}{The full sum, mostly discarded. ReduceScatter leaves each rank its reduced shard for half the
+  bytes (key idea one).}
+\ans{2}{(a) Twice \val{qgb} GB $\div$ \val{beta} GB/s $\approx$ \val{qflat} ms. (b) Shard \val{qshard} MB;
+  \val{qringfactor} $\times$ \val{qshard} MB $\div$ \val{beta} GB/s $\approx$ \val{qinter} ms; NVLink phases
+  \val{qnvfrac} of \val{qgb} GB at \val{nvlink} GB/s $\approx$ \val{qrs} ms each; total \val{qtotal} ms,
+  \val{qgain}$\times$ faster. (c) Shards take turns: cross-node \val{hiergpus} $\times$ \val{qinter} $\approx$
+  \val{qshared} ms, about \val{qsharedtotal} ms in all, near flat (hierarchy card).}
+\columnbreak
+\ans{3}{It removes \val{qremoved} ms for \val{qcodec} ms: \val{qcompressed} + \val{qcodec} = \val{qnew} ms,
+  \val{qspeedup}$\times$ faster. On NVLink it removes only \val{qfastremoved} ms: \val{qfastcompressed} +
+  \val{qcodec} = \val{qfastnew} ms, \val{qfastslow}$\times$ slower (payback condition, compression card).}
+\ans{4}{Record each rank's GPU, NIC, node and rail; rerun the benchmark matched to the job, changing only
+  placement. If it slows, placement; if not, look at overlap or contention (ring card).}
+\end{answers}
+
+\begin{leftcol}
+\sheetsec{Worked example}
+\begin{practicebox}\boxtitle{Is a \val{bucket} MB gradient bucket bandwidth bound?}
+Ring AllReduce of one \val{bucket} MB bucket on the NDR port, on \val{small} and \val{large} ranks.\par\vspace{5pt}
+{\centering
+\begin{tikzpicture}[sheet]
+  \pgfmathsetmacro\s{62}
+  \draw[dim] (8,0) -- (232,0);
+  \foreach \e/\t in {1/{10 KB},2/{100 KB},3/{1 MB},4/{10 MB}}{
+    \draw[dim] ({8+(\e-1)*\s},0) -- ({8+(\e-1)*\s},-2.5);
+    \node[small, anchor=north] at ({8+(\e-1)*\s},-4) {\t};}
+  \pgfmathsetmacro\xl{8+(\val{logchunklarge}-1)*\s} \pgfmathsetmacro\xn{8+(\val{lognstar}-1)*\s}
+  \pgfmathsetmacro\xs{8+(\val{logchunksmall}-1)*\s} \pgfmathsetmacro\xb{8+(\val{logbucket}-1)*\s}
+  \draw[accent, dashed, line width=0.7pt] (\xn,-2) -- (\xn,26);
+  \node[note, anchor=south] at (\xn,27) {knee, \val{nstar} KB};
+  \filldraw[fill=accent, draw=accent] (\xl,0) circle (2.4pt);
+  \filldraw[fill=accentsoft, draw=accent, line width=0.5pt] (\xs,0) circle (2.4pt);
+  \filldraw[fill=white, draw=muted] (\xb,0) circle (2.4pt);
+  \node[note, anchor=south] at (\xl,5) {\val{chunklarge} KB};
+  \node[note, anchor=south] at (\xs,5) {\val{chunksmall} KB};
+  \node[note, anchor=south east] at ({\xb+3},5) {\val{bucket} MB};
+\end{tikzpicture}\par}\vspace{6pt}
+\begin{steps}
+\item Knee: $\LatencyBandwidthCrossoverSize$ = \val{alpha}\,$\MicroUnitPrefix$s $\times$ \val{beta} GB/s = \val{nstar} KB.
+\item Chunk $\CollectivePayloadSize/\DeviceCount$: \val{chunksmall} KB on \val{small} ranks (above: bandwidth
+  bound), \val{chunklarge} KB on \val{large} (below: latency bound).
+\item Startup: \val{stepssmall} $\times$ \val{alpha}\,$\MicroUnitPrefix$s = \val{startupsmall} ms;
+  \val{stepslarge} $\times$ \val{alpha}\,$\MicroUnitPrefix$s = \val{startuplarge} ms.
+\item Bytes about \val{bytessmall} and \val{byteslarge} ms. Ring: \res{\val{ringsmall} ms} and
+  \res{\val{ringlarge} ms}, \val{ringslowdown}$\times$ slower for the same bytes.
+\end{steps}
+\takeaway{The regime belongs to the chunk, not the tensor. On a big group, cut rounds.}
+\end{practicebox}
+
+\vspace{10pt}
+\sheetsec{Your turn: finish it}
+\begin{practicebox}\boxtitle{Would the simple tree beat the ring on \val{large} ranks?}
+\textbf{Given:} crossover \val{large} $\times$ \val{alpha}\,$\MicroUnitPrefix$s
+$\times$ \val{beta} GB/s $\div$ \val{log2large} = \val{crossover} MB; the tree's \val{treerounds} rounds cost
+\val{treestartup} ms of startup, and each sends all \val{bucket} MB in \val{perround} ms.\par
+\textbf{You:} find the tree's time, compare it with the ring's \val{ringlarge} ms using the crossover,
+then estimate tree rounds with ring bytes.\par\vspace{34pt}
+\end{practicebox}
+\end{leftcol}%
+\begin{rightcol}
+\sheetsec{Common mistakes}
+\mistake{``An expert exchange costs its average traffic.''}%
+  {It ends at its hottest receiver. \val{moegpus} GPUs, \val{moeexperts} experts: each receives
+   \val{rxuniform} MB, at least \val{bounduniform}\,$\MicroUnitPrefix$s. One rank at \val{skew}$\times$ the load
+   receives \val{rxhot} MB: at least \val{boundhot}\,$\MicroUnitPrefix$s for the whole layer.}{}
+\mistake{``Asynchronous AllReduce hides all communication.''}%
+  {\val{layers} layers, \val{bwdlayer} ms backward and \val{commlayer} ms reduction each: overlapped
+   \val{bwdtotal} + \val{commlayer} + \val{layersless} $\times$ \val{exposed} = \val{overlapped} ms, not
+   \val{bwdtotal}; sequential \val{sequential}.}{}
+\mistake{``Error feedback is optional for compression.''}%
+  {Gradients \val{efgrads}, rounded to whole units: alone, \val{efnaive} of the true \val{eftrue} is sent.
+   With error feedback, \val{efsent} is sent and $\val{efresidual}$ is kept.}{}
+
+\vspace{4pt}
+\sheetsec{Check yourself}
+\begin{qs}
+\item Each rank updates only its weight shard, but the code AllReduces the full gradient. What does
+  each rank hold, what should it call, and what is saved?
+\item \assumed{} \val{qgb} GB on \val{qnodes} nodes of \val{hiergpus} GPUs, NVLink \val{nvlink} GB/s, one
+  \val{beta} GB/s port per GPU. (a) Flat ring time? (b) Shard, cross-node phase and hierarchical
+  total? (c) And if a node's GPUs share one uplink?
+\item \assumed{} a \val{qcomm} ms synchronization; compression gives an effective \val{qratio}$\times$ at
+  \val{qcodec} ms of encoding. Does it pay here, and on NVLink where it takes \val{qfast} ms? Which
+  condition decides?
+\item An AllReduce benchmark reaches full bus bandwidth; the job's reductions get a fraction.
+  Fabric or placement? What do you record?
+\end{qs}
+\end{rightcol}
+\end{document}

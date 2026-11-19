@@ -1,0 +1,164 @@
+% Study sheet: Volume I, Chapter 4, Data Engineering.
+% Numbers: \val{...} from data_engineering_studysheet_numbers.tex, written by data_engineering_studysheet_numbers.py.
+\documentclass{studysheet}
+\input{data_engineering_studysheet_numbers}
+\sheetvolume{1}
+\sheetchapter{4}{Data Engineering}
+\sheetsources{Numbers from the chapter's keyword-spotting and ResNet-50 scenarios in mlsysim; assumed inputs are marked.}
+
+\begin{document}
+% ===================================================================== FRONT: LEARN
+\frontside
+\begin{bigidea}
+A model can learn only what its data contains, and it trains only as fast as its data arrives.
+Data is therefore \hl{code}, to be versioned, tested and released, and \hl{freight}, to be stored,
+delivered as fast as the accelerator consumes it.
+\end{bigidea}
+
+\begin{leftcol}
+\sheetsec{Key ideas}
+\begin{ideas}
+\idea{Data is code.}{Changing the dataset changes the model with no code change. Splits are trust
+  boundaries: put each speaker or household wholly in one split, or the test score measures memory.}
+\idea{Defects cascade silently.}{A wrong field passes schemas and trains fine while every later stage
+  builds on it. Check at ingestion: rules on each record, statistics on each batch.}
+\idea{Labels are the specification.}{A wrong label redefines ``correct''; labels are often the largest
+  data cost. Check agreement beyond chance and known answers.}
+\idea{Fit once, replay everywhere.}{Fit scaling on training data only, store it with the model, use
+  only inputs serving has. Else leakage or silent \emph{training-serving skew}.}
+\idea{Training runs no faster than its data.}{Storage, host decoding and bytes per sample each cap the
+  supply. Large datasets pull computation to them (\emph{data gravity}).}
+\idea{Drift warns; labels measure.}{Drift comes from the world, skew from the stack. Logs show what
+  the model caught, not what it missed.}
+\end{ideas}
+
+\vspace{11pt}
+\sheetsec{Which failure is it?}
+\begin{sheettable}{@{}l L L@{}}
+\thead{Cause} & \thead{What changed} & \thead{Evidence that separates it}\\ \midrule
+Skew & the stack: features computed differently & replay fixed raw inputs through both paths\\
+Covariate drift & the world: inputs moved & input statistics vs.\ training (PSI, K-S); old vs.\ new cohorts on one path and rubric\\
+Rubric change & the yardstick: grading rules & rescore fixed predictions under both rubrics\\
+Concept drift & the input-to-label link & fresh labels only\\
+Schema change & an upstream field & contract check at ingestion\\
+\end{sheettable}
+\vspace{3pt}
+{\fontsize{8.6}{11}\selectfont\color{muted}Population stability index (PSI) below \val{psiwarn}: stable;
+above \val{psicrit}: investigate.\par}
+\end{leftcol}%
+\begin{rightcol}
+\sheetsec{Formulas you will use}
+\fcard{Data supply bound}%
+  {\begin{gathered}\TrainingSampleThroughput \le \min(\ComputeLimitedSampleRate,\,\DataSupplyRate)\\[2pt]
+   \DataSupplyRate = \frac{\StorageBandwidth(1-\OperationalOverheadFraction)}{\SampleStorageSize}\end{gathered}}%
+  {Samples trained per second: the smaller of what compute uses and what storage delivers (bandwidth
+   $\StorageBandwidth$, overhead share $\OperationalOverheadFraction$, bytes per sample $\SampleStorageSize$).
+   Host decoding also caps supply; use the lower rate. Feeding loss $= 1 - $ supply $\div$ demand
+   when supply is short; $\OperationalOverheadFraction = 0$ unless given.}%
+  {Storage-bound: faster tier, sequential shards, denser codec, fewer bytes per sample.
+   Decode-bound: more workers, hardware decode, a faster-to-decode codec. Storing decoded samples
+   skips decoding but multiplies bytes and fixes the stored crops.}{}
+\fcard{False-wake budget}%
+  {\text{false-positive rate per window} \le \frac{\text{false wakes allowed}}{\text{windows listened}}}%
+  {{\raggedright One wake a month over one-second windows: $1/\val{fwwin} \approx \val{fwfpr}$.
+   With zero false wakes observed, hours needed $\approx \val{fwthree} \div$ allowed
+   false wakes per hour (\val{fwconf}\% confidence), so one per \val{fwmonthh}-hour month needs
+   \val{fwhours} hours of representative non-wake audio.\par}}{}{}
+
+\vspace{11pt}
+\sheetsec{The pipeline and its two bounds}
+{\centering
+\begin{tikzpicture}[sheet, y=1.25pt, stg/.style={accbox, minimum width=40pt, minimum height=17pt}]
+  \foreach \i/\t in {0/Acquire,1/Validate,2/Label,3/Process,4/Release}{
+    \node[stg] (c\i) at ({24+\i*50.5},62) {\t};}
+  \foreach \i in {0,...,3}{\pgfmathtruncatemacro\j{\i+1}\draw[arr] (c\i) -- (c\j);}
+  \node[note, anchor=south] at (125,73) {capability: what the model can learn};
+  \node[nbox, minimum width=60pt, minimum height=17pt] (s0) at (40,14) {Storage};
+  \node[nbox, minimum width=60pt, minimum height=17pt] (s1) at (125,14) {Host decode};
+  \node[hotbox, minimum width=60pt, minimum height=17pt] (s2) at (210,14) {Accelerator};
+  \draw[arr] (s0) -- (s1); \draw[arr] (s1) -- (s2);
+  \draw[arr, rounded corners=3pt] (c4.south) -- (226,40) -- (40,40) -- (s0.north);
+  \node[note, anchor=north] at (125,3) {throughput: how fast it learns};
+\end{tikzpicture}\par}
+\end{rightcol}
+
+% ===================================================================== BACK: PRACTICE
+\backside
+\begin{answers}
+\ans{Finish}{\val{disk} MB/s $\div$ \val{deckb} KB $=$ \val{ygot} img/s; $\val{one} - \val{ygot}/\val{rate} =$ \val{yloss}\%
+  lost, worse than \val{loss}\%. The cache removed decoding but multiplied bytes per sample by \val{expand},
+  and fixed the stored crops. (Supply bound)}
+\ans{1}{$\val{one} \div \val{qwin} = \val{qfpr}$ per window. Hours needed: $\val{fwthree} \div (\val{one}$ per
+  \val{qweekh} h$) =$ \val{qhours} h, \val{qweeks} weeks with no false wake. (False-wake budget)}
+\ans{2}{Per-clip peak uses the finished clip, which a streaming device never has: skew. Whole-corpus
+  fitting leaks test statistics into training, so the test score is no longer trustworthy. Fit on the training split, store,
+  replay. (Fit once, replay everywhere)}
+\columnbreak
+\ans{3}{(a) Decode-bound: Snappy, less work per byte. (b) Storage-bound: gzip, fewer bytes per sample
+  raise the supply rate. (Supply bound)}
+\ans{4}{\val{psiobs} $>$ \val{psicrit}: new-microphone inputs moved; it says nothing yet about accuracy.
+  Replay fixed audio through old and new preprocessing; rescore fixed predictions under both rubrics;
+  compare microphone cohorts, matched for speakers and rooms, on one path and one rubric. (Which failure)}
+\end{answers}
+
+\begin{leftcol}
+\sheetsec{Worked example}
+\begin{practicebox}\boxtitle{Can a cloud disk keep one accelerator fed?}
+ResNet-50 training sustains \val{rate} images/s on one accelerator. Each image is a \val{jpgkb} KB JPEG
+read from disk every epoch; the volume supplies \val{disk} MB/s.\par\vspace{5pt}
+{\centering
+\begin{tikzpicture}[sheet]
+  \pgfmathsetmacro\u{150/\val{need}}
+  \node[note, anchor=east] at (52,30) {needed};
+  \draw[nbox] (56,23) rectangle ({56+\val{need}*\u},37);
+  \node[lab, anchor=west] at ({60+\val{need}*\u},30) {\val{need} MB/s};
+  \node[note, anchor=east] at (52,8) {supplied};
+  \draw[hotbox] (56,1) rectangle ({56+\val{disk}*\u},15);
+  \node[lab, anchor=west] at ({60+\val{disk}*\u},8) {\val{disk} MB/s};
+\end{tikzpicture}\par}\vspace{4pt}
+\begin{steps}
+\item Demand: \val{rate} img/s $\times$ \val{jpgkb} KB $=$ \res{\val{need} MB/s}.
+\item Supply: \val{disk} MB/s $\div$ \val{jpgkb} KB $=$ \res{\val{got} img/s}, the smaller rate, so it sets the pace.
+\item Feeding loss: $\val{one} - \val{got}/\val{rate} =$ \res{\val{loss}\%} of the sustained rate.
+\end{steps}
+\takeaway{Compare bytes needed per second with bytes supplied; the smaller rate wins, however fast the accelerator.}
+\end{practicebox}
+
+\vspace{12pt}
+\sheetsec{Your turn: finish it}
+\begin{practicebox}\boxtitle{Cache decoded tensors to skip decoding?}
+To spare the host, the team stores each image already decoded, as a 32-bit tensor of \val{deckb} KB
+(\val{expand}$\times$ the JPEG), on the same \val{disk} MB/s volume.\par\vspace{3pt}
+\textbf{Given:} demand $=$ \val{rate} $\times$ \val{deckb} KB $=$ \val{yneed} GB/s.\par
+\textbf{You:} find the supplied rate and the feeding loss, and say what the cache traded away.
+\end{practicebox}
+\end{leftcol}%
+\begin{rightcol}
+\sheetsec{Common mistakes}
+\mistake{``More data always improves the model.''}%
+  {In the keyword-spotting design, \val{morex}$\times$ the examples buys \val{moregainlo}--\val{moregainhi}\%
+   more detection for \val{morex}$\times$ the labeling cost. Redundant samples still cost I/O.}{}
+\mistake{``Training and serving share the feature code, so they match.''}%
+  {If serving recomputes the mean on each batch, the same code feeds the model different numbers.
+   Store the fitted state with the model.}{}
+\mistake{``Our logs show where the wake-word model fails.''}%
+  {The device uploads audio only when it wakes, so a missed wake word leaves no recording.
+   Measure misses with separate, consented collection.}{}
+
+\sheetsec{Check yourself}
+\begin{qs}
+\item \assumed{} a budget of one false wake per week, one-second windows, always listening. What
+  per-window false-positive rate is needed? If none occur, how many hours of representative
+  non-wake audio support the claim?
+\item The detector decides as audio streams in, before a clip ends. One engineer scales each stored clip to its own peak loudness; another fits mean and variance on
+  the whole corpus before splitting. What goes wrong in each case, and what is the fix?
+\item A loader starves the accelerator. (a) Host CPUs at full load, disk half busy. (b) Disk at full
+  bandwidth, CPUs idle. Snappy (decodes fast, compresses less) or gzip (compresses more, decodes
+  slowly)? Why?
+\item \val{q4months} months after launch, a wake-word detector's measured detection rate is \val{q4drop}
+  points lower. A new microphone shipped, the grading rubric was revised, and preprocessing changed.
+  \assumed{} PSI of new-microphone inputs vs.\ training is \val{psiobs}. What does that tell you, and what three
+  comparisons separate the causes?
+\end{qs}
+\end{rightcol}
+\end{document}

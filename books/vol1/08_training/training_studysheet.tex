@@ -1,0 +1,170 @@
+% Study sheet: Volume I, Chapter 8, Model Training.
+% Numbers: \val{...} from training_studysheet_numbers.tex, written by training_studysheet_numbers.py.
+\documentclass{studysheet}
+\input{training_studysheet_numbers}
+\sheetvolume{1}
+\sheetchapter{8}{Model Training}
+\sheetsources{Numbers from the mlsysim registry and the chapter's scenarios; memory totals exclude workspace; assumed inputs are marked.}
+
+\begin{document}
+% ===================================================================== FRONT
+\frontside
+\begin{bigidea}
+A training run is \hl{one step repeated millions of times}, so every FLOP and byte a step spends is
+multiplied by the length of the run. Three questions decide it: how long it takes, whether the step
+\hl{fits in memory}, and whether the accelerator is \hl{kept fed}. Make it fit first, then profile and fix the slowest part.
+\end{bigidea}
+
+\begin{leftcol}
+\sheetsec{Key ideas}
+\begin{ideas}
+\idea{Backward costs twice forward.}{Each parameter costs \val{ffwd} FLOPs per token forward and
+  \val{fbwd} backward, so a run needs about \val{fpp} FLOPs per parameter per token.}
+\idea{Memory decides whether it runs.}{Gradients and optimizer state sit beside the weights; saved
+  activations grow with batch and sequence length.}
+\idea{Utilization is a pipeline property.}{Input stalls, memory-bound kernels and synchronization lower
+  $\EfficiencyHw$. Measure it as model FLOPs utilization (MFU); ``busy'' time counts stalls too, so it bounds MFU from above.}
+\idea{The slowest stage sets the pace.}{In series, busy $=$ compute $\div$ sum of stages; overlapped,
+  compute $\div$ longest stage. Workers divide preparation time by their count.}
+\idea{Add accelerators last.}{Each data-parallel replica sends $2(\AcceleratorCount{-}1)/\AcceleratorCount$ of the gradient bytes
+  per step at link bandwidth; those bytes stay fixed as its work shrinks.}
+\end{ideas}
+
+\vspace{12pt}
+\fcard{Training-time law}%
+  {\TrainingTime = \frac{\Operations}{\PeakRate\,\EfficiencyHw}, \quad \Operations \approx 6\Parameters\DatasetSize, \quad \TotalEnergy = \DevicePower\,\TrainingTime}%
+  {$\Parameters$ parameters, $\DatasetSize$ tokens, device power $\DevicePower$; rented hours scale with time.}%
+  {$\ModelFlopsUtilization = \ModelStepOperations/(\PeakRate\,\TrainingStepTime)$: useful FLOPs per step over peak times
+   step time. Reference machine: \val{hpeak} TFLOP/s at 16-bit (\val{hfp32} at 32-bit), \val{hcapgib} GiB
+   $=$ \val{hcapgb} GB, \val{htdp} W.}{}
+
+\end{leftcol}%
+\begin{rightcol}
+\fcard{Training memory}%
+  {\TotalMemoryFootprint = \WeightMemory + \GradientMemory + \OptimizerStateMemory + \ActivationMemory}%
+  {Activations grow with the batch $\BatchSize$. Mixed-precision Adam holds \val{bstate} bytes per parameter before any activation, \val{xinfer}$\times$ the
+   16-bit weights a server keeps.}%
+  {}%
+  {\begin{tikzpicture}[sheet]
+     \pgfmathsetmacro\u{14}
+     \pgfmathsetmacro\xa{\val{bw}*\u}
+     \pgfmathsetmacro\xb{\xa+\val{bg}*\u}
+     \pgfmathsetmacro\xc{\xb+\val{bmaster}*\u}
+     \pgfmathsetmacro\xd{\xc+\val{bmom}*\u}
+     \draw[nbox] (0,0) rectangle (\xa,16);
+     \draw[nbox] (\xa,0) rectangle (\xb,16);
+     \draw[accbox] (\xb,0) rectangle (\xc,16);
+     \draw[hotbox] (\xc,0) rectangle (\xd,16);
+     \node[lab] at ({\xa/2},8) {\val{bw}};
+     \node[lab] at ({(\xa+\xb)/2},8) {\val{bg}};
+     \node[lab] at ({(\xb+\xc)/2},8) {\val{bmaster}};
+     \node[lab, text=white] at ({(\xc+\xd)/2},8) {\val{bmom}};
+     \node[small, anchor=north] at ({\xa/2},-3) {weights};
+     \node[small, anchor=north] at ({(\xa+\xb)/2},-11) {gradients};
+     \node[small, anchor=north] at ({(\xb+\xc)/2},-3) {32-bit master};
+     \node[small, anchor=north] at ({(\xc+\xd)/2},-3) {Adam moments};
+     \node[lab, anchor=west] at (\xd+4,8) {$=$ \val{bstate} B};
+   \end{tikzpicture}}
+\vspace{4pt}
+{\fontsize{8.6}{11}\selectfont\color{muted}Optimizer state per parameter: SGD none, momentum or RMSprop one value,
+Adam and AdamW two, often for fewer steps. Plain 32-bit Adam also totals \val{b32state}: mixed precision shrinks only the activations.
+Training scope decides which terms exist: frozen weights stay resident; only trained parameters
+(adapters, say) carry gradients and optimizer state.\par}
+
+\vspace{12pt}
+\sheetsec{Match the fix to the profile}
+\begin{sheettable}{@{}L L L@{}}
+\thead{Profile shows} & \thead{Fix} & \thead{What it changes}\\ \midrule
+Data bound: idle gaps, host busy & prefetch, more workers & $\EfficiencyHw$ up; host buffers\\
+Compute bound: matrix units full at 32-bit & mixed precision & $\PeakRate$ \val{bfx}$\times$ (peak); activations halve\\
+Memory bound: HBM saturated, matrix units idle & kernel fusion, FlashAttention & fewer bytes; scores never stored\\
+Batch too big & gradient accumulation & activations $\div$ micro-batch count; same math\\
+Activations too big & checkpointing & keeps segment inputs; ${\sim}$1/3 more math\\
+\end{sheettable}
+\end{rightcol}
+
+% ===================================================================== BACK
+\backside
+\begin{answers}
+\ans{Finish}{$\val{lw} + \val{lad} + \val{lact8} = \val{ltot8}$ GB $>$ \val{hcapgb} GB: no. Accumulate \val{lsteps} micro-batches of \val{lbatch}: \val{ltot4} GB, \val{lhead} GB spare.
+  Full fine-tuning's state alone is \val{lpb}B $\times$ \val{bstate} B $=$ \val{lfull} GB (memory card).}
+\ans{1}{Work $=$ \val{fpp} $\times$ \val{gpb}B $\times$ \val{q1tok}B $=$ \val{q1work}$\times\val{q1pow}$ FLOPs; time
+  $=$ work $\div$ (\val{hpeak} TFLOP/s $\times$ \val{q1eta}\%) $=$ \val{q1h} h (\val{q1d} days); energy \val{q1h} h $\times$
+  \val{htdp} W $=$ \val{q1kwh} kWh; rent \$\val{q1usd} (law card).}
+\ans{2}{MFU $=$ \val{q2tflop} TFLOP $\div$ (\val{hpeak} TFLOP/s $\times$ \val{q2t} s) $\approx$ \val{q2mfu}\%, though
+  \val{q2busy}\% busy: busy counts stalls. Memory bound: kernel fusion or FlashAttention, not more math (law card, fix table).}
+\columnbreak
+\ans{3}{Serial: \val{q3comp} $\div$ (\val{q3comp} $+$ \val{q3prep}) $\approx$ \val{q3serial}\% busy. With
+  \val{q3w} workers a batch is ready every \val{q3int} ms, under \val{q3comp} ms, so compute
+  limits and the accelerator is busy the whole step, ideally (slowest-stage idea).}
+\ans{4}{Each sends \val{q4factor} $\times$ \val{q4grad} GB; $\div$ \val{q4link} GB/s $=$ \val{q4ar} ms. Compute
+  for \val{q4per} sequences at \val{q4eta}\% $=$ \val{q4comp} ms, so sync is \val{q4share}\% of the step (last key idea).}
+\end{answers}
+
+\begin{leftcol}
+\sheetsec{Worked example}
+\begin{practicebox}\boxtitle{Does GPT-2 XL's step fit one accelerator?}
+\val{gpb}B parameters, a batch of \val{gbatch} sequences of \val{gseq} tokens, mixed-precision Adam, on the
+reference machine (\val{hcapgb} GB).\par\vspace{5pt}
+{\centering
+\begin{tikzpicture}[sheet]
+  \pgfmathsetmacro\u{0.56}
+  \pgfmathsetmacro\cap{\val{hcapgb}*\u+64}
+  \foreach \lab/\tot/\y/\sty in {standard attention/\val{gtot}/36/hotbox, FlashAttention/\val{gtotfl}/18/accbox, + accumulation/\val{gtotmic}/0/accbox}{
+    \node[lab, anchor=east] at (62,\y+6) {\lab};
+    \draw[nbox] (64,\y) rectangle ({64+\val{gstatic}*\u},\y+12);
+    \draw[\sty] ({64+\val{gstatic}*\u},\y) rectangle ({64+\tot*\u},\y+12);}
+  \node[note, anchor=east] at ({64+\val{gtot}*\u-3},42) {\textcolor{white}{\val{gtot} GB}};
+  \node[note, anchor=west] at ({64+\val{gtotfl}*\u+3},24) {\val{gtotfl} GB};
+  \node[note, anchor=west] at (\cap+3,6) {$\leftarrow$ \val{gtotmic} GB, fits};
+  \draw[ink, dashed, line width=0.7pt] (\cap,-4) -- (\cap,56);
+  \node[note, anchor=south] at (\cap,57) {capacity \val{hcapgb} GB};
+  \node[small, anchor=south] at ({64+\val{gstatic}*\u/2},49) {state};
+\end{tikzpicture}\par}
+\begin{steps}
+\item State: \val{gpb}B $\times$ \val{bstate} B $=$ \val{gstatic} GB, whatever the batch.
+\item Activations (16-bit): \val{gact} GB, total \res{\val{gtot} GB}, \val{gover}$\times$ capacity.
+\item FlashAttention drops the score matrices (\val{gscore} GB): \res{\val{gtotfl} GB}, \val{gexcess} GB over.
+\item Gradient accumulation, two micro-batches of \val{gmicro}: activations halve to \val{gactmic} GB, \res{\val{gtotmic} GB}. Fits.
+\end{steps}
+\takeaway{Fixed state, then activations, which scale with the batch held at once.}
+\end{practicebox}
+
+\vspace{12pt}
+\sheetsec{Your turn: finish it}
+\begin{practicebox}\boxtitle{Do adapters fit a bigger batch?}
+Llama~3 8B (\val{lpb}B parameters) with adapters (\val{ladm}M trained), on the reference machine.
+\assumed{} a batch of \val{lbatchnew} sequences of \val{lseq} tokens.\par\vspace{4pt}
+\textbf{Given:} frozen 16-bit weights \val{lw} GB; adapter state \val{lad} GB; activations \val{lact4} GB
+at a batch of \val{lbatch}, so \val{lact8} GB at \val{lbatchnew}.\par
+\textbf{You:} does it fit? If not, how do you keep the batch of \val{lbatchnew}? Why can full fine-tuning never fit?
+\end{practicebox}
+\end{leftcol}%
+\begin{rightcol}
+\sheetsec{Common mistakes}
+\mistake{``Adam is always the better optimizer.''}%
+  {Its two 32-bit moments take \val{bmom} bytes per parameter, \val{gmom} GB of GPT-2 XL's \val{gstatic} GB state,
+   room the batch loses; SGD keeps none. Fewer steps pay only if time to target quality falls.}{}
+\mistake{``A bigger batch with the same learning rate just trains faster.''}%
+  {Fewer updates move the weights less. The linear scaling rule raises the rate with the batch
+   (\val{m2lr0} at \val{m2b0}, \val{m2lr1} at \val{m2b1}) plus warmup, validated. Past the critical batch, more batch saves no updates.}{}
+\mistake{``A faster accelerator makes training faster.''}%
+  {Not if input limits it. ResNet-50 on the reference machine wants \val{m3dem} images/s; its host
+   cores decode \val{m3sup}, so it is busy \val{m3busy}\% of the time.}{}
+
+\vspace{2pt}
+\sheetsec{Check yourself}
+\begin{qs}
+\item \assumed{} GPT-2 XL (\val{gpb}B) trains on \val{q1tok}B more tokens on one reference accelerator in 16-bit at
+  \val{q1eta}\% utilization, \$\val{q1price}/hour. How long, how much energy, what cost?
+\item \assumed{} a GPT-2 XL step of \val{gbatch} $\times$ \val{gseq} tokens takes \val{q2t} s at
+  \val{q2busy}\% busy. MFU? Kernels run back to back, HBM near peak, matrix units mostly idle:
+  which bottleneck, which fix first?
+\item GPT-2 XL's step computes for \val{q3comp} ms; one core tokenizes a batch in \val{q3prep} ms.
+  Busy fraction if they run in series? \assumed{} \val{q3w} workers and
+  prefetching: which stage limits now?
+\item \assumed{} GPT-2 XL data parallel on \val{q4n} accelerators: a global batch of \val{gbatch} sequences of \val{gseq}
+  tokens, \val{q4grad} GB of 16-bit gradients, \val{q4link} GB/s links, \val{q4eta}\% utilization, no overlap. AllReduce time; its share of compute $+$ sync?
+\end{qs}
+\end{rightcol}
+\end{document}

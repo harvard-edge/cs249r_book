@@ -1,0 +1,180 @@
+% Study sheet: Volume II, Chapter 2, Compute Infrastructure.
+% Numbers: \val{...} from compute_infrastructure_studysheet_numbers.tex, written by compute_infrastructure_studysheet_numbers.py.
+\documentclass{studysheet}
+\input{compute_infrastructure_studysheet_numbers}
+\sheetvolume{2}
+\sheetchapter{2}{Compute Infrastructure}
+\sheetsources{Numbers from the mlsysim registry and the chapter's scenarios; floors are idealized bounds; GB is decimal; assumed inputs are marked.}
+
+\begin{document}
+% ===================================================================== FRONT
+\frontside
+\begin{bigidea}
+A model that outgrows one accelerator turns a chip problem into a \hl{building problem}. Memory,
+communication, power and reliability limits bind at successive scales, and each level's limit becomes
+the next level's input. In C³ terms, the hardware sets the compute and communication bounds within which
+the fleet coordinates \hl{sustained useful work}.
+\end{bigidea}
+
+\begin{leftcol}
+\sheetsec{Key ideas}
+\begin{ideas}
+\idea{The walls cascade.}{Memory binds at the accelerator, communication at the node, power at the rack,
+  reliability across the pod. New technology moves a wall.}
+\idea{Capacity and bandwidth are separate tests.}{Capacity: does state fit? Bandwidth: how fast does
+  low-reuse work, such as decode, run?}
+\idea{Plan on sustained, not peak.}{A run sustaining a fraction $\EfficiencyHw$ of peak needs
+  $1/\EfficiencyHw$ times a peak plan's GPU-hours.}
+\idea{The hierarchy places parallelism.}{Tensor parallelism stays on NVLink; pipeline and data parallelism
+  cross nodes. Misplacement shows as exposed collective time.}
+\idea{Watts and failures are design inputs.}{A DGX H100 rack draws \val{rackkw} kW, a traditional one about
+  \val{tradkw} kW. Some GPU fails every $\MeanTimeToFailure/\DeviceCount$ hours: buy checkpoints, fast restart.}
+\idea{Specialize by the binding constraint.}{Specialization bets the operators last: compute for training,
+  bandwidth for decode, capacity for embeddings.}
+\end{ideas}
+
+\vspace{12pt}
+\fcard{Fleet Law: where the hardware enters}%
+  {\DistributedStepTime = \under{\frac{\IronLawComputeTime}{\DeviceCount}}{chips} + \under{\CommunicationTime}{links}
+   + \under{\SynchronizationTime}{waiting} - \under{\OverlappedTime}{hiding}}%
+  {Stragglers and pipeline bubbles add waiting inside the step.}%
+  {Failures, checkpoints and maintenance add time between steps.}%
+  {}
+\end{leftcol}%
+\begin{rightcol}
+\sheetsec{Napkin rules}
+\begin{sheettable}{@{}l c L@{}}
+\thead{Quantity} & \thead{Rule} & \thead{H100 example}\\ \midrule
+Ridge point & $\RooflineRidgePoint = \PeakRate/\Bandwidth$ & \val{peaktflops}~TFLOP/s $\div$ \val{bandwidthtb}~TB/s $\approx$ \val{ridge}~FLOP/byte\\
+Transfer floor & $\DataVolume/\Bandwidth$ & decode: weight bytes over HBM bandwidth\\
+Decode intensity & $\BatchSize$ FLOP/byte & $2\Parameters$ FLOPs per token on $2\Parameters$ FP16 bytes, shared by a batch of $\BatchSize$\\
+Training state per GPU & $\dfrac{\val{bytesparam}\,\Parameters}{\TensorparallelDegreeTp\PipelineparallelDegreePp}$ bytes & \val{reftp} $\times$ \val{refpp} split of a 175B model: \val{refstate} GB\\
+Compute-only time & $\dfrac{6\Parameters\DatasetSize}{\DeviceCount\PeakRate\EfficiencyHw}$ & then $\div\,\ScalingEfficiency$; add checkpoint, failure, maintenance\\
+Failure interval & $\MeanTimeBetweenFailures \approx \MeanTimeToFailure/\DeviceCount$ & \val{mttf} h per GPU\\
+\end{sheettable}
+\vspace{3pt}
+{\fontsize{8.4}{10.4}\selectfont\color{muted}Adam: FP16 weights and gradients, FP32 master and two moments;
+leftover HBM holds activations. $\Parameters$ parameters,
+$\DatasetSize$ tokens, $\DeviceCount$ GPUs, $\PeakRate$ dense FP16 peak, $\EfficiencyHw$ local efficiency,
+$\TensorparallelDegreeTp, \PipelineparallelDegreePp$ tensor and pipeline degrees. One H100: \val{capgib} GiB
+$=$ \val{capgb} GB of HBM.\par}
+
+\vspace{12pt}
+\sheetsec{The bandwidth staircase (per direction)}
+{\centering
+\begin{tikzpicture}[sheet]
+  \pgfmathsetmacro\u{54}
+  \draw[dim] (10,0) -- (232,0);
+  \foreach \tk/\tl in {1/1,10/10,100/100,1000/{1,000},10000/{10,000}}{
+    \pgfmathsetmacro\x{14+log10(\tk)*\u}
+    \draw[dim] (\x,0) -- (\x,-2.5);
+    \node[small, anchor=north] at (\x,-4) {\tl};}
+  \node[small, anchor=north east] at (232,-14) {GB/s, log scale};
+  \pgfmathsetmacro\xi{14+log10(\val{posIB})*\u}
+  \pgfmathsetmacro\xn{14+log10(\val{posNVL})*\u}
+  \pgfmathsetmacro\xh{14+log10(\val{posHBM})*\u}
+  \filldraw[fill=accentsoft, draw=accent] (\xi,0) circle (2.4pt);
+  \filldraw[fill=accent, draw=accent] (\xn,0) circle (2.4pt);
+  \filldraw[fill=accent, draw=accent] (\xh,0) circle (2.4pt);
+  \node[note, anchor=south, align=center] at (\xi,5) {InfiniBand\\port \val{ladderib}};
+  \node[note, anchor=south, align=center] at (\xn,5) {NVLink\\\val{laddernvlink}};
+  \node[note, anchor=south, align=center] at (\xh,5) {HBM\\\val{ladderhbm}};
+  \node[hotbox, anchor=north, align=center] at (\xn,-28) {tensor\\parallel};
+  \node[accbox, anchor=north, align=center] at (\xi,-28) {pipeline,\\data parallel};
+\end{tikzpicture}\par}
+\end{rightcol}
+
+% ===================================================================== BACK
+\backside
+\begin{answers}
+\ans{Finish}{\val{ygb} GB $\div$ (\val{ygpus} $\times$ \val{bandwidthtb} TB/s) $=$ \val{ystep} ms per step;
+  \val{ybatch} tokens per step give about \val{ytok} tokens/s per replica. Intensity \val{yint} FLOP/byte is still
+  below \val{ridge}, so bandwidth still binds. A ceiling: it assumes balanced shards and ignores collectives.}
+\ans{1}{$\val{qtotalsci}$ FLOPs $\div$ (\val{qgpus} $\times$ \val{peaktflops} TFLOP/s $\times$ \val{qeta}\%
+  $=$ $\val{qratesci}$ FLOP/s) $=$ \val{qhours} h, about \val{qdays} days compute-only; $\div$ \val{effone}
+  $\to$ \val{qdaysscaled} days before operational overheads.}
+\ans{2}{\val{bytesparam} $\times$ \val{stateparams}B $=$ \val{statetotal} GB; $\div$ \val{reftp} $=$ \val{statetp} GB per GPU,
+  over \val{capgb} GB. \val{statepp} stages give \val{stategpu} GB with \val{stateroom} GB left for activations:
+  \val{stategpus} GPUs per replica.}
+\columnbreak
+\ans{3}{\val{buffer} GB takes \val{bufnvlink} ms on NVLink but \val{bufib} ms on one port, \val{nvlinkgap}$\times$
+  slower, and tensor-parallel exchanges sit on every layer's critical path. Keep the group in one node; let
+  pipeline or data parallelism cross. Evidence: exposed collective time grows in the trace while compute
+  per layer stays flat.}
+\ans{4}{\val{mttf} h $\div$ \val{fleetgpus} $\approx$ \val{fleetmtbf} h (about \val{fleetmtbfmin} minutes) between
+  GPU failures on average: routine, not rare. Buy checkpoint storage and fast restart.}
+\end{answers}
+
+\begin{leftcol}
+\sheetsec{Worked example}
+\begin{practicebox}\boxtitle{Is batch-one decode limited by math or by memory?}
+Llama-3 \val{wparams}B, FP16 weights (\val{wgb} GB, more than one H100 holds), one request, one
+hypothetical H100-equivalent path (\val{peaktflops} TFLOP/s, \val{bandwidthtb} TB/s), weights only.\par\vspace{5pt}
+{\centering
+\begin{tikzpicture}[sheet]
+  \pgfmathsetmacro\ux{50}\pgfmathsetmacro\uy{22}
+  \draw[dim] (20,0) -- (222,0); \draw[dim] (20,0) -- (20,72);
+  \foreach \tk/\tl in {1/1,10/10,100/100,1000/{1,000},10000/{10,000}}{
+    \pgfmathsetmacro\x{20+log10(\tk)*\ux}
+    \draw[dim] (\x,0) -- (\x,-2.5); \node[small, anchor=north] at (\x,-4) {\tl};}
+  \node[small, anchor=north east] at (222,-13) {FLOP per byte};
+  \node[small, anchor=south west] at (22,73) {TFLOP/s, log};
+  \pgfmathsetmacro\bw{\val{bandwidthtb}}
+  \pgfmathsetmacro\pk{\val{peaktflops}}
+  \pgfmathsetmacro\xr{20+log10(\pk/\bw)*\ux}
+  \pgfmathsetmacro\yr{log10(\pk)*\uy}
+  \draw[accent, line width=0.8pt] (20,{log10(\bw)*\uy}) -- (\xr,\yr) -- (222,\yr);
+  \draw[accent, dashed, line width=0.5pt] (\xr,0) -- (\xr,\yr);
+  \node[note, anchor=south] at (\xr,\yr+2) {ridge \val{ridge}};
+  \pgfmathsetmacro\xt{20+log10(\val{posTRAIN})*\ux}
+  \filldraw[fill=accent, draw=accent] (20,{log10(\bw)*\uy}) circle (2.4pt);
+  \filldraw[fill=white, draw=accent] (\xt,\yr) circle (2.2pt);
+  \node[note, anchor=north west] at (24,{log10(\bw)*\uy-3}) {decode, batch one: \val{wintensity}};
+  \node[note, anchor=north] at (\xt,\yr-4) {training: \val{rtraini}};
+\end{tikzpicture}\par}
+\vspace{2pt}
+\begin{steps}
+\item Math: $2\Parameters$ $=$ \val{wgflop} GFLOP per token; $\div$ \val{peaktflops} TFLOP/s $\approx$ \val{wtcomp} ms.
+\item Memory: \val{wgb} GB $\div$ \val{bandwidthtb} TB/s $\approx$ \res{\val{wtmem} ms}.
+\item Intensity: \val{wgflop} GFLOP $\div$ \val{wgb} GB $\approx$ \res{\val{wintensity} FLOP/byte}, far below \val{ridge};
+  memory is \val{wshare}\% of the summed time.
+\end{steps}
+\takeaway{Below the ridge, compare bandwidth per dollar, not TFLOP/s; reuse moves the point right.}
+\end{practicebox}
+
+\vspace{12pt}
+\sheetsec{Your turn: finish it}
+\begin{practicebox}\boxtitle{How fast can one node serve the 175B model?}
+A tensor-parallel replica on one node of \val{ygpus} H100s holds \val{ygb} GB of FP16 weights;
+\val{ybatch} requests share each weight read.\par\vspace{4pt}
+\textbf{Given:} each decode step reads every weight once over \val{ygpus} paths of \val{bandwidthtb} TB/s.\par
+\textbf{You:} find the step floor, the ceiling in tokens per second, and whether the batch crossed the ridge.
+\end{practicebox}
+\end{leftcol}%
+\begin{rightcol}
+\sheetsec{Common mistakes}
+\mistake{``Eight times the GPUs trains eight times faster.''}%
+  {Scaling efficiency falls as exposed communication grows: \val{effone} at \val{gpusone} GPUs, \val{effeight} at
+   \val{gpuseight}. That is \val{hwratio}$\times$ the hardware for \val{speedup}$\times$ the speed, with \val{lost}\% of local
+   throughput lost.}{}
+\mistake{``A custom ASIC beats a GPU on throughput per watt, so it is always the better buy.''}%
+  {Its fixed dataflow bets that today's operators last. A chip takes over a year to design, then serves years
+   in a facility built to outlast several generations; a shift such as CNNs to Transformers can strand it.}{}
+\mistake{``Power and cooling can be sorted out after the GPUs arrive.''}%
+  {A DGX H100 rack draws \val{rackratio}$\times$ a traditional rack, and racks near \val{liquidkw} kW need liquid
+   cooling. Facility upgrades take months; the accelerators sit idle meanwhile.}{}
+
+\vspace{2pt}
+\sheetsec{Check yourself}
+\begin{qs}
+\item Train the \val{qparams}B model on \val{qtokens}B tokens on the \val{qgpus}-GPU reference cluster at
+  \val{qeta}\% local efficiency. What is the compute-only time, and what does a scaling efficiency of \val{effone} make it?
+\item \assumed{} a \val{stateparams}B model with mixed-precision Adam and eight-way tensor parallelism on
+  H100s. Does its training state fit per GPU? What is the shallowest power-of-two pipeline that fits?
+\item A team splits one tensor-parallel group across two nodes. Compare a \val{buffer} GB transfer on
+  each link. What should cross instead, and what trace evidence shows the problem?
+\item \assumed{} a \val{fleetgpus}-GPU training job. How often does some GPU fail, and what must the
+  design buy?
+\end{qs}
+\end{rightcol}
+\end{document}

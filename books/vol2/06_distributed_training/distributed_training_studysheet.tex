@@ -1,0 +1,167 @@
+% Study sheet: Volume II, Chapter 6, Distributed Training.
+% Numbers: \val{...} from distributed_training_studysheet_numbers.tex, written by distributed_training_studysheet_numbers.py.
+\documentclass{studysheet}
+\input{distributed_training_studysheet_numbers}
+\sheetvolume{2}
+\sheetchapter{6}{Distributed Training}
+\sheetsources{Numbers from the mlsysim registry and the chapter's modeled scenarios; HBM \val{hbmgib} GiB = \val{hbm} GB, GB decimal; assumed inputs are marked.}
+
+\begin{document}
+% ===================================================================== FRONT
+\frontside
+\begin{bigidea}
+Splitting training across machines does not shrink the work; it \hl{moves the overhead}. Each split
+divides compute or memory and pays in communication or coordination, so judge a layout by its
+\hl{time to the target quality}, not its accelerator count.
+\end{bigidea}
+
+\begin{leftcol}
+\sheetsec{Key ideas}
+\begin{ideas}
+\idea{Three ways to cut the training loop.}{Data parallelism splits the batch, pipeline parallelism the
+  layers, tensor parallelism the matrices inside a layer.}
+\idea{The slowest worker sets the step.}{Each step waits at a barrier; if ranks are late
+  independently with chance $\NodeStragglerProbability$, a step is clean with chance $(1-\NodeStragglerProbability)^{\DeviceCount}$.}
+\idea{Sharding buys memory with messages.}{ZeRO and FSDP shard optimizer state, then gradients, then
+  weights, across the data-parallel ranks.}
+\idea{Tensor parallelism needs the fast domain.}{Its exchanges sit on every layer's critical path;
+  NVLink gives \val{nvlink} GB/s per direction, an NDR port \val{ndr} GB/s (\val{ndrgbit} Gb/s).}
+\idea{Pipelines trade bytes for bubbles.}{Stages pass only boundary activations, but fill and drain
+  idle every stage; more microbatches shrink the bubble.}
+\idea{Throughput must serve convergence.}{Past the critical batch, more examples per step stop cutting
+  steps; relaxed barriers (SSP, ASP) trade waiting for stale updates.}
+\end{ideas}
+
+\vspace{8pt}
+\sheetsec{Where each split goes}
+\begin{sheettable}{@{}l l l l@{}}
+\thead{Axis} & \thead{Splits} & \thead{Exchanges} & \thead{Place on}\\ \midrule
+Tensor & layer matrices & two AllReduces per layer & one node\\
+Pipeline & layers & activations, one hop & across nodes\\
+Data & the batch & gradients, once per update & outermost\\
+\end{sheettable}
+\vspace{2pt}
+{\fontsize{8.4}{10.4}\selectfont\color{muted}$\DeviceCount = \DataParallelDegree\,\PipelineParallelDegree\,\TensorParallelDegree$.
+Model splits divide all state by $\TensorParallelDegree\PipelineParallelDegree$ first.\par}
+
+\vspace{8pt}
+\fcard{Critical batch}%
+  {\CriticalBatchSize \approx \frac{\operatorname{tr}(\GradientCovarianceMatrix)}{\lVert\nabla\LossFunction\rVert^{2}}
+   \qquad \DeviceCount_{\text{useful}} \approx \frac{\CriticalBatchSize}{\LocalBatchSize}}%
+  {Gradient noise over signal, from a trace. Below $\CriticalBatchSize$ a bigger batch cuts steps
+   almost in proportion; above it, steps flatten while samples climb.}%
+  {A guide, not a hard limit.}{}
+\end{leftcol}%
+\begin{rightcol}
+\sheetsec{Formulas you will use}
+\fcard{Step time and scaling efficiency}%
+  {\ScalingEfficiency = \frac{\PerDeviceComputeTime}{\PerDeviceComputeTime + \ExposedCommunicationTime + \text{waits}}}%
+  {Useful compute over the whole step; exposed time is what overlap did not hide. A ring AllReduce takes
+   about \mbox{$2(\DeviceCount-1)/\DeviceCount\cdot\GradientPayload/\LinkBandwidth$} for gradient bytes $\GradientPayload$ at link rate $\LinkBandwidth$.}%
+  {Per-rank traces: one rank late into the collective while peers wait is a straggler; every rank slow
+   inside it is the link.}{}
+\fcard{Training state per GPU}%
+  {\text{DDP } \val{statebytes} \quad \text{Z1 } \val{weightgradbytes}+\tfrac{\val{optbytes}}{\DataParallelDegree}
+   \quad \text{Z2 } \val{halfbytes}+\tfrac{\val{gradoptbytes}}{\DataParallelDegree} \quad \text{Z3 } \tfrac{\val{statebytes}}{\DataParallelDegree}\ \text{B/param}}%
+  {FP16 weights and gradients (\val{halfbytes} B each), FP32 master weights and two Adam moments (\val{optbytes} B).
+   ZeRO-1 and ZeRO-2 swap the gradient AllReduce for a ReduceScatter plus a post-update parameter AllGather.}%
+  {Same bytes as DDP; ZeRO-3 gathers weights twice per step: \val{zthreemult}$\times$.}%
+  {\begin{tikzpicture}[sheet]
+     \foreach \y/\lab/\x/\v in {48/DDP/\val{xddp}/\val{zddp},36/ZeRO-1/\val{xone}/\val{zone},24/ZeRO-2/\val{xtwo}/\val{ztwo},12/ZeRO-3/\val{xthree}/\val{zthree}}{
+       \node[lab, anchor=east] at (44,\y) {\lab};
+       \fill[accentsoft, draw=accent, line width=0.5pt] (48,\y-4.5) rectangle ({48+\x},\y+4.5);
+       \node[small, anchor=west] at ({50+\x},\y) {\v~GB};}
+     \fill[accent] (48,43.5) rectangle ({48+\val{xddp}},52.5);
+     \node[lab, anchor=west, text=white] at (52,48) {does not fit};
+     \draw[dim, dashed] ({48+\val{xhbm}},2) -- ({48+\val{xhbm}},55);
+     \node[small, anchor=south] at ({48+\val{xhbm}},58) {\val{hbmgib} GiB (\val{hbm} GB)};
+     \node[note, anchor=north west] at (48,0) {chapter: \val{zparams}B model, \val{zgpus} GPUs};
+   \end{tikzpicture}}
+\fcard{Pipeline bubble}%
+  {\text{idle share} = \frac{\PipelineParallelDegree-1}{\MicrobatchCount+\PipelineParallelDegree-1}}%
+  {$\PipelineParallelDegree$ stages, $\MicrobatchCount$ microbatches per update. Idle time is busy time
+   $\times\,(\PipelineParallelDegree-1)/\MicrobatchCount$.}%
+  {1F1B bounds live activations by stages, not microbatches.}{}
+\end{rightcol}
+
+% ===================================================================== BACK
+\backside
+\begin{answers}
+\ans{Finish}{\val{statetotal} $\div$ \val{cmodel} = \val{cstate} GB, over \val{hbm}. ZeRO-1: weights and gradients
+  \val{cwg} GB + optimizer \val{copt} GB (\val{statetotal} GB $\times$ \val{optbytes}/\val{statebytes} $\div$ \val{cgroup}) = \val{czero} GB, fits.
+  Bubble \val{cppminus}/\val{cbubbleden} = \val{cbubble}\%, \val{cbub} s against \val{tbub} s, but the optimizer
+  update now needs a parameter AllGather (state card, bubble card).}
+\ans{1}{DDP \val{qoneddp} GB: no. ZeRO-1: \val{qoneparams}B $\times$ (\val{weightgradbytes} + \val{qoneoptshard}) = \val{qoneone} GB,
+  leaving \val{qoneleft} GB. Stop: DDP traffic; ZeRO-3 (\val{qonethree} GB) moves more (state card).}
+\columnbreak
+\ans{2}{NDR is \val{linkratio}$\times$ slower: \val{qtwonv} $\times$ \val{linkratio} $\approx$ \val{qtwoib} ms, \val{qtwoover}$\times$ the
+  \val{qtwocomp} ms of compute, on the critical path. Keep tensor groups in the node; span nodes with stages (placement table).}
+\ans{3}{\val{qthreeontime} to the \val{qthreen} $=$ \val{qthreeclean}\%: \val{qthreelate}\% stall. Per-rank traces: a straggler
+  computes long while the rest sit in barrier wait; a slow link shows every rank long inside the collective (efficiency card).}
+\ans{4}{$\CriticalBatchSize$ = \val{qfourtrace}M $\div$ \val{qfournorm} = \val{qfourcrit}; useful workers $\approx$ \val{qfouruseful}.
+  \val{qfourn} $\times$ \val{qfourlocal} = \val{qfourglobal}, \val{qfourmult}$\times$ $\CriticalBatchSize$: steps barely fall while samples climb (critical-batch card).}
+\end{answers}
+
+\begin{leftcol}
+\sheetsec{Worked example}
+\begin{practicebox}\boxtitle{Does the reference layout fit, and what does each axis cost?}
+The chapter's \val{refparams}B model on \val{refgpus} GPUs (\val{hbmgib} GiB = \val{hbm} GB each): tensor \val{reftp},
+pipeline \val{refpp}, data \val{refdp}; \val{batch} sequences per update, one per microbatch. GPU compute
+\val{tcomp} s; tensor exchanges \val{ttp} s; gradient reduction \val{tdp}~s.
+\begin{steps}
+\item Devices: \val{reftp} $\times$ \val{refpp} $\times$ \val{refdp} $=$ \val{refgpus}. State: \val{refparams}B $\times$ \val{statebytes} B $=$
+  \val{statetotal} GB $\div$ \val{refmodel} $=$ \res{\val{refstate} GB}, leaving \val{refhead} GB.
+\item Microbatches: \val{batch} $\div$ \val{refdp} $=$ \val{refmicro}. Bubble \val{refppminus}/\val{refbubbleden} $=$ \res{\val{refbubble}\%};
+  \val{tcomp} $\times$ \val{refppminus}/\val{refmicro} $=$ \val{tbub} s idle.
+\item Exposed reduction \val{tdp} $\times$ \val{exposedfrac} $=$ \val{tdpexp} s. Step: \val{tcomp} + \val{ttp} + \val{tdpexp} + \val{tbub} $=$ \res{\val{tstep} s}; $\ScalingEfficiency$ $=$ \val{tcomp} $\div$ \val{tstep} $=$ \res{\val{refeta}\%}.
+\end{steps}
+{\centering
+\begin{tikzpicture}[sheet]
+  \draw[accbox] (0,0) rectangle (\val{barcomp},12); \node[lab] at ({\val{barcomp}/2},6) {compute};
+  \draw[hotbox] (\val{barcomp},0) rectangle (\val{bartp},12);
+  \draw[nbox] (\val{bartp},0) rectangle (\val{barbub},12);
+  \draw[dim] ({(\val{barcomp}+\val{bartp})/2},12) -- ({(\val{barcomp}+\val{bartp})/2},16);
+  \node[small, anchor=south east] at ({(\val{barcomp}+\val{bartp})/2+2},16.5) {tensor};
+  \draw[dim] ({(\val{bardp}+\val{barbub})/2},0) -- ({(\val{bardp}+\val{barbub})/2},-4);
+  \node[small, anchor=north east] at ({(\val{bardp}+\val{barbub})/2+2},-4.5) {bubble};
+  \node[lab, anchor=west] at ({\val{barbub}+4},6) {\val{tstep} s};
+\end{tikzpicture}\par}
+\takeaway{Memory picks the layout; each axis adds its own exchange or idle time.}
+\end{practicebox}
+
+\vspace{8pt}
+\sheetsec{Your turn: finish it}
+\begin{practicebox}\boxtitle{A shallower pipeline: tensor \val{reftp}, pipeline \val{cpp}, data \val{cdp}}
+Same model and batch: \val{cmicro} microbatches each.\par\vspace{3pt}
+\textbf{Given:} state per GPU $=$ \val{statetotal} GB $\div$ (\val{reftp} $\times$ \val{cpp}).\par
+\textbf{You:} does it fit? If not, add ZeRO-1 across the data-parallel group. Find the bubble
+and idle time; name the collective ZeRO-1 adds.
+\end{practicebox}
+\end{leftcol}%
+\begin{rightcol}
+\sheetsec{Common mistakes}
+\mistake{``Four times the GPUs gives about four times the speed.''}%
+  {GPT-2: \val{gptgrad} GB of gradients, \val{gptcomp} s of compute. Across \val{gptgpus} GPUs on \val{ethgbit} Gb/s
+   Ethernet (\val{ethbytes} GB/s) the ring moves \val{gptring} GB in \val{gptinter} s. Efficiency falls from \val{gpteffone}\% (one
+   \val{gptsmall}-GPU node) to \val{gptefffour}\%.}{}
+\mistake{``Full sharding is free memory.''}%
+  {The \val{refparams}B model on \val{fsgpus} GPUs fits at \val{fsstate} GB each, but each step gathers its \val{fsweights} GB of
+   weights twice and reduces gradients once: \val{fstraffic} GB, \val{fstime} s on one NDR port, \val{fsratio}$\times$ reference compute.}{}
+\mistake{``Relaxing the barrier always finishes sooner.''}%
+  {At \val{syncworkers} workers SSP cuts overhead from \val{bspcomm}\% to \val{sspcomm}\%, but needs more
+   iterations: \val{sspiters} $\times$ \val{sspmult} $=$ \val{sspwork} against \val{bspiters} $\times$ \val{bspmult} $=$ \val{bspwork} for BSP.}{}
+
+\vspace{2pt}
+\sheetsec{Check yourself}
+\begin{qs}
+\item \assumed{} a \val{qoneparams}B model, \val{qonegpus}-GPU data-parallel group, \val{hbmgib} GiB (\val{hbm} GB) GPUs, \val{qonekeep} GB
+  kept for activations. Which is the least-sharded stage that fits, and why stop there?
+\item One reference-model layer, one sequence: \val{reftp}-way tensor parallelism takes \val{qtwocomp} ms of compute and
+  \val{qtwonv} ms of exchanges on NVLink. Should the same group span two nodes, its exchanges on one NDR port?
+\item \assumed{} \val{qthreen} workers, each late on \val{qthreep}\% of steps. What share of steps is straggler-free?
+  What evidence separates a straggler from a slow link?
+\item \assumed{} a pilot trace gives $\operatorname{tr}(\GradientCovarianceMatrix)$ $=$ \val{qfourtrace}M and $\lVert\nabla\LossFunction\rVert^{2}$ $=$ \val{qfournorm};
+  local batch \val{qfourlocal}. About how many workers still pay off? Judge \val{qfourn}.
+\end{qs}
+\end{rightcol}
+\end{document}

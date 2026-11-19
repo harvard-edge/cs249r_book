@@ -1,0 +1,168 @@
+% Study sheet: Volume II, Chapter 3, Network Fabrics.
+% Numbers: \val{...} from network_fabrics_studysheet_numbers.tex, written by network_fabrics_studysheet_numbers.py.
+\documentclass{studysheet}
+\input{network_fabrics_studysheet_numbers}
+\sheetvolume{2}
+\sheetchapter{3}{Network Fabrics}
+\sheetsources{Numbers from the mlsysim registry and the chapter's scenarios; link rates in Gb/s are bits, GB/s bytes; assumed inputs are marked.}
+
+\begin{document}
+% ===================================================================== FRONT
+\frontside
+\begin{bigidea}
+At fleet scale the network is the \hl{synchronization backbone}: every step waits at a barrier for its
+slowest required transfer. In C\textsuperscript{3} terms the fabric carries communication, and the barrier
+turns its delays into coordination. Judge it by \hl{collective completion time and its tail}, not port speed.
+\end{bigidea}
+
+\begin{leftcol}
+\sheetsec{Key ideas}
+\begin{ideas}
+\idea{Bulk-synchronous training inverts traffic.}{Few large, synchronized flows meet at a barrier; the
+  slowest sets the step, and static hashing can pin two to one link.}
+\idea{Two costs per message.}{Fixed startup latency plus per-byte time: control messages are
+  latency bound, gradient shards bandwidth bound.}
+\idea{The cut caps collectives.}{Bisection bandwidth spans the narrowest cut halving the
+  cluster; oversubscription divides it by its ratio.}
+\idea{Topology must match traffic.}{Fat-trees give full bisection; rails give same-rank gradient
+  traffic its own switches; a torus suits neighbor rings, not all-to-all.}
+\idea{Lossless moves the risk.}{Credits (InfiniBand) or PAUSE frames (PFC) prevent drops and ECN
+  marks slow senders, but pauses spread to victim flows (a storm) or freeze a cycle of full buffers.}
+\idea{Faults hide as silent waste.}{A link that trains at a lower rate or on fewer lanes stays up at
+  reduced bandwidth; full rate with rising pause counters points to congestion.}
+\end{ideas}
+
+\vspace{10pt}
+\sheetsec{Sizing and stress rules}
+\begin{sheettable}{@{}L c L@{}}
+\thead{Rule} & \thead{Formula} & \thead{Radix-\val{radix} / chapter case}\\ \midrule
+Two-tier fat-tree hosts & $\SwitchRadix^2/2$ & \val{twotier}; longest path three switches\\
+Three-tier fat-tree hosts & $\SwitchRadix^3/4$ & \val{threetier}; longest path five switches\\
+Incast: buffer fills in & $\dfrac{\EgressBufferCapacity}{\EgressArrivalRate-\EgressServiceRate}$ & \val{incsend}\,$\times$\,\val{ndrbytes}~GB/s into one \val{ndrbytes}~GB/s port, \val{incbuf} MB: \val{incfill}\,$\MicroUnitPrefix$s, under one \val{incrtt}\,$\MicroUnitPrefix$s feedback round trip\\
+\end{sheettable}
+\vspace{3pt}
+{\fontsize{8.4}{10.4}\selectfont\color{muted}Radix $\SwitchRadix$: ports per switch. At one port:
+arrivals $\EgressArrivalRate$, drain $\EgressServiceRate$, buffer $\EgressBufferCapacity$. Separate traffic
+classes (virtual lanes, QoS) keep checkpoint bursts out of a collective's buffers.\par}
+\end{leftcol}%
+\begin{rightcol}
+\fcard{Alpha-beta model}%
+  {\PointToPointTransferTime(\PointToPointMessageSize) = \MessageStartupLatency + \frac{\PointToPointMessageSize}{\LinkBandwidth}
+   \qquad \LatencyBandwidthCrossoverSize = \MessageStartupLatency\LinkBandwidth}%
+  {A message of $\PointToPointMessageSize$ bytes pays startup $\MessageStartupLatency$ plus
+   $\PointToPointMessageSize/\LinkBandwidth$. Far below $\LatencyBandwidthCrossoverSize$ more bandwidth barely helps;
+   far above it, lower latency barely helps.}%
+  {Modeled NDR path: $\MessageStartupLatency = \val{alpha}\,\MicroUnitPrefix$s,
+   $\LinkBandwidth = \val{ndrbytes}$~GB/s (\val{ndrgbit}~Gb/s), so $\LatencyBandwidthCrossoverSize \approx \val{crossover}$~KB.}%
+  {\begin{tikzpicture}[sheet]
+     \draw[dim] (24,0) -- (220,0);
+     \draw[dim] (24,0) -- (24,90);
+     \foreach \d/\tl in {2/100 B,4/10 KB,6/1 MB,8/100 MB}{
+       \pgfmathsetmacro\x{24+(\d-2)*28}
+       \draw[dim] (\x,0) -- (\x,-2.5);
+       \node[small, anchor=north] at (\x,-4) {\tl};}
+     \foreach \d/\tl in {0/1\,µs,2/100\,µs,4/10\,ms}{
+       \pgfmathsetmacro\y{\d*20}
+       \draw[dim] (24,\y) -- (21.5,\y);
+       \node[small, anchor=east] at (20,\y) {\tl};}
+     \node[small, anchor=north] at (122,-13) {message size (log)};
+     \node[small, anchor=south west] at (2,92) {time (log)};
+     \draw[gridline, dashed] (24,\val{yalpha}) -- (150,\val{yalpha});
+     \fill[accentsoft] (24,0.5) rectangle (\val{xknee},88);
+     \edef\abplot{\noexpand\draw[accent, line width=1pt] plot coordinates {\val{abcurve}};}\abplot
+     \draw[accent, dashed, line width=0.6pt] (\val{xknee},0) -- (\val{xknee},\val{yknee});
+     \filldraw[fill=white, draw=accent, line width=0.6pt] (\val{xknee},\val{yknee}) circle (1.8pt);
+     \node[note, anchor=south east] at (\val{xknee}-1,\val{yknee}+12) {$\LatencyBandwidthCrossoverSize$ = \val{crossover} KB};
+     \node[small, anchor=north west] at (27,86) {latency bound};
+     \node[small, anchor=north west] at (\val{xknee}+3,86) {bandwidth bound};
+     \filldraw[fill=accent, draw=accent] (\val{xctrl},\val{yctrl}) circle (2.2pt);
+     \node[note, anchor=south] at (\val{xctrl},\val{yctrl}+6) {control \val{ctrlkb} KB};
+     \filldraw[fill=accent, draw=accent] (\val{xshard},\val{yshard}) circle (2.2pt);
+     \node[note, anchor=east] at (\val{xshard}-5,\val{yshard}+2) {shard \val{shardmb} MB};
+   \end{tikzpicture}}
+\vspace{4pt}
+\fcard{Capacity across the cut}%
+  {\BisectionBandwidth = \frac{\DeviceCount}{2}\,\LinkBandwidth
+   \qquad \text{relative throughput} = \frac{1}{(1-\CommunicationTimeFraction) + \CommunicationTimeFraction\,\CommunicationSlowdownFactor}}%
+  {Per direction, $\DeviceCount$ devices, non-blocking; an oversubscribed tier divides it by its ratio.
+   $\CommunicationTimeFraction$: share of step time spent crossing the cut; $\CommunicationSlowdownFactor$: how much
+   that time stretches (the ratio, when the cut is saturated). Loss is one minus relative throughput.}%
+  {Chapter: \val{cutgpus} GPUs at \val{ndrgbit}~Gb/s: \val{cutfull} TB/s; a \val{cutratio}:1 spine leaves
+   \val{cutover}~TB/s. At $\CommunicationTimeFraction$ = \val{twocomm}\%, a \val{tworatio}:1 spine costs \val{twoloss}\% of throughput.}%
+  {}
+\end{rightcol}
+
+% ===================================================================== BACK
+\backside
+\begin{answers}
+\ans{Finish}{$\LatencyBandwidthCrossoverSize$ = \val{roceal}\,$\MicroUnitPrefix$s $\times$ \val{ndrbytes} GB/s
+  = \val{rocecross} KB. Handoff: \val{roceal} + \val{handxfer} = \val{handroce}\,$\MicroUnitPrefix$s, against
+  \val{handndr} on NDR (\val{handratio}$\times$ slower). Shard: only \val{sharddiff}\,$\MicroUnitPrefix$s more
+  (\val{sharddiffpct}\%): \val{shardtime} ms on both. Startup matters only for small messages (alpha-beta card).}
+\ans{1}{\val{qoneside} $\times$ \val{ndrbytes} GB/s = \val{qonefull} TB/s; the spine divides it by \val{qoneratio}: \val{qoneover} TB/s.
+  Throughput keeps one over (\val{qonekeep} + \val{qonestretch}) $=$ \val{qonerel}: \val{qoneloss}\% lost (cut card).}
+\ans{2}{Two tiers hold $\SwitchRadix$ squared over two hosts: \val{qtwosmallhosts} with radix \val{radix}, too few;
+  \val{qtwobighosts} with radix \val{qtwobig}, enough. Radix \val{radix} needs three tiers: more switches,
+  five per path instead of three (sizing table).}
+\columnbreak
+\ans{3}{Arrivals \val{qthreeload} TB/s, drain \val{ndrbytes} GB/s: \val{qthreebuf} MB $\div$ \val{qthreenet} TB/s
+  = \val{qthreefill}\,$\MicroUnitPrefix$s, about \val{qthreertts} round trips. Marks on the first queued bytes
+  can act in time. A separate class for checkpoint traffic protects the collective (sizing table).}
+\ans{4}{Read the pair's link state. A rate of \val{qfourhdr} GB/s (HDR) or half its lanes is a degraded
+  link, even without symbol errors; full rate with rising pause counters is congestion (key idea on silent waste).}
+\end{answers}
+
+\begin{leftcol}
+\sheetsec{Worked example}
+\begin{practicebox}\boxtitle{Will a faster link speed up this step's messages?}
+A pipeline \val{ctrlkb} KB control message and a \val{shardmb} MB gradient shard on the modeled NDR path
+($\MessageStartupLatency = \val{alpha}\,\MicroUnitPrefix$s, $\LinkBandwidth = \val{ndrbytes}$~GB/s).
+\begin{steps}
+\item Crossover: \val{alpha}\,$\MicroUnitPrefix$s $\times$ \val{ndrbytes} GB/s $=$ \res{\val{crossover} KB}.
+  The control message is below it, the shard far above.
+\item Control: \val{alpha} + \val{ctrlkb} KB$/$\val{ndrbytes} GB/s $=$ \val{alpha} + \val{ctrlxfer} $=$
+  \res{\val{ctrltime}\,$\MicroUnitPrefix$s}; bytes are \val{ctrlshare}\% of it.
+\item Shard: \val{shardmb} MB$/$\val{ndrbytes} GB/s $=$ \res{\val{shardtime} ms}; startup is negligible.
+\item Double $\LinkBandwidth$ to \val{betadouble} GB/s: control \val{ctrltimetwo}\,$\MicroUnitPrefix$s
+  (\val{ctrlsaving}\% less time); shard \val{shardtimetwo} ms (\val{shardspeedup}$\times$ faster).
+\end{steps}
+\takeaway{Compare each message with $\LatencyBandwidthCrossoverSize$ before buying bandwidth.}
+\end{practicebox}
+
+\vspace{12pt}
+\sheetsec{Your turn: finish it}
+\begin{practicebox}\boxtitle{Does the transport matter at the same line rate?}
+\assumed{} a RoCE path at the same \val{ndrgbit}~Gb/s ($\LinkBandwidth = \val{ndrbytes}$~GB/s) with
+$\MessageStartupLatency = \val{roceal}\,\MicroUnitPrefix$s; a \val{handkb} KB pipeline handoff and the \val{shardmb} MB shard.\par\vspace{4pt}
+\textbf{Given:} $\LatencyBandwidthCrossoverSize = \val{roceal}\,\MicroUnitPrefix\text{s} \times \val{ndrbytes}$~GB/s.\par
+\textbf{You:} finish the crossover, time both messages on RoCE and on NDR, and say which messages the
+transport affects.
+\end{practicebox}
+\end{leftcol}%
+\begin{rightcol}
+\sheetsec{Common mistakes}
+\mistake{``Going from HDR (\val{hdrgbit}~Gb/s) to NDR (\val{ndrgbit}~Gb/s) doubles the rate, so every message gets twice as fast.''}%
+  {A \val{fallkb} KB message drops from \val{fallhdr} to \val{fallndr}\,$\MicroUnitPrefix$s, only \val{fallspeed}$\times$
+   faster (\val{fallless}\% less time) with the same \val{alpha}\,$\MicroUnitPrefix$s startup, which dominates.}{}
+\mistake{``PFC makes Ethernet lossless, so congestion is solved.''}%
+  {It turns loss into congestion spreading: PAUSE frames climb tier by tier and stall victim flows.
+   A storm ends when the slow receiver recovers; a cyclic deadlock does not.}{}
+\mistake{``Adaptive routing will fix our oversubscribed spine.''}%
+  {It moves flows off colliding paths but adds no capacity; a full cut needs placement that avoids it, or more capacity.}{}
+
+\vspace{2pt}
+\sheetsec{Check yourself}
+\begin{qs}
+\item \assumed{} a \val{qonegpus}-GPU non-blocking fat-tree with \val{ndrgbit}~Gb/s links. Its bisection
+  bandwidth? What share of throughput would a \val{qoneratio}:1 spine cost a job spending \val{qonecomm}\% of
+  each step on cut traffic?
+\item \assumed{} \val{qtwogpus} GPUs, one port each, on a two-tier non-blocking fat-tree. Which rule tells you whether
+  radix-\val{radix} or radix-\val{qtwobig} switches suffice, and what does the smaller radix cost?
+\item \assumed{} \val{qthreesend} GPUs write a checkpoint at \val{ndrbytes} GB/s each into one \val{ndrgbit}~Gb/s
+  port (\val{qthreebuf} MB buffer) that a training collective also uses. How soon does it fill? Can
+  \val{incrtt}\,$\MicroUnitPrefix$s feedback act in time? What protects the collective?
+\item Step time drifts up a few percent with no errors; one node pair tests at
+  \val{qfourmeas} GB/s instead of \val{ndrbytes}. What evidence separates a degraded link from congestion?
+\end{qs}
+\end{rightcol}
+\end{document}

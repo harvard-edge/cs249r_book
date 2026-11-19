@@ -1,0 +1,176 @@
+% Study sheet: Volume IV, Chapter 8, Sensor Perception.
+% Numbers: \val{...} from perception_studysheet_numbers.tex, written by perception_studysheet_numbers.py.
+\documentclass{studysheet}
+\input{perception_studysheet_numbers}
+\sheetvolume{4}
+\sheetchapter{8}{Sensor Perception}
+\sheetsources{Numbers from the chapter's mlsysim scenarios for the warehouse mobile manipulator (illustrative stage allocations and stereo rig); questions marked assumed use new inputs.}
+
+\begin{document}
+% ===================================================================== FRONT: LEARN
+\frontside
+\begin{bigidea}
+A camera can name an obstacle correctly yet place it where it stood before the robot moved.
+Each observation must state \hl{when it was captured, where it was measured from, and how far to trust it}.
+The permission path can refuse only what it can check, and stale evidence that crosses the
+\hl{causal boundary} becomes motion that cannot be recalled.
+\end{bigidea}
+
+\begin{leftcol}
+\sheetsec{Key ideas}
+\begin{ideas}
+\idea{Choose the sensor by the quantity.}{Camera: bearing and class; LiDAR: metric range. A qualified
+  range return vetoes motion, whatever the label says.}
+\idea{Date at capture, not arrival.}{Use the exposure midpoint; the navigation camera's arrival
+  stamp (DMA completion) is \val{arrival}\,ms late.}
+\idea{Age is paid in travel.}{The base covers $\SpeedAtDetection\ObservationAge$ before anyone reads the frame;
+  no later stage returns it.}
+\idea{Fix geometry before interpreting it.}{Timing errors grow with speed, mount errors with range.}
+\idea{An inset rests on measured residuals.}{A covariance or a network's spread is a belief; the
+  inset uses a measured p99 residual, bias and outliers included.}
+\idea{Silent failures are the dangerous ones.}{A misdated frame passes every check and
+  narrows its spread around the wrong spot.}
+\end{ideas}
+
+\vspace{9pt}
+\sheetsec{How each error grows}
+\begin{sheettable}{@{}l l L@{}}
+\thead{Error} & \thead{Size} & \thead{Grows with}\\ \midrule
+Age travel & $\SpeedAtDetection\ObservationAge$ & speed and every stage\\
+Rolling-shutter skew & $\SpeedAtDetection\FrameReadoutTime$ & speed; removed by IMU row poses\\
+Misdated frame & $\SpeedAtDetection\,\SmallPerturbation\TimeInstant$ & speed, along travel; zero at rest\\
+Mount angle & $\CameraFrameDepth\ExtrinsicMisalignmentAngle$ & range, sideways; present at rest\\
+Stereo depth & $\DepthStandardDeviation$ & range squared\\
+\end{sheettable}
+\par\vspace{2pt}{\fontsize{8.6}{11}\selectfont\color{muted}$\CameraFrameDepth$: range; $\ExtrinsicMisalignmentAngle$: mount angle.}\par
+
+\vspace{9pt}
+\global\firstcardtrue
+\fcard{Stereo depth and the clearance inset}%
+  {\DepthStandardDeviation \approx \frac{\CameraFrameDepth^2\DisparityStandardDeviation}{\FocalLength\StereoBaseline},
+   \qquad \ClearanceInset = \RequiredClearance + \lVert\SpatialErrorVector\rVert_{\text{p99}}}%
+  {Depth spread from disparity spread $\DisparityStandardDeviation$ (px), focal length $\FocalLength$ (px),
+   baseline $\StereoBaseline$; equate it to an allowance to find the range that spends it. The inset adds the
+   measured p99 residual to the required clearance $\RequiredClearance$.}%
+  {One standard deviation misses tail, bias and outliers.}{}
+
+\end{leftcol}%
+\begin{rightcol}
+\fcard{Observation age}%
+  {\ObservationAge = \tfrac{1}{2}\ExposureDuration + \FrameReadoutTime + \SensorLinkTransportTime + \DmaQueueTime
+     + \IspProcessingTime + \VisionBackboneTime + \PerceptionDispatchTime}%
+  {Serial stages add, from exposure midpoint to dispatch. Dispatch refuses a frame older than
+   the budget plus the clock bound $\ClockConversionBound$ (\val{threshold}\,ms here).}%
+  {Admission recomputes $\CurrentMonotonicTime - \CaptureTimestamp + \ClockConversionBound$ on its own clock, against a
+   later limit. Batching ages the oldest frame by whole frame periods.}%
+  {\begin{tikzpicture}[sheet]
+
+     \foreach \lab/\v/\y/\sty in {{age at dispatch}/\val{btravel}/45/hotbox, {arrival stamp}/\val{barrival}/30/nbox,
+        {row skew}/\val{bskew}/15/nbox, {uncorrected trigger}/\val{btrigger}/0/nbox}{
+       \node[lab, anchor=east] at (78,\y+5) {\lab};
+       \draw[\sty] (82,\y) rectangle ({82+\v},\y+10);}
+     \node[note, anchor=west] at ({85+\val{btravel}},50) {\val{travel}};
+     \node[note, anchor=west] at ({85+\val{barrival}},35) {\val{arrivaltravel}};
+     \node[note, anchor=west] at ({85+\val{bskew}},20) {\val{skew}};
+     \node[note, anchor=west] at ({85+\val{btrigger}},5) {\val{trigger}};
+     \draw[dim, dashed] ({82+\val{barallow}},-4) -- ({82+\val{barallow}},60);
+     \node[small, anchor=south] at ({82+\val{barallow}},60) {$\LocalizationBound$ = \val{loc}\,mm};
+     \node[note, anchor=north west] at (82,-6) {at \val{speed}\,m/s, mm: budgeted age, then slips};
+   \end{tikzpicture}}
+\vspace{14pt}
+\sheetsec{Before reading the payload}
+\begin{steps}
+\item Checksum and health bits clean (sync, saturation, out-of-distribution).
+\item Clock conversion valid: bound $\ClockConversionBound$ present, mapping unexpired.
+\item Current age on the consumer's own clock within the limit for this use.
+\item Frame id and calibration revision valid.
+\end{steps}
+\vspace{2pt}Any failure: refuse and fall back.\par
+\vspace{9pt}
+\sheetsec{Numbers to know}
+\begin{tiles}\tile{\val{age}\,ms}{camera age at dispatch}\hfill\tile{\val{loc}\,mm}{localization allowance $\LocalizationBound$}\par\vspace{6pt}
+\noindent\tile{\val{sync}\,ms}{clock bound $\ClockConversionBound$}\hfill\tile{\val{remain}\,mm}{of \val{clearmm}\,mm left after five rows}\end{tiles}
+\end{rightcol}
+
+% ===================================================================== BACK: PRACTICE
+\backside
+\begin{answers}
+\ans{Finish}{\val{speed}\,m/s $\times$ \val{batched}\,ms = \res{\val{batchtravel}\,mm}. Age \val{batched}\,ms exceeds the
+  \val{threshold}\,ms threshold: \res{refused at dispatch}. Its extra \val{extra}\,mm would take
+  \val{extrashare}\% of the remainder.}
+\ans{1}{\val{slow}\,m/s $\times$ \val{readout}\,ms = \res{\val{skewslow}\,mm}, about \val{skewshare}\% of $\LocalizationBound$.
+  It falls only linearly with speed; de-skew each row with IMU poses first (error table).}
+\ans{2}{(a) \val{rack}$^2$ $\times$ \val{disptwo} $\div$ \val{fb} = \val{sigmeter}\,m = \res{\val{sigracktwo}\,mm}.
+  (b) $\sqrt{\val{locm} \times \val{fb} \div \val{disptwo}}$ = \res{\val{zloctwo}\,m}. (c) $\DepthStandardDeviation$ is one
+  standard deviation; the inset needs the measured p99 residual with bias and outliers (inset card).}
+\columnbreak
+\ans{3}{Along travel, scaling with speed, gone at rest: timing. A mount error is sideways and stays when parked. \val{gap}\,mm $\div$ \val{qspeed}\,m/s = \res{\val{gaptime}\,ms}, the arrival offset: consistent with DMA-completion stamping.}
+\ans{4}{\val{age} + \val{admit} + \val{sync} = \res{\val{current}\,ms} upper bound (\val{currenttravel}\,mm of travel). No: the dispatch
+  threshold is not the admission limit. The permission path recomputes age from the capture stamp on its own
+  clock; the extra \val{admextra}\,mm beyond row five comes out of the remainder (age card).}
+\end{answers}
+
+\begin{leftcol}
+\sheetsec{Worked example}
+\begin{practicebox}\boxtitle{How old is the frame, and does the stop fit?}
+Base at \val{speed}\,m/s. Camera stages (ms): half exposure \val{expohalf}, readout \val{readout}, transport
+\val{transport}, DMA \val{dma}, ISP \val{isp}, backbone \val{backbone}, IPC dispatch \val{ipc}. Clock bound \val{sync}\,ms;
+the stop without the age row needs \val{before} of \val{clearmm}\,mm.\par\vspace{5pt}
+{\centering
+\begin{tikzpicture}[sheet]
+  \draw[accbox] (\val{pzero},0) rectangle (\val{pexp},12);
+  \draw[accbox] (\val{pexp},0) rectangle (\val{pread},12);
+  \draw[nbox] (\val{pread},0) rectangle (\val{pisp},12);
+  \draw[hotbox] (\val{pisp},0) rectangle (\val{pback},12);
+  \draw[nbox] (\val{pback},0) rectangle (\val{pdisp},12);
+  \node[small, anchor=south] at ({\val{pexp}/2},13) {exposure};
+  \node[small, anchor=south] at ({(\val{pexp}+\val{pread})/2},13) {readout};
+  \node[small, anchor=south] at ({(\val{pisp}+\val{pback})/2},13) {backbone};
+  \draw[dim, dashed] (\val{pdisp},-4) -- (\val{pdisp},24);
+  \node[small, anchor=south] at (\val{pdisp},24) {dispatch};
+  \node[note, anchor=north] at (103,-4) {to scale, from the exposure midpoint};
+\end{tikzpicture}\par}\vspace{4pt}
+\begin{steps}
+\item Sum the stages: $\ObservationAge$ = \res{\val{age}\,ms}.
+\item Travel: \val{speed}\,m/s $\times$ \val{age}\,ms = \res{\val{travel}\,mm}.
+\item Dispatch threshold: \val{age} + \val{sync} = \res{\val{threshold}\,ms}, met with no spare.
+\item Partial stop: \val{before} + \val{travel} = \res{\val{after}\,mm}; the \val{remain}\,mm left is owed to
+  admission delay, jerk-limited braking and the tracking inset.
+\end{steps}
+\takeaway{Exposure and readout spend half the age before computing starts.}
+\end{practicebox}
+
+\vspace{10pt}
+\sheetsec{Your turn: finish it}
+\begin{practicebox}\boxtitle{Same pipeline, batched frames}
+Perception batches \val{batch} frames at \val{fps}\,Hz.\par\vspace{4pt}
+\textbf{Given:} the oldest frame waits three frame periods (\val{wait}\,ms), so its age is
+\val{age} + \val{wait} = \val{batched}\,ms.\par
+\textbf{You:} find its travel, admit or refuse at dispatch, and the share of the \val{remain}\,mm remainder the extra travel takes.\par\vspace{30pt}
+\end{practicebox}
+\end{leftcol}%
+\begin{rightcol}
+\sheetsec{Common mistakes}
+\mistake{``The scene model is confident the patch ahead is a shadow, so the LiDAR return there can be dropped.''}%
+  {Confidence describes appearance at a past exposure, not clearance. A qualified LiDAR return inside the
+   stopping envelope vetoes: slow or halt.}{}
+\mistake{``The driver reports no errors, so the frame is good.''}%
+  {Stamped at arrival, the frame is \val{arrival}\,ms late: at \val{speed}\,m/s the obstacle sits \val{arrivaltravel}\,mm
+   from where it stood, with growing confidence. A dropped frame at least ages honestly, by \val{frameperiod}\,ms.}{}
+
+\vspace{2pt}
+\sheetsec{Check yourself}
+\begin{qs}
+\item \assumed{} the base slows to \val{slow}\,m/s; readout stays \val{readout}\,ms. Along-travel skew between top and
+  bottom rows? Share of $\LocalizationBound$? Why is slowing not the fix?
+\item \assumed{} corrugated siding doubles the stereo rig's $\DisparityStandardDeviation$ to \val{disptwo}\,px
+  ($\FocalLength\StereoBaseline$ = \val{focal}\,px $\times$ \val{baseline}\,m = \val{fb}\,px$\cdot$m). (a) $\DepthStandardDeviation$ at the
+  \val{rack}\,m rack end? (b) Range where $\DepthStandardDeviation$ alone equals $\LocalizationBound$? (c) What is wrong with
+  $\ClearanceInset = \RequiredClearance + \DepthStandardDeviation$?
+\item \assumed{} at \val{qspeed}\,m/s the camera places a fixed upright \val{gap}\,mm ahead of the LiDAR's position
+  along travel; parked, they agree. Shifted mount or bad timestamp? What time offset does the gap imply?
+\item \assumed{} a frame dispatches at its \val{age}\,ms budget and reaches the permission path \val{admit}\,ms later.
+  Upper bound on its age? Refuse it for exceeding \val{threshold}\,ms? Who computes the age, and how?
+\end{qs}
+\end{rightcol}
+\end{document}

@@ -1,0 +1,150 @@
+% Study sheet: Volume II, Chapter 9, Fleet Efficiency.
+% Numbers: \val{...} from performance_engineering_studysheet_numbers.tex, written by performance_engineering_studysheet_numbers.py.
+\documentclass{studysheet}
+\input{performance_engineering_studysheet_numbers}
+\sheetvolume{2}
+\sheetchapter{9}{Fleet Efficiency}
+\sheetsources{Numbers from the mlsysim registry and the chapter's constructed running example; assumed inputs are marked.}
+
+\begin{document}
+% ===================================================================== FRONT
+\frontside
+\begin{bigidea}
+A fleet can be fully allocated and visibly busy while only a fraction of its capacity becomes useful work.
+\hl{ML goodput} follows each accelerator-hour across three boundaries and \hl{charges every loss once}.
+In C\textsuperscript{3} terms, every compute gain answers to the communication and coordination costs that decide what reaches useful work.
+\end{bigidea}
+
+\begin{leftcol}
+\sheetsec{Key ideas}
+\begin{ideas}
+\idea{Busy is not useful.}{Utilization counts held or active devices; goodput counts only retained
+  work at the hardware's ideal rate.}
+\idea{Charge each loss once, at its first boundary.}{No complete gang: scheduling. Held, no
+  retained step: runtime. Retained but slow step: program.}
+\idea{Find the factor before the mechanism.}{Read scheduler records, then the job timeline,
+  then step traces: cheapest and broadest first.}
+\idea{Each factor needs its own window.}{Program: hundreds of steps; runtime: weeks;
+  scheduling: whole demand cycles. Multiply only like windows.}
+\idea{A lever helps only through the exposed term it shortens.}{Kernels shorten local work, layout
+  sets communication, overlap hides it. Speedups do not add: re-measure.}
+\idea{Judge a trade by the product.}{One factor dipping is not a regression if the product rises.}
+\end{ideas}
+
+\vspace{10pt}
+\sheetsec{Where is a loss charged?}
+\begin{sheettable}{@{}L l L@{}}
+\thead{Loss} & \thead{Factor} & \thead{Record that sees it}\\ \midrule
+Partial gang, fragments, idle pool & scheduling & scheduler records: gang-complete time\\
+Startup, input wait, synchronous checkpoint, failure, preemption, zombie job & runtime & job timeline: per-step input wait, restarts\\
+Exposed collective, straggler, bubble, memory stall, dispatch & program & step traces: collective bars over idle compute on every rank (exposed); all ranks but one waiting (straggler)\\
+\end{sheettable}
+\par\vspace{3pt}{\fontsize{8.6}{11}\selectfont\color{muted}Scheduling goodput is the share of capacity in complete gangs:
+assigned minus gangs still waiting for members.\par}
+
+\end{leftcol}%
+\begin{rightcol}
+\sheetsec{Formulas you will use}
+\fcard{ML productivity goodput}%
+  {\begin{aligned}\MlProductivityGoodput &= \SchedulingGoodput \times \RuntimeGoodput \times \ProgramGoodput\\[2pt]
+   1-\MlProductivityGoodput &= (1-\SchedulingGoodput) + \SchedulingGoodput(1-\RuntimeGoodput)\\
+   &\quad + \SchedulingGoodput\RuntimeGoodput(1-\ProgramGoodput)\end{aligned}}%
+  {Each factor divides what crossed its boundary by what reached it. Raising one factor multiplies MPG
+   by its new-to-old ratio; a point is worth the other two's product.}%
+  {Cost of a useful GPU-hour: price per GPU-hour $\div$ MPG.}%
+  {\begin{tikzpicture}[sheet]
+     \draw[dim, fill=white] (\val{xa},0) rectangle (\val{xb},16);
+     \draw[dim, fill=white] (\val{xb},0) rectangle (\val{xc},16);
+     \draw[dim, fill=white] (\val{xc},0) rectangle (\val{xd},16);
+     \filldraw[fill=accent, draw=accent] (\val{xd},0) rectangle (\val{xe},16);
+     \node[lab] at ({(\val{xa}+\val{xb})/2},8) {scheduling \val{sharespct}\%};
+     \node[lab] at ({(\val{xc}+\val{xd})/2},8) {program \val{sharepppct}\%};
+     \node[lab, text=white] at ({(\val{xd}+\val{xe})/2},8) {useful \val{mpgpct}\%};
+     \draw[dim] ({(\val{xb}+\val{xc})/2},0) -- ({(\val{xb}+\val{xc})/2},-6);
+     \node[small, anchor=north] at ({(\val{xb}+\val{xc})/2},-7) {runtime \val{sharerpct}\%};
+     \node[note, anchor=south west] at (0,19) {running example: offered capacity, lost at each boundary};
+   \end{tikzpicture}}
+\fcard{Runtime loss, five owners}%
+  {\begin{aligned}1-\RuntimeGoodput &\approx \frac{\JobStartupTime}{\AllocatedWallTime} + \DataStallFraction + \CheckpointWasteFraction(\CheckpointInterval)\\
+   &\quad + \frac{\FailureRecoveryTime}{\SystemMtbf} + \PreemptionRate\,\PreemptionTaxTime\end{aligned}}%
+  {Shares of held time add: startup, input stalls, checkpoint waste $\CheckpointWasteFraction$ (writes plus rework),
+   recovery, preemptions.}%
+  {Count rework once (in $\CheckpointWasteFraction$); charge warmup to the event that caused it.}{}
+\fcard{Program goodput}%
+  {\ProgramGoodput = \frac{\UsefulModelFlops/(\DeviceCount\,\PeakRate)}{\DistributedStepTime} = \ModelFlopsUtilization}%
+  {Model FLOPs utilization: ideal step time at peak over actual, retained steps only. Fleet MFU = node MFU
+   $\times$ scaling efficiency. Bandwidth-bound decode uses model bandwidth utilization (MBU): weight-streaming floor over step time.}%
+  {Never multiply a run-averaged MFU by runtime goodput: restarts count twice.}{}
+\end{rightcol}
+
+% ===================================================================== BACK
+\backside
+\begin{answers}
+\ans{Finish}{Scheduling: \val{ceilsched} $\times$ \val{runtime} $\times$ \val{program} = \val{mpgceilsched} (+\val{gainceilsched}\%).
+  Runtime: \val{sched} $\times$ \val{ceilruntime} $\times$ \val{program} = \val{mpgceilruntime} (+\val{gainceilruntime}\%).
+  Program: \val{sched} $\times$ \val{runtime} $\times$ \val{ceilprogram} = \val{mpgceilprogram} (+\val{gainceilprogram}\%).
+  Program wins with the largest ratio; capacity a scheduler recovers must still cross the later boundaries (product card).}
+\ans{1}{Preemption: \val{qrate} $\times$ \val{tpreempt} min over a day = \val{qpreempt}\%. Loss \val{runtimeloss} $-$ \val{termpreempt}
+  + \val{qpreempt} = \val{qloss}\%, so $\RuntimeGoodput$ = \val{qruntime}. Input waits (\val{terminput}\%) still lead (runtime card).}
+\columnbreak
+\ans{2}{Product of ratios: \val{qpnew}/\val{program} = \val{qratiop} times \val{qrnew}/\val{runtime} = \val{qratior}, giving \val{qratio}:
+  MPG up \val{qgain}\%. Scheduling goodput cancels: it multiplies both (product card).}
+\ans{3}{The job timeline, which covers every hour. Input wait between steps is a runtime loss (data pipeline);
+  collective bars over idle compute on every rank are exposed communication, a program loss. Shorten or hide that term (layout,
+  overlap, gradient accumulation); kernel fusion shortens only local work (charging table, lever idea).}
+\ans{4}{Not by itself: even at the floor, streaming every weight per token leaves arithmetic near that share of peak. Compare
+  measured step time with the floor (MBU); a low MBU points to dispatch, cache reads or exchanges (program card).}
+\end{answers}
+
+\begin{leftcol}
+\sheetsec{Worked example}
+\begin{practicebox}\boxtitle{Where does the running example's capacity go?}
+A \val{gpus}-GPU job on a shared pool. Pool: \val{assigned} of capacity assigned, \val{incomplete} in gangs still waiting.
+Over a week, runtime terms (\% of held time): startup \val{termstartup}, input \val{terminput},
+checkpoint \val{termcheckpoint}, recovery \val{termrecovery}, preemption \val{termpreempt}.
+A step does \val{usefulpflop} PFLOP of model work in \val{stepms} ms; peak \val{peaktflops} TFLOP/s per GPU; price \$\val{price} per GPU-hour.
+\begin{steps}
+\item $\SchedulingGoodput$ = \val{assigned} $-$ \val{incomplete} = \res{\val{sched}}.
+\item Runtime loss: the five terms add to \val{runtimeloss}\%, so $\RuntimeGoodput$ = \res{\val{runtime}}.
+\item Peak budget: \val{gpus} $\times$ \val{peaktflops} TFLOP/s $\times$ \val{stepms} ms = \val{budgetpflop} PFLOP;
+  $\ProgramGoodput$ = \val{usefulpflop} $\div$ \val{budgetpflop} = \res{\val{program}}.
+\item MPG = \val{sched} $\times$ \val{runtime} $\times$ \val{program} = \res{\val{mpg}}. Lost: scheduling \val{shares},
+  runtime \val{sharer}, program \val{sharep}. Useful GPU-hour: \$\val{price} $\div$ \val{mpg} = \res{\$\val{useful}}, \val{costmult}$\times$ the price.
+\end{steps}
+\takeaway{Restarts and checkpoints, the most visible losses, are the smallest slice.}
+\end{practicebox}
+
+\vspace{10pt}
+\sheetsec{Your turn: finish it}
+\begin{practicebox}\boxtitle{Which owner's lever is worth most?}
+Each owner can reach a ceiling: scheduling \val{ceilsched} (partial holds refilled), runtime \val{ceilruntime}
+(input waits removed), program \val{ceilprogram} (single-node MFU).\par\vspace{4pt}
+\textbf{Given:} the worked factors \val{sched}, \val{runtime}, \val{program}.\par
+\textbf{You:} find MPG with each lever alone at its ceiling, rank them, and explain why scheduling, the largest loss, is not first.
+\end{practicebox}
+\end{leftcol}%
+\begin{rightcol}
+\sheetsec{Common mistakes}
+\mistake{``Our MFU beats Llama 3's, so we use the fleet well.''}%
+  {The example's \val{program} beats Llama 3 405B's \val{llamaprogram}, yet its pool turns only \val{mpgpct}\% of capacity
+   into progress. MFU sees retained steps only.}{}
+\mistake{``Charge each loss to the team that will fix it.''}%
+  {A zombie job's hours already count as held; charging them to scheduling subtracts them twice. A straggler moved to
+   reliability vanishes from program goodput, yet every step runs at its pace.}{}
+\mistake{``One day of profiling characterizes the job.''}%
+  {With MTBF \val{mtbfhours} h (about \val{mtbfdays} days), a day usually sees no failure. Runtime needs weeks.}{}
+
+\vspace{2pt}
+\sheetsec{Check yourself}
+\begin{qs}
+\item \assumed{} the worked job now suffers \val{qrate} forced preemptions a day at \val{tpreempt} min each. New runtime goodput?
+  Which term now leads?
+\item \assumed{} an autotuned build lifts $\ProgramGoodput$ to \val{qpnew} but its longer startups drop $\RuntimeGoodput$ to
+  \val{qrnew}. Did the fleet gain? Why is scheduling goodput not needed?
+\item A job retains fewer steps than planned, yet a step trace from a healthy hour looks clean. Which record next? What
+  evidence separates an input stall from an exposed collective, and which kind of lever fits the collective?
+\item The example's batch-one decode replica (weight-streaming floor \val{decodems} ms per token) shows MFU near
+  \val{decodeutil}\%. Does that indict the kernel? What should you measure?
+\end{qs}
+\end{rightcol}
+\end{document}
