@@ -1,0 +1,180 @@
+% Study sheet: Volume IV, Chapter 3, The Cognitive Brain.
+% Numbers: \val{...} from brain_studysheet_numbers.tex, written by brain_studysheet_numbers.py.
+\documentclass{studysheet}
+\input{brain_studysheet_numbers}
+\sheetvolume{4}
+\sheetchapter{3}{The Cognitive Brain}
+\sheetsources{Numbers from the chapter's mlsysim scenarios for the warehouse mobile manipulator; questions marked assumed use new inputs.}
+
+\begin{document}
+% ===================================================================== FRONT: LEARN
+\frontside
+\begin{bigidea}
+A learned model handles objects no engineer listed, but it is the slowest computation on board
+and only \hl{proposes}. Two budgets govern it: how often it can \hl{renew} and how long each answer
+stays \hl{true}. Motion past the causal boundary cannot be recalled, so every proposal must stay refusable.
+\end{bigidea}
+
+\begin{leftcol}
+\sheetsec{Key ideas}
+\begin{ideas}
+\idea{Learned proposes; the permission path admits.}{Classical geometry is provable but runs out of cases;
+  a learned model covers more and proves nothing.}
+\idea{The memory wall.}{At batch size one, each decode token streams every off-chip weight: bytes moved,
+  not arithmetic, set the rate.}
+\idea{Prefill and decode bind differently.}{Prefill reads the input in one pass, reusing each weight
+  (compute-bound); each decoded token rereads all weights.}
+\idea{Chunks supply motion, not fresh evidence.}{$\ActionChunkHorizon$ setpoints per evaluation cut weight traffic
+  per setpoint; new evidence still waits a renewal plus an inference.}
+\idea{Two proposers.}{A slow intent model names a target pose; a fast chunk policy renews motion. What
+  crosses between them sets what can be checked.}
+\idea{On time can still be wrong.}{An in-limits proposal can aim at the wrong
+  thing; only outside evidence refuses it.}
+\end{ideas}
+
+\vspace{9pt}
+\fcard{Memory wall}%
+  {\ProposerEvaluationRate \le \frac{\SustainedMemoryBandwidth}{\WeightMemory}, \qquad \WeightMemory = \Parameters \times \text{bytes per parameter}}%
+  {Rate if each evaluation streams all $\Parameters$ weights once.}%
+  {A ceiling; prefill and cache reads add time.}{}
+\fcard{One fresh evaluation}%
+  {\ProposerInferenceTime \approx \under{\max\!\Big(\frac{\PrefillOperations}{\EfficiencyHw\PeakRate},\ \frac{\WeightMemory}{\SustainedMemoryBandwidth}\Big)}{prefill}
+   + \under{(\EmittedTokenCount - 1)\,\frac{\WeightMemory}{\SustainedMemoryBandwidth}}{decode sweeps}}%
+  {$\PrefillOperations \approx 2\Parameters\SequenceLength$ ($\SequenceLength$ input tokens, efficiency $\EfficiencyHw$
+   of peak $\PeakRate$, $\EmittedTokenCount$ output tokens). Weight-only quantization shrinks only decode.}%
+  {Prefill intensity is about $\SequenceLength$ FLOP/byte at FP16, decode about one; above the ridge
+   ($\PeakRate$ over peak bandwidth), compute binds.}{}
+\end{leftcol}%
+\begin{rightcol}
+\sheetsec{A chunk is buffer, not permission}
+{\centering
+\begin{tikzpicture}[sheet]
+  \pgfmathsetmacro\s{236/\val{span}}
+  \pgfmathsetmacro\xa{\val{infer}*\s}\pgfmathsetmacro\xb{\val{age}*\s}
+  \pgfmathsetmacro\xc{\val{tau}*\s}\pgfmathsetmacro\xd{\val{span}*\s}
+  \fill[rulegray] (0,20) rectangle (\xa,32);
+  \draw[hotbox] (\xa,20) rectangle (\xb,32);
+  \draw[accbox] (\xb,20) rectangle (\xc,32);
+  \draw[nbox, dashed] (\xc,20) rectangle (\xd,32);
+  \draw[dim, densely dashed] (\xc,18) -- (\xc,46);
+  \node[lab, anchor=south] at ({(\xa+\xb)/2},34) {in force};
+  \node[lab, anchor=south] at ({(\xb+\xc)/2},34) {evidence holds};
+  \node[lab, anchor=south] at ({(\xc+\xd)/2},34) {buffer, not permission};
+  \node[small, anchor=north] at (0,17) {0};
+  \node[small, anchor=south] at ({\xa/2},34) {infer};
+  \node[small, anchor=north] at (\xa,17) {\val{infer}};
+  \node[small, anchor=north] at (\xb,17) {\val{age}};
+  \node[small, anchor=north] at (\xc,12) {$\EvidenceHorizon$ = \val{tau}};
+  \node[small, anchor=north] at (\xd,17) {\val{span} ms};
+\end{tikzpicture}\par}
+\vspace{3pt}
+{\fontsize{8.6}{11}\selectfont From capture: $\ActionChunkHorizon=\val{horizon}$ setpoints \val{step} ms apart, renewed every \val{renew} ms.\par}
+
+\vspace{6pt}
+\fcard{Evidence horizon and minimum supply}%
+  {\EvidenceHorizon = \sqrt{\frac{2(\PositionalTaskTolerance - \InitialTrackingError)}{\SlipAccelerationBound}},
+   \qquad \MinimumChunkSetpointCount = \left\lceil \frac{\ChunkRenewalPeriod + \ProposerInferenceTime}{\SetpointStepInterval} \right\rceil}%
+  {Belt speed tracked: slip $\SlipAccelerationBound$ after capture eats the margin from initial
+   error $\InitialTrackingError$ to tolerance $\PositionalTaskTolerance$. Need $\ChunkRenewalPeriod + \ProposerInferenceTime \le \EvidenceHorizon$.}%
+  {$\MinimumChunkSetpointCount$ steps of $\SetpointStepInterval$ bridge one renewal $\ChunkRenewalPeriod$.}{}
+\fcard{KV cache of retained context}%
+  {\KvCacheMemory = 2 \times \LayerCount \times \HiddenDimension \times \SequenceLength \times \ElementStorageSize}%
+  {$\SequenceLength$ tokens kept, $\LayerCount$ layers of width $\HiddenDimension$, $\ElementStorageSize$ bytes per value
+   (two at FP16). One read takes $\KvCacheMemory/\SustainedMemoryBandwidth$.}{}{}
+
+\vspace{8pt}
+\sheetsec{Refuse on outside evidence}
+\begin{sheettable}{@{}>{\raggedright\arraybackslash}p{0.40\linewidth} L@{}}
+\thead{What arrives} & \thead{What can refuse it}\\ \midrule
+Latent vector & Only its motion: no position to check or age\\
+Target pose + capture time & Depth; its age against $\EvidenceHorizon$\\
+Grasp on a printed handle & Depth shows a flat surface\\
+Confidence near one & Depth vetoes it; softmax sums to one by design\\
+Label flipping (chattering) & Depth and track hold still; debounce (ages evidence), filter, limit jerk\\
+\end{sheettable}
+\end{rightcol}
+
+% ===================================================================== BACK: PRACTICE
+\backside
+\begin{answers}
+\ans{Finish}{\val{tpre} + \val{decodesteps} $\times$ \val{sweepeight} = \val{tpre} + \val{deceight} = \res{\val{toteight} ms}:
+  fits, \val{slackeight} ms spare. Faster needs fewer bytes or a shorter prefill; weights alone cannot pass
+  \val{ceiling} Hz (evaluation card).}
+\ans{Q1}{(a) $\sqrt{\val{qtauinner}}$ s $\approx$ \val{qtau} ms. (b) \val{renew} + \val{infer} = \val{age} ms fits;
+  $\MinimumChunkSetpointCount = \lceil \val{age}/\val{step} \rceil = \val{hmin}$. (c) \val{qrenewslow} + \val{infer} =
+  \val{qageslow} ms $>$ \val{qtau}: evidence expires first (evidence card).}
+\ans{Q2}{\val{pertoken} B $\times$ \val{ctx} $\approx$ \val{perstep} MB per step, $\times$ \val{qsteps} = \val{qcache} GB;
+  with weights \val{qtotal} GB, \val{qshare}\% of \val{memgb} GB. One full read takes \val{qcache} $\div$ \val{bw}
+  $\approx$ \val{qreread} ms, more than the chunk policy's \val{renew} ms renewal (KV card).}
+\columnbreak
+\ans{Q3}{The target: a latent holds no position to compare with depth or age against drift; only chunk
+  motion stays checkable. Keep a target pose with capture time (table).}
+\ans{Q4}{Perceptual chattering near a class boundary: the label flips while depth and tracked position hold
+  still. Debounce, filter the state, limit jerk; debouncing delays real changes and ages the evidence (table).}
+\end{answers}
+
+\begin{leftcol}
+\sheetsec{Worked example}
+\begin{practicebox}\boxtitle{How often can the intent model renew?}
+The running machine's \val{params}B intent model: bandwidth \val{bwpeak} GB/s peak, \val{buspct}\% sustained
+(\val{bw} GB/s); FP16 \val{peak} TFLOP/s at $\EfficiencyHw$ = \val{util}; $\SequenceLength$ = \val{tokensin},
+$\PrefillOperations$ = \val{flops}$\times10^{12}$ FLOPs, $\EmittedTokenCount$ = \val{tokensout}.\par\vspace{5pt}
+{\centering
+\begin{tikzpicture}[sheet]
+  \pgfmathsetmacro\sc{150/\val{totfp}}
+  \pgfmathsetmacro\p{\val{tpre}*\sc}
+  \foreach \lab/\d/\tot/\y in {FP16/\val{decfp}/\val{totfp}/16, INT4/\val{decint}/\val{totint}/0}{
+    \node[lab, anchor=east] at (30,\y+6) {\lab};
+    \draw[accbox] (34,\y) rectangle ({34+\p},\y+12);
+    \draw[nbox] ({34+\p},\y) rectangle ({34+\tot*\sc},\y+12);
+    \node[note, anchor=west] at ({38+\tot*\sc},\y+6) {\tot\ ms};}
+  \node[lab] at ({34+\p/2},38) {prefill};
+  \node[lab] at ({34+\p+\val{decint}*\sc/2+10},38) {decode};
+  \draw[dim, densely dashed] ({34+\val{period}*\sc},-4) -- ({34+\val{period}*\sc},32);
+  \node[small, anchor=north] at ({34+\val{period}*\sc},-8) {\val{period} ms period};
+\end{tikzpicture}\par}\vspace{4pt}
+\begin{steps}
+\item FP16 weights \val{params}B $\times$ 2 B = \val{wfp} GB; sweep \val{wfp} $\div$ \val{bw} = \val{sweepfp} ms, a wall of \val{wallfp} Hz.
+\item Prefill: \val{tokensin} FLOP/byte $>$ ridge \val{peak}T $\div$ \val{bwpeak}G $\approx$ \val{ridge}, so compute-bound:
+  \val{flops}$\times10^{12} \div (\val{util} \times \val{peak}\times10^{12})$ = \res{\val{tpre} ms}.
+\item FP16: \val{tpre} + \val{decodesteps} $\times$ \val{sweepfp} = \val{tpre} + \val{decfp} = \res{\val{totfp} ms}.
+\item INT4 (\val{wint} GB, sweep \val{sweepint} ms): \val{tpre} + \val{decodesteps} $\times$ \val{sweepint} = \res{\val{totint} ms},
+  so the machine runs at \val{rate} Hz.
+\end{steps}
+\takeaway{A quarter of the bytes gives only \val{speedup}$\times$ (\val{lesstime}\% less time): prefill is now \val{preshare}\%.}
+\end{practicebox}
+
+\vspace{10pt}
+\sheetsec{Your turn: finish it}
+\begin{practicebox}\boxtitle{Does an 8-bit build fit the same period?}
+One byte per weight.\par\vspace{3pt}
+\textbf{Given:} \val{weight} GB; sweep \val{weight} $\div$ \val{bw} = \val{sweepeight} ms.\par
+\textbf{You:} find the evaluation time; does it fit \val{period} ms? What would a faster rate need?\par\vspace{30pt}
+\end{practicebox}
+\end{leftcol}%
+\begin{rightcol}
+\sheetsec{Common mistakes}
+\mistake{``A smooth chunk inside joint limits is safe to run to its end.''}%
+  {Its \val{span} ms rest on one capture whose evidence holds \val{tau} ms. Run to the end, \val{slip} m/s$^2$
+   slip drifts \val{driftend} mm: \val{errend} mm of error against \val{tol} mm tolerance.}{}
+\mistake{``With chunks and a fast decoder, the big model can drive the arm.''}%
+  {Every decoder, token by token, one pass or iterative, first pays the \val{tpre} ms prefill, above the
+   \val{renew} ms renewal. A fresh chunk lands \val{totint} ms after capture, \val{gap} renewal periods.}{}
+\mistake{``The model reports high confidence, so the grasp is good.''}%
+  {Softmax sums to one by construction, and networks can be most confident far from training data.
+   Admit on depth.}{}
+
+\vspace{2pt}
+\sheetsec{Check yourself}
+\begin{qs}
+\item \assumed{} slip \val{qslip} m/s$^2$; tolerance \val{tol} mm, initial error \val{errzero} mm, \val{step} ms steps,
+  \val{infer} ms inference. (a) $\EvidenceHorizon$? (b) Does \val{renew} ms renewal fit; $\MinimumChunkSetpointCount$? (c) \val{qrateslow} Hz?
+\item \assumed{} a \val{qwindow} s history at \val{qhz} Hz: \val{layers} layers, $\HiddenDimension$ = \val{width}, FP16,
+  \val{ctx} tokens per step. Cache size; share of \val{memgib} GiB (\val{memgb} GB) with INT4 weights? Read time at \val{bw} GB/s?
+\item A reviewer proposes passing the chunk policy a latent vector instead of a target pose: richer, no
+  decoding. What does the permission path lose?
+\item Motor currents spike; the log shows the target's label flipping between ``mug'' and ``bowl'' every
+  frame. Name the failure, the confirming evidence, and the defenses with their cost.
+\end{qs}
+\end{rightcol}
+\end{document}

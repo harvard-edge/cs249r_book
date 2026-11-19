@@ -1,0 +1,166 @@
+% Study sheet: Volume IV, Chapter 12, Safety Enforcement.
+% Numbers: \val{...} from enforcement_studysheet_numbers.tex, written by enforcement_studysheet_numbers.py.
+\documentclass{studysheet}
+\input{enforcement_studysheet_numbers}
+\sheetvolume{4}
+\sheetchapter{12}{Safety Enforcement}
+\sheetsources{Numbers from the chapter's mlsysim scenarios for the warehouse mobile manipulator (illustrative profiles); questions marked assumed use new inputs.}
+
+\begin{document}
+% ===================================================================== FRONT: LEARN
+\frontside
+\begin{bigidea}
+A plan safe at admission can turn unsafe while the machine follows it. So the permission path
+re-checks every proposal \hl{on every control tick}: pass it, correct it minimally, or run its own
+stop. Work across the \hl{causal boundary} cannot be recalled.
+\end{bigidea}
+
+\begin{leftcol}
+\sheetsec{Key ideas}
+\begin{ideas}
+\idea{Permission is renewed every tick.}{Admission judges the predicted state; the enforcer,
+  the state actually reached.}
+\idea{Clearance is a finished budget.}{Delay grows with speed, braking with its square, plus jerk
+  ramps and tracking bound; each is a watched premise.}
+\idea{Gravity spends braking authority.}{Moving with the load, only the torque left over
+  brakes, and stopping distance grows as one over it.}
+\idea{A barrier must carry the cost to stop.}{On raw distance, torque has no authority until
+  too late; subtracting the stopping distance restores it.}
+\idea{Correct minimally; veto the incoherent.}{Project a sound proposal onto the boundary;
+  per-axis clamps can still break the joint constraint.}
+\idea{The certified floor carries the claim.}{The filter is unrated; rated drive,
+  scanner and watchdog functions beneath it carry the protective claim.}
+\end{ideas}
+
+\vspace{8pt}
+\fcard{Finished stopping budget and speed ceiling}%
+  {\begin{gathered}\SpeedAtDetection\PrebrakeDelay + \frac{\SpeedAtDetection^2}{2\CredibleBrakingDeceleration}
+     + \SpeedAtDetection\frac{\CredibleBrakingDeceleration}{2\JerkLimit}
+     + \LocalizationBound + \ProtectiveClearanceMargin + \TrackingErrorBound \le \ClearDistance\\[3pt]
+   \SpeedBound = -\CredibleBrakingDeceleration\EffectiveBrakingDelay + \sqrt{(\CredibleBrakingDeceleration\EffectiveBrakingDelay)^2
+     + 2\CredibleBrakingDeceleration\InsetAvailableBrakingDistance}\end{gathered}}%
+  {Allowances: localization $\LocalizationBound$, protective $\ProtectiveClearanceMargin$, tracking
+   $\TrackingErrorBound$; $\InsetAvailableBrakingDistance$ is $\ClearDistance$ less all three;
+   $\EffectiveBrakingDelay = \PrebrakeDelay + \CredibleBrakingDeceleration/2\JerkLimit$.
+   Spare ($\ClearDistance$ less total) pays dispatch travel $\SpeedAtDetection\DispatchAdmissionInterval$; the rest is reserve.}%
+  {$\SpeedBound$ excludes dispatch travel.}%
+  {\begin{tikzpicture}[sheet]
+     \foreach \yy/\lab/\pb/\ps in {{24/{drive \val{vdrive}\,m/s}/\val{pdblind}/\val{pdstop}}, {4/{aisle \val{wv}\,m/s}/\val{pablind}/\val{pastop}}}{
+       \node[lab, anchor=east] at (54,\yy+6) {\lab};
+       \draw[nbox] (58,\yy) rectangle ({58+\pb},\yy+12);
+       \draw[accbox] ({58+\pb},\yy) rectangle ({58+\pb+\ps},\yy+12);
+       \draw[nbox] ({58+\pb+\ps},\yy) rectangle ({58+\pb+\ps+\val{pallow}},\yy+12);}
+     \node[small, anchor=south] at ({58+\val{pdblind}/2},39) {delay};
+     \node[small, anchor=south] at ({58+\val{pdblind}+\val{pdstop}/2},39) {stop};
+     \node[small, anchor=south] at ({58+\val{pdblind}+\val{pdstop}+\val{pallow}/2},39) {allow.};
+     \draw[dim, dashed] ({58+\val{pclear}},-2) -- ({58+\val{pclear}},37);
+     \node[small, anchor=north west] at ({60+\val{pclear}},-3) {$\ClearDistance$ = \val{wclear}\,m};
+     \node[note, anchor=west] at ({62+\val{pdblind}+\val{pdstop}+\val{pallow}},30) {\val{dtotal}\,mm};
+     \node[note, anchor=west] at ({62+\val{pdblind}+\val{pdstop}+\val{pallow}},10) {\val{atotal}\,mm};
+     \node[note, anchor=north west] at (58,-3) {to scale};
+   \end{tikzpicture}}
+\end{leftcol}%
+\begin{rightcol}
+\fcard{Gravity braking tax}%
+  {\NetAngularBrakingDeceleration = \frac{\JointTorqueLimit - \JointBiasTorque}{\EffectiveJointInertia},
+   \qquad \text{tool travel} = \frac{\LeverArmLength\,\JointAngularSpeed^2}{2\NetAngularBrakingDeceleration}}%
+  {Peak torque less gravity torque pushing with the motion, over joint inertia.}%
+  {}{}
+\fcard{Kinetic barrier}%
+  {\BarrierFunction = \AngularClearance - \frac{\JointAngularSpeed^2}{2\NetAngularBrakingDeceleration} \ge 0}%
+  {$\AngularClearance$: tool clearance over $\LeverArmLength$. Unlike raw distance, its rate contains torque,
+   giving a per-tick torque limit. At $\BarrierFunction = 0$: full peak braking; closer, more than the motor has.}%
+  {}{}
+\fcard{Least-change projection}%
+  {\CertifiedControlAction = \NominalControlCommand - \BarrierProjectionMultiplier\BarrierConstraintNormal,
+   \quad \BarrierProjectionMultiplier = \max\!\left(0, \frac{\BarrierConstraintNormal^\top\NominalControlCommand - \BarrierConstraintBound}{\|\BarrierConstraintNormal\|^2}\right)}%
+  {Constraint $\BarrierConstraintNormal^\top \ControlInput \le \BarrierConstraintBound$. A safe proposal
+   ($\BarrierProjectionMultiplier = 0$) passes untouched; a breach lands exactly on the boundary.}%
+  {Holds only inside actuator limits.}{}
+
+\vspace{9pt}
+\sheetsec{Fallback ladder: pick, don't descend}
+\begin{sheettable}{@{}l L l@{}}
+\thead{Rung} & \thead{Selected when} & \thead{Runs on}\\ \midrule
+\texttt{PROJECT} & proposal fresh, barrier feasible & MCU\\
+\texttt{HOLD} & lease or heartbeat lost \emph{at standstill} & MCU\\
+\texttt{STOP} & lease lost, error past $\TrackingErrorBound$, or no feasible torque \emph{in motion} & MCU\\
+\texttt{INHIBIT} & the MCU itself fails & hardware\\
+\end{sheettable}
+\par\vspace{3pt}{\fontsize{8.6}{11}\selectfont\color{muted}\texttt{INHIBIT} removes torque (STO); a moving
+base coasts until spring brakes set.\par}
+\vspace{8pt}
+\sheetsec{The log's blind spot}
+Tracking error and barrier margin read the same position estimate, so drift hides from both.
+An independent range sensor exposes it; charge it to $\LocalizationBound$.
+\end{rightcol}
+
+% ===================================================================== BACK: PRACTICE
+\backside
+\begin{answers}
+\ans{Finish}{\val{wblind} + \val{wstop} + \val{wlocmar} + \val{yeps} = \res{\val{ytotal}\,mm}; spare \val{yspare}\,mm,
+  reserve after \val{wdatravel}\,mm of dispatch travel only \res{\val{yreserve}\,mm}. With $\InsetAvailableBrakingDistance$ =
+  \val{yavail}\,mm, root \val{yroot}, $\SpeedBound \approx$ \res{\val{yvmax}\,m/s} before dispatch. Watch tracking error every tick.}
+\ans{1}{$(\val{tmax} - \val{qbias})/\val{jin}$ = \res{\val{qalpha}\,rad/s$^2$}; \val{lever} $\times \val{omega}^2$ over twice \val{qalpha} =
+  \res{\val{qtool}\,mm}, \val{qratio}$\times$ the unbiased \val{toolfree}\,mm: one over the remaining \val{qremain}\% share (gravity tax card).}
+\columnbreak
+\ans{2}{(a) $\val{qsone} - \val{bnd}$ over \val{qnormsq}: $\BarrierProjectionMultiplier$ = \val{qlam}; \res{[\val{qpa}, \val{qpb}]\,N$\cdot$m},
+  on the boundary, inside limits. (b) \val{qstwo} $\le$ \val{bnd}: passes untouched (projection card).}
+\ans{3}{(a) \texttt{HOLD}: standing still, powered hold suffices. (b) \texttt{STOP}: the resident powered stop;
+  \texttt{INHIBIT} would let it coast. (c) \texttt{INHIBIT}: only hardware survives (ladder).}
+\ans{4}{Both fields read the same drifted position estimate, so both look healthy. A safety lidar's range
+  disagreeing with odometry exposes the drift, which is charged to $\LocalizationBound$ (log card).}
+\end{answers}
+
+\begin{leftcol}
+\sheetsec{Worked example}
+\begin{practicebox}\raggedright\boxtitle{Does the aisle speed fit the finished budget?}
+The base runs at \val{wv}\,m/s toward a rack end \val{wclear}\,m away. $\PrebrakeDelay$ = \val{wtau}\,ms,
+$\CredibleBrakingDeceleration$ = \val{wa}\,m/s$^2$, $\JerkLimit$ = \val{wj}\,m/s$^3$ (so $\CredibleBrakingDeceleration/2\JerkLimit$ =
+\val{wramp}\,ms). Allowances: $\LocalizationBound$ = \val{wloc}, $\ProtectiveClearanceMargin$ = \val{wmar},
+$\TrackingErrorBound$ = \val{weps}\,mm. $\DispatchAdmissionInterval$ = \val{wdda}\,ms.
+\begin{steps}
+\item Delay: \val{wv}\,m/s $\times$ \val{wtau}\,ms = \res{\val{wblind}\,mm}.
+\item Stop: $\val{wv}^2/(2\times\val{wa})$ = \val{wbrake}\,mm plus \val{wv} $\times$ \val{wramp} = \val{wrampt}: \res{\val{wstop}\,mm}.
+\item Plus \val{wallow}\,mm: \res{\val{wtotal}\,mm}, spare \val{wspare}\,mm. Dispatch travel \val{wv} $\times$ \val{wdda} =
+  \val{wdatravel}\,mm leaves a \res{\val{wreserve}\,mm} reserve.
+\item $\EffectiveBrakingDelay$ = \val{wteff}\,ms, $\InsetAvailableBrakingDistance$ = \val{wavail}\,mm:
+  $\sqrt{\val{watau}^2 + 2\times\val{wa}\times\val{wavailm}}$ = \val{wroot}\,m/s; less \val{watau}: \res{$\SpeedBound \approx$ \val{wvmax}\,m/s} before dispatch.
+\end{steps}
+\takeaway{It fits while every premise holds; the \val{vdrive}\,m/s drive limit does not.}
+\end{practicebox}
+
+\vspace{10pt}
+\sheetsec{Your turn: finish it}
+\begin{practicebox}\boxtitle{Same run, worn drive}
+\assumed{} worn tires double the tracking bound to $\TrackingErrorBound$ = \val{yeps}\,mm; nothing else changes.\par\vspace{4pt}
+\textbf{Given:} delay \val{wblind}\,mm and stop \val{wstop}\,mm are unchanged.\par
+\textbf{You:} find the total, the reserve after dispatch travel, and the new ceiling. What must watch for this?\par\vspace{30pt}
+\end{practicebox}
+\end{leftcol}%
+\begin{rightcol}
+\sheetsec{Common mistakes}
+\mistake{``A barrier on distance to the workstation will stop the descending arm.''}%
+  {Torque is absent from the rate of raw distance, so that filter acts too late. Under a \val{biasch}\%
+   gravity load, the kinetic barrier asks \val{tfar}\,N$\cdot$m of braking at \val{bfar}\,mm, the full peak at \val{toolch}\,mm, and
+   \val{tnear} (more than the motor has) at \val{bnear}\,mm.}{}
+\mistake{``The handover speed passed the force criterion, so any handover at it is safe.''}%
+  {Peak force is speed times $\sqrt{\text{stiffness}\times\text{mass}}$. At \val{vhand}\,m/s a free \val{mhand}\,kg hand recoils
+   and sees \val{ffree}\,N, inside \val{crit}\,N. A hand clamped against a rack meets the arm's full \val{meff}\,kg and sees
+   \val{fclamp}\,N: the ceiling needs clamp-free geometry.}{}
+
+\vspace{2pt}
+\sheetsec{Check yourself}
+\begin{qs}
+\item \assumed{} an emptier gripper: gravity takes \val{qfrac}\% of the \val{tmax}\,N$\cdot$m peak ($\EffectiveJointInertia$ = \val{jin}\,kg$\cdot$m$^2$,
+  $\LeverArmLength$ = \val{lever}\,m, $\JointAngularSpeed$ = \val{omega}\,rad/s). Net deceleration and tool travel on the descent?
+  Ratio to the unbiased stop?
+\item \assumed{} $\BarrierConstraintNormal$ = [\val{na}, \val{nb}], $\BarrierConstraintBound$ = \val{bnd}\,N$\cdot$m, limits $\pm$\val{ulim}\,N$\cdot$m. Admitted command
+  for (a) $\NominalControlCommand$ = [\val{qua}, \val{qub}] and (b) [\val{qva}, \val{qvb}]\,N$\cdot$m?
+\item Which rung, and why: (a) the base is parked and the \val{lease}\,ms lease lapses; (b) it cruises at
+  \val{wv}\,m/s and the lease lapses; (c) the MCU misses its \val{watchdog}\,ms watchdog?
+\item The log shows tracking error within $\TrackingErrorBound$ and a positive barrier on every tick, yet the base
+  ended closer to the rack than planned. Why did neither field see it; what evidence would?
+\end{qs}
+\end{rightcol}
+\end{document}
