@@ -1,4 +1,5 @@
 // LocalStorage-based progress tracking for the Heat Map + Spaced Repetition
+import { localDateKey, previousLocalDateKey } from './dates';
 
 export interface AttemptRecord {
   questionId: string;
@@ -42,11 +43,14 @@ function getStorage<T>(key: string, fallback: T): T {
   }
 }
 
-function setStorage<T>(key: string, value: T): void {
+/** Returns true if the value was persisted, false if the write failed (quota, disabled storage). */
+function setStorage<T>(key: string, value: T): boolean {
   try {
     window.localStorage.setItem(key, JSON.stringify(value));
+    return true;
   } catch {
     console.warn('Failed to write to localStorage');
+    return false;
   }
 }
 
@@ -224,14 +228,14 @@ interface StreakData {
   activeDates: string[];  // last 90 days of activity
 }
 
+// Streak days are the learner's LOCAL calendar days (not UTC), so the streak
+// rolls over at their midnight.
 function getToday(): string {
-  return new Date().toISOString().split('T')[0];
+  return localDateKey();
 }
 
 function getYesterday(): string {
-  const d = new Date();
-  d.setDate(d.getDate() - 1);
-  return d.toISOString().split('T')[0];
+  return previousLocalDateKey();
 }
 
 export function getStreakData(): StreakData {
@@ -416,9 +420,15 @@ export function importProgress(json: string): boolean {
     // Validate all shapes before touching storage.
     if (data.attempts !== undefined) {
       if (!Array.isArray(data.attempts)) return false;
-      if (data.attempts.length > 0) {
-        const first = data.attempts[0];
-        if (typeof first.questionId !== 'string' || typeof first.selfScore !== 'number') return false;
+      // Validate EVERY record, not just the first: a single malformed entry
+      // would be persisted and then crash getHeatMapData / getSubjectProgressMap
+      // (e.g. `a.competencyArea` on null) on every later page load.
+      for (const a of data.attempts) {
+        if (
+          !a || typeof a !== 'object' ||
+          typeof a.questionId !== 'string' ||
+          typeof a.selfScore !== 'number'
+        ) return false;
       }
     }
     if (data.gauntlets !== undefined && !Array.isArray(data.gauntlets)) return false;
@@ -441,18 +451,24 @@ export function importProgress(json: string): boolean {
       }
     };
 
-    try {
-      if (data.attempts !== undefined) setStorage(STORAGE_KEY, data.attempts);
-      if (data.gauntlets !== undefined) setStorage(GAUNTLET_KEY, data.gauntlets);
-      if (data.sr !== undefined) setStorage(SR_KEY, data.sr);
-      if (data.streak !== undefined) setStorage(STREAK_KEY, data.streak);
-      if (data.daily !== undefined) setStorage('staffml_daily', data.daily);
-      if (data.planProgress !== undefined) setStorage('staffml_plan_progress', data.planProgress);
-      if (data.customPaths !== undefined) setStorage('staffml_custom_paths', data.customPaths);
-      if (data.analytics !== undefined && Array.isArray(data.analytics)) setStorage('staffml_analytics', data.analytics);
-    } catch {
-      rollback();
-      return false;
+    // setStorage reports failure via its return value (it never throws), so
+    // check every write: a quota error part-way through must roll back instead
+    // of leaving a half-imported mix of old and new data and reporting success.
+    const writes: Array<[string, unknown]> = [];
+    if (data.attempts !== undefined) writes.push([STORAGE_KEY, data.attempts]);
+    if (data.gauntlets !== undefined) writes.push([GAUNTLET_KEY, data.gauntlets]);
+    if (data.sr !== undefined) writes.push([SR_KEY, data.sr]);
+    if (data.streak !== undefined) writes.push([STREAK_KEY, data.streak]);
+    if (data.daily !== undefined) writes.push(['staffml_daily', data.daily]);
+    if (data.planProgress !== undefined) writes.push(['staffml_plan_progress', data.planProgress]);
+    if (data.customPaths !== undefined) writes.push(['staffml_custom_paths', data.customPaths]);
+    if (data.analytics !== undefined && Array.isArray(data.analytics)) writes.push(['staffml_analytics', data.analytics]);
+
+    for (const [key, value] of writes) {
+      if (!setStorage(key, value)) {
+        rollback();
+        return false;
+      }
     }
 
     return true;
