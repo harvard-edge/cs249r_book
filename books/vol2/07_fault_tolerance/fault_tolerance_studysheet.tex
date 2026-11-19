@@ -1,0 +1,161 @@
+% Study sheet: Volume II, Chapter 7, Fault Tolerance.
+% Numbers: \val{...} from fault_tolerance_studysheet_numbers.tex, written by fault_tolerance_studysheet_numbers.py.
+\documentclass{studysheet}
+\input{fault_tolerance_studysheet_numbers}
+\sheetvolume{2}
+\sheetchapter{7}{Fault Tolerance}
+\sheetsources{Numbers from the mlsysim registry and the chapter's modeled scenarios; TB and GB are decimal; assumed inputs are marked.}
+
+\begin{document}
+% ===================================================================== FRONT
+\frontside
+\begin{bigidea}
+At fleet scale, \hl{failure is the normal state}: device failure rates add, so a job on ten thousand
+GPUs is interrupted every few hours. In C\textsuperscript{3} terms, fault tolerance spends coordination
+so each failure costs \hl{bounded lost work and recovery time}. Training protects progress; serving protects the latency contract.
+\end{bigidea}
+
+\begin{leftcol}
+\sheetsec{Key ideas}
+\begin{ideas}
+\idea{Scale makes failure routine.}{Failure rates add, so MTBF falls as one over the device count;
+  shared power, switches or software add correlated incidents.}
+\idea{Liveness is not correctness.}{A slow (gray) rank answers heartbeats yet sets every synchronous step;
+  silent data corruption (SDC) passes ECC with wrong gradients.}
+\idea{Classify on three axes.}{Persistence picks the fix, manifestation who notices, scope
+  (node to region) which redundancy helps.}
+\idea{Cadence balances two costs.}{Each save costs write time; each failure replays half an interval.
+  The optimum shrinks only as $\sqrt{\SystemMtbf}$.}
+\idea{A checkpoint counts once committed.}{Shards of one step, manifest last, stale writers fenced;
+  restarts and resizes resume from it. RPO caps lost work; RTO, delay.}
+\idea{Serving buys availability with replicas.}{Place them in independent failure domains; rebuild or replicate session
+  state. Beyond that, degrade a validated property.}
+\end{ideas}
+
+\vspace{10pt}
+\sheetsec{Which failure? Read the evidence}
+\begin{sheettable}{@{}l L L@{}}
+\thead{Failure} & \thead{Evidence} & \thead{First response}\\ \midrule
+Fail-stop & missed heartbeats, collective timeout & restart from last committed checkpoint\\
+Gray & heartbeats fine; step time above the median for many steps & replace if expected time saved exceeds restart plus replay\\
+SDC & loss or gradient-norm spike, no error & pause; replay on good hardware: mismatch, drain and roll back; match, check data\\
+Intermittent & recurs on one node under load & drain; stress-test before readmitting\\
+Permanent & repeats on one device & replace; restore from before its first bad write\\
+\end{sheettable}
+
+\vspace{10pt}
+\fcard{Replicas in parallel}%
+  {\RedundantServiceAvailability = 1 - (1 - \ReplicaAvailability)^{\RedundantReplicaCount}}%
+  {Up if any of $\RedundantReplicaCount$ independent replicas is.
+   One \val{replicaone}\% replica is down \val{downone} days a year; two, \val{downtwo} min.}%
+  {}{}
+\end{leftcol}%
+\begin{rightcol}
+\sheetsec{Formulas you will use}
+\fcard{Fleet failure rate}%
+  {\begin{aligned}\SystemFailureRate &= \sum \ComponentFailureRate_i\\[2pt]
+   \SystemMtbf &= \frac{1}{\SystemFailureRate} = \frac{\ComponentMttf}{\RequiredComponentCount}\end{aligned}}%
+  {Series parts add rates ($\RequiredComponentCount$ GPUs: $\RequiredComponentCount\ComponentFailureRate$); a node's shared part splits across its GPUs.
+   \val{fleetgpus} GPUs of MTTF \val{mttfgpu} h: \val{gpuonlymtbf} h GPU-only, \val{mtbfcascade} h with PCIe and NICs.}%
+  {Independent failures.}{}
+\fcard{Young-Daly interval}%
+  {\begin{aligned}\OptimalCheckpointInterval &= \sqrt{2\,\CheckpointWriteTime\,\SystemMtbf}\\[2pt]
+   \CheckpointWasteFraction &\approx \frac{\CheckpointWriteTime}{\CheckpointInterval} + \frac{\CheckpointInterval}{2\,\SystemMtbf}\end{aligned}}%
+  {Waste $\CheckpointWasteFraction$ is writes plus rework; the two are equal at the optimum, where
+   $\CheckpointWasteFraction = \sqrt{2\CheckpointWriteTime/\SystemMtbf}$.}%
+  {}%
+  {\begin{tikzpicture}[sheet]
+     \draw[dim] (24,0) -- (234,0);
+     \draw[dim] (24,0) -- (24,80);
+     \foreach \m in {0,15,30,45,60}{
+       \draw[dim] ({24+3*\m},0) -- ({24+3*\m},-2.5);
+       \node[small, anchor=north] at ({24+3*\m},-4) {\m};}
+     \foreach \p in {0,10,20}{
+       \draw[dim] (24,{3.2*\p}) -- (21.5,{3.2*\p});
+       \node[small, anchor=east] at (20,{3.2*\p}) {\p\%};}
+     \node[small, anchor=north] at (129,-13) {checkpoint interval (min)};
+     \node[small, anchor=south west] at (2,82) {time wasted};
+     \edef\wplot{\noexpand\draw[accent, line width=1pt] plot coordinates {\val{wastecurve}};}\wplot
+     \draw[accent, dashed, line width=0.6pt] (\val{xopt},0) -- (\val{xopt},\val{yopt});
+     \filldraw[fill=accent, draw=accent] (\val{xopt},\val{yopt}) circle (2pt);
+     \filldraw[fill=white, draw=accent, line width=0.6pt] (\val{xhour},\val{yhour}) circle (2pt);
+     \node[lab, anchor=north west] at (\val{xopt}+5,\val{yopt}-4) {optimum \val{tauoptmin} min, \val{wasteopt}\%};
+     \node[lab, anchor=south east] at (\val{xhour}-3,\val{yhour}+3) {hourly \val{hourwaste}\%};
+   \end{tikzpicture}}
+\fcard{Recovery time budget}%
+  {\FailureRecoveryTime = \FailureDetectionTime + \JobRestartTime + \CheckpointLoadTime + \RecoveryWarmupTime}%
+  {Paid per failure while survivors idle (Fleet Law coordination). Cold path: \val{tdetect} s + \val{trestart} min + \val{tload} s
+   + \val{twarmup} min = \val{trecovery} min. Failures grow with $\RequiredComponentCount$, so recovery loss grows as $\RequiredComponentCount$; checkpoint waste, as its square root.}%
+  {Timeouts: too short kills slow, healthy workers; too long idles peers.}{}
+\end{rightcol}
+
+% ===================================================================== BACK
+\backside
+\begin{answers}
+\ans{Finish}{Interval: square root of twice \val{twrite} $\times$ \val{mtbfdouble} = \val{taudouble} s (\val{taudoublemin} min);
+  waste: square root of twice \val{twrite} $\div$ \val{mtbfdouble} = \val{wastedouble}\%. Interval shorter and waste higher, each by
+  \val{factortau}$\times$, the square root of the MTBF ratio: storage need not double (Young-Daly card).}
+\ans{1}{\val{tdetect} s + \val{trestarthot} min + \val{tload} s + \val{twarmup} min = \val{trecoveryhot} min, against \val{trecovery}.
+  Per day: \val{trecovery} $\times$ \val{perday} = \val{daycold} min becomes \val{dayhot} min, \val{savedmin} min saved on
+  \val{fleetgpus} GPUs, about \val{savedgpuh} GPU-hours, against \val{sparegpuh} for the idle node: worth it (recovery card).}
+\columnbreak
+\ans{2}{Parallel rule, since any replica serves. One gives \val{qoneavail}\%; \val{qreps} give
+  one minus \val{qmiss} squared = \val{qrepsavail}\%, enough, if they share no rack or power (replica card).}
+\ans{3}{Step \val{qstep} $\div$ \val{qspeed}\% = \val{qslow} s, so the job keeps \val{qkeep}\%: \val{qlost}\% lost,
+  since the slowest rank sets the step. Heartbeats still arrive; compare each rank's step time
+  with the median over several steps (evidence table).}
+\ans{4}{Replay the step on known-good hardware from the same state, batch and seed, within tolerance. A mismatch implicates the device: drain it and roll back to a
+  checkpoint before the spike. A match points to the batch, optimizer or sync path (evidence table).}
+\end{answers}
+
+\begin{leftcol}
+\sheetsec{Worked example}
+\begin{practicebox}\boxtitle{How often should the \val{fleetgpus}-GPU cluster checkpoint?}
+Per GPU: GPU MTTF \val{mttfgpu} h, PCIe link \val{mttfpcie} h, one NIC per \val{gpusnode} GPUs at
+\val{mttfnic} h; power supplies redundant (no term). Checkpoint \val{ckpttb} TB (\val{bpp} bytes per
+parameter, \val{writebw} GB/s to storage).
+\begin{steps}
+\item Rates per million GPU-hours: \val{rategpu} + \val{ratepcie} + \val{ratenet} = \res{\val{ratetotal}}.
+\item Cluster: \val{fleetgpus} $\times$ \val{ratetotal} per million = \val{sysrate} per hour, so
+  $\SystemMtbf$ = \res{\val{mtbfcascade} h} (\val{mtbfsec} s), \val{perday} failures a day.
+\item Write: \val{ckpttb} TB $\div$ \val{writebw} GB/s = \res{\val{twrite} s}.
+\item $\OptimalCheckpointInterval = \sqrt{2 \times \val{twrite} \times \val{mtbfsec}} = \sqrt{\val{radicand}}$ =
+  \res{\val{tauopt} s (\val{tauoptmin} min)}; waste \res{\val{wasteopt}\%}, half writes, half rework.
+  Hourly: \val{hourwrite} + \val{hourrework} = \val{hourwaste}\%.
+\end{steps}
+\takeaway{The floor is shallow: a rough MTBF works, an interval several times off does not.}
+\end{practicebox}
+
+\vspace{10pt}
+\sheetsec{Your turn: finish it}
+\begin{practicebox}\boxtitle{The cluster doubles to \val{gpusdouble} GPUs}
+Same checkpoint, same storage; failures stay independent.\par\vspace{4pt}
+\textbf{Given:} $\SystemMtbf$ halves to \val{mtbfdouble} s; $\CheckpointWriteTime$ = \val{twrite} s.\par
+\textbf{You:} find the new interval and waste, the factor by which each changes, and why it is not two.
+\end{practicebox}
+\end{leftcol}%
+\begin{rightcol}
+\sheetsec{Common mistakes}
+\mistake{``Checkpointing every hour is the safe default.''}%
+  {On the worked cluster hourly wastes \val{hourwaste}\% against \val{wasteopt}\%. On \val{onekgpus} GPUs (MTBF \val{onekmtbf} h) with a
+   \val{onekwrite}-min write the optimum is \val{oneklong} min, so hourly saves too often. Compute it.}{}
+\mistake{``Our hardware has ECC, so silent corruption is negligible.''}%
+  {ECC and CRCs protect stored and moved bits, not arithmetic. A rank that checksums its own wrong gradient
+   passes; only replay, invariants or model evidence expose it.}{}
+\mistake{``The newest checkpoint directory is safe to resume from.''}%
+  {Only a generation whose manifest was published after every shard confirmed counts. A rank that dies mid-save
+   leaves the last committed step; fencing rejects its late writes; an elastic resize resumes from that commit too.}{}
+
+\vspace{2pt}
+\sheetsec{Check yourself}
+\begin{qs}
+\item \assumed{} on the \val{fleetgpus}-GPU cluster, a hot spare cuts the restart term to \val{trestarthot} min on the cold path. New recovery time?
+  At \val{perday} failures a day, is an idle \val{gpusnode}-GPU spare node worth it?
+\item \assumed{} each serving replica is \val{qavail}\% available. Which rule applies, and how many replicas reach
+  \val{qtarget}\%?
+\item \assumed{} one of \val{qgpus} GPUs throttles to \val{qspeed}\% speed (step \val{qstep} s). What share of throughput
+  is lost? Why does the heartbeat timeout miss it, and what catches it?
+\item Loss spikes mid-run with no error. What evidence decides between a faulty device and a bad batch?
+\end{qs}
+\end{rightcol}
+\end{document}
