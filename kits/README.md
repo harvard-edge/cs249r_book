@@ -95,6 +95,11 @@ This is where AI systems meet the physical world.
       <td>Full Linux SBC for edge AI</td>
       <td>Complex pipelines, prototyping</td>
     </tr>
+    <tr>
+      <td align="center"><b>Arduino UNO Q</b></td>
+      <td>Linux MPU and real-time MCU on one board</td>
+      <td>Edge GenAI with physical I/O</td>
+    </tr>
   </tbody>
 </table>
 
@@ -171,7 +176,7 @@ Each platform includes progressive labs:
 ```text
 kits/
 ├── contents/                # Lab content
-│   ├── arduino/             # Arduino Nicla Vision labs
+│   ├── arduino/             # Arduino Nicla Vision and UNO Q labs
 │   ├── seeed/               # Seeed XIAO & Grove Vision labs
 │   ├── raspi/               # Raspberry Pi labs
 │   └── shared/              # Shared resources (DSP, features)

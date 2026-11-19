@@ -27,6 +27,7 @@ export class PlatformTreeProvider implements vscode.TreeDataProvider<TreeNode> {
         new CategoryTreeItem('Seeed XIAO ESP32S3', 'xiao', 'circuit-board'),
         new CategoryTreeItem('Grove Vision AI V2', 'grove', 'circuit-board'),
         new CategoryTreeItem('Raspberry Pi', 'raspi', 'circuit-board'),
+        new CategoryTreeItem('Arduino UNO Q', 'uno_q', 'circuit-board'),
         new CategoryTreeItem('Shared Resources', 'shared', 'library'),
       ];
     }
@@ -64,6 +65,15 @@ export class PlatformTreeProvider implements vscode.TreeDataProvider<TreeNode> {
             ['Motion Classification', 'motion_classification'],
             ['LLM Deployment', 'llm'],
             ['VLM Deployment', 'vlm'],
+          ]);
+        case 'uno_q':
+          return this.getLabsForPlatform('arduino/uno_q', [
+            ['Setup', 'setup'],
+            ['Small Language Models', 'llm'],
+            ['Vision-Language Models', 'vlm'],
+            ['Image Classification', 'image_classification'],
+            ['Object Detection', 'object_detection'],
+            ['Agentic AI', 'agentic_ai'],
           ]);
         case 'shared':
           return this.getLabsForPlatform('shared', [
