@@ -47,6 +47,13 @@ the package's two device-power assumptions: rated TDP and `Engine.solve`'s
 energy-proportional rule. `gpu-energy/README.md` documents the protocol and
 the measurement boundary.
 
+`gpu-energy-workloads/` is a second declared test with the same runner,
+protocol and analysis and a new seed, 2198. It adds Llama-2-7B, Llama-2-13B and
+Mixtral-8x7B, adds the H200 as a third GPU, and measures Llama-3.1-8B and
+ResNet-50 training again on new boards. `make publication-check` runs
+`analyze_gpu_energy.py --check --root paper/data/gpu-energy-workloads` on it,
+and its README reports the results and the changes made after measuring began.
+
 `serverless-gpu-energy/` has per-run GPU energy measurements from Modal
 serverless GPUs (T4 to B200): idle power with a model loaded, cold starts,
 keep-warm windows, pausing a training job, and 148 power runs of seven
