@@ -38,6 +38,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -72,6 +73,8 @@ app = modal.App("mlsysim-gpu-energy", image=image)
 cache = modal.Volume.from_name("mlsysim-hf-cache", create_if_missing=True)
 GPU_OPTIONS = dict(
     timeout=4 * 3600,
+    # One run per container. A reused container could still hold the previous run's files.
+    single_use_containers=True,
     # Reserve host CPU: vLLM schedules every decode step on the CPU, so a starved
     # container would slow decode. The manifest records the CPU limit the run saw.
     cpu=8.0,
@@ -107,7 +110,8 @@ def prefetch(models: list[dict]) -> list[str]:
 
 
 def _measure(device_key: str, configs: list[str], name: str = "") -> dict[str, bytes]:
-    out = Path("/tmp/run")
+    # A fresh folder per call, so a run can never return files another run left behind.
+    out = Path(tempfile.mkdtemp(prefix="run-")) / "run"
     command = ["python", f"{REMOTE}/measure_gpu_energy.py", "--plan", f"{REMOTE}/plan.json",
                "--device", device_key, "--out", str(out)]
     for config in configs:
