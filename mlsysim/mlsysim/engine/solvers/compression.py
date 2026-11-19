@@ -20,6 +20,7 @@ from ...core.types import Quantity
 from ...core.units import BITS_PER_BYTE, resolve_precision
 from ...models.types import Workload
 from ...hardware.types import HardwareNode
+from ..accuracy_curve import AccuracyCurve
 from .base import ForwardModel
 
 class CompressionModel(ForwardModel):
@@ -46,7 +47,8 @@ class CompressionModel(ForwardModel):
               baseline_precision: str = "fp32",
               group_size: Optional[int] = None,
               scale_bits: int = 16,
-              accuracy_delta: float = 0.0) -> CompressionResult:
+              accuracy_delta: float = 0.0,
+              accuracy_curve: Optional[AccuracyCurve] = None) -> CompressionResult:
         """Estimate physical compression footprint, Roofline speedup, and supplied quality delta.
 
         Parameters
@@ -79,12 +81,30 @@ class CompressionModel(ForwardModel):
             drop). Task accuracy depends on model, calibration data, and evaluation
             benchmark rather than bitwidth or sparsity alone, so no synthetic accuracy
             curve is invented when omitted.
+        accuracy_curve : AccuracyCurve, optional
+            A measured accuracy curve for this model and method. When given,
+            ``estimated_accuracy_delta`` is read from the curve at
+            ``target_bitwidth`` (a bitwidth curve, with quantization) or at
+            ``sparsity`` (a sparsity curve, with pruning), and the result's
+            ``constraint_trace`` names the curve. Cannot be combined with a
+            non-zero ``accuracy_delta``.
 
         Returns
         -------
         CompressionResult
             Original and compressed sizes in GB, compression ratio, memory savings
-            percentage, Roofline inference speedup, and the supplied ``accuracy_delta``.
+            percentage, Roofline inference speedup, and the supplied ``accuracy_delta``
+            (or curve-derived delta).
+
+        Raises
+        ------
+        TypeError
+            If ``accuracy_curve`` is not an ``AccuracyCurve``.
+        ValueError
+            If ``accuracy_curve`` has the wrong axis for ``method``, if
+            ``method`` is neither quantization nor pruning, if the requested
+            level is outside the curve's measured range, or if both a non-zero
+            ``accuracy_delta`` and ``accuracy_curve`` are passed.
 
         See Also
         --------
@@ -102,10 +122,12 @@ class CompressionModel(ForwardModel):
         speedup follows bandwidth savings (``compression_ratio``) or low-precision Tensor
         Core peak ratios; structured and 2:4 ``n_m`` pruning convert sparsity into compute
         speedup while unstructured pruning saves storage only. ``estimated_accuracy_delta``
-        echoes the caller's ``accuracy_delta`` input directly.
+        echoes ``accuracy_delta`` directly unless ``accuracy_curve`` is supplied, in which
+        case the curve is taken to describe this model, method, and task (the solver cannot
+        verify workload identity).
 
         Excludes: sparse index metadata (CSR/bitmask overhead), dequantization kernel
-        overhead, activation quantization, and task-accuracy prediction.
+        overhead, activation quantization, and unmeasured task-accuracy prediction.
 
         References
         ----------
@@ -172,6 +194,14 @@ class CompressionModel(ForwardModel):
             compression_ratio = 1.0
             reported_delta = float(accuracy_delta)
 
+        # The trace is set only with a curve, so a result without one is unchanged in every field.
+        curve_fields = {}
+        if accuracy_curve is not None:
+            if accuracy_delta != 0.0:
+                raise ValueError("pass either accuracy_delta or accuracy_curve, not both")
+            reported_delta, accuracy_trace = self._curve_delta(accuracy_curve, method, target_bitwidth, sparsity)
+            curve_fields["constraint_trace"] = accuracy_trace
+
         compressed_size = original_size / compression_ratio
 
         return CompressionResult(
@@ -182,6 +212,7 @@ class CompressionModel(ForwardModel):
             estimated_accuracy_delta=reported_delta,
             memory_savings_pct=(1.0 - 1.0 / compression_ratio) * 100,
             inference_speedup=inference_speedup,
+            **curve_fields,
         )
 
     def candidate(
@@ -202,6 +233,7 @@ class CompressionModel(ForwardModel):
         group_size: Optional[int] = None,
         scale_bits: int = 16,
         accuracy_delta: float = 0.0,
+        accuracy_curve: Optional[AccuracyCurve] = None,
     ) -> CompressionCandidate:
         """Apply declared size, quality, speed, and support constraints to a candidate.
 
@@ -225,7 +257,7 @@ class CompressionModel(ForwardModel):
         size_limit : Quantity, optional
             Maximum compressed checkpoint size, convertible to bytes.
         max_accuracy_drop : float, optional
-            Maximum absolute assumed accuracy delta as a fraction, not percent.
+            Maximum accuracy drop as a fraction, not percent. A gain never violates it.
         min_speedup : float, optional
             Minimum dimensionless modeled speed ratio relative to baseline precision.
         require_hardware_support : bool, optional
@@ -238,6 +270,9 @@ class CompressionModel(ForwardModel):
             Bitwidth of each quantization group's scale metadata when ``group_size`` is set.
         accuracy_delta : float, default: 0.0
             Caller-supplied empirical task quality change passed to ``solve``.
+        accuracy_curve : AccuracyCurve, optional
+            Measured accuracy curve passed to ``solve``. The ``max_accuracy_drop``
+            gate then tests the curve's value, and ``source_trace`` names the curve.
 
         Returns
         -------
@@ -253,8 +288,8 @@ class CompressionModel(ForwardModel):
         Notes
         -----
         Equation: feasible = all(requested limits pass), where size <= size_limit,
-        abs(quality_delta) <= max_accuracy_drop, speedup >= min_speedup, and optional
-        hardware support. Missing limits impose no condition.
+        max(0, -quality_delta) <= max_accuracy_drop, speedup >= min_speedup, and
+        optional hardware support. Missing limits impose no condition.
 
         Assumptions: the estimates returned by ``solve`` apply unchanged. Hardware
         support is inferred from registry keys and pattern names, not from a kernel
@@ -292,6 +327,7 @@ class CompressionModel(ForwardModel):
             group_size=group_size,
             scale_bits=scale_bits,
             accuracy_delta=accuracy_delta,
+            accuracy_curve=accuracy_curve,
         )
         hardware_supported = self._hardware_supported(
             hardware,
@@ -306,9 +342,11 @@ class CompressionModel(ForwardModel):
                 f"model_size: {result.compressed_size_gb.to('MB').magnitude:.3g} MB exceeds "
                 f"{size_limit.to('MB').magnitude:.3g} MB"
             )
-        if max_accuracy_drop is not None and abs(result.estimated_accuracy_delta) > max_accuracy_drop:
+        # A measured curve can sit above its baseline (a positive delta), and a gain is not a drop.
+        accuracy_drop = max(0.0, -result.estimated_accuracy_delta)
+        if max_accuracy_drop is not None and accuracy_drop > max_accuracy_drop:
             violations.append(
-                f"quality: accuracy drop {abs(result.estimated_accuracy_delta):.3g} exceeds "
+                f"quality: accuracy drop {accuracy_drop:.3g} exceeds "
                 f"{max_accuracy_drop:.3g}"
             )
         if min_speedup is not None and result.inference_speedup < min_speedup:
@@ -334,6 +372,8 @@ class CompressionModel(ForwardModel):
             source_trace.append(f"max_accuracy_drop={max_accuracy_drop}")
         if min_speedup is not None:
             source_trace.append(f"min_speedup={min_speedup}")
+        if accuracy_curve is not None:
+            source_trace.append(f"accuracy_curve={accuracy_curve.name}")
 
         return CompressionCandidate(
             label=label or self._candidate_label(normalized_method, target_bitwidth, sparsity, normalized_sparsity_type),
@@ -380,12 +420,12 @@ class CompressionModel(ForwardModel):
             Common device profile evaluated for every candidate.
         candidate_configs : list of dict
             Candidate keyword dictionaries accepted by ``candidate``, such as method,
-            target_bitwidth, sparsity, sparsity_type, and label. Do not repeat the
-            shared constraints or baseline passed separately here.
+            target_bitwidth, sparsity, sparsity_type, accuracy_curve, and label. Do
+            not repeat the shared constraints or baseline passed separately here.
         size_limit : Quantity, optional
             Maximum checkpoint size for each candidate, convertible to bytes.
         max_accuracy_drop : float, optional
-            Maximum absolute assumed accuracy delta as a fraction, not percent.
+            Maximum accuracy drop as a fraction, not percent. A gain never violates it.
         min_speedup : float, optional
             Minimum modeled speed ratio relative to the common baseline.
         require_hardware_support : bool, optional
@@ -412,7 +452,7 @@ class CompressionModel(ForwardModel):
         Equation: A dominates B if A has no larger size, no lower speed, and no lower
         quality (1 + accuracy_delta), with at least one strict improvement. Among
         feasible frontier entries, selection minimizes the tuple
-        (abs(accuracy_delta), size/max(speedup, 1e-9)).
+        (max(0, -accuracy_delta), size/max(speedup, 1e-9)).
 
         Assumptions: each candidate uses the same workload, hardware, and baseline.
         Dominance is evaluated across all candidates, including infeasible ones;
@@ -461,8 +501,9 @@ class CompressionModel(ForwardModel):
         if feasible_frontier:
             best = min(
                 feasible_frontier,
+                # Rank by accuracy drop, so a measured gain counts as no loss. Default deltas are never positive.
                 key=lambda candidate: (
-                    abs(candidate.estimated_accuracy_delta),
+                    max(0.0, -candidate.estimated_accuracy_delta),
                     candidate.compressed_size_gb.to("GB").magnitude / max(candidate.inference_speedup, 1e-9),
                 ),
             )
@@ -478,6 +519,26 @@ class CompressionModel(ForwardModel):
                 f"{len(frontier_labels)} candidates on Pareto frontier",
             ],
         )
+
+    @staticmethod
+    def _curve_delta(curve: AccuracyCurve, method: str, target_bitwidth: int, sparsity: float):
+        """Read the accuracy delta for one configuration from a measured curve."""
+        if not isinstance(curve, AccuracyCurve):
+            raise TypeError(
+                f"accuracy_curve must be an AccuracyCurve, got {type(curve).__name__}. "
+                "Load a shipped curve with mlsysim.engine.accuracy_curve.shipped_curve(name)."
+            )
+        axis = {"quantization": "bitwidth", "pruning": "sparsity"}.get(method)
+        if axis is None:
+            raise ValueError(f"accuracy_curve applies to quantization or pruning, got method={method!r}")
+        if curve.axis != axis:
+            raise ValueError(
+                f"accuracy curve {curve.name!r} is a {curve.axis} curve, and {method} needs a {axis} curve"
+            )
+        level = float(target_bitwidth) if axis == "bitwidth" else float(sparsity)
+        delta = curve.delta_at(level)
+        how = "measured point" if curve.is_measured(level) else "interpolated between measured points"
+        return delta, [f"accuracy from curve {curve.name}: {how} at {axis} {level:g}"]
 
     @staticmethod
     def _normalize_sparsity_type(sparsity_type: str) -> str:

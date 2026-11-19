@@ -287,6 +287,64 @@ the workload is memory-bound AND measured accuracy loss stays within the applica
   (e.g., offline batch processing) is already compute-bound unless hardware supports faster low-precision arithmetic.
 :::
 
+### Using a Measured Accuracy Curve
+
+Passing a scalar `accuracy_delta` works for a single operating point, while sweeping bitwidths or pruning ratios benefits from a multi-point `AccuracyCurve`. A curve records the accuracy one experiment measured across several compression levels alongside the uncompressed baseline in the same evaluation harness, together with explicit `Provenance`.
+
+The package ships four published curves as examples of the format. Below, two curves for Qwen-7B-Chat from Table 2 of Jin et al. (2024) compare GPTQ against SpQR across bitwidths (note that the curves belong to Qwen-7B-Chat rather than `{python} _model.name`, so treat the table as a demonstration of how quantizer choice reshapes the cliff):
+
+```{python}
+from mlsysim.engine.accuracy_curve import shipped_curve
+
+gptq_curve = shipped_curve("qwen-7b-chat-gptq")
+spqr_curve = shipped_curve("qwen-7b-chat-spqr")
+
+rows = []
+for bits in [8, 4, 3, 2]:
+    gptq_res = comp_solver.solve(model=model, hardware=hardware, baseline_precision="fp16", target_bitwidth=bits, accuracy_curve=gptq_curve)
+    spqr_res = comp_solver.solve(model=model, hardware=hardware, baseline_precision="fp16", target_bitwidth=bits, accuracy_curve=spqr_curve)
+    rows.append([
+        bits,
+        f"{gptq_res.estimated_accuracy_delta:+.1%}",
+        f"{spqr_res.estimated_accuracy_delta:+.1%}",
+    ])
+
+table(["Bits", "Qwen-7B-Chat (GPTQ)", "Qwen-7B-Chat (SpQR)"], rows)
+```
+
+Only the accuracy column changes between the two curves; size, compression ratio, and Roofline speedup are computed from physical bitwidth and group-scale parameters as before. A curve returns exact values at measured points, interpolates linearly between adjacent measured points, and refuses to extrapolate outside its measured range because the accuracy cliff varies sharply across models and quantizers.
+
+To use your own results, build a curve from your measured points:
+
+```{python}
+from mlsysim.core.provenance import Provenance
+from mlsysim.engine.accuracy_curve import AccuracyCurve
+
+my_curve = AccuracyCurve(
+    name="my-model-rtn",
+    axis="bitwidth",                      # or "sparsity" for a pruning curve
+    measured_model="my model and checkpoint",
+    method="round-to-nearest, per-channel, weights only",
+    metric="top-1 accuracy",
+    dataset="my validation set (10,000 examples)",
+    retrained=False,
+    baseline_accuracy=0.761,              # the uncompressed model, same harness
+    points=[(16, 0.761), (8, 0.759), (6, 0.752), (4, 0.705)],
+    provenance=Provenance(
+        kind="derived",
+        ref="my quantization sweep",
+        verified="2026-11-16",
+        notes="Measured with my evaluation script on my validation set.",
+    ),
+)
+
+c = comp_solver.solve(model=model, hardware=hardware, target_bitwidth=6, accuracy_curve=my_curve)
+info("From my curve", accuracy_change_at_6_bits=f"{c.estimated_accuracy_delta:+.1%}")
+```
+
+A curve describes the model, method and data it was measured on. The solver cannot check that it matches the
+workload you pass, so keep one curve per model and method.
+
 ---
 
 ## Where This Clicks in the Textbook
