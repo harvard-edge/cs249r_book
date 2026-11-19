@@ -68,6 +68,12 @@ def numbers() -> dict:
              trigtime=f(age.trigger_offset.to("ms").magnitude, 0), loc=f(loc, 0), side=f(side, 0),
              imu=f(rm.imu.sample_rate.to("Hz").magnitude, 0), frameperiod=f(age.frame_period.to("ms").magnitude, 1),
              fps=f(cam.frame_rate.to("Hz").magnitude, 0))
+    # tile: lateral miss from a mount error at range (chapter: ExtrinsicErrorBudget)
+    mount = Scenarios.WarehouseLongAisleMountError
+    mountmm = mount.result.angle_lateral.to("mm").magnitude
+    assert round(mountmm) == 262 and mountmm > side
+    n.update(mountmm=f(mountmm, 0), mountdeg=f(mount.angle_error.to("degree").magnitude, 0),
+             mountrange=f(mount.distance.to("m").magnitude, 0))
     # picture: slips against the localization allowance, 1 mm = 1.9 pt
     for k, val in (("btravel", travel), ("barrival", arrivaltravel), ("bskew", skew), ("btrigger", trigger), ("barallow", loc)):
         n[k] = f(val * 1.9, 2)
@@ -113,7 +119,8 @@ def numbers() -> dict:
     current = round(t_age, 1) + adm + round(sync, 1)
     ctravel = v * current
     n.update(admit=f(adm, 0), current=f(current, 1), currenttravel=f(ctravel, 1),
-             admextra=f(v * (adm + round(sync, 1)), 1))
+             admextra=f(v * adm, 1))  # clock-bound travel is absorbed into delta_loc (chapter)
+    n.update(batchedclk=f(batched + round(sync, 1), 1))
     return n
 
 

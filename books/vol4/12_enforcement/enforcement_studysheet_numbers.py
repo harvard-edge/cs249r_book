@@ -103,8 +103,8 @@ def numbers() -> dict:
     tool0 = joint.tool_stop_free.to("mm").magnitude
     n.update(tmax=f(tmax, 0), jin=f(jin, 0), lever=f(lev, 1), omega=f(om, 1), qfrac=f(frac * 100, 0),
              qbias=f(bias1, 1), qnet=f(tmax - bias1, 1), qalpha=f(alpha1, 1), qtool=f(tool1, 1),
-             toolfree=f(tool0, 1), qratio=f(1 / (1 - frac), 2), qremain=f((1 - frac) * 100, 0),
-             biasch=f(joint.bias_fraction * 100, 0), toolch=f(joint.tool_stop_descending.to("mm").magnitude, 2))
+             toolfree=f(tool0, 1), qratio=f(1 / (1 - frac), 2), qremain=f((1 - frac) * 100, 0), qremainfrac=f(1 - frac, 2), one="1",
+             biasch=f(joint.bias_fraction * 100, 0), toolch=f(joint.tool_stop_descending.to("mm").magnitude, 0))
 
     # ---- Q2: projection onto the chapter's two-joint half-space with ASSUMED proposals
     proj = Scenarios.TwoJointTorqueProjection
@@ -136,10 +136,26 @@ def numbers() -> dict:
     meff = rm.arm_effective_contact_mass
     khand = aisle.k_contact_human
     vh = aisle.v_handover
+    # free hand: two-body reduced mass; printed rounded inputs reproduce both forces
+    mh, me = aisle.m_contact_human.to("kg").magnitude, meff.to("kg").magnitude
+    mred = 1 / (1 / mh + 1 / me)
+    kh = khand.to("kN/m").magnitude
+    ffree_p = vh.to("m/s").magnitude * math.sqrt(kh * 1e3 * round(mred, 3))
+    fclamp_p = vh.to("m/s").magnitude * math.sqrt(kh * 1e3 * me)
+    assert abs(ffree_p - calc_transient_impact_force(vh, meff, khand, human_mass=aisle.m_contact_human).to("N").magnitude) < 0.05
+    assert abs(fclamp_p - calc_transient_impact_force(vh, meff, khand).to("N").magnitude) < 1e-9
+    n.update(khand=f(kh, 0), mred=f(mred, 3))
     n.update(vhand=f(vh.to("m/s").magnitude, 2), crit=f(aisle.f_contact_criterion.to("N").magnitude, 0),
              ffree=f(calc_transient_impact_force(vh, meff, khand, human_mass=aisle.m_contact_human).to("N").magnitude, 1),
              fclamp=f(calc_transient_impact_force(vh, meff, khand).to("N").magnitude, 1),
              meff=f(meff.to("kg").magnitude, 0), mhand=f(aisle.m_contact_human.to("kg").magnitude, 1))
+
+    # ---- Mistake: inter-sample (zero-order hold) drift at the drive limit (chapter: EnforcementZOHBuffer)
+    hold = Scenarios.WarehouseBaseHoldDrift
+    zv, za, zt = hold.speed.to("m/s").magnitude, hold.acceleration.to("m/s^2").magnitude, hold.period.to("ms").magnitude
+    zdrift = zv * zt + za * zt ** 2 / 2 * 1e-3          # mm (m/s x ms = mm; m/s^2 x ms^2 = 1e-3 mm)
+    assert abs(zdrift - hold.drift.to("mm").magnitude) < 1e-9
+    n.update(zv=f(zv, 1), za=f(za, 1), ztick=f(zt, 0), zdrift=f(zdrift, 3))
     return n
 
 

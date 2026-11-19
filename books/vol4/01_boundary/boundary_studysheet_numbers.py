@@ -68,7 +68,7 @@ def numbers() -> dict:
     assert vstar < v and spare_mm > 0
     per_ms = v                                                       # mm of travel per ms of delay at v m/s
     n.update(speed=fx(v, 1), speedsq=fx(v ** 2, 2), decel=fx(a, 1), twodecel=fx(2 * a, 1), clear=fx(clear / 1000, 2),
-             clearmm=fx(clear, 0), delaytravel=fx(delay_mm, 1), braketravel=fx(brake_mm, 1), stopmm=fx(stop_mm, 1),
+             clearmm=fx(clear, 0), clearmmc=f"{r(clear, 0):,.0f}", delaytravel=fx(delay_mm, 1), braketravel=fx(brake_mm, 1), stopmm=fx(stop_mm, 1),
              spare=fx(spare_mm, 1), crossover=fx(vstar, 2), permm=fx(per_ms, 1),
              brakeratio=fx(brake_mm / delay_mm, 1),
              backbonemm=fx(backbone * per_ms, 0), leasemm=fx(lease * per_ms, 0))

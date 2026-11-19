@@ -95,6 +95,10 @@ def numbers() -> dict:
              qfrigid=f(vq * math.sqrt(kp * m), 1), qfsim=f(vq * math.sqrt(ksim * m), 1),
              qover=f(vq * math.sqrt(kp * m) - flim, 1))
     assert vq * math.sqrt(kp * m) > flim
+    # Q2 answer: the guarded approach the declared ODD admits, from the printed rounded root
+    qfguard = vg * round(math.sqrt(kp * m))
+    n.update(qfguard=f(qfguard, 1))
+    assert qfguard < flim
 
     # ---- Declared ODD (chapter: PretrainSupport over the latch scenario table)
     t = Scenarios.LatchScenarioTable

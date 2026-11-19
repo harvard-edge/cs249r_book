@@ -80,6 +80,27 @@ def numbers() -> dict:
     p = rare.failure_probability
     mant, expo = f"{p:.1e}".split("e")
     n.update(failshare=f(rare.proposal_failure_share * 100, 0), pmant=mant, pexp=str(int(expo)))
+    # same delay model once the dispatch-to-admission allocation is charged
+    # (chapter: RareEventCharged, Scenarios.WarehouseQueueDelayChargedSpareExhaustion)
+    pc = Scenarios.WarehouseQueueDelayChargedSpareExhaustion.result.failure_probability
+    cmant, cexp = f"{pc:.1e}".split("e")
+    n.update(cmant=cmant, cexp=str(int(cexp)))
+
+    # ---- Front card: zero-miss injection count (chapter: InjectedPopulationTrials,
+    # Scenarios.WarehouseDiagnosticCoverageHundredFit); n >= ln(1 - C)/ln C_diag, rounded up
+    import math
+    cov = Scenarios.WarehouseDiagnosticCoverageHundredFit
+    conf = cov.confidence
+    cdiag = round(cov.result.coverage * 100, 2)  # printed percent
+    ncov = math.ceil(math.log(1 - conf) / math.log(cdiag / 100))
+    assert ncov == cov.result.injections
+    n.update(conf=f(conf * 100, 0), cdiag=f(cdiag, 2), ncov=f(ncov, 0),
+             rule3=f(3 / (1 - cdiag / 100), 0))
+    # Q4(b): ASSUMED coverage target 99.5% at the same confidence
+    qc = 99.5
+    qn_exact = math.log(1 - conf) / math.log(qc / 100)
+    n.update(qcov=f(qc, 1), qconfm=f(1 - conf, 2), qcovf=f(qc / 100, 3), qnexact=f(qn_exact, 1),
+             qn=f(math.ceil(qn_exact), 0))
 
     # ---- Q1: ASSUMED measured onset of 95 ms at the aisle speed, lease and stop command on time
     q1 = 95.0

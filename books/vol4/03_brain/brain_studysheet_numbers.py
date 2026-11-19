@@ -137,6 +137,20 @@ def numbers() -> dict:
     near(gap, traffic.renewal_gap, 0.02)
     n.update(amort=fx(amort, 1), gap=fx(gap, 1))
 
+    # ---- Front decoder table: one fresh H-step chunk from the INT4 intent backbone, per decoder family
+    # (chapter: DecoderFamilies, Scenarios.IntentBackboneDecoderFamilies)
+    fam = SC.IntentBackboneDecoderFamilies
+    famr = fam.result
+    assert famr.binned_tokens == horizon * d_out
+    near(mag(famr.t_prefill, "ms"), mag(int4.t_prefill, "ms"), 1e-6)
+    assert famr.t_binned > famr.t_fast > famr.t_parallel > famr.t_expert > famr.t_prefill
+    assert r(mag(famr.t_prefill, "ms"), 0) == t_pre and t_pre > renew
+    # the prefill emits the first token, so the binned decoder rereads the weights binned_tokens - 1 times
+    near((mag(famr.t_binned, "ms") - mag(famr.t_prefill, "ms")) / mag(int4.t_weight_sweep, "ms"), famr.binned_tokens - 1, 1e-6)
+    n.update(decsweeps=f"{famr.binned_tokens - 1}", decbinned=f"{famr.binned_tokens}", decbinnedsec=fx(mag(famr.t_binned, "s"), 1),
+             decparallel=fx(mag(famr.t_parallel, "ms"), 0), decexpert=fx(mag(famr.t_expert, "ms"), 0),
+             decsteps=f"{fam.expert_steps}")
+
     # ---- Q1. ASSUMED: residual slip rises to 1.5 m/s^2; tolerance, error, step and inference as the chapter
     q_slip = 1.5
     q_tau = math.sqrt(2 * (tol - e0) / 1000 / q_slip) * 1000

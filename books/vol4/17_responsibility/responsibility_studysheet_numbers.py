@@ -113,8 +113,31 @@ def numbers() -> dict:
     assert abs(rho1 - q1.result.utilization) < 5e-3
     assert abs(w1 - q1.result.mean_wait.to("minute").magnitude) < 0.1
     nmax1 = q1.max_machines
+    # ---- Mistake: shifted labor (chapter: ShiftedLabor, Scenarios.WarehouseRemoteAssistantLabor)
+    lab = Scenarios.WarehouseRemoteAssistantLabor
+    lrho = round(lab.queue.result.utilization, 2)
+    lday = lab.operating_day.to("hour").magnitude
+    lreq = lrho * lday
+    assert abs(lreq - lab.request_time.to("hour").magnitude) < 1e-9
+    lsweep = round(lab.sweep_total.to("hour").magnitude, 1)
+    ltotal = lday + lsweep  # console staffed every operating hour, plus sweeps
+    assert abs(ltotal - lab.total.to("hour").magnitude) < 0.05
+    lshift = lab.shift.to("hour").magnitude
+    n.update(lmach=f"{lab.queue.machines}", lrho=f(lrho, 2), lday=f(lday, 0), lreq=f(lreq, 0),
+             lsweep=f(lsweep, 1), ltotal=f(ltotal, 1), lshift=f(lshift, 0), lshifts=f(ltotal / lshift, 1))
+    # ---- Gate note: event-triggered retention (chapter: Retention, Scenarios.WarehouseEventTriggeredRetention)
+    ret = Scenarios.WarehouseEventTriggeredRetention
+    rwin = ret.window.to("s").magnitude
+    rday = ret.operating_day.to("hour").magnitude
+    rkept = ret.events_per_day * rwin / (rday * 3600)
+    assert abs(rkept - ret.kept_share) < 1e-12
+    n.update(rwin=f(rwin, 0), revents=f"{ret.events_per_day}", rday=f(rday, 0), rkept=f(rkept * 100, 0),
+             rred=f(1 / rkept, 0))
     n.update(aqmach=f"{q1.machines}", aqrate=f(0.6, 1), aqserv=f(4.0, 0), aqlam=f(lam1, 1),
              aqrho=f(rho1, 2), aqlammin=f(lam1 / 60, 2), aqidle=f(1 - rho1, 2), aqwait=f(w1, 1), aqper=f(0.6 * 4.0 / 60, 2), aqmax=f"{nmax1}")
+    # Q1 labor part: same assistant over the chapter's operating day (from the rounded utilization)
+    q1req = round(rho1, 2) * lday
+    n.update(aqreq=f(q1req, 1), aqwatch=f(lday - round(q1req, 1), 1))
 
     # ---- Front card: leaving a stage (chapter: StageExit); Q2 uses ASSUMED inputs
     st = Scenarios.WarehouseSupervisedStageExit
