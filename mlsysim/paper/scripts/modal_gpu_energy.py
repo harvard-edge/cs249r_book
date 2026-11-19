@@ -13,12 +13,15 @@ paper/data that holds the plan, and defaults to ``gpu-energy``.
 
 A vLLM engine keeps its GPU memory until its process exits, so each run serves
 one language model. When a device has configurations for several language
-models, each model gets its own run and container, and the run folder names the
-model. Training configurations join the device's first language-model run.
+models, each model gets its own run and container. Training configurations join
+the device's first language-model run. When the plan has more than one language
+model, every run folder names its model.
 
-Each run also saves its files in the volume under ``gpu-energy-results/<folder>/<run>/``.
-If the local client loses its connection, copy a run from there with
-``modal volume get mlsysim-hf-cache gpu-energy-results/<folder>/<run> <run folder>``.
+Each run also saves its files in the volume under ``gpu-energy-results/<folder>/<run>/``,
+with the runner's exit code beside it in ``<run>.exit_code``. If the local client
+loses its connection, copy a run into ``runs/`` with
+``modal volume get mlsysim-hf-cache gpu-energy-results/<folder>/<run> paper/data/<folder>/runs/``.
+Tested with Modal 1.6.3.
 
 One command does the whole matrix without spending GPU time on anything but
 measurement. A CPU-only container first downloads the pinned weights into a
@@ -130,13 +133,18 @@ def _measure(device_key: str, configs: list[str], name: str = "") -> dict[str, b
             process.wait()
     code = 0 if finished_at is not None else process.returncode
     files = {p.name: p.read_bytes() for p in sorted(out.iterdir()) if p.is_file()} if out.exists() else {}
-    files["exit_code.txt"] = f"{code}\n".encode()
     if name:
-        saved = Path(RESULTS) / name
-        saved.mkdir(parents=True, exist_ok=True)
-        for file_name, data in files.items():
-            (saved / file_name).write_bytes(data)
-        cache.commit()
+        # A failed copy must not lose the run, which is still returned below.
+        try:
+            saved = Path(RESULTS) / name
+            saved.mkdir(parents=True, exist_ok=True)
+            for file_name, data in files.items():
+                (saved / file_name).write_bytes(data)
+            (saved.parent / f"{saved.name}.exit_code").write_text(f"{code}\n")
+            cache.commit()
+        except Exception as exc:
+            print(f"could not save a copy in the volume: {exc!r}")
+    files["exit_code.txt"] = f"{code}\n".encode()
     return files
 
 
@@ -175,6 +183,29 @@ def _runs_for(plan: dict, configs: list[dict]) -> list[tuple[str, list[dict]]]:
     return runs
 
 
+def _plan_jobs(plan: dict, devices: list[str], repeats: int, selected: list[str], label: str,
+               stamp: str) -> list[tuple[str, list[str], list[dict], str]]:
+    """Return (device, config ids for the runner, configurations, run folder name) for every run.
+
+    An empty id list lets the runner measure every configuration of the device.
+    Explicit ids keep the plan's order.
+    """
+    language_models = [w for w, spec in plan["workloads"].items() if spec["kind"] == "generate"]
+    jobs = []
+    for key in devices:
+        mine = [c for c in plan["configs"] if c["device"] == key and (not selected or c["id"] in selected)]
+        if not mine:
+            continue
+        runs = _runs_for(plan, mine)
+        for k in range(1, repeats + 1):
+            for model, group in runs:
+                name = model.replace("_", "-") if len(language_models) > 1 else ""
+                folder = "-".join(p for p in (label, key.lower(), name, stamp, str(k)) if p)
+                ids = [c["id"] for c in mine if c in group] if selected or len(runs) > 1 else []
+                jobs.append((key, ids, group, folder))
+    return jobs
+
+
 @app.local_entrypoint()
 def main(devices: str = "", repeats: int = 2, configs: str = "", label: str = ""):
     """Measure every requested device ``repeats`` times. ``devices`` defaults to every device in the plan."""
@@ -186,20 +217,12 @@ def main(devices: str = "", repeats: int = 2, configs: str = "", label: str = ""
         raise SystemExit(f"unknown configs: {', '.join(unknown)}")
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     jobs = []
-    for key in [d for d in devices.split(",") if d]:
-        mine = [c for c in plan["configs"] if c["device"] == key and (not selected or c["id"] in selected)]
-        if not mine:
-            continue
-        runs = _runs_for(plan, mine)
-        for k in range(1, repeats + 1):
-            for model, group in runs:
-                name = model.replace("_", "-") if len(runs) > 1 else ""
-                target = RUNS / "-".join(p for p in (label, key.lower(), name, stamp, str(k)) if p)
-                if target.exists():  # checked before any GPU time, so a name clash costs nothing
-                    raise SystemExit(f"{target} already exists")
-                # An empty list lets the runner measure every configuration of the device.
-                ids = [c["id"] for c in group] if selected or len(runs) > 1 else []
-                jobs.append((key, ids, group, target))
+    for key, ids, group, folder in _plan_jobs(plan, [d for d in devices.split(",") if d], repeats, selected,
+                                              label, stamp):
+        target = RUNS / folder
+        if target.exists():  # checked before any GPU time, so a name clash costs nothing
+            raise SystemExit(f"{target} already exists")
+        jobs.append((key, ids, group, target))
     if not jobs:
         raise SystemExit("nothing to run")
     llm_workloads = {c["workload"] for _, _, mine, _ in jobs for c in mine
@@ -218,7 +241,8 @@ def main(devices: str = "", repeats: int = 2, configs: str = "", label: str = ""
             files = call.get()
         except Exception as exc:  # the container died and returned nothing
             target.rmdir()
-            print(f"{target.name}: no result ({exc!r})")
+            print(f"{target.name}: no result ({exc!r}). A copy may be in the volume at "
+                  f"gpu-energy-results/{DATA.name}/{target.name}.")
             failed += 1
             continue
         code = int(files.pop("exit_code.txt").decode())

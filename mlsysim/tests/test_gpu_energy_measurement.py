@@ -145,10 +145,26 @@ def test_workloads_plan_is_valid_and_holds_out_every_configuration():
         assert 0 < protocol.efficiency_of(plan, config) <= 1
         analysis.resolve(plan["devices"][config["device"]]["registry"])
         analysis.resolve(plan["workloads"][config["workload"]]["registry"])
-    # The repeated workloads are declared exactly as in the first plan.
-    first = protocol.load_plan(PLAN_PATH)
+
+
+def test_workloads_plan_repeats_the_first_plan_apart_from_the_seed():
+    plan, first = protocol.load_plan(WORKLOADS_PLAN_PATH), protocol.load_plan(PLAN_PATH)
+    for key in ("schema", "trials", "warmup_trials", "phase_min_seconds", "idle_seconds",
+                "sample_interval_s", "counter_probe_seconds", "boundary"):
+        assert plan[key] == first[key], key
+    assert plan["seed"] != first["seed"]
     for name in ("llama31_8b", "resnet50_train"):
         assert plan["workloads"][name] == first["workloads"][name]
+    for key in ("H100", "A100"):
+        assert plan["devices"][key] == first["devices"][key]
+
+    def shape(p, name):
+        return sorted((c["device"], c["batch"], c.get("prompt_tokens"), c.get("output_tokens"),
+                       protocol.efficiency_of(p, c)) for c in p["configs"]
+                      if c["workload"] == name and c["device"] in ("H100", "A100"))
+
+    for name in ("llama31_8b", "resnet50_train"):
+        assert shape(plan, name) == shape(first, name)
 
 
 def test_modal_launcher_requests_the_gpu_the_plan_names():
@@ -164,33 +180,66 @@ def test_modal_launcher_requests_the_gpu_the_plan_names():
     assert named == launcher
 
 
-def _launcher_function(name):
-    # The launcher imports modal at the top, so load the one pure helper on its own.
-    source = (SCRIPTS / "modal_gpu_energy.py").read_text()
-    node = next(n for n in ast.parse(source).body if isinstance(n, ast.FunctionDef) and n.name == name)
+def _launcher_tree():
+    return ast.parse((SCRIPTS / "modal_gpu_energy.py").read_text())
+
+
+def test_each_launcher_function_measures_the_device_it_is_named_for():
+    tree = _launcher_tree()
+    functions = next(n.value for n in tree.body if isinstance(n, ast.Assign) and n.targets[0].id == "FUNCTIONS")
+    mapping = {k.value: v.id for k, v in zip(functions.keys, functions.values)}
+    assert mapping == {key: f"measure_{key.lower()}" for key in mapping}
+    for key, function in mapping.items():
+        node = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == function)
+        call = next(c for c in ast.walk(node) if isinstance(c, ast.Call) and getattr(c.func, "id", "") == "_measure")
+        assert call.args[0].value == key
+
+
+def test_each_launcher_run_gets_its_own_container_and_output_folder():
+    tree = _launcher_tree()
+    options = next(n.value for n in tree.body if isinstance(n, ast.Assign) and n.targets[0].id == "GPU_OPTIONS")
+    assert any(k.arg == "single_use_containers" and k.value.value is True for k in options.keywords)
+    measure = ast.get_source_segment((SCRIPTS / "modal_gpu_energy.py").read_text(),
+                                     next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "_measure"))
+    assert "mkdtemp" in measure and '"/tmp/run"' not in measure
+
+
+def _launcher_functions(*names):
+    # The launcher imports modal at the top, so load its pure helpers on their own.
+    nodes = [n for n in _launcher_tree().body if isinstance(n, ast.FunctionDef) and n.name in names]
     namespace = {}
-    exec(compile(ast.Module([node], type_ignores=[]), "modal_gpu_energy.py", "exec"), namespace)
-    return namespace[name]
+    exec(compile(ast.Module(nodes, type_ignores=[]), "modal_gpu_energy.py", "exec"), namespace)
+    return namespace
 
 
-def test_launcher_keeps_one_run_per_device_for_one_language_model():
-    runs_for = _launcher_function("_runs_for")
+def test_launcher_keeps_the_first_plans_run_folders_and_runner_arguments():
+    plan_jobs = _launcher_functions("_runs_for", "_plan_jobs")["_plan_jobs"]
     plan = protocol.load_plan(PLAN_PATH)
-    mine = [c for c in plan["configs"] if c["device"] == "H100"]
-    runs = runs_for(plan, mine)
-    assert len(runs) == 1 and sorted(c["id"] for c in runs[0][1]) == sorted(c["id"] for c in mine)
+    jobs = plan_jobs(plan, ["H100", "A100"], 2, [], "", "STAMP")
+    assert [folder for *_, folder in jobs] == ["h100-STAMP-1", "h100-STAMP-2", "a100-STAMP-1", "a100-STAMP-2"]
+    assert all(ids == [] for _, ids, _, _ in jobs)
+    h100 = [c for c in plan["configs"] if c["device"] == "H100"]
+    assert sorted(c["id"] for c in jobs[0][2]) == sorted(c["id"] for c in h100)
+    selected = [c["id"] for c in reversed(h100)]
+    _, ids, _, folder = plan_jobs(plan, ["H100"], 1, selected, "pilot", "STAMP")[0]
+    assert folder == "pilot-h100-STAMP-1" and ids == [c["id"] for c in h100]
 
 
-def test_launcher_gives_each_language_model_its_own_run():
-    runs_for = _launcher_function("_runs_for")
+def test_launcher_gives_each_language_model_its_own_named_run():
+    plan_jobs = _launcher_functions("_runs_for", "_plan_jobs")["_plan_jobs"]
     plan = protocol.load_plan(WORKLOADS_PLAN_PATH)
-    mine = [c for c in plan["configs"] if c["device"] == "H200"]
-    runs = runs_for(plan, mine)
-    assert [model for model, _ in runs] == ["llama31_8b", "llama2_7b", "llama2_13b", "mixtral_8x7b"]
-    for model, group in runs:
-        assert {c["workload"] for c in group} - {"resnet50_train"} == {model}
-    assert [c["workload"] for c in runs[0][1]][0] == "resnet50_train"
-    assert sum(len(group) for _, group in runs) == len(mine)
+    jobs = plan_jobs(plan, ["H200"], 1, [], "", "STAMP")
+    assert [folder for *_, folder in jobs] == [
+        "h200-llama31-8b-STAMP-1", "h200-llama2-7b-STAMP-1", "h200-llama2-13b-STAMP-1", "h200-mixtral-8x7b-STAMP-1"]
+    order = [c["id"] for c in plan["configs"]]
+    for _, ids, group, folder in jobs:
+        assert ids == sorted((c["id"] for c in group), key=order.index)
+        assert {c["workload"] for c in group} - {"resnet50_train"} == {folder.split("-", 1)[1].rsplit("-", 2)[0].replace("-", "_")}
+    assert any(c["workload"] == "resnet50_train" for c in jobs[0][2])
+    assert sum(len(group) for _, _, group, _ in jobs) == sum(c["device"] == "H200" for c in plan["configs"])
+    # A pilot of one model still names it.
+    _, _, _, folder = plan_jobs(plan, ["H100"], 1, ["h100-llama2-7b-b16-p2048"], "pilot", "STAMP")[0]
+    assert folder == "pilot-h100-llama2-7b-STAMP-1"
 
 
 @pytest.mark.parametrize("mutate, message", [
