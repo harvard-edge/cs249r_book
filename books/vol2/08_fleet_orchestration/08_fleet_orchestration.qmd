@@ -3,7 +3,7 @@ number-offset: [7]
 quiz: fleet_orchestration_quizzes.json
 concepts: fleet_orchestration_concepts.yml
 engine: jupyter
-notation-local: [\AssignedJobGpu, \BilledAllocationTime, \ContendingApplicationCount, \DepartmentQuotaLimit, \DominantShare, \EffectiveAdmissionCeiling, \EffectiveSpotTrainingCost, \ElasticMaximumWorkerCount, \ElasticMinimumWorkerCount, \FairShareStabilizingConstant, \FleetResourceCapacity, \GpuTopologicalDistance, \IsolatedJobRunTime, \JobIndex, \JobQueueWaitTime, \JobSlowdown, \LocalityPenaltyFunction, \PerWorkerBatchSize, \PreemptionFanoutCount, \RecentUsageShare, \ResourceTypeIndex, \RetainedProductiveTime, \RigidGangJob, \ScalingCurveWorkerCount, \ServiceTimeStandardDeviation, \ServiceTimeVariationCoefficient, \SiblingTeamAllocation, \SpotHourlyPrice, \TargetFairShare, \TeamQuotaCap, \TenantIndex, \TenantResourceAllocation]
+notation-local: [\AssignedJobGpu, \BilledAllocationTime, \ContendingApplicationCount, \DepartmentQuotaLimit, \DominantShare, \EffectiveAdmissionCeiling, \EffectiveSpotTrainingCost, \ElasticMaximumWorkerCount, \ElasticMinimumWorkerCount, \FairShareStabilizingConstant, \FleetResourceCapacity, \GpuTopologicalDistance, \IsolatedJobRunTime, \JobIndex, \JobQueueWaitTime, \JobSlowdown, \LocalityPenaltyFunction, \PerWorkerBatchSize, \PlacementLocalityPenalty, \PreemptionFanoutCount, \RecentUsageShare, \ResourceTypeIndex, \RetainedProductiveTime, \RigidGangJob, \ScalingCurveWorkerCount, \ServiceTimeStandardDeviation, \ServiceTimeVariationCoefficient, \SiblingTeamAllocation, \SpotHourlyPrice, \TargetFairShare, \TeamQuotaCap, \TenantIndex, \TenantResourceAllocation]
 ---
 
 # Fleet Orchestration {#sec-fleet-orchestration}
@@ -519,7 +519,7 @@ Equalizing GPU counts alone fails when one tenant's jobs saturate host CPU and m
 
 : **Worked DRF Allocation**: Progressive filling gives Tenant A four one-GPU replicas and Tenant B a pair of two-GPU workers. Both tenants reach a dominant share of 0.50 even though their CPU and memory allocations differ. GPUs and network are jointly saturated; CPU and memory remain available but cannot increase either allocation without exceeding a saturated resource. {#tbl-fleet-orchestration-drf-allocation tbl-colwidths="[12,19,13,13,14,15,14]"}
 
-For tenant $\TenantIndex$, define its dominant share as $\DominantShare_i=\max_\ResourceTypeIndex(\TenantResourceAllocation/\FleetResourceCapacity)$, where $\TenantResourceAllocation$ is its allocation of resource $\ResourceTypeIndex$ and $\FleetResourceCapacity$ is fleet capacity for that resource. The calculation equalizes $\DominantShare_i$, not every resource share. One A replica raises A's dominant share by `{python} DrfAllocation.a_step_math`, whereas one B worker raises B's by `{python} DrfAllocation.b_step_math`. Progressive filling, which repeatedly gives one more bundle to the tenant with the smaller dominant share until a resource saturates, therefore grants roughly two A replicas for each B worker until both dominant shares reach `{python} DrfAllocation.dom_a_math`.
+For tenant $\TenantIndex$, define its dominant share as $\DominantShare_i=\max_{\ResourceTypeIndex}(\TenantResourceAllocation/\FleetResourceCapacity)$, where $\TenantResourceAllocation$ is its allocation of resource $\ResourceTypeIndex$ and $\FleetResourceCapacity$ is fleet capacity for that resource. The calculation equalizes $\DominantShare_i$, not every resource share. One A replica raises A's dominant share by `{python} DrfAllocation.a_step_math`, whereas one B worker raises B's by `{python} DrfAllocation.b_step_math`. Progressive filling, which repeatedly gives one more bundle to the tenant with the smaller dominant share until a resource saturates, therefore grants roughly two A replicas for each B worker until both dominant shares reach `{python} DrfAllocation.dom_a_math`.
 
 The equalized split from progressive filling is a fair policy target, but it is not yet a feasible placement. If B's two workers form one four-GPU gang, the four GPUs must become available atomically. If tensor parallelism requires one NVLink domain, four free GPUs scattered across nodes do not satisfy the allocation. If the job requires 80 GB HBM accelerators, four incompatible GPUs do not count at all. A production scheduler therefore applies capability, gang, and topology constraints to the feasible set, then uses DRF\index{Dominant resource fairness!progressive filling} to choose fairly among allocations that can actually run. The order is not a convenience. Feasibility comes before fairness (principle \ref{pri-feasibility-before-fairness}) because a fair share of accelerators on which the job cannot run delivers no progress to the tenant who holds it. When no equal-share placement exists, the scheduler should report the constraint causing the deviation rather than silently presenting an infeasible entitlement as service delivered.
 
@@ -1124,7 +1124,7 @@ For a 4-GPU collective group, the routing paths make that cost concrete (@fig-to
 
 The illustrated `{python} FleetTopologyInterconnect.rack_vs_spine_mult_str` bandwidth difference between the 1-hop leaf path and the 3-hop spine route (@fig-topology-placement-paths) stretches the transfer component by the same factor when transfer time is bandwidth-dominated. Crossing a spine does not impose that ratio independently of load and topology. Whether communication exceeds computation also depends on the model and overlap schedule, and repeated exchanges can amplify the exposed cost. Topology-aware placement algorithms assign jobs to nodes that reduce this cost, turning resource packing into graph optimization over the physical topology. A simple **locality cost**\index{Locality cost!definition}, defined in @eq-fleet-orchestration-locality-score, penalizes allocations spanning multiple topology domains:
 
-$$ \text{Cost}_{\text{locality}} = \sum_{i < j} \LocalityPenaltyFunction(\GpuTopologicalDistance(\AssignedJobGpu_i, \AssignedJobGpu_j)) $$ {#eq-fleet-orchestration-locality-score}
+$$ \PlacementLocalityPenalty = \sum_{i < j} \LocalityPenaltyFunction(\GpuTopologicalDistance(\AssignedJobGpu_i, \AssignedJobGpu_j)) $$ {#eq-fleet-orchestration-locality-score}
 
 where $\AssignedJobGpu_i$ and $\AssignedJobGpu_j$ are GPUs assigned to the job, $\GpuTopologicalDistance(\AssignedJobGpu_i, \AssignedJobGpu_j)$ is their topological distance (0 for same node, 1 for same rack, 2 for different racks), and $\LocalityPenaltyFunction(\cdot)$ is a weighting function that increases with distance. The scheduler minimizes this score when selecting an allocation from the set of feasible placements. An illustrative heuristic assigns locality penalties of $\LocalityPenaltyFunction(0) = 0$ (same node, NVLink, no penalty), $\LocalityPenaltyFunction(1) = 1$ (same rack, one switch hop), and $\LocalityPenaltyFunction(2) = 10$ (different racks, multiple switch hops). These dimensionless weights are policy assumptions rather than measured latency or bandwidth ratios, so a deployment must calibrate them to its traffic and topology. An unweighted pairwise score still cannot distinguish heavily communicating rank pairs from pairs that rarely exchange data.
 
@@ -1140,9 +1140,9 @@ More sophisticated algorithms distinguish the communication requirements of diff
 \begin{algorithm}
 \caption{Topology-aware placement}
 \begin{algorithmic}
-\Require job requesting $N$ accelerators with tensor-, pipeline-, and data-parallel groups; cluster topology with illustrative per-level locality weights $w(\cdot)$
+\Require job requesting $\DeviceCount$ accelerators with tensor-, pipeline-, and data-parallel groups; cluster topology with illustrative per-level locality weights $\LocalityPenaltyFunction(\cdot)$
 \Ensure an all-or-nothing feasible placement with the lowest illustrative locality score, or the job stays queued
-\State enumerate candidate slots: sets of $N$ free accelerators that satisfy every resource dimension \Comment{gang: all or nothing}
+\State enumerate candidate slots: sets of $\DeviceCount$ free accelerators that satisfy every resource dimension \Comment{gang: all or nothing}
 \State retain only slots that admit a rank mapping satisfying the job's tensor-, pipeline-, and data-parallel communication constraints
 \If{no feasible slot exists}
     \State leave the job queued without holding any accelerators \Comment{prevents hold-and-wait deadlock}
@@ -1150,9 +1150,9 @@ More sophisticated algorithms distinguish the communication requirements of diff
 \EndIf
 \For{each feasible slot}
     \State use a feasible rank mapping: tensor-parallel ranks within an NVLink domain, pipeline stages within a rack, data-parallel replicas across racks where permitted
-    \State score the slot by $\text{Cost}_{\text{locality}} = \sum_{i < j} w(d(g_i, g_j))$
+    \State score the slot by $\PlacementLocalityPenalty = \sum_{i < j} \LocalityPenaltyFunction(\GpuTopologicalDistance(\AssignedJobGpu_i, \AssignedJobGpu_j))$
 \EndFor
-\State \Return the feasible slot of least $\text{Cost}_{\text{locality}}$ \Comment{minimum score among enumerated feasible placements; atomic allocation}
+\State \Return the feasible slot of least $\PlacementLocalityPenalty$ \Comment{minimum score among enumerated feasible placements; atomic allocation}
 \end{algorithmic}
 \end{algorithm}
 ```

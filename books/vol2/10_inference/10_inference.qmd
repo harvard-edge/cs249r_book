@@ -3,7 +3,7 @@ number-offset: [9]
 quiz: inference_quizzes.json
 concepts: inference_concepts.yml
 engine: jupyter
-notation-local: [\ActiveParameterCount, \ActivePrefillRequestSet, \AdapterIndex, \AdapterScalingFactor, \AutoscalingDecisionTime, \AutoscalingDetectionTime, \AutoscalingResponseTime, \BatchMaxOutputLength, \BatchMaximumDeviationMultiple, \BatchMeanOutputLength, \BlockRangeMaximum, \BlockRangeMinimum, \CoordinationLatency, \DecodeBatchSize, \DeploymentDuration, \DraftModelDistribution, \DraftedToken, \EffectiveWasteFraction, \HashRingServer, \HashRingServerCount, \HashRingServerSet, \HighOccupancyBinCount, \HybridIterationTime, \IndependentEventProbability, \InputCaptureTime, \IterationTokenBudget, \KvCacheHandoffTime, \MaxBatchingWindow, \ModelLifetimeCost, \OccupancyThreshold, \OutputLengthStandardDeviation, \PaddingWasteFraction, \PerDeviceWeightReadTime, \PrefillAllocatedTokenCount, \PrefillArithmeticIntensity, \PrefillChunkSize, \PrefillRequestIndex, \PromptLength, \ReplicaColdStartTime, \ReplicaModelLoadTime, \ReplicaProvisioningTime, \ReplicaWarmupTime, \RequestOutputLength, \ResampledReplacementToken, \ResultActionTime, \RoundEmittedTokenCount, \SequenceIterationOperations, \SerializationLatency, \SeriesComponentCount, \ServerIndex, \ServerRoutingWeight, \ServingCostPerQuery, \StaticBatchingOperations, \StreamingEndToEndLatency, \TargetBatchSize, \TargetModelDistribution, \TensorParallelLayerTime, \WorkloadMeanOutputLength]
+notation-local: [\ActiveParameterCount, \ActivePrefillRequestSet, \AdapterIndex, \AdapterScalingFactor, \AutoscalingDecisionTime, \AutoscalingDetectionTime, \AutoscalingResponseTime, \BatchMaxOutputLength, \BatchMaximumDeviationMultiple, \BatchMeanOutputLength, \BlockRangeMaximum, \BlockRangeMinimum, \CoordinationLatency, \DecodeBatchSize, \DecodeRequestSet, \DeploymentDuration, \DraftModelDistribution, \DraftedToken, \EffectiveWasteFraction, \HashRingServer, \HashRingServerCount, \HashRingServerSet, \HighOccupancyBinCount, \HybridIterationTime, \InputCaptureTime, \IterationTokenBudget, \KvCacheHandoffTime, \MaxBatchingWindow, \ModelLifetimeCost, \OccupancyThreshold, \OutputLengthStandardDeviation, \PaddingWasteFraction, \PerDeviceWeightReadTime, \PrefillAllocatedTokenCount, \PrefillArithmeticIntensity, \PrefillChunkSize, \PrefillRequestIndex, \PromptLength, \ReplicaColdStartTime, \ReplicaModelLoadTime, \ReplicaProvisioningTime, \ReplicaWarmupTime, \RequestOutputLength, \ResampledReplacementToken, \ResultActionTime, \RoundEmittedTokenCount, \SequenceIterationOperations, \SerializationLatency, \ServerIndex, \ServerRoutingWeight, \ServingCostPerQuery, \StaticBatchingOperations, \StreamingEndToEndLatency, \TargetBatchSize, \TargetModelDistribution, \TensorParallelLayerTime, \WorkloadMeanOutputLength]
 ---
 
 # Serving at Scale {#sec-inference-scale}
@@ -1918,18 +1918,18 @@ The waste grows with the spread of output lengths, a dependence that @sec-infere
 \begin{algorithm}
 \caption{Continuous batching decode scheduler}
 \begin{algorithmic}
-\Require prefilled waiting queue $Q$; active set $A$; KV-cache page allocator; active-token capacity $C_{\text{tok}}$; batched decode kernel
+\Require prefilled waiting queue; active decode set $\DecodeRequestSet$; KV-cache page allocator; active-token capacity $\IterationTokenBudget$; batched decode kernel
 \Ensure generated tokens for completed requests; a continually refreshed active batch
 \While{the service is running}
-    \State admit requests from $Q$ while capacity and free KV-cache pages remain; allocate state, append to $A$
+    \State admit requests from the waiting queue while $\IterationTokenBudget$ and free KV-cache pages remain; allocate state and add to $\DecodeRequestSet$
     \State reserve pages for the next decode step; preempt requests that do not fit
-    \State run one batched decode kernel over the remaining sequences in $A$
+    \State run one batched decode kernel over the remaining sequences in $\DecodeRequestSet$
     \State append each sampled token; extend its KV-cache pages
-    \State remove completed or length-limited sequences from $A$; return their pages to the allocator
+    \State remove completed or length-limited sequences from $\DecodeRequestSet$; return their pages to the allocator
     \If{HBM pressure exceeds the policy threshold}
-        \State move low-priority sequences from $A$ to the paused set; page their KV-cache to CPU DRAM
+        \State move low-priority sequences from $\DecodeRequestSet$ to the paused set; page their KV-cache to CPU DRAM
     \EndIf
-    \State fill freed capacity from $Q$, or resume paused sequences whose pages now fit
+    \State fill freed capacity from the waiting queue, or resume paused sequences whose pages now fit
 \EndWhile
 \end{algorithmic}
 \end{algorithm}
@@ -3347,7 +3347,7 @@ class KVCacheCapacityEstimator:
     # Display-math expressions for the three step equations (pre-compute LaTeX
     # in Python to avoid `{python}` refs inside $$..$$ — §7 anti-pattern).
     step1_kv_per_token_math = fmt_display_math(
-        f" m_{{\\text{{token}}}} = 2 \\times {n_layers} \\times {n_kv_heads} \\times {d_head} \\times {bytes_per_elem} "
+        f" \\KvCacheBytesPerToken = 2 \\times {n_layers} \\times {n_kv_heads} \\times {d_head} \\times {bytes_per_elem} "
         f"= {kv_bytes_per_token:,} \\text{{ bytes}} \\approx "
         f"{kv_mb_per_token_display:.2f} \\text{{ MB/token}} "
     )
@@ -4056,21 +4056,20 @@ On a shared time axis (@fig-speculative-decoding), standard decoding uses four t
 \begin{algorithm}
 \caption{Speculative decoding}
 \begin{algorithmic}
-\Require target distribution $p_\theta(\cdot \mid \cdot)$; draft distribution $q_\phi(\cdot \mid \cdot)$; prefix $y_{1:t}$; draft length $K$
-\Ensure one or more new tokens distributed as $p_\theta$
-\For{$i = 1$ to $K$}
-    \State draft $\hat{y}_{t+i}$ from $q_\phi(\cdot \mid y_{1:t}, \hat{y}_{t+1:t+i-1})$
+\Require target distribution $\TargetModelDistribution$; draft distribution $\DraftModelDistribution$; current prefix; draft length $\SpeculativeDraftLength$
+\Ensure one or more new tokens distributed as $\TargetModelDistribution$
+\For{each draft position from $1$ to $\SpeculativeDraftLength$}
+    \State sample the next draft token from $\DraftModelDistribution$ conditioned on the prefix and prior drafts
 \EndFor
-\State run $p_\theta$ once on the prefix plus all $K$ drafts to obtain target distributions for the drafted positions and final next-token position
-\For{$i = 1$ to $K$}
-    \State $a_i \gets \min\!\left(1,\frac{p_\theta(\hat{y}_{t+i}\mid y_{1:t},\hat{y}_{t+1:t+i-1})}{q_\phi(\hat{y}_{t+i}\mid y_{1:t},\hat{y}_{t+1:t+i-1})}\right)$
-    \State accept $\hat{y}_{t+i}$ with probability $a_i$
-    \If{$\hat{y}_{t+i}$ is rejected}
-        \State sample one corrected token from the normalized positive residual $(p_\theta-q_\phi)_+$
+\State run $\TargetModelDistribution$ once on the prefix plus all $\SpeculativeDraftLength$ drafts to obtain target probabilities for the drafted positions and final next-token position
+\For{each drafted token in order from $1$ to $\SpeculativeDraftLength$}
+    \State accept the drafted token with probability $\min\!\left(1, \TargetModelDistribution / \DraftModelDistribution\right)$ evaluated at that token and context
+    \If{the drafted token is rejected}
+        \State sample one corrected token from the normalized positive residual $(\TargetModelDistribution - \DraftModelDistribution)_+$
         \State emit accepted draft tokens and the corrected token; discard the remaining draft; start a new round
     \EndIf
 \EndFor
-\State if all $K$ drafts were accepted, emit them and sample one extra token from the target distribution
+\State if all $\SpeculativeDraftLength$ drafts were accepted, emit them and sample one extra token from $\TargetModelDistribution$
 \end{algorithmic}
 \end{algorithm}
 ```
@@ -4354,27 +4353,26 @@ where $\DecodeBatchSize$ is the number of active decode tokens and $\PrefillAllo
 \begin{algorithm}
 \caption{Chunked prefill and hybrid batch scheduler}
 \begin{algorithmic}
-\Require waiting prefill queue $\mathcal{Q}_{\text{prefill}}$; active decode set $\mathcal{D}$; iteration token budget $N_{\text{budget}}$; maximum chunk size $C_{\text{chunk}}$
+\Require waiting prefill queue; active decode set $\DecodeRequestSet$; iteration token budget $\IterationTokenBudget$; maximum chunk size $\PrefillChunkSize$
 \Ensure generated tokens for decode requests; incremental KV-cache construction for prefills
 \While{serving engine is active}
-    \State $B_{\text{dec}} \gets |\mathcal{D}|$
-    \State $N_{\text{rem}} \gets N_{\text{budget}} - B_{\text{dec}}$
-    \State $\mathcal{B}_{\text{prefill}} \gets \emptyset$
-    \For{each $R_i$ in a snapshot of $\mathcal{Q}_{\text{prefill}}$, in queue order}
-        \If{$N_{\text{rem}} > 0$}
-            \State $o_i \gets R_i.\text{offset}$
-            \State $C_i \gets \min(C_{\text{chunk}}, N_{\text{rem}}, R_i.\text{prompt\_length} - o_i)$
-            \State $\mathcal{B}_{\text{prefill}} \gets \mathcal{B}_{\text{prefill}} \cup \{(R_i, o_i, C_i)\}$
-            \State $N_{\text{rem}} \gets N_{\text{rem}} - C_i$
+    \State $\DecodeBatchSize \gets |\DecodeRequestSet|$
+    \State set remaining token budget to $\IterationTokenBudget - \DecodeBatchSize$
+    \State $\ActivePrefillRequestSet \gets \emptyset$
+    \For{each waiting request $\PrefillRequestIndex$ in queue order}
+        \If{remaining token budget $> 0$}
+            \State allocate $\PrefillAllocatedTokenCount_{\PrefillRequestIndex} \gets \min(\PrefillChunkSize,\ \text{remaining budget},\ \text{unprocessed prompt tokens of request }\PrefillRequestIndex)$
+            \State add request $\PrefillRequestIndex$ with its $\PrefillAllocatedTokenCount_{\PrefillRequestIndex}$-token slice to $\ActivePrefillRequestSet$
+            \State decrease remaining token budget by $\PrefillAllocatedTokenCount_{\PrefillRequestIndex}$
         \EndIf
     \EndFor
-    \State run hybrid forward pass using each prefill slice $R_i[o_i:o_i+C_i]$ and the decode set $\mathcal{D}$
-    \State append newly generated tokens for all $R \in \mathcal{D}$
-    \State remove completed decode requests from $\mathcal{D}$ and release their KV blocks
-    \For{$(R_i, o_i, C_i) \in \mathcal{B}_{\text{prefill}}$}
-        \State update prompt offset: $R_i.\text{offset} \gets o_i + C_i$
-        \If{$R_i.\text{offset} = R_i.\text{prompt\_length}$}
-            \State promote $R_i$ from $\mathcal{Q}_{\text{prefill}}$ to $\mathcal{D}$
+    \State run hybrid forward pass over the allocated slices in $\ActivePrefillRequestSet$ and the decode set $\DecodeRequestSet$
+    \State append newly generated tokens for all requests in $\DecodeRequestSet$
+    \State remove completed decode requests from $\DecodeRequestSet$ and release their KV blocks
+    \For{each request $\PrefillRequestIndex \in \ActivePrefillRequestSet$}
+        \State advance its prompt offset by $\PrefillAllocatedTokenCount_{\PrefillRequestIndex}$
+        \If{all $\PromptLength$ prompt tokens of request $\PrefillRequestIndex$ have been processed}
+            \State promote request $\PrefillRequestIndex$ from the prefill queue to $\DecodeRequestSet$
         \EndIf
     \EndFor
 \EndWhile
@@ -4778,7 +4776,7 @@ When a single weight or activation channel is ten times larger than its neighbor
 
 ::: {#dfn-inference-block-wise-quantization .callout-definition title="Block-wise quantization"}
 
-***Block-wise quantization***\index{Block-wise quantization!definition}\index{Quantization!block-wise} is an ML quantization scheme that partitions a weight tensor into nonoverlapping groups of $\QuantizationBlockSize$ elements and assigns each group its own scale. An affine scheme uses $\QuantizationScale_i = (\BlockRangeMaximum- \BlockRangeMinimum) / (2^\NumericBitWidth- 1)$ together with an offset or zero point; a symmetric scheme centers the range at zero and needs only scale metadata. The metadata examples below assume symmetric scale-only quantization.
+***Block-wise quantization***\index{Block-wise quantization!definition}\index{Quantization!block-wise} is an ML quantization scheme that partitions a weight tensor into nonoverlapping groups of $\QuantizationBlockSize$ elements and assigns each group its own scale. An affine scheme uses $\QuantizationScale_i = (\BlockRangeMaximum- \BlockRangeMinimum) / (2^{\NumericBitWidth}- 1)$ together with an offset or zero point; a symmetric scheme centers the range at zero and needs only scale metadata. The metadata examples below assume symmetric scale-only quantization.
 
 1.  **Significance**: With block size $\QuantizationBlockSize = 64$ and $\NumericBitWidth= 4$ bits, weights compress from 16 bits to 4 bits (a 4$\times$ memory reduction) while each FP16 scale adds $16/64 = 0.25$ bits per weight. This yields an effective bit-width of $4.25$ bits per weight: 6.25 percent overhead relative to the INT4 payload, or about 1.6 percent of the original FP16 weight size.
 2.  **Distinction**: Unlike per-tensor quantization\index{Quantization!per-tensor}, which applies a single scale across the entire weight matrix, block-wise quantization contains outlier damage within individual blocks. Per-tensor scaling forces that scale to accommodate outlier values, which wastes precision on the majority of near-zero weights. A single extreme value therefore cannot degrade quantization fidelity for the whole tensor.
@@ -5027,7 +5025,7 @@ class HardwareSetupSharding:
     h100_mem_gb_str = fmt_memory_capacity(h100_mem, unit=GiB, precision=0, commas=False)
     min_shards_str = fmt_int(min_shards, commas=False)
     weight_display_math = fmt_display_math(
-        rf"M_{{\text{{weights}}}} = {sci_latex(params, precision=0)} \times \frac{{{fp16_bits}}}{{8}} = "
+        rf"\WeightMemory = {sci_latex(params, precision=0)} \times \frac{{{fp16_bits}}}{{8}} = "
         rf"{fmt(weights.to(GB).magnitude, precision=0, commas=False)} \text{{ GB}}"
     )
 ```
@@ -5980,18 +5978,18 @@ Polling every replica in a large fleet on every arrival turns the load balancer 
 \begin{algorithm}
 \caption{Power-of-two choices request routing}
 \begin{algorithmic}
-\Require eligible replica set $\mathcal{S}$; request $r$; positive capacity weights $w_s$; per-replica work signal $W_s$ (queue length, active tokens, predicted work, or KV-cache occupancy); finite attempt budget
-\Ensure an admitting replica for $r$, or an overload rejection
+\Require eligible pool of $\ReplicaCount$ replicas; incoming request; positive capacity weights $\ServerRoutingWeight_{\ServerIndex}$ per replica $\ServerIndex$; per-replica work signal (queue length, active tokens, predicted work, or KV-cache occupancy); finite attempt budget
+\Ensure an admitting replica for the request, or an overload rejection
 \For{each allowed attempt}
-    \If{$\mathcal{S}$ is empty}
+    \If{the eligible replica pool is empty}
         \State \Return overload rejection
     \EndIf
-    \State sample two candidate replicas $s_a, s_b$ from $\mathcal{S}$ with replacement \Comment{capacity-weighted}
-    \State query $W_{s_a}, W_{s_b}$; estimate incremental work $\hat{c}(r)$ (expected output tokens or KV pages)
-    \State $u_s \gets (W_s + \hat{c}(r)) / w_s$ for $s \in \{s_a, s_b\}$ \Comment{post-admission load}
-    \State $s^\star \gets$ candidate with smaller $u_s$ \Comment{ties: cache affinity}
-    \If{$s^\star$ atomically admits $r$ and reserves its local capacity}
-        \State \Return $s^\star$
+    \State sample two candidate replicas with replacement in proportion to their capacity weights $\ServerRoutingWeight_{\ServerIndex}$
+    \State query each candidate's current work signal and estimate the request's incremental work (expected output tokens or KV pages)
+    \State compute each candidate's normalized post-admission load as $(\text{current work} + \text{incremental work}) / \ServerRoutingWeight_{\ServerIndex}$
+    \State select the candidate with smaller normalized load \Comment{ties: cache affinity}
+    \If{the selected candidate atomically admits the request and reserves its local capacity}
+        \State \Return the selected candidate
     \EndIf
 \EndFor
 \State \Return overload rejection

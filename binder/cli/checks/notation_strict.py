@@ -179,7 +179,9 @@ _FENCE = re.compile(r"^\s*(```+|~~~+)")
 _HEADING = re.compile(r"^(#{1,6})\s+(.*?)\s*$")
 _DIV_ATTR = re.compile(r"^\s*:{3,}\s*\{.*\}\s*$")
 _CAPTION_ATTR = re.compile(r"\b(fig-cap|tbl-cap|lst-cap|title)=\"((?:[^\"\\]|\\.)*)\"")
-_FMT_MATH = re.compile(r"fmt_math\(\s*([rfRF]{0,2})([\"'])(.*?)(?<!\\)\2", re.S)
+_FMT_MATH_CALL = re.compile(r"\bfmt_(display_)?math\s*\(")
+_PY_STR_TOKEN = re.compile(r'([rfRF]{0,2})(?:("""|\'\'\')((?:\\.|(?!\2).)*?)\2|(["\'])((?:\\.|(?!\4)[^\n])*?)\4)', re.S)
+_PSEUDOCODE_FENCE = re.compile(r"^\s*(```+|~~~+)\s*pseudocode\b")
 
 
 def _blank(text: str, pattern: re.Pattern) -> str:
@@ -327,15 +329,49 @@ def _fstring_literal(body: str) -> str:
 
 
 def extract_fmt_math(source: str) -> List[MathSpan]:
-    """LaTeX passed to fmt_math(...) inside Python cells (f-string fields become 1)."""
-    out = []
-    for m in _FMT_MATH.finditer(source):
-        prefix, body = m.group(1).lower(), m.group(3)
-        if "f" in prefix:
-            body = _fstring_literal(body)
-        if "r" not in prefix:
-            body = body.replace("\\\\", "\\")
-        out.append(MathSpan(source.count("\n", 0, m.start()) + 1, 1, body, False, "fmt_math"))
+    """LaTeX passed to fmt_math(...) or fmt_display_math(...) inside Python cells."""
+    out: List[MathSpan] = []
+    for m in _FMT_MATH_CALL.finditer(source):
+        display = bool(m.group(1))
+        pos = m.end()
+        parts: List[str] = []
+        while pos < len(source):
+            while pos < len(source) and source[pos] in " \t\r\n":
+                pos += 1
+            sm = _PY_STR_TOKEN.match(source, pos)
+            if not sm:
+                break
+            prefix = sm.group(1).lower()
+            body = sm.group(3) if sm.group(2) else sm.group(5)
+            if "f" in prefix:
+                body = _fstring_literal(body)
+            if "r" not in prefix:
+                body = body.replace("\\\\", "\\")
+            parts.append(body)
+            pos = sm.end()
+        if parts:
+            out.append(MathSpan(source.count("\n", 0, m.start()) + 1, 1, "".join(parts), display, "fmt_math"))
+    return out
+
+
+def extract_pseudocode_math(source: str) -> List[MathSpan]:
+    """Math inside fenced ```pseudocode blocks (skipped by Pandoc's markdown reader)."""
+    lines = source.split("\n")
+    in_pseudo, fence_marker = False, ""
+    section, out = "", []
+    for idx, line in enumerate(lines):
+        if not in_pseudo:
+            if _HEADING.match(line):
+                section = line.strip()
+            pm = _PSEUDOCODE_FENCE.match(line)
+            if pm:
+                in_pseudo, fence_marker = True, pm.group(1)[0] * 3
+            continue
+        if line.strip().startswith(fence_marker):
+            in_pseudo = False
+            continue
+        for _, col, body, disp in _scan_dollars(line, line):
+            out.append(MathSpan(idx + 1, col, body, disp, "pseudocode", section))
     return out
 
 
@@ -539,7 +575,7 @@ def judge(math: str, registry: Registry, scope: Optional[Set[str]] = None) -> Li
             j = _skip_space(toks, i + 1)
             if j < len(toks) and toks[j].startswith("\\"):
                 e = registry.entries.get(registry.canonical(toks[j][1:]))
-                if e is not None and len(tokenize(e.latex)) > 1:
+                if e is not None:
                     found.append(Finding(t + toks[j], "unbraced-script", i, j + 1))
     sub_stack: List[int] = []      # 1 for a subscript group, 0 otherwise
     depth_sub = 0
@@ -638,8 +674,9 @@ def judge(math: str, registry: Registry, scope: Optional[Set[str]] = None) -> Li
                 (t in ex.index and (depth_sub > 0 or prev == "_")) or
                 (t in ex.transpose and (prev == "^" or (prev == "{" and prev2 == "^" and nxt == "}"))) or
                 (t in ex.euler and nxt == "^") or
-                (t in ex.differential and (bool(re.fullmatch(r"[A-Za-z]", nxt))
-                                           or (nxt.startswith("\\") and registry.is_macro(nxt[1:]))))
+                (t in ex.differential and not prev.isdigit()
+                 and (bool(re.fullmatch(r"[A-Za-z]", nxt))
+                      or (nxt.startswith("\\") and registry.is_macro(nxt[1:]))))
             )
             if not exempt:
                 raw, end = _with_label(toks, t, k + 1, ex)
@@ -774,7 +811,7 @@ def scan_path(path: Path, repo: Path, registry: Registry, scoped: bool = True) -
     vol = volume_of(rel)
     if scoped and vol and not rel.endswith("frontmatter/notation.qmd"):
         scope = notation_table_macros(repo, vol) | local_macros(text)
-    return scan_spans(extract_math(text) + extract_fmt_math(text), rel, registry, scope)
+    return scan_spans(extract_math(text) + extract_fmt_math(text) + extract_pseudocode_math(text), rel, registry, scope)
 
 
 def work_package(violations: List[Violation], rel: str) -> Dict:
@@ -1053,10 +1090,17 @@ def glyph_collisions(source: str, registry: Registry, level: int = 2) -> List[Di
         h2_at.append(current)
 
     first: Dict[Tuple[str, str], Dict[str, int]] = collections.defaultdict(dict)
-    for span in extract_math(source):
-        if span.source not in ("body", "caption"):
+    is_json = source.lstrip().startswith("{")
+    spans = (extract_quiz_math(source) if is_json
+             else extract_math(source) + extract_fmt_math(source) + extract_pseudocode_math(source))
+    for span in spans:
+        if not is_json and span.source not in ("body", "caption", "fmt_math", "pseudocode"):
             continue
-        section = h2_at[span.line - 1] if span.line - 1 < len(h2_at) else ""
+        if is_json:
+            parts = span.section.split("/")
+            section = "/".join(parts[:2]) if len(parts) >= 2 else span.section
+        else:
+            section = h2_at[span.line - 1] if span.line - 1 < len(h2_at) else ""
         for m in re.finditer(r"\\([A-Za-z]+)(?![A-Za-z])", span.text):
             name = m.group(1)
             if not registry.is_macro(name) or name == "Glyph":

@@ -100,9 +100,31 @@ def test_an_accented_labeled_macro_takes_its_index_with_an_empty_group():
 
 
 def test_a_macro_used_as_a_script_is_braced():
-    # x^\DecodeInterval reads x^T then _{decode} on x; x^{\DecodeInterval} is right
+    # x^\DecodeInterval reads x^T then _{decode} on x; x^{\DecodeInterval} is right.
+    # Every macro used as a script must be braced so future LaTeX changes stay safe.
     assert raws(r"2^\DecodeInterval") == [(r"^\DecodeInterval", "unbraced-script")]
-    assert raws(r"2^{\DecodeInterval} + 2^\NumberOfDevices") == []   # one-token LaTeX is fine
+    assert raws(r"2^{\DecodeInterval} + 2^\NumberOfDevices") == [(r"^\NumberOfDevices", "unbraced-script")]
+    assert raws(r"2^{\DecodeInterval} + 2^{\NumberOfDevices}") == []
+
+
+def test_digit_before_d_is_not_a_differential():
+    assert raws(r"2d\Time") == [("d", "letter")]
+    assert raws(r"\Time\,d\Time") == []
+
+
+def test_fmt_display_math_and_pseudocode_extraction():
+    from notation_strict import extract_fmt_math, extract_pseudocode_math
+    src = (
+        'x = fmt_display_math(\n'
+        '    rf"v + {val}"\n'
+        '    rf" = 1"\n'
+        ')\n'
+        '```pseudocode\n'
+        '\\Require $N$ workers\n'
+        '```\n'
+    )
+    assert [s.text for s in extract_fmt_math(src)] == ["v + 1 = 1"]
+    assert [s.text for s in extract_pseudocode_math(src)] == ["N"]
 
 
 def test_unknown_alias_scope():
