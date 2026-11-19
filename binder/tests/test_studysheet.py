@@ -70,5 +70,16 @@ def test_no_digits_typed_into_answers(tex):
     text = re.sub(r"\d+-bit", "", text)                              # "8-bit" names a format, not a result
     text = re.sub(r"\b[A-Za-z][\w-]*\d[\w-]*", "", text)                # names such as ResNet-50, GPT-2
     text = re.sub(r"C\{3\}|C\$\^\{?3\}?\$", "", text)               # the C³ taxonomy name
+    text = re.sub(r"CO\$?_\{?2\}?\$?|CO\{2\}|CO₂", "", text)                 # CO2, a chemical name
     text = re.sub(r"\$?\^\{?[23]\}?\$?", "", text)                       # unit exponents: m/s^2, m^3
     assert not re.findall(r"\d", re.sub(r"\(\w\)", "", text)), f"typed digits in answers: {text.strip()[:200]}"
+
+
+@pytest.mark.parametrize("tex", SHEETS, ids=lambda p: str(p.relative_to(REPO_ROOT / "books")))
+def test_check_yourself_has_three_or_four_questions(tex):
+    """studysheet.md: Check yourself holds 3-4 questions (added 2026-11-19 after two sheets grew a fifth)."""
+    body = _strip_comments(tex.read_text())
+    qs = re.search(r"\\begin\{qs\}(.*?)\\end\{qs\}", body, flags=re.S)
+    assert qs, "the back has a Check yourself list"
+    n = len(re.findall(r"\\item\b", qs.group(1)))
+    assert 3 <= n <= 4, f"Check yourself has {n} questions; the rule allows 3-4"

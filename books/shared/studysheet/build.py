@@ -28,6 +28,7 @@ BOOKS = ROOT / "books"
 INCLUDES = BOOKS / "shared" / "_includes"
 OUT = BOOKS / "_build" / "studysheets"
 MIN_FREE_PT = 24.0            # every column ends with at least this much free space (studysheet.md)
+MAX_IDEA_LINES = 3           # each key idea at most 3 printed lines (studysheet.md)
 
 
 def sheets(scope: str | None = None) -> list[Path]:
@@ -77,6 +78,7 @@ def compile_tex(tex: Path, out: Path, volume: int) -> dict:
     return {"pdf": out / f"{tex.stem}.pdf", "pages": int(pages.group(1)) if pages else 0,
             "free": [(int(p), float(a), float(b)) for p, a, b in
                      re.findall(r"STUDYSHEET-FREE page=(\d+) left=([-\d.]+)pt right=([-\d.]+)pt", log)],
+            "idea_lines": [int(x) for x in re.findall(r"STUDYSHEET-IDEA lines=(\d+)", log)],
             "overfull": [float(x) for x in re.findall(r"Overfull \\hbox \(([\d.]+)pt too wide\)", log)],
             "errors": re.findall(r"^! (.*)$", log, flags=re.M)}
 
@@ -92,6 +94,8 @@ def problems(rep: dict) -> list[str]:
     for page, a, b in rep["free"]:
         out += [f"page {page} {side} column: {f:.1f} pt free (< {MIN_FREE_PT:g})"
                 for side, f in (("left", a), ("right", b)) if f < MIN_FREE_PT]
+    out += [f"key idea {i + 1} runs {n} lines (> {MAX_IDEA_LINES})"
+            for i, n in enumerate(rep.get("idea_lines", [])) if n > MAX_IDEA_LINES]
     return out + [f"overfull box {x:.1f} pt" for x in rep["overfull"] if x > 1.0]
 
 
