@@ -11,7 +11,7 @@
 \frontside
 \begin{bigidea}
 A neural network replaces hand-written rules with \hl{arithmetic}: matrix products and simple
-activations whose shapes fix the work, the bytes and the memory before any code runs. Training
+activations whose shapes fix work, bytes and memory before any code runs. Training
 keeps \hl{state that serving never needs}, and it fails when numbers leave their range, not when logic breaks.
 \end{bigidea}
 
@@ -37,7 +37,7 @@ keeps \hl{state that serving never needs}, and it fails when numbers leave their
   \node[small, anchor=north east] at (\xc,-3) {layer 2: \val{w2}; layer 3: \val{w3}};
 \end{tikzpicture}\par}
 \vspace{5pt}
-{\fontsize{8.6}{11}\selectfont\color{muted}Each hidden unit: a weighted sum of all its inputs plus a bias, then ReLU. Softmax turns the
+{\fontsize{8.6}{11}\selectfont\color{muted}Each hidden unit: a weighted sum of its inputs plus a bias, then ReLU. Softmax turns the
 \val{nout} scores into probabilities. \val{weights} weights $=$ \val{macs} MACs per digit; with \val{biases} biases,
 \val{params} parameters, \val{wkb} KB.\par}
 
@@ -56,10 +56,8 @@ keeps \hl{state that serving never needs}, and it fails when numbers leave their
   then $\ActivationFunction$, one row per example. Without $\ActivationFunction$, the layers collapse into one affine map.}
 \idea{Shapes fix the cost.}{One multiply-accumulate (MAC, 2 FLOPs) per weight per example. Widening adjacent
   layers costs quadratically; depth, linearly but in sequence.}
-\idea{Batching reuses weights.}{Batch \val{batch} shares each weight read: about \val{i32} FLOP/byte, not \val{i1}.
-  Tiny networks may still be ruled by per-operation overhead.}
-\idea{Learning fails by number range.}{Sigmoid's slope (at most \val{sigslope}) shrinks gradients layer by layer; ReLU,
-  a cheap comparator, passes 1. Overflow gives Inf or NaN.}
+\idea{Learning fails by number range.}{Sigmoid's slope (at most \val{sigslope}) shrinks gradients layer by layer; ReLU
+  passes 1. Overflow gives Inf or NaN.}
 \idea{A threshold turns scores into decisions.}{Items below it go to people. Pick the lowest
   $\ManualReviewFraction\ManualReviewCost + \MisclassifiedFraction\ErroneousPredictionCost$, where $\MisclassifiedFraction =$ accepted share $\times$ error among accepted.}
 \end{ideas}
@@ -69,40 +67,45 @@ keeps \hl{state that serving never needs}, and it fails when numbers leave their
 \fcard{Backward pass of one dense layer}%
   {\frac{\partial \LossFunction}{\partial \WeightMatrix^{(\LayerIndex)}} = {\ActivationMatrix^{(\LayerIndex-1)}}^{T} \frac{\partial \LossFunction}{\partial \PreactivationMatrix^{(\LayerIndex)}}
    \qquad \frac{\partial \LossFunction}{\partial \ActivationMatrix^{(\LayerIndex-1)}} = \frac{\partial \LossFunction}{\partial \PreactivationMatrix^{(\LayerIndex)}} {\WeightMatrix^{(\LayerIndex)}}^{T}}%
-  {Two forward-sized products: one reads the saved input, one carries the signal back. Layer 1 skips
-   the second, so a step costs about 3 forward passes, less here.}%
-  {Then every parameter steps against its gradient: $\ModelParameters \leftarrow \ModelParameters - \LearningRate\,\nabla_{\ModelParameters}\LossFunction$.}{}
+  {Two forward-sized products (the first reads the saved input), so a step costs about 3 forward
+   passes; less here, as layer 1 skips the second.}%
+  {Then each parameter steps downhill: $\ModelParameters \leftarrow \ModelParameters - \LearningRate\,\nabla_{\ModelParameters}\LossFunction$.}{}
 \fcard{Training against inference memory}%
   {\begin{aligned}\text{training} &\approx \text{parameters} + \text{gradients} + \text{Adam} + \text{saved}\\
    \text{inference} &\approx \text{parameters} + \text{widest pair of outputs}\end{aligned}}%
-  {Gradients match the parameters; Adam keeps two values per parameter. Training saves every layer's output,
-   input included: batch $\BatchSize \times \sum \CurrentLayerWidth$ values.}%
+  {Gradients match the parameters; Adam keeps two values per parameter. Training saves the input and
+   every layer's output: $\BatchSize \times \sum \CurrentLayerWidth$ values.}%
   {Inference frees each output once the next layer reads it: $\BatchSize(\PreviousLayerWidth + \CurrentLayerWidth)$ values at the widest pair.}{}
 \fcard{Cross-entropy and its gradient}%
   {\LossFunction = -\ln \CorrectClassProbability \qquad
    \frac{\partial \LossFunction}{\partial \NeuronPreactivation_{\ClassIndex}} = \PredictedOutputComponent_{\ClassIndex} - \TrueLabelComponent_{\ClassIndex}}%
   {Gradient: predicted minus target (1 for the true class,
    else 0); a negative one raises that score.}%
-  {A uniform guess costs \val{q2uni}. Compute the loss fused from max-shifted scores, so no probability rounds to zero before the log.}{}
+  {Compute the loss fused from max-shifted scores, so no probability rounds to zero.}{}
+\fcard{Arithmetic intensity of a batch}%
+  {\ArithmeticIntensity = \frac{\BatchSize\,\Operations}{\DataVolume}}%
+  {Matrix-product FLOPs per byte moved. $\DataVolume$: parameters read once per batch; per example, input read, output
+   written, each hidden value written and read.}%
+  {Batching reuses weights: about \val{i32} FLOP/byte at batch \val{batch}, \val{i1} at batch 1.}{}
 \end{rightcol}
 
 % ===================================================================== BACK
 \backside
 \begin{answers}
 \ans{Finish}{Activations \val{bakb} KB; training \val{statekb} $+$ \val{bakb} $=$ \val{btrain} KB. Inference
-  \val{wkb} $+$ \val{bikb} $=$ \val{binfer} KB. Ratio \val{bratio}$\times$: saved activations are now
-  \val{bactshare}\% of training memory, so the batch, not the parameters, sets it. [Memory card]}
+  \val{wkb} $+$ \val{bikb} $=$ \val{binfer} KB. Ratio \val{bratio}$\times$; saved activations,
+  \val{bactshare}\% of training, now dominate. [Memory card]}
 \ans{1}{Weights \val{q1w1} $+$ \val{q1w2} $+$ \val{q1w3} $=$ \val{q1w} $=$ MACs per digit (\val{q1x}$\times$
   the running network); $+$ \val{q1b} biases $=$ \val{q1p} parameters, \val{q1mb} MB. The first layer holds \val{q1share}\%. [Counting card]}
-\ans{2}{$-\log \val{q2pbad} = \val{q2lbad}$ against $-\log \val{q2pok} = \val{q2lok}$, about \val{q2lx}$\times$.
+\ans{2}{$-\ln \val{q2pbad} = \val{q2lbad}$ against $-\ln \val{q2pok} = \val{q2lok}$, about \val{q2lx}$\times$.
   Gradients: true digit \val{q2pbad} $-$ \val{q2target} $=$ \val{q2gtrue} (push up); wrong digit $+$\val{q2gwrong} (push down). [Cross-entropy card]}
 \columnbreak
 \ans{3}{A: vanishing gradients; the sigmoid slopes alone allow at most \val{sigslope}$^{\val{sigdepth}} \approx \val{sigsurv}$
-  by the first layer. Switch to ReLU. B: a range failure (overflow, or the log of a probability rounded to zero); compute
-  the loss fused from the scores. [range idea; cross-entropy card]}
+  by the first layer. Switch to ReLU. B: a range failure before any update (so not the learning rate): the true class's
+  probability rounds to zero, so its loss is infinite. Compute the loss fused from max-shifted scores. [range idea; cross-entropy card]}
 \ans{4}{Per \val{q4per} items, A: \val{q4an} reviews $\times$ \$\val{q4cr} $+$ \val{q4aw} errors $\times$ \$\val{q4ce}
   $=$ \$\val{q4acost}. B: \val{q4bn} $\times$ \$\val{q4cr} $+$ \val{q4bw} $\times$ \$\val{q4ce} $=$ \$\val{q4bcost}.
-  B is cheaper: its extra reviews cost less than A's extra errors. [threshold idea]}
+  B is cheaper: extra reviews cost less than A's extra errors. [threshold idea]}
 \end{answers}
 
 \begin{leftcol}
@@ -129,20 +132,20 @@ The running network, batch \val{batch}, FP32, trained with Adam.\par\vspace{5pt}
   \node[lab, anchor=west] at ({\qb+4},8) {\val{inferkb} KB};
 \end{tikzpicture}\par}
 \begin{steps}
-\item Parameters: \val{params} $\times$ \val{bpv} B $=$ \val{wkb} KB. Gradients \val{gkb} KB; Adam \val{okb} KB:
+\item Parameters: \val{params} $\times$ \val{bpv} bytes $=$ \val{wkb} KB. Gradients \val{gkb} KB; Adam \val{okb} KB:
   \res{\val{statekb} KB} of parameter state.
 \item Saved: \val{batch} $\times$ (\val{inputs}$+$\val{nh1}$+$\val{nh2}$+$\val{nout}) $=$ \val{actvals} values $=$ \val{akb} KB. Training \res{\val{trainkb} KB}.
 \item Inference: \val{batch} $\times$ (\val{inputs}$+$\val{nh1}) $=$ \val{infvals} values $=$ \val{ikb} KB, plus parameters:
   \res{\val{inferkb} KB}, so training needs \res{\val{memratio}$\times$}.
 \end{steps}
-\takeaway{At small batch, the parameter state, not the activations, makes training dearer.}
+\takeaway{At small batch, parameter state, not activations, makes training dearer.}
 \end{practicebox}
 
 \vspace{12pt}
 \sheetsec{Your turn: finish it}
 \begin{practicebox}\boxtitle{Raise the batch to \val{bbatch}}
 Same network, \val{bgrow}$\times$ the batch.\par\vspace{4pt}
-\textbf{Given:} parameter state is unchanged, \val{statekb} KB. Saved values: \val{bbatch} $\times$ \val{actsum}
+\textbf{Given:} parameter state \val{statekb} KB, unchanged. Saved values: \val{bbatch} $\times$ \val{actsum}
 $=$ \val{bactvals}. Inference buffers: \val{bbatch} $\times$ \val{pairw} $=$ \val{binfvals} values $=$ \val{bikb} KB.\par
 \textbf{You:} find training and inference memory, their ratio, and which term now dominates training.
 \end{practicebox}
@@ -154,10 +157,11 @@ $=$ \val{bactvals}. Inference buffers: \val{bbatch} $\times$ \val{pairw} $=$ \va
    but each of \val{epops} small operations per step pays a fixed launch cost: \val{eptotacc} ms against
    the CPU's \val{eptotcpu} ms, \val{epovh}\% of it overhead.}{}
 \mistake{``The backward pass runs the network in reverse, so it costs one forward pass.''}%
-  {Each layer needs two products of forward size, weight gradient and input gradient. This network's step
-   costs \val{trainratio}$\times$ the forward work, not 3$\times$, only because layer 1 needs no gradient for the raw pixels.}{}
-\mistake{``The 1989 ZIP-code reader had \val{ziperr}\% error, so machines sorted 99\% of the mail.''}%
-  {The \val{ziperr}\% held only for the digits it accepted, after sending \val{ziprej}\% to people.}{}
+  {Each layer needs two forward-sized products, for the weight and input gradients. This network's step
+   costs \val{trainratio}$\times$ the forward work, not 3$\times$, only because layer 1 needs no input gradient.}{}
+\mistake{``A batch of \val{batch} digits does \val{batch}$\times$ the work, so it moves \val{batch}$\times$ the bytes.''}%
+  {Parameters are read once per batch: work grows from \val{work1} to \val{work32} MFLOP, traffic
+   from \val{traffic1} to \val{traffic32} KB (\val{trafficgrow}$\times$), so intensity rises from \val{i1} to \val{i32} FLOP/byte.}{}
 
 \vspace{2pt}
 \sheetsec{Check yourself}
@@ -167,7 +171,8 @@ $=$ \val{bactvals}. Inference buffers: \val{bbatch} $\times$ \val{pairw} $=$ \va
 \item \assumed{} for a seven, the network gives probability \val{q2pbad} to ``seven'' and \val{q2pwrong} to ``three''. Find the loss,
   compare it with \val{q2pok} on ``seven'', and give the gradient at both scores.
 \item A \val{sigdepth}-layer sigmoid network stalls. In run A the loss is flat and gradients shrink toward the first layers;
-  in run B the loss becomes NaN. Which failure does each suggest, and what would you change first?
+  in run B the loss is infinite at the first step, before any update, where a wrong digit's score is huge.
+  Which failure is each, and what would you change first?
 \item \assumed{} review costs \$\val{q4cr}, an accepted error \$\val{q4ce}. Threshold A reviews \val{q4arev}\%
   and errs on \val{q4aerr}\% of accepted items; B reviews \val{q4brev}\% and errs on \val{q4berr}\%. Which is cheaper?
 \end{qs}

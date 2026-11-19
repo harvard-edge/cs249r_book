@@ -19,15 +19,15 @@ bandwidth, or work the accelerator never touches, sets the time.
 \sheetsec{Key ideas}
 \begin{ideas}
 \idea{Moving data costs more than math.}{A DRAM access costs about \val{dramovermul}$\times$ the energy of
-  an FP32 multiply and hundreds of cycles. Specialized hardware exists to avoid that trip.}
-\idea{Reuse is the design.}{Matrix units reuse each fetched operand across many multiply-accumulates;
-  a systolic array passes it cell to cell. Vector units take element-wise work and reductions.}
+  an FP32 multiply. Specialized hardware exists to avoid that trip.}
+\idea{Reuse is the design.}{Matrix units reuse each operand many times;
+  a systolic array passes operands between neighbors; vector units do element-wise work.}
 \idea{A peak belongs to one path.}{INT8 doubles the H100's compute ceiling, not its bandwidth, so the
-  ridge doubles. Zeros are skipped only in the supported 2:4 pattern.}
+  ridge doubles. Quote achieved op/s against that path's own peak.}
 \idea{Batch one streams every weight.}{Decoding a token reads all weights for 2 operations each. A dense
   layer reuses each weight $\BatchSize$ times, so $\ArithmeticIntensity \approx \BatchSize$ at FP16.}
-\idea{Mapping decides the bytes.}{Keeping weights or partial sums local (weight- or output-stationary),
-  tiles that fit on chip, and fused kernels cut HBM traffic: the kernel moves right on the roofline.}
+\idea{Mapping decides the bytes.}{Local weights or partial sums, on-chip tiles and fusion can cut
+  HBM bytes; fewer bytes for the same work move the kernel right.}
 \idea{Profile before buying.}{The roofline bounds a kernel; Amdahl bounds the job. A profile shows
   which limit you actually hit.}
 \end{ideas}
@@ -51,7 +51,7 @@ Job speedup far below the kernel gain & Amdahl: fix the unaccelerated work\\
   {Intensity $\ArithmeticIntensity$ = operations per byte moved. Below the ridge $\RooflineRidgePoint$, bandwidth
    $\Bandwidth$ sets the rate; above it, the peak $\PeakRate$ of that precision path does.}%
   {Bounds at HBM. Batch-one decode: time per token $\ge$ weight bytes $\div \Bandwidth$. H100: \val{hpeaksixteen} TFLOP/s FP16,
-   \val{hpeakeight} TOPS INT8, \val{hbw} TB/s.}%
+   \val{hpeakeight} TOPS (tera-ops/s) INT8, \val{hbw} TB/s.}%
   {\begin{tikzpicture}[sheet]
      % x: log10(I) -0.3..3.7 -> 30..202 ; y: log10(TFLOP/s) 0..3.5 -> 0..105
      \pgfmathsetmacro\sx{43}\pgfmathsetmacro\sy{30}
@@ -63,7 +63,7 @@ Job speedup far below the kernel gain & Amdahl: fix the unaccelerated work\\
        \pgfmathsetmacro\y{log10(\tk)*\sy}
        \draw[gridline] (30,\y) -- (202,\y);
        \node[small, anchor=east] at (27,\y) {\tl};}
-     \node[small, anchor=north east] at (202,-12) {operations per byte};
+     \node[small, anchor=north east] at (202,-12) {op/byte};
      \node[small, anchor=south, rotate=90] at (8,52) {tera-ops/s};
      \pgfmathsetmacro\bw{\val{hbw}}
      \pgfmathsetmacro\rs{\val{ridgesixteen}}\pgfmathsetmacro\re{\val{ridgeeight}}
@@ -101,12 +101,33 @@ Job speedup far below the kernel gain & Amdahl: fix the unaccelerated work\\
   \pgfmathsetmacro\xm{10+(log10(\val{emulfp})+1)*57.5}
   \pgfmathsetmacro\xs{10+(log10(\val{esram})+1)*57.5}
   \pgfmathsetmacro\xd{10+(log10(\val{edram})+1)*57.5}
-  \foreach \xx in {\xm,\xs}{\filldraw[fill=accentsoft, draw=accent, line width=0.5pt] (\xx,0) circle (2.4pt);}
+  \filldraw[fill=accentsoft, draw=accent, line width=0.5pt] (\xm,0) circle (2.4pt);
+  \draw[dim] (\xs,0) -- (\xs,9);
+  \filldraw[fill=accentsoft, draw=accent, line width=0.5pt] (\xs,11.4) circle (2.4pt);
   \filldraw[fill=accent, draw=accent] (\xd,0) circle (2.4pt);
   \node[note, anchor=south east] at (\xm+1,5) {FP32 multiply \val{emulfp}};
   \node[note, anchor=south west] at (\xs-1,15) {8 KB SRAM read \val{esram}};
-  \draw[dim] (\xs,3) -- (\xs,14);
   \node[note, anchor=south] at (\xd-6,5) {DRAM \val{edram}};
+\end{tikzpicture}\par}
+\vspace{10pt}
+\sheetsec{Bandwidth per tier (H100 server, GB/s each way)}
+{\centering
+\begin{tikzpicture}[sheet]
+  \draw[dim] (10,0) -- (240,0);
+  \foreach \tk/\tl in {1/1,10/10,100/100,1000/1000,10000/10000}{
+    \pgfmathsetmacro\x{10+log10(\tk)*57.5}
+    \draw[dim] (\x,0) -- (\x,-2.5);
+    \node[small, anchor=north] at (\x,-4) {\tl};}
+  \pgfmathsetmacro\xh{10+log10(\val{hbw}*1000)*57.5}
+  \pgfmathsetmacro\xn{10+log10(\val{lnvlink})*57.5}
+  \pgfmathsetmacro\xp{10+log10(\val{lpcie})*57.5}
+  \pgfmathsetmacro\xv{10+log10(\val{lnvme})*57.5}
+  \foreach \xx in {\xn,\xp,\xv}{\filldraw[fill=accentsoft, draw=accent, line width=0.5pt] (\xx,0) circle (2.4pt);}
+  \filldraw[fill=accent, draw=accent] (\xh,0) circle (2.4pt);
+  \node[note, anchor=south] at (\xv,5) {NVMe \val{lnvme}};
+  \node[note, anchor=south] at (\xp,5) {PCIe \val{lpcie}};
+  \node[note, anchor=south] at (\xn,5) {NVLink \val{lnvlink}};
+  \node[note, anchor=south] at (\xh-4,5) {HBM \val{lhbm}};
 \end{tikzpicture}\par}
 \end{rightcol}
 
@@ -115,7 +136,7 @@ Job speedup far below the kernel gain & Amdahl: fix the unaccelerated work\\
 \begin{answers}
 \ans{Finish}{\val{gops} G $\div$ \val{yweightgb} GB $=$ \val{yintensity} op/byte, far below \val{ridgeeight}: bandwidth
   bound. Floor \val{yweightgb} GB $\div$ \val{hbw} TB/s $=$ \val{yfloorms} ms, a floor \val{yspeedup}$\times$ lower
-  (\val{ycut}\% less time), all from halved bytes; the doubled INT8 peak is never reached.}
+  (\val{ycut}\% less time), all from halved bytes; the INT8 peak is never reached.}
 \ans{1}{One over (\val{qoneserialfrac} $+$ \val{qonepg}) $=$ \val{qonespeed}$\times$; ceiling one over \val{qoneserialfrac}
   $=$ \val{qoneceiling}$\times$. Fix the data loading first: it caps the job.}
 \ans{2}{\val{edram} $\div$ \val{esram} $=$ \val{dramoversram} SRAM reads. Streaming: \val{qtwonaiveacc} $\times$ \val{edram} $+$
@@ -132,12 +153,12 @@ Job speedup far below the kernel gain & Amdahl: fix the unaccelerated work\\
 \begin{leftcol}
 \sheetsec{Worked example}
 \begin{practicebox}\boxtitle{Is batch-one decoding limited by math or memory?}
-GPT-2 XL (\val{gparams} B parameters, \val{gweightgb} GB at FP16) generates one token at a time on an H100
+GPT-2 XL (\val{gparams} billion parameters, \val{gweightgb} GB at FP16) generates one token at a time on an H100
 (\val{hpeaksixteen} TFLOP/s FP16, \val{hbw} TB/s).
 \begin{steps}
 \item Work and bytes: 2 per parameter $=$ \val{gops} GFLOP on \val{gweightgb} GB, so
-  $\ArithmeticIntensity =$ \res{\val{gintensity} FLOP/byte}.
-\item Ridge: \val{hpeaksixteen} $\div$ \val{hbw} $=$ \res{\val{ridgesixteen} FLOP/byte}, far above: bandwidth bound.
+  $\ArithmeticIntensity =$ \res{\val{gintensity} op/byte}.
+\item Ridge: \val{hpeaksixteen} $\div$ \val{hbw} $=$ \res{\val{ridgesixteen} op/byte}, far above: bandwidth bound.
 \item Ceiling: \val{hbw} TB/s $\times$ \val{gintensity} $=$ \val{gattain} TFLOP/s, \res{\val{gshare}\% of peak}.
   Floor: \val{gweightgb} GB $\div$ \val{hbw} TB/s $=$ \res{\val{gfloorms} ms per token}: at most about \val{gtokens} tokens/s.
 \end{steps}
@@ -162,10 +183,10 @@ Same model and H100, weights in INT8 (1 byte each), run on the INT8 path (\val{h
 \mistake{``For batch-one serving, buy the bigger peak.''}%
   {At batch one the ceiling is bandwidth. An A100 has \val{peakratio}$\times$ a T4's peak (\val{apeak} vs.\
    \val{tpeak} TFLOP/s) but \val{bwratio}$\times$ its bandwidth (\val{abw} vs.\ \val{tbw} GB/s) at
-   \val{costratio}$\times$ the price: about the same bandwidth-bound throughput per dollar.}{}
-\mistake{``Pruning half the weights to zero halves the time.''}%
-  {Scattered zeros need index lookups and scattered reads, and can run slower than dense. Only the 2:4 pattern
-   on a sparse path skips the work.}{}
+   \val{costratio}$\times$ the price: about equal bandwidth-bound throughput per dollar.}{}
+\mistake{``Weights that spill to host memory only cost capacity.''}%
+  {If all \val{gweightgb} GB cross PCIe each token, the transfer floor is \val{gweightgb} GB $\div$ \val{lpcie} GB/s $=$
+   \val{offms} ms, not \val{gfloorms} ms from HBM: \val{offratio}$\times$. Keep weights on the device.}{}
 
 \vspace{2pt}
 \sheetsec{Check yourself}
@@ -173,7 +194,7 @@ Same model and H100, weights in INT8 (1 byte each), run on the INT8 path (\val{h
 \item \assumed{} \val{qonefrac}\% of a training step's baseline time runs \val{qonegain}$\times$ faster on a new
   accelerator; \val{qoneserial}\% is data loading. Speedup? Ceiling? What would you fix first?
 \item How many 8 KB SRAM reads cost as much energy as one DRAM access? \assumed{} a MAC that streams 3 operands in and
-  1 out of DRAM, against a \val{qtwowidth}-wide systolic array that fetches 2 operands per \val{qtwowidth} MACs.
+  1 out of DRAM (one 32-bit access each), against a \val{qtwowidth}-wide systolic array that fetches 2 operands per \val{qtwowidth} MACs.
   Charge \val{qtwomac} pJ of arithmetic per MAC. Energy per MAC for each?
 \item On the H100 at FP16, place LayerNorm (\val{qthreeln} op/byte), ResNet-50's classifier head at batch
   \val{qthreebatch} (\val{qthreehead}) and the stage-3 convolution (\val{qthreeconv}). Ceiling and lever for each?

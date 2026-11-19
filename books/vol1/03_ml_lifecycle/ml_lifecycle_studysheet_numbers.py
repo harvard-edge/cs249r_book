@@ -6,6 +6,7 @@ Inputs the sheet chooses for its own questions are marked ASSUMED.
 """
 from pathlib import Path
 
+from mlsysim import load_series
 from mlsysim.engine.scenarios import Scenarios as SC
 
 
@@ -81,6 +82,10 @@ def numbers() -> dict:
              fastruns=g(it.fast_effective_runs), slowfinal=g(it.slow_final), fastfinal=g(it.fast_final),
              ideas=f"{it.ideas_ratio:.1f}", startgap=g(it.slow_start - it.fast_start),
              slowgain=g(it.slow_gain), fastgain=g(it.fast_gain), ceiling=g(it.ceiling), weeks=g(it.window.to("week").magnitude))
+    # Where the hours go (data-scientist-time-allocation cell; CrowdFlower 2016 survey CSV)
+    survey = {r["activity"]: int(r["pct_respondents"])
+              for r in load_series("vol1/03_ml_lifecycle/data/crowdflower_2016_time_survey.csv").entries}
+    n["datawork"] = g(survey["Cleaning and organizing data"] + survey["Collecting datasets"])
     return n
 
 

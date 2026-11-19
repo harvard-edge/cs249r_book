@@ -28,8 +28,8 @@ The model is one stage of the request path, live traffic decides when work arriv
   form; at batch one, compiling beats lower precision.}
 \idea{Replicas start late and can skew.}{Loading, compiling and warmup take seconds, so
   scale-out lags; preprocessing unlike training's silently changes answers.}
-\idea{Language models.}{Prefill sets time to first token; decode rereads all weights per token,
-  so bandwidth sets its pace; the key-value (KV) cache caps concurrency.}
+\idea{Language models.}{Prefill sets time to first token, decode time per output token.
+  Continuous batching refills each step; key-value (KV) memory caps concurrency.}
 \end{ideas}
 
 \vspace{10pt}
@@ -47,7 +47,7 @@ The model is one stage of the request path, live traffic decides when work arriv
   \pgfmathsetmacro\xff{\xe+\val{sfwdfast}*\u}
   \pgfmathsetmacro\xgg{\xff+\val{stop}*\u}
   % eager engine
-  \node[lab, anchor=east] at (\xa-3,31) {eager};
+  \node[lab, anchor=east] at (\xa-3,31) {eager, ms};
   \draw[nbox] (\xa,24) rectangle (\xb,38);
   \draw[nbox] (\xb,24) rectangle (\xe,38);
   \draw[hotbox] (\xe,24) rectangle (\xf,38);
@@ -68,15 +68,35 @@ The model is one stage of the request path, live traffic decides when work arriv
   \node[small, anchor=south] at (\xf,45) {top-5 \val{topfive}};
 \end{tikzpicture}\par}
 \vspace{6pt}
-{\fontsize{8.6}{11}\selectfont Time each stage before optimizing. Idle gaps on the accelerator's timeline point to
-the host; waiting that grows with load points to the queue.\par}
+Idle gaps on the accelerator's timeline point to the host; waiting that grows with load points to the queue.\par
+
+\vspace{12pt}
+\sheetsec{Starting one replica}
+{\centering
+\begin{tikzpicture}[sheet]
+  \pgfmathsetmacro\u{4.8}
+  \pgfmathsetmacro\xa{58}
+  \pgfmathsetmacro\xb{\xa+\val{bstore}*\u+\val{bcuda}*\u}
+  \pgfmathsetmacro\xc{\xb+\val{bbuild}*\u}
+  \pgfmathsetmacro\xd{\xc+\val{btail}*\u}
+  \pgfmathsetmacro\xw{\xa+\val{bwarm}*\u}
+  \node[lab, anchor=east] at (\xa-3,24) {first deploy};
+  \draw[nbox] (\xa,17) rectangle (\xb,31);
+  \draw[hotbox] (\xb,17) rectangle (\xc,31);
+  \draw[nbox] (\xc,17) rectangle (\xd,31);
+  \node[lab, text=white] at ({(\xb+\xc)/2},24) {engine build \val{csbuild} s};
+  \node[note, anchor=west] at (\xd+3,24) {\val{cscold} s};
+  \node[lab, anchor=east] at (\xa-3,6) {precompiled};
+  \draw[nbox] (\xa,-1) rectangle (\xw,13);
+  \node[note, anchor=west] at (\xw+3,6) {\val{cswarm} s};
+\end{tikzpicture}\par}
 \end{leftcol}%
 \begin{rightcol}
 \fcard{Queueing: utilization against the tail (M/M/1)}%
-  {\RequestTimeInSystem = \frac{\text{service time}}{1-\ServingUtilization},\qquad
+  {\RequestTimeInSystem = \frac{\BatchServiceTime(1)}{1-\ServingUtilization},\qquad
    \TailRequestLatency \approx \val{tailfactor}\,\RequestTimeInSystem}%
-  {Mean time in system and its p99 (the time 99\% of requests beat), with utilization $\ServingUtilization = \ArrivalRate/\ServiceRate$ (arrival rate over service rate).}%
-  {To size: $\ServingUtilization \le 1 - \val{tailfactor}\times\text{service time}/\text{p99 budget}$; servers
+  {Mean time in system and its p99 (the time 99\% of requests beat), with batch-one service time $\BatchServiceTime(1)$ and utilization $\ServingUtilization = \ArrivalRate/\ServiceRate$ (arrival rate over service rate).}%
+  {To size: $\ServingUtilization \le 1 - \val{tailfactor}\,\BatchServiceTime(1)/\text{p99 budget}$; servers
    $=\ArrivalRate/(\ServingUtilization\,\ServiceRate)$, round up; apply headroom, round up again. Little's law, $\RequestConcurrency =
    \ArrivalRate\,\RequestTimeInSystem$, counts requests in flight. Assumes Poisson arrivals.}%
   {\begin{tikzpicture}[sheet]
@@ -110,9 +130,9 @@ Batched capacity & $\EffectiveServiceRate(\BatchSize) = \BatchSize/\BatchService
   $\ServingUtilization = \ArrivalRate/\EffectiveServiceRate(\BatchSize)$ must stay below one\\
 Batched latency & mean $\BatchingWindow/2 + \BatchServiceTime(\BatchSize)$ (window $\BatchingWindow$, full
   batches, idle worker); the tail waits the full $\BatchingWindow$\\
-Decode floor & $\DecodeTokenTimeFloor \approx \DataVolume/\AcceleratorMemoryBandwidth$,: weight bytes over memory bandwidth\\
+Decode floor & $\DecodeTokenTimeFloor \approx \DataVolume/\AcceleratorMemoryBandwidth$: weight bytes over memory bandwidth\\
 KV cache per token & $2\times$ layers $\times$ KV heads $\times$ head width $\times$ bytes per value;
-  conversations $\le$ (memory $-$ weights) $\div$ KV per conversation; one GiB $=$ \val{gibgb} GB\\
+  conversations $\le$ (memory $-$ weights) $\div$ KV per conversation\\
 Cost per inference & (replicas $\times$ price per hour) $\div$ requests served per hour within the SLO\\
 \end{sheettable}
 \end{rightcol}
@@ -127,13 +147,12 @@ Cost per inference & (replicas $\times$ price per hour) $\div$ requests served p
   Mean latency \val{qhalf} $+$ \val{qtsixteen} $=$ \val{qlat} ms; in flight \val{qrate} $\times$ \val{qlat} ms $\approx$
   \val{qinflight}.}
 \columnbreak
-\ans{2}{\val{lpertok} B $\times$ \val{lctx} $=$ \val{lconv} GB each; \val{lcapgib} GiB $=$ \val{lcapgb} GB, minus
-  \val{lweights} leaves \val{lfree} GB: about \val{lconvs}. Floor \val{lweights} GB $\div$ \val{hbw} TB/s $\approx$
-  \val{lfloor} ms (\val{ltokrate} tokens/s). Stutter is decode: bandwidth, not compute.}
-\ans{3}{Per-stage timestamps or a timeline: accelerator gaps while the host decodes mean host-bound; wait before
-  service that grows with load means queueing.}
+\ans{2}{\val{lpertok} B $\times$ \val{lctx} $=$ \val{lconv} GB each; \val{lcapgb} $-$ \val{lweights} leaves
+  \val{lfree} GB: about \val{lconvs}. Floor \val{lweights} GB $\div$ \val{hbw} TB/s $\approx$
+  \val{lfloor} ms (\val{ltokrate} tokens/s). Stutter is decode: at batch one more compute cannot lower a bandwidth floor. Continuous batching: waiting requests fill freed slots at each step; paging keeps KV memory unfragmented.}
+\ans{3}{A: host-bound (decode and copy; the gap does not depend on load). B: queueing (wait grows as utilization nears one).}
 \ans{4}{T4: \val{cload}/\val{ct4use} $=$ \val{ct4ratio} $\to$ \val{ct4n}, \$\val{ct4hour}/h, \$\val{ct4million} per
-  million. H100: \val{chbusy}\% busy, \$\val{chmillion} per million (\$\val{chsat} only if full).}
+  million. H100: \val{chbusy}\% busy, \$\val{chmillion} per million (\$\val{chsat} only if full). T4s win at this load.}
 \end{answers}
 
 \begin{leftcol}
@@ -154,7 +173,7 @@ accelerator, \val{wservice} ms batch-one service time on one H100, \val{wheadpct
 \vspace{12pt}
 \sheetsec{Your turn: finish it}
 \begin{practicebox}\boxtitle{What does a faster engine save?}
-Same plan, but a graph executor removes Python dispatch: \val{tservice} ms per request.\par\vspace{4pt}
+Same plan, but TorchScript removes Python dispatch: \val{tservice} ms per request.\par\vspace{4pt}
 \textbf{Given:} safe utilization $1 - \val{tailfactor}\times\val{tservice}/\val{wbudget} = \val{trho}$.\par
 \textbf{You:} find the required rate, the GPU count with \val{wheadpct}\% headroom, and why the fleet shrinks by
 more than the service time did.
@@ -163,15 +182,14 @@ more than the service time did.
 \begin{rightcol}
 \sheetsec{Common mistakes}
 \mistake{``Make the model \val{speedup}$\times$ faster and requests get \val{speedup}$\times$ faster.''}%
-  {Decoding, resizing, normalizing and copying (\val{hostshare}\% of the \val{total} ms request) are untouched: the request falls
-   to \val{totalfast} ms, \val{amdahl}$\times$ faster.}{}
-\mistake{``Run the accelerators at \val{utilhigh}\% to save money.''}%
-  {Mean time in system goes from \val{meanlow}$\times$ (at \val{utillow}\%) to \val{meanhigh}$\times$ the service time;
-   with \val{wservice} ms service, p99 goes from \val{ptailow} ms to \val{ptailhigh} ms.}{}
+  {Decode, resize, normalize and copy (\val{hostshare}\% of the \val{total} ms request) are untouched: \val{totalfast} ms,
+   only \val{amdahl}$\times$ faster.}{}
+\mistake{``Cold start only matters for the first request.''}%
+  {A first-deploy replica is dark for \val{cscold} s, \val{csbuild} of them building its engine, while old replicas
+   carry the spike. Precompiled, on local disk: \val{cswarm} s.}{}
 \mistake{``INT8 makes batch-one serving \val{fourx}$\times$ faster.''}%
-  {Compiling the eager model (\val{rteager} ms) to one captured graph gives \val{rtfp32} ms, \val{rtcompile}$\times$;
-   INT8 then adds \val{rtprecision}$\times$ (\val{rtint8} ms), because a per-kernel floor dominates one image.
-   Precision pays at large batch.}{}
+  {TensorRT compiles the eager model (\val{rteager} ms) into one fused graph: \val{rtfp32} ms, \val{rtcompile}$\times$;
+   INT8 then adds \val{rtprecision}$\times$ (\val{rtint8} ms), because a per-kernel floor dominates one image.}{}
 
 
 \vspace{2pt}
@@ -179,13 +197,13 @@ more than the service time did.
 \begin{qs}
 \item \assumed{} \val{qrate} requests/s reach one ResNet-50 replica with an \val{qwin} ms batching window and
   $\BatchServiceTime(\BatchSize) = \val{tfixed} + \val{tper}\,\BatchSize$ ms. Which batch cap (\val{bone}, \val{beight} or \val{bsixteen}) keeps
-  utilization at or below \val{qmax}? With full batches and an idle worker, what is its mean latency, and how many requests are in flight?
+  utilization at or below \val{qmax}? What is its mean latency, and how many requests are in flight?
 \item Llama 3 8B (\val{llayers} layers, \val{lkvheads} KV heads of width \val{lheaddim}, 16-bit) holds
-  \val{lweights} GB of weights on an \val{lcapgib} GiB H100 (\val{hbw} TB/s). How many \val{lctx}-token
+  \val{lweights} GB of weights on an \val{lcapgib} GiB (\val{lcapgb} GB) H100 (\val{hbw} TB/s). How many \val{lctx}-token
   conversations fit? What is the batch-one floor per output token? A fast first token, then a stutter: which phase, and does
-  more compute help?
-\item A node misses its p99 while the accelerator is busy only a third of the time. What observation separates a
-  slow host path from queueing?
+  more compute help? What keeps one weight read shared as conversations end at different times?
+\item Two nodes miss their p99. Trace A: after each request arrives, the host spends \val{hostpre} ms preparing it before the
+  first kernel, at any load. Trace B: enqueue-to-dispatch time rises with request rate. Which cause does each point to?
 \item \assumed{} \val{cload} images/s, kept at or below \val{cutil}\% utilization. T4s (\$\val{ct4price}/h,
   \val{ct4rate}/s each) or one H100 (\$\val{chprice}/h, \val{chrate}/s)? Cost per million images?
 \end{qs}

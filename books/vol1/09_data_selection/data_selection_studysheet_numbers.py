@@ -66,22 +66,22 @@ def numbers() -> dict:
     assert abs(cs.full_time.to("min").magnitude - full_min) < 1
     assert abs(cs.rescoring_saving_fraction - (1 - dyn_min / full_min)) < 0.01
 
-    # ---- Your turn: half-size coreset, 90 epochs, same epoch time (chapter: ResNetEpochOnH100)
-    E2, keep2 = ep.epochs, ep.keep_fraction
+    # ---- Your turn: same 100-epoch run, only the fraction kept changes to half (chapter: ResNetEpochOnH100 keep)
+    E2, keep2 = E, ep.keep_fraction
     t_sub2 = t_ep * keep2
     full2 = E2 * t_ep
     static2 = E2 * t_sub2 + t_score
     dyn2 = E2 * (t_sub2 + t_score)
     n.update(yepochs=c(E2), ykeep=f"{keep2 * 100:.0f}", ysubep=c(t_sub2),
              yfull=c(full2), ystatic=c(static2), ystaticsave=f"{(1 - static2 / full2) * 100:.1f}",
-             ydyn=c(dyn2), ydynsave=f"{(1 - dyn2 / full2) * 100:.0f}",
+             ydyn=c(dyn2), ydynsave=f"{(1 - dyn2 / full2) * 100:.1f}",
              yrescper=f"{t_score / t_sub2:.2f}")
-    assert abs(ep.saving_fraction() - (1 - static2 / full2)) < 0.001
 
-    # ---- Mistake 3: ten times the data for a few points (chapter: FpFallacyCalc / TenfoldDataFourPoints)
-    ten = Scenarios.TenfoldDataFourPoints
-    n.update(m3scale=c(ten.scale), m3gain=c(ten.accuracy_gain),
-             m3base=f"{ten.base_examples.magnitude / 1e6:.0f}M", m3big=f"{ten.scaled_examples.magnitude / 1e6:.0f}M")
+    # ---- Mistake 3: synthetic-only training, accuracy over five recursive generations
+    # (chapter: FpFallacyCalc.synthetic_gen1_acc_pct / synthetic_gen5_acc_pct; illustrative chapter scenario values,
+    # not in mlsysim, copied from the chapter's LEGO cell)
+    gen1, gen5, gens = 95.0, 78.0, 5
+    n.update(m3first=c(gen1), m3last=c(gen5), m3gens=c(gens), m3drop=c(gen1 - gen5))
 
     # ---- Q1: ASSUMED 3B-parameter model, 30B unique tokens, 1.8e21 FLOPs budget
     p, d_unique, budget = 3e9, 30e9, 1.8e21
@@ -112,10 +112,10 @@ def numbers() -> dict:
     n.update(q3pool=c(pool), q3share=f"{rare_share * 100:.1f}", q3keep=c(keep3 * 100), q3floor=c(floor),
              q3rare=c(rare), q3budget=c(budget3), q3exp=c(expected), q3rest=c(budget3 - floor))
 
-    # ---- Q4: ASSUMED dedup pipeline: 40K build + 8K compute, 6K saved per run
+    # ---- Q4: ASSUMED dedup pipeline: $40,000 build + $8,000 compute, $6,000 saved per run
     build, once, save = 40_000, 8_000, 6_000
     inv = build + once
-    n.update(q4build=c(build / 1e3), q4once=c(once / 1e3), q4inv=c(inv / 1e3), q4save=c(save / 1e3),
+    n.update(q4build=c(build), q4once=c(once), q4inv=c(inv), q4save=c(save),
              q4even=c(inv / save), q4roione=f"{(save - inv) / inv * 100:.1f}",
              q4n=c(20), q4roin=c((20 * save - inv) / inv * 100))
     return n

@@ -79,11 +79,19 @@ def numbers() -> dict:
              tgpus=c(tgpus), theadraw=f"{tgpus * head:.1f}", tfinal=c(tfinal),
              tfaster=f"{svc / ts:.1f}", tfewer=f"{final / tfinal:.1f}")
 
-    # ---- Mistake: run hot. M/M/1 multiples at 50 % and 90 % with the 3.53 ms service (UtilizationLatency)
-    lo, hi = 0.5, 0.9
-    n.update(utillow=f"{lo * 100:.0f}", utilhigh=f"{hi * 100:.0f}", meanlow=f"{1 / (1 - lo):.0f}",
-             meanhigh=f"{1 / (1 - hi):.0f}", ptailow=f"{factor * svc / (1 - lo):.1f}",
-             ptailhigh=f"{factor * svc / (1 - hi):.0f}")
+    # ---- Mistake: cold start (ColdStartCalc, Scenarios.ResNet50ReplicaStartup; FallacyColdstartCalc's point)
+    boot = Scenarios.ResNet50ReplicaStartup
+    cold = boot.cold_total.to("s").magnitude               # 35 s first deploy
+    warm = boot.warm_total.to("s").magnitude               # 1.5 s precompiled, local SSD
+    build = boot.phases["TensorRT engine build"].to("s").magnitude
+    assert abs(sum(boot.phases[k].to("s").magnitude for k in boot.cold_path) - cold) < 1e-9
+    ph = {k: v.to("s").magnitude for k, v in boot.phases.items()}
+    # front bars, drawn to scale: cold path = object-store weights, CUDA context, engine build, warmup + runtime
+    n.update(bstore=f"{ph['weights from object storage']:.4f}", bcuda=f"{ph['CUDA context']:.4f}",
+             bbuild=f"{ph['TensorRT engine build']:.4f}", btail=f"{ph['warmup'] + ph['runtime']:.4f}", bwarm=f"{warm:.4f}")
+    n.update(cscold=f"{cold:.0f}", cswarm=f"{warm:.1f}", csbuild=f"{build:.0f}", csratio=f"{round(cold) / round(warm, 1):.0f}")
+    # host stages before the forward pass (Q3's idle gap)
+    n.update(hostpre=f"{st['JPEG decode'] + st['resize'] + st['normalize'] + st['copy to GPU']:.1f}")
 
     # ---- Mistake: precision at batch one (RuntimeComparisonCalc)
     eager = ms(prof.eager_fp16(1))

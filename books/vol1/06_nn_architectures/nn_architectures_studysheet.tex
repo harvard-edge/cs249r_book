@@ -18,21 +18,18 @@ how many multiply-accumulates to run, and how many bytes to move, which decides 
 \begin{leftcol}
 \sheetsec{Key ideas}
 \begin{ideas}
-\idea{Inductive bias.}{Each family assumes a structure. When the data has it, the model needs fewer
-  weights and examples; when it does not, the assumption gets in the way.}
-\idea{Count three things.}{The weights it stores, the multiply-accumulates (MACs) it runs per
-  example, and the bytes it moves or keeps resident: its cost signature.}
-\idea{Reuse sets the bottleneck.}{A filter reused across a whole image keeps the math busy; a weight
-  read for one example leaves the math waiting on memory. Batching adds reuse. Dense, convolution and
-  attention layers run as matrix multiplies; embedding gathers, residual adds and normalization do
-  little math per byte.}
-\idea{One transformer, two regimes.}{Prefill reads the prompt at once and reuses every weight;
-  decode re-reads every weight, and a growing key-value (KV) cache, for each new token.}
-\idea{Two limits that are not intensity.}{An RNN takes its steps in order, one per token. A
-  recommender's tables must fit before anything runs: shrink them, move them to host memory, or
-  split them across accelerators.}
-\idea{Depth needs support.}{Skip connections keep gradients alive and normalization keeps
-  activations in range. Both cost memory traffic, not much math.}
+\idea{Inductive bias.}{Each family assumes a structure; data that has it needs fewer weights and
+  examples, and data that lacks it fights the model.}
+\idea{Count three things.}{The weights stored, the MACs (multiply-accumulates) run per
+  example, and the bytes moved or kept resident.}
+\idea{Reuse sets the bottleneck.}{A filter reused across an image keeps the math busy; a weight read
+  for one example leaves it waiting on memory. Batching adds reuse.}
+\idea{One transformer, two regimes.}{Prefill reuses each weight across the prompt; decode re-reads
+  every weight, and a growing key-value (KV) cache, per token.}
+\idea{Two limits that are not intensity.}{An RNN's steps run in order. A recommender's tables must
+  fit first: shrink them, move them to host memory, or split them.}
+\idea{Depth needs support.}{Skip connections keep gradients alive; normalization keeps activations
+  in range. Both cost more memory traffic than math.}
 \end{ideas}
 
 
@@ -54,15 +51,15 @@ DLRM & IDs become learned vectors & memory capacity\\
 \thead{Block} & \thead{Weights} & \thead{MACs} & \thead{Writes or keeps}\\ \midrule
 Dense & $\LayerInputWidth\LayerOutputWidth$ & $\LayerInputWidth\LayerOutputWidth$ & $\LayerOutputWidth$ outputs\\
 Convolution & $\KernelSize^2\InputChannelCount\OutputChannelCount$ & $\FeatureMapHeight\FeatureMapWidth\,\times$ weights & $\FeatureMapHeight\FeatureMapWidth\OutputChannelCount$ outputs\\
+Depthwise separable & $\KernelSize^2\InputChannelCount{+}\InputChannelCount\OutputChannelCount$ & $\FeatureMapHeight\FeatureMapWidth\,\times$ weights & $\FeatureMapHeight\FeatureMapWidth\OutputChannelCount$ outputs\\
 RNN step & $\HiddenDimension^2{+}\HiddenDimension\LayerInputWidth$ & same, $\SequenceLength$ steps in order & state of $\HiddenDimension$\\
-Transformer block & $12\HiddenDimension^2$ & $12\SequenceLength\HiddenDimension^2 + 2\SequenceLength^2\HiddenDimension$ & KV cache $2\HiddenDimension$ per token\\
+Transformer block & $12\HiddenDimension^2$ & $12\SequenceLength\HiddenDimension^2 + 2\SequenceLength^2\HiddenDimension$ & KV cache $2\HiddenDimension$ per token, per block\\
 Embedding & rows $\times$ width & almost none & whole table resident\\
 \end{sheettable}
 \vspace{3pt}
-{\fontsize{8.4}{10.4}\selectfont\color{muted}Transformer row: feed-forward width $4\HiddenDimension$; $2\SequenceLength^2\HiddenDimension$
-is the attention scores and weighted values. One MAC is 2 FLOPs. Symbols: widths $\LayerInputWidth, \LayerOutputWidth$;
-kernel $\KernelSize$; channels $\InputChannelCount, \OutputChannelCount$; output $\FeatureMapHeight{\times}\FeatureMapWidth$;
-tokens $\SequenceLength$; model width $\HiddenDimension$ (heads $\times$ head width).\par}
+{\fontsize{8.4}{10.4}\selectfont\color{muted}Widths $\LayerInputWidth, \LayerOutputWidth$; kernel $\KernelSize$; channels
+$\InputChannelCount, \OutputChannelCount$; output $\FeatureMapHeight{\times}\FeatureMapWidth$; tokens $\SequenceLength$; hidden width
+$\HiddenDimension$ (transformer: heads $\times$ head width), feed-forward $4\HiddenDimension$. Counts are values, not bytes; one MAC is 2 FLOPs.\par}
 
 \vspace{10pt}
 \fcard{Arithmetic intensity against balance}%
@@ -89,7 +86,7 @@ tokens $\SequenceLength$; model width $\HiddenDimension$ (heads $\times$ head wi
      \node[note, anchor=south west] at (\xr-1,5) {ResNet-50 \val{iresnet}};
    \end{tikzpicture}}
 \vspace{12pt}
-\sheetsec{When the context grows}
+\sheetsec{When the context doubles}
 {\centering
 \begin{tikzpicture}[sheet]
   \pgfmathsetmacro\u{24}
@@ -98,9 +95,6 @@ tokens $\SequenceLength$; model width $\HiddenDimension$ (heads $\times$ head wi
     \draw[\sty] (74,\y) rectangle ({74+\v*\u},\y+14);
     \node[note, anchor=west] at ({78+\v*\u},\y+7) {\v$\times$, \note};}
 \end{tikzpicture}\par}
-\vspace{4pt}
-{\centering\fontsize{8.6}{11}\selectfont Context $\times\,k$: weights $\times 1$, KV cache $\times\,k$, attention scores $\times\,k^2$
-(here $k = \val{dgrow}$).\par}
 \end{rightcol}
 
 % ===================================================================== BACK
@@ -108,19 +102,20 @@ tokens $\SequenceLength$; model width $\HiddenDimension$ (heads $\times$ head wi
 \begin{answers}
 \ans{Finish}{\val{yflop} GFLOP $\div$ \val{ymb} MB $=$ \val{yi} FLOP/byte, below \val{ybal}: memory still sets
   the time (\val{ytmem} $\mu$s vs.\ \val{ytcmp} $\mu$s, ideal). A batch of about \val{ybal} reaches the
-  balance; one-token decoding has a batch of one.}
-\ans{1}{Photos have local structure. ResNet-50: \val{q1rg} $\div$ \val{q1gops} $\to$ \val{q1rt} ms, too slow;
-  MobileNetV2: \val{q1mt} ms, fits. Both fit in memory; time decides.}
+  balance; a lone decoding request is batch one.}
+\ans{1}{Photos have local structure. ResNet-50: \val{q1rg} $\div$ \val{q1gops} $\to$ at least \val{q1rt} ms even at
+  peak: ruled out. MobileNetV2: at least \val{q1mt} ms, so it fits only if it sustains \val{q1share}\% of peak;
+  FLOPs count work, not time: measure it. Both weight sets fit.}
 \ans{2}{Weights \val{q2w} (\val{q2wkb} KB); MACs \val{q2mac}; outputs \val{q2act} (\val{q2actmb} MB),
   \val{q2ratio}$\times$ the weights: feature maps, not filters, fill its memory.}
 \columnbreak
-\ans{3}{Scores $\times$\val{q3score} (they grow with the square of the context), cache $\times$\val{q3kv}
+\ans{3}{Scores $\times$\val{q3score} (square of the growth), cache $\times$\val{q3kv}
   (one entry per token), weights unchanged. Keys and values for \val{kvlayers} layers of width \val{kvwidth}, two bytes each, take \val{kvpertokbytes}
   bytes per token; at \val{q3tok}
   tokens, \val{q3gb} GB per request.}
-\ans{4}{\val{q4rows} $\times$ \val{q4dim} $\times$ \val{q4bytes} bytes $=$ \val{q4gb} GB $>$ \val{q4capgb} GB
-  (\val{q4cap} GiB): no. 8-bit values make it \val{q4int8} GB, which fits; else host memory or several
-  accelerators.}
+\ans{4}{\val{q4rows} $\times$ \val{q4dim} $\times$ \val{q4bytes} bytes $=$ \val{q4gb} GB $>$ \val{q4capgb} GB: no.
+  Any one: 8-bit values (\val{q4int8} GB, fits; risks accuracy), host memory (slower lookups), or
+  split across accelerators (cross-device lookups).}
 \end{answers}
 
 \begin{leftcol}
@@ -155,12 +150,11 @@ data-center accelerator with \val{apeak} TFLOP/s and \val{abw} GB/s.\par\vspace{
 
 \vspace{12pt}
 \sheetsec{Your turn: finish it}
-\begin{practicebox}\boxtitle{Does batching rescue a feed-forward layer?}
-\assumed{} a \val{ydin}$\,\to\,$\val{ydout} feed-forward layer, 16-bit weights, a batch of \val{ybatch},
-on the same accelerator.\par\vspace{4pt}
+\begin{practicebox}\boxtitle{Does batching rescue the dense layer?}
+\assumed{} the same layer and accelerator, now with a batch of \val{ybatch}.\par\vspace{4pt}
 \textbf{Given:} \val{yw} weights $=$ \val{ymb} MB, read once per batch; work
 $=$ 2 $\times$ \val{yw} $\times$ \val{ybatch} $=$ \val{yflop} GFLOP.\par
-\textbf{You:} find the intensity and which term sets the time, the batch that would reach the balance,
+\textbf{You:} find the intensity, which term sets the time, the batch that reaches the balance,
 and why one-token decoding is the worst case.
 \end{practicebox}
 \end{leftcol}%
@@ -171,7 +165,7 @@ and why one-token decoding is the worst case.
    engine, so on a data-center accelerator it gains far less.}{}
 \mistake{``A transformer has one bottleneck.''}%
   {Prefill and training reuse each weight across many tokens and are limited by compute; batch-one
-   decoding re-reads every weight per token and is limited by bandwidth. Measure each regime.}{}
+   decoding re-reads every weight per token and is limited by bandwidth.}{}
 \mistake{``Attention's quadratic cost dominates at any length.''}%
   {Per block, projections and feed-forward layers cost $12\SequenceLength\HiddenDimension^2$ MACs and
    attention $2\SequenceLength^2\HiddenDimension$. Attention wins only past $\SequenceLength = 6\HiddenDimension$:
@@ -180,17 +174,17 @@ and why one-token decoding is the worst case.
 \vspace{2pt}
 \sheetsec{Check yourself}
 \begin{qs}
-\item \assumed{} a camera trap classifies photos on a board that runs \val{q1gops} GOPS in 8-bit, with
+\item \assumed{} a camera trap classifies photos on a board that peaks at \val{q1gops} GOPS in 8-bit, with
   \val{q1ram} MB of memory and \val{q1ms} ms per photo. Why a CNN? Which fits: ResNet-50 (\val{q1rg} GFLOP,
   \val{q1rmb} MB in 8-bit) or MobileNetV2 (\val{q1mg} GFLOP, \val{q1mmb} MB)?
 \item \assumed{} a $\val{q2k}{\times}\val{q2k}$ convolution from \val{q2cin} to \val{q2cout} channels
   with a $\val{q2hw}{\times}\val{q2hw}$ output, 16-bit values. Count its weights, MACs and output
   values. Which takes more memory?
 \item A chat model (\val{kvweights} GB, \val{kvlayers} layers, width \val{kvwidth}, 16-bit) grows its context
-  from \val{q3s0} to \val{q3s1} tokens. How do attention scores, the KV cache and the weights grow? How
+  from \val{q3s0} to \val{q3s1} tokens. How do full-prompt attention scores, the KV cache and the weights grow? How
   big is one request's cache at \val{q3s1}?
 \item \assumed{} an embedding table of \val{q4rows} rows $\times$ \val{q4dim} 32-bit values. Does it fit
-  one \val{q4cap} GiB accelerator? If not, which way out would you try first?
+  one \val{q4cap} GiB (\val{q4capgb} GB) accelerator? If not, name one way out and what it costs.
 \end{qs}
 \end{rightcol}
 \end{document}

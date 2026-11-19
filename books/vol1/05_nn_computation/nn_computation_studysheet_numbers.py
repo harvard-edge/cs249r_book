@@ -51,11 +51,33 @@ def numbers() -> dict:
     i1 = net.variant(batch_size=1).result.intensity.to("flop/byte").magnitude
     i32 = r.intensity.to("flop/byte").magnitude
     n.update(i1=f"{i1:.1f}", i32=f"{i32:.0f}")
+    # Mistake 3: the same traffic model in the sheet's terms (intensity card): work = B x O with
+    # O = 2 x MACs per example; traffic = parameters once + B x (input + output + 2 x hidden) values.
+    # Printed work and traffic are rounded to whole KFLOP / KB; the printed intensities are
+    # recomputed from those rounded values and checked against mlsysim's (which adds bias/ReLU FLOPs).
+    hidden = sum(widths[1:-1])
+    for b, key in ((1, "1"), (batch, "32")):
+        work_m = round(2 * r.macs_per_example * b / 1e6, 2 if b == 1 else 1)   # MFLOP, as printed
+        traffic_kb = round(bpv * (r.parameters + b * (widths[0] + widths[-1] + 2 * hidden)) / 1e3)
+        ref = net.variant(batch_size=b).result
+        assert abs(traffic_kb - ref.traffic_bytes.to("byte").magnitude / 1e3) < 0.5
+        printed = float(n["i" + key])
+        ratio = work_m * 1e3 / traffic_kb
+        assert abs(ratio - printed) < 0.06 if key == "1" else round(ratio) == int(printed)
+        n.update({f"work{key}": f"{work_m:.2f}" if b == 1 else f"{work_m:.1f}", f"traffic{key}": c(traffic_kb)})
+    # the printed batch-32 work reproduces from the printed batch-1 work x 32
+    assert round(float(n["work1"]) * batch, 1) == float(n["work32"])
+    n.update(trafficgrow=f"{float(n['traffic32'].replace(',', '')) / float(n['traffic1'].replace(',', '')):.1f}")
 
     # ---- Worked example: training vs inference memory at batch 32 (MnistTrainingMemoryCalc)
     wkb = kb1(r.parameter_bytes.to("byte").magnitude)
-    gkb = kb1(r.gradient_bytes.to("byte").magnitude)
-    okb = kb1(r.optimizer_bytes.to("byte").magnitude)
+    # Gradients match the parameters; Adam keeps two values per parameter (memory card).
+    # Computed from the printed parameter KB so a student's 2 x 437.5 reproduces the sheet,
+    # and checked against mlsysim's unrounded optimizer bytes.
+    gkb = wkb
+    okb = round(2 * wkb, 1)
+    assert abs(gkb - r.gradient_bytes.to("byte").magnitude / 1e3) < 0.1
+    assert abs(okb - r.optimizer_bytes.to("byte").magnitude / 1e3) < 0.1
     act_vals = r.saved_activation_values                    # B x (784+128+64+10)
     akb = kb1(r.saved_activation_bytes.to("byte").magnitude)
     inf_vals = r.inference_activation_values                # B x largest adjacent pair
@@ -127,7 +149,7 @@ def numbers() -> dict:
              q2lok=f"{-math.log(p_ok):.2f}", q2lbad=f"{-math.log(p_bad):.2f}",
              q2uni=f"{ce.uniform_loss:.1f}", q2classes=c(ce.classes),
              q2target="1", q2gtrue=f"{p_bad - 1:.2f}", q2gwrong=f"{p_wrong:.1f}",
-             q2lx=f"{math.log(p_bad) / math.log(p_ok):.0f}")
+             q2lx=f"{round(-math.log(p_bad), 2) / round(-math.log(p_ok), 2):.0f}")   # from the printed losses
 
     # ---- Q3: 20 sigmoid layers (Scenarios.TwentySigmoidLayers)
     sg = Scenarios.TwentySigmoidLayers
