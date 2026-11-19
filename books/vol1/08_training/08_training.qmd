@@ -3,7 +3,7 @@ number-offset: [7]
 quiz: training_quizzes.json
 concepts: training_concepts.yml
 engine: jupyter
-notation-local: [\AcceleratorConsumptionRate, \AccumulatedSyncTime, \AccumulatedUpdateTime, \AccumulationStepCount, \ActivationCheckpointCount, \AdamFirstMoment, \AdamMomentDecayRate, \AdamSecondMoment, \BaseBatchSize, \BaseLearningRate, \BatchBufferMemory, \BatchDataVolume, \BatchFetchTime, \BatchOperations, \BatchProcessingTime, \ClusterNodeCount, \CommunicationTime, \EffectiveStorageThroughput, \FeedForwardOperations, \FullBatchLoss, \HostPower, \HostTransferBandwidth, \InputPipelineRate, \LayerIntermediateStateMemory, \LayerSavedTensorCount, \MicrobatchGradient, \MicrobatchIndex, \MicrobatchPassTime, \MicrobatchSize, \ModelStepOperations, \OptimizerStepTime, \OutputProjectionOperations, \PipelineBufferMemory, \PipelineIterationTime, \PrefetchBufferCount, \PreprocessingServiceTime, \PreprocessingThroughput, \ProcessingBufferCount, \RmspropSquaredGradientAverage, \ScaledBatchSize, \ScaledLearningRate, \StandardNormalCumulativeDistribution, \StorageReadTime, \StorageThroughput, \SystemMemoryBandwidth, \TensorCoreAccumulatorMatrix, \TensorCoreLeftInput, \TensorCoreOutputMatrix, \TensorCoreRightInput, \TokenizationTime, \TrainingThroughput, \TransferBufferCount, \UpdatedSoftmaxRunningMaximum, \WorkerTransformTime]
+notation-local: [\AcceleratorConsumptionRate, \AccumulatedSyncTime, \AccumulatedUpdateTime, \AccumulationStepCount, \ActivationCheckpointCount, \AdamBiasCorrectedFirstMoment, \AdamBiasCorrectedSecondMoment, \AdamFirstMoment, \AdamMomentDecayRate, \AdamSecondMoment, \AttentionOutputAccumulator, \AttentionTileSize, \BaseBatchSize, \BaseLearningRate, \BatchBufferMemory, \BatchDataVolume, \BatchFetchTime, \BatchOperations, \BatchProcessingTime, \CheckpointLayerSet, \ClusterNodeCount, \CommunicationTime, \EffectiveStorageThroughput, \FeedForwardOperations, \FullBatchLoss, \HostPower, \HostTransferBandwidth, \InputPipelineRate, \LayerIntermediateStateMemory, \LayerSavedTensorCount, \MicrobatchGradient, \MicrobatchIndex, \MicrobatchPassTime, \MicrobatchSize, \ModelStepOperations, \OptimizerStepTime, \OutputProjectionOperations, \PipelineBufferMemory, \PipelineIterationTime, \PrefetchBufferCount, \PreprocessingServiceTime, \PreprocessingThroughput, \ProcessingBufferCount, \RmspropSquaredGradientAverage, \ScaledBatchSize, \ScaledLearningRate, \StandardNormalCumulativeDistribution, \StorageReadTime, \StorageThroughput, \SystemMemoryBandwidth, \TensorCoreAccumulatorMatrix, \TensorCoreLeftInput, \TensorCoreOutputMatrix, \TensorCoreRightInput, \TokenizationTime, \TrainingThroughput, \TransferBufferCount, \UpdatedSoftmaxRunningMaximum, \WorkerTransformTime, \ZeroVector]
 ---
 
 # Model Training {#sec-model-training}
@@ -620,15 +620,15 @@ Every forward matrix multiplication in a training step must be followed by two b
 
 [^fn-blas-gemm-acceleration]: **BLAS (basic linear algebra subprograms)**\index{BLAS!training compute hierarchy}: The original BLAS specification standardized reusable Fortran-callable vector operations [@lawson1979]; later BLAS extensions added matrix-vector and matrix-matrix routines, giving the familiar Level 1, Level 2, and Level 3 hierarchy [@dongarra1988]. Training is dominated by Level 3 operations precisely because their high arithmetic intensity, $\mathcal{O}(\SquareGemmDimension)$ FLOP/byte, can sustain high compute utilization. Frameworks commonly dispatch dense matrix multiplication to optimized libraries such as cuBLAS and oneDNN or to compiler-generated kernels.
 
-To see why each linear layer requires three matrix multiplications per step and what tensors it must keep in memory, we write the forward propagation\index{Forward propagation!layer computation} of layer $\ell$ in row-vector form, with one batch example per row:
+To see why each linear layer requires three matrix multiplications per step and what tensors it must keep in memory, we write the forward propagation\index{Forward propagation!layer computation} of layer $\LayerIndex$ in row-vector form, with one batch example per row:
 $$
-\ActivationMatrix^{(\ell)} = \ActivationFunction\left(\ActivationMatrix^{(\ell-1)}\WeightMatrix^{(\ell)} + \BiasVector^{(\ell)}\right)
+\ActivationMatrix^{(\LayerIndex)} = \ActivationFunction\left(\ActivationMatrix^{(\LayerIndex-1)}\WeightMatrix^{(\LayerIndex)} + \BiasVector^{(\LayerIndex)}\right)
 $$
 where:
 
-* $\ActivationMatrix^{(\ell-1)}$ represents the activations from the previous layer (or the input layer for the first layer), with each row being a sample in the batch,
-* $\WeightMatrix^{(\ell)} \in \mathbb{R}^{\LayerWidth_{\ell-1} \times \LayerWidth_\ell}$ is the weight matrix at layer $\ell$, which contains the parameters learned by the network,
-* $\BiasVector^{(\ell)}$ is the bias vector for layer $\ell$,
+* $\ActivationMatrix^{(\LayerIndex-1)}$ represents the activations from the previous layer (or the input layer for the first layer), with each row being a sample in the batch,
+* $\WeightMatrix^{(\LayerIndex)} \in \mathbb{R}^{\LayerWidth_{\LayerIndex-1} \times \LayerWidth_{\LayerIndex}}$ is the weight matrix at layer $\LayerIndex$, which contains the parameters learned by the network,
+* $\BiasVector^{(\LayerIndex)}$ is the bias vector for layer $\LayerIndex$,
 * $\ActivationFunction(\cdot)$ is the activation function applied elementwise (for example, ReLU, sigmoid) to introduce nonlinearity.
 
 #### Matrix operations {#sec-model-training-matrix-operations-1f21}
@@ -1189,12 +1189,12 @@ Optimizer memory, once quantified, fixes what each update must read and write. I
 \begin{algorithm}
 \caption{Adam parameter update (one optimizer step)}
 \begin{algorithmic}
-\Require gradient $\Gradient_t = \nabla\LossFunction(\ModelParameters_t)$; step $t$; rate $\LearningRate$; decays $\beta_1,\beta_2$; constant $\NumericalStabilityConstant$
-\Ensure updated parameter $\theta_{t+1}$; moment buffers $m_t, v_t$ carried to the next step
-\State $m_t \gets \beta_1 m_{t-1} + (1-\beta_1)\, \Gradient_t$ \Comment{first moment (momentum)}
-\State $v_t \gets \beta_2 v_{t-1} + (1-\beta_2)\, \Gradient_t^2$ \Comment{uncentered second moment}
-\State $\hat{m}_t \gets m_t / (1-\beta_1^{t})$; $\hat{v}_t \gets v_t / (1-\beta_2^{t})$ \Comment{bias correction}
-\State $\ModelParameters_{t+1} \gets \ModelParameters_t - \LearningRate\, \hat{m}_t / (\sqrt{\hat{v}_t} + \NumericalStabilityConstant)$ \Comment{parameter update}
+\Require gradient $\LossGradient_{\OptimizerStepIndex} = \nabla\LossFunction(\ModelParameters_{\OptimizerStepIndex})$; step $\OptimizerStepIndex$; rate $\LearningRate$; decays $\AdamMomentDecayRate_1,\AdamMomentDecayRate_2$; constant $\NumericalStabilityConstant$
+\Ensure updated parameter $\ModelParameters_{\OptimizerStepIndex+1}$; moment buffers $\AdamFirstMoment_{\OptimizerStepIndex}, \AdamSecondMoment_{\OptimizerStepIndex}$ carried to the next step
+\State $\AdamFirstMoment_{\OptimizerStepIndex} \gets \AdamMomentDecayRate_1 \AdamFirstMoment_{\OptimizerStepIndex-1} + (1-\AdamMomentDecayRate_1)\, \LossGradient_{\OptimizerStepIndex}$ \Comment{first moment (momentum)}
+\State $\AdamSecondMoment_{\OptimizerStepIndex} \gets \AdamMomentDecayRate_2 \AdamSecondMoment_{\OptimizerStepIndex-1} + (1-\AdamMomentDecayRate_2)\, \LossGradient_{\OptimizerStepIndex}^2$ \Comment{uncentered second moment}
+\State $\AdamBiasCorrectedFirstMoment_{\OptimizerStepIndex} \gets \AdamFirstMoment_{\OptimizerStepIndex} / (1-\AdamMomentDecayRate_1^{\OptimizerStepIndex})$; $\AdamBiasCorrectedSecondMoment_{\OptimizerStepIndex} \gets \AdamSecondMoment_{\OptimizerStepIndex} / (1-\AdamMomentDecayRate_2^{\OptimizerStepIndex})$ \Comment{bias correction}
+\State $\ModelParameters_{\OptimizerStepIndex+1} \gets \ModelParameters_{\OptimizerStepIndex} - \LearningRate\, \AdamBiasCorrectedFirstMoment_{\OptimizerStepIndex} / (\sqrt{\AdamBiasCorrectedSecondMoment_{\OptimizerStepIndex}} + \NumericalStabilityConstant)$ \Comment{parameter update}
 \end{algorithmic}
 \end{algorithm}
 ```
@@ -1526,7 +1526,7 @@ Each remedy in the notebook buys memory with something else, as recomputation sp
 
 #### Memory-computation trade-offs {#sec-model-training-memorycomputation-tradeoffs-411e}
 
-Training systems must balance memory usage\index{Training!memory management} against computational efficiency\index{Memory-computation tradeoff!training systems}. Each forward pass generates values that backward rules may request. For a simplified network model with $\LayerCount$ layers, let $\LayerIntermediateStateMemory$ denote the bytes of saved intermediate state per example at layer $\LayerIndex$, such as the pre-activation values the layer computes before its nonlinearity, and $\ActivationMemory^{(\ell)}$ the bytes of saved activation outputs per example, the values the nonlinearity produces. Under this per-example convention, their storage scales linearly with batch size and is approximated by @eq-activation-memory-per-batch:
+Training systems must balance memory usage\index{Training!memory management} against computational efficiency\index{Memory-computation tradeoff!training systems}. Each forward pass generates values that backward rules may request. For a simplified network model with $\LayerCount$ layers, let $\LayerIntermediateStateMemory$ denote the bytes of saved intermediate state per example at layer $\LayerIndex$, such as the pre-activation values the layer computes before its nonlinearity, and $\ActivationMemory^{(\LayerIndex)}$ the bytes of saved activation outputs per example, the values the nonlinearity produces. Under this per-example convention, their storage scales linearly with batch size and is approximated by @eq-activation-memory-per-batch:
 
 $$ \ActivationMemory = \BatchSize \times \sum_{\LayerIndex=1}^{\LayerCount} \left(\LayerIntermediateStateMemory + \ActivationMemory^{(\LayerIndex)}\right) $$ {#eq-activation-memory-per-batch}
 
@@ -4902,18 +4902,18 @@ The key algorithmic insight relies on the structure of @eq-attention. Softmax no
 \begin{algorithm}
 \caption{FlashAttention: tiled attention with online softmax}
 \begin{algorithmic}
-\Require queries $\AttentionQueryMatrix$, keys $\AttentionKeyMatrix$, values $\AttentionValuesMatrix$ for a length-$\SequenceLength$ sequence; tile size $b_{\text{tile}}$
+\Require queries $\AttentionQueryMatrix$, keys $\AttentionKeyMatrix$, values $\AttentionValuesMatrix$ for a length-$\SequenceLength$ sequence; tile size $\AttentionTileSize$
 \Ensure attention output $\AttentionHeadOutput$, without materializing the $\SequenceLength\times \SequenceLength$ score matrix
 \For{each query tile $\AttentionQueryMatrix_i$}
-    \State in SRAM: $\AttentionHeadOutput_i^{\text{acc}} \gets \mathbf{0}$, $\SoftmaxRunningMaximum_i \gets -\infty$, $\SoftmaxNormalizer_i \gets 0$
+    \State in SRAM: $\AttentionOutputAccumulator_i \gets \ZeroVector$, $\SoftmaxRunningMaximum_i \gets -\infty$, $\SoftmaxNormalizer_i \gets 0$
     \For{each key/value tile $(\AttentionKeyMatrix_j, \AttentionValuesMatrix_j)$}
         \State load $\AttentionQueryMatrix_i, \AttentionKeyMatrix_j, \AttentionValuesMatrix_j$ into SRAM; $\AttentionScoreMatrix_{ij} \gets \AttentionQueryMatrix_i \AttentionKeyMatrix_j^T / \sqrt{\AttentionHeadDimension}$
         \State $\UpdatedSoftmaxRunningMaximum_i \gets \max(\SoftmaxRunningMaximum_i,\operatorname{rowmax}(\AttentionScoreMatrix_{ij}))$ \Comment{new stable max}
-        \State $\AttentionHeadOutput_i^{\text{acc}} \gets \AttentionHeadOutput_i^{\text{acc}}\odot e^{\SoftmaxRunningMaximum_i-\UpdatedSoftmaxRunningMaximum_i} + e^{\AttentionScoreMatrix_{ij}-\UpdatedSoftmaxRunningMaximum_i}\AttentionValuesMatrix_j$
+        \State $\AttentionOutputAccumulator_i \gets \AttentionOutputAccumulator_i\odot e^{\SoftmaxRunningMaximum_i-\UpdatedSoftmaxRunningMaximum_i} + e^{\AttentionScoreMatrix_{ij}-\UpdatedSoftmaxRunningMaximum_i}\AttentionValuesMatrix_j$
         \State $\SoftmaxNormalizer_i \gets \SoftmaxNormalizer_i\odot e^{\SoftmaxRunningMaximum_i-\UpdatedSoftmaxRunningMaximum_i} + \operatorname{rowsum}(e^{\AttentionScoreMatrix_{ij}-\UpdatedSoftmaxRunningMaximum_i})$; $\SoftmaxRunningMaximum_i \gets \UpdatedSoftmaxRunningMaximum_i$
         \State discard $\AttentionScoreMatrix_{ij}$ \Comment{never written to HBM}
     \EndFor
-    \State $\AttentionHeadOutput_i \gets \AttentionHeadOutput_i^{\text{acc}} / \SoftmaxNormalizer_i$; write $\AttentionHeadOutput_i$ to HBM
+    \State $\AttentionHeadOutput_i \gets \AttentionOutputAccumulator_i / \SoftmaxNormalizer_i$; write $\AttentionHeadOutput_i$ to HBM
 \EndFor
 \end{algorithmic}
 \end{algorithm}
@@ -5262,12 +5262,12 @@ Where gradient accumulation splits the batch across steps, activation checkpoint
 \begin{algorithm}
 \caption{Gradient checkpointing (activation recomputation)}
 \begin{algorithmic}
-\Require $\NumberOfLayers$-layer network; checkpoint set $\mathcal{C} \subseteq \{1,\dots,\NumberOfLayers\}$ (e.g., every $\sqrt{\NumberOfLayers}$ layers)
+\Require $\LayerCount$-layer network; checkpoint set $\CheckpointLayerSet \subseteq \{1,\dots,\LayerCount\}$ (e.g., every $\sqrt{\LayerCount}$ layers)
 \Ensure parameter gradients, at reduced peak activation memory
-\For{$\LayerIndex = 1$ to $\NumberOfLayers$}
-    \State forward layer $\LayerIndex$; store its activation only if $\LayerIndex \in \mathcal{C}$ \Comment{drop the rest}
+\For{$\LayerIndex = 1$ to $\LayerCount$}
+    \State forward layer $\LayerIndex$; store its activation only if $\LayerIndex \in \CheckpointLayerSet$ \Comment{drop the rest}
 \EndFor
-\For{$\LayerIndex = \NumberOfLayers$ down to $1$}
+\For{$\LayerIndex = \LayerCount$ down to $1$}
     \If{the activation of layer $\LayerIndex$ was dropped}
         \State recompute the forward segment from the nearest stored checkpoint through layer $\LayerIndex$
     \EndIf
@@ -5343,11 +5343,11 @@ The two techniques address different terms. Gradient accumulation bounds the act
 
 @Algo-gradient-checkpointing stated the $\sqrt{\LayerCount}$ schedule without justifying it. For a network with $\LayerCount$ layers of comparable activation size and recomputation cost, each storing $\ActivationMemory^{(\LayerIndex)}$ bytes of activations per example (the per-layer share inside @eq-activation-memory-per-batch, not the batch total $\ActivationMemory$), @tbl-checkpoint-tradeoffs quantifies how the number and placement of checkpoints determines the memory-compute trade-off. Sub-linear checkpointing strategies can reduce memory consumption from $\mathcal{O}(\LayerCount)$ to $\mathcal{O}(\sqrt{\LayerCount})$ with additional forward arithmetic; the resulting wall-clock overhead depends on execution, while the reduced footprint can enable deeper models on existing hardware.
 
-| **Strategy**                                        |                                                              **Memory Cost**                                                              | **Recompute Cost**                                     |
-|:----------------------------------------------------|:-----------------------------------------------------------------------------------------------------------------------------------------:|:-------------------------------------------------------|
-| **No checkpointing**                                |                                              $\LayerCount \times \ActivationMemory^{(\ell)}$                                              | 0 forward ops                                          |
-| **One checkpoint ($\ActivationCheckpointCount=1$)** |                                $\ActivationMemory^{(\ell)} + \LayerCount \times \ActivationMemory^{(\ell)}$                               | $(\LayerCount-1)$ forward ops                          |
-| **$\ActivationCheckpointCount$ checkpoints**        | $\ActivationCheckpointCount\times \ActivationMemory^{(\ell)} + (\LayerCount/\ActivationCheckpointCount)\times \ActivationMemory^{(\ell)}$ | $(\LayerCount-\ActivationCheckpointCount)$ forward ops |
+| **Strategy**                                        |                                                                     **Memory Cost**                                                                     | **Recompute Cost**                                     |
+|:----------------------------------------------------|:-------------------------------------------------------------------------------------------------------------------------------------------------------:|:-------------------------------------------------------|
+| **No checkpointing**                                |                                                  $\LayerCount \times \ActivationMemory^{(\LayerIndex)}$                                                 | 0 forward ops                                          |
+| **One checkpoint ($\ActivationCheckpointCount=1$)** |                                $\ActivationMemory^{(\LayerIndex)} + \LayerCount \times \ActivationMemory^{(\LayerIndex)}$                               | $(\LayerCount-1)$ forward ops                          |
+| **$\ActivationCheckpointCount$ checkpoints**        | $\ActivationCheckpointCount\times \ActivationMemory^{(\LayerIndex)} + (\LayerCount/\ActivationCheckpointCount)\times \ActivationMemory^{(\LayerIndex)}$ | $(\LayerCount-\ActivationCheckpointCount)$ forward ops |
 
 : **Checkpointing Memory-Compute Trade-Offs**: Different checkpoint strategies trade memory savings against recomputation overhead. The optimal number of checkpoints balances these factors. {#tbl-checkpoint-tradeoffs}
 
@@ -5395,17 +5395,17 @@ class GPT2SqrtCheckpoint:
     check(round(extra_compute, 2) == 0.33, f"Prose says about 33 percent more step compute, got {extra_compute:.3f}.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    full_memory_math = fmt_math(f"{layers} \\times \\ActivationMemory^{{(\\ell)}}")
+    full_memory_math = fmt_math(f"{layers} \\times \\ActivationMemory^{{(\\LayerIndex)}}")
     sqrt_layers_math = fmt_math(f"\\sqrt{{{layers}}} \\approx {checkpoints}")
     ckpt_memory_math = fmt_math(
-        f"{checkpoints} \\times \\ActivationMemory^{{(\\ell)}} + ({layers}/{checkpoints}) \\times \\ActivationMemory^{{(\\ell)}}"
-        f" \\approx {round(memory_layers)} \\times \\ActivationMemory^{{(\\ell)}}"
+        f"{checkpoints} \\times \\ActivationMemory^{{(\\LayerIndex)}} + ({layers}/{checkpoints}) \\times \\ActivationMemory^{{(\\LayerIndex)}}"
+        f" \\approx {round(memory_layers)} \\times \\ActivationMemory^{{(\\LayerIndex)}}"
     )
     memory_saved_pct_str = fmt_percent(round(memory_saved, 2), precision=0, commas=False, style="prose")
     extra_compute_pct_str = fmt_percent(round(extra_compute, 2), precision=0, commas=False, style="prose")
 ```
 
-Setting the derivative of total memory cost $(\ActivationCheckpointCount\times \ActivationMemory^{(\ell)} + (\LayerCount/\ActivationCheckpointCount) \times \ActivationMemory^{(\ell)})$ with respect to the checkpoint count $\ActivationCheckpointCount$ to zero yields the analytical optimum at $\ActivationCheckpointCount= \sqrt{\LayerCount}$. In the standard $\sqrt{\LayerCount}$ checkpointing scheme, this costs roughly one extra forward pass, about one-third more total step compute, in exchange for minimizing activation footprint under this analytical model. For GPT-2 with forty-eight transformer layers, the operational difference is substantial. Uncheckpointed training requires `{python} GPT2SqrtCheckpoint.full_memory_math` in full activation storage. Uniform checkpointing (`{python} GPT2SqrtCheckpoint.sqrt_layers_math` checkpoints) requires `{python} GPT2SqrtCheckpoint.ckpt_memory_math`, which saves `{python} GPT2SqrtCheckpoint.memory_saved_pct_str` of activation memory for approximately `{python} GPT2SqrtCheckpoint.extra_compute_pct_str` additional total step computation (by recomputing one forward pass over the uncheckpointed layers during backpropagation).
+Setting the derivative of total memory cost $(\ActivationCheckpointCount\times \ActivationMemory^{(\LayerIndex)} + (\LayerCount/\ActivationCheckpointCount) \times \ActivationMemory^{(\LayerIndex)})$ with respect to the checkpoint count $\ActivationCheckpointCount$ to zero yields the analytical optimum at $\ActivationCheckpointCount= \sqrt{\LayerCount}$. In the standard $\sqrt{\LayerCount}$ checkpointing scheme, this costs roughly one extra forward pass, about one-third more total step compute, in exchange for minimizing activation footprint under this analytical model. For GPT-2 with forty-eight transformer layers, the operational difference is substantial. Uncheckpointed training requires `{python} GPT2SqrtCheckpoint.full_memory_math` in full activation storage. Uniform checkpointing (`{python} GPT2SqrtCheckpoint.sqrt_layers_math` checkpoints) requires `{python} GPT2SqrtCheckpoint.ckpt_memory_math`, which saves `{python} GPT2SqrtCheckpoint.memory_saved_pct_str` of activation memory for approximately `{python} GPT2SqrtCheckpoint.extra_compute_pct_str` additional total step computation (by recomputing one forward pass over the uncheckpointed layers during backpropagation).
 
 A practical schedule treats $\sqrt{\LayerCount}$ as a starting point rather than the answer, because the derivation above priced a stored segment input and one layer of the live segment as equal amounts of memory. In GPT-2 they differ greatly because each segment input is only the hidden tensor, whereas each layer of the live segment being recomputed also holds its attention and feed-forward intermediates. When stored inputs are this cheap, adding segments shrinks the large live segment at little cost in stored inputs, so the best count lies above $\sqrt{\LayerCount}$, while the recomputation stays at about one extra forward pass for any count. The GPT-2 notebook below therefore counts the small segment inputs and the large live segment separately, and it uses eight equal segments of six layers, an even division of the forty-eight layers just above that starting point.
 
@@ -7176,18 +7176,18 @@ The same pressures shaped the hardware. Dense matrix patterns drove Tensor Cores
 
 The counting rules developed across the chapter fit on one page (@tbl-training-key-equations). Together they estimate, before any profiler runs, how long a run takes, what it costs in energy, whether its step fits in memory, and which stage of its pipeline is the bottleneck.
 
-| **Quantity**                 | **Formula**                                                                                                                                                                                              | **Where derived**                                      |
-|:-----------------------------|:---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:-------------------------------------------------------|
-| **Training time**            | $\TrainingTime= \frac{\Operations}{\PeakRate \times \EfficiencyHw}$                                                                                                                                      | @eq-training-iron-law                                  |
-| **Training work**            | $\Operations \approx 6\Parameters\DatasetSize$ FLOPs (2 forward, 4 backward per parameter per token)                                                                                                     | @sec-model-training-iron-law-training-performance-a53f |
-| **Training energy**          | $\TotalEnergy = \DevicePower \times \TrainingTime$ at constant power                                                                                                                                     | @sec-model-training-iron-law-training-performance-a53f |
-| **Training memory**          | $\TotalMemoryFootprint = \WeightMemory + \GradientMemory + \OptimizerStateMemory + \ActivationMemory$; 16 bytes per parameter of static state in mixed-precision Adam                                    | @eq-total-training-memory                              |
-| **Activation memory**        | $\ActivationMemory = \BatchSize \times \sum_{\LayerIndex=1}^{\LayerCount} \left(\LayerIntermediateStateMemory + \ActivationMemory^{(\LayerIndex)}\right)$                                                | @eq-activation-memory-per-batch                        |
-| **Pipeline throughput**      | $\TrainingThroughput=\min\left(\PreprocessingThroughput, \frac{\HostTransferBandwidth}{\BatchDataVolume}, \frac{\SustainedComputeRate}{\BatchOperations}\right)$                                         | @eq-training-bottleneck                                |
-| **Model FLOPs utilization**  | $\ModelFlopsUtilization = \ModelStepOperations/ (\PeakRate \cdot \TrainingStepTime)$                                                                                                                     | @sec-model-training-identifying-bottlenecks-f57f       |
-| **Checkpointed activations** | $\ActivationCheckpointCount\times \ActivationMemory^{(\ell)} + (\LayerCount/\ActivationCheckpointCount)\times \ActivationMemory^{(\ell)}$, minimized at $\ActivationCheckpointCount= \sqrt{\LayerCount}$ | @tbl-checkpoint-tradeoffs                              |
-| **Effective batch**          | $\BatchSize= \AccumulationStepCount\times \MicrobatchSize$ per device                                                                                                                                    | @eq-gradient-accumulation-equivalence                  |
-| **Ring AllReduce time**      | $\CommunicationTime \approx \frac{2(\AcceleratorCount-1)}{\AcceleratorCount} \cdot \frac{\DataVolume}{\Bandwidth}$                                                                                       | @eq-training-ring-allreduce                            |
+| **Quantity**                 | **Formula**                                                                                                                                                                                                            | **Where derived**                                      |
+|:-----------------------------|:-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:-------------------------------------------------------|
+| **Training time**            | $\TrainingTime= \frac{\Operations}{\PeakRate \times \EfficiencyHw}$                                                                                                                                                    | @eq-training-iron-law                                  |
+| **Training work**            | $\Operations \approx 6\Parameters\DatasetSize$ FLOPs (2 forward, 4 backward per parameter per token)                                                                                                                   | @sec-model-training-iron-law-training-performance-a53f |
+| **Training energy**          | $\TotalEnergy = \DevicePower \times \TrainingTime$ at constant power                                                                                                                                                   | @sec-model-training-iron-law-training-performance-a53f |
+| **Training memory**          | $\TotalMemoryFootprint = \WeightMemory + \GradientMemory + \OptimizerStateMemory + \ActivationMemory$; 16 bytes per parameter of static state in mixed-precision Adam                                                  | @eq-total-training-memory                              |
+| **Activation memory**        | $\ActivationMemory = \BatchSize \times \sum_{\LayerIndex=1}^{\LayerCount} \left(\LayerIntermediateStateMemory + \ActivationMemory^{(\LayerIndex)}\right)$                                                              | @eq-activation-memory-per-batch                        |
+| **Pipeline throughput**      | $\TrainingThroughput=\min\left(\PreprocessingThroughput, \frac{\HostTransferBandwidth}{\BatchDataVolume}, \frac{\SustainedComputeRate}{\BatchOperations}\right)$                                                       | @eq-training-bottleneck                                |
+| **Model FLOPs utilization**  | $\ModelFlopsUtilization = \ModelStepOperations/ (\PeakRate \cdot \TrainingStepTime)$                                                                                                                                   | @sec-model-training-identifying-bottlenecks-f57f       |
+| **Checkpointed activations** | $\ActivationCheckpointCount\times \ActivationMemory^{(\LayerIndex)} + (\LayerCount/\ActivationCheckpointCount)\times \ActivationMemory^{(\LayerIndex)}$, minimized at $\ActivationCheckpointCount= \sqrt{\LayerCount}$ | @tbl-checkpoint-tradeoffs                              |
+| **Effective batch**          | $\BatchSize= \AccumulationStepCount\times \MicrobatchSize$ per device                                                                                                                                                  | @eq-gradient-accumulation-equivalence                  |
+| **Ring AllReduce time**      | $\CommunicationTime \approx \frac{2(\AcceleratorCount-1)}{\AcceleratorCount} \cdot \frac{\DataVolume}{\Bandwidth}$                                                                                                     | @eq-training-ring-allreduce                            |
 
 : **Key Equations**: The chapter's counting rules in the notation of the sections that derive them, so that a training run can be estimated before it is profiled. The activation rule sums per-example saved state over layers; the transformer estimates in the chapter specialize it to batch, sequence length, and hidden width. {#tbl-training-key-equations tbl-colwidths="[22,56,22]"}
 

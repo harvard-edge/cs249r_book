@@ -226,8 +226,8 @@
           "focus_areas": [
             "the pipeline throughput equation (linear scaling with GPU count)",
             "data stall ratio diagnostic metric and latency hiding limits",
-            "prefetch buffer sizing to P99 tail latency ($Q_{\\text{prefetch}} = \\lceil T_{\\text{I/O,p99}} / T_{\\text{compute}} \\rceil$)",
-            "multi-worker CPU allocation heuristics ($W \\approx 4 \\times G$)",
+            "prefetch buffer sizing to P99 tail latency ($\\MinimumPrefetchBufferCount = \\lceil \\TailStepIoTime / \\IronLawComputeTime \\rceil$)",
+            "multi-worker CPU allocation heuristics ($\\DataLoaderWorkerCount \\approx 4 \\times \\InputConsumerAcceleratorCount$)",
             "locality-aware scheduling and cryptographic dataset versioning"
           ],
           "question_strategy": "Combine quantitative equation applications with systems diagnostics and process ordering. Cover linear GPU scaling, prefetch sizing for tail latency, pipelining overlap limits, and host-memory data loading steps.",
@@ -250,15 +250,15 @@
           },
           {
             "question_type": "SHORT",
-            "question": "A training iteration has a GPU compute time of $T_{\\text{compute}} = 200\\text{ ms}$ and an average I/O fetch time of $T_{\\text{I/O}} = 250\\text{ ms}$ per batch. Explain why enabling double-buffering (pipelining batch $i+1$ during batch $i$ compute) reduces but cannot eliminate the data stall, and quantify the remaining stall time per step.",
-            "answer": "Pipelining overlaps I/O with compute such that step time becomes $T_{\\text{step}} = \\max(T_{\\text{compute}}, T_{\\text{I/O}}) = T_{\\text{compute}} + \\max(0, T_{\\text{I/O}} - T_{\\text{compute}})$. Because $T_{\\text{I/O}} (250\\text{ ms}) > T_{\\text{compute}} (200\\text{ ms})$, the pipeline remains fundamentally I/O-bound: when the GPU completes its 200 ms forward-backward pass, the next batch is still 50 ms away from completing its transfer. Pipelining reduces step time from sequential execution ($200 + 250 = 450\\text{ ms}$) to $250\\text{ ms}$, but an exposed stall of $50\\text{ ms}$ (a $20\\%$ stall ratio, calculated as $(250 - 200) / 250 \\times 100$) persists until storage bandwidth is increased or I/O volume is reduced.",
+            "question": "A training iteration has a GPU compute time of $\\IronLawComputeTime = 200\\text{ ms}$ and an average I/O fetch time of $\\StepIoTime = 250\\text{ ms}$ per batch. Explain why enabling double-buffering (pipelining batch $\\BatchIndex+1$ during batch $\\BatchIndex$ compute) reduces but cannot eliminate the data stall, and quantify the remaining stall time per step.",
+            "answer": "Pipelining overlaps I/O with compute such that step time becomes $\\TrainingStepTime = \\max(\\IronLawComputeTime, \\StepIoTime) = \\IronLawComputeTime + \\max(0, \\StepIoTime - \\IronLawComputeTime)$. Because $\\StepIoTime (250\\text{ ms}) > \\IronLawComputeTime (200\\text{ ms})$, the pipeline remains fundamentally I/O-bound: when the GPU completes its 200 ms forward-backward pass, the next batch is still 50 ms away from completing its transfer. Pipelining reduces step time from sequential execution ($200 + 250 = 450\\text{ ms}$) to $250\\text{ ms}$, but an exposed stall of $50\\text{ ms}$ (a $20\\%$ stall ratio, calculated as $(250 - 200) / 250 \\times 100$) persists until storage bandwidth is increased or I/O volume is reduced.",
             "learning_objective": "Calculate the exposed data stall time when I/O fetch duration exceeds accelerator computation time under pipelining"
           },
           {
             "question_type": "MCQ",
-            "question": "A data loader pipeline has an accelerator compute window of $T_{\\text{compute}} = 200\\text{ ms}$ per batch. The storage tier exhibits median I/O latency of $180\\text{ ms}$ but experiences P99 tail-latency spikes of $500\\text{ ms}$ due to network jitter. What is the minimum recommended prefetch buffer depth ($Q_{\\text{prefetch}}$) suggested by the P99 sizing rule, before allowing for longer or correlated stalls?",
+            "question": "A data loader pipeline has an accelerator compute window of $\\IronLawComputeTime = 200\\text{ ms}$ per batch. The storage tier exhibits median I/O latency of $180\\text{ ms}$ but experiences P99 tail-latency spikes of $500\\text{ ms}$ due to network jitter. What is the minimum recommended prefetch buffer depth ($\\MinimumPrefetchBufferCount$) suggested by the P99 sizing rule, before allowing for longer or correlated stalls?",
             "choices": [
-              "At least 3 batches ($Q_{\\text{prefetch}} = \\lceil 500 / 200 \\rceil = 3$) plus a safety margin, covering the stated P99 delay when the queue is full.",
+              "At least 3 batches ($\\MinimumPrefetchBufferCount = \\lceil 500 / 200 \\rceil = 3$) plus a safety margin, covering the stated P99 delay when the queue is full.",
               "Exactly 1 batch, because median I/O latency ($180\\text{ ms}$) is strictly less than compute time ($200\\text{ ms}$).",
               "Zero batches, because multi-worker asynchronous threading eliminates the need for host-memory queue buffering.",
               "At least 10 batches, because queue depth must equal the total number of CPU worker threads allocated to the data loader."
@@ -295,7 +295,7 @@
         "rationale": {
           "focus_areas": [
             "DMA-based bypass mechanism vs traditional 3-hop bounce-buffer path",
-            "latency reduction ($120\\ \\mu\\text{s} \\to 30\\ \\mu\\text{s}$) and CPU core savings",
+            "latency reduction ($120\\ \\MicroUnitPrefix\\text{s} \\to 30\\ \\MicroUnitPrefix\\text{s}$) and CPU core savings",
             "workload suitability (high transfer rate, GPU-decodable data) vs CPU-bound decode pipelines",
             "GDS scope boundaries (accelerates local/RDMA NVMe, does not eliminate cloud object store latency)"
           ],
@@ -331,14 +331,14 @@
           },
           {
             "question_type": "MCQ",
-            "question": "In a high-throughput vision training node with 8 GPUs processing a combined 64,000 images per second, traditional CPU-mediated I/O requires $120\\ \\mu\\text{s}$ of CPU time per image (consuming $\\approx 7.68$ CPU seconds per wall-clock second, or $\\approx 8$ dedicated CPU cores). GDS reduces CPU overhead to $30\\ \\mu\\text{s}$ per image ($1.92$ CPU seconds per second, or $\\approx 2$ cores). What is the primary systems benefit of this 'CPU bypass dividend'?",
+            "question": "In a high-throughput vision training node with 8 GPUs processing a combined 64,000 images per second, traditional CPU-mediated I/O requires $120\\ \\MicroUnitPrefix\\text{s}$ of CPU time per image (consuming $\\approx 7.68$ CPU seconds per wall-clock second, or $\\approx 8$ dedicated CPU cores). GDS reduces CPU overhead to $30\\ \\MicroUnitPrefix\\text{s}$ per image ($1.92$ CPU seconds per second, or $\\approx 2$ cores). What is the primary systems benefit of this 'CPU bypass dividend'?",
             "choices": [
               "It enables the cluster to eliminate all local NVMe SSDs in favor of remote tape archives.",
               "It frees approximately 6 CPU cores per node that can be reallocated to computationally intensive data augmentation and pipeline orchestration without adding hardware.",
               "It reduces GPU power consumption by $75\\%$ during tensor matrix multiplication.",
               "It doubles the physical PCIe bus bandwidth between the CPU socket and the GPU accelerators."
             ],
-            "answer": "The correct answer is B. It frees approximately 6 CPU cores per node that can be reallocated to computationally intensive data augmentation and pipeline orchestration without adding hardware. By offloading raw memory-copy and interrupt-handling work to hardware DMA engines, GDS reduces per-transfer CPU overhead by $75\\%$ (from $120\\ \\mu\\text{s}$ to $30\\ \\mu\\text{s}$), freeing CPU cores to perform complex data augmentations that improve model convergence without throttling the input pipeline. The tape archive option is absurd for active training feeds. The GPU power reduction claim is false because GDS changes storage transfer overhead, not GPU arithmetic energy. The PCIe bus bandwidth claim confuses hardware physical link capacity with software transfer efficiency.",
+            "answer": "The correct answer is B. It frees approximately 6 CPU cores per node that can be reallocated to computationally intensive data augmentation and pipeline orchestration without adding hardware. By offloading raw memory-copy and interrupt-handling work to hardware DMA engines, GDS reduces per-transfer CPU overhead by $75\\%$ (from $120\\ \\MicroUnitPrefix\\text{s}$ to $30\\ \\MicroUnitPrefix\\text{s}$), freeing CPU cores to perform complex data augmentations that improve model convergence without throttling the input pipeline. The tape archive option is absurd for active training feeds. The GPU power reduction claim is false because GDS changes storage transfer overhead, not GPU arithmetic energy. The PCIe bus bandwidth claim confuses hardware physical link capacity with software transfer efficiency.",
             "learning_objective": "Calculate the CPU core savings delivered by GPUDirect Storage and evaluate its impact on host preprocessing capacity"
           },
           {
@@ -362,7 +362,7 @@
             "ZeRO-3 sharded checkpointing vs naive full-replica checkpoint storms",
             "checkpoint retention policies and restore verification imperatives"
           ],
-          "question_strategy": "Focus on the write path, $T_{\\text{write}}$ minimization, and fault recovery. Test tiered staging arithmetic ($0.34\\text{ s}$ local vs $2.45\\text{ s}$ PFS), sharding math, retention policies, and workflow ordering.",
+          "question_strategy": "Focus on the write path, $\\CheckpointWriteTime$ minimization, and fault recovery. Test tiered staging arithmetic ($0.34\\text{ s}$ local vs $2.45\\text{ s}$ PFS), sharding math, retention policies, and workflow ordering.",
           "difficulty_progression": "Start with tiered staging mechanics (MCQ), evaluate restore verification with TF, analyze ZeRO-3 sharding math (SHORT), evaluate retention policies (MCQ), and sequence tiered checkpoint workflow steps (ORDER).",
           "integration": "Builds on training dynamics and the compute infrastructure chapter; sets up fault tolerance principles in distributed clusters.",
           "ranking_explanation": "Addresses the single most demanding write workload in ML systems and the mechanics of preventing catastrophic data loss."
@@ -370,7 +370,7 @@
         "questions": [
           {
             "question_type": "MCQ",
-            "question": "A 256-node cluster saves a 175B-parameter resumable checkpoint ($2.45\\text{ TB}$ total: $350\\text{ GB}$ FP16 weights, $700\\text{ GB}$ FP32 master weights, and $1.4\\text{ TB}$ of Adam moments) every 10 minutes. Under tiered staging, each node writes its $9.57\\text{ GB}$ ZeRO-3 shard to local NVMe ($28\\text{ GB/s}$ local array) in $\\approx 0.34\\text{ s}$, followed by an asynchronous background copy to a $1\\text{ TB/s}$ parallel file system taking $\\approx 2.45\\text{ s}$. What is the exposed training pause time ($T_{\\text{write}}$) per checkpoint?",
+            "question": "A 256-node cluster saves a 175B-parameter resumable checkpoint ($2.45\\text{ TB}$ total: $350\\text{ GB}$ FP16 weights, $700\\text{ GB}$ FP32 master weights, and $1.4\\text{ TB}$ of Adam moments) every 10 minutes. Under tiered staging, each node writes its $9.57\\text{ GB}$ ZeRO-3 shard to local NVMe ($28\\text{ GB/s}$ local array) in $\\approx 0.34\\text{ s}$, followed by an asynchronous background copy to a $1\\text{ TB/s}$ parallel file system taking $\\approx 2.45\\text{ s}$. What is the exposed training pause time ($\\CheckpointWriteTime$) per checkpoint?",
             "choices": [
               "Roughly $2.8\\text{ s}$, because training must remain paused until both the local write and the durable PFS copy complete.",
               "Roughly $0.34\\text{ s}$, because the training barrier releases immediately after the fast local NVMe write completes, while the PFS replication proceeds asynchronously in the background.",
@@ -667,7 +667,7 @@
           {
             "question_type": "TF",
             "question": "True or False: Sizing a data loader's prefetch buffer depth based on average storage read latency ensures that training runs will not experience data stalls during multi-week training jobs on shared object storage.",
-            "answer": "False. Average latency does not bound tail stalls. A starting buffer budget is $Q_{\\text{prefetch}} = \\lceil T_{\\text{I/O,p99}} / T_{\\text{compute}} \\rceil$ plus margin, but longer or correlated delays can still drain it; sustained delivery bandwidth must also keep pace with consumption.",
+            "answer": "False. Average latency does not bound tail stalls. A starting buffer budget is $\\MinimumPrefetchBufferCount = \\lceil \\TailStepIoTime / \\IronLawComputeTime \\rceil$ plus margin, but longer or correlated delays can still drain it; sustained delivery bandwidth must also keep pace with consumption.",
             "learning_objective": "Evaluate why prefetch queues sized to average latency fail to prevent accelerator stalls under tail-latency variance"
           },
           {

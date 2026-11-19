@@ -269,8 +269,8 @@
           },
           {
             "question_type": "SHORT",
-            "question": "For a static LLM batch that retains all slots and pads completed sequences until the longest sequence finishes, define the waste ratio $W=1-\\bar{S}/S_{\\max}$. How can continuous batching reduce this waste?",
-            "answer": "The stated implementation allocates $B S_{\\max}$ token-step slots but performs only $B\\bar{S}$ useful token steps, leaving a waste fraction $1-\\bar{S}/S_{\\max}$. Continuous batching can replace completed sequences with waiting requests at each iteration. This reduces padded-slot waste when enough admissible work is queued; it does not guarantee a full batch under light arrivals or memory pressure. Holding responses until the batch finishes is a separate response-barrier policy, not an inherent consequence of fixed membership.",
+            "question": "For a static LLM batch that retains all slots and pads completed sequences until the longest sequence finishes, define the waste ratio $\\PaddingWasteFraction = 1 - \\BatchMeanOutputLength / \\BatchMaxOutputLength$. How can continuous batching reduce this waste?",
+            "answer": "The stated implementation allocates $\\BatchSize \\BatchMaxOutputLength$ token-step slots but performs only $\\BatchSize \\BatchMeanOutputLength$ useful token steps, leaving a waste fraction $1 - \\BatchMeanOutputLength / \\BatchMaxOutputLength$. Continuous batching can replace completed sequences with waiting requests at each iteration. This reduces padded-slot waste when enough admissible work is queued; it does not guarantee a full batch under light arrivals or memory pressure. Holding responses until the batch finishes is a separate response-barrier policy, not an inherent consequence of fixed membership.",
             "learning_objective": "Analyze the mathematical formulation of batching waste in static LLM execution and the mechanism of continuous batching."
           },
           {
@@ -284,9 +284,9 @@
             "question": "A stable inference service completes 1,000 requests/sec with an assumed mean end-to-end latency of 100 ms. Each replica executes full batches of eight in 80 ms, giving 100 requests/sec of service capacity. With a separate target of at most 80% mean service utilization, what mean in-flight work and candidate fleet size follow, without claiming a P99 guarantee?",
             "choices": [
               "Mean in-flight work is 100 requests; sizing service capacity at the 80% utilization target gives 13 replicas",
-              "Required concurrency $Q_{\\text{req}} = 1{,}000$; minimum SLO-sized fleet $= 125$ replicas",
-              "Required concurrency $Q_{\\text{req}} = 80$; minimum SLO-sized fleet $= 10$ replicas",
-              "Required concurrency $Q_{\\text{req}} = 100$; minimum SLO-sized fleet $= 10$ replicas"
+              "Required concurrency $\\RequestConcurrency = 1{,}000$; minimum SLO-sized fleet $= 125$ replicas",
+              "Required concurrency $\\RequestConcurrency = 80$; minimum SLO-sized fleet $= 10$ replicas",
+              "Required concurrency $\\RequestConcurrency = 100$; minimum SLO-sized fleet $= 10$ replicas"
             ],
             "answer": "The correct answer is A. Little's law gives 1,000 × 0.1 = 100 requests in flight on average, including waiting work. Fleet sizing instead uses the separate utilization target: ceil(1,000/(0.8 × 100)) = 13 replicas, running at about 76.9% utilization. Their 104 executing positions exclude queues. Under the idealized assumption that all other latency is waiting or batch formation, the fixed 80 ms service time gives 80 requests executing on average and leaves 20 waiting or accumulating. Ten replicas are the throughput-only saturation boundary. The assumed mean and tail SLO both require validation; dividing in-flight work by batch slots does not establish the fleet size.",
             "learning_objective": "Separate mean in-flight occupancy from executing capacity and size a candidate fleet with an explicit service-utilization target."
@@ -460,11 +460,11 @@
             "question": "How does SmoothQuant enable efficient 8-bit weight and 8-bit activation (W8A8) inference, and why is its speedup significantly higher during prefill than during decode?",
             "choices": [
               "It prunes 50% of model weights using structured sparsity, accelerating decode but having no effect on prefill.",
-              "It divides activations by a per-channel scale $s$ and multiplies weights by $s$, moving quantization difficulty toward weights; compute-bound prefill can benefit from native INT8 arithmetic while decode remains sensitive to memory traffic",
+              "It divides activations by a per-channel scale $\\QuantizationScale$ and multiplies weights by $\\QuantizationScale$, moving quantization difficulty toward weights; compute-bound prefill can benefit from native INT8 arithmetic while decode remains sensitive to memory traffic",
               "It rotates the coordinate basis using randomized Walsh-Hadamard matrices, eliminating memory bandwidth bottlenecks during decode.",
               "It converts floating-point weights into binary spikes, enabling single-cycle bitwise operations during token generation."
             ],
-            "answer": "The correct answer is B. The equivalent transform is $XW=(X\\operatorname{diag}(s)^{-1})(\\operatorname{diag}(s)W)$. It smooths activation outliers while increasing weight range, enabling an INT8 path when calibration preserves quality. Compute-bound prefill can benefit from higher arithmetic throughput; memory-bound decode depends on bytes moved and conversion costs. Speedup is workload-dependent, not guaranteed by the transform alone.",
+            "answer": "The correct answer is B. The equivalent transform is $\\LayerInputMatrix\\WeightMatrix=(\\LayerInputMatrix\\operatorname{diag}(\\QuantizationScale)^{-1})(\\operatorname{diag}(\\QuantizationScale)\\WeightMatrix)$. It smooths activation outliers while increasing weight range, enabling an INT8 path when calibration preserves quality. Compute-bound prefill can benefit from higher arithmetic throughput; memory-bound decode depends on bytes moved and conversion costs. Speedup is workload-dependent, not guaranteed by the transform alone.",
             "learning_objective": "Analyze the mathematical mechanism of SmoothQuant W8A8 quantization and contrast its performance gains during prefill versus decode phases."
           },
           {
@@ -564,13 +564,13 @@
           },
           {
             "question_type": "ORDER",
-            "question": "Order the sequence of operations that occurs during token execution in an Expert-Parallel (MoE) transformer layer:\n(1) AllToAll dispatch transmits token activation vectors to the specific GPUs hosting the selected experts\n(2) Gating network evaluates input representations and computes top-$k$ routing probabilities\n(3) AllToAll gather routes expert output activations back to the originating host devices\n(4) Selected expert sub-networks compute local feed-forward transformations on assigned tokens\n(5) Weighted sum combines expert outputs with gating coefficients and adds residual connections",
-            "answer": "The correct sequence is (2) -> (1) -> (4) -> (3) -> (5).\n- (2) The gating network evaluates token embeddings to select the top-$k$ experts per token.\n- (1) An AllToAll dispatch collective routes token representations to the devices hosting their assigned experts.\n- (4) Expert devices execute feed-forward matrix multiplications in parallel on received tokens.\n- (3) A second AllToAll gather collective transmits computed expert outputs back to originating devices.\n- (5) The host device performs a weighted summation of expert outputs using routing probabilities and adds residual connections.",
+            "question": "Order the sequence of operations that occurs during token execution in an Expert-Parallel (MoE) transformer layer:\n(1) AllToAll dispatch transmits token activation vectors to the specific GPUs hosting the selected experts\n(2) Gating network evaluates input representations and computes top-$\\RoutedExpertCount$ routing probabilities\n(3) AllToAll gather routes expert output activations back to the originating host devices\n(4) Selected expert sub-networks compute local feed-forward transformations on assigned tokens\n(5) Weighted sum combines expert outputs with gating coefficients and adds residual connections",
+            "answer": "The correct sequence is (2) -> (1) -> (4) -> (3) -> (5).\n- (2) The gating network evaluates token embeddings to select the top-$\\RoutedExpertCount$ experts per token.\n- (1) An AllToAll dispatch collective routes token representations to the devices hosting their assigned experts.\n- (4) Expert devices execute feed-forward matrix multiplications in parallel on received tokens.\n- (3) A second AllToAll gather collective transmits computed expert outputs back to originating devices.\n- (5) The host device performs a weighted summation of expert outputs using routing probabilities and adds residual connections.",
             "learning_objective": "Structure the sequence of computation and communication steps in Expert-Parallel MoE token execution."
           },
           {
             "question_type": "SHORT",
-            "question": "Using the $\\alpha$-$\\beta$ communication model, explain why Tensor Parallelism across nodes linked via standard 100G Ethernet introduces prohibitive latency overhead compared to intra-node NVLink.",
+            "question": "Using the $\\MessageStartupLatency$-$\\LinkBandwidth$ communication model, explain why Tensor Parallelism across nodes linked via standard 100G Ethernet introduces prohibitive latency overhead compared to intra-node NVLink.",
             "answer": "TP invokes collectives repeatedly along the forward-pass critical path. In a ring model, both startup steps and transferred bytes matter: slower Ethernet links can expose far more time than intra-node NVLink. Use per-direction bandwidth consistently, specify message size and rank count, and include both collectives per layer where required. For decode, the per-collective latency column of the interconnect table, not the bandwidth column, decides placement, because that fixed cost is paid twice per layer for every generated token.",
             "learning_objective": "Analyze the quantitative impact of interconnect bandwidth and latency on Tensor Parallelism communication overhead."
           }
@@ -602,7 +602,7 @@
             "question": "Why does the power-of-two-choices result motivate probing two replicas, and what limitation applies when using the classical balls-into-bins bounds to predict a 1,000-server serving fleet?",
             "choices": [
               "It eliminates all network packet headers by broadcasting requests to all 1,000 servers simultaneously.",
-              "Two probes improve static occupancy scaling from $\\Theta(\\log R/\\log\\log R)$ to $\\Theta(\\log\\log R)$, but do not determine production queue depths or P99 latency",
+              "Two probes improve static occupancy scaling from $\\AsymptoticTightBound(\\log \\ReplicaCount/\\log\\log \\ReplicaCount)$ to $\\AsymptoticTightBound(\\log\\log \\ReplicaCount)$, but do not determine production queue depths or P99 latency",
               "It guarantees zero queuing delay by dynamically compiling new CUDA kernels on the fly for each request.",
               "It forces all requests to execute on CPU fallback nodes whenever GPU utilization exceeds 50%."
             ],
@@ -885,7 +885,7 @@
             "question": "A team upgrades a cluster serving a 13B LLM from 80 GB GPUs to 140 GB GPUs with identical HBM3 memory bandwidth (3.35 TB/s). At an unchanged small batch and context length, with resident weights and weight-read-dominated decode, why does extra capacity alone not raise the bandwidth-limited throughput ceiling?",
             "choices": [
               "Autoregressive decode is strictly compute-bound; increasing memory without adding Tensor Cores leaves execution time unchanged.",
-              "Autoregressive decode is memory-bandwidth bound ($D_{\\text{vol}} / \\text{BW}$); once model weights fit resident in memory, token generation speed is constrained by memory bandwidth, not total memory capacity.",
+              "Autoregressive decode is memory-bandwidth bound ($\\DataVolume / \\Bandwidth$); once model weights fit resident in memory, token generation speed is constrained by memory bandwidth, not total memory capacity.",
               "140 GB GPUs automatically disable CUDA graph compilation, adding driver launch latency to every iteration.",
               "The larger memory capacity forces PagedAttention block sizes to shrink from 16 tokens to 2 tokens."
             ],

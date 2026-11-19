@@ -4,7 +4,7 @@ concepts: brain_concepts.yml
 format:
   html:
     title: "The Cognitive Brain"
-notation-local: [\ActionChunkIndex, \ChunkEnsemblingWeight, \ChunkReactionLatency, \ChunkRenewalRate, \ContextHiddenRepresentation, \DebounceFrameCount, \FullPrecisionWeight, \GroundPlaneAbscissa, \GroundPlaneOrdinate, \HalfPrecisionGemvIntensity, \IntegerWeightCode, \LayerInputVector, \LayerOutputVector, \MinimumChunkSetpointCount, \PolicyActionWindow, \ProposalExpiryInstant, \ProposalPayload, \ProposedEndEffectorPoseSequence, \ProposedGripperCommandSequence, \ProposedJointPositionSequence, \ProposedJointVelocitySequence, \ProposerConfidenceScore, \QuantizationBitWidth, \QuantizationBlockSize, \QuantizationScale, \ReconstructedWeight, \SensorErrorBound]
+notation-local: [\ActionChunkIndex, \AmortizedActionStepTime, \ChunkDecoderRate, \ChunkDecoderWeightMemory, \ChunkEnsemblingWeight, \ChunkReactionLatency, \ChunkRenewalRate, \ContextHiddenRepresentation, \DebounceFrameCount, \EmbeddingBufferMemory, \FullPrecisionInferenceTime, \FullPrecisionWeight, \GroundPlaneAbscissa, \GroundPlaneOrdinate, \HalfPrecisionGemvIntensity, \IntegerWeightCode, \IntentProposerRate, \LayerInputVector, \LayerOutputVector, \MinimumChunkSetpointCount, \PolicyActionWindow, \PrefillPassTime, \ProposalExpiryInstant, \ProposalPayload, \ProposedEndEffectorPoseSequence, \ProposedGripperCommandSequence, \ProposedJointPositionSequence, \ProposedJointVelocitySequence, \ProposerConfidenceScore, \QuantizationBitWidth, \QuantizationBlockSize, \QuantizationScale, \QuantizedInferenceTime, \QuantizedWeightMemory, \ReconstructedWeight, \RooflineRidgePoint, \SensorErrorBound, \StreamingInferenceTime, \WeightSweepTime]
 ---
 
 # The Cognitive Brain {#sec-brain}
@@ -437,7 +437,7 @@ class TokenFootprint:
     kv_token_bytes_str = fmt_int(kv_token_bytes)
     kv_token_mb_str = fmt_memory(kv_token_mem, unit=MB, precision=3)
     embed_display_math = fmt_display_math(
-        rf"M_{{\text{{embed}}}} = S \times d \times 2\,\text{{bytes}} = {s_round} \times {d_model} \times 2 \approx {embed_mem.magnitude:.2f}\,\text{{MB}}"
+        rf"\EmbeddingBufferMemory = \SequenceLength \times \HiddenDimension \times 2\,\text{{bytes}} = {s_round} \times {d_model} \times 2 \approx {embed_mem.magnitude:.2f}\,\text{{MB}}"
     )
 ```
 
@@ -460,7 +460,7 @@ To grasp the mug, the model turns camera images and a language instruction into 
    Attention weights are also not geometry. A strong weight between the language tokens "mug handle" and a visual patch does not establish a graspable affordance[^fn-affordance-grasp-planning] or collision-free clearance, and the KV cache does not keep track of an object while it is occluded. The formal patch-embedding, position-encoding, and attention formulations appear in @sec-appendix-ml-patch-embedding.
 
 3. *Specialized action decoders (the outputs).*
-   Instead of generating open-ended conversational text, the final hidden representation $\ContextHiddenRepresentation \in \mathbb{R}^\HiddenDimension$ is routed to specialized action decoders. The running machine's chunk policy proposes base velocity and arm targets together in one whole-body stream (@sec-brain-two-proposers), so its decoder is a manipulation decoder whose outputs include the base. Separate navigation models that decode waypoints over a topological map of the building (@fig-vln-navigation) follow the same proposal rules but are not part of this machine. Manipulation (VLA) models diverge sharply in how they bridge semantic representations to physical motion.
+   Instead of generating open-ended conversational text, the final hidden representation $\ContextHiddenRepresentation \in \mathbb{R}^{\HiddenDimension}$ is routed to specialized action decoders. The running machine's chunk policy proposes base velocity and arm targets together in one whole-body stream (@sec-brain-two-proposers), so its decoder is a manipulation decoder whose outputs include the base. Separate navigation models that decode waypoints over a topological map of the building (@fig-vln-navigation) follow the same proposal rules but are not part of this machine. Manipulation (VLA) models diverge sharply in how they bridge semantic representations to physical motion.
 
    Discrete action decoders map each action dimension to a categorical token by dividing its continuous range into bins [@brohan2023rt1; @brohan2023rt2; @kim2024openvla]. Autoregressive decoders such as RT-2 and OpenVLA then generate those tokens sequentially, requiring one complete model evaluation per action dimension [@brohan2023rt2; @kim2024openvla]. However, discretization does not require sequential decoding. RT-1 predicts all action tokens simultaneously in a single forward pass, and its authors demonstrated that autoregressively conditioning each action dimension on preceding dimensions yielded no accuracy gains while more than doubling inference latency [@brohan2023rt1]. What separates modern decoders in systems practice is the computational cost of generating a trajectory chunk and the volume of model weights reread across three main decoder families.
 
@@ -798,19 +798,19 @@ class IntentModelLatency:
     three_total_str = fmt_latency(round(int4_three.t_total.to(millisecond).magnitude) * millisecond, unit=millisecond, precision=0)
 
     sweep_display_math = fmt_display_math(
-        rf"t_{{\text{{sweep}}}} = \frac{{M_{{\text{{weights}}}}}}{{\text{{BW}}_{{\text{{mem}}}}}} = \frac{{{m_fp16_str}}}{{{b_sus_str}}} \approx {sweep_fp16_str}, \qquad f \le \frac{{1}}{{t_{{\text{{sweep}}}}}} \approx {f_wall_str}"
+        rf"\WeightSweepTime = \frac{{\WeightMemory}}{{\SustainedMemoryBandwidth}} = \frac{{{m_fp16_str}}}{{{b_sus_str}}} \approx {sweep_fp16_str}, \qquad \ProposerEvaluationRate \le \frac{{1}}{{\WeightSweepTime}} \approx {f_wall_str}"
     )
     flops_display_math = fmt_display_math(
-        rf"O_{{\text{{prefill}}}} \approx 2 P S + 2 N_{{L}} d S^2 = {sci_latex(flops_linear, precision=2)} + {sci_latex(flops_attn, precision=2)} \approx {sci_latex(int4.prefill_flops, precision=2)}\ \text{{FLOPs}}"
+        rf"\PrefillOperations \approx 2 \Parameters \SequenceLength + 2 \LayerCount \HiddenDimension \SequenceLength^2 = {sci_latex(flops_linear, precision=2)} + {sci_latex(flops_attn, precision=2)} \approx {sci_latex(int4.prefill_flops, precision=2)}\ \text{{FLOPs}}"
     )
     prefill_display_math = fmt_display_math(
-        rf"t_{{\text{{prefill}}}} = \frac{{O_{{\text{{prefill}}}}}}{{\eta_{{\text{{hw}}}}\,R_{{\text{{peak}}}}}} = \frac{{{sci_latex(int4.prefill_flops, precision=2)}\ \text{{FLOPs}}}}{{{_u_display} \times {pi_str}}} \approx {prefill_ms_str}"
+        rf"\PrefillPassTime = \frac{{\PrefillOperations}}{{\EfficiencyHw\,\PeakRate}} = \frac{{{sci_latex(int4.prefill_flops, precision=2)}\ \text{{FLOPs}}}}{{{_u_display} \times {pi_str}}} \approx {prefill_ms_str}"
     )
     fp16_total_display_math = fmt_display_math(
-        rf"t_{{\text{{FP16}}}} = t_{{\text{{prefill}}}} + (S_{{\text{{out}}}}-1)\,t_{{\text{{sweep}}}} \approx {prefill_whole_str} + {decode_steps_str} \times {sweep_fp16_str} \approx {prefill_whole_str} + {decode_fp16_str} = {total_fp16_str}"
+        rf"\FullPrecisionInferenceTime = \PrefillPassTime + (\EmittedTokenCount-1)\,\WeightSweepTime \approx {prefill_whole_str} + {decode_steps_str} \times {sweep_fp16_str} \approx {prefill_whole_str} + {decode_fp16_str} = {total_fp16_str}"
     )
     int4_total_display_math = fmt_display_math(
-        rf"t_{{\text{{INT4}}}} \approx {prefill_whole_str} + {decode_steps_str} \times {sweep_int4_str} \approx {prefill_whole_str} + {decode_int4_str} = {total_int4_str}, \qquad f \le {f_int4_str}"
+        rf"\QuantizedInferenceTime \approx {prefill_whole_str} + {decode_steps_str} \times {sweep_int4_str} \approx {prefill_whole_str} + {decode_int4_str} = {total_int4_str}, \qquad \ProposerEvaluationRate \le {f_int4_str}"
     )
 
 IntentModelLatency.u_display = IntentModelLatency._u_display
@@ -886,7 +886,7 @@ roof_ridge_str = fmt_arithmetic_intensity(ridge * flop / byte, precision=1)
 roof_attainable_str = fmt_qty(attainable(I_TOKEN) * node.compute.peak_flops.units, unit="TFLOP/s", precision=3)
 roof_fraction_str = fmt_percent(attainable(I_TOKEN) / peak, precision=2, style="prose")
 roof_ridge_display_math = fmt_display_math(
-    rf"I_{{\text{{ridge}}}} = \frac{{R_{{\text{{peak}}}}}}{{\text{{BW}}}} = \frac{{{roof_peak_str}}}{{{roof_bw_str}}} \approx {roof_ridge_str}"
+    rf"\RooflineRidgePoint = \frac{{\PeakRate}}{{\Bandwidth}} = \frac{{{roof_peak_str}}}{{{roof_bw_str}}} \approx {roof_ridge_str}"
 )
 
 points = [
@@ -1301,7 +1301,7 @@ If a proposer emits only one future setpoint per evaluation and takes longer tha
 ***Temporal action chunking***\index{Temporal action chunking!definition}\index{Action chunking!definition} is the policy formulation that predicts an entire horizon of $\ActionChunkHorizon$ future continuous actions $\PolicyActionWindow = [\CognitivePolicyAction_{t}, \dots, \CognitivePolicyAction_{t+\ActionChunkHorizon-1}]$ in a single neural evaluation or diffusion rollout, amortizing parameter memory transfers across extended physical execution windows.
 
 1.  **Significance**: Chunking divides the weight traffic per supplied setpoint by $\ActionChunkHorizon$, `{python} ChunkSchedule.horizon_str` on the mobile manipulator, but leaves the delay before a new observation can change the motion at one renewal period plus one inference, `{python} ChunkSchedule.t_reaction_str` for its chunk policy. It does not make fresh observations or policy decisions arrive at the waypoint rate; a downstream controller tracks the accepted trajectory between model updates.
-2.  **Distinction**: Unlike single-step policies $\CognitivePolicyAction_{t} \sim \pi(\cdot \mid \MultimodalObservation_{t})$, which condition only on the current observation and re-evaluate the full neural network at every control step, action chunking deliberately generates multi-step feedforward trajectories. It executes only the start of each before the next replaces it (receding-horizon execution), and it blends across overlapping chunks to reconcile slow neural deliberation with fast closed-loop control.
+2.  **Distinction**: Unlike single-step policies $\CognitivePolicyAction_{t} \sim \LearnerPolicy(\cdot \mid \MultimodalObservation_{t})$, which condition only on the current observation and re-evaluate the full neural network at every control step, action chunking deliberately generates multi-step feedforward trajectories. It executes only the start of each before the next replaces it (receding-horizon execution), and it blends across overlapping chunks to reconcile slow neural deliberation with fast closed-loop control.
 3.  **Common pitfall**: Executing action chunks open-loop, without smoothing across chunk boundaries or a check by the permission path. Without smooth blending across overlapping chunk boundaries, switching between independently generated horizons injects acceleration jumps and torque shocks that excite mechanical gearbox resonances.
 
 :::
@@ -1435,7 +1435,7 @@ Ensembling has two limits. It averages, and the average of two valid predictions
 :::
 
 ::: {.callout-perspective title="The temporal ensembling jerk trap"}
-Exponentially weighted temporal ensembling averages overlapping predictions, but averaging sampled setpoints alone guarantees neither continuous position nor continuous velocity between samples or at chunk boundaries. The interpolator on the permission path determines those properties. If successive chunks disagree in slope, a controller can receive a step in commanded velocity even when position remains continuous. In joint proportional-derivative (PD) tracking ($\JointTorque = \ProportionalGainMatrix \TrackingErrorVector + \DerivativeGainMatrix \TrackingErrorRate$), that velocity jump produces a finite torque step. With an illustrative derivative gain for one joint, the diagonal entry $\PidDerivativeGain = 40\,\text{N}\cdot\text{m}\cdot\text{s/rad}$ of $\DerivativeGainMatrix$, and an illustrative velocity discontinuity $\FiniteChange \JointVelocity = 0.5\,\text{rad/s}$, the derivative term changes by $\FiniteChange \CommandedJointTorque = \PidDerivativeGain \FiniteChange \JointVelocity = 20\,\text{N}\cdot\text{m}$. Dividing by the servo period would instead describe a torque slew rate, not a torque. Abrupt torque changes can excite mechanical resonances or exceed drive limits. Interpolation must match position, velocity, and acceleration at adjoining segments, the property called $\Glyph{C}^2$ continuity, while enforcing the machine's velocity, acceleration, and torque limits. Smoothness alone does not establish that the requested motion is feasible.
+Exponentially weighted temporal ensembling averages overlapping predictions, but averaging sampled setpoints alone guarantees neither continuous position nor continuous velocity between samples or at chunk boundaries. The interpolator on the permission path determines those properties. If successive chunks disagree in slope, a controller can receive a step in commanded velocity even when position remains continuous. In joint proportional-derivative (PD) tracking ($\JointTorque = \ProportionalGainMatrix \TrackingErrorVector + \DerivativeGainMatrix \TrackingErrorRate$), that velocity jump produces a finite torque step. With an illustrative derivative gain for one joint, the diagonal entry $\PidDerivativeGain = 40\,\text{N}\cdot\text{m}\cdot\text{s/rad}$ of $\DerivativeGainMatrix$, and an illustrative velocity discontinuity $\FiniteChange \JointVelocity = 0.5\,\text{rad/s}$, the derivative term changes by $\FiniteChange \CommandedJointTorque = \PidDerivativeGain \FiniteChange \JointVelocity = 20\,\text{N}\cdot\text{m}$. Dividing by the servo period would instead describe a torque slew rate, not a torque. Abrupt torque changes can excite mechanical resonances or exceed drive limits. Interpolation must match position, velocity, and acceleration at adjoining segments, the property called $\TwiceDifferentiableClass$ continuity, while enforcing the machine's velocity, acceleration, and torque limits. Smoothness alone does not establish that the requested motion is feasible.
 :::
 
 ::: {.column-margin .margin-pointer}
@@ -1860,7 +1860,7 @@ class ActionChunkingLPDDR5:
     soc_mem_gb_str = fmt_memory(soc_mem, unit=GB, precision=1)
 
     tau_step_display_math = fmt_display_math(
-        rf"t_{{\text{{amort}}}} = \frac{{t_{{\text{{stream}}}}}}{{H}} = \frac{{{t_stream_ms_str}}}{{{chunk_horizon_str}\text{{ setpoints}}}} \approx {tau_step_str}\text{{ per setpoint}}"
+        rf"\AmortizedActionStepTime = \frac{{\StreamingInferenceTime}}{{\ActionChunkHorizon}} = \frac{{{t_stream_ms_str}}}{{{chunk_horizon_str}\text{{ setpoints}}}} \approx {tau_step_str}\text{{ per setpoint}}"
     )
     t_replan_str = fmt_latency((1 / chunk_rate).to(millisecond), unit=millisecond, precision=0)
     renewal_gap_str = fmt(renewal_gap, precision=1)
@@ -1873,10 +1873,10 @@ class ActionChunkingLPDDR5:
     t_decode_int4_str = fmt_latency(round(t_decode_int4.magnitude) * millisecond, unit=millisecond, precision=0)
     intent_period_str = fmt_latency((1 / intent_rate).to(millisecond), unit=millisecond, precision=0)
     renewal_display_math = fmt_display_math(
-        rf"\frac{{t_{{\text{{INT4}}}}}}{{T_{{\text{{chunk}}}}}} = \frac{{{intent_latency_str}}}{{{t_replan_str}}} \approx {renewal_gap_str}\text{{ renewal periods}}, \qquad \frac{{{chunk_weight_mem_str}}}{{{b_sustained_str}}} \approx {chunk_t_stream_str}"
+        rf"\frac{{\QuantizedInferenceTime}}{{\ChunkRenewalPeriod}} = \frac{{{intent_latency_str}}}{{{t_replan_str}}} \approx {renewal_gap_str}\text{{ renewal periods}}, \qquad \frac{{{chunk_weight_mem_str}}}{{{b_sustained_str}}} \approx {chunk_t_stream_str}"
     )
     bus_display_math = fmt_display_math(
-        rf"S_{{\text{{out}}}}\,M_{{\text{{INT4}}}}\,f_{{\text{{intent}}}} + M_{{\text{{chunk}}}}\,f_{{\text{{chunk}}}} = {sweeps_per_eval_str} \times {weight_mem_int4_str} \times {intent_rate_str} + {chunk_weight_mem_str} \times {chunk_rate_str} = {intent_bw_str} + {chunk_bw_str} = {proposer_bw_str}"
+        rf"\EmittedTokenCount\,\QuantizedWeightMemory\,\IntentProposerRate + \ChunkDecoderWeightMemory\,\ChunkDecoderRate = {sweeps_per_eval_str} \times {weight_mem_int4_str} \times {intent_rate_str} + {chunk_weight_mem_str} \times {chunk_rate_str} = {intent_bw_str} + {chunk_bw_str} = {proposer_bw_str}"
     )
 ```
 
@@ -2027,16 +2027,16 @@ class ConveyorChunkSizing:
     _a = fmt(a_slip.to("m/s**2").magnitude, precision=2)
     _ms = lambda q: fmt_int(round(q.to(millisecond).magnitude))  # whole-ms display; guards pin exact values
     untracked_math = fmt_display_math(
-        rf"\frac{{r_{{\text{{tol}}}} - e_0}}{{v_{{\text{{conv}}}}}} = \frac{{{_mm}\ \text{{mm}}}}{{{_v}\ \text{{m/s}}}} = {_ms(t_untracked)}\ \text{{ms}}"
+        rf"\frac{{\PositionalTaskTolerance - \InitialTrackingError}}{{\ConveyorSpeed}} = \frac{{{_mm}\ \text{{mm}}}}{{{_v}\ \text{{m/s}}}} = {_ms(t_untracked)}\ \text{{ms}}"
     )
     tau_ev_math = fmt_display_math(
-        rf"\tau_{{\text{{ev}}}} = \sqrt{{\frac{{2 \times {_mm}\ \text{{mm}}}}{{{_a}\ \text{{m/s}}^2}}}} \approx {_ms(tau_ev)}\ \text{{ms}}"
+        rf"\EvidenceHorizon = \sqrt{{\frac{{2 \times {_mm}\ \text{{mm}}}}{{{_a}\ \text{{m/s}}^2}}}} \approx {_ms(tau_ev)}\ \text{{ms}}"
     )
     open_loop_math = fmt_display_math(
-        rf"T_{{\text{{chunk}}}} + t_{{\text{{infer}}}} = {_ms(chunk_period)} + {_ms(chunk_latency)} = {_ms(open_loop)}\ \text{{ms}}, \quad \tfrac{{1}}{{2}} a_{{\text{{slip}}}} T^2 = \tfrac{{1}}{{2}} \times {_a} \times ({fmt(open_loop.to(second).magnitude, precision=2)}\ \text{{s}})^2 \approx {fmt(drift_open_loop.magnitude, precision=1)}\ \text{{mm}}, \quad h_{{\min}} = \left\lceil \tfrac{{{_ms(open_loop)}}}{{{_ms(chunk_step)}}} \right\rceil = {h_min}"
+        rf"\ChunkRenewalPeriod + \ProposerInferenceTime = {_ms(chunk_period)} + {_ms(chunk_latency)} = {_ms(open_loop)}\ \text{{ms}}, \quad \tfrac{{1}}{{2}} \SlipAccelerationBound \Time^2 = \tfrac{{1}}{{2}} \times {_a} \times ({fmt(open_loop.to(second).magnitude, precision=2)}\ \text{{s}})^2 \approx {fmt(drift_open_loop.magnitude, precision=1)}\ \text{{mm}}, \quad \MinimumChunkSetpointCount = \left\lceil \tfrac{{{_ms(open_loop)}}}{{{_ms(chunk_step)}}} \right\rceil = {h_min}"
     )
     full_math = fmt_display_math(
-        rf"H\,\Delta t_{{\text{{step}}}} = {chunk_horizon} \times {_ms(chunk_step)}\ \text{{ms}} = {_ms(chunk_span)}\ \text{{ms}}, \quad e_0 + \tfrac{{1}}{{2}} \times {_a} \times ({fmt(chunk_span.to(second).magnitude, precision=2)}\ \text{{s}})^2 = {fmt(e_0.to(millimeter).magnitude, precision=0)} + {fmt(drift_full.magnitude, precision=0)} = {fmt(err_full.magnitude, precision=0)}\ \text{{mm}} > {fmt(r_tol.to(millimeter).magnitude, precision=0)}\ \text{{mm}}"
+        rf"\ActionChunkHorizon\,\SetpointStepInterval = {chunk_horizon} \times {_ms(chunk_step)}\ \text{{ms}} = {_ms(chunk_span)}\ \text{{ms}}, \quad \InitialTrackingError + \tfrac{{1}}{{2}} \times {_a} \times ({fmt(chunk_span.to(second).magnitude, precision=2)}\ \text{{s}})^2 = {fmt(e_0.to(millimeter).magnitude, precision=0)} + {fmt(drift_full.magnitude, precision=0)} = {fmt(err_full.magnitude, precision=0)}\ \text{{mm}} > {fmt(r_tol.to(millimeter).magnitude, precision=0)}\ \text{{mm}}"
     )
 
 ConveyorChunkSizing.tau_ev_rounded = ConveyorChunkSizing._tau_ev_rounded
@@ -2245,7 +2245,7 @@ A chunk proposed by a mobile manipulator's policy can arrive within its `{python
 
 Without a verified input domain and sensitivity bound, small sensing changes to a learned proposer can yield unexpectedly large changes in proposed motion, a sensitivity demonstrated early by imperceptible image perturbations that flipped image classification outputs [@szegedy2013intriguing]. Benchmark success does not establish closed-loop stability, timing bounds, or physical safety under unseen operating conditions; those guarantees require independent evidence across the model, the software runtime, and the physical plant.[^fn-math-lipschitz-calibration] Even when a valid sensitivity bound exists, it characterizes only the relationship between input perturbations and output deviations over a specified domain. It provides no proof that the nominal proposed action is collision-free or physically admissible, meaning analytical bounds can inform, but never replace, an independent permission decision.
 
-[^fn-math-lipschitz-calibration]: **Lipschitz Continuity in Neural Policies**\index{Lipschitz continuity!policy sensitivity}\index{Adversarial vulnerability!perturbation bounds}: Although neural networks with smooth activations are continuous on compact domains, a sensitivity bound $\PolicyLipschitzBound = \sup_{\MechanicalPlantState_1 \ne \MechanicalPlantState_2} \frac{\lVert \pi(\MechanicalPlantState_1) - \pi(\MechanicalPlantState_2) \rVert}{\lVert \MechanicalPlantState_1 - \MechanicalPlantState_2 \rVert}$ must be established over a stated operating region. Where that bound holds, sensor error $\lVert \FiniteChange \MechanicalPlantState \rVert \le \SensorErrorBound$ bounds the action change by $\lVert \FiniteChange \CognitivePolicyAction \rVert \le \PolicyLipschitzBound\SensorErrorBound$; an unverified $\PolicyLipschitzBound$ gives no usable action-error guarantee. Full derivations appear in @sec-appendix-ml-lipschitz.
+[^fn-math-lipschitz-calibration]: **Lipschitz Continuity in Neural Policies**\index{Lipschitz continuity!policy sensitivity}\index{Adversarial vulnerability!perturbation bounds}: Although neural networks with smooth activations are continuous on compact domains, a sensitivity bound $\PolicyLipschitzBound = \sup_{\MechanicalPlantState_1 \ne \MechanicalPlantState_2} \frac{\lVert \LearnerPolicy(\MechanicalPlantState_1) - \LearnerPolicy(\MechanicalPlantState_2) \rVert}{\lVert \MechanicalPlantState_1 - \MechanicalPlantState_2 \rVert}$ must be established over a stated operating region. Where that bound holds, sensor error $\lVert \FiniteChange \MechanicalPlantState \rVert \le \SensorErrorBound$ bounds the action change by $\lVert \FiniteChange \CognitivePolicyAction \rVert \le \PolicyLipschitzBound\SensorErrorBound$; an unverified $\PolicyLipschitzBound$ gives no usable action-error guarantee. Full derivations appear in @sec-appendix-ml-lipschitz.
 
 A numerical interface easily traps malformed tensors, NaN values, and out-of-range floating-point setpoints, but it cannot detect a wrong grasp plan. Both classical pipelines and learned models can emit well-formed yet wrong commands; learning, however, adds failures rooted in high-dimensional latent features, out-of-distribution hallucinations, and uncalibrated confidence scores. Independent safety monitors can reject proposals that contradict measured geometry or joint limits, but they cannot infer true task intent. Catching those failures before they reach the actuators requires runtime checks beyond packet formatting, testing each candidate against independent geometry, calibrated uncertainty, filtered state, and active lease timers.
 
@@ -2262,7 +2262,7 @@ Independent geometric evidence exposes this hallucination directly. A runtime va
 ### The softmax illusion and out-of-distribution overconfidence {#sec-brain-softmax-illusion}
 
 A natural temptation is to filter out hallucinations like the cardboard mug, or frames degraded by intense specular glare, dynamic shadows, and water droplets on camera lenses, by rejecting proposals whose reported confidence falls below a threshold. That defense fails when deployment interfaces conflate mathematical normalization with the physical probability of task success. In discrete classification, classification-based tokenization, or categorical action heads, raw output logits are transformed via the softmax operator:[^fn-softmax-function-origin]
-$$\SoftmaxFunction(\LogitVector)_i = \frac{e^{\OutputLogit_i}}{\sum_{j=1}^\ClassCount e^{\OutputLogit_j}}$$
+$$\SoftmaxFunction(\LogitVector)_i = \frac{e^{\OutputLogit_i}}{\sum_{j=1}^{\ClassCount} e^{\OutputLogit_j}}$$
 whose outputs sum to one purely by algebraic construction. When an embodied machine encounters those out-of-distribution (OOD) observations or novel visual textures, the network can still emit confidence scores near one for physically disastrous actions. Modern deep networks are often overconfident even on in-distribution inputs [@guo2017calibration], and networks constructed from rectified linear units provably approach maximum confidence on inputs far from their training distribution [@hein2019relu].
 
 [^fn-softmax-function-origin]: **Softmax** (soft arg max): @bridle1990probabilistic named the normalized exponential "softmax" because it is a differentiable version of the winner-take-all operation that picks the largest input. A function built to pick a winner keeps doing so far from its training data, pushing its top output toward one whenever one logit separates from the rest, whether or not the input resembles anything the model has seen. \index{Softmax normalization!origin}\index{Probability calibration!algebraic normalization}
