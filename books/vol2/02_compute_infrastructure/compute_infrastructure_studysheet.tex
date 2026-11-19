@@ -19,16 +19,16 @@ the fleet coordinates \hl{sustained useful work}.
 \begin{leftcol}
 \sheetsec{Key ideas}
 \begin{ideas}
-\idea{The walls cascade.}{Memory binds at the accelerator, communication at the node, power at the rack,
-  reliability across the pod. New technology moves a wall.}
+\idea{The walls cascade.}{Memory binds at the node, power at the rack, communication across the pod,
+  reliability across the fleet; the workload decides which binds.}
 \idea{Capacity and bandwidth are separate tests.}{Capacity: does state fit? Bandwidth: how fast does
   low-reuse work, such as decode, run?}
 \idea{Plan on sustained, not peak.}{A run sustaining a fraction $\EfficiencyHw$ of peak needs
   $1/\EfficiencyHw$ times a peak plan's GPU-hours.}
 \idea{The hierarchy places parallelism.}{Tensor parallelism stays on NVLink; pipeline and data parallelism
   cross nodes. Misplacement shows as exposed collective time.}
-\idea{Watts and failures are design inputs.}{A DGX H100 rack draws \val{rackkw} kW, a traditional one about
-  \val{tradkw} kW. Some GPU fails every $\MeanTimeToFailure/\DeviceCount$ hours: buy checkpoints, fast restart.}
+\idea{Watts and failures are design inputs.}{The hall fixes each rack's power and cooling. Some GPU
+  fails every $\MeanTimeToFailure/\DeviceCount$ hours: buy checkpoints, fast restart.}
 \idea{Specialize by the binding constraint.}{Specialization bets the operators last: compute for training,
   bandwidth for decode, capacity for embeddings.}
 \end{ideas}
@@ -40,6 +40,17 @@ the fleet coordinates \hl{sustained useful work}.
   {Stragglers and pipeline bubbles add waiting inside the step.}%
   {Failures, checkpoints and maintenance add time between steps.}%
   {}
+
+\vspace{12pt}
+\sheetsec{The accelerator spectrum: a bet on stability}
+\begin{sheettable}{@{}l l L@{}}
+\thead{Chip} & \thead{Flexibility} & \thead{Pays off when}\\ \midrule
+GPU (H100) & high & workloads keep changing\\
+TPU (v5p) & moderate & matrix-heavy work runs at scale\\
+Custom ASIC & low & one stable workload, huge volume\\
+\end{sheettable}
+\vspace{3pt}
+{\fontsize{8.4}{10.4}\selectfont\color{muted}Generality tax: silicon spent on flexibility, not arithmetic.\par}
 \end{leftcol}%
 \begin{rightcol}
 \sheetsec{Napkin rules}
@@ -57,10 +68,10 @@ Failure interval & $\MeanTimeBetweenFailures \approx \MeanTimeToFailure/\DeviceC
 leftover HBM holds activations. $\Parameters$ parameters,
 $\DatasetSize$ tokens, $\DeviceCount$ GPUs, $\PeakRate$ dense FP16 peak, $\EfficiencyHw$ local efficiency,
 $\TensorparallelDegreeTp, \PipelineparallelDegreePp$ tensor and pipeline degrees. One H100: \val{capgib} GiB
-$=$ \val{capgb} GB of HBM.\par}
+$=$ \val{capgb} GB.\par}
 
 \vspace{12pt}
-\sheetsec{The bandwidth staircase (per direction)}
+\sheetsec{The bandwidth staircase (links per direction)}
 {\centering
 \begin{tikzpicture}[sheet]
   \pgfmathsetmacro\u{54}
@@ -82,14 +93,26 @@ $=$ \val{capgb} GB of HBM.\par}
   \node[hotbox, anchor=north, align=center] at (\xn,-28) {tensor\\parallel};
   \node[accbox, anchor=north, align=center] at (\xi,-28) {pipeline,\\data parallel};
 \end{tikzpicture}\par}
+
+\vspace{12pt}
+\sheetsec{The power wall: watts per rack}
+\begin{sheettable}{@{}L r L@{}}
+\thead{Unit} & \thead{Power} & \thead{Cooling}\\ \midrule
+Traditional rack & \val{tradkw} kW & ordinary air\\
+DGX H100 node, \val{nodegpus} GPUs & \val{nodekw} kW & \\
+DGX H100 rack, \val{nodespr} nodes & \val{rackkw} kW & engineered air, in a suitable facility\\
+High-density training rack & \val{liquidkw} kW & liquid\\
+\end{sheettable}
+\vspace{3pt}
+{\fontsize{8.4}{10.4}\selectfont\color{muted}A rack holds only the whole nodes its power feed and cooling carry.\par}
 \end{rightcol}
 
 % ===================================================================== BACK
 \backside
 \begin{answers}
-\ans{Finish}{\val{ygb} GB $\div$ (\val{ygpus} $\times$ \val{bandwidthtb} TB/s) $=$ \val{ystep} ms per step;
-  \val{ybatch} tokens per step give about \val{ytok} tokens/s per replica. Intensity \val{yint} FLOP/byte is still
-  below \val{ridge}, so bandwidth still binds. A ceiling: it assumes balanced shards and ignores collectives.}
+\ans{Finish}{The floor stays \val{wgb} GB $\div$ \val{bandwidthtb} TB/s $=$ \val{wtmem} ms; \val{ybatch} tokens per step
+  give \val{ybatch} $\div$ \val{wtmem} ms $\approx$ \val{ytok} tokens/s (about \val{yone} at batch one). Intensity
+  \val{yint} FLOP/byte is still below \val{ridge}: bandwidth still binds. A ceiling: it ignores key-value cache reads.}
 \ans{1}{$\val{qtotalsci}$ FLOPs $\div$ (\val{qgpus} $\times$ \val{peaktflops} TFLOP/s $\times$ \val{qeta}\%
   $=$ $\val{qratesci}$ FLOP/s) $=$ \val{qhours} h, about \val{qdays} days compute-only; $\div$ \val{effone}
   $\to$ \val{qdaysscaled} days before operational overheads.}
@@ -102,7 +125,9 @@ $=$ \val{capgb} GB of HBM.\par}
   pipeline or data parallelism cross. Evidence: exposed collective time grows in the trace while compute
   per layer stays flat.}
 \ans{4}{\val{mttf} h $\div$ \val{fleetgpus} $\approx$ \val{fleetmtbf} h (about \val{fleetmtbfmin} minutes) between
-  GPU failures on average: routine, not rare. Buy checkpoint storage and fast restart.}
+  GPU failures on average: routine, not rare. Buy checkpoint storage and fast restart. (b) \val{fleetgpus} $\div$
+  \val{rackgpus} $=$ \val{bigracks} racks $\times$ \val{rackkw} kW $\approx$ \val{bigmw} MW. A \val{tradkw} kW rack feeds
+  \val{tradnodes} \val{nodekw} kW node, so \val{tradracks} racks: plan power before buying GPUs.}
 \end{answers}
 
 \begin{leftcol}
@@ -144,10 +169,9 @@ hypothetical H100-equivalent path (\val{peaktflops} TFLOP/s, \val{bandwidthtb} T
 
 \vspace{12pt}
 \sheetsec{Your turn: finish it}
-\begin{practicebox}\boxtitle{How fast can one node serve the 175B model?}
-A tensor-parallel replica on one node of \val{ygpus} H100s holds \val{ygb} GB of FP16 weights;
-\val{ybatch} requests share each weight read.\par\vspace{4pt}
-\textbf{Given:} each decode step reads every weight once over \val{ygpus} paths of \val{bandwidthtb} TB/s.\par
+\begin{practicebox}\boxtitle{The same path, now \val{ybatch} requests at once}
+Same Llama-3 \val{wparams}B weights and H100-equivalent path; only the batch changes, from one to \val{ybatch}.\par\vspace{4pt}
+\textbf{Given:} each decode step still reads every weight once, and all \val{ybatch} requests share that read.\par
 \textbf{You:} find the step floor, the ceiling in tokens per second, and whether the batch crossed the ridge.
 \end{practicebox}
 \end{leftcol}%
@@ -159,10 +183,7 @@ A tensor-parallel replica on one node of \val{ygpus} H100s holds \val{ygb} GB of
    throughput lost.}{}
 \mistake{``A custom ASIC beats a GPU on throughput per watt, so it is always the better buy.''}%
   {Its fixed dataflow bets that today's operators last. A chip takes over a year to design, then serves years
-   in a facility built to outlast several generations; a shift such as CNNs to Transformers can strand it.}{}
-\mistake{``Power and cooling can be sorted out after the GPUs arrive.''}%
-  {A DGX H100 rack draws \val{rackratio}$\times$ a traditional rack, and racks near \val{liquidkw} kW need liquid
-   cooling. Facility upgrades take months; the accelerators sit idle meanwhile.}{}
+   in a facility built to outlast several generations; a workload shift can strand its efficiency advantage.}{}
 
 \vspace{2pt}
 \sheetsec{Check yourself}
@@ -173,8 +194,8 @@ A tensor-parallel replica on one node of \val{ygpus} H100s holds \val{ygb} GB of
   H100s. Does its training state fit per GPU? What is the shallowest power-of-two pipeline that fits?
 \item A team splits one tensor-parallel group across two nodes. Compare a \val{buffer} GB transfer on
   each link. What should cross instead, and what trace evidence shows the problem?
-\item \assumed{} a \val{fleetgpus}-GPU training job. How often does some GPU fail, and what must the
-  design buy?
+\item \assumed{} a \val{fleetgpus}-GPU training job. (a) How often does some GPU fail, and what must the
+  design buy? (b) On DGX H100 racks, how many racks and megawatts? Could a hall of traditional racks host it?
 \end{qs}
 \end{rightcol}
 \end{document}

@@ -81,19 +81,19 @@ def numbers() -> dict:
     near(round(s.linf_budget, 4) * round(math.sqrt(s.coordinates), 1), s.box_corner_l2, 5e-3)
     assert not s.covers_box and s.radius < s.box_corner_l2
     n.update(rsp=fx(s.top_class_probability, 3), rssigma=fx(s.noise_sd, 1), rsq=fx(s.quantile, 2),
-             rsr=fx(s.radius, 2), rslevels=f"{s.linf_levels}", rspix=f"{s.pixel_levels - 1}",
+             # radius printed from the printed 0.5 x 3.09, so it reproduces exactly
+             rsr=fx(round(s.noise_sd, 1) * round(s.quantile, 2), 3), rslevels=f"{s.linf_levels}", rspix=f"{s.pixel_levels - 1}",
              rseps=fx(s.linf_budget, 4), rsd=f"{s.coordinates:,}", rssqrtd=fx(math.sqrt(s.coordinates), 1),
              rscorner=fx(s.box_corner_l2, 2))
 
     # ---- Mistake: robustness penalty (chapter: RobustnessTaxAnalysis; data/imagenet_testbed_shift.csv)
     rows = {r["model"]: r for r in load_series("vol2/14_robust_ai/data/imagenet_testbed_shift.csv").entries}
     std_clean = rows["resnet50"]["val"]
-    rob_clean = rows["resnet50_linf_eps4_robust"]["val"]   # same testbed: l-infinity 4/255 adversarially trained
     rob_attacked = 50.0                                     # chapter's scenario input (RobustnessTaxAnalysis)
-    n.update(robeps="4/255",                              # budget of the testbed row (linf_eps4) and the chapter's scenario
-             stdclean=f"{std_clean:.0f}", robattacked=f"{rob_attacked:.0f}",
-             crossgap=f"{round(std_clean) - round(rob_attacked):.0f}", robclean=f"{rob_clean:.0f}",
-             cleanpen=f"{round(std_clean) - round(rob_clean):.0f}")
+    # The chapter states no clean-accuracy penalty (it depends on model, data, budget and recipe), so the
+    # sheet prints only the cross-condition pair and the four-cell rule, not a testbed-derived penalty.
+    n.update(stdclean=f"{std_clean:.0f}", robattacked=f"{rob_attacked:.0f}",
+             crossgap=f"{round(std_clean) - round(rob_attacked):.0f}")
 
     # ---- Check yourself Q1, ASSUMED: fallback load at two thresholds against fallback capacity
     lam, cov_lo, cov_hi, cap = 2000, 0.95, 0.90, 150    # requests/s, coverages, fallback requests/s

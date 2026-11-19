@@ -28,8 +28,8 @@ so each failure costs \hl{bounded lost work and recovery time}. Training protect
   The optimum shrinks only as $\sqrt{\SystemMtbf}$.}
 \idea{A checkpoint counts once committed.}{Shards of one step, manifest last, stale writers fenced;
   restarts and resizes resume from it. RPO caps lost work; RTO, delay.}
-\idea{Serving buys availability with replicas.}{Place them in independent failure domains; rebuild or replicate session
-  state. Beyond that, degrade a validated property.}
+\idea{Serving buys availability with replicas.}{Spread them over failure domains; beyond that,
+  fall back in validated steps: model, features, load.}
 \end{ideas}
 
 \vspace{10pt}
@@ -46,8 +46,8 @@ Permanent & repeats on one device & replace; restore from before its first bad w
 \vspace{10pt}
 \fcard{Replicas in parallel}%
   {\RedundantServiceAvailability = 1 - (1 - \ReplicaAvailability)^{\RedundantReplicaCount}}%
-  {Up if any of $\RedundantReplicaCount$ independent replicas is.
-   One \val{replicaone}\% replica is down \val{downone} days a year; two, \val{downtwo} min.}%
+  {Up if any of $\RedundantReplicaCount$ independent replicas is. Each replica's
+   $\ReplicaAvailability = \MeanTimeBetweenFailures/(\MeanTimeBetweenFailures+\MeanTimeToRepair)$: faster recovery raises it.}%
   {}{}
 \end{leftcol}%
 \begin{rightcol}
@@ -94,7 +94,7 @@ Permanent & repeats on one device & replace; restore from before its first bad w
 \begin{answers}
 \ans{Finish}{Interval: square root of twice \val{twrite} $\times$ \val{mtbfdouble} = \val{taudouble} s (\val{taudoublemin} min);
   waste: square root of twice \val{twrite} $\div$ \val{mtbfdouble} = \val{wastedouble}\%. Interval shorter and waste higher, each by
-  \val{factortau}$\times$, the square root of the MTBF ratio: storage need not double (Young-Daly card).}
+  \val{factortau}$\times$, the square root of the MTBF ratio, not two (Young-Daly card).}
 \ans{1}{\val{tdetect} s + \val{trestarthot} min + \val{tload} s + \val{twarmup} min = \val{trecoveryhot} min, against \val{trecovery}.
   Per day: \val{trecovery} $\times$ \val{perday} = \val{daycold} min becomes \val{dayhot} min, \val{savedmin} min saved on
   \val{fleetgpus} GPUs, about \val{savedgpuh} GPU-hours, against \val{sparegpuh} for the idle node: worth it (recovery card).}
@@ -117,7 +117,7 @@ parameter, \val{writebw} GB/s to storage).
 \begin{steps}
 \item Rates per million GPU-hours: \val{rategpu} + \val{ratepcie} + \val{ratenet} = \res{\val{ratetotal}}.
 \item Cluster: \val{fleetgpus} $\times$ \val{ratetotal} per million = \val{sysrate} per hour, so
-  $\SystemMtbf$ = \res{\val{mtbfcascade} h} (\val{mtbfsec} s), \val{perday} failures a day.
+  $\SystemMtbf$ = \res{\val{mtbfcascade} h}, used as \val{mtbfsec} s; \val{perday} failures a day.
 \item Write: \val{ckpttb} TB $\div$ \val{writebw} GB/s = \res{\val{twrite} s}.
 \item $\OptimalCheckpointInterval = \sqrt{2 \times \val{twrite} \times \val{mtbfsec}} = \sqrt{\val{radicand}}$ =
   \res{\val{tauopt} s (\val{tauoptmin} min)}; waste \res{\val{wasteopt}\%}, half writes, half rework.
@@ -138,10 +138,11 @@ Same checkpoint, same storage; failures stay independent.\par\vspace{4pt}
 \sheetsec{Common mistakes}
 \mistake{``Checkpointing every hour is the safe default.''}%
   {On the worked cluster hourly wastes \val{hourwaste}\% against \val{wasteopt}\%. On \val{onekgpus} GPUs (MTBF \val{onekmtbf} h) with a
-   \val{onekwrite}-min write the optimum is \val{oneklong} min, so hourly saves too often. Compute it.}{}
-\mistake{``Our hardware has ECC, so silent corruption is negligible.''}%
-  {ECC and CRCs protect stored and moved bits, not arithmetic. A rank that checksums its own wrong gradient
-   passes; only replay, invariants or model evidence expose it.}{}
+   \val{onekwrite}-min write the optimum is \val{oneklong} min, so hourly saves too often.}{}
+\mistake{``If recovery misses the latency budget, the service is down.''}%
+  {A designed ladder keeps serving: smaller model, then default or cached features, then shed
+   low-priority requests. Each rung is validated beforehand; monitoring reports the fallback rate, or
+   lost quality hides behind uptime.}{}
 \mistake{``The newest checkpoint directory is safe to resume from.''}%
   {Only a generation whose manifest was published after every shard confirmed counts. A rank that dies mid-save
    leaves the last committed step; fencing rejects its late writes; an elastic resize resumes from that commit too.}{}
@@ -149,7 +150,7 @@ Same checkpoint, same storage; failures stay independent.\par\vspace{4pt}
 \vspace{2pt}
 \sheetsec{Check yourself}
 \begin{qs}
-\item \assumed{} on the \val{fleetgpus}-GPU cluster, a hot spare cuts the restart term to \val{trestarthot} min on the cold path. New recovery time?
+\item \assumed{} on the \val{fleetgpus}-GPU cluster, a hot spare cuts the cold-path restart term from \val{trestart} to \val{trestarthot} min. New recovery time?
   At \val{perday} failures a day, is an idle \val{gpusnode}-GPU spare node worth it?
 \item \assumed{} each serving replica is \val{qavail}\% available. Which rule applies, and how many replicas reach
   \val{qtarget}\%?

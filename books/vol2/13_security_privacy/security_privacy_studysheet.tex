@@ -11,40 +11,47 @@
 \frontside
 \begin{bigidea}
 A machine learning service can run exactly as designed and still leak its training data or be
-subverted through interfaces it exposes on purpose. Each control guards \hl{one boundary} and
-\hl{costs something}. In C\textsuperscript{3} terms, compute, communication and coordination must preserve
-confidentiality, integrity and control.
+subverted through interfaces it exposes on purpose. Each control guards \hl{one boundary} and pays a
+C\textsuperscript{3} price in \hl{compute, communication or coordination}.
 \end{bigidea}
 
 \begin{leftcol}
 \sheetsec{Key ideas}
 \begin{ideas}
-\idea{Write the threat model in four fields.}{Asset, boundary, adversary (what it can see or change,
-  and wants), control. Authentication says who sent an update, not that it is benign.}
-\idea{Learned behavior is an attack surface.}{Theft copies weights or behavior, poisoning needs write
-  access to training data, and adversarial inputs and denial of wallet need only an account.}
+\idea{Write the threat model in four fields.}{Asset, boundary, adversary, control. Authentication
+  says who sent an update, not that it is benign.}
+\idea{Learned behavior is an attack surface.}{Theft copies behavior, poisoning needs write access to
+  training data, and adversarial inputs need only an account.}
 \idea{Correct outputs can leak training data.}{Membership inference, inversion and verbatim extraction
   read only authorized answers; risk grows with overfitting.}
-\idea{Extraction is bounded by cumulative budgets.}{A daily quota slows a copier but never caps the
-  total; a lifetime budget per principal can.}
+\idea{Model output is untrusted input.}{Injected text rides normal channels: separate instructions
+  from retrieved content; authorize actions outside the model.}
 \idea{Privacy is an accounted budget.}{Every data-dependent release spends $\PrivacyBudget$; querying a
   fixed DP-trained model is post-processing and spends none.}
-\idea{Provenance bounds trust.}{Trust a model only as far as signed records of its data, code and
-  weights reach. On a breach: isolate, keep evidence, roll back to a verified release, fix the boundary.}
+\idea{Provenance bounds trust.}{Trust a model only as far as records of its data, code and weights
+  reach. Breach: isolate, keep evidence, roll back, fix the boundary.}
 \end{ideas}
 
 \vspace{10pt}
 \sheetsec{Every control has a C\textsuperscript{3} price}
 \begin{sheettable}{@{}L l L@{}}
 \thead{Control} & \thead{Axis} & \thead{Cost (chapter case)}\\ \midrule
-Robust aggregation that gathers every gradient & comm. & $\DataParallelDegree$ replicas: half of $\DataParallelDegree$
-  times ring traffic, \val{gatherratio}$\times$ at \val{dp}\\
+Robust aggregation that gathers every gradient & comm. & $\DataParallelDegree/2$ $\times$ ring traffic: \val{gatherratio}$\times$ at
+  $\DataParallelDegree = \val{dp}$\\
 Fabric cipher at half the link rate & comm. & halves link bandwidth $\LinkBandwidth$, doubling the bandwidth term of $\CommunicationTime$\\
 Attestation and key release at every restart & coord. & a wait in $\SynchronizationTime$ before rejoining\\
-DP-SGD clipping and noise & compute & lower throughput, more steps\\
 \end{sheettable}
-\par\vspace{2pt}{\fontsize{8.6}{11}\selectfont\color{muted}A mean of $\DataParallelDegree$ gradients has breakdown
+\par\vspace{2pt}{\fontsize{8.6}{11}\selectfont\color{muted}A mean of gradients has breakdown
 point zero: one unbounded update moves it anywhere.\par}
+
+\vspace{8pt}
+\sheetsec{Hardware anchors guard one boundary each}
+\begin{sheettable}{@{}l L@{}}
+Secure boot & only an authorized boot chain starts\\
+TEE & isolates execution from the host\\
+HSM & keeps keys out of host memory\\
+\end{sheettable}
+\par\vspace{2pt}{\fontsize{8.6}{11}\selectfont\color{muted}None proves the model correct or an authorized output private.\par}
 \end{leftcol}%
 \begin{rightcol}
 \sheetsec{Formulas you will use}
@@ -66,8 +73,8 @@ point zero: one unbounded update moves it anywhere.\par}
   {\text{members flagged} \leq e^{\PrivacyBudget} \times \text{nonmembers flagged}}%
   {Under pure $\PrivacyBudget$-DP no membership test beats this: an upper bound on leakage. An audit attack
    measures it from below.}%
-  {$e^{\PrivacyBudget}$ = \val{eone} at $\PrivacyBudget = \val{epsone}$; the ceiling bends where the bound on
-   unflagged records takes over.}%
+  {$e^{\PrivacyBudget}$ = \val{eone} at $\PrivacyBudget = \val{epsone}$; this branch binds while nonmembers flagged
+   $< 1/(1+e^{\PrivacyBudget})$ = \val{knee}.}%
   {\begin{tikzpicture}[sheet]
      \draw[dim] (40,0) rectangle (210,80);
      \draw[gridline, dashed] (40,0) -- (210,80);
@@ -94,14 +101,14 @@ point zero: one unbounded update moves it anywhere.\par}
   \val{qgroup} = \$\val{qerr} expected error, \val{qratio}$\times$ the chapter's \$\val{salerr} (half the budget,
   half the people). (b) \val{qmonths} $\times$ \val{qeps} = \val{qtotal} under basic composition. (c) $\PrivacyAdditiveSlack$,
   the protected unit, the accountant and its inputs (Laplace card).}
-\ans{Q-Fleet}{(a) Half of \val{qdp}: \val{qgatherratio}$\times$ the ring traffic, every step. (b) Effective
+\ans{Q-Fleet}{(a) Half of \val{qdp}: \val{qgatherratio}$\times$ the ring traffic. (b) Effective
   $\LinkBandwidth$ halves: the bandwidth term doubles unless overlapped. (c) Coordination, $\SynchronizationTime$:
   fresh evidence and the key come before rejoining (price table).}
 \columnbreak
 \ans{Q-Audit}{Ceiling \val{eone} $\times$ \val{auditfpr}\% = \val{ceilpct}\% $<$ \val{audittpr}\%: if the rates are
-  measured precisely, the release breaks $\PrivacyBudget = \val{epsone}$: accounting or implementation is wrong.
+  precise, the release breaks $\PrivacyBudget = \val{epsone}$: accounting or implementation is wrong.
   Below the ceiling, an audit proves nothing (membership card).}
-\ans{Q-Rollback}{Pull it from serving and revoke its credentials, keeping an isolated copy as evidence;
+\ans{Q-Rollback}{Pull it from serving, revoke its credentials, keep an isolated copy as evidence;
   roll back to a release whose record (data, dependencies, image) verifies; repair the boundary (provenance).}
 \end{answers}
 
@@ -110,7 +117,7 @@ point zero: one unbounded update moves it anywhere.\par}
 \begin{practicebox}\boxtitle{Does a daily quota stop a copier?}
 A ResNet-50 API cost \$\val{wtrain} to train; a copy needs \val{wqueriesM}M answers for
 \val{wfidelity}\% fidelity. Billing: \$\val{wprice} a query; a \$\val{wtier}-a-month tier capped at
-\val{wquota} a day; or a lifetime allowance of \val{wallowK}K per principal, then per query.\par\vspace{5pt}
+\val{wquota} a day; or, on the tier, a lifetime allowance of \val{wallowK}K per principal, then per query.\par\vspace{5pt}
 {\centering
 \begin{tikzpicture}[sheet]
   \pgfmathsetmacro\sc{140/\val{drawtrain}}
@@ -129,7 +136,7 @@ A ResNet-50 API cost \$\val{wtrain} to train; a copy needs \val{wqueriesM}M answ
 \item Lifetime: (\val{wqueriesM}M $-$ \val{wallowK}K) $\times$ \$\val{wprice} = \$\val{woverage}, plus \$\val{wallowfee}
   of tier fees (\val{wallowdays} days) = \res{\$\val{wlife}}, \val{wlifepct}\% of training.
 \end{steps}
-\takeaway{A daily quota buys time, not cost; a lifetime allowance billed per query prices the copy like training.}
+\takeaway{A daily quota buys time, not cost; a lifetime allowance prices the copy like training.}
 \end{practicebox}
 
 \vspace{10pt}
@@ -146,6 +153,10 @@ queries a day; \assumed{} its fee is \$\val{ffee} a month.\par
 \mistake{``An attested worker sends honest gradients.''}%
   {Attestation shows which code booted, not that its update is benign. One unbounded gradient moves
    the mean for all \val{gpus} GPUs; robust aggregation or update checks address it.}{}
+\mistake{``A strict system prompt stops prompt injection.''}%
+  {Roles and delimiters guide the model but authorize nothing; retrieved text can still steer it.
+   A policy point outside the model checks the user's permission for each tool call and holds
+   irreversible ones for approval.}{}
 \mistake{``Federated learning keeps the data private.''}%
   {Updates can reconstruct examples. Secure aggregation hides each update (given at least
    \val{noncolluding} noncolluding clients); only accounted DP bounds what the released model reveals.}{}

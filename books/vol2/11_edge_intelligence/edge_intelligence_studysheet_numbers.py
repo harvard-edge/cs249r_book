@@ -6,6 +6,7 @@ Inputs the sheet chooses for its own examples and questions are marked ASSUMED.
 MB is decimal (10^6 bytes). Phone RAM and the adapter payload are binary in the registry
 (GiB, MiB); the sheet prints both forms.
 """
+import math
 from pathlib import Path
 
 from mlsysim import Hardware, Platforms, ReferenceStats
@@ -78,6 +79,12 @@ def numbers() -> dict:
              payloadmbit=f"{pay_mbit:.0f}", bitsperbyte=f"{bits_per_byte}", linkslow=f"{lo:.0f}", linkfast=f"{hi:.0f}",
              uploadslows=f"{t_lo:.0f}", uploadslowmin=f"{t_lo / 60:.1f}", uploadfasts=f"{t_hi:.0f}",
              deadlinemin=f"{deadline_min}")
+    # Q1 clause: over-selection for a secure-aggregation round (chapter: about 130% of target selected).
+    target_clients, miss_share = 100, 0.30  # ASSUMED target cohort and share of selected devices that miss
+    select_raw = target_clients / (1 - miss_share)
+    n.update(targetclients=f"{target_clients}", misspct=f"{miss_share * 100:.0f}",
+             completefrac=f"{1 - miss_share:.2f}", selectraw=f"{select_raw:.1f}",
+             selectclients=f"{math.ceil(select_raw)}", selectmult=f"{math.ceil(select_raw) / target_clients:.2f}")
 
     # ---- Q2: coverage ratio. Fleet shares from the chapter's tier profile; completed-update shares ASSUMED.
     budget_fleet, flagship_fleet = float(prof.BudgetFleetShare), float(prof.FlagshipFleetShare)
@@ -90,7 +97,8 @@ def numbers() -> dict:
     # device draw, update increment and latencies ASSUMED.
     thermal = ReferenceStats.MobilePower.MobileMlSustainedHigh.to("watt").magnitude
     p_dev, p_upd = 2.5, 1.0                 # ASSUMED, watts
-    lat, dlat, deadline_ms = 30, 25, 50     # ASSUMED, milliseconds
+    lat, dlat, deadline_ms = 30, 15, 50     # ASSUMED, milliseconds: latency passes, power fails
+    assert lat + dlat <= deadline_ms and p_dev + p_upd > thermal
     n.update(thermalw=f"{thermal:.0f}", devicew=f"{p_dev:.1f}", updatew=f"{p_upd:.1f}",
              sumw=f"{p_dev + p_upd:.1f}", latms=f"{lat}", dlatms=f"{dlat}", deadlinems=f"{deadline_ms}",
              summs=f"{lat + dlat}")
@@ -105,6 +113,9 @@ def numbers() -> dict:
     n.update(rawmb=f"{raw:.0f}", updatemb=f"{upd:.1f}", breakeven=f"{breakeven:.0f}",
              dailyrounds=f"{daily}", hourlyrounds=f"{hourly}",
              dailyupmb=f"{daily * upd:.1f}", hourlyupmb=f"{hourly * upd:.0f}")
+    # ---- Mistake: latency forces local inference, not local learning (chapter, Simpler alternatives first:
+    # a 33 ms camera deadline against 50-200 ms network round trips; prose values).
+    n.update(cameradeadlinems="33", rttlowms="50", rtthighms="200")
     return n
 
 

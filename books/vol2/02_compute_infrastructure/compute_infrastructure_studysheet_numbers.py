@@ -66,15 +66,12 @@ def numbers() -> dict:
     # Roofline points (chapter: RooflineLandscapeMath)
     n.update(rtraini=c(2048 * 1.0), posTRAIN=f"{2048 * 1.0:.0f}")  # ASSUMED-by-chapter: 2,048 local tokens share each weight read
 
-    # ---- Your turn: 175B FP16 replica, TP-8 on one node, batch 32 (chapter: ServingReplicaEstimate)
-    gpt3 = Models.Language.GPT3
-    w175 = gpt3.parameters.to("param").magnitude * 2 / 1e9  # FP16: two bytes per parameter, in GB
-    gpus = Systems.Nodes.DGX_H100.accelerators_per_node
-    batch = 32
-    step_ms = w175 / (gpus * bw / 1e9) * 1e3
-    step_ms_r = round(step_ms, 2)
-    n.update(ygb=c(w175), ygpus=c(gpus), ybatch=c(batch), ystep=f"{step_ms_r:.2f}",
-             ytok=c(round(batch / (step_ms_r / 1e3), -1)), yint=c(batch))
+    # ---- Your turn: the same 70.6B path, batch 32 (one condition changed; chapter: RooflineLandscapeMath decode batch)
+    batch = 32                                                     # ASSUMED-by-chapter: decode batch of 32
+    wtmem_r = round(r.memory_time.to("ms").magnitude, 1)          # printed step floor, ms
+    n.update(ybatch=c(batch), ytok=c(round(batch / (wtmem_r / 1e3), -1)), yint=c(batch),
+             yone=c(round(1 / (wtmem_r / 1e3))))
+    assert batch < ridge                                           # batch 32 is still below the ridge
 
     # ---- Mistake 1: scaling efficiency tiers (chapter: InfraFrontierStragglerRecap23)
     e1k = round(Scenarios.DenseLLMPretrainingStep.result.scaling_efficiency, 2)
@@ -86,6 +83,7 @@ def numbers() -> dict:
 
     # ---- Q1: compute-only time on the 1,024-GPU reference cluster (chapter: PodTrainingMath, ReferenceClusterTrainingTime)
     step = Scenarios.DenseLLMPretrainingStep
+    gpt3 = Models.Language.GPT3
     P = gpt3.parameters.to("param").magnitude
     D = gpt3.training_tokens.to("count").magnitude
     N = step.fleet.total_accelerators
@@ -114,6 +112,17 @@ def numbers() -> dict:
     # ---- Q4: ASSUMED 16,384-GPU job, independent failures
     big = 16384
     n.update(fleetgpus=c(big), fleetmtbf=f"{mttf / big:.1f}", fleetmtbfmin=c(mttf / big * 60))
+    # Q4(b): its power on four-node DGX H100 racks vs a hall built for traditional racks (chapter: RackPowerRackRecap)
+    rack_gpus = rack.accelerator_count
+    node_gpus = rack.node.accelerators_per_node
+    racks_big = big / rack_gpus
+    rack_kw_r = round(rack_kw, 1)
+    node_kw_r = round(rack_kw / rack.nodes_per_rack, 1)
+    trad_nodes = math.floor(trad_kw / node_kw_r)                  # whole nodes a traditional rack can feed
+    assert trad_nodes >= 1
+    n.update(nodegpus=c(node_gpus), rackgpus=c(rack_gpus), nodespr=c(rack.nodes_per_rack), bigracks=c(racks_big),
+             bigmw=f"{racks_big * rack_kw_r / 1e3:.1f}", tradnodes=c(trad_nodes),
+             tradracks=c(big / (trad_nodes * node_gpus)))
     return n
 
 

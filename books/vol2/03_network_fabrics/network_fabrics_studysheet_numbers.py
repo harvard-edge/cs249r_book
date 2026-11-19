@@ -122,13 +122,17 @@ def numbers() -> dict:
     q2n, kbig = 6000, 128
     n.update(qtwogpus=c(q2n), qtwobig=c(kbig), qtwosmallhosts=c(ft.radix ** 2 / 2), qtwobighosts=c(kbig ** 2 / 2))
     assert ft.radix ** 2 / 2 == ft.two_tier_hosts
-    # Q3: ASSUMED 32 GPUs each at the NDR rate into one NDR storage port with a 16 MB buffer; ECN round trip 5 us
-    q3s, q3buf = 32, 16e6
+    # Q3: ASSUMED 8 GPUs each at the NDR rate into one NDR storage port with a 16 MB buffer; ECN round trip 5 us
+    # (8 senders make the answer decisive: the buffer lasts many feedback round trips, unlike the chapter's incast)
+    q3s, q3buf = 8, 16e6
     lam = q3s * beta * 1e9
     mu = beta * 1e9
     fill = q3buf / (lam - mu) * 1e6
     n.update(qthreesend=c(q3s), qthreebuf=f"{q3buf / 1e6:.0f}", qthreeload=f"{lam / 1e12:.1f}",
              qthreenet=f"{(lam - mu) / 1e12:.2f}", qthreefill=f"{fill:.1f}", qthreertts=f"{fill / inc.feedback_rtt.to('microsecond').magnitude:.0f}")
+    assert fill / inc.feedback_rtt.to('microsecond').magnitude > 5      # decisive: many round trips
+    # printed fill reproduces from the printed buffer and net rate
+    assert abs(q3buf / 1e6 / float(f"{(lam - mu) / 1e12:.2f}") - float(f"{fill:.1f}")) < 0.06
     # Q4: one node pair measures half the NDR rate (chapter's debugging checkpoint uses the same halving)
     n.update(qfourmeas=f"{beta / 2:.0f}", qfourhdr=f"{hdr.to('GB/s').magnitude:.0f}")
     return n

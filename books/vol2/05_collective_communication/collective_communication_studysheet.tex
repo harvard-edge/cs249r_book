@@ -25,7 +25,7 @@ Fleet Law's communication term.
 \idea{Rings save bytes, trees save rounds.}{The simple tree uses few rounds but resends the whole
   tensor each level.}
 \idea{Hierarchy buys parallel ports.}{Reduce in the node, cross nodes with one shard per GPU,
-  gather; it needs a port per GPU.}
+  gather. On one shared uplink, the $\AcceleratorsPerNode$ shard rings run in turn.}
 \idea{AllToAll ends at its active bound.}{Startup, injection, reception or the cut; under skew,
   the hottest receiver sets the layer.}
 \idea{Shrink or hide, then judge by time to quality.}{Compression cuts only bytes; overlap hides network
@@ -48,8 +48,8 @@ Experts, embeddings (tokens) & AllToAll\\
   {\CodecOverheadTime < \CommunicationTime(\DeviceCount)\left(1-\frac{1}{\CompressionRatio}\right),
    \qquad \ErrorFeedbackResidual_{\OptimizerStepIndex+1} = \LocalGradient_{\OptimizerStepIndex}
    + \ErrorFeedbackResidual_{\OptimizerStepIndex} - \CompressedGradientUpdate_{\OptimizerStepIndex}}%
-  {Encoding must cost less than the transfer it removes. Error feedback sends $\CompressedGradientUpdate$
-   and keeps the unsent residual $\ErrorFeedbackResidual$ for the next gradient $\LocalGradient$.}{}{}
+  {Error feedback sends $\CompressedGradientUpdate$
+   and keeps the residual $\ErrorFeedbackResidual$ for the next gradient $\LocalGradient$.}{}{}
 \end{leftcol}%
 \begin{rightcol}
 \sheetsec{Formulas you will use}
@@ -57,8 +57,8 @@ Experts, embeddings (tokens) & AllToAll\\
   {\RingAllReduceCompletionTime = \under{2(\DeviceCount-1)\MessageStartupLatency}{rounds}
    + \under{2\frac{\DeviceCount-1}{\DeviceCount}\frac{\CollectivePayloadSize}{\LinkBandwidth}}{bytes}}%
   {Each step sends a chunk $\CollectivePayloadSize/\DeviceCount$; below
-   $\LatencyBandwidthCrossoverSize = \MessageStartupLatency\LinkBandwidth$ it is latency bound. The byte term is
-   every AllReduce's floor.}%
+   $\LatencyBandwidthCrossoverSize = \MessageStartupLatency\LinkBandwidth$ it is latency bound. Fusing
+   $\SplitMessageCount$ small messages pays $\MessageStartupLatency$ once, not $\SplitMessageCount$ times.}%
   {NDR port: $\MessageStartupLatency = \val{alpha}\,\MicroUnitPrefix$s, $\LinkBandwidth = \val{beta}$~GB/s
    (\val{gbit}~Gb/s), so $\LatencyBandwidthCrossoverSize = \val{nstar}$~KB. Fit both on a benchmark
    matching operation, size, ranks, algorithm and placement (GPU, NIC, rail).}{}
@@ -100,7 +100,7 @@ Experts, embeddings (tokens) & AllToAll\\
 \backside
 \begin{answers}
 \ans{Finish}{\val{treerounds} $\times$ \val{perround} = \val{treebytes} ms of bytes, \val{treetotal} ms in all:
-  \val{treevsring}$\times$ the ring, as \val{bucket} MB is above the \val{crossover} MB crossover. Tree rounds,
+  \val{treevsring}$\times$ slower than the ring's \val{ringlarge} ms, as \val{bucket} MB is above the \val{crossover} MB crossover. Tree rounds,
   ring bytes: \val{treestartup} + \val{byteslarge} = \val{doubletree} ms, \val{doubletreegain}$\times$ faster
   than the ring (tree card).}
 \ans{1}{The full sum, mostly discarded. ReduceScatter leaves each rank its reduced shard for half the
@@ -114,8 +114,8 @@ Experts, embeddings (tokens) & AllToAll\\
 \ans{3}{It removes \val{qremoved} ms for \val{qcodec} ms: \val{qcompressed} + \val{qcodec} = \val{qnew} ms,
   \val{qspeedup}$\times$ faster. On NVLink it removes only \val{qfastremoved} ms: \val{qfastcompressed} +
   \val{qcodec} = \val{qfastnew} ms, \val{qfastslow}$\times$ slower (payback condition, compression card).}
-\ans{4}{Record each rank's GPU, NIC, node and rail; rerun the benchmark matched to the job, changing only
-  placement. If it slows, placement; if not, look at overlap or contention (ring card).}
+\ans{4}{Record each rank's GPU, NIC, node and rail; rerun the matched benchmark, changing only
+  placement. If it slows, placement; if not, overlap or contention (ring card).}
 \end{answers}
 
 \begin{leftcol}
@@ -136,9 +136,9 @@ Ring AllReduce of one \val{bucket} MB bucket on the NDR port, on \val{small} and
   \filldraw[fill=accent, draw=accent] (\xl,0) circle (2.4pt);
   \filldraw[fill=accentsoft, draw=accent, line width=0.5pt] (\xs,0) circle (2.4pt);
   \filldraw[fill=white, draw=muted] (\xb,0) circle (2.4pt);
-  \node[note, anchor=south] at (\xl,5) {\val{chunklarge} KB};
-  \node[note, anchor=south] at (\xs,5) {\val{chunksmall} KB};
-  \node[note, anchor=south east] at ({\xb+3},5) {\val{bucket} MB};
+  \node[note, anchor=south, align=center] at (\xl,5) {\val{large} ranks\\chunk \val{chunklarge} KB};
+  \node[note, anchor=south, align=center] at (\xs,5) {\val{small} ranks\\chunk \val{chunksmall} KB};
+  \node[note, anchor=south east, align=right] at ({\xb+3},5) {bucket\\\val{bucket} MB};
 \end{tikzpicture}\par}\vspace{6pt}
 \begin{steps}
 \item Knee: $\LatencyBandwidthCrossoverSize$ = \val{alpha}\,$\MicroUnitPrefix$s $\times$ \val{beta} GB/s = \val{nstar} KB.
@@ -165,7 +165,7 @@ then estimate tree rounds with ring bytes.\par\vspace{34pt}
 \begin{rightcol}
 \sheetsec{Common mistakes}
 \mistake{``An expert exchange costs its average traffic.''}%
-  {It ends at its hottest receiver. \val{moegpus} GPUs, \val{moeexperts} experts: each receives
+  {\val{moegpus} GPUs, \val{moeexperts} experts: each receives
    \val{rxuniform} MB, at least \val{bounduniform}\,$\MicroUnitPrefix$s. One rank at \val{skew}$\times$ the load
    receives \val{rxhot} MB: at least \val{boundhot}\,$\MicroUnitPrefix$s for the whole layer.}{}
 \mistake{``Asynchronous AllReduce hides all communication.''}%
