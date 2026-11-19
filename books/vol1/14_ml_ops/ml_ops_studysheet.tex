@@ -1,0 +1,176 @@
+% Study sheet: Volume I, Chapter 14, ML Operations.
+% Numbers: \val{...} from ml_ops_studysheet_numbers.tex, written by ml_ops_studysheet_numbers.py.
+\documentclass{studysheet}
+\input{ml_ops_studysheet_numbers}
+\sheetvolume{1}
+\sheetchapter{14}{ML Operations}
+\sheetsources{Numbers from the mlsysim registry and the chapter's ranking-service scenarios; assumed inputs are marked.}
+
+\begin{document}
+% ===================================================================== FRONT: LEARN
+\frontside
+\begin{bigidea}
+A deployed model can be \hl{perfectly available and perfectly wrong}: every health check stays green
+while the world drifts away from its training data. Operations keeps it right as a loop that never
+ends, and each step of that loop is paid for in a \hl{machine resource}.
+\end{bigidea}
+
+\begin{leftcol}
+\sheetsec{Key ideas}
+\begin{ideas}
+\idea{Available is not correct.}{Label-free signals (PSI on inputs: investigate at \val{psiwarn}, escalate
+  at \val{psicrit}; shifts in predicted scores) only warn. Labels confirm a loss and alone catch concept drift.}
+\idea{Confirmation waits for labels.}{Time to confirm = labels needed $\div$ label arrival rate:
+  \val{budget} labels take \val{minuteshigh} minutes at \val{ratehigh} per second, \val{dayslow} days at \val{ratelow} per day.}
+\idea{Check parity per request.}{Replay the same recorded requests through the training and serving
+  transforms and compare values by request ID. Matching histograms can hide wrong values.}
+\idea{Diagnose before acting, data first.}{Pipeline, then skew, slices, time pattern, model. An abrupt
+  drop points to a recent change (roll back); a gradual one to drift. Retraining on a broken feature learns the defect.}
+\idea{Release safety costs memory.}{Each control holds a full second copy, whatever its traffic share.
+  Rollback restores weights, feature schema and cache together.}
+\idea{Maturity is the weakest suite.}{ML Test Score = the minimum of the data, model, infrastructure and
+  monitoring scores. Raise the weakest first, such as skew and staleness alerts.}
+\end{ideas}
+
+\vspace{12pt}
+\sheetsec{The operations loop and what each step spends}
+{\centering
+\begin{tikzpicture}[sheet, every node/.style={nbox, text width=58pt, align=center, minimum height=22pt}]
+  \node[accbox, text width=58pt, align=center, minimum height=22pt] (det) at (38,46) {\textbf{Detect}\\telemetry bytes};
+  \node (dia) at (125,46) {\textbf{Diagnose}\\logged requests};
+  \node (dec) at (212,46) {\textbf{Decide}\\accelerator-hours};
+  \node[hotbox, text width=58pt, align=center, minimum height=22pt] (rel) at (168,0) {\textbf{Release}\\a second copy};
+  \node (rec) at (82,0) {\textbf{Recover}\\a hot standby};
+  \draw[arr] (det) -- (dia); \draw[arr] (dia) -- (dec);
+  \draw[arr] (dec.south) |- (rel.east); \draw[arr] (rel) -- (rec);
+  \draw[arr] (rec.west) -| (det.south);
+\end{tikzpicture}\par}
+
+\vspace{12pt}
+\sheetsec{The running case: a ranking service}
+DLRM's embedding tables are \val{tablegb} GB and an H100 holds \val{hbmgib} GiB (\val{hbmgb} GB), so one
+copy of the model needs \val{percopy} H100s. Its node has \val{node}; a retraining run holds \val{runaccels}
+of them for \val{runhours} hours.
+\end{leftcol}%
+\begin{rightcol}
+\sheetsec{Formulas you will use}
+\fcard{Accuracy decay}%
+  {\AccuracyAfterDeployment(\DeploymentAge) = \InitialAccuracy\, e^{-\AccuracyDecayRate \DeploymentAge}}%
+  {Accuracy fitted from outcomes falls at daily rate $\AccuracyDecayRate$ after a retraining run.}%
+  {Fit from two readings: $\AccuracyDecayRate = \ln\!\big(\InitialAccuracy / \AccuracyAfterDeployment(\DeploymentAge)\big) / \DeploymentAge$.
+   Holds for steady drift, not sudden breaks.}{}
+\fcard{Optimal retraining interval}%
+  {\RetrainingInterval^* \approx \sqrt{\frac{2\,\RetrainingRunCost}{\DailyQueryVolume\,\AccuracyPayoffPerQuery\,\InitialAccuracy\,\AccuracyDecayRate}}}%
+  {Daily cost $= \RetrainingRunCost/\RetrainingInterval + \tfrac{1}{2}\DailyQueryVolume\AccuracyPayoffPerQuery\InitialAccuracy\AccuracyDecayRate\,\RetrainingInterval$:
+   run cost $\RetrainingRunCost$ (compute, validation, deployment, risk) spread over $\RetrainingInterval$ days, plus
+   average staleness. $\DailyQueryVolume$: queries a day; $\AccuracyPayoffPerQuery$: value per query of a whole unit of accuracy.}%
+  {Valid while $\AccuracyDecayRate\RetrainingInterval$ is small. Four times any input moves $\RetrainingInterval^*$
+   only twice. Retrain only when the recovered value exceeds $\RetrainingRunCost$.}{}
+
+\vspace{10pt}
+\sheetsec{Release controls}
+\begin{sheettable}{@{}l L L L@{}}
+\thead{Control} & \thead{Users exposed} & \thead{Extra memory} & \thead{What it buys}\\ \midrule
+Shadow & none & full copy & output and latency check (scores every request twice)\\
+Canary & small share & full copy & live quality evidence\\
+A/B test & split & full copy & powered outcome comparison\\
+Blue-green & all, after switch & full second environment & rollback by one route flip\\
+Hot standby & none & full previous version & instant rollback\\
+\end{sheettable}
+\end{rightcol}
+
+% ===================================================================== BACK: PRACTICE
+\backside
+\begin{answers}
+\ans{Finish}{A: $\sqrt{\val{two} \times \text{\val{runa}} \div \text{\val{slope}}}$ = \val{tstara} days, barely moved: compute
+  is only \val{computepct}\% of the run. B: $\sqrt{\val{two} \times \text{\val{runb}} \div \text{\val{slope}}}$ = \val{tstarb} days:
+  cost fell \val{runratio}$\times$, so the interval fell $\sqrt{\val{runratio}}$ = \val{tratio}$\times$. Validation, not training, dominates.}
+\ans{1}{\val{budget} $\div$ \val{fraudrate} = \val{frauddays} days. Until then watch input PSI and predicted-score
+  shifts: label-free warnings that cannot show whether accuracy fell.}
+\columnbreak
+\ans{2}{\val{node} $-$ \val{percopy} $-$ \val{runaccels} = \val{freeaccels} free H100s: room for \val{freecopies}
+  copy. Keep the standby so rollback stays instant; start the canary when the run ends.}
+\ans{3}{Data first: the drop is abrupt and follows a release. Replay those requests through both transforms by
+  request ID; mismatched values mean a broken feature contract, not drift. Roll back the transform and its cache;
+  retraining would learn the defect.}
+\ans{4}{The minimum, \val{suitemin}. A model test leaves it unchanged: monitoring is still weakest. Add monitoring
+  tests, such as skew and staleness alerts.}
+\end{answers}
+
+\begin{leftcol}
+\sheetsec{Worked example}
+\begin{practicebox}\boxtitle{How often should the ranking service retrain?}
+Accuracy is \val{accstart} at launch and \val{accweek} after \val{slidedays} days. $\DailyQueryVolume$ = \val{queries}
+requests a day, $\AccuracyPayoffPerQuery$ = \$\val{value} per query, run cost $\RetrainingRunCost$ = \$\val{runcost}.\par\vspace{5pt}
+{\centering
+\begin{tikzpicture}[sheet]
+  % x: 0..6 days -> 30..222 pt; y: 0..6000 dollars per day -> 0..62 pt
+  \pgfmathsetmacro\sx{32} \pgfmathsetmacro\sy{62/6000}
+  \foreach \d in {0,2,4,6}{\draw[gridline] ({30+\d*\sx},0) -- ({30+\d*\sx},62);
+    \node[small, anchor=north] at ({30+\d*\sx},-3) {\d};}
+  \foreach \c/\cl in {2000/2k,4000/4k,6000/6k}{\draw[gridline] (30,{\c*\sy}) -- (222,{\c*\sy});
+    \node[small, anchor=east] at (28,{\c*\sy}) {\$\cl};}
+  \node[small, anchor=north east] at (222,-12) {days between runs};
+  \node[small, anchor=south west] at (0,66) {dollars per day};
+  \draw[dim] (30,0) -- (222,0);
+  \draw[muted, line width=0.8pt, domain=0.85:6, samples=60] plot ({30+\x*\sx},{\val{plotrun}/\x*\sy});
+  \draw[muted, line width=0.8pt, dashed, domain=0:6] plot ({30+\x*\sx},{0.5*\val{plotslope}*\x*\sy});
+  \draw[accent, line width=1.1pt, domain=1.0:6, samples=60] plot ({30+\x*\sx},{(\val{plotrun}/\x+0.5*\val{plotslope}*\x)*\sy});
+  \pgfmathsetmacro\xs{30+\val{plottstar}*\sx}
+  \pgfmathsetmacro\ys{(2*\val{plotrun}/\val{plottstar})*\sy}
+  \draw[accent, dashed, line width=0.6pt] (\xs,0) -- (\xs,\ys);
+  \filldraw[fill=accent, draw=accent] (\xs,\ys) circle (2.2pt);
+  \node[note, anchor=south] at (\xs,{\ys+4}) {best: \val{tstar} days};
+  \node[lab, anchor=south west] at ({30+4.3*\sx},13.5) {run cost $\div$ days};
+  \pgfmathsetmacro\ang{atan(0.5*\val{plotslope}*\sy/\sx)}
+  \node[lab, anchor=south, rotate=\ang] at ({30+1.5*\sx},{0.5*\val{plotslope}*1.5*\sy+1}) {staleness};
+  \node[lab, anchor=south east, text=accent] at (222,{(\val{plotrun}/6+0.5*\val{plotslope}*6)*\sy+2}) {total};
+\end{tikzpicture}\par}\vspace{8pt}
+\begin{steps}
+\item Decay: $\AccuracyDecayRate$ = ln(\val{accstart} $\div$ \val{accweek}) $\div$ \val{slidedays} = \val{lnratio} $\div$ \val{slidedays}
+  = \res{\val{gamma} per day}.
+\item Staleness grows at \val{queries} $\times$ \val{value} $\times$ \val{accstart} $\times$ \val{gamma} = \res{\$\val{slope} per day$^2$}
+  (daily cost adds half of it times $\RetrainingInterval$).
+\item Interval: $\sqrt{2 \times \text{\val{runcost}} \div \text{\val{slope}}}$ = \res{\val{tstar} days}, where the two daily costs meet.
+\end{steps}
+\takeaway{The square root forgives rough inputs: four times the traffic only halves it, to \val{tstarfour} days.}
+\end{practicebox}
+
+\vspace{12pt}
+\sheetsec{Your turn: finish it}
+\begin{practicebox}\boxtitle{Faster training or faster validation?}
+The run's compute is \val{runaccels} H100s $\times$ \val{runhours} h = \val{accelhours} accelerator-hours at
+\$\val{price}, or \$\val{compute} of the \$\val{runcost} run. Same service, same slope.\par\vspace{4pt}
+\textbf{Given:} (A) training twice as fast saves \$\val{halfsave}: $\RetrainingRunCost$ = \$\val{runa}.
+(B) \assumed{} automated validation cuts $\RetrainingRunCost$ to \$\val{runb}.\par
+\textbf{You:} find $\RetrainingInterval^*$ for each, and say which change moves the interval and why.
+\end{practicebox}
+\end{leftcol}%
+\begin{rightcol}
+\sheetsec{Common mistakes}
+\mistake{``A \val{canarypct}\% canary costs \val{canarypct}\% of the hardware.''}%
+  {Any request may look up any table row, so the canary holds all \val{tablegb} GB: the H100s holding
+   tables go from \val{percopy} to \val{twocopies} while it serves one request in \val{canaryshare}.}{}
+\mistake{``The training and serving histograms match, so there is no skew.''}%
+  {Training gives requests A and B \val{sessiontrain} and \val{sessionserve} minutes; serving gives
+   \val{sessionserve} and \val{sessiontrain}. Same histogram, both values wrong; only replay by request ID sees it.}{}
+\mistake{``The drift alert fired, so retrain now.''}%
+  {Divergence does not prove accuracy fell, and if a broken feature caused it, retraining bakes the defect
+   in. Diagnose first; retrain only when the recovered value exceeds the run cost.}{}
+
+\vspace{2pt}
+\sheetsec{Check yourself}
+\begin{qs}
+\item \assumed{} a fraud model's policy needs \val{budget} labeled outcomes to confirm a drop, and chargebacks
+  resolve \val{fraudrate} a day. How long until enough labels arrive to test for a drop? What can you watch meanwhile, and what
+  can that not show?
+\item On the ranking node a retraining run starts. The team wants a canary during the run, and rollback must
+  stay instant. Does it fit? What do you schedule?
+\item Click-through falls \val{ctrdrop}\% in an hour, just after a release of the serving feature transform;
+  the weights did not change. Where do you look first, what separates a broken feature from drift, and
+  should you retrain?
+\item \assumed{} suite scores of data \val{suitedata}, model \val{suitemodel}, infrastructure \val{suiteinfra},
+  monitoring \val{suitemon}. What is the ML Test Score? Would one more model test raise it? What next?
+\end{qs}
+\end{rightcol}
+\end{document}

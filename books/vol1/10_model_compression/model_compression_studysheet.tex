@@ -1,0 +1,168 @@
+% Study sheet: Volume I, Chapter 10, Model Compression.
+% Numbers: \val{...} from model_compression_studysheet_numbers.tex, written by model_compression_studysheet_numbers.py.
+\documentclass{studysheet}
+\input{model_compression_studysheet_numbers}
+\sheetvolume{1}
+\sheetchapter{10}{Model Compression}
+\sheetsources{Numbers from the mlsysim registry and the chapter's scenarios; raw bytes, no scales or metadata; assumed inputs are marked.}
+
+\begin{document}
+% ===================================================================== FRONT
+\frontside
+\begin{bigidea}
+A trained model carries the appetite of the server it trained on; the device grants a fixed
+\hl{budget of memory, time and energy per result}. Compression gives up surplus weights or bits to
+fit it, and the \hl{hardware decides what each saving is worth}.
+\end{bigidea}
+
+\begin{leftcol}
+\sheetsec{Key ideas}
+\begin{ideas}
+\idea{Find the limiting term first.}{Capacity, bandwidth, arithmetic or energy: whichever runs out first
+  picks the lever.}
+\idea{Three tiers.}{Structure: what the model computes (pruning; distillation, training a small student to mimic a teacher). Precision: bits per value
+  (quantization). Execution: how it runs (fusion, sparse kernels).}
+\idea{Zeros pay only if skipped.}{Structured pruning leaves smaller dense tensors (keep channel counts on the
+  tile multiple); a 2:4 pattern needs hardware with a sparse path. Densely stored zeros save nothing. An $i$-byte index per kept $v$-byte value leaves $(1{-}\SparsityRatio)(v{+}i)/v$
+  of the dense bytes at sparsity $\SparsityRatio$: smaller only past $\SparsityRatio = i/(v{+}i)$.}
+\idea{Plateau, then cliff.}{Accuracy holds to some bit width, then falls. Try post-training quantization
+  (PTQ) first; quantization-aware training (QAT) only if it misses.}
+\idea{Quantize last.}{Prune, distill (as recovery training), fold normalization, then calibrate:
+  earlier ranges fit a model that no longer exists.}
+\idea{Bytes multiply; speed does not.}{Measure on the target. A model that is a fraction $\ModelTimeFraction$
+  of request time, made $\AcceleratedFractionSpeedup\times$ faster, speeds the request
+  $1/\big((1{-}\ModelTimeFraction) + \ModelTimeFraction/\AcceleratedFractionSpeedup\big)$, never past $1/(1{-}\ModelTimeFraction)$.}
+\end{ideas}
+
+\vspace{12pt}
+\sheetsec{The levers}
+\begin{sheettable}{@{}l L l@{}}
+\thead{Lever} & \thead{Pays off only if} & \thead{Costs}\\ \midrule
+Structured pruning & shapes fill the tiles & fine-tuning\\
+Unstructured pruning & sparse kernels skip the zeros & index bytes\\
+Distillation & the student fits the budget & a training run\\
+Quantization & the target has a kernel for it & calibration\\
+Fusion & unfused steps round-trip memory & none\\
+\end{sheettable}
+\end{leftcol}%
+\begin{rightcol}
+\sheetsec{Where one result's time goes (phone, \val{phonebw} GB/s)}
+{\centering
+\begin{tikzpicture}[sheet]
+  \pgfmathsetmacro\u{2.55}
+  \pgfmathsetmacro\xs{78}
+  % camera frame
+  \node[lab, anchor=east] at (\xs-4,44) {camera frame};
+  \draw[nbox] (\xs,36) rectangle ({\xs+\val{framebudget}*\u},52);
+  \fill[accent] (\xs,36) rectangle ({\xs+max(\val{mobileread}*\u,1.2)},52);
+  \node[note, anchor=west] at ({\xs+\val{framebudget}*\u+3},44) {deadline \val{framebudget} ms};
+  \node[note, anchor=south west] at (\xs,54) {weight reads \val{mobileread} ms (\val{mobileshare}\%)};
+  % GPT-2 XL token
+  \node[lab, anchor=east] at (\xs-4,8) {GPT-2 XL token};
+  \draw[hotbox] (\xs,0) rectangle ({\xs+\val{weightreadsixteen}*\u},16);
+  \draw[accbox] ({\xs+\val{weightreadsixteen}*\u},0) rectangle ({\xs+\val{timesixteen}*\u},16);
+  \node[lab, text=white] at ({\xs+\val{weightreadsixteen}*\u/2},8) {16-bit weights \val{weightreadsixteen} ms};
+  \node[small, anchor=north east] at ({\xs+\val{timesixteen}*\u},-3) {KV cache \val{kvread} ms};
+  \node[note, anchor=west] at ({\xs+\val{timesixteen}*\u+3},8) {\val{timesixteen} ms};
+\end{tikzpicture}\par}
+\vspace{4pt}
+{\fontsize{8.6}{11}\selectfont MobileNetV2 spends its frame on arithmetic and activations: structural levers, or INT8 to move
+off the CPU onto the integer accelerator (it runs integers only). GPT-2 XL decoding spends its token reading bytes: precision.\par}
+
+\vspace{12pt}
+\fcard{Bandwidth-bound decode}%
+  {\text{time per token} \approx \frac{\DataVolume}{\Bandwidth}}%
+  {At batch one, each token reads all weights and the key-value (KV) cache: $\DataVolume$ $=$ weight bytes
+   $+$ cache bytes. Weight bytes $=$ parameters $\times$ 2, 1 or 0.5 bytes (16, 8, 4 bits).}%
+  {Weight-only quantization shrinks only the weights; it pays only with dequantization fused into the matrix multiply.}{}
+\fcard{Affine quantization to $\QuantizationBitWidth$ bits}%
+  {\QuantizationScale = \frac{\ClippingRangeUpperBound - \ClippingRangeLowerBound}{2^{\QuantizationBitWidth}-1},
+   \quad \QuantizationZeroPoint = \text{round}\Big(\frac{-\ClippingRangeLowerBound}{\QuantizationScale}\Big),
+   \quad \QuantizedIntegerCode = \text{round}\Big(\frac{\QuantizerInput}{\QuantizationScale} + \QuantizationZeroPoint\Big)}%
+  {Range $[\ClippingRangeLowerBound, \ClippingRangeUpperBound]$ from calibration; real zero lands on
+   $\QuantizationZeroPoint$. Read back $\QuantizerInput \approx \QuantizationScale(\QuantizedIntegerCode - \QuantizationZeroPoint)$,
+   off by at most $\QuantizationScale/2$ inside the range.}%
+  {Clamp codes to $[0, 2^{\QuantizationBitWidth}-1]$. Too wide a range wastes levels on outliers; too tight clips them.}{}
+\end{rightcol}
+
+% ===================================================================== BACK
+\backside
+\begin{answers}
+\ans{Finish}{\val{weighteight} $+$ \val{kvmb} $=$ \val{totaleight} MB; $\div$ \val{phonebw} GB/s $=$
+  \val{timeeight} ms (\val{rateeight} tokens/s), \val{speedeight}$\times$ faster than 16-bit; INT4 cuts more weight bytes (\val{speedfour}$\times$). Neither shrinks the cache (decode card).}
+\ans{1}{$\QuantizationScale = \val{qrange}/\val{qsteps} = \val{qscale}$; $\QuantizationZeroPoint = \text{round}(\val{qzexact}) = \val{qzero}$;
+  $\QuantizedIntegerCode = \text{round}(\val{qdiv} + \val{qzero}) = \val{qcode}$. Read back
+  $\val{qscale} \times (\val{qcode} - \val{qzero}) = \val{qback}$: error \val{qerr}, under half a step (affine card).}
+\ans{2}{Not bytes: weight reads are \val{mobileshare}\% of the frame. Structural levers (channel pruning, distillation) cut
+  the arithmetic. INT8 helped by moving the model onto the integer accelerator. Confirm with per-layer timing on the phone (picture).}
+\columnbreak
+\ans{3}{Each kept value costs \val{valuebytes} $+$ \val{indexbytes} $=$ \val{keptbytes} bytes against \val{valuebytes} dense:
+  \val{keptshare} $\times$ \val{keptbytes} $=$ \val{storedratio}$\times$ the dense size, larger. Break-even is
+  \val{indexbytes}/\val{keptbytes} $=$ \val{breakeveneight}\% sparsity. Remove whole channels instead (zeros key idea).}
+\ans{4}{$\val{unity}/(\val{restfrac} + \val{modelfrac}/\val{modelgain}) = \val{overall}\times$; ceiling
+  $\val{unity}/\val{restfrac} = \val{ceiling}\times$ even for an infinitely fast model (last key idea).}
+\end{answers}
+
+\begin{leftcol}
+\sheetsec{Worked example}
+\begin{practicebox}\boxtitle{How much faster does GPT-2 XL decode with 4-bit weights?}
+The phone reads memory at \val{phonebw} GB/s. GPT-2 XL has \val{gptparams}B parameters; at a full
+\val{context}-token context its 16-bit KV cache (keys and values, \val{layers} layers $\times$ \val{width} values)
+holds \val{kvmb} MB. Batch one.\par\vspace{5pt}
+{\centering
+\begin{tikzpicture}[sheet]
+  \pgfmathsetmacro\u{0.042}
+  \foreach \lab/\w/\tot/\shown/\y in {16-bit weights/\val{drawsixteen}/\val{drawtotalsixteen}/\val{totalsixteen}/18, 4-bit weights/\val{drawfour}/\val{drawtotalfour}/\val{totalfour}/0}{
+    \node[lab, anchor=east] at (66,\y+6) {\lab};
+    \draw[hotbox] (70,\y) rectangle ({70+\w*\u},\y+12);
+    \draw[accbox] ({70+\w*\u},\y) rectangle ({70+\tot*\u},\y+12);
+    \node[note, anchor=west] at ({73+\tot*\u},\y+6) {\shown\ MB};}
+  \node[small, anchor=north] at ({70+(\val{drawfour}+\val{drawtotalfour})*\u/2},-3) {KV cache};
+\end{tikzpicture}\par}
+\begin{steps}
+\item Bytes per token, 16-bit: \val{weightsixteen} $+$ \val{kvmb} $=$ \val{totalsixteen} MB, so
+  \val{totalsixteen} MB $\div$ \val{phonebw} GB/s $=$ \res{\val{timesixteen} ms} (\val{ratesixteen} tokens/s).
+\item 4-bit weights, cache unchanged: \val{weightfour} $+$ \val{kvmb} $=$ \val{totalfour} MB, so \res{\val{timefour} ms}
+  (\val{ratefour} tokens/s).
+\item Speedup: \val{timesixteen} $\div$ \val{timefour} $=$ \res{\val{speedfour}$\times$}, below the
+  \val{weightcut}$\times$ cut in weight bytes.
+\end{steps}
+\takeaway{Time follows the bytes each token reads. The cache does not shrink, and the gain is real only with fused dequantization.}
+\end{practicebox}
+
+\vspace{12pt}
+\sheetsec{Your turn: finish it}
+\begin{practicebox}\boxtitle{What if the weights are 8-bit instead?}
+Same phone, same model, same \val{kvmb} MB cache.\par\vspace{4pt}
+\textbf{Given:} \val{gptparams}B parameters $\times$ 1 byte $=$ \val{weighteight} MB of weights.\par
+\textbf{You:} find the bytes and time per token, the speedup over 16-bit, and why it falls short of
+the 4-bit result.
+\end{practicebox}
+\end{leftcol}%
+\begin{rightcol}
+\sheetsec{Common mistakes}
+\mistake{``I pruned half the weights, so the layer runs twice as fast.''}%
+  {Zeros stored densely are still read and multiplied. A sparse format may save bytes yet run slower.
+   Speed needs whole channels removed or a 2:4 pattern on hardware with a sparse path.}{}
+\mistake{``Removing half the weights gives \val{prunex}$\times$ and 32-bit to 8-bit gives \val{quantx}$\times$, so \val{paperx}$\times$ faster.''}%
+  {The stored bytes do shrink \val{paperx}$\times$; the time does not. Shapes leave tiles part empty; conversions and
+   launches remain. The chapter's illustrative pipeline runs \val{measuredx}$\times$ faster.}{}
+\mistake{``Quantize first: it is the cheapest step.''}%
+  {Pruning and distillation then move the weights and activations, so calibrated ranges go stale; updates smaller
+   than one integer step round away.}{}
+
+\vspace{2pt}
+\sheetsec{Check yourself}
+\begin{qs}
+\item \assumed{} an activation calibrated to $[\val{qlo}, \val{qhi}]$, 8-bit unsigned. Find the scale, the zero-point
+  and the code for $\QuantizerInput = \val{qx}$. How far off is the value read back?
+\item The camera runs MobileNetV2 at \val{framerate} frames/s; its 32-bit weights stream in \val{mobileread} ms of the
+  \val{framebudget} ms frame. Which tier is the lever? Why did INT8 still take the frame from \val{cpuframe} ms on the
+  CPU to \val{npuframe} ms? What phone measurement would confirm it?
+\item \assumed{} a layer pruned to \val{sparsepct}\% scattered zeros, stored as 8-bit values each with a 16-bit
+  column index. Is the stored layer smaller than the dense one? What would you do instead?
+\item The model is \val{modelpct}\% of a request's latency. \assumed{} compression makes it \val{modelgain}$\times$ faster.
+  How much faster is the request, and what is the most any compression could give?
+\end{qs}
+\end{rightcol}
+\end{document}
