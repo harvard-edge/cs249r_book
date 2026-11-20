@@ -110,6 +110,21 @@ def numbers() -> dict:
     n.update(files=f"{melt.files / 1e6:.0f}", shards=c(melt.shards), filesper=c(melt.files_per_shard),
              ratedbw=c(melt.rated_bandwidth.to(GBs).magnitude))
 
+    # ---- Q5 ASSUMED: a rollout of the 175B FP16 weights to 200 replicas at once, read from the chapter's
+    #      100 GB/s aggregate object store or its 1 TB/s parallel file system (scenario Gpt3RolloutFanout100).
+    #      200 replicas at the chapter's 1 GB/s single-client rate ask for 200 GB/s, so the aggregate binds.
+    ro = SC.Gpt3RolloutFanout100
+    ro_gb = ro.payload.to("GB").magnitude
+    ro_n = 200
+    client = SC.Gpt3WeightsColdStart.links["object store"].to(GBs).magnitude
+    ro_total = ro_n * ro_gb
+    obj = ro.links["object store"].to(GBs).magnitude
+    pfs_ro = ro.links["file system"].to(GBs).magnitude
+    assert ro_n * client >= obj                                    # the object aggregate, not the per-client rate, binds
+    n.update(roweights=c(ro_gb), roreplicas=c(ro_n), rototal=c(ro_total), roobject=c(obj), ropfs=fx(pfs_ro / 1000, 0),
+             roobjtime=c(ro_total / obj), roobjmin=fx(ro_total / obj / 60, 1), ropfstime=c(ro_total / pfs_ro),
+             rochapter=c(ro.copies))
+
     # ---- Mistake 2: stream vs stage a 50 TB vision corpus (VisionCorpusStreamVsStage)
     plan = SC.VisionCorpusStreamVsStage
     ds_tb = plan.dataset_bytes.to("TB").magnitude

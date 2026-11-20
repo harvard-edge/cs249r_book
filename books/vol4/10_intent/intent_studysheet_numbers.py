@@ -11,7 +11,7 @@ import math
 from pathlib import Path
 
 from mlsysim import Embodied, Scenarios
-from mlsysim.physics.robotics import calc_target_evidence_horizon
+from mlsysim.physics.robotics import calc_latch_contact_stopping_profile, calc_target_evidence_horizon
 
 
 def f(x, nd):
@@ -86,6 +86,20 @@ def numbers() -> dict:
     stall = cad.stall.to("ms").magnitude
     n.update(stall=f(stall, 0), erru=f(cad.stall_error_untracked.to("mm").magnitude, 0),
              errt=f(cad.stall_error_tracked.to("mm").magnitude, 0))
+
+    # ---- Mistake: effort ceiling at the cage-door latch (chapter: latch ceilings notebook)
+    ftrip = aisle.f_latch_tripwire.to("N").magnitude
+    klatch = aisle.k_latch.to("N/mm").magnitude
+    vlatch = aisle.v_latch_approach.to("m/s").magnitude
+    tcontact = aisle.t_contact_response.to("ms").magnitude
+    fbrake = ftrip + klatch * vlatch * tcontact          # N/mm x (m/s x ms = mm)
+    assert abs(fbrake - calc_latch_contact_stopping_profile(scenario=aisle)["f_at_brake_onset"].to("N").magnitude) < 1e-9
+    assert fbrake < aisle.f_latch_limit.to("N").magnitude
+    xrem = (aisle.f_latch_limit.to("N").magnitude - fbrake) / klatch    # mm left before the limit
+    assert abs(xrem - calc_latch_contact_stopping_profile(scenario=aisle)["x_remaining"].to("mm").magnitude) < 1e-9
+    n.update(xrem=f(xrem, 2))
+    n.update(ftrip=f(ftrip, 0), klatch=f(klatch, 0), vlatch=f(vlatch, 2), tcontact=f(tcontact, 0),
+             fbrake=f(fbrake, 0), flimit=f(aisle.f_latch_limit.to("N").magnitude, 0))
 
     # ---- Mistake: per-box scores (chapter: ConformalAmbiguity, MugJarReferentSet)
     beside = Scenarios.MugJarReferentSet

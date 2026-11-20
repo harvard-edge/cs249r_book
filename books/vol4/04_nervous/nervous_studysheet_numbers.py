@@ -56,6 +56,15 @@ def numbers() -> dict:
              tick=f(tick, 0), bus=f(bus, 0), onset=f(onset, 0), lease=f(t_lease, 0), renew=f(renew, 0),
              jitter=f(jitter, 0), agedispatch=f(age_dispatch, 1), dispatchadmit=f(t_da, 1), ageadmit=f(age_admit, 1),
              mmperms=f(mm_per_ms, 1), fixedpath=f(tick + bus + onset, 0))
+    # front event strip (chapter: tbl-04-event-timing, CaptureToBrakeTiming): capture -> dispatch -> admission ->
+    # brake onset; row 3 is the stalled-proposer response, lease + tick + bus + onset. 1 ms = 1.1 pt
+    resp = t_lease + tick + bus + onset
+    assert abs(resp - aisle.t_admission_to_brake_onset.to("ms").magnitude) < 1e-9
+    assert abs(age_admit + resp - aisle.t_capture_to_brake_onset.to("ms").magnitude) < 1e-9
+    esc = 1.1
+    n.update(resp=f(resp, 0), totalonset=f(round(age_dispatch, 1) + round(t_da, 1) + resp, 1),
+             eage=f(age_dispatch * esc, 2), eda=f((age_dispatch + t_da) * esc, 2),
+             eend=f((age_admit + resp) * esc, 2))
 
     # ---- Worked example: size the lease at the drive limit (chapter's numbers)
     brake_mm = v ** 2 / (2 * a) * 1e3

@@ -119,6 +119,12 @@ def numbers() -> dict:
     g_q1 = sig_pred ** 2 / (sig_pred ** 2 + sig_l1 ** 2)
     sig_q1 = math.sqrt(1 - round(g_q1, 3)) * sig_pred
     n.update(qsiglidar=f(sig_l1, 0), qgain=f(g_q1, 3), qsigpost=f(sig_q1, 1))
+    # Q1 evidence: ASSUMED mean square of 200 innovations; NIS from the printed rounded spreads
+    nis_count, nu2_mean = 200, 12000.0
+    s_innov = round(sig_pred, 1) ** 2 + round(sig_l1, 0) ** 2
+    nis = nu2_mean / round(s_innov)
+    n.update(qnisn=f(nis_count, 0), qnutwo=f(nu2_mean, 0), qinnovs=f(s_innov, 0), qnis=f(nis, 1))
+    assert nis > 2
 
     # ---- Q3: clearance query on the permission controller (chapter: RepresentationQuery)
     cq_s = Scenarios.WarehousePermissionClearanceQuery

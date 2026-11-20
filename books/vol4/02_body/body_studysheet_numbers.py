@@ -117,16 +117,30 @@ def numbers() -> dict:
              qvfin=f(vfin, 1), vswitch=f(rm.drive_bus_switch_rating.to("V").magnitude, 0),
              vfinchap=f(u.capacitor_only_endpoint.to("V").magnitude, 1))
 
-    # ---- Q4: current limit lowered to the rated current; K_t x I route (the chapter's 0.78 uses rated torque)
+    # ---- Q4: current limit lowered to the rated current. As the chapter (BrakingLimits), use the datasheet
+    # rated torque per hub (20.0 N m), so the ceiling matches the chapter's 0.78 m/s^2. Printed chain:
+    # 2 x 20.0 / 0.133 m = 301 N (rounded), / 387 kg.
     hub = rm.drive_unit
-    kt = hub.torque_constant.to("N*m/A").magnitude
+    tq_rated = hub.rated_torque.to("N*m").magnitude
     irated = hub.rated_current.to("A").magnitude
     ipeak = rm.drive_current_limit.to("A").magnitude
     rw = hub.wheel_radius.to("m").magnitude
     meff = round(lim.m_eff.to("kg").magnitude)
-    a4 = 2 * kt * irated / (rw * meff)
-    n.update(kt=f(kt, 1), irated=f(irated, 1), ipeak=f(ipeak, 0), rwheel=f(rw * 1e3, 0), meff=f(meff, 0),
-             qforce=f(2 * kt * irated / rw, 0), qadrive=f(a4, 2))
+    force4 = round(2 * tq_rated / round(rw, 3))
+    a4 = force4 / meff
+    assert abs(a4 - lim.a_torque_rated.to("m/s^2").magnitude) < 0.005
+    assert f(a4, 2) == f(lim.a_torque_rated.to("m/s^2").magnitude, 2)
+    n.update(tqrated=f(tq_rated, 1), irated=f(irated, 1), ipeak=f(ipeak, 0), rwheel=f(rw, 3), meff=f(meff, 0),
+             qforce=f(force4, 0), qadrive=f(a4, 2))
+
+    # ---- Q2(b): inertia matching for the chapter's illustrative geared rotor (Scenarios.GearedRotorFlywheel)
+    rot = Scenarios.GearedRotorFlywheel
+    jr = rot.rotor_inertia.to("kg*m^2").magnitude
+    jl = rot.load_inertia.to("kg*m^2").magnitude
+    nstar = math.sqrt(jl / jr)
+    assert abs(nstar - rot.result.matched_ratio) < 1e-9
+    n.update(jrotor=f(jr * 1e6, 1), jload=f(jl * 1e3, 1), jratio=f"{jl / jr:.0f}", nstar=f(nstar, 0),
+             ngear=f(rot.gear_ratio, 0))
 
     # ---- Mistakes
     gears = Scenarios.PandaClassJointGearRatios
@@ -134,7 +148,7 @@ def numbers() -> dict:
     n1, n2, _ = gears.ratios
     n.update(gone=f(n1, 0), gtwo=f(n2, 0), lossone=f(gr.copper_loss[n1].to("W").magnitude, 1),
              losstwo=f(gr.copper_loss[n2].to("W").magnitude, 1),
-             jone=f(gr.reflected_inertia[n1].to("kg*m^2").magnitude, 3),
+             jone=f(gr.reflected_inertia[n1].to("kg*m^2").magnitude, 4),
              jtwo=f(gr.reflected_inertia[n2].to("kg*m^2").magnitude, 3))
     return n
 

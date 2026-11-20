@@ -80,9 +80,22 @@ def numbers() -> dict:
              refhead=f"{float(f'{hbm_label:.1f}') - per_gpu:.2f}", batch=c(step.global_batch_sequences), refmicro=c(m_d),
              refppminus=c(pp - 1), refbubbleden=c(m_d + pp - 1), refbubble=f"{r.bubble_fraction * 100:.1f}",
              tcomp=f"{t_comp:.2f}", ttp=f"{t_tp:.2f}", tdp=f"{t_dp:.2f}", tdpexp=f"{t_dp_exposed:.2f}",
-             overlap=f"{overlap * 100:.0f}", exposedfrac=f"{1 - overlap:.2f}", tbub=f"{t_bub:.2f}", tstep=f"{t_step:.2f}",
+             overlap=f"{overlap * 100:.0f}", exposedfrac=f"{1 - overlap:.2f}", overlapfrac=f"{overlap:.2f}",
+             tbub=f"{t_bub:.2f}", tstep=f"{t_step:.2f}",
              refeta=f"{r.scaling_efficiency * 100:.0f}")
     assert abs(float(f"{t_comp:.2f}") + float(f"{t_tp:.2f}") + float(f"{t_dp_exposed:.2f}") + float(f"{t_bub:.2f}") - float(f"{t_step:.2f}")) < 0.011
+    # printed exposed DP reproduces from printed reduction time and printed overlap
+    assert abs(float(f"{t_dp:.2f}") * (1 - float(f"{overlap:.2f}")) - float(f"{t_dp_exposed:.2f}")) < 0.006
+    # ---- Mistake (MFU x eta double counting; chapter's MfuScalingPitfall on the same reference job)
+    local_mfu = step.local_efficiency
+    eta = r.scaling_efficiency
+    fleet_mfu = local_mfu * eta
+    n.update(mfulocal=f"{local_mfu * 100:.0f}", mfufleet=f"{fleet_mfu * 100:.0f}",
+             mfutwice=f"{fleet_mfu * eta * 100:.0f}")
+    assert round(local_mfu * 100) == 45 and round(fleet_mfu * 100) == 37 and round(fleet_mfu * eta * 100) == 31
+    # printed fleet MFU reproduces from the printed local MFU and printed eta
+    assert abs(round(local_mfu * 100) * round(eta * 100) / 100 - fleet_mfu * 100) < 0.5
+    assert abs(round(fleet_mfu * 100) * round(eta * 100) / 100 - fleet_mfu * eta * 100) < 0.5
     # step bar on the back, to scale: 8.71 s -> 160 pt
     sc = 160.0 / t_step
     xa = t_comp * sc
@@ -162,8 +175,8 @@ def numbers() -> dict:
     s1k = Scenarios.StragglerFreeStep1K
     n.update(chapn=c(s1k.n_components), chapp=f"{(1 - s1k.availability) * 100:.0f}", chapclean=f"{s1k.all_up * 100:.3f}")
 
-    # ---- Q4: ASSUMED pilot trace tr(Sigma) = 3.2e6, |grad|^2 = 200; local batch 16; 4,096 workers proposed
-    tr_sig, gn2, b_loc, q4n = 3.2e6, 200.0, 16, 4096
+    # ---- Q4: ASSUMED pilot trace tr(Sigma) = 2.4e6, |grad|^2 = 200; local batch 16; 4,096 workers proposed
+    tr_sig, gn2, b_loc, q4n = 2.4e6, 200.0, 16, 4096
     bcrit = tr_sig / gn2
     glob = q4n * b_loc
     n.update(qfourtrace=f"{tr_sig / 1e6:.1f}", qfournorm=f"{gn2:.0f}", qfourlocal=c(b_loc), qfourn=c(q4n),

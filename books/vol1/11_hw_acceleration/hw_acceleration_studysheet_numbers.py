@@ -56,14 +56,29 @@ def numbers() -> dict:
     n.update(yweightgb=f"{wbytes8 / 1e9:.1f}", yintensity=f"{inten8:.1f}",
              yfloorms=f"{floor8 * 1e3:.2f}", yspeedup=f"{floor_s / floor8:.1f}", ycut=f"{(1 - floor8 / floor_s) * 100:.0f}")
 
+    # ---- Bandwidth ladder (chapter: operand-supply hierarchy / bandwidth taper, InterconnectHierarchy)
+    bw_hbm = h100.memory.bandwidth.to("GB/s").magnitude
+    bw_nvl = h100.nvlink.bandwidth.to("GB/s").magnitude / 2       # registry is bidirectional total; per direction
+    assert h100.nvlink.direction == "bidirectional_total"
+    bw_pcie = h100.interconnect.bandwidth.to("GB/s").magnitude    # PCIe Gen5 x16, per direction
+    bw_nvme = h100.storage.bandwidth.to("GB/s").magnitude
+    n.update(lhbm=c(bw_hbm), lnvlink=c(bw_nvl), lpcie=c(bw_pcie), lnvme=c(bw_nvme))
+    # Mistake 3: weights offloaded to host memory cross PCIe every token (printed GB, printed GB/s)
+    wgb = round(wbytes / 1e9, 1)
+    t_pcie = wgb / round(bw_pcie) * 1e3
+    n.update(offms=c(t_pcie), offratio=c(round(bw_hbm) / round(bw_pcie)))
+
     # ---- Mistake 1: stage-3 3x3 conv, batch 32 (chapter: ResNet50Int8Crossing)
     s3 = Scenarios.ResNet50Stage3ConvBatch32
     s3w = Scenarios.ResNet50Stage3ConvBatch32Int8Weights
     s3all = Scenarios.ResNet50Stage3ConvBatch32Int8
     act_mb = (s3.batch_input_bytes + s3.batch_output_bytes).to("MB").magnitude
     n.update(convsixteen=f"{s3.traffic_intensity:.0f}", convmixed=f"{s3w.traffic_intensity:.0f}",
-             convall=c(s3all.traffic_intensity), convact=f"{act_mb:.1f}",
-             convweight=f"{s3.weight_bytes.to('MB').magnitude:.1f}")
+             convall=c(s3all.traffic_intensity), convact=f"{act_mb:.2f}",
+             convweight=f"{s3.weight_bytes.to('MB').magnitude:.2f}")
+    # the INT8-weights intensity reproduces from the printed FP16 intensity and printed MB (work fixed, weight bytes halved)
+    pa, pw = float(n["convact"]), float(n["convweight"])
+    assert round(round(s3.traffic_intensity) * (pa + pw) / (pa + pw / 2)) == round(s3w.traffic_intensity)
 
     # ---- Mistake 2: batch-one 2048 x 2048 dense layer, A100 vs T4 (chapter: FpSmallBatchCalc)
     bw_a, bw_t = a100.memory.bandwidth.to("GB/s").magnitude, t4.memory.bandwidth.to("GB/s").magnitude

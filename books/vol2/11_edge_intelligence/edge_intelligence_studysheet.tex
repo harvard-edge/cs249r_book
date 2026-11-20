@@ -20,34 +20,37 @@ In C\textsuperscript{3} terms: compute fits each device, communication a thin up
 \begin{ideas}
 \idea{Learning multiplies the footprint.}{Gradients, optimizer state and saved activations make a full
   update \val{floormult}--\val{ceilingmult}$\times$ the weights; the background allowance, not RAM, binds.}
-\idea{Bytes, not TOPS, set update time.}{A step moves many times an inference's bytes;
-  backward operators may run on the CPU.}
+\idea{Bytes, not TOPS, set update time.}{A step moves many times an inference's bytes.}
 \idea{Background learning is admitted, not assumed.}{Energy, heat and foreground latency must all pass;
   charging relaxes only energy.}
 \idea{Each technique shrinks one term.}{Choose the smallest update space that captures
-  the local change; replay guards against forgetting, at a memory cost.}
+  the local change; fall back to the generic model when adaptation hurts.}
 \idea{Admission selects the population.}{Newer, charged, connected devices pass and
   report first: the model learns the admitted fleet.}
 \idea{Federation moves updates, not data.}{Updates still leak; secure aggregation
   and differential privacy protect them.}
 \end{ideas}
 
-\vspace{10pt}
+\vspace{8pt}
+\sheetsec{Learn on device only if}
+Simpler alternatives (local features, lookup tables, central fine-tuning) cannot meet the privacy, connectivity or
+quality need, and a measured gain pays the cost. A short deadline fixes where the model runs, not where it learns.\par
+
+\vspace{8pt}
 \sheetsec{Which method shrinks which term}
 \begin{sheettable}{@{}l L L@{}}
 \thead{Method} & \thead{Shrinks} & \thead{Fits when}\\ \midrule
 Full & nothing & large shift\\
 Bias-only & smallest $\TrainableStateMemory$; activations stay & calibration, tiny budget\\
-Head-only & $\TrainableStateMemory$, most activations (backward stops at the head) & new classes, wake word\\
+Head-only & $\TrainableStateMemory$, most activations & new classes, wake word\\
 LoRA & $\TrainableStateMemory$ (rank) & one per user, merged\\
 Residual adapters & $\TrainableStateMemory$ & switching contexts\\
 \end{sheettable}
 
 \vspace{10pt}
 \fcard{Round traffic}%
-  {\begin{aligned}\RoundCommunicationVolume &= \RoundDownloadVolume + \RoundUploadVolume\\ &\quad + \RoundProtocolVolume + \RoundRetryVolume\\[2pt]
-   \text{upload time} &= \RoundUploadVolume/\Bandwidth\end{aligned}}%
-  {Federation saves bytes only while rounds $\times$ update stays below the raw data it replaces.}%
+  {\RoundCommunicationVolume = \RoundDownloadVolume + \RoundUploadVolume + \RoundProtocolVolume + \RoundRetryVolume}%
+  {Upload time = $\RoundUploadVolume/\Bandwidth$. Federation saves bytes only while rounds $\times$ update stays below the raw data.}%
   {Mb/s counts bits: bytes $\times$ \val{bitsperbyte}.}{}
 \end{leftcol}%
 \begin{rightcol}
@@ -84,48 +87,48 @@ Residual adapters & $\TrainableStateMemory$ & switching contexts\\
   {\begin{aligned}&\AdaptationWindowEnergy \le \AdaptationEnergyAllowance \;\land\;
    \DevicePower + \AdaptationPowerIncrement \le \ThermalPowerLimit\\[2pt]
    \land\;&\ForegroundLatency + \AdaptationLatencyIncrease \le \CompletionDeadline\end{aligned}}%
-  {Energy within the allowance, power under the thermal limit, worst-case foreground latency within its deadline.}%
+  {Energy within the allowance, power under the thermal limit, foreground latency within its deadline.}%
   {Fails? Shorten the window, lower the duty cycle, or train fewer parameters.}{}
 \fcard{Who the model learns from}%
   {\ModelParameters \leftarrow \sum_{\ClientIndex} \frac{\ClientSampleCount_{\ClientIndex}}{\RoundSampleCount}\,\ModelParameters_{\ClientIndex}}%
   {FedAvg weights each completing client by its examples $\ClientSampleCount_{\ClientIndex}$ ($\RoundSampleCount$: their total);
    a late client adds nothing. Coverage ratio = a cohort's share of completed updates (completion logs) $\div$ its fleet
    share (deployment inventory); below one, the cohort is underrepresented.}%
-  {Stratify sampling among eligible devices; reweighting cannot add devices that never pass admission.
-   More local epochs: fewer rounds, more client drift.}{}
+  {Stratify among eligible devices; reweighting cannot add devices never admitted.
+   Over-select: target $\div$ completion share; secure aggregation needs a minimum count.}{}
 \end{rightcol}
 
 % ===================================================================== BACK
 \backside
 \begin{answers}
-\ans{Finish}{\val{weightsmb} + \val{gradsmb} + \val{actmb} = \val{sgdmb} MB, \val{sgdmult}$\times$ the weights: under the allowance, if
-  workspace and keyboard state fit the \val{sgdspare} MB left. Activations are \val{sgdactshare}\% of it: cut them next,
-  e.g.\ head-only (memory budget, method table).}
+\ans{Finish}{\val{weightsmb} + \val{gradsmb} + \val{actmb} = \val{sgdmb} MB, \val{sgdmult}$\times$ the weights: fits if
+  workspace and keyboard state fit the \val{sgdspare} MB left. Activations are \val{sgdactshare}\% of it: cut them next
+  (memory budget, method table).}
 \ans{Upload}{\val{payloadmb} MB $\times$ \val{bitsperbyte} = \val{payloadmbit} Mb. At \val{linkslow} Mb/s, \val{uploadslows} s (\val{uploadslowmin} min):
-  misses the deadline; at \val{linkfast} Mb/s, \val{uploadfasts} s. Slow-uplink cohorts drop out of $\RoundSampleCount$, so
-  they are underrepresented. The deadline caps the Fleet Law's
-  coordination wait at the cost of coverage (round traffic, who learns).}
+  misses the deadline; at \val{linkfast} Mb/s, \val{uploadfasts} s. Slow-uplink cohorts drop out of $\RoundSampleCount$:
+  underrepresented. Select \val{targetclients} $\div$
+  \val{completefrac} = \val{selectraw} $\to$ \res{\val{selectclients}}; if fewer finish, the round is abandoned (who learns).}
 \columnbreak
 \ans{Coverage}{Budget \val{budgetdone} $\div$ \val{budgetfleet} = \val{budgetcover}; flagship \val{flagshipdone} $\div$
-  \val{flagshipfleet} = \val{flagshipcover}. Completion logs over deployment inventory. Stratify among eligible devices and check per-cohort
-  quality; weights cannot add absent devices.}
+  \val{flagshipfleet} = \val{flagshipcover}. Completion logs over deployment inventory. No: weights cannot add
+  absent devices; stratify among eligible ones (who learns).}
 \ans{Methods}{(a) Head-only: cuts $\TrainableStateMemory$ and most activations. (b) Residual adapters: small $\TrainableStateMemory$,
-  swapped per context. (c) Bias-only: smallest $\TrainableStateMemory$, if its activations still fit (method table).}
-\ans{Admit}{Whatever the energy test gives, \val{devicew} + \val{updatew} = \val{sumw} W exceeds \val{thermalw} W and
-  \val{latms} + \val{dlatms} = \val{summs} ms exceeds \val{deadlinems} ms. Reject: charging waives neither; shorten the window or lower the duty cycle (admission card).}
+  swapped per context. (c) Bias-only: same classes, so no new head; smallest $\TrainableStateMemory$, if its activations fit (method table).}
+\ans{Admit}{Latency passes (\val{latms} + \val{dlatms} = \val{summs} $\le$ \val{deadlinems} ms), but \val{devicew} + \val{updatew} =
+  \val{sumw} W exceeds \val{thermalw} W: reject. Charging raises only the energy allowance (admission card).}
 \end{answers}
 
 \begin{leftcol}
 \sheetsec{Worked example}
-\begin{practicebox}\boxtitle{Can a keyboard phone run a full update in the background?}
+\begin{practicebox}\boxtitle{Can a keyboard phone run a full background update?}
 A \val{paramsmillion}M-parameter FP32 model, Adam, activations \val{actfactor}$\times$ the weights.
 RAM \val{phoneramgib} GiB (\val{phoneramgb} GB); background allowance \val{allowancemb} MB; memory bandwidth \val{phonebw} GB/s.
 \begin{steps}
 \item Weights \val{paramsmillion}M $\times$ \val{bytesparam} B = \val{weightsmb} MB; gradients \val{gradsmb};
   Adam \val{moments} $\times$ \val{weightsmb} = \val{adammb}; activations \val{actmb}. Total \res{\val{totalmb} MB},
   \val{amplification}$\times$ the weights.
-\item Against the allowance: \val{totalmb} $-$ \val{allowancemb} = \res{\val{overmb} MB over}: the OS may evict
-  it mid-update, though RAM is larger.
+\item \val{totalmb} $-$ \val{allowancemb} = \res{\val{overmb} MB over}: the OS may evict
+  it, though RAM is larger.
 \item Bytes per step, one pass per tensor use: forward reads weights, writes activations (\val{fwdmb});
   backward reads both, writes gradients (\val{bwdmb}); Adam reads four arrays, writes three (\val{adamtrafficmb}). Total \res{\val{stepmb} MB}, \val{trafficratio}$\times$ an inference's weight reads.
 \item Floor: \val{stepmb} MB $\div$ \val{phonebw} GB/s = \res{\val{stepms} ms} per step before any arithmetic.
@@ -144,26 +147,27 @@ SGD keeps no moments; activations are unchanged.\par\vspace{4pt}
 \begin{rightcol}
 \sheetsec{Common mistakes}
 \mistake{``A compressed update always uses less network than the data.''}%
-  {A week of photos is \val{rawmb} MB; one update \val{updatemb} MB: upload-only break-even at \val{breakeven} rounds a week.
-   Daily rounds upload \val{dailyupmb} MB; hourly (\val{hourlyrounds}) upload \val{hourlyupmb} MB, more than the photos.}{}
+  {A week of photos is \val{rawmb} MB; one update \val{updatemb} MB, so break-even is \val{breakeven} rounds a week.
+   Hourly rounds (\val{hourlyrounds}) upload \val{hourlyupmb} MB, more than the photos.}{}
 \mistake{``Raw data stays on the phone, so federated learning is private.''}%
-  {Updates can be inverted to rebuild examples. Secure aggregation hides each update (and blocks per-client
-   poisoning filters); differential privacy costs utility and rounds.}{}
-\mistake{``The adapted model disagrees with its frozen shadow, so roll it back.''}%
-  {Disagreement detects change, not quality. Hold the candidate; roll back only on validated outcomes:
-   labels, trusted corrections, a safety invariant.}{}
+  {Updates can be inverted to rebuild examples. Secure aggregation hides each update but blocks per-client
+   poisoning filters.}{}
+\mistake{``Inference must be local for latency, so training must be too.''}%
+  {A \val{cameradeadlinems} ms camera deadline under \val{rttlowms}--\val{rtthighms} ms round trips forces local inference, but a fixed
+   model runs offline too: learn locally only for a measured gain.}{}
 
 \vspace{2pt}
 \sheetsec{Check yourself}
 \begin{qs}
 \item \assumed{} uploads must finish in \val{deadlinemin} min. The \val{payloadmib} MiB (\val{payloadmb} MB) adapter update
-  goes over \val{linkslow} and \val{linkfast} Mb/s uplinks. Upload times? Who misses, and what does the deadline trade?
+  goes over \val{linkslow} and \val{linkfast} Mb/s uplinks. Upload times? Who misses?
+  If \val{misspct}\% of selected devices miss, how many to select so \val{targetclients} complete a secure-aggregation round?
 \item \assumed{} budget phones are \val{budgetfleet}\% of the fleet but supply \val{budgetdone}\% of completed updates;
   flagships, \val{flagshipfleet}\% and \val{flagshipdone}\%. Coverage ratios, from which logs? Does reweighting fix it?
 \item Pick a method and the term it cuts: (a) a custom wake word from a few recordings; (b) a flagship switching
-  home, car and office contexts; (c) a budget phone with almost no allowance.
+  home, car and office contexts; (c) a budget phone correcting a small calibration shift (same classes) with almost no allowance.
 \item \assumed{} a charging phone draws \val{devicew} W; the update adds \val{updatew} W; thermal limit
-  \val{thermalw} W. Typing latency \val{latms} ms rises \val{dlatms} ms, deadline \val{deadlinems} ms. Admit?
+  \val{thermalw} W. Typing latency \val{latms} ms rises \val{dlatms} ms, deadline \val{deadlinems} ms. Admit? Does charging change it?
 \end{qs}
 \end{rightcol}
 \end{document}

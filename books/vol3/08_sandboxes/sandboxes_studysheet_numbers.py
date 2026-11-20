@@ -26,6 +26,10 @@ def r(x, nd):
     return float(fx(x, nd))
 
 
+def ints(x):
+    return f"{x:,.0f}"
+
+
 def pct(x, nd=0):
     return fx(x * 100, nd)
 
@@ -75,7 +79,9 @@ def numbers() -> dict:
              guestmib=fx(guest_mib, 0), guestgb=fx(guest_gb, 3), dirty=fx(dirty_mb, 0), standby=fx(standby_mb, 0),
              target=pct(target, 1), active=fx(active, 0), mu=fx(mu, 2), pone=pct(p1, 2), ptwo=pct(p2, 3),
              reserve=f"{reserve}", activegb=fx(active_gb, 1), standbygb=fx(standby_gb, 3),
-             poolgb=fx(pool_gb, 1), privategb=fx(private_gb, 1), memratio=fx(ratio, 1))
+             poolgb=fx(pool_gb, 1), privategb=fx(private_gb, 1), memratio=fx(ratio, 1),
+             privatemib=ints(active * guest_mib))
+    assert fx(active * guest_mib * 2**20 / 1e9, 1) == fx(private_gb, 1)   # 307,200 MiB is the printed 322.1 GB
 
     # ---- Your turn. ASSUMED: restores contend under burst concurrency and take 120 ms (8x), all else equal
     slow_ms = 120

@@ -12,7 +12,7 @@
 \begin{bigidea}
 Long trajectories outlive their workers. The runtime keeps an \hl{append-only log} on storage that
 survives a declared failure, writes each \hl{intent before dispatch}, and rebuilds state by folding
-that log, never by asking the model again. What the log cannot settle stays \hl{in doubt}.
+it, never by asking the model.
 \end{bigidea}
 
 \begin{leftcol}
@@ -21,38 +21,44 @@ that log, never by asking the model again. What the log cannot settle stays \hl{
 \idea{Durable against a named failure.}{An acknowledgment survives only the faults its storage
   survives: declare the failure domain first.}
 \idea{The log is the record; state is a fold.}{A reducer replays typed events into the control record,
-  calling no model or tool. The context window is a view, not a record.}
-\idea{Intent before dispatch.}{An admitted operation's identity, arguments, grant and reservation
-  are durable before the request leaves, or a crash leaves a phantom effect.}
-\idea{Resume is authorization, not restart.}{Prove the prefix, take ownership under a new epoch (a
-  fencing token the log, gate and resource check; lease expiry alone does not exclude), restore,
-  reconcile, admit. Ownership licenses fresh dispatches, never a repeat of one in doubt.}
-\idea{In doubt is settled by evidence.}{Reconcile by operation identity (result inbox, status
-  query); repeat only under the endpoint's idempotency contract.}
+  calling no model or tool; the context is a view.}
+\idea{Intent before dispatch.}{An admitted operation's grant and reservation are durable before the
+  request leaves, or a crash leaves a phantom effect.}
+\idea{Resume is authorization, not restart.}{Prove the prefix; take a new epoch the log, gate and resources check;
+  restore and reconcile before admitting new work.}
+\idea{In doubt is settled by evidence.}{Reconcile by operation identity; repeat only under an idempotency contract.}
 \idea{Replay, not rerun; keep what the promise needs.}{A rerun samples a new trajectory. Retention
-  follows the recovery promise; a digest does not keep the bytes.}
+  follows the recovery promise; a digest keeps no bytes.}
 \end{ideas}
 
 \vspace{8pt}
 \sheetsec{Three uses of a recording}
 \begin{sheettable}{@{}l L@{}}
 \thead{Mode} & \thead{What runs; what it supports}\\ \midrule
-Time-travel & reducer folds events: what state the record held\\
-Harness regression & harness code on recorded inputs, effects off: how it responds\\
-Counterfactual & changed condition, new observations: only this new experiment\\
+Time-travel & reducer folds events: the state held\\
+Harness regression & harness on recorded inputs, effects off: how it responds\\
+Counterfactual & changed condition, new observations: this experiment only\\
 \end{sheettable}
 \vspace{3pt}
-{\fontsize{8.6}{11}\selectfont\color{muted}Divergence: step boundary by boundary from a verified
-checkpoint (model input, response, decision, observation). The first mismatch localizes; it does not
-prove cause.\par}
+{\fontsize{8.6}{11}\selectfont\color{muted}Divergence: from a verified checkpoint, the first mismatched step
+boundary localizes; it does not prove cause.\par}
+
+\vspace{8pt}
+\fcard{Resume budget}%
+  {\ResumeTime = \OwnershipAcquisitionTime + \CheckpointSuffixReadTime + \SuffixFoldTime
+   + \WorkspaceRestoreTime + \OperationReconciliationTime + \PrefillTime}%
+  {Ownership, checkpoint and suffix read, fold, workspace restore, reconciliation, prefill; overlapping stages count
+   by critical path.}%
+  {With no cached prefix, prefill adds a floor of about \val{coldprefill}~s for
+   \val{coldtokens} tokens; folding calls no model.}{}
 \end{leftcol}%
 \begin{rightcol}
 \sheetsec{Where the crash falls}
 {\centering
 \begin{tikzpicture}[sheet]
   \foreach \x/\lab/\sty in {21/proposal/nbox, 67/admission/nbox, 113/intent ack/accbox, 159/dispatch/nbox, 205/evidence/nbox}{
-    \node[\sty, minimum width=42pt, minimum height=15pt] at (\x,60) {\lab};}
-  \foreach \a/\b in {42/46, 88/92, 134/138, 180/184}{\draw[arr] (\a,60) -- (\b,60);}
+    \node[\sty, minimum width=38pt, minimum height=15pt] at (\x,60) {\lab};}
+  \foreach \a/\b in {40/48, 86/94, 132/140, 178/186}{\draw[arr] (\a,60) -- (\b,60);}
   \draw[dim, dashed] (136,76) -- (136,22);
   \node[note] at (136,82) {durability barrier: the request may leave};
   \draw[dim] (113,51) -- (113,38); \draw[dim] (205,51) -- (205,38);
@@ -64,13 +70,13 @@ prove cause.\par}
   \node[note, anchor=north] at (228.5,20) {per endpoint};
 \end{tikzpicture}\par}
 \vspace{4pt}
-{\fontsize{8.6}{11}\selectfont A missing intent proves non-dispatch only in a \hl{complete
-authoritative prefix}, never in a lagging replica. A pending or timeout result leaves it in doubt.\par}
+{\fontsize{8.6}{11}\selectfont A found intent cannot show whether the request left. A missing one
+proves non-dispatch only in a \hl{complete authoritative prefix}, never a lagging replica.\par}
 
 \vspace{8pt}
-\sheetsec{Which acknowledgment survives which failure}
+\sheetsec{What each acknowledgment survives}
 \begin{sheettable}{@{}l L@{}}
-\thead{Failure} & \thead{Acknowledgment that survives it}\\ \midrule
+\thead{Failure} & \thead{Acknowledgment that survives}\\ \midrule
 Process crash & returned \texttt{write()} (page cache)\\
 Power or host loss & \texttt{fdatasync()}, drive cache flushed\\
 Volume loss & quorum of replicas off that volume\\
@@ -82,17 +88,16 @@ Volume loss & quorum of replicas off that volume\\
    + \TraceCrashCount\,\CheckpointRestoreTime + \TurnReconstructionTime \cdot \text{lost turns}\\
    \CheckpointStride^* = \sqrt{2\,\CheckpointWriteTime/(\TurnFailureRate\,\TurnReconstructionTime)}\end{gathered}}%
   {Every $\CheckpointStride$ turns: $\StrideCheckpointCount$ pauses of $\CheckpointWriteTime$. Each of
-   $\TraceCrashCount$ crashes restores ($\CheckpointRestoreTime$), then rebuilds each lost turn, those
-   past the last checkpoint ($\TurnReconstructionTime$ each). $\TurnFailureRate$: crashes $\div$ turns.}%
+   $\TraceCrashCount$ crashes restores ($\CheckpointRestoreTime$), then rebuilds each turn past the last checkpoint ($\TurnReconstructionTime$ each). $\TurnFailureRate$: crashes $\div$ turns.}%
   {Unlogged turns cost re-execution $\TurnReexecutionTime$, so logging lengthens the stride by
-   $\sqrt{\TurnReexecutionTime/\TurnReconstructionTime}$.}{}
+   $\sqrt{\TurnReexecutionTime/\TurnReconstructionTime}$. At steady growth, full snapshots write $(\StrideCheckpointCount+1)/2$
+   times delta bytes; deltas pay in replay.}{}
 
 \fcard{Group commit}%
-  {\begin{gathered}\text{wait} = \text{gather} + \text{flush}\\
-   \text{storage work per intent} = \text{flush}/\CommitBatchRecordCount\end{gathered}}%
+  {\text{wait} = \text{gather} + \text{flush}}%
   {A timer gathers $\CommitBatchRecordCount$ intents into one quorum flush. The first arrival waits
-   timer plus flush; the last, the flush.}%
-  {Batching divides work, not latency.}{}
+   timer plus flush; the last, as the timer fires, the flush.}%
+  {Batching divides storage work (flush$/\CommitBatchRecordCount$ per intent), not latency.}{}
 \end{rightcol}
 
 % ===================================================================== BACK: PRACTICE
@@ -100,19 +105,18 @@ Volume loss & quorum of replicas off that volume\\
 \begin{answers}
 \ans{Finish}{\val{slowcapquarter} + \val{recoveryquarter} = \val{slowtotalquarter}~s; \val{slowcaphalf} +
   \val{recoveryhalf} = \val{slowtotalhalf}~s; \val{stridequarter} still wins, narrowly. $\CheckpointStride^* =
-  \sqrt{\val{slowinside}} \approx$ \val{kslow}: a \val{pausefactor}$\times$ pause doubles the stride (stride card).}
+  \sqrt{\val{slowinside}} \approx$ \val{kslow}: a \val{pausefactor}$\times$ pause doubles it (stride card).}
 \ans{Group commit}{(a) First \val{qtimer} + \val{qflush} = \val{qfirst}~ms; last \val{qlast}~ms; work
   \val{qflush} $\div$ \val{qbatch} = \val{qwork}~ms per intent. (b) The gather term: first waits
-  \val{qtimertwo} + \val{qflush} = \val{qfirsttwo}~ms; work per intent unchanged. (c) A process crash
-  only; after power or volume loss a sent request may have no intent on record (table).}
-\ans{Crash positions}{(a) Not dispatched, yet the intent may be durable; recovery cannot tell it from (b).
-  (b) In doubt: keep identity and reservation; reconcile. (c) Still in doubt; keep the
-  reservation. (d) No: a replica is not a complete prefix (picture).}
+  \val{qtimertwo} + \val{qflush} = \val{qfirsttwo}~ms; work unchanged. (c) A process crash
+  only; power loss can erase an intent whose request left (table).}
+\ans{Crash positions}{(a) Not dispatched; a found intent looks like (b), so it is held in doubt.
+  (b) In doubt: keep the reservation; reconcile. (c) Still in doubt. (d) No: a replica is not a complete prefix (picture).}
 \columnbreak
-\ans{Resume}{(a) The fencing token: log, gate and resource reject the old epoch; lease expiry alone
-  does not exclude. (b) No: ownership licenses fresh dispatches only. Reconcile by operation identity;
-  repeat only under an idempotency contract (resume idea).}
-\ans{Divergence}{(a) Harness regression replay; localized to context assembly, before any model call.
+\ans{Resume}{(a) The new epoch: log, gate and resource reject the old one (lease expiry alone
+  cannot). (b) No: reconcile by operation identity first (resume idea). (c) Prefill, a floor of about \val{coldprefill}~s for
+  \val{coldtokens} tokens; folding calls no model. Prefix-aware placement weighs that against queueing.}
+\ans{Divergence}{(a) Harness regression; context assembly.
   (b) That the omission caused the claim. (c) A counterfactual branch restoring the note (table).}
 \end{answers}
 
@@ -144,7 +148,8 @@ Stride \val{strideten}, \val{stridequarter} or \val{stridehalf}?
 \item Totals \val{totalten}, \val{totalquarter}, \val{totalhalf}~s: \res{\val{best} turns wins}.
 \item {\raggedright Balance: $\TurnFailureRate = \val{ncrash}/\val{turns} = \val{rate}$, so
   $\CheckpointStride^* = \sqrt{2 \times \val{pause} / (\val{rate} \times \val{rebuild})} = \sqrt{\val{balanceinside}}
-  \approx$ \res{\val{klog} turns}. Unlogged (\val{reexec}~s per turn): $\approx$ \val{kexec}.\par}
+  \approx$ \res{\val{klog} turns}. Unlogged (\val{reexec}~s per turn): $\sqrt{2 \times \val{pause} / (\val{rate} \times \val{reexec})} =
+  \sqrt{\val{execinside}} \approx$ \val{kexec}.\par}
 \end{steps}
 \takeaway{A logged crash costs reconstruction, not re-execution: the stride grows \val{gain}$\times$.}
 \end{practicebox}
@@ -152,7 +157,7 @@ Stride \val{strideten}, \val{stridequarter} or \val{stridehalf}?
 \vspace{10pt}
 \sheetsec{Your turn: finish it}
 \begin{practicebox}\boxtitle{The same trace with a slower capture}
-\assumed{} each checkpoint now pauses \val{slowpause}~s; all else unchanged.\par\vspace{4pt}
+\assumed{} each checkpoint now pauses \val{slowpause}~s.\par\vspace{4pt}
 \textbf{Given:} stride \val{strideten}: \val{countten} $\times$ \val{slowpause} + \val{recoveryten} = \val{slowtotalten}~s.\par
 \textbf{You:} totals at \val{stridequarter} and \val{stridehalf}, the winner, the new balance stride.\par\vspace{30pt}
 \end{practicebox}
@@ -160,27 +165,28 @@ Stride \val{strideten}, \val{stridequarter} or \val{stridehalf}?
 \begin{rightcol}
 \sheetsec{Common mistakes}
 \mistake{``To reproduce the failure, rerun it at temperature zero.''}%
-  {Serving is not numerically deterministic. At \val{rerunq}\% per call, independently, a \val{rerunh}-turn run matches
-   only $\val{rerunqfrac}^{\val{rerunh}}$ = \val{rerunall}\% of the time. Replay the log.}{}
+  {Serving is not numerically deterministic. At \val{rerunq}\% per call, a \val{rerunh}-turn run matches
+   $\val{rerunqfrac}^{\val{rerunh}}$ = \val{rerunall}\% of the time. Replay the log.}{}
 \mistake{``Checkpoint after every turn to be safe.''}%
-  {Logged turns make a crash cheap. On the worked trace: \val{everyturn}~s against \val{totalquarter}~s
-   at \val{best} turns.}{}
+  {Logging makes a crash cheap: \val{everyturn}~s against \val{totalquarter}~s
+   at \val{best} turns on the worked trace.}{}
 \mistake{``Prune the log to save storage.''}%
   {Keeping every recovery input \val{retmonths} months costs \val{retcents} cents, \val{retshare}\% of a
-   \$\val{retattempt} attempt (the log: \val{retlogshare}\%). Pruning required bytes forfeits recovery.}{}
+   \$\val{retattempt} attempt. Pruning those bytes forfeits recovery.}{}
 
 \vspace{2pt}
 \sheetsec{Check yourself}
 \begin{qs}
-\item \assumed{} \val{qtimer}~ms timer, \val{qflush}~ms flush, \val{qbatch} intents per batch.
-  (a) First and last waits; work per intent? (b) The timer doubles, batch fixed: what grows? (c) Acknowledge from
-  the page cache instead: which failures does it survive?
-\item Give the recovery state: a crash (a) after the intent append, before its acknowledgment;
+\item \assumed{} \val{qtimer}~ms timer, \val{qflush}~ms flush, \val{qbatch}-intent batches.
+  (a) First and last waits; work per intent? (b) Timer doubled, batch fixed: what grows? (c) Ack from the
+  page cache: survives which failures?
+\item Recovery states: a crash (a) after the intent append, before its ack: what happened; what does recovery conclude on finding the intent?
   (b) after it, before any result; (c) after a durable timeout. (d) A replica lacks the intent: re-dispatch?
-\item A replacement owns the repair; its test is in doubt. The old worker was only partitioned and
-  appends again. (a) What stops it? (b) May the new owner re-dispatch the test?
-\item After a harness change, replay feeds the recorded test output, but the next model input drops
-  ``regression suite skipped''; the model then claims success. (a) Which mode; what is localized? (b) What is unproven? (c) Test the cause how?
+\item A replacement owns the repair; its test is in doubt. The old worker, only partitioned,
+  appends again. (a) What stops it? (b) May the new owner re-dispatch the test? (c) On an
+  idle worker with no cached prefix, which term must it add?
+\item After a harness change, replay shows the next model input dropping
+  ``regression suite skipped''; the model then claims success. (a) Which mode; what is localized? (b) What is unproven? (c) How to test the cause?
 \end{qs}
 \end{rightcol}
 \end{document}

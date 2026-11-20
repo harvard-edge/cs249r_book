@@ -81,7 +81,7 @@ def numbers() -> dict:
     n.update(m3ms=c(budget_ms), m3mb=c(budget_mb), m3tflms=c(tfl_ms), m3tflmb=c(tfl_mb),
              m3onnxms=c(onnx_ms), m3onnxmb=c(onnx_mb))
 
-    # ---- Q1: ASSUMED LayerNorm -> dropout -> ReLU on 16M 16-bit values, same device memory bandwidth
+    # ---- Q1: ASSUMED bias add -> dropout -> ReLU on 16M 16-bit values, same device memory bandwidth
     q1n, q1k, q1b = 16e6, 3, 2
     unf = 2 * q1k * q1n * q1b
     fus = 2 * q1n * q1b

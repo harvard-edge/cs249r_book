@@ -18,16 +18,16 @@ inputs, a burst or a sustained run. Benchmarking turns an optimization claim int
 \begin{leftcol}
 \sheetsec{Key ideas}
 \begin{ideas}
-\idea{Predict, then measure.}{The roofline puts ResNet-50 training on an H100's compute roof;
-  it sustains \val{mfuach} of \val{mfupeak} TFLOP/s ($\EfficiencyHw = \val{mfu}\%$). Profile the gap.}
+\idea{Predict, then measure.}{The roofline predicts a ceiling; measure the rate and
+  profile the gap.}
 \idea{Scope sets the question.}{Micro finds slow kernels, macro compares models, end to end decides
-  what the user waits. Untouched stages dilute any speedup.}
+  what the user waits.}
 \idea{Report the tail, under load.}{A mean hides the slowest 1\%: report p99 at a stated load.
   A client that waits for each reply goes quiet during a stall, hiding the queue.}
 \idea{A difference must beat the noise.}{Repeat runs in random order; pair models on the same
-  examples. ``Not significant'' is not ``equivalent''; a finite test is evidence, not proof.}
+  examples. ``Not significant'' is not ``equivalent.''}
 \idea{Accuracy is not quality.}{Compression can keep top-1 while confidence stops matching correctness
-  (calibration) and rare slices fail. Test data must cover deployed inputs.}
+  (calibration) and rare slices fail.}
 \end{ideas}
 
 \vspace{10pt}
@@ -38,7 +38,17 @@ Inputs & which data; JPEG on storage, or tensor in memory?\\
 Quality floor & still at least \val{target}\% top-1\\
 Metric & throughput \emph{and} p99, at a stated load\\
 Harness & sync the device (a host call returns at enqueue); warm-up; independent arrivals\\
-Run rules & same model and libraries; seeds, clocks, power limit; repeats\\
+Run rules & same libraries; seeds, clocks, power limit; repeats\\
+\end{sheettable}
+
+\vspace{10pt}
+\sheetsec{Inference scenarios (MLPerf)}
+\begin{sheettable}{@{}l L l@{}}
+\thead{Scenario} & \thead{Arrivals; metric} & \thead{Models}\\ \midrule
+SingleStream & after each reply; tail latency & phone camera app\\
+MultiStream & grouped; tail group latency & multi-camera fusion\\
+Server & Poisson; QPS within a tail bound (often p99) & cloud API\\
+Offline & all at once; samples/s & batch jobs\\
 \end{sheettable}
 
 \vspace{10pt}
@@ -46,7 +56,7 @@ Run rules & same model and libraries; seeds, clocks, power limit; repeats\\
   {\text{Eff}_{\text{scaling}} = \frac{\Time(1)}{\AcceleratorCount\,\Time(\AcceleratorCount)}}%
   {Score the time until validation quality first reaches the target: samples needed $\div$ samples/s.
    \val{sct1} h on one, \val{sctn} h on \val{scn}: \val{sceff}\%.}%
-  {Times show the loss, not its cause: measure sync time, input stalls.}{}
+  {}{}
 \end{leftcol}%
 \begin{rightcol}
 \sheetsec{Formulas you will use}
@@ -64,7 +74,7 @@ Run rules & same model and libraries; seeds, clocks, power limit; repeats\\
      \node[lab, anchor=west] at ({\pB+4},25) {\val{amtotal} ms};
      \node[note, anchor=west] at (0,7) {after};
      \draw[nbox] (40,0) rectangle (\pA,14); \node[lab] at ({(40+\pA)/2},7) {preprocess};
-     \draw[hotbox] (\pA,0) rectangle (\qB,14);
+     \draw[hotbox] (\pA,0) rectangle (\qB,14); \node[small, anchor=north] at ({(\pA+\qB)/2},-1) {\val{amoptinf} ms};
      \node[lab, anchor=west] at ({\qB+4},7) {\val{amopttotal} ms};
    \end{tikzpicture}}
 \fcard{Paired test on the same examples (McNemar, uncorrected)}%
@@ -90,7 +100,7 @@ Run rules & same model and libraries; seeds, clocks, power limit; repeats\\
   {$\InferenceDutyCycle$: share of time inferring. Keyword spotting at \val{kwsactive} W
    active, \val{kwsidle} mW idle, one \val{kwsms} ms inference per second ($\InferenceDutyCycle = \val{kwsduty}\%$):
    \val{kwsavg} mW, \val{kwsidleshare}\% of it idle.}%
-  {Energy: integrate power over one window inside a stated boundary (chip, board, facility).}%
+  {Energy: integrate power over one window inside a stated boundary.}%
   {\begin{tikzpicture}[sheet]
      \pgfmathsetmacro\sc{200/\val{kwsavg}}
      \pgfmathsetmacro\xa{\val{kwsactmw}*\sc} \pgfmathsetmacro\xb{\xa+\val{kwsidlemw}*\sc}
@@ -105,11 +115,11 @@ Run rules & same model and libraries; seeds, clocks, power limit; repeats\\
 \backside
 \begin{answers}
 \ans{Finish}{The gap \val{ytbase} $-$ \val{ytcomp}, squared, is \val{ytsq}; \val{ytsq} $\div$ \val{ytdis} $=$ \val{ytstat}, below \val{mccrit}:
-  unresolved: with many disagreements the gap can be noise. Not equivalent either; test more
+  unresolved: with many disagreements the gap can be noise. Not equivalent; test more
   examples against a stated tolerance. (Paired-test card)}
 \ans{1}{Host \val{qpre} + \val{qhost} $=$ \val{qhoste2e} ms; accelerator \val{qpre} + \val{qacc} + \val{qlink} $=$
   \val{qacce2e} ms: \val{qe2e}$\times$ end to end, not \val{qiso}$\times$. Ceiling: preprocessing and copy remain,
-  \val{qhoste2e} $\div$ \val{qrest} $=$ \val{qcap}$\times$. Both meet \val{qbudget} ms, so the deadline does not decide. (Amdahl card)}
+  \val{qhoste2e} $\div$ \val{qrest} $=$ \val{qcap}$\times$. Both meet \val{qbudget} ms, so the deadline does not decide. SingleStream (one frame at a time). (Amdahl card)}
 \ans{2}{Now \val{wavg} mW (\val{widleshare}\% idle). Faster inference ($\InferenceDutyCycle = \val{wfastduty}\%$):
   \val{wfast} mW. Idle at \val{wlowidlemw} mW: \val{wlowidle} mW. Cut idle power; at a small duty cycle it dominates. (Duty-cycle card)}
 \columnbreak
@@ -117,7 +127,7 @@ Run rules & same model and libraries; seeds, clocks, power limit; repeats\\
   during a stall, hiding the queue and p99: use independent (open-loop) arrivals. One run cannot beat
   noise: repeat in random order, give an interval. Also state inputs, quality floor, load. (Table)}
 \ans{4}{\val{ft1} $\div$ (\val{fdev} $\times$ \val{ftn}) $=$ \val{feff}\% (ideal \val{fideal} h). The rival is no faster: twice the
-  samples needed $\div$ twice the samples/s gives the same time to quality. (Training card)}
+  samples $\div$ twice the samples/s gives the same time to quality. (Training card)}
 \end{answers}
 
 \begin{leftcol}
@@ -155,17 +165,18 @@ $\CompressedOnlyCorrectCount = \val{ytcomp}$.\par
   {Top-1 fell \val{qdrop} points (\val{qtopf}\% to \val{qtopi}\%), inside the \val{qgate}-point gate, but
    calibration error rose \val{qecef} to \val{qecei} and edge-case accuracy fell \val{qedgedrop} points: it fails.}{}
 \mistake{``The datasheet says \val{dstops} TOPS at \val{dswatt} W, so \val{dseff} TOPS/W.''}%
-  {Both peaks were read at different operating points. Sustained, it ran \val{sutops} TOPS at \val{suwatt} W:
-   \val{sueff} TOPS/W, \val{effgap}$\times$ worse. Measure both at one operating point.}{}
+  {The peaks came from different operating points. Sustained, it ran \val{sutops} TOPS at \val{suwatt} W:
+   \val{sueff} TOPS/W, \val{effgap}$\times$ worse. Measure both at one warm, sustained point;
+   heat throttles clocks in long runs.}{}
 
 \vspace{2pt}
 \sheetsec{Check yourself}
 \begin{qs}
 \item \assumed{} a camera-trap frame spends \val{qpre} ms preprocessing on the host and \val{qhost} ms in the
   model. An attached accelerator runs the model in \val{qacc} ms (\val{qiso}$\times$) but adds a \val{qlink} ms
-  copy. End-to-end speedup? Ceiling? Do both meet the \val{qbudget} ms budget at \val{qfps} frames/s?
+  copy. End-to-end speedup? Ceiling? Do both meet the \val{qbudget} ms budget at \val{qfps} frames/s? Which MLPerf scenario fits?
 \item \assumed{} a wake-word board draws \val{wact} W for one \val{wms} ms inference each second and
-  \val{widle} mW idle. Which helps battery life more: halving inference time, or halving idle power?
+  \val{widle} mW idle. Which helps battery life more: halving inference time or idle power?
 \item A teammate claims ``INT8 is 2$\times$ faster'' from one run, timing the host call, with one client that
   waits for each reply. What three harness flaws would you fix, and why?
 \item \assumed{} training takes \val{ft1} h on one accelerator and \val{ftn} h on \val{fdev}. Scaling

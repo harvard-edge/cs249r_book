@@ -55,6 +55,20 @@ def numbers() -> dict:
     n.update(weighteight=c(w8 * 1e3), totaleight=c((w8 + kv) * 1e3), timeeight=f"{t8:.1f}",
              rateeight=f"{1000 / t8:.0f}", speedeight=f"{t16 / t8:.1f}")
 
+    # ---- Energy tiles and the DRAM energy per token (chapter: PrecisionEnergy, 45 nm reference energies)
+    from mlsysim import Hardware
+    en = Scenarios.Int8VsFp32OperationEnergy45nm
+    pj_byte = Hardware.Tech.Memory.DRAM.energy_per_byte.to("pJ/B").magnitude
+    n.update(drampj=c(pj_byte), dramread=c(en.memory_read.to("pJ").magnitude),
+             macfp=f"{en.wide_mac.to('pJ/flop').magnitude:.1f}", macint=f"{en.narrow_mac.to('pJ/flop').magnitude:.1f}",
+             macratio=f"{en.mac_ratio:.0f}")
+    # energy per token from the printed MB and printed pJ/byte (J)
+    mb16, mb4, mb8 = round((w16 + kv) * 1e3), round((w4 + kv) * 1e3), round((w8 + kv) * 1e3)
+    pjb = round(pj_byte)
+    e16, e4, e8 = (mb * 1e6 * pjb * 1e-12 for mb in (mb16, mb4, mb8))
+    n.update(energysixteen=f"{e16:.2f}", energyfour=f"{e4:.2f}", energyeight=f"{e8:.2f}",
+             energycutfour=f"{e16 / e4:.1f}", energycuteight=f"{e16 / e8:.1f}")
+
     # ---- Front picture: the camera frame vs its weight reads (chapter: ModelDeviceComparison, CameraRunningCase)
     mread = Scenarios.MobileNetV2Fp32WeightReadPhone
     cam = Scenarios.MobileNetV2BlurPipelinePhone

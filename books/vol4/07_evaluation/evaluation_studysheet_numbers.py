@@ -48,6 +48,9 @@ def numbers() -> dict:
                      ("lxthreenines", runs["threenines"])):
         n[key] = f(60 * (math.log10(cnt) - 1), 2)
     n.update(tickten=f(10, 0), tickhundred=f(100, 0), tickthousand=f(1000, 0))
+    # with failures: exact binomial (Clopper-Pearson) lower limit, chapter's BoundWithFailures
+    n.update(nwithfail=f(camp.clean_runs - camp.recorded_failures, 0), pfailpct=pct(camp.lower_bound_with_failures, 1))
+    assert camp.lower_bound_with_failures < p20
 
     # ---- Worked example: what twenty clean runs support, and what a 99 percent claim costs
     expo20 = round(ln_inv, 3) / n20

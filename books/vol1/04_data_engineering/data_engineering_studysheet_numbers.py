@@ -24,7 +24,6 @@ def numbers() -> dict:
     # 150 KB JPEGs read from a baseline cloud block volume every epoch.
     f = SC.ResNet50A100InputFeed
     rate = f.sustained_rate.to("1/s").magnitude                 # img/s the accelerator sustains
-    ceil = f.ceiling_rate.to("1/s").magnitude                   # img/s compute ceiling
     jpg_kb = f.encoded_sample.to("kB").magnitude
     disk = f.supply.bandwidth.to("MB/s").magnitude
     need = rate * jpg_kb / 1000                                 # MB/s demand in compressed bytes
@@ -32,7 +31,7 @@ def numbers() -> dict:
     got = disk / (jpg_kb / 1000)                                # img/s the disk supplies
     loss = 1 - got / rate
     assert abs(loss - f.feeding_loss()) < 1e-9
-    n.update(rate=c(rate), ceil=c(ceil), jpgkb=c(jpg_kb), disk=c(disk), need=c(need),
+    n.update(rate=c(rate), jpgkb=c(jpg_kb), disk=c(disk), need=c(need),
              got=c(got), loss=f"{loss * 100:.0f}", ratiopct=f"{got / rate * 100:.0f}")
 
     # ---- Your turn: same disk, but a cache of pre-decoded FP32 tensors (224x224x3 x 4 bytes)

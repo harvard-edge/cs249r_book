@@ -35,5 +35,36 @@ python3 books/shared/studysheet/build.py books/vol1/01_introduction/introduction
 ```
 
 The build regenerates the numbers, runs lualatex, and fails a sheet that is not exactly two pages,
-leaves less than 24 pt free at the foot of any column, or has an overfull box.
+leaves less than 24 pt free at the foot of any column, runs a key idea past three lines, or has an
+overfull box.
 `binder/tests/test_studysheet.py` checks every sheet without LaTeX.
+
+## Publishing
+
+Study sheets publish like the lecture slides: as PDFs on GitHub releases, linked from the book and
+the slides site. Three workflows in `.github/workflows/`:
+
+| Workflow | When | What |
+|---|---|---|
+| `studysheets-validate-dev.yml` | push or PR touching the sheets, their numbers, or mlsysim | builds every sheet in the book's TeX container, runs the tests, stages the release files |
+| `studysheets-preview-dev.yml` | push to `dev` | validate, then all four volumes to the `studysheets-dev` prerelease |
+| `studysheets-publish-live.yml` | manual (type `PUBLISH`), or `publish-all-live.yml` | live volumes to the `studysheets-latest` release |
+
+A release holds each chapter's sheet as `volN_<stem>_studysheet.pdf` (releases are flat) and each
+volume's sheets combined in book order as `MLSysBook-StudySheets-VolN.pdf`.
+
+**Live volumes** are `LIVE_VOLUMES` in `build.py`, kept equal to the slides' list (a test checks).
+A released volume's links point at `studysheets-latest`; an unreleased volume's point at
+`studysheets-dev`, which only the dev preview shows. To release a volume, add it there and in
+`slides-publish-live.yml`, then publish the sheets before the book.
+
+**Links.** Under each chapter title the online book shows "For this chapter: Lecture slides ·
+Study sheet (PDF)". `build.py --manifest` writes the chapter-to-URL map at the book's HTML
+pre-render (`books/config/_quarto-html-volN.yml`), and `books/shared/filters/inject_slides.lua`
+adds the line. The slides site's chapter rows link the same URL through `slides/tools/lectures.py`.
+
+```bash
+python3 books/shared/studysheet/build.py --stage DIR vol1 vol2   # flat + combined PDFs
+python3 books/shared/studysheet/build.py --manifest PATH         # chapter -> URL map, no LaTeX
+python3 books/shared/studysheet/build.py --live-volumes          # "vol1 vol2"
+```

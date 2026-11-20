@@ -126,6 +126,19 @@ def numbers() -> dict:
     n.update(rentrate=f"{own1.rent_rate.to(USD / hour).magnitude:.0f}",
              nodebreak=f"{100 * own1.breakeven_utilization:.1f}", bigcluster=f"{own10k.gpus:,}",
              bigbreak=f"{100 * own10k.breakeven_utilization:.0f}")
+    # Break-even card and Q2(c): the chapter's single node (TcoScenario). Owning costs a fixed amortized
+    # amount every hour plus energy only while busy; renting costs the node's GPU-hours while busy.
+    hpy = own1.hours_per_year.to(hour).magnitude
+    fixed_h = own1.node_price.to(USD).magnitude / own1.years / hpy
+    energy_h = own1.use_cost_per_year_full.to(USD).magnitude / hpy        # per busy hour
+    rent_h = own1.gpus * own1.rent_rate.to(USD / hour).magnitude
+    u_star = round(fixed_h, 2) / (rent_h - round(energy_h, 2))           # from the printed, rounded values
+    near(u_star, own1.breakeven_utilization, 5e-4)
+    n.update(nodegpus=f"{own1.gpus}", nodepricek=f"{own1.node_price.to(USD).magnitude / 1e3:.0f}",
+             nodeyears=f"{own1.years}", fixedhour=fx(fixed_h, 2), energyhour=fx(energy_h, 2),
+             renthour=f"{rent_h:.0f}", rentnet=fx(rent_h - round(energy_h, 2), 2), nodebreakq=f"{100 * u_star:.1f}")
+    # Mistake 1 with the same 40 models: possible pairs
+    n.update(linpairs=f"{fallacy_models * (fallacy_models - 1) // 2:,}")
 
     # ---- Budget vector card picture (chapter: fig-ops-scale-budget-vector, illustrative values)
     vec = {"avail": 0.40, "latency": 0.60, "fresh": 1.30, "quality": 0.50}

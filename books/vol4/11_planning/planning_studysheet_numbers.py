@@ -108,7 +108,7 @@ def numbers() -> dict:
     assert abs(tmin * 1e3 - res.shortest_bridge.to("ms").magnitude) < 1e-9
     n.update(qbridge=f(t1 * 1e3, 0), qacc=f(1.5 * dw / t1, 0), qpeak=f(jref * 1.5 * dw / t1, 2),
              qjerk=f(6 * dw / t1 ** 2, 0), qrate=f(rate1, 0), qratio=f(rate1 / taudmax, 2),
-             qshortest=f(up(tmin * 1e3, 1), 1))
+             qshortest=f(tmin * 1e3, 2))
 
     # ---- Worked example: the stall runway (chapter: PlanningLeaseRule, PlanningStallRunway)
     stall = Scenarios.WarehouseArmStallStop
@@ -159,7 +159,13 @@ def numbers() -> dict:
     assert abs(vfit - mug.carry_speed.to("m/s").magnitude) < 2e-3
     assert vfit >= am ** 2 / jm
     n.update(ma=f(am, 3), mj=f(jm, 2), mthresh=f(am ** 2 / jm, 3), mbrake=f(bm, 1), mramp=f(rmp, 1),
-             mstop=f(stopm, 1), mtotal=f(totalm, 1), mover=f(totalm - clear, 1), mfit=f(down(vfit, 2), 2))
+             mstop=f(stopm, 1), mtotal=f(totalm, 1), mover=f(totalm - clear, 1))
+    # the same speed through the S-curve card's ceiling formula, chained from printed values
+    teff = r(tr, 3) + am / (2 * jm)                       # s
+    at = r(am * r(teff, 4), 3)                             # m/s
+    vmax = math.sqrt(at ** 2 + 2 * am * clear / 1e3) - at
+    assert abs(vmax - vfit) < 1e-3
+    n.update(wrespsec=f(tr, 3), mteff=f(teff, 4), mat=f(at, 3), wclearm=f(clear / 1e3, 1), mfit=f(vmax, 3), two="2")
 
     # ---- Mistake: constant deceleration on the base (chapter: PlanningC2Stop)
     base = Scenarios.WarehouseBaseJerkLimitedStop
@@ -184,7 +190,7 @@ def numbers() -> dict:
     handoffs = shift * rate
     eps = eps_m / handoffs
     n.update(qshiftmin=f(shift / 60, 0), qhz=f(rate, 0), qmission=sci(eps_m, 0),
-             qhandoffs=f(handoffs, 0), qeps=sci(eps, 1, down=True))
+             qhandoffs=f(handoffs, 0), qeps=sci(eps, 2))
 
     # ---- Q4: ASSUMED two seam logs on the seam joint
     w4, d4, acc4 = 0.6, 70.0, 4.0

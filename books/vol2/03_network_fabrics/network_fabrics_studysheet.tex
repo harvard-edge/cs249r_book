@@ -26,10 +26,10 @@ turns its delays into coordination. Judge it by \hl{collective completion time a
   cluster; oversubscription divides it by its ratio.}
 \idea{Topology must match traffic.}{Fat-trees give full bisection; rails give same-rank gradient
   traffic its own switches; a torus suits neighbor rings, not all-to-all.}
-\idea{Lossless moves the risk.}{Credits (InfiniBand) or PAUSE frames (PFC) prevent drops and ECN
-  marks slow senders, but pauses spread to victim flows (a storm) or freeze a cycle of full buffers.}
-\idea{Faults hide as silent waste.}{A link that trains at a lower rate or on fewer lanes stays up at
-  reduced bandwidth; full rate with rising pause counters points to congestion.}
+\idea{Lossless moves the risk.}{Credits or PFC pauses prevent drops but spread to victim flows or
+  freeze a cycle of full buffers; ECN marks slow senders first.}
+\idea{Faults hide as silent waste.}{A link trained at a lower rate (HDR, half of NDR) or on fewer
+  lanes stays up; full rate with rising pause counters points to congestion.}
 \end{ideas}
 
 \vspace{10pt}
@@ -42,15 +42,13 @@ Incast: buffer fills in & $\dfrac{\EgressBufferCapacity}{\EgressArrivalRate-\Egr
 \end{sheettable}
 \vspace{3pt}
 {\fontsize{8.4}{10.4}\selectfont\color{muted}Radix $\SwitchRadix$: ports per switch. At one port:
-arrivals $\EgressArrivalRate$, drain $\EgressServiceRate$, buffer $\EgressBufferCapacity$. Separate traffic
-classes (virtual lanes, QoS) keep checkpoint bursts out of a collective's buffers.\par}
+arrivals $\EgressArrivalRate$, drain $\EgressServiceRate$, buffer $\EgressBufferCapacity$.\par}
 \end{leftcol}%
 \begin{rightcol}
 \fcard{Alpha-beta model}%
   {\PointToPointTransferTime(\PointToPointMessageSize) = \MessageStartupLatency + \frac{\PointToPointMessageSize}{\LinkBandwidth}
    \qquad \LatencyBandwidthCrossoverSize = \MessageStartupLatency\LinkBandwidth}%
-  {A message of $\PointToPointMessageSize$ bytes pays startup $\MessageStartupLatency$ plus
-   $\PointToPointMessageSize/\LinkBandwidth$. Far below $\LatencyBandwidthCrossoverSize$ more bandwidth barely helps;
+  {Message size $\PointToPointMessageSize$ in bytes. Far below $\LatencyBandwidthCrossoverSize$ more bandwidth barely helps;
    far above it, lower latency barely helps.}%
   {Modeled NDR path: $\MessageStartupLatency = \val{alpha}\,\MicroUnitPrefix$s,
    $\LinkBandwidth = \val{ndrbytes}$~GB/s (\val{ndrgbit}~Gb/s), so $\LatencyBandwidthCrossoverSize \approx \val{crossover}$~KB.}%
@@ -84,12 +82,23 @@ classes (virtual lanes, QoS) keep checkpoint bursts out of a collective's buffer
 \fcard{Capacity across the cut}%
   {\BisectionBandwidth = \frac{\DeviceCount}{2}\,\LinkBandwidth
    \qquad \text{relative throughput} = \frac{1}{(1-\CommunicationTimeFraction) + \CommunicationTimeFraction\,\CommunicationSlowdownFactor}}%
-  {Per direction, $\DeviceCount$ devices, non-blocking; an oversubscribed tier divides it by its ratio.
+  {Per direction, $\DeviceCount$ devices, non-blocking.
    $\CommunicationTimeFraction$: share of step time spent crossing the cut; $\CommunicationSlowdownFactor$: how much
-   that time stretches (the ratio, when the cut is saturated). Loss is one minus relative throughput.}%
+   that time stretches (the ratio, when the cut is saturated).}%
   {Chapter: \val{cutgpus} GPUs at \val{ndrgbit}~Gb/s: \val{cutfull} TB/s; a \val{cutratio}:1 spine leaves
    \val{cutover}~TB/s. At $\CommunicationTimeFraction$ = \val{twocomm}\%, a \val{tworatio}:1 spine costs \val{twoloss}\% of throughput.}%
   {}
+
+\vspace{10pt}
+\sheetsec{Triage a slow job, top down}
+\begin{sheettable}{@{}l L L@{}}
+\thead{} & \thead{Look at} & \thead{It tells you}\\ \midrule
+1 & step timeline, utilization & compute, input or collectives?\\
+2 & collective-library logs & transport; a slower fallback?\\
+3 & pair bandwidth test & which path is slow?\\
+4 & PFC and ECN counters & congestion?\\
+5 & link rate, lanes, CRC errors & a failing wire?\\
+\end{sheettable}
 \end{rightcol}
 
 % ===================================================================== BACK
@@ -106,10 +115,12 @@ classes (virtual lanes, QoS) keep checkpoint bursts out of a collective's buffer
   five per path instead of three (sizing table).}
 \columnbreak
 \ans{3}{Arrivals \val{qthreeload} TB/s, drain \val{ndrbytes} GB/s: \val{qthreebuf} MB $\div$ \val{qthreenet} TB/s
-  = \val{qthreefill}\,$\MicroUnitPrefix$s, about \val{qthreertts} round trips. Marks on the first queued bytes
-  can act in time. A separate class for checkpoint traffic protects the collective (sizing table).}
-\ans{4}{Read the pair's link state. A rate of \val{qfourhdr} GB/s (HDR) or half its lanes is a degraded
-  link, even without symbol errors; full rate with rising pause counters is congestion (key idea on silent waste).}
+  = \val{qthreefill}\,$\MicroUnitPrefix$s, about \val{qthreertts} round trips: marks on the first queued bytes slow
+  senders in time, unlike the \val{incfill}\,$\MicroUnitPrefix$s incast (sizing table). A separate traffic class
+  (virtual lane, QoS) with its own buffers isolates checkpoint bursts from the collective.}
+\ans{4}{Top down (triage table): timeline, library logs, pair test, then counters. A port trained at
+  \val{qfourhdr} GB/s (HDR) or on half its lanes is degraded even without symbol errors; full rate with
+  rising pause counters is congestion (silent-waste key idea).}
 \end{answers}
 
 \begin{leftcol}
@@ -147,8 +158,6 @@ transport affects.
 \mistake{``PFC makes Ethernet lossless, so congestion is solved.''}%
   {It turns loss into congestion spreading: PAUSE frames climb tier by tier and stall victim flows.
    A storm ends when the slow receiver recovers; a cyclic deadlock does not.}{}
-\mistake{``Adaptive routing will fix our oversubscribed spine.''}%
-  {It moves flows off colliding paths but adds no capacity; a full cut needs placement that avoids it, or more capacity.}{}
 
 \vspace{2pt}
 \sheetsec{Check yourself}
@@ -159,10 +168,10 @@ transport affects.
 \item \assumed{} \val{qtwogpus} GPUs, one port each, on a two-tier non-blocking fat-tree. Which rule tells you whether
   radix-\val{radix} or radix-\val{qtwobig} switches suffice, and what does the smaller radix cost?
 \item \assumed{} \val{qthreesend} GPUs write a checkpoint at \val{ndrbytes} GB/s each into one \val{ndrgbit}~Gb/s
-  port (\val{qthreebuf} MB buffer) that a training collective also uses. How soon does it fill? Can
-  \val{incrtt}\,$\MicroUnitPrefix$s feedback act in time? What protects the collective?
-\item Step time drifts up a few percent with no errors; one node pair tests at
-  \val{qfourmeas} GB/s instead of \val{ndrbytes}. What evidence separates a degraded link from congestion?
+  port (\val{qthreebuf} MB buffer) that a training collective also uses. How soon does it fill, and in how many
+  \val{incrtt}\,$\MicroUnitPrefix$s feedback round trips? Can ECN act in time? What protects the collective?
+\item Step time drifts up a few percent; no errors are logged. In what order do you look, and what
+  port evidence separates a degraded link from congestion?
 \end{qs}
 \end{rightcol}
 \end{document}

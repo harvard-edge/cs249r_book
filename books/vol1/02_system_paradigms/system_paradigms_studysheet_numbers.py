@@ -21,7 +21,7 @@ def g(x, nd=3):
 
 
 def c(x):
-    return f"{x:,.0f}"
+    return f"{x:,.0f}".replace(",", "{,}")                                  # {,}: no gap after the comma in math
 
 
 def numbers() -> dict:
@@ -71,9 +71,11 @@ def numbers() -> dict:
     radio = SC.RadioUploadVsMobileNetV2.transmit_energy_per_byte.to("mJ/MB").magnitude
     n["radio"] = g(radio)
 
-    # ---- Mistake 3: edge TCO pitfall (chapter: TcoPitfallCalc scenario inputs, USD per month)
+    # ---- Mistake 3: edge TCO pitfall, USD per month. A copy of the scenario inputs typed in the
+    # chapter's TcoPitfallCalc LEGO cell (no mlsysim scenario holds them); keep in step with that cell.
     cloud, hw, net, maint, rel = 2000, 500, 3000, 500, 2000
     edge = hw + net + maint + rel
+    assert round(edge / cloud) == 3                                         # the chapter cell's own check
     n.update(tcocloud=c(cloud), tcohw=c(hw), tconet=c(net), tcomaint=c(maint), tcorel=c(rel), tcoedge=c(edge),
              tcox=g(edge / cloud), tcolabor=f"{(net + maint + rel) / edge * 100:.0f}")
 

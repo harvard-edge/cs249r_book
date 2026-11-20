@@ -20,16 +20,16 @@ each step's \hl{overhead, bytes and efficiency}, often several-fold.
 \begin{ideas}
 \idea{Three problems, three terms.}{Execution sets overhead $\Latency$; differentiation adds bytes
   $\DataVolume$ and work $\Operations$; abstraction (kernel, layout, precision) sets efficiency $\EfficiencyHw$.}
-\idea{Eager, graph, compiled.}{Eager debugs easily but shows one operation at a time; a captured or
-  JIT-compiled graph lets a compiler fuse and plan memory.}
+\idea{A module carries a mode.}{Evaluation mode turns off dropout and freezes batch-norm statistics;
+  no-grad stops saving activations. Validation needs both.}
 \idea{Every operation costs host time.}{Python dispatch plus a kernel launch, microseconds each.
   Shorter kernels leave the accelerator waiting.}
 \idea{Fusion cuts trips to memory.}{A fused chain reads and writes its tensor once, not once per
   operation, and launches once; it still stores what backward reads.}
-\idea{Gradients cost memory.}{One backward sweep gives every gradient; saved activations grow
-  with batch and depth. Micro-batches or checkpointing cut the peak.}
-\idea{The host link is slow.}{Copies run far below device bandwidth; pinned memory and a second
-  stream overlap them with compute, pageable memory does not.}
+\idea{Gradients cost memory.}{One reverse sweep yields every weight gradient; its saved activations grow
+  with batch and depth; micro-batches or checkpointing cut the peak.}
+\idea{The host link is slow.}{Pinned memory on a second stream overlaps copies with compute;
+  one shared stream, or a host that waits on each copy, serializes them.}
 \end{ideas}
 
 \vspace{10pt}
@@ -58,23 +58,23 @@ Replaying captured launches as one submission leaves about the weight read.\par}
 \begin{rightcol}
 \sheetsec{Counting rules}
 \fcard{Dispatch ratio}%
-  {r = \frac{\HostSoftwareTime}{\IronLawComputeTime + \IronLawMemoryTime}}%
+  {\text{ratio} = \frac{\HostSoftwareTime}{\IronLawComputeTime + \IronLawMemoryTime}}%
   {Host time $\HostSoftwareTime$ $=$ Python calls $\times$ \val{pyus} $\mu$s $+$ kernel launches $\times$ \val{lnus} $\mu$s
    (eager: one of each per operation). Ideal: $\IronLawComputeTime = \Operations/\PeakRate$,
    $\IronLawMemoryTime = \DataVolume/\Bandwidth$.}%
-  {$r>1$: overhead-bound, dispatch share $r/(1+r)$. Otherwise the larger device term rules.}{}
+  {Ratio $>1$: overhead-bound, dispatch share ratio$/(1+$ratio$)$. Otherwise the larger device term rules.}{}
 \vspace{8pt}
 \begin{sheettable}{@{}l L@{}}
 \thead{Cost} & \thead{Rule}\\ \midrule
 Fused chain & $2\ChainedOperationCount\TensorElementCount\ElementStorageSize$ bytes unfused, $2\TensorElementCount\ElementStorageSize$ fused\\
 Compile breakeven & $\CompilationBreakevenCount = \dfrac{\CompilationTime}{\EagerExecutionTime - \CompiledExecutionTime}$ runs\\
 Saved activations & $\ActivationMemory \approx \BatchSize\,\LayerCount\,\SequenceLength\,\HiddenDimension\,\LayerSavedTensorCount\,\ElementStorageSize$\\
-Host copy & $\BatchTransferTime = \Latency + \DataVolume/\Bandwidth$; per batch, serial $\IronLawComputeTime + \BatchTransferTime$, overlapped $\max(\IronLawComputeTime, \BatchTransferTime)$\\
+Host copy & $\BatchTransferTime \approx$ batch bytes$/\HostLinkBandwidth$ (startup negligible); per batch, serial compute $+ \BatchTransferTime$, overlapped $\max($compute$, \BatchTransferTime)$\\
 \end{sheettable}
 \vspace{3pt}
 {\fontsize{8.4}{10.4}\selectfont\color{muted}$\ChainedOperationCount$ elementwise operations on $\TensorElementCount$ values of $\ElementStorageSize$ bytes;
 times per run $\EagerExecutionTime$, $\CompiledExecutionTime$; batch $\BatchSize$, layers $\LayerCount$,
-sequence $\SequenceLength$, width $\HiddenDimension$, $\LayerSavedTensorCount$ tensors saved per layer; $\Latency$ copy startup.\par}
+sequence $\SequenceLength$, width $\HiddenDimension$, $\LayerSavedTensorCount$ tensors saved per layer; $\HostLinkBandwidth$ host-link bandwidth.\par}
 
 \vspace{12pt}
 \sheetsec{Choosing a path}
@@ -82,7 +82,7 @@ sequence $\SequenceLength$, width $\HiddenDimension$, $\LayerSavedTensorCount$ t
 \thead{If} & \thead{Then}\\ \midrule
 code changes every few minutes & stay eager\\
 the same graph runs more than $\CompilationBreakevenCount$ times & compile (ahead of time for a fixed target)\\
-$r > 1$ & fewer operations (fuse), cheaper launches (replay a captured graph), or a bigger batch (same host cost, more device work)\\
+ratio $> 1$ & fewer operations (fuse), cheaper launches (replay a captured graph), or a bigger batch (same host cost, more device work)\\
 choosing a framework & drop paths that cannot export every operator to a runtime that fits the target; then weigh team pipeline and migration cost\\
 \end{sheettable}
 \end{rightcol}
@@ -91,19 +91,19 @@ choosing a framework & drop paths that cannot export every operator to a runtime
 \backside
 \begin{answers}
 \ans{Finish}{\val{yentries} $\times$ \val{pyus} $+$ \val{ylaunch} $\times$ \val{lnus} $=$ \val{ythost} $\mu$s;
-  $r = \val{ythost} \div \val{wtdev} \approx \val{yratio}$, still overhead-bound (\val{yshare}\% dispatch).
+  ratio $\val{ythost} \div \val{wtdev} \approx \val{yratio}$, still overhead-bound (\val{yshare}\% dispatch).
   After replay, memory (\val{wtm} $\mu$s) $>$ compute (\val{wtc} $\mu$s): memory-bound next (dispatch card).}
-\ans{1}{Unfused $\val{q1rw} \times \val{q1k} \times \val{q1n} \times \val{q1bytes}$ B $=$ \val{q1unf} MB, \val{q1tunf} $\mu$s; fused
+\ans{1}{Unfused $\val{q1rw} \times \val{q1k} \times \val{q1n} \times \val{q1bytes}$ bytes $=$ \val{q1unf} MB, \val{q1tunf} $\mu$s; fused
   \val{q1fus} MB, \val{q1tfus} $\mu$s. Two fewer operations save \val{q1saved} $\mu$s of host time.}
 \ans{2}{\val{q2comp} s $\div$ (\val{q2te} $-$ \val{q2tc}) ms $=$ \val{q2be} runs. Serving passes it in
   \val{q2min} min: compile. A notebook's \val{q2nb} runs never do: stay eager (breakeven).}
 \columnbreak
-\ans{3}{\val{q3b} $\times$ \val{q3l} $\times$ \val{q3s} $\times$ \val{q3d} $\times$ \val{q3k} $\times$ \val{q3bytes} B
+\ans{3}{\val{q3b} $\times$ \val{q3l} $\times$ \val{q3s} $\times$ \val{q3d} $\times$ \val{q3k} $\times$ \val{q3bytes} bytes
   $=$ \val{q3gb} GB; batch \val{q3b2}: \val{q3gb2} GB $>$ \val{q3free} GB, no. Accumulate gradients over two
   micro-batches of \val{q3b}, or checkpoint (saved activations).}
 \ans{4}{\val{q4mb} MB $\div$ \val{q4link} GB/s $=$ \val{q4t} ms. Serial \val{q4t} $+$ \val{q4c} $=$ \val{q4serial} ms;
-  overlapped \val{q4ovl} ms, set by the copy. Without overlap, copies and kernels never run at
-  once: pageable memory, or a synchronize call (host copy).}
+  overlapped \val{q4ovl} ms, set by the copy. No overlap: one shared stream, or a
+  host that waits on each copy (host-link idea).}
 \end{answers}
 
 \begin{leftcol}
@@ -116,7 +116,7 @@ The chapter's two-layer MLP (\val{win}$\,\to\,$\val{whid}$\,\to\,$\val{wout}, ba
 \item Device: \val{wmflop} MFLOP $\div$ \val{wpeak} TFLOP/s $=$ \val{wtc} $\mu$s; \val{wmb} MB $\div$ \val{wbw} TB/s
   $=$ \val{wtm} $\mu$s; together \res{\val{wtdev} $\mu$s} (ideal).
 \item Host: \val{wentries} calls $\times$ \val{pyus} $+$ \val{wlaunch} $\times$ \val{lnus} $=$ \res{\val{wthost} $\mu$s}.
-\item Ratio: $r = \val{wthost} \div \val{wtdev} \approx$ \res{\val{wratio}}; dispatch share \val{wshare}\%.
+\item Ratio: \val{wthost} $\div$ \val{wtdev} $\approx$ \res{\val{wratio}}; dispatch share \val{wshare}\%.
 \end{steps}
 \takeaway{Count launches before FLOPs: at this size the host sets the time.}
 \end{practicebox}
@@ -127,7 +127,7 @@ The chapter's two-layer MLP (\val{win}$\,\to\,$\val{whid}$\,\to\,$\val{wout}, ba
 \assumed{} compiling fuses the step into \val{ylaunch} kernels behind \val{yentries} Python call;
 device time stays \val{wtdev} $\mu$s.\par\vspace{4pt}
 \textbf{Given:} host time $=$ \val{yentries} $\times$ \val{pyus} $+$ \val{ylaunch} $\times$ \val{lnus} $\mu$s.\par
-\textbf{You:} find $r$ and the dispatch share. Still overhead-bound? If replay then made host time
+\textbf{You:} find the ratio and the dispatch share. Still overhead-bound? If replay then made host time
 negligible, which device term would set the step?\par\vspace{50pt}
 \end{practicebox}
 \end{leftcol}%
@@ -139,10 +139,10 @@ negligible, which device term would set the step?\par\vspace{50pt}
 \mistake{``Compilation is a one-time cost, so always turn it on.''}%
   {Illustrative ResNet-50: \val{m2img} images with \val{m2rec} recompilations take
    \val{m2eager} s eager and \val{m2compiled} s compiled (\val{m2comp} s per compile): \val{m2slow}$\times$ slower.}{}
-\mistake{``Pick the framework with the fastest benchmark.''}%
-  {The chapter's embedded project, budget \val{m3ms} ms p99 and \val{m3mb} MB: TensorFlow Lite \val{m3tflms} ms,
-   \val{m3tflmb} MB; PyTorch with ONNX Runtime \val{m3onnxms} ms, \val{m3onnxmb} MB. Both pass, so the team kept
-   its own pipeline: unused headroom does not pay for migrating.}{}
+\mistake{``I wrapped evaluation in no-grad, so the model is in evaluation mode.''}%
+  {No-grad only stops saving for backward. Dropout still drops until the module is set to evaluation
+   mode, so predictions on fixed inputs vary run to run. The reverse slip, evaluation mode
+   without no-grad, saves activations: peak memory rises.}{}
 
 \vspace{2pt}
 \sheetsec{Check yourself}
@@ -156,7 +156,7 @@ negligible, which device term would set the step?\par\vspace{50pt}
   \val{q3b2} fit in \val{q3free} GB free for activations? If not, two ways out.
 \item \assumed{} each step copies a \val{q4batch}-image 32-bit batch (\val{q4mb} MB) over a
   \val{q4link} GB/s host link and computes for \val{q4c} ms. Time per batch after warm-up (no startup), serial and
-  overlapped? What does a timeline show if copies do not overlap?
+  overlapped? A timeline shows copies and kernels never running at once: two causes?
 \end{qs}
 \end{rightcol}
 \end{document}

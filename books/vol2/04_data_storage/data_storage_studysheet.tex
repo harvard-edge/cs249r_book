@@ -20,12 +20,12 @@ state that \hl{can be restored}.
 \begin{ideas}
 \idea{The I/O wall.}{Faster compute against a fixed input path speeds training only up to the delivery
   rate. Prefetching hides variation, never a sustained shortfall.}
-\idea{Size from demand, then the slowest stage.}{Not from tier ratios: batch bytes per compute time,
-  at every stage. GPUDirect Storage helps only if the host copy limits.}
+\idea{Size from demand, then the slowest stage.}{Batch bytes per compute time, checked at every
+  stage. GPUDirect Storage helps only if the host copy or its CPU time limits.}
 \idea{Small files are a metadata problem.}{Signature: metadata operations at their limit while data
   servers idle. Packing thousands of samples per shard divides the opens.}
-\idea{Commit boundaries make state safe.}{Pause for the local write; publish the manifest last; keep
-  the previous generation until then. Replays write under stable keys.}
+\idea{Commit boundaries make state safe.}{Pause for the local write, publish the manifest last, keep
+  the old generation. Durability, availability, consistency: separate contracts.}
 \idea{Total delivery cost decides placement.}{Capacity is billed per byte stored, egress per byte read,
   requests per operation. Data read often belongs close.}
 \idea{Serving reads differently.}{A rollout is a burst of whole-model reads from every replica; graph
@@ -37,10 +37,11 @@ state that \hl{can be restored}.
 {\centering
 \begin{tikzpicture}[sheet]
   \pgfmathsetmacro\k{17}
-  \foreach \e in {-4,...,4}{\draw[gridline] ({100+(\e+4)*\k},-8) -- ({100+(\e+4)*\k},74);}
+  \foreach \e in {-4,...,4}{\draw[gridline] ({100+(\e+4)*\k},-8) -- ({100+(\e+4)*\k},90);}
   \foreach \e/\t in {-3/{1 MB/s}, 0/{1 GB/s}, 3/{1 TB/s}}{\node[small, anchor=north] at ({100+(\e+4)*\k},-10) {\t};}
   \foreach \lab/\v/\y/\sty/\txt/\side/\dx in {%
-      {HBM, per accelerator}/\val{ladderhbm}/68/white/{\val{hbmbandwidth} TB/s}/east/-4,
+      {HBM, per accelerator}/\val{ladderhbm}/84/white/{\val{hbmbandwidth} TB/s}/east/-4,
+      {host DRAM, per node}/\val{ladderdram}/68/white/{\val{drambandwidth} GB/s}/east/-4,
       {NVMe stripe, per node}/\val{ladderstripe}/52/white/{\val{stripebandwidth} GB/s}/west/4,
       {file-system share, per node}/\val{ladderpfs}/36/white/{\val{pfsshare} GB/s}/west/4,
       {image job needs, per node}/\val{ladderimage}/16/accent/{\val{imagenode} GB/s}/west/4,
@@ -90,7 +91,7 @@ state that \hl{can be restored}.
 \begin{answers}
 \ans{Finish}{$\val{ckptgb} \div \val{sharebw}$ GB/s $=$ \val{directs} s, \val{directpct}\% of each
   \val{intervals} s interval, \val{directratio}$\times$ the staged \val{writes} s pause. Staged, the copy
-  drains off the step; keep the previous generation until the manifest is published (checkpoint card).}
+  drains off the step (checkpoint card).}
 \ans{1}{$\val{qimages} \times \val{qkb}$ KB $=$ \val{qbatch} MB; $\val{qgpus} \times \val{qeta} \times
   \val{qbatch} \div$ \val{qms} ms $=$ \val{qneed} GB/s. Share $\val{qnodes} \times \val{pershare} \approx
   \val{qfair}$ GB/s suffices; decode, \val{qdecode} GB/s, is the minimum: not fed (demand card).}
@@ -100,8 +101,9 @@ state that \hl{can be restored}.
 \columnbreak
 \ans{3}{$\lceil \val{pnine} / \val{pms} \rceil = \val{depth}$ ready batches; $\val{depth} \times \val{pmb}
   \times \val{pgpus} = \val{pbuffer}$ MB per node. At \val{slowms} ms, stall \val{slowgap} $\div$ \val{slowms} $=$ \val{stallpct}\% at any depth (prefetch card).}
-\ans{4}{Metadata: operations at their limit while data servers idle, and the lost time is
-  input-queue wait, not collectives. Pack into shards: \val{filesper}$\times$ fewer opens (small files idea).}
+\ans{4}{Metadata: operations at their limit while data servers idle; time lost waits on
+  input, not collectives. Pack into shards: \val{filesper}$\times$ fewer opens (small files idea). (b) \val{roreplicas} $\times$ \val{roweights} GB $=$ \val{rototal} GB: \val{roobjtime} s from
+  objects, \val{ropfstime} s from the file system: the shared tier's aggregate rate sets it (serving idea).}
 \end{answers}
 
 \begin{leftcol}
@@ -126,7 +128,7 @@ state that \hl{can be restored}.
   \node[note, anchor=north east] at (\b+1,-2) {manifest last};
 \end{tikzpicture}\par}\vspace{3pt}
 \begin{steps}
-\item Size: \val{params}B $\times$ \val{bytesperparam} bytes $=$ \val{ckptgb} GB, written once in total.
+\item Size: \val{params}B $\times$ \val{bytesperparam} bytes $=$ \val{ckptgb} GB.
 \item Per node: \val{ckptgb} $\div$ \val{clusternodes} $=$ \val{shardgb} GB at \val{localbw} GB/s
   $=$ \res{\val{writes} s pause} (\val{pausepct}\% of the interval).
 \item Background: \val{ckptgb} GB $\div$ \val{durablebw} TB/s $=$ \res{\val{drains} s} to drain, off the step.
@@ -139,29 +141,29 @@ state that \hl{can be restored}.
 \begin{practicebox}\boxtitle{What if the save goes straight to a busy file system?}
 Same save, but \val{jobs} jobs share the file system, so this one gets
 \val{durablebw} TB/s $\div$ \val{jobs} $=$ \val{sharebw} GB/s.\par\vspace{4pt}
-\textbf{Given:} the checkpoint is \val{ckptgb} GB.\par
-\textbf{You:} find the pause when every byte goes directly to the file system, its share of each
-\val{intervalmin}-minute interval, and what local staging changes.
+\textbf{You:} find the pause when every byte goes straight to the file system, its share of the
+interval, and what staging changes.
 \end{practicebox}
+
+\vspace{12pt}
+\sheetsec{Common mistake}
+\mistake{``If a pipeline worker crashes, just replay its work.''}%
+  {Appending writes the row twice, double-counting the event in training. Write under a stable
+   key (data version, event ID) so a replay overwrites it.}{}
 \end{leftcol}%
 \begin{rightcol}
 \sheetsec{Common mistakes}
 \mistake{``HBM is \val{tierratio}$\times$ faster than an NVMe drive, so storage can never feed the accelerators.''}%
-  {That ratio compares tiers, not demand; HBM mostly carries reused weights and activations.
-   The chapter's text job needs \val{textjob} MB/s for \val{textgpus} GPUs.}{}
+  {That compares tiers, not demand: HBM serves reused weights and activations. The text job needs
+   only \val{textjob} MB/s for \val{textgpus} GPUs.}{}
 \mistake{``Object storage is the cheapest tier, so stream from it every epoch.''}%
   {Egress is billed per byte read: a \val{corpustb} TB corpus read \val{epochs} times at \$\val{egress}/GB
-   costs \$\val{perrun} per run, against \$\val{storeyear} a year to store it. Staging on local NVMe reads it
-   across the boundary once per run: \$\val{stageegress}.}{}
-\mistake{``If a pipeline worker crashes, replay its work; one extra write does no harm.''}%
-  {An appended replay writes the row twice, so the event counts twice in every training set. Write
-   under a stable key (data version, event ID) so a replay overwrites the same row.}{}
-
+   costs \$\val{perrun} per run, against \$\val{storeyear} a year to store it.}{}
 \vspace{2pt}
 \sheetsec{Check yourself}
 \begin{qs}
 \item \assumed{} \val{qgpus} GPUs each read \val{qimages} images of \val{qkb} KB per \val{qms} ms step;
-  target \val{qeta}. What bandwidth is needed? Its \val{qnodes} nodes get the per-node file-system share;
+  target \val{qeta}. Bandwidth needed? Its \val{qnodes} nodes get the per-node file-system share;
   decoding sustains \val{qdecode} GB/s. Is it fed?
 \item \assumed{} \val{hitpct}\% of reads hit local NVMe and misses take \val{missx}$\times$ as long. What
   share of the all-hot rate is delivered? What hit rate gives half?
@@ -169,6 +171,8 @@ Same save, but \val{jobs} jobs share the file system, so this one gets
   \val{pmb} MB, \val{pgpus} GPUs per node. Depth and host memory? If reads average \val{slowms} ms, does a deeper queue help?
 \item A job moves from \val{shards} shards to \val{files} million single-image files on a \val{ratedbw} GB/s file
   system and gets under one percent of it. Bandwidth or metadata? What evidence decides? The fix?
+  (b) \assumed{} a rollout loads the \val{roweights} GB weights into \val{roreplicas} replicas at once. Time
+  from an object store serving \val{roobject} GB/s in total? From the \val{ropfs} TB/s file system?
 \end{qs}
 \end{rightcol}
 \end{document}

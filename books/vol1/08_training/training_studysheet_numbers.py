@@ -36,7 +36,8 @@ def numbers() -> dict:
     cap_gb = h100.memory.capacity.to("GB").magnitude
     tdp = h100.tdp.to("W").magnitude
     n.update(hpeak=c(peak), hfp32=c(fp32), hcapgib=c(cap_gib), hcapgb=f"{cap_gb:.1f}", htdp=c(tdp),
-             hbw=f"{h100.memory.bandwidth.to('TB/s').magnitude:.2f}", bfx=f"{peak / fp32:.0f}")
+             hbw=f"{h100.memory.bandwidth.to('TB/s').magnitude:.2f}", bfx=f"{peak / fp32:.0f}",
+             bftf=f"{peak / h100.compute.precision_flops['tf32'].to('TFLOP/s').magnitude:.0f}")
 
     # ---- Work per token (chapter lighthouse: 2 forward + 4 backward = 6 FLOPs per parameter per token)
     fwd, bwd = 2, 4
@@ -108,7 +109,11 @@ def numbers() -> dict:
     tc = r(feed.compute_time.to("ms").magnitude, 0)
     tp = r(feed.tokenization_time.to("ms").magnitude)
     workers = 4
-    n.update(q3comp=f"{tc:.0f}", q3prep=f"{tp:.1f}", q3w=c(workers), q3int=f"{tp / workers:.1f}",
+    # interval printed round-half-up from the printed preparation time (655.4 / 4 = 163.85 -> 163.9)
+    from decimal import Decimal, ROUND_HALF_UP
+    q3int = Decimal(f"{tp:.1f}") / workers
+    n.update(q3comp=f"{tc:.0f}", q3prep=f"{tp:.1f}", q3w=c(workers),
+             q3int=str(q3int.quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)),
              q3serial=f"{tc / (tc + tp) * 100:.0f}", q3rate=f"{amp.batch_size / (tc / 1e3):.0f}")
 
     # ---- Q4: ring AllReduce inside one server (chapter: GPT2NodeAllReduce); ASSUMED four accelerators
@@ -123,6 +128,13 @@ def numbers() -> dict:
     t_c = r((fwd + bwd) * p_b * 1e9 * per_rep * acts.sequence / (peak * 1e12 * eta_ch) * 1e3)
     n.update(q4n=c(nacc), q4link=c(link), q4grad=f"{grad:.0f}", q4factor=f"{factor:.1f}", q4ar=f"{t_ar:.1f}",
              q4per=c(per_rep), q4eta=f"{eta_ch * 100:.0f}", q4comp=f"{t_c:.0f}", q4share=f"{t_ar / (t_c + t_ar) * 100:.1f}")
+
+    # ---- Activation checkpointing recompute cost (chapter: GPT2WalkthroughCalc, recompute_overhead =
+    # one extra forward pass over a three-forward-pass step), printed as the fraction the chapter states
+    from fractions import Fraction
+    extra = Fraction(Scenarios.Gpt2XlBatch32Activations.recompute_overhead).limit_denominator(10)
+    assert extra == Fraction(fwd, fwd + bwd)
+    n.update(ckptextra=f"{extra.numerator}/{extra.denominator}")
 
     # ---- Mistakes
     # 2: linear scaling rule, chapter's illustrative batch 512 -> 4,096 at learning rate 0.1 (FallaciesPitfallsSetup)

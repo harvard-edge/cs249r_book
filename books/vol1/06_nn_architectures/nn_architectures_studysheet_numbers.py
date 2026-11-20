@@ -61,8 +61,8 @@ def numbers() -> dict:
              tmem=f"{t_mem * 1e6:.1f}", tcmp=f"{t_cmp * 1e6:.2f}", tratio=f"{t_mem / t_cmp:.0f}",
              wbatch=f"{math.ceil(bal / i1):.0f}")
 
-    # ---- Your turn: ASSUMED 4096 -> 16384 feed-forward layer, 16-bit weights, batch 64, same accelerator
-    din, dout, batch = 4096, 16384, 64
+    # ---- Your turn: the worked example's layer with one change, ASSUMED batch 64 (same accelerator)
+    din, dout, batch = width, width, 64
     yw = din * dout
     ybytes = yw * bytes_w
     yflop = 2 * yw * batch
@@ -79,13 +79,17 @@ def numbers() -> dict:
              kvwidth=c(kv.workload.heads * kv.workload.head_width), kvpertokbytes=c(per_tok), kvweights=f"{weights:.0f}")
 
     # ---- Check yourself (ASSUMED inputs)
-    # Q1: ASSUMED camera board, 8-bit, sustains 5 GOPS, 250 ms budget, 256 MB RAM
+    # Q1: ASSUMED camera board, 8-bit, peaks at 5 GOPS, 250 ms budget, 256 MB RAM.
+    # FLOPs / peak is a lower bound on time (FLOPs count work, not time), so the answer
+    # reports the share of peak MobileNetV2 must sustain to meet the budget.
     gops, budget_ms, ram_mb = 5, 250, 256
     rg = resnet.inference_flops.to("GFLOPs").magnitude
     mg = mobilenet.inference_flops.to("GFLOPs").magnitude
     n.update(q1gops=c(gops), q1ms=c(budget_ms), q1ram=c(ram_mb), q1rg=f"{rg:.1f}", q1mg=f"{mg:.1f}",
              q1rmb=f"{resnet.parameters.to('param').magnitude / 1e6:.1f}", q1mmb=f"{mobilenet.parameters.to('param').magnitude / 1e6:.1f}",
              q1rt=f"{rg / gops * 1e3:,.0f}", q1mt=f"{mg / gops * 1e3:.0f}")
+    # share of peak, from the printed (rounded) lower bound and budget
+    n.update(q1share=f"{round(mg / gops * 1e3) / budget_ms * 100:.0f}")
     # Q2: 3x3 conv, 32 -> 64 channels, 112 x 112 output, FP16
     k, cin, cout, hw, b16 = 3, 32, 64, 112, 2
     q2w = k * k * cin * cout
@@ -97,9 +101,9 @@ def numbers() -> dict:
     # Front picture: what doubling the context does (weights fixed, KV cache linear, scores quadratic)
     grow = 2
     n.update(dgrow=c(grow), dw=c(1), dkv=c(grow), dsc=c(grow ** 2))
-    # Q3: context grows 4K -> 16K tokens
+    # Q3: context grows 4,096 -> 16,384 tokens
     s0, s1 = 4096, 16384
-    n.update(q3s0=f"{s0 // 1024}K", q3s1=f"{s1 // 1024}K", q3score=f"{(s1 / s0) ** 2:.0f}", q3kv=f"{s1 / s0:.0f}",
+    n.update(q3s0=c(s0), q3s1=c(s1), q3score=f"{(s1 / s0) ** 2:.0f}", q3kv=f"{s1 / s0:.0f}",
              q3tok=c(s1), q3gb=f"{per_tok * s1 / 1e9:.1f}", q3users=f"{weights / (per_tok * s1 / 1e9):.1f}")
     # Q4: embedding table 500M rows x 64 values, FP32, against one 80 GiB accelerator
     rows, dim = 500_000_000, 64

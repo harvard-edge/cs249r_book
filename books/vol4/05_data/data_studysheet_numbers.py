@@ -51,7 +51,7 @@ def numbers() -> dict:
     n.update(sched=f(sched, 0), motion=f(motion, 0), attempt=f(att, 0), reset=f(rst, 0), cycle=f(cyc, 0),
              failpct=f(camp.failure_rate * 100, 0), qapct=f(camp.qa_rate * 100, 0),
              failshare=f(camp.failure_rate, 2), qashare=f(camp.qa_rate, 2), retention=f(ret, 2),
-             attempts=f(attempts, 0), motionsec=f(motion * 60, 0), kept=f(kept, 2), target=f(target, 0),
+             attempts=f(attempts, 0), motionsec=f(motion * 60, 0), kept=f(kept, 1), target=f(target, 0),
              campaign=f(total, 0), hours=f(hours, 1), cableper=f(ncable, 0), gearper=f(ngear, 0),
              cablecycles=f(cable, 0), gearcycles=f(gear, 0), cablelife=f(lcable, 0), gearlife=f(lgear, 0),
              cablepct=f(cable / lcable * 100, 1), gearpct=f(gear / lgear * 100, 1))

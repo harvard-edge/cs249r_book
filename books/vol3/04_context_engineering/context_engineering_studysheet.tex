@@ -10,24 +10,24 @@
 % ===================================================================== FRONT: LEARN
 \frontside
 \begin{bigidea}
-A model carries no state between calls: the runtime rebuilds every request, and fitting is not the goal.
-Each call needs a \hl{selected working set}: the evidence the next decision needs, bound to the revision it
-describes, laid out for prefix reuse, and withdrawn when the workspace changes.
+The runtime rebuilds every request, and fitting is not the goal. Each call needs a \hl{selected working
+set}: the evidence the next decision needs, bound to its revision, laid out for prefix reuse, withdrawn
+once stale.
 \end{bigidea}
 
 \begin{leftcol}
 \sheetsec{Key ideas}
 \begin{ideas}
-\idea{Admitted is not usable.}{The window sets what fits; what the model can use is measured per model and
-  workload. Each staged key competes with the evidence for attention.}
+\idea{Admitted is not usable.}{The window sets what fits; usable context is measured per model and workload,
+  and every staged key competes for attention.}
 \idea{Select for the next decision.}{Relevance, not recency. Bulky payloads stay outside behind a handle,
   re-read by a checked tool call.}
 \idea{Order by change rate.}{Root, trunk, leaf. Prefix reuse ends at the first changed token, but a
   stale trunk is never kept to save a cache hit.}
 \idea{Every observation keeps its scope.}{It supports claims only for the revision and run conditions
   that produced it. Labels guide the model; host gates enforce.}
-\idea{Compact from raw records, then audit.}{Protected fields must survive. A model-written record is a
-  candidate, checked against the task contract and the event log.}
+\idea{Compact from raw records, then audit.}{Keep the raw records and an inventory of protected fields. A
+  model-written record is a candidate, checked against both.}
 \idea{Invalidate, do not delete.}{A write marks bound observations historical and flags the conclusions
   built on them. A missing edge never proves freshness.}
 \end{ideas}
@@ -56,7 +56,7 @@ cited as background.\par}
 \fcard{Input budget}%
   {\SystemInstructionTokenCount + \ToolDeclarationTokenCount + \TaskStateTokenCount + \ObservationTokenCount
    \le \ContextWindow - \OutputLimit}%
-  {Four roles share the window $\ContextWindow$ less the reply reserve $\OutputLimit$.}%
+  {Four roles share window $\ContextWindow$ less reply reserve $\OutputLimit$.}%
   {}%
   {\begin{tikzpicture}[sheet]
      \pgfmathsetmacro\u{232/\val{kwindow}}
@@ -81,10 +81,10 @@ cited as background.\par}
 \fcard{Compaction spacing}%
   {\CompactionCycleTurnCount = \left\lceil \frac{\CompactionTriggerLength - \CompactionTargetLength}{\TurnAppendLength} \right\rceil}%
   {Trigger $\CompactionTriggerLength$, target $\CompactionTargetLength$. Each pass rewrites the trunk.}%
-  {}{}
-\fcard{Judge a policy by accepted tasks}%
-  {\CostPerAcceptedTask = \frac{\mathbb{E}[\AttemptCost]}{\AcceptanceProbability}}%
-  {Charge every read and compaction to the policy. Pruning a needed fact lowers $\AcceptanceProbability$.}{}{}
+  {Judge policies by $\CostPerAcceptedTask = \mathbb{E}[\AttemptCost]/\AcceptanceProbability$, every pass charged.}{}
+\fcard{Attention dilution}%
+  {\TargetKeyAttentionWeight = \frac{e^{\TargetKeyLogit}}{e^{\TargetKeyLogit} + \sum_{j=1}^{\CompetingKeyCount} e^{\CompetingKeyLogit_j}}}%
+  {Target logit $\TargetKeyLogit$ against $\CompetingKeyCount$ competing keys; each admitted key adds a term $e^{\CompetingKeyLogit_j}$ below.}{}{}
 \vspace{10pt}
 \sheetsec{Root, trunk, leaf}
 \begin{sheettable}{@{}l L L r@{}}
@@ -108,16 +108,15 @@ call is cold.\par}
 \ans{1}{(a) Nothing reused: \val{total} uncached. (b) Cold call, rewrites prefill trunk and leaf, the rest the leaf:
   \val{request} + \val{rewrites} $\times$ \val{suffix} + \val{warm} $\times$ \val{leaf} = \val{stable}; (a) is
   \val{unstableratio}$\times$ (b) (root, trunk, leaf table).}
-\ans{2}{Wide: $\lceil$\val{gap} $\div$ \val{perturn}$\rceil$ = \val{cycle} turns, \val{passes} passes,
+\ans{2}{(a) Wide: $\lceil$\val{gap} $\div$ \val{perturn}$\rceil$ = \val{cycle} turns, \val{passes} passes,
   \val{qkeep}$^{\val{passes}}$ = \val{qwide}\%. Narrow: $\lceil$\val{altgap} $\div$ \val{perturn}$\rceil$ = \val{altcycle},
-  \val{altpasses} passes, \val{qkeep}$^{\val{altpasses}}$ = \val{qnarrow}\%: more rewrites, worse retention.}
+  \val{altpasses} passes, \val{qkeep}$^{\val{altpasses}}$ = \val{qnarrow}\%: more rewrites, worse retention. (b) A: \val{qcosta} $\div$ \val{qpa} = \$\val{qeffa}; B:
+  \val{qcostb} $\div$ \val{qpb} = \$\val{qeffb}. B costs more per attempt, less per accepted repair (spacing card).}
 \columnbreak
 \ans{3}{Replace: the next edit targets it, and a notice leaves \val{excerpt} stale tokens in every later call;
   then read \texttt{r18}. Keep the failure as \texttt{r17} history; flag the hypothesis for reassessment (three choices).}
 \ans{4}{Compare the request sent at that decision with the host's field inventory. Absent: trace the records pass
   by pass to where it vanished. Present: the model did not comply. An executed deploy means a host gate was missing.}
-\ans{5}{A: \val{qcosta} $\div$ \val{qpa} = \$\val{qeffa}; B: \val{qcostb} $\div$ \val{qpb} = \$\val{qeffb}.
-  B costs more per attempt but less per accepted repair (judge a policy).}
 \end{answers}
 
 \begin{leftcol}
@@ -163,8 +162,8 @@ Window \val{window}, reserve \val{reserve}; instructions \val{system}, tools \va
 \vspace{10pt}
 \sheetsec{Common mistakes}
 \mistake{``If every token fits, every fact is usable.''}%
-  {Fixed logits (target \val{ztarget}, others \val{zback}): the target holds \val{shortweight}\% of the weight
-   among \val{shortkeys} keys, \val{longweight}\% among \val{longkeys}, though all fit.}{}
+  {Fixed logits (target \val{ztarget}, others $\val{zback}$): the target holds \val{shortweight}\% of the weight
+   among \val{shortkeys} keys in all, \val{longweight}\% among \val{longkeys}, though all fit.}{}
 \mistake{``The record passes the schema, so the constraints survived.''}%
   {Schemas check presence. At \val{rho}\% loss per pass a constraint survives \val{roundslong} passes with
    \val{survivelong}\%, every record still valid.}{}
@@ -182,17 +181,17 @@ Window \val{window}, reserve \val{reserve}; instructions \val{system}, tools \va
 \sheetsec{Check yourself}
 \begin{qs}
 \item Root \val{root}, trunk \val{trunk}, leaf \val{leaf} tokens; \val{turns} calls; after the first, the trunk is
-  rewritten \val{rewrites} times; cached state is kept. Count uncached input tokens with a per-call ID (a) first,
-  (b) in the leaf.
+  rewritten \val{rewrites} times; cached state is kept. Count uncached input tokens with a per-call ID placed (a) at the
+  very start of the request, (b) in the leaf.
 \item \assumed{} each pass loses a constraint with probability \val{qrho}\%. Arrivals \val{perturn} per turn,
-  trigger \val{high}. Target \val{low} or \val{alt}: turns between passes, passes in \val{turns} turns, survival?
+  trigger \val{high}. (a) Target \val{low} or \val{alt}: turns between passes, passes in \val{turns} turns, survival?
+  (b) \assumed{} over \val{qtrials} trials, policy A costs \$\val{qcosta} per attempt and \val{qacca} are accepted;
+  B costs \$\val{qcostb} and \val{qaccb} are accepted. Which is cheaper per accepted repair?
 \item The patch writes \texttt{r18}. An \val{excerpt}-token \texttt{r17} excerpt the next edit targets opens the
   trunk. A \val{marker}-token marker re-prefills \val{replsuffix} tokens; a notice, \val{notice}. Which, and why? What
   happens to the \texttt{r17} failure and the hypothesis built on it?
 \item A trial deployed despite the no-deploy rule. What evidence separates ``compaction dropped the rule'' from
   ``the model ignored it''? What should have stopped it?
-\item \assumed{} over \val{qtrials} trials, policy A costs \$\val{qcosta} per attempt and \val{qacca} are accepted;
-  policy B costs \$\val{qcostb} and \val{qaccb} are accepted. Which is cheaper per accepted repair?
 \end{qs}
 \end{rightcol}
 \end{document}

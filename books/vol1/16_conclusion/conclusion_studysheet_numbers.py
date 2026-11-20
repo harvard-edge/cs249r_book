@@ -60,7 +60,9 @@ def numbers() -> dict:
     dram = Hardware.Tech.Memory.DRAM.energy_per_access.to("pJ").magnitude
     fp32 = Hardware.Tech.Op.FlopFp32.energy.to("pJ/flop").magnitude
     fp16 = Hardware.Tech.Op.FlopFp16.energy.to("pJ/flop").magnitude
-    n.update(elow=f"{dram / fp32:.0f}", ehigh=f"{dram / fp16:.0f}")
+    n.update(elow=f"{dram / fp32:.0f}", ehigh=f"{dram / fp16:.0f}",
+             edram=f"{dram:.0f}", efpthirtytwo=f"{fp32:.1f}", efpsixteen=f"{fp16:.1f}")
+    assert round(round(dram) / round(fp32, 1)) == round(dram / fp32) and round(round(dram) / round(fp16, 1)) == round(dram / fp16)
 
     # ---- Mistake: Amdahl pitfall (chapter: conclusion-amdahl-pitfall)
     am = SC.HostPreprocessingRequestPath
@@ -72,7 +74,7 @@ def numbers() -> dict:
     tl = SC.ChatEndpointTtftMeanVersusP99
     n.update(tlmean=c(tl.mean.to("ms").magnitude), tlp99=c(tl.tail_high.to("ms").magnitude), tlx=f"{tl.gap_high:.0f}", tlp99raw=f"{tl.tail_high.to('ms').magnitude:.0f}")
 
-    # ---- Mistake: one accuracy metric (chapter prose, Fallacies; scenario values stated in the chapter)
+    # ---- Mistake: one accuracy metric. Chapter prose constants (Fallacies section; no mlsysim scenario backs them)
     n.update(fleetdrop="4", slo="100", accA="95", latA="500", accB="93", latB="50")
 
     # ---- Q1: DLRM tables against one H100 (chapter: conclusion-voice-request-trace)

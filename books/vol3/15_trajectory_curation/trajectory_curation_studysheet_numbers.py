@@ -92,6 +92,16 @@ def numbers() -> dict:
              admproc=fx(per_adm_p, 1), admout=fx(per_adm_o, 1))
     # paired bars (s per attempted record)
     n.update(barproc=fx(e_p, 2), barout=fx(e_o, 2))
+    # the cascade sum term by term, as the sheet prints it: reach of each later check, rounded to 3 places
+    head = t["record"] + p["record"] * t["use"]
+    r_proc, r_out, r_both = r(reach * p["process"], 3), r(reach * p["outcome"], 3), r(reach * p["process"] * p["outcome"], 3)
+    sum_p = r(head, 3) + r(reach, 3) * t["process"] + r_proc * t["outcome"] + r_both * t["target"]
+    sum_o = r(head, 3) + r(reach, 3) * t["outcome"] + r_out * t["process"] + r_both * t["target"]
+    assert fx(sum_p, 2) == fx(e_p, 2) and fx(sum_o, 2) == fx(e_o, 2), (sum_p, e_p, sum_o, e_o)
+    n.update(precfrac=fx(p["record"], 2), headtime=fx(head, 3), reachproc=fx(reach * p["process"], 3),
+             reachout=fx(reach * p["outcome"], 3), reachboth=fx(reach * p["process"] * p["outcome"], 3),
+             savewhole=pct((r(e_o, 2) - r(e_p, 2)) / r(e_o, 2), 0))
+    assert n["savewhole"] == pct(save, 0)
 
     # ---- Your turn: the chapter's slower, less selective process audit
     #      (chapter checkpoint: Scenarios.DemonstrationAdmissionOrderSlowAudit)
@@ -116,6 +126,19 @@ def numbers() -> dict:
              vrejproc=fx(rej_pv, 0), vgain=fx(gainv, 3), veproc=fx(ev_p, 2), veout=fx(ev_o, 2),
              vsavepct=pct(r(gainv, 3) / r(ev_p, 2), 1), vyield=fx(yv, 4), vadm=fx(adm_v, 1))
     near(r(gainv, 3) / r(ev_p, 2), vres.saving, 0.001)
+    # Finish: the outcome-first cascade sum, term by term from rounded reaches
+    rv_out, rv_both = r(reach * pv["outcome"], 3), r(reach * pv["outcome"] * pv["process"], 3)
+    sumv_o = r(head, 3) + r(reach, 3) * tv["outcome"] + rv_out * tv["process"] + rv_both * tv["target"]
+    assert fx(sumv_o, 2) == fx(ev_o, 2), (sumv_o, ev_o)
+    n.update(vreachboth=fx(reach * pv["outcome"] * pv["process"], 3),
+             vsaveround=pct((r(ev_p, 2) - r(ev_o, 2)) / r(ev_p, 2), 1))
+    assert n["vsaveround"] == n["vsavepct"]
+
+    # ---- Mistake: staging sized from average verifier utilization
+    #      (chapter: VerifierBurstExhaustion, Scenarios.VerifierTimeoutStagingBurst)
+    vb = SC.VerifierTimeoutStagingBurst
+    n.update(burstrho=pct(vb.result.utilization), burstfull=fx(vb.result.time_to_full.to("minute").magnitude, 1),
+             bursttimeout=fx(vb.timeout.to(second).magnitude, 0))
 
     # ---- Mistake: accepted run, every token a target (chapter: RecoveryPoolDenominators)
     pool = SC.RecoveryPoolDenominators

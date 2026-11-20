@@ -49,7 +49,7 @@ def numbers() -> dict:
     travel_da = round(v * dda, 1)
     reserve = round(spare - travel_da, 1)
     assert abs(reserve - disp.result.spare.to("mm").magnitude) < 0.1
-    n.update(v=f(v, 1), tau=f(tau, 1), age=f(age, 1), onsetdelay=f(onset_delay, 0), abrake=f(a, 0),
+    n.update(v=f(v, 1), tau=f(tau, 1), age=f(age, 1), onsetdelay=f(onset_delay, 0), abrake=f(a, 1),
              jerk=f(j, 2), loc=f(loc, 0), track=f(trk, 0), margin=f(mar, 0), allow=f(loc + trk + mar, 0),
              clear=f(clear / 1e3, 2), clearmm=f(clear, 0), dda=f(dda, 1),
              react=f(react, 1), quad=f(quad, 1), jerkterm=f(jerkterm, 1), brake=f(brake, 1),

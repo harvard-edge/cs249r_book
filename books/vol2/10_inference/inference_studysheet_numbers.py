@@ -123,16 +123,24 @@ def numbers() -> dict:
              perday=c(s.requests_per_user_per_day), perrequestcost=f"{s.cost_per_request:.3f}",
              servingm=f"{s.annual_serving_cost / 1e6:.2f}", ratio=f"{s.serving_to_training:.1f}",
              crossweeks=f"{s.crossover_weeks:.0f}")
-    # Q4: ASSUMED $5M training, 2M daily users x 20 requests at $0.0005, 10% unit-cost cut.
-    tr4, u4, r4, c4, cut = 5e6, 2e6, 20, 0.0005, 0.10
-    daily = u4 * r4
-    annual = daily * s.days_per_year
-    cost = annual * c4
-    perday_cost = daily * c4
-    n.update(qtrainm=f"{tr4 / 1e6:.0f}", qusers=f"{u4 / 1e6:.0f}", qper=c(r4), qcost=f"{c4:.4f}",
-             qdaily=f"{daily / 1e6:.0f}", qdays=c(s.days_per_year), qannual=f"{annual / 1e9:.1f}",
-             qservem=f"{cost / 1e6:.2f}", qratio=f"{cost / tr4:.2f}", qdaycost=c(perday_cost),
-             qcross=c(tr4 / perday_cost), qcut=f"{100 * cut:.0f}", qsave=f"{cost * cut / 1e6:.2f}")
+    # ---- Little's law card and Q4: the chapter's vision service (Scenarios.VisionServingLittlesLaw,
+    # cell LittlesLawExample: 1,000 req/s, 100 ms mean, batches of 8 in 80 ms, 80% target -> 100 in flight, 13 replicas).
+    ll = Scenarios.VisionServingLittlesLaw
+    assert round(ll.in_flight) == 100 and ll.replicas_needed == 13
+    lb = ll.batch_size
+    lsvc = ll.batch_service_time.to("ms").magnitude
+    lu = ll.utilization_target
+    # Q4: ASSUMED traffic grows to 1,500 req/s at 120 ms mean time in system; same replicas and target.
+    q4rate, q4lat = 1500, 120.0
+    q4inflight = q4rate * q4lat / 1000
+    q4rep = lb / (lsvc / 1000)
+    q4floor = math.ceil(q4rate / q4rep)
+    q4need_raw = q4rate / (lu * q4rep)
+    q4need = math.ceil(q4need_raw)
+    n.update(lbatch=c(lb), lsvc=f"{lsvc:.0f}", lutil=f"{100 * lu:.0f}", lutilfrac=f"{lu:.1f}",
+             qlrate=c(q4rate), qllat=f"{q4lat:.0f}", qllats=f"{q4lat / 1000:.2f}", qlinflight=c(q4inflight),
+             qlrep=c(q4rep), qlfloor=c(q4floor), qlneedraw=f"{q4need_raw:.2f}", qlneed=c(q4need),
+             qlsvcs=f"{lsvc / 1000:.2f}")
 
     # ---- Mistake: continuous batching (Scenarios.FourRequestDecodeBatch).
     fb = Scenarios.FourRequestDecodeBatch

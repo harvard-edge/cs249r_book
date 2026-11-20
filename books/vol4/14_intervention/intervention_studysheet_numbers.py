@@ -43,7 +43,7 @@ def numbers() -> dict:
     chunk = aisle.t_lease.to("ms").magnitude
     n.update(wv=f(v, 1), wtau=f(tau, 1), wa=f(a, 0), wj=f(j, 2), wramp=f(ramp, 1),
              wclear=f(dclear / 1e3, 2), wclearmm=f(dclear, 0), wover=f(over, 0), wavail=f(avail, 0),
-             wdda=f(dda, 1), tin=f(tin, 0), tool=f(tool, 1), chunk=f(chunk, 0),
+             wdda=f(dda, 1), tin=f(tin, 0), tool=f(tool, 1), toolms=f(tool * 1e3, 0), chunk=f(chunk, 0),
              vknee=f(a ** 2 / j, 2))
 
     # ---- Takeover delay terms (Mode 1, slow end of the Model Human Processor; console = video + handshake)
@@ -123,17 +123,16 @@ def numbers() -> dict:
              tda=f(tda, 1), tleft2=f(tleft2, 1), tlease=f(tlease, 1), tleft3=f(tleft3, 1),
              ceilda=f(ceil_da, 3), vool=f(aisle.v_takeover_out_of_loop.to("m/s").magnitude, 2))
 
-    # ---- Q1: ASSUMED a wireless console link with 200 ms glass-to-glass video; ceiling on the complete budget
-    tvid_w = 200.0
-    tin_w = ts + tc + tm + tvid_w + thandshake
-    b = round((tau + dda + tin_w + ramp) / 1e3, 4)          # s
+    # ---- Q1: the chapter's out-of-loop (monitoring) takeover delay; ceiling on the complete budget
+    tin_o = Scenarios.WarehouseOutOfLoopTakeoverAtAisleSpeed.takeover.to("ms").magnitude
+    b = round((tau + dda + tin_o + ramp) / 1e3, 4)          # s
     rad = round(b ** 2 + 2 * (avail / 1e3) / a, 4)
     root = round(math.sqrt(rad), 4)
     qv = a * (root - b)
-    wl = at_aisle.model_copy(update={"takeover": at_aisle.takeover * tin_w / tin})
-    assert abs(qv - wl.result.with_takeover_and_dispatch.speed_ceiling.to("m/s").magnitude) < 5e-4
-    assert qv > a ** 2 / j and qv < vin
-    n.update(qvid=f(tvid_w, 0), qtin=f(tin_w, 0), qb=f(b, 4), qrad=f(rad, 4), qroot=f(root, 4), qceil=f(qv, 3))
+    # below the knee the card's plateau stop overstates the true jerk-limited stop, so this bound is conservative
+    true_ceiling = Scenarios.WarehouseOutOfLoopTakeoverAtAisleSpeed.result.with_takeover_and_dispatch.speed_ceiling.to("m/s").magnitude
+    assert qv < a ** 2 / j and qv <= true_ceiling and abs(qv - true_ceiling) < 0.005
+    n.update(qb=f(b, 4), qrad=f(rad, 4), qroot=f(root, 4), qceil=f(qv, 3))
 
     # ---- Q2: ASSUMED arm joint-torque change 24 N.m under the chapter's 750 N.m/s torque-rate ceiling
     smax = 15 / 8                                           # peak slope of the quintic smoothstep
@@ -163,6 +162,11 @@ def numbers() -> dict:
     trav = at_aisle.result.takeover_travel.to("mm").magnitude
     sp = at_aisle.result.machine_with_dispatch.spare.to("mm").magnitude
     n.update(m2travel=f(trav, 1), m2spare=f(sp, 1), m2ratio=f(trav / sp, 1))
+    # ---- Session table: the base's braking blend beyond the resident stop (chapter: InterventionBlendBudget)
+    blend = Scenarios.WarehouseTakeoverBrakingBlend.result
+    bover = round(blend.excess_over_scurve.to("mm").magnitude, 1)
+    assert abs(blend.speed.to("m/s").magnitude - vin) < 1e-12 and bover > tleft3
+    n.update(blendover=f(bover, 1), blendshort=f(bover - tleft3, 1))
     return n
 
 

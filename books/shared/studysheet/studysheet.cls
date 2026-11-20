@@ -93,7 +93,11 @@
 % ---- key ideas
 \newlist{ideas}{enumerate}{1}
 \setlist[ideas]{label=\textcolor{accent}{\sheetsans\bfseries\arabic*.}, leftmargin=13pt, labelsep=4pt, itemsep=3.5pt, topsep=0pt, parsep=0pt}
-\newcommand{\idea}[2]{\item {\sheetsans\bfseries #1} #2}
+% Each key idea is typeset once in a measuring box; the build fails an idea longer than 3 lines.
+\newsavebox{\cs@ideabox}
+\newcommand{\idea}[2]{\item\sbox{\cs@ideabox}{\parbox[t]{\linewidth}{\strut{\sheetsans\bfseries #1} #2\strut}}%
+  \typeout{STUDYSHEET-IDEA lines=\the\numexpr(\ht\cs@ideabox+\dp\cs@ideabox)/\baselineskip\relax}%
+  {\sheetsans\bfseries #1} #2}
 
 % ---- formula card: \fcard{name}{display math}{what it says}{when it holds}{figure}
 \newtcolorbox{eqbox}{colback=accentsoft, colframe=accentsoft, boxrule=0pt, arc=2pt, left=4pt, right=4pt, top=2pt, bottom=2pt, halign=center}
