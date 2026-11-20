@@ -10,12 +10,21 @@ paper/data that holds the plan, and defaults to ``gpu-energy``.
     modal run paper/scripts/modal_gpu_energy.py --devices H100 --repeats 1 \\
         --configs h100-llama-b16-p2048 --label pilot                  # a pilot
     GPU_ENERGY_DATA=gpu-energy-workloads modal run paper/scripts/modal_gpu_energy.py
+    GPU_ENERGY_DATA=gpu-energy-seeds/seed-2193 GPU_ENERGY_PAIR=gpu-energy-seeds/seed-2198 \\
+        modal run paper/scripts/modal_gpu_energy.py --repeats 4  # both plans in each container
 
 A vLLM engine keeps its GPU memory until its process exits, so each run serves
 one language model. When a device has configurations for several language
 models, each model gets its own run and container. Training configurations join
 the device's first language-model run. When the plan has more than one language
 model, every run folder names its model.
+
+``GPU_ENERGY_PAIR`` names a second plan folder with the same devices and
+configurations. Each container then measures both plans on the same GPU, one
+after the other, and writes one run into each folder under the same name. The
+order alternates between the containers of each device and model: the first
+measures ``GPU_ENERGY_DATA``'s plan first, the second the other plan first,
+and so on.
 
 Each run also saves its files in the volume under ``gpu-energy-results/<folder>/<run>/``,
 with the runner's exit code beside it in ``<run>.exit_code``. If the local client
@@ -52,6 +61,8 @@ HERE = Path(__file__).resolve().parent
 DATA = HERE.parent / "data" / os.environ.get("GPU_ENERGY_DATA", "gpu-energy")
 PLAN = DATA / "plan.json"
 RUNS = DATA / "runs"
+# An optional second plan, measured in the same container as the first.
+PAIR = HERE.parent / "data" / os.environ["GPU_ENERGY_PAIR"] if os.environ.get("GPU_ENERGY_PAIR") else None
 REMOTE = "/root/gpu-energy"
 CACHE = "/cache"
 # Each run also saves its files here, so a lost connection to the local client does not lose a run.
@@ -72,6 +83,8 @@ image = (
     .add_local_file(HERE / "gpu_energy_protocol.py", f"{REMOTE}/gpu_energy_protocol.py")
     .add_local_file(PLAN, f"{REMOTE}/plan.json")
 )
+if PAIR is not None:
+    image = image.add_local_file(PAIR / "plan.json", f"{REMOTE}/pair-plan.json")
 app = modal.App("mlsysim-gpu-energy", image=image)
 cache = modal.Volume.from_name("mlsysim-hf-cache", create_if_missing=True)
 GPU_OPTIONS = dict(
@@ -112,16 +125,43 @@ def prefetch(models: list[dict]) -> list[str]:
     return paths
 
 
-def _measure(device_key: str, configs: list[str], name: str = "") -> dict[str, bytes]:
-    # A fresh folder per call, so a run can never return files another run left behind.
-    out = Path(tempfile.mkdtemp(prefix="run-")) / "run"
-    command = ["python", f"{REMOTE}/measure_gpu_energy.py", "--plan", f"{REMOTE}/plan.json",
-               "--device", device_key, "--out", str(out)]
-    for config in configs:
-        command += ["--config", config]
+def _measure(device_key: str, configs: list[str], name: str = "", pair_name: str = "",
+             pair_first: bool = False) -> dict[str, bytes]:
+    """Run the runner and return its files. With ``pair_name``, also run the paired plan, whose files get a "pair/" prefix."""
+    plans = [(f"{REMOTE}/plan.json", name, "")]
+    if pair_name:
+        plans.insert(0 if pair_first else 1, (f"{REMOTE}/pair-plan.json", pair_name, "pair/"))
+    returned = {}
+    for plan_path, run_name, prefix in plans:
+        # A fresh folder per run, so a run can never return files another run left behind.
+        out = Path(tempfile.mkdtemp(prefix="run-")) / "run"
+        command = ["python", f"{REMOTE}/measure_gpu_energy.py", "--plan", plan_path,
+                   "--device", device_key, "--out", str(out)]
+        for config in configs:
+            command += ["--config", config]
+        code = _run(command, out / "manifest.json")
+        files = {p.name: p.read_bytes() for p in sorted(out.iterdir()) if p.is_file()} if out.exists() else {}
+        if run_name:
+            # A failed copy must not lose the run, which is still returned below.
+            try:
+                saved = Path(RESULTS) / run_name
+                saved.mkdir(parents=True, exist_ok=True)
+                for file_name, data in files.items():
+                    (saved / file_name).write_bytes(data)
+                (saved.parent / f"{saved.name}.exit_code").write_text(f"{code}\n")
+                cache.commit()
+            except Exception as exc:
+                print(f"could not save a copy in the volume: {exc!r}")
+        files["exit_code.txt"] = f"{code}\n".encode()
+        returned.update({prefix + file_name: data for file_name, data in files.items()})
+    return returned
+
+
+def _run(command: list[str], manifest: Path) -> int:
+    """Run the runner offline and return its exit code."""
     offline = {**os.environ, "HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1"}
     process = subprocess.Popen(command, env=offline)
-    manifest, finished_at = out / "manifest.json", None
+    finished_at = None
     while process.poll() is None:
         time.sleep(5)
         if finished_at is None and manifest.exists() and "finished_utc" in manifest.read_text():
@@ -131,37 +171,26 @@ def _measure(device_key: str, configs: list[str], name: str = "") -> dict[str, b
         if finished_at is not None and time.monotonic() - finished_at > 120:
             process.kill()
             process.wait()
-    code = 0 if finished_at is not None else process.returncode
-    files = {p.name: p.read_bytes() for p in sorted(out.iterdir()) if p.is_file()} if out.exists() else {}
-    if name:
-        # A failed copy must not lose the run, which is still returned below.
-        try:
-            saved = Path(RESULTS) / name
-            saved.mkdir(parents=True, exist_ok=True)
-            for file_name, data in files.items():
-                (saved / file_name).write_bytes(data)
-            (saved.parent / f"{saved.name}.exit_code").write_text(f"{code}\n")
-            cache.commit()
-        except Exception as exc:
-            print(f"could not save a copy in the volume: {exc!r}")
-    files["exit_code.txt"] = f"{code}\n".encode()
-    return files
+    return 0 if finished_at is not None else process.returncode
 
 
 @app.function(gpu="H100!", **GPU_OPTIONS)
-def measure_h100(configs: list[str], name: str = "") -> dict[str, bytes]:
-    return _measure("H100", configs, name)
+def measure_h100(configs: list[str], name: str = "", pair_name: str = "",
+                 pair_first: bool = False) -> dict[str, bytes]:
+    return _measure("H100", configs, name, pair_name, pair_first)
 
 
 @app.function(gpu="A100-80GB", **GPU_OPTIONS)
-def measure_a100(configs: list[str], name: str = "") -> dict[str, bytes]:
-    return _measure("A100", configs, name)
+def measure_a100(configs: list[str], name: str = "", pair_name: str = "",
+                 pair_first: bool = False) -> dict[str, bytes]:
+    return _measure("A100", configs, name, pair_name, pair_first)
 
 
 # More host memory for the H200: it is the one device that loads Mixtral-8x7B's 93 GB of weights.
 @app.function(gpu="H200", **{**GPU_OPTIONS, "memory": 65536})
-def measure_h200(configs: list[str], name: str = "") -> dict[str, bytes]:
-    return _measure("H200", configs, name)
+def measure_h200(configs: list[str], name: str = "", pair_name: str = "",
+                 pair_first: bool = False) -> dict[str, bytes]:
+    return _measure("H200", configs, name, pair_name, pair_first)
 
 
 FUNCTIONS = {"H100": measure_h100, "A100": measure_a100, "H200": measure_h200}
@@ -206,6 +235,20 @@ def _plan_jobs(plan: dict, devices: list[str], repeats: int, selected: list[str]
     return jobs
 
 
+def _pair_first(runs: list[tuple]) -> list[bool]:
+    """For each job, in job order, whether the paired plan runs first.
+
+    ``runs`` gives each job's device and workloads. The order alternates between
+    jobs of the same device and workloads, so every model gets both orders.
+    """
+    seen: dict[tuple, int] = {}
+    order = []
+    for run in runs:
+        seen[run] = seen.get(run, 0) + 1
+        order.append(seen[run] % 2 == 0)
+    return order
+
+
 @app.local_entrypoint()
 def main(devices: str = "", repeats: int = 2, configs: str = "", label: str = ""):
     """Measure every requested device ``repeats`` times. ``devices`` defaults to every device in the plan."""
@@ -216,12 +259,18 @@ def main(devices: str = "", repeats: int = 2, configs: str = "", label: str = ""
     if unknown:
         raise SystemExit(f"unknown configs: {', '.join(unknown)}")
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    if PAIR is not None:
+        pair_plan = json.loads((PAIR / "plan.json").read_text())
+        if pair_plan["devices"] != plan["devices"] or pair_plan["configs"] != plan["configs"]:
+            raise SystemExit(f"{PAIR} must have the same devices and configurations as {DATA}")
     jobs = []
     for key, ids, group, folder in _plan_jobs(plan, [d for d in devices.split(",") if d], repeats, selected,
                                               label, stamp):
         target = RUNS / folder
-        if target.exists():  # checked before any GPU time, so a name clash costs nothing
-            raise SystemExit(f"{target} already exists")
+        # checked before any GPU time, so a name clash costs nothing
+        for path in (target, PAIR / "runs" / folder) if PAIR is not None else (target,):
+            if path.exists():
+                raise SystemExit(f"{path} already exists")
         jobs.append((key, ids, group, target))
     if not jobs:
         raise SystemExit("nothing to run")
@@ -231,24 +280,37 @@ def main(devices: str = "", repeats: int = 2, configs: str = "", label: str = ""
         models = [{"repo": plan["workloads"][w]["hf_model"], "revision": plan["workloads"][w]["hf_revision"],
                    "weights_sha256": plan["workloads"][w]["weights_sha256"]} for w in sorted(llm_workloads)]
         print("weights in the volume:", prefetch.remote(models))
-    for _, _, _, target in jobs:
-        target.mkdir(parents=True)
-    calls = [(FUNCTIONS[key].spawn(ids, f"{DATA.name}/{target.name}"), target) for key, ids, _, target in jobs]
-    print(f"started {len(calls)} runs:", ", ".join(target.name for _, target in calls))
+    data_root = HERE.parent / "data"
+    calls = []
+    runs = [(key, tuple(sorted({c["workload"] for c in group}))) for key, _, group, _ in jobs]
+    for (key, ids, _, target), pair_first in zip(jobs, _pair_first(runs)):
+        targets = {"": target}
+        if PAIR is not None:
+            targets["pair/"] = PAIR / "runs" / target.name
+        for path in targets.values():
+            path.mkdir(parents=True)
+        names = {prefix: str(path.relative_to(data_root).parent.parent / path.name) for prefix, path in targets.items()}
+        call = FUNCTIONS[key].spawn(ids, names[""], names.get("pair/", ""), PAIR is not None and pair_first)
+        calls.append((call, targets, names))
+    print(f"started {len(calls)} containers:", ", ".join(targets[""].name for _, targets, _ in calls))
     failed = 0
-    for call, target in calls:
+    for call, targets, names in calls:
         try:
             files = call.get()
         except Exception as exc:  # the container died and returned nothing
-            target.rmdir()
-            print(f"{target.name}: no result ({exc!r}). A copy may be in the volume at "
-                  f"gpu-energy-results/{DATA.name}/{target.name}.")
-            failed += 1
+            for path in targets.values():
+                path.rmdir()
+            print(f"{targets[''].name}: no result ({exc!r}). A copy may be in the volume at "
+                  + " and ".join(f"gpu-energy-results/{name}" for name in names.values()) + ".")
+            failed += len(targets)
             continue
-        code = int(files.pop("exit_code.txt").decode())
-        for name, data in files.items():
-            (target / name).write_bytes(data)
-        print(f"{target.name}: wrote {len(files)} files (runner exit code {code})")
-        failed += code != 0
+        for prefix, target in targets.items():
+            mine = {name[len(prefix):]: data for name, data in files.items()
+                    if name.startswith(prefix) and "/" not in name[len(prefix):]}
+            code = int(mine.pop("exit_code.txt").decode())
+            for name, data in mine.items():
+                (target / name).write_bytes(data)
+            print(f"{target.relative_to(data_root)}: wrote {len(mine)} files (runner exit code {code})")
+            failed += code != 0
     if failed:
         raise SystemExit(f"{failed} run(s) did not finish cleanly")
