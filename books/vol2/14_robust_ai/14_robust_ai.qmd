@@ -1376,11 +1376,15 @@ class RobustnessTaxAnalysis:
     from mlsysim import Models, load_series
 
     m = Models.Vision.ResNet50
-    standard_clean_acc = next(r["val"] for r in load_series("vol2/14_robust_ai/data/imagenet_testbed_shift.csv").entries if r["model"] == "resnet50")
+    _testbed = load_series("vol2/14_robust_ai/data/imagenet_testbed_shift.csv").entries
+    standard_clean_acc = next(r["val"] for r in _testbed if r["model"] == "resnet50")
+    # The like-for-like clean cell: the testbed's l-inf (4/255) adversarially trained ResNet-50.
+    robust_clean_acc = next(r["val"] for r in _testbed if r["model"] == "resnet50_linf_eps4_robust")
     robust_model_attacked_acc = 50.0  # scenario assumption: an adversarially trained ImageNet model at 4/255
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     cross_condition_gap = standard_clean_acc - robust_model_attacked_acc
+    clean_penalty = standard_clean_acc - robust_clean_acc
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     from mlsysim.fmt import check
@@ -1394,13 +1398,15 @@ class RobustnessTaxAnalysis:
     clean_acc_str = fmt_percent(round(standard_clean_acc) / 100, precision=0, commas=False, style='prose')
     robust_acc_str = fmt_percent(robust_model_attacked_acc / 100, precision=0, commas=False, style='prose')
     cross_condition_gap_pp_str = fmt_pp(round(cross_condition_gap), precision=0, commas=False)
+    robust_clean_str = fmt_percent(round(robust_clean_acc) / 100, precision=0, commas=False, style='prose')
+    clean_penalty_pp_str = fmt_pp(round(clean_penalty), precision=0, commas=False)
 ```
 
 ::: {#psp-robust-ai-robustness-tax .callout-perspective title="Pricing the robustness penalty correctly"}
 
 Suppose a standard ResNet-50\index{ResNet-50} records `{python} RobustnessTaxAnalysis.clean_acc_str` Top-1 accuracy on clean ImageNet, while an adversarially trained model records about `{python} RobustnessTaxAnalysis.robust_acc_str` under a specified $\ell_\infty$ attack at $\AdversarialPerturbationBudget=4/255$, the budget conventionally used for ImageNet. Subtracting these values yields `{python} RobustnessTaxAnalysis.cross_condition_gap_pp_str`, but that gap compares different models under different evaluation conditions. It is not the clean-accuracy cost of robustness.
 
-The clean-accuracy penalty\index{Robustness penalty!clean-accuracy trade-off} must compare standard and robust models on the same clean test set. The robustness benefit must compare those models under the same attack, perturbation budget, and attack strength. The four cells are the standard model on clean data, the standard model under attack, the robust model on clean data, and the robust model under attack. The penalty is the first minus the third, the benefit is the fourth minus the second, and the quoted pair supplies only the first and the fourth. Reporting all four cells prevents an apparent trade-off from mixing a model effect with an evaluation-condition effect.
+The clean-accuracy penalty\index{Robustness penalty!clean-accuracy trade-off} must compare standard and robust models on the same clean test set. The robustness benefit must compare those models under the same attack, perturbation budget, and attack strength. The four cells are the standard model on clean data, the standard model under attack, the robust model on clean data, and the robust model under attack. The penalty is the first minus the third, the benefit is the fourth minus the second, and the quoted pair supplies only the first and the fourth. On the same clean test set, an adversarially trained ResNet-50 at that budget records `{python} RobustnessTaxAnalysis.robust_clean_str` [@taori2020measuring], so the clean-accuracy penalty is `{python} RobustnessTaxAnalysis.clean_penalty_pp_str`, about half the mixed comparison. Reporting all four cells prevents an apparent trade-off from mixing a model effect with an evaluation-condition effect.
 
 **Systems insight**: Robustness can reduce clean accuracy and increase compute, but each cost needs a like-for-like baseline. A deployment gate should report clean accuracy, empirical robust accuracy, attack specification, and evaluation cost separately.
 

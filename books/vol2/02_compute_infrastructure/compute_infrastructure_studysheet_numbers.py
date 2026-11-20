@@ -75,7 +75,7 @@ def numbers() -> dict:
 
     # ---- Mistake 1: scaling efficiency tiers (chapter: InfraFrontierStragglerRecap23)
     e1k = round(Scenarios.DenseLLMPretrainingStep.result.scaling_efficiency, 2)
-    e8k = ReferenceStats.TrainingScaleProfiles.Eff8192Gpu
+    e8k = round(Scenarios.DenseLLMPretrainingStep8K.result.scaling_efficiency, 2)  # as the chapter: the NDR 8,192-GPU step
     hw = Systems.Clusters.Frontier_8K.total_accelerators / Scenarios.DenseLLMPretrainingStep.fleet.total_accelerators
     n.update(effone=f"{e1k:.2f}", effeight=f"{e8k:.2f}", hwratio=c(hw), speedup=f"{hw * e8k / e1k:.1f}",
              lost=c((1 - e8k) * 100), gpusone=c(Scenarios.DenseLLMPretrainingStep.fleet.total_accelerators),
