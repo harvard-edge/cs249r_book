@@ -73,11 +73,14 @@ function backoffDelay(attempt: number): number {
 function isRetryable(err: unknown): boolean {
   if (err instanceof VaultFetchError) return err.retryable;
   // Network errors surface as TypeError (fetch) or a NetworkError DOMException.
-  // A caller-initiated AbortError is NOT retryable.
+  // The per-attempt AbortSignal.timeout() rejects with a TimeoutError
+  // DOMException — a transient failure that must be retried like any other.
+  // A caller-initiated AbortError is NOT retryable (and the caller's own
+  // signal is checked separately in vaultFetchJson).
   if (err && typeof err === "object" && "name" in err) {
     const name = (err as { name: string }).name;
     if (name === "AbortError") return false;
-    return name === "TypeError" || name === "NetworkError";
+    return name === "TypeError" || name === "NetworkError" || name === "TimeoutError";
   }
   return false;
 }
