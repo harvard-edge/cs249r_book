@@ -2449,7 +2449,7 @@ def _labeled_capacity(hardware: HardwareNode) -> Quantity:
     """The capacity a vendor label prints: binary gigabytes read as "GB" (an
     "80 GB" A100 holds 80 GiB). Shares of a labeled device divide decimal bytes
     by this figure, as the chapters do."""
-    return Q_(hardware.memory.capacity.to("GiB").magnitude, "GB")
+    return hardware.memory.labeled_capacity
 
 
 class PackedQkvProjectionScenario(BaseScenario):
