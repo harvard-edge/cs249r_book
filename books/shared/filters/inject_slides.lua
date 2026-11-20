@@ -102,16 +102,31 @@ local function inject_slides(doc)
   local sheet = entry_for(SHEETS_MANIFEST, vol, chapter)
   if not slides and not sheet then return nil end
 
-  for i, block in ipairs(doc.blocks) do
-    if block.t == "Header" and block.level == 1 then
-      doc.blocks:insert(i + 1, materials_line(slides, sheet))
-      io.stderr:write("[Slides Filter] Linked " .. (slides and "slides" or "")
-        .. (slides and sheet and " + " or "") .. (sheet and "study sheet" or "")
-        .. " for " .. vol .. "/" .. chapter .. "\n")
-      return doc
+  -- Directly under the chapter's level-1 header. In the website build that
+  -- header sits inside a wrapper Div, not at the top level of the body, so
+  -- the search looks one level into Divs. With no header at all, the line
+  -- goes first in the body, right below Quarto's title block. (Until
+  -- 2026-11-20 the filter searched the top level only, never found the
+  -- header, and the slide links never appeared on the website.)
+  local function after_h1(blocks)
+    for i, block in ipairs(blocks) do
+      if block.t == "Header" and block.level == 1 then
+        blocks:insert(i + 1, materials_line(slides, sheet))
+        return true
+      end
+      if block.t == "Div" and after_h1(block.content) then
+        return true
+      end
     end
+    return false
   end
-  return nil
+  if not after_h1(doc.blocks) then
+    doc.blocks:insert(1, materials_line(slides, sheet))
+  end
+  io.stderr:write("[Slides Filter] Linked " .. (slides and "slides" or "")
+    .. (slides and sheet and " + " or "") .. (sheet and "study sheet" or "")
+    .. " for " .. vol .. "/" .. chapter .. "\n")
+  return doc
 end
 
 return {
