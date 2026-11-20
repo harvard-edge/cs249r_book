@@ -286,6 +286,9 @@ ax.tick_params(labelsize=14)
 sp.save(fig, out / 'goyal_batch.svg')
 deck_label = {'AlexNet': 'AlexNet', 'VGG-16': '', 'BERT-Large': '', 'GPT-2': 'GPT-2', 'GPT-3': 'GPT-3', 'PaLM': 'PaLM', 'Llama 3 (405B)': 'Llama 3 405B'}
 wall_rows = [{'Year': 2012, 'Date': '2012-09-30', 'Name': 'AlexNet', 'Type': 'Model', 'Memory_GB': 0.96}, {'Year': 2014, 'Date': '2014-09-04', 'Name': 'VGG-16', 'Type': 'Model', 'Memory_GB': 2.208}, {'Year': 2015, 'Date': '2015-12-10', 'Name': 'ResNet-152', 'Type': 'Model', 'Memory_GB': 0.9632}, {'Year': 2018, 'Date': '2018-10-11', 'Name': 'BERT-Large', 'Type': 'Model', 'Memory_GB': 5.44}, {'Year': 2019, 'Date': '2019-02-14', 'Name': 'GPT-2', 'Type': 'Model', 'Memory_GB': 24.0}, {'Year': 2020, 'Date': '2020-05-28', 'Name': 'GPT-3', 'Type': 'Model', 'Memory_GB': 2793.6}, {'Year': 2022, 'Date': '2022-04-04', 'Name': 'PaLM', 'Type': 'Model', 'Memory_GB': 8645.6}, {'Year': 2024, 'Date': '2024-07-23', 'Name': 'Llama 3 (405B)', 'Type': 'Model', 'Memory_GB': 6480.0}, {'Year': 2014, 'Date': None, 'Name': 'K80', 'Type': 'GPU', 'Memory_GB': 12}, {'Year': 2017, 'Date': None, 'Name': 'V100', 'Type': 'GPU', 'Memory_GB': 32}, {'Year': 2020, 'Date': None, 'Name': 'A100', 'Type': 'GPU', 'Memory_GB': 80}, {'Year': 2022, 'Date': None, 'Name': 'H100', 'Type': 'GPU', 'Memory_GB': 80}, {'Year': 2024, 'Date': None, 'Name': 'B200', 'Type': 'GPU', 'Memory_GB': 180}]
+# B300 (2025) added 2026-11-20 from the registry, as the chapter's MemoryWallTrend reads it.
+from mlsysim import Hardware as _Hw
+wall_rows.append({'Year': int(_Hw.Cloud.B300.release_year), 'Date': '2025-08-22', 'Name': 'B300', 'Type': 'GPU', 'Memory_GB': _Hw.Cloud.B300.memory.capacity.to('GiB').magnitude})
 mx, my, ml = ([], [], [])
 for r_ in wall_rows:
     if r_['Type'] == 'Model' and r_['Name'] in deck_label:
@@ -304,8 +307,8 @@ fig, ax = plt.subplots(figsize=(5.8, 2.35))
 ax.plot(gx, gy, '--s', color=C['memory'], lw=2.5, ms=7)
 ax.plot(mx, my, '-o', color=C['danger'], lw=2.5, ms=7)
 for x, y, lab in zip(gx, gy, gl):
-    ax.annotate(lab, (x, y), xytext=(0, -16), textcoords='offset points', ha='center', fontsize=10.5, fontweight='bold', color=C['memory'])
-offs = {'AlexNet': (4, 8), '': (0, 0), 'GPT-2': (8, -12), 'GPT-3': (-10, 8), 'PaLM': (0, 9), 'Llama 3 405B': (0, -18)}
+    ax.annotate(lab, (x, y), xytext=(0, 9) if lab == 'B300' else (0, -16), textcoords='offset points', ha='center', fontsize=10.5, fontweight='bold', color=C['memory'])
+offs = {'AlexNet': (4, 8), '': (0, 0), 'GPT-2': (8, -12), 'GPT-3': (-10, 8), 'PaLM': (0, 9), 'Llama 3 405B': (0, 9)}
 for x, y, lab in zip(mx, my, ml):
     ax.annotate(lab, (x, y), xytext=offs[lab], textcoords='offset points', ha='right' if lab == 'GPT-3' else 'left' if lab == 'GPT-2' else 'center', fontsize=10.5, fontweight='bold', color=C['danger'])
 ax.annotate('GPT-3: 2.8 TB of state,\n35× one 80 GB GPU', (2020.4, gpt3['Memory_GB']), xytext=(2013.6, 1500), fontsize=11, fontweight='bold', color=C['text'], arrowprops=dict(arrowstyle='->', color=C['text'], lw=1.2))
@@ -313,7 +316,7 @@ ax.text(2012.3, 70, "one accelerator's memory", fontsize=11, fontweight='bold', 
 ax.text(2015.6, 0.35, 'training state, 16 B per parameter', fontsize=11, fontweight='bold', color=C['danger'])
 ax.set_yscale('log')
 ax.set_ylim(0.2, 30000)
-ax.set_xlim(2011.8, 2025.2)
+ax.set_xlim(2011.8, 2025.8)
 ax.set_ylabel('GB (log)')
 ax.set_yticks([1, 10, 100, 1000, 10000])
 ax.set_yticklabels(['1', '10', '100', '1,000', '10,000'])
