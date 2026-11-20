@@ -194,7 +194,7 @@ def fold():
 def intent():
     """Durable intent before dispatch, and what each crash position proves."""
     chain = [('propose', 'model reply', 'sys'), ('admit', 'grant, reserve', 'sys'), ('intent ack', 'durable', 'sys'), ('dispatch', 'request leaves', 'tool'), ('evidence', 'result logged', 'sys')]
-    for k in (1, 2):
+    for k in (1, 2, 3):
         s = Svg(900, 460)
         w, gap, y = (158, 22, 66)
         for i, (a, b, role) in enumerate(chain):
@@ -210,12 +210,17 @@ def intent():
         s.text(268, 198, 'runtime can still withhold', 22, GRAY)
         s.text(712, 198, 'request may have left', 22, GRAY)
         if k >= 2:
-            zones = [(10, 439, 'struct', 'Not dispatched', 'absence proves it only', 'in a complete log'), (449, 281, 'fault', 'In doubt', 'reconcile before', 'dependent work'), (730, 160, 'memory', 'Established', 'per endpoint', 'contract')]
-            for x, w2, role, a, b, c in zones:
+            for x, w2, role, a, b, c in [(10, 439, 'struct', 'Not dispatched', 'absence proves it only', 'in a complete log'), (730, 160, 'memory', 'Established', 'per endpoint', 'contract')]:
                 s.rect(x, 262, w2, 180, role, rx=0, sw=2.5)
                 s.text(x + w2 / 2, 312, a, 25, ROLE[role][2], weight='bold')
                 s.text(x + w2 / 2, 362, b, 22, INK)
                 s.text(x + w2 / 2, 394, c, 22, INK)
+        if k >= 3:
+            x, w2, role, a, b, c = (449, 281, 'fault', 'In doubt', 'reconcile before', 'dependent work')
+            s.rect(x, 262, w2, 180, role, rx=0, sw=3.5)
+            s.text(x + w2 / 2, 312, a, 26, ROLE[role][2], weight='bold')
+            s.text(x + w2 / 2, 362, b, 22, INK, weight='bold')
+            s.text(x + w2 / 2, 394, c, 22, INK, weight='bold')
         s.save(f'intent_step{k}')
 
 def crashrun():
