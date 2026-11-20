@@ -21,7 +21,7 @@ Scenarios.* quantities. Where each figure's inputs live:
     targets: Scenarios.TeacherSoftTargetsT4.
   - Fusion: Scenarios.ResNet50Conv256FusionH100.
   - Waterfall, paper against realized, Amdahl: Scenarios.MobileNetV2Blur-
-    PipelinePhone, PrunedInt8PaperVsMeasured, ModelFifthOfRequestLatency.
+    PipelinePhone, PrunedInt8PaperVsRealized, ModelFifthOfRequestLatency.
   - Break-even axis: CSR and COO from physics.memory; the 80 to 90 percent
     band for unstructured kernels is the chapter's (Sec. 10.4.2), unsourced.
   - MLP share: physics.transformer.calc_transformer_block_weights.

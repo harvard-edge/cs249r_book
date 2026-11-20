@@ -394,10 +394,12 @@ from mlsysim.fmt import (
     fmt_percent,
     fmt_bandwidth,
 )
+from mlsysim.core.units import labeled_capacity
 
 def _overflow_ratio(model_mem, device_mem):
-    """Return how many times a model exceeds a device memory envelope."""
-    return model_mem.to(byte).magnitude / device_mem.to(byte).magnitude
+    """How many times a model exceeds a device's labeled memory ("8 GB", "512 KB"), the
+    envelope the table prints, so each ratio is the reader's own division."""
+    return (model_mem / labeled_capacity(device_mem)).to("").magnitude
 
 class ModelDeviceComparison:
     """The running cases' weight bytes, work, and weight-streaming time against the deployment budget."""
@@ -481,12 +483,12 @@ class ModelDeviceComparison:
     mobile_cap_gb_str = fmt_memory_capacity(mobile_mem, unit=GiB, precision=0, commas=False)
     tiny_cap_kb_str = fmt_memory_capacity(tiny_mem, unit=KiB, precision=0, commas=False, approx=True)
     dlrm_mobile_overflow_mult_str = fmt_multiple(dlrm_mobile_overflow)
-    dlrm_tiny_overflow_mult_str = fmt_multiple(dlrm_tiny_overflow)
-    gpt2_tiny_overflow_mult_str = fmt_multiple(gpt2_tiny_overflow)
-    gpt2_int4_tiny_overflow_mult_str = fmt_multiple(gpt2_int4_tiny_overflow)
+    dlrm_tiny_overflow_mult_str = fmt_multiple(round(dlrm_tiny_overflow), precision=0, commas=True)  # hundreds and up: whole multiples
+    gpt2_tiny_overflow_mult_str = fmt_multiple(round(gpt2_tiny_overflow), precision=0, commas=True)  # hundreds and up: whole multiples
+    gpt2_int4_tiny_overflow_mult_str = fmt_multiple(round(gpt2_int4_tiny_overflow), precision=0, commas=True)  # hundreds and up: whole multiples
     mobilenet_stream_share_pct_str = fmt_percent(round(mobilenet_stream_share * 100) / 100, precision=0, commas=False, style='prose')
-    resnet_tiny_overflow_mult_str = fmt_multiple(resnet_tiny_overflow)
-    mobilenet_tiny_overflow_mult_str = fmt_multiple(mobilenet_tiny_overflow)
+    resnet_tiny_overflow_mult_str = fmt_multiple(round(resnet_tiny_overflow), precision=0, commas=True)  # hundreds and up: whole multiples
+    mobilenet_tiny_overflow_mult_str = fmt_multiple(round(mobilenet_tiny_overflow), precision=0, commas=False)  # whole multiple: 14 MB / 512 KB = 27
     mobilenet_int8_tiny_ratio_mult_str = fmt_multiple(mobilenet_int8_tiny_ratio, precision=1, commas=False)
 ```
 
@@ -5602,12 +5604,12 @@ from mlsysim.fmt import check, fmt_multiple, fmt_percent
 
 class TheoryPracticeSpeedup:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    # Scenarios.PrunedInt8PaperVsMeasured: 50% structured pruning and FP32-to-INT8
+    # Scenarios.PrunedInt8PaperVsRealized: 50% structured pruning and FP32-to-INT8
     # storage on paper against a hypothetical realized outcome.
-    paper = Scenarios.PrunedInt8PaperVsMeasured
+    paper = Scenarios.PrunedInt8PaperVsRealized
     pruning_speedup = paper.factors["pruning"]
     quant_speedup = paper.factors["quantization"]
-    measured_speedup = paper.measured
+    realized_speedup = paper.realized
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     theoretical_speedup = paper.paper
@@ -5615,17 +5617,17 @@ class TheoryPracticeSpeedup:
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(theoretical_speedup == 8.0, "Expected paper speedup anchor should be 8x.")
-    check(measured_speedup < theoretical_speedup, "Measured speedup should remain below idealized paper speedup.")
+    check(realized_speedup < theoretical_speedup, "The realized speedup should remain below the idealized paper speedup.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     pruning_speedup_mult_str = fmt_multiple(round(pruning_speedup), precision=0, commas=False)
     quant_speedup_mult_str = fmt_multiple(round(quant_speedup), precision=0, commas=False)
     theoretical_speedup_mult_str = fmt_multiple(round(theoretical_speedup), precision=0, commas=False)
-    measured_speedup_mult_str = fmt_multiple(measured_speedup, precision=1, commas=False)
+    realized_speedup_mult_str = fmt_multiple(realized_speedup, precision=1, commas=False)
     realized_fraction_pct_str = fmt_percent(realized_fraction_pct / 100, precision=1, commas=False, style='prose')
 ```
 
-Pruning a model structurally to half its weights and quantizing the survivors from FP32 to INT8 cuts stored weight bytes by `{python} TheoryPracticeSpeedup.pruning_speedup_mult_str` and `{python} TheoryPracticeSpeedup.quant_speedup_mult_str`, or `{python} TheoryPracticeSpeedup.theoretical_speedup_mult_str` in all, which would be the speedup if run time scaled with weight bytes. The byte reduction is real, because the stored artifact does shrink by that product; it is the speed that fails to multiply. In production such a model can easily run only `{python} TheoryPracticeSpeedup.measured_speedup_mult_str` faster, roughly `{python} TheoryPracticeSpeedup.realized_fraction_pct_str` of that paper projection. Profiling shows where the missing speedup goes. The structurally pruned layers are smaller dense tensors, but their new shapes can leave tiles partly empty. Reduced-precision operators trigger unfused type conversions that flood the memory bus, and small layers spend more time launching kernels and moving intermediates than doing arithmetic. Paper metrics (parameter counts, theoretical FLOPs, and nominal bit depths) establish upper bounds that hold only when a workload is limited purely by weight traffic and every kernel exploits the new representation. Bridging the divide between paper reduction and measured hardware speedup is the job of the third tier of the stack, efficient **hardware implementation**\index{Hardware implementation!theory-practice gap}.
+Pruning a model structurally to half its weights and quantizing the survivors from FP32 to INT8 cuts stored weight bytes by `{python} TheoryPracticeSpeedup.pruning_speedup_mult_str` and `{python} TheoryPracticeSpeedup.quant_speedup_mult_str`, or `{python} TheoryPracticeSpeedup.theoretical_speedup_mult_str` in all, which would be the speedup if run time scaled with weight bytes. The byte reduction is real, because the stored artifact does shrink by that product; it is the speed that fails to multiply. In production such a model can easily run only `{python} TheoryPracticeSpeedup.realized_speedup_mult_str` faster, roughly `{python} TheoryPracticeSpeedup.realized_fraction_pct_str` of that paper projection. Profiling shows where the missing speedup goes. The structurally pruned layers are smaller dense tensors, but their new shapes can leave tiles partly empty. Reduced-precision operators trigger unfused type conversions that flood the memory bus, and small layers spend more time launching kernels and moving intermediates than doing arithmetic. Paper metrics (parameter counts, theoretical FLOPs, and nominal bit depths) establish upper bounds that hold only when a workload is limited purely by weight traffic and every kernel exploits the new representation. Bridging the divide between paper reduction and measured hardware speedup is the job of the third tier of the stack, efficient **hardware implementation**\index{Hardware implementation!theory-practice gap}.
 
 The measured bottleneck selects the implementation technique. Kernel fusion consolidates memory-bound operator chains, custom dequantization loops keep packed low-precision weights inside cache, and hardware sparsity engines align with tensor layouts to bypass zeroed arithmetic.
 
@@ -7838,10 +7840,10 @@ class FallaciesAnalysis:
 
     # Combined pruning + quantization scenario (Pitfall 5): 50% structured sparsity
     # and the chapter's realized outcome, as in TheoryPracticeSpeedup
-    # (Scenarios.PrunedInt8PaperVsMeasured).
-    paper = Scenarios.PrunedInt8PaperVsMeasured
+    # (Scenarios.PrunedInt8PaperVsRealized).
+    paper = Scenarios.PrunedInt8PaperVsRealized
     prune_speedup = paper.factors["pruning"]
-    measured_speedup = paper.measured
+    realized_speedup = paper.realized
     # Scenarios.IrregularSparsityLatencyTrace: the representative pruned-model trace.
     trace = Scenarios.IrregularSparsityLatencyTrace
 
@@ -7849,7 +7851,7 @@ class FallaciesAnalysis:
     quant_speedup = expected_bits / target_bits  # 4× from INT8
     combined_expected = quant_speedup * prune_speedup  # 8× theoretical
     quant_after_overhead = quant_speedup * (1 - overhead_pct / 100)  # scenario quant-only value
-    realized_fraction_pct = measured_speedup / combined_expected * 100
+    realized_fraction_pct = realized_speedup / combined_expected * 100
     prune_share = 1 - 1 / prune_speedup  # weights removed for the pruning factor
     bert_int8_size = bert_fp32_size * target_bits / expected_bits
 
@@ -7886,7 +7888,7 @@ Engineers assume optimization strategies compose additively: `{python} Fallacies
 
 **Pitfall**: *Assuming theoretical metrics or compression ratios translate directly into proportional deployment speedup.*
 
-Teams frequently reduce FLOPs or parameter counts substantially without realizing proportional latency gains on physical hardware. In one representative trace, a pruned model with `{python} FallaciesAnalysis.param_removal_str` percent fewer parameters achieves only a `{python} FallaciesAnalysis.latency_reduction_str` percent latency reduction because irregular sparsity prevents efficient execution. Similarly, reducing a transformer from `{python} FallaciesAnalysis.bert_fp32_mb_str` to `{python} FallaciesAnalysis.bert_int8_mb_str` through INT8 quantization yields a `{python} FallaciesAnalysis.int8_size_reduction_mult_str` raw weight-payload reduction, yet format conversion and scalar fallback on hardware without a native low-precision datapath erode the latency gain. In the chapter's illustrative composed pipeline combining `{python} FallaciesAnalysis.prune_share_pct_str` structured pruning and INT8 quantization, the realized speedup reaches only `{python} TheoryPracticeSpeedup.measured_speedup_mult_str` against an `{python} FallaciesAnalysis.expected_speedup_mult_str` paper target. Measure wall-clock latency on the target execution units rather than extrapolating from nominal compression ratios.
+Teams frequently reduce FLOPs or parameter counts substantially without realizing proportional latency gains on physical hardware. In one representative trace, a pruned model with `{python} FallaciesAnalysis.param_removal_str` percent fewer parameters achieves only a `{python} FallaciesAnalysis.latency_reduction_str` percent latency reduction because irregular sparsity prevents efficient execution. Similarly, reducing a transformer from `{python} FallaciesAnalysis.bert_fp32_mb_str` to `{python} FallaciesAnalysis.bert_int8_mb_str` through INT8 quantization yields a `{python} FallaciesAnalysis.int8_size_reduction_mult_str` raw weight-payload reduction, yet format conversion and scalar fallback on hardware without a native low-precision datapath erode the latency gain. In the chapter's illustrative composed pipeline combining `{python} FallaciesAnalysis.prune_share_pct_str` structured pruning and INT8 quantization, the realized speedup reaches only `{python} TheoryPracticeSpeedup.realized_speedup_mult_str` against an `{python} FallaciesAnalysis.expected_speedup_mult_str` paper target. Measure wall-clock latency on the target execution units rather than extrapolating from nominal compression ratios.
 
 :::
 
@@ -8000,7 +8002,7 @@ The counting rules developed across the chapter fit on one page (@tbl-model-comp
 * **Compression spends surplus capacity**: Production models trade unused parameters, precision, and capacity for latency, memory, power, or cost limits the deployment cannot violate. The target is an artifact that meets the deployment objective and all required quality and resource constraints.
 * **Bytes multiply; speed does not**: Structural pruning, distillation, quantization, and architecture changes multiply raw footprint reductions, as the modeled BERT mobile pipeline's `{python} BertCompression.compression_ratio_mult_str` ratio illustrates. Speed compounds far less, because each step changes what the next one sees, and it becomes real only when task quality holds and the resulting operators match the target runtime and accelerator.
 * **Precision is a deployment decision**: Where the target runtime supports it, INT8 post-training quantization is a useful first experiment because it reduces raw FP32 weight payload by 4$\times$ without retraining. QAT, distillation, or mixed precision become candidates when range calibration or layer sensitivity exposes unacceptable error.
-* **Hardware decides what a saving is worth**: Unstructured sparsity and theoretical FLOP cuts do not imply latency gains unless kernels and memory layouts can exploit them. The gap between the chapter's hypothetical `{python} TheoryPracticeSpeedup.theoretical_speedup_mult_str` paper target and its `{python} TheoryPracticeSpeedup.measured_speedup_mult_str` realized outcome is why target-hardware profiling is mandatory.
+* **Hardware decides what a saving is worth**: Unstructured sparsity and theoretical FLOP cuts do not imply latency gains unless kernels and memory layouts can exploit them. The gap between the chapter's hypothetical `{python} TheoryPracticeSpeedup.theoretical_speedup_mult_str` paper target and its `{python} TheoryPracticeSpeedup.realized_speedup_mult_str` realized outcome is why target-hardware profiling is mandatory.
 * **End-to-end latency caps model wins**: Compression reduces end-to-end latency only when it accelerates the critical path; capacity or energy savings can remain valuable elsewhere. When inference is `{python} AmdahlCompression.model_fraction_pct_str` of total request latency, Amdahl's law (principle \ref{pri-amdahl}) caps even perfect model acceleration at `{python} AmdahlCompression.max_speedup_mult_str`, so preprocessing, dispatch, and data movement may be the true optimization target.
 
 :::

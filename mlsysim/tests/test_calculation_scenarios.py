@@ -1451,7 +1451,7 @@ def test_token_serving_scenarios():
     assert cs.tpot.m_as('ms') == pytest.approx(1.24765, rel=1e-05)
     assert cs.kv_capacity_tokens == 589824 and cs.resident_requests == 469
     assert cs.request_rate.m_as('1/s') == pytest.approx(10)
-    assert cs.cost_per_million_tokens.m_as('dollar') == pytest.approx(0.0663482, rel=1e-05)
+    assert cs.cost_per_million_tokens.m_as('dollar') == pytest.approx(0.0884643, rel=1e-05)  # $4/h (was $3/h, 2026-11-20)
     e = Scenarios.H100ChatEnergyPerToken
     assert e.joules_per_token.m_as('J') == pytest.approx(1.096491, rel=1e-06) and e.low_use_ratio == pytest.approx(6)
 

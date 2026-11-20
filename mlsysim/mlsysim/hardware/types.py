@@ -198,6 +198,36 @@ class MemoryHierarchy(BaseModel):
     # bandwidth/capacity = bandwidth / hbm_stacks, capacity / hbm_stacks.
     hbm_stacks: Optional[int] = None
 
+    @property
+    def labeled_capacity(self) -> Quantity:
+        """Return the primary capacity as the vendor label prints it.
+
+        Returns
+        -------
+        Quantity
+            The label's number in the decimal unit: 80 GB for an 80 GiB HBM capacity.
+
+        Notes
+        -----
+        Equation: labeled = magnitude of capacity in its largest binary unit at least one, in the matching decimal unit.
+
+        Assumptions: the vendor label uses the binary magnitude with a decimal-looking unit.
+
+        Excludes: usable capacity after ECC, firmware reservations, or runtime overhead.
+
+        References
+        ----------
+        Derivation: delegates to ``mlsysim.core.units.labeled_capacity``; a share shown against the label divides by this value.
+
+        Examples
+        --------
+        >>> from mlsysim import Hardware
+        >>> str(Hardware.Cloud.H100.memory.labeled_capacity)
+        '80 GB'
+        """
+        from mlsysim.core.units import labeled_capacity
+        return labeled_capacity(self.capacity)
+
     @field_validator("capacity", "sram_capacity", "flash_capacity", "l2_cache", "register_file_per_sm", "shared_memory_per_sm", mode="after")
     @classmethod
     def _validate_capacity_fields(cls, v, info):

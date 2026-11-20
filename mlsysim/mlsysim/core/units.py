@@ -16,7 +16,7 @@ __all__ = [
     "byte", "bit", "second", "joule", "watt", "kilowatt", "milliwatt", "meter", "liter", "L", "hour", "day", "count",
     "kelvin", "K",
     # Data scale units
-    "KB", "MB", "GB", "TB", "PB", "KiB", "MiB", "GiB", "TiB",
+    "KB", "MB", "GB", "TB", "PB", "KiB", "MiB", "GiB", "TiB", "labeled_capacity",
     # Precision sizes
     "BYTES_FP32", "BYTES_INT32", "BYTES_INT64", "BYTES_INT16", "BYTES_FP16", "BYTES_INT8", "BYTES_INT4",
     "BYTES_ADAM_STATE", "BYTES_ADAM_MOMENTS", "BYTES_ADAM_TOTAL", "BYTES_TRAINING_STATE_MIXED_PRECISION",
@@ -273,6 +273,27 @@ KiB = ureg.KiB
 MiB = ureg.MiB
 GiB = ureg.GiB
 TiB = ureg.TiB
+
+
+def labeled_capacity(capacity):
+    """The size a vendor label prints for a binary capacity, as a decimal quantity.
+
+    Memory is sold under decimal-looking labels for binary sizes: an "80 GB" H100 holds
+    80 GiB (85.9 GB), and a "512 KB" microcontroller SRAM holds 512 KiB. This returns the
+    label's number in the matching decimal unit (80 GiB -> 80 GB, 512 KiB -> 512 KB), using
+    the largest binary prefix at which the capacity is at least one.
+
+    A share or multiple of a labeled device that the prose shows as ``size / "80 GB"``
+    divides by this, so the printed result is the one the reader computes. The physical
+    share divides by the capacity itself; prose that uses it should print the decimal size
+    (85.9 GB) beside the label. Added 2026-11-20 after three Vol I chapters divided decimal
+    sizes by the physical capacity while printing the label.
+    """
+    for binary, decimal in ((TiB, TB), (GiB, GB), (MiB, MB), (KiB, KB)):
+        magnitude = capacity.to(binary).magnitude
+        if magnitude >= 1:
+            return Q_(magnitude, decimal)
+    return capacity.to(byte)
 
 # --- Time (legacy uppercase MS/US/NS loaded from mlsysim_units.txt) ---
 MS = ureg.MS
