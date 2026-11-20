@@ -184,30 +184,39 @@ def socmem():
     save(fig, 'socmem')
 
 def backlog():
-    labels = ['unloaded', '21 backlogs', '82 backlogs', '114 backlogs', '5, one channel']
-    rows = [('unloaded', 0, 0.0, 40.0), ('21 backlogs', 21, 39.46744118, 0.02007843137), ('82 backlogs', 82, 154.1109608, 0.02007843137), ('114 backlogs', 114, 214.2518235, 0.02007843137), ('5, one channel', 5, 141.9146569, 0.321254902)]
+    sense = 40.0
+    rows = [
+        ('unloaded', 0, 0.0, 0.0),
+        ('21 backlogs', 21, 39.46744118, 0.02007843137),
+        ('61 backlogs', 61, 114.64351961, 0.02007843137),
+        ('93 backlogs', 93, 174.78438235, 0.02007843137),
+        ('4, one channel', 4, 113.53172549, 0.321254902),
+    ]
     for k in range(1, 6):
         fig, ax = plt.subplots(figsize=(5.8, 2.7))
         for i, (lab, n, w, r) in enumerate(rows):
             yy = len(rows) - 1 - i
             show = i < k
-            mem = w + r
-            if n == 0:
-                ax.barh(yy, mem, height=0.6, color=P['petrol'], alpha=a(show))
-            else:
-                ax.barh(yy, mem, height=0.6, color=P['amber_l'], ec=P['amber'], hatch='///', alpha=a(show), lw=1)
-            ax.barh(yy, 95.0, left=mem, height=0.6, color=P['green'], alpha=a(show))
+            if w > 0:
+                ax.barh(yy, w, height=0.6, color=P['amber_l'], ec=P['amber'], hatch='///', alpha=a(show), lw=1)
+            ax.barh(yy, sense + r, left=w, height=0.6, color=P['petrol'], alpha=a(show))
+            ax.barh(yy, 95.0, left=w + sense + r, height=0.6, color=P['green'], alpha=a(show))
+            end = w + sense + r + 95.0
             ax.text(-12, yy, lab, ha='right', va='center', fontsize=12, fontweight='bold', color=P['text'], alpha=a(show))
-            ax.text(mem + 95.0 + 8, yy, f'{mem + 95.0:.0f}', va='center', fontsize=11, color=P['text'], alpha=a(show))
+            x_lab = end + 8
+            for x_line in (250.0, 310.0, 400.0):
+                if end <= x_line < end + 28:
+                    x_lab = x_line + 10
+            ax.text(x_lab, yy, f'{end:.0f}', va='center', fontsize=11, color=P['text'], alpha=a(show))
         for x, lab, c, ha, yo in ((40.0, '40', P['petrol'], 'center', 0.0), (250.0, 'WCET 250', P['slate'], 'center', 0.0), (400.0, 'deadline 400', P['red'], 'left', 0.0), (1000.0, 'next tick', P['slate'], 'right', 0.0)):
-            ax.axvline(x, color=c, lw=1.6, ls='--')
-            ax.text(x + (6 if ha == 'left' else -6 if ha == 'right' else 0), len(rows) - 0.35 + yo, lab, ha=ha, fontsize=11, color=c, fontweight='bold')
-        ax.axvspan(310.0, 400.0, color=P['gray_l'], lw=0)
+            ax.vlines(x, -0.6, len(rows) - 0.52, color=c, lw=1.6, ls='--')
+            ax.text(x + (10 if ha == 'left' else -10 if ha == 'right' else 0), len(rows) - 0.38 + yo, lab, ha=ha, va='bottom', fontsize=11, color=c, fontweight='bold')
+        ax.axvspan(310.0, 400.0, ymin=0.0, ymax=(len(rows) - 0.52 - (-0.6)) / (len(rows) + 0.15 - (-0.6)), color=P['gray_l'], lw=0, zorder=0)
         ax.set_xlim(0, 1010)
-        ax.set_ylim(-0.6, len(rows) + 0.05)
+        ax.set_ylim(-0.6, len(rows) + 0.15)
         ax.set_yticks([])
         ax.spines['left'].set_visible(False)
-        ax.set_xlabel('Time within one tick (µs); hatched: memory wait')
+        ax.set_xlabel('Time within one tick (µs); hatched: wait; teal: sense; green: eval', fontsize=11)
         fig.subplots_adjust(left=0.24, right=0.98, bottom=0.2, top=0.95)
         save(fig, f'backlog_step{k}')
 
