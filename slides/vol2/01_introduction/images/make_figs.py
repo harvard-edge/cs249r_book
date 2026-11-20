@@ -232,19 +232,27 @@ def coupling(path, k):
         for i, lab in enumerate(['GPU 0', 'GPU 1', 'GPU 2']):
             y = 3.95 - i * 0.98
             ax.text(7.3, y, lab, ha='right', va='center', fontsize=12, color=GRAY)
-            if i < 2:
-                lane(ax, y, 7.45, 8.6 + 0.3 * i, C1L, C1)
-                lane(ax, y, 8.6 + 0.3 * i, 10.7, '#e2e8f0', '#94a3b8', 'wait', GRAY, ls='--', lw=1)
+            if k == 2:
+                lane(ax, y, 7.45, 8.85 + 0.12 * (i % 2), C1L, C1)
             else:
-                lane(ax, y, 7.45, 10.7, REDL, RED, 'slow', RED, ls='--')
-        rbox(ax, 10.8, 1.65, 0.75, 2.6, C2L, C2, lw=1.6, r=0.05)
-        ax.text(11.175, 2.95, 'AllReduce', rotation=90, ha='center', va='center', fontsize=12, color=C2T, fontweight='bold')
+                if i < 2:
+                    lane(ax, y, 7.45, 8.6 + 0.3 * i, C1L, C1)
+                    lane(ax, y, 8.6 + 0.3 * i, 10.7, '#e2e8f0', '#94a3b8', 'wait', GRAY, ls='--', lw=1)
+                else:
+                    lane(ax, y, 7.45, 10.7, REDL, RED, 'slow', RED, ls='--')
+        ar_x = 9.05 if k == 2 else 10.8
+        rbox(ax, ar_x, 1.65, 0.75, 2.6, C2L, C2, lw=1.6, r=0.05)
+        ax.text(ar_x + 0.375, 2.95, 'AllReduce', rotation=90, ha='center', va='center', fontsize=12, color=C2T, fontweight='bold')
         ax.text(7.3, 1.05, 'update', ha='right', va='center', fontsize=12, color=GRAY)
-        lane(ax, 1.05, 10.8, 12.0, C1L, C1)
-        ax.text(9.2, 0.1, 'all wait for the slowest', ha='center', fontsize=12, color=RED, fontweight='bold')
+        lane(ax, 1.05, ar_x, ar_x + 1.2, C1L, C1)
+        if k == 2:
+            ax.text(9.1, 0.1, 'balanced step: AllReduce', ha='center', fontsize=12, color=C1T, fontweight='bold')
+        else:
+            ax.text(9.2, 0.1, 'all wait for the slowest', ha='center', fontsize=12, color=RED, fontweight='bold')
     sp.save(fig, path)
 coupling(out / 'coupling_step1.svg', 1)
 coupling(out / 'coupling_step2.svg', 2)
+coupling(out / 'coupling_step3.svg', 3)
 fig, ax = plt.subplots(figsize=(3.8, 1.45))
 for y, lab, v, col, txt in [(2, 'FP32 gradient', 700.0, C['memory'], '700 GB'), (1, 'ring, FP32', 1400.0, C['network'], '1,400 GB'), (0, 'ring, FP16', 700.0, C['network'], '700 GB')]:
     ax.barh(y, v, color=col, height=0.6)
@@ -323,7 +331,7 @@ ax.tick_params(labelsize=10)
 ax.text(-10, 1.55, 'GPUs', ha='right', va='bottom', fontsize=10, color=C['neutral'])
 sp.save(fig, out / 'llama_mfu.svg')
 
-def c3(path):
+def c3(path, k):
     fig, ax = plt.subplots(figsize=(5.9, 1.95))
     ax.set_xlim(0, 12)
     ax.set_ylim(0, 4.0)
@@ -331,14 +339,17 @@ def c3(path):
     cols = [('Compute', '$C_1$:  T$_{compute}$/N', 'kernel time, MFU,\nmemory counters', C1L, C1, C1T), ('Communication', '$C_2$:  T$_{comm}$(N)', 'link utilization,\ncollective timing', C2L, C2, C2T), ('Coordination', '$C_3$:  T$_{sync}$(N)', 'barrier waits,\nrecovery records', C3L, C3, C3T)]
     for i, (name, term, ev, fc, ec, tc) in enumerate(cols):
         x = 0.05 + i * 4.0
-        rbox(ax, x, 0.1, 3.9, 3.8, fc, ec, lw=2.0, r=0.12)
-        ax.text(x + 1.95, 3.4, name, ha='center', va='center', fontsize=12, fontweight='bold', color=tc)
-        ax.text(x + 1.95, 2.7, term, ha='center', va='center', fontsize=12, color=tc)
-        ax.plot([x + 0.3, x + 3.6], [2.25, 2.25], color=ec, lw=1)
-        ax.text(x + 1.95, 1.85, 'evidence', ha='center', va='center', fontsize=10, color=GRAY)
-        ax.text(x + 1.95, 1.0, ev, ha='center', va='center', fontsize=11.5, color=tc, fontweight='bold')
+        a = 1.0 if i < k else 0.0
+        p = FancyBboxPatch((x, 0.1), 3.9, 3.8, boxstyle='round,pad=0,rounding_size=0.12', fc=fc, ec=ec, lw=2.0, alpha=a)
+        ax.add_patch(p)
+        ax.text(x + 1.95, 3.4, name, ha='center', va='center', fontsize=12, fontweight='bold', color=tc, alpha=a)
+        ax.text(x + 1.95, 2.7, term, ha='center', va='center', fontsize=12, color=tc, alpha=a)
+        ax.plot([x + 0.3, x + 3.6], [2.25, 2.25], color=ec, lw=1, alpha=a)
+        ax.text(x + 1.95, 1.85, 'evidence', ha='center', va='center', fontsize=10, color=GRAY, alpha=a)
+        ax.text(x + 1.95, 1.0, ev, ha='center', va='center', fontsize=11.5, color=tc, fontweight='bold', alpha=a)
     sp.save(fig, path)
-c3(out / 'c3.svg')
+for k in (1, 2, 3):
+    c3(out / f'c3_step{k}.svg', k)
 
 def fl_bar(ax, x0, x1, y, fc, ec, text, tc):
     rbox(ax, x0, y - 0.4, x1 - x0, 0.8, fc, ec, lw=1.6, r=0.05)
@@ -368,20 +379,22 @@ def fleetlaw(path, k):
     sp.save(fig, path)
 fleetlaw(out / 'fleetlaw_step1.svg', 1)
 fleetlaw(out / 'fleetlaw_step2.svg', 2)
-fig, ax = plt.subplots(figsize=(5.8, 1.85))
-meas = [('GPT-3 run', int(20.0), '% of peak, run average', C['neutral']), ('Megatron-LM', int(52.0), '% of peak, 3,072 A100s', C['neutral']), ('Llama 3 405B', int(41.0), '% MFU, 16,384 H100s', C1), ('Llama 3 405B', int(90.0), '%+ effective training time', C['data'])]
-for i, (lab, v, m, col) in enumerate(meas):
-    y = len(meas) - 1 - i
-    ax.barh(y, v, color=col, height=0.6)
-    ax.text(-1.5, y, lab, ha='right', va='center', fontsize=13, fontweight='bold')
-    ax.text(v + 1.5, y, f'{v}{m}', va='center', fontsize=12.5, fontweight='bold', color=col)
-ax.set_xlim(0, 155)
-ax.set_ylim(-0.6, 3.6)
-ax.set_yticks([])
-ax.set_xticks([0, 25, 50, 75, 100])
-ax.spines['left'].set_visible(False)
-ax.set_xlabel('percent')
-sp.save(fig, out / 'measures.svg')
+meas = [('GPT-3 run', int(20.0), '% of peak, run average', C['neutral'], 1), ('Megatron-LM', int(52.0), '% of peak, 3,072 A100s', C['neutral'], 1), ('Llama 3 405B', int(41.0), '% MFU, 16,384 H100s', C1, 1), ('Llama 3 405B', int(90.0), '%+ effective training time', C['data'], 2)]
+for k in (1, 2):
+    fig, ax = plt.subplots(figsize=(5.8, 1.85))
+    for i, (lab, v, m, col, first) in enumerate(meas):
+        y = len(meas) - 1 - i
+        a = 1.0 if k >= first else 0.0
+        ax.barh(y, v, color=col, height=0.6, alpha=a)
+        ax.text(-1.5, y, lab, ha='right', va='center', fontsize=13, fontweight='bold', alpha=a)
+        ax.text(v + 1.5, y, f'{v}{m}', va='center', fontsize=12.5, fontweight='bold', color=col, alpha=a)
+    ax.set_xlim(0, 155)
+    ax.set_ylim(-0.6, 3.6)
+    ax.set_yticks([])
+    ax.set_xticks([0, 25, 50, 75, 100])
+    ax.spines['left'].set_visible(False)
+    ax.set_xlabel('percent')
+    sp.save(fig, out / f'measures_step{k}.svg')
 
 def anplot(path, k):
     fig, ax = plt.subplots(figsize=(3.9, 2.05))

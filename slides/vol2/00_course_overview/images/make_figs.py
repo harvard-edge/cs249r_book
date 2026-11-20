@@ -24,25 +24,37 @@ FONT = 'Helvetica, Arial, sans-serif'
 sp.hbars_steps(out / 'gpt3_days', [('One A100', 11648.3, 'neutral', '32 years'), ('10,000 V100s', 14.8, 'memory', '15 days')], 'days', xlabel='GPT-3 training time (days, log)', size=(3.8, 2.2))
 
 def cluster_counts():
-    rows = [('AlexNet', 2012, 2.0, False, (8, -3, 'left')), ('Megatron-LM', 2019, 512.0, False, (-8, 4, 'right')), ('GPT-3 (estimate)', 2020, 10000.0, True, (-10, 0, 'right')), ('PaLM', 2022, 6144.0, False, (0, 13, 'center')), ('LLaMA 1', 2023, 2048.0, False, (-4, -17, 'right')), ('DeepSeek-V3', 2024, 2048.0, False, (4, -17, 'left')), ('Llama 3', 2024, 16384.0, False, (9, 4, 'left'))]
-    fig, ax = sp.plt.subplots(figsize=(5.7, 2.4))
+    rows = [
+        ('AlexNet', 2012, 2.0, False, (8, -3, 'left'), 1),
+        ('Megatron-LM', 2019, 512.0, False, (-8, 4, 'right'), 1),
+        ('GPT-3 (estimate)', 2020, 10000.0, True, (-10, 0, 'right'), 1),
+        ('PaLM', 2022, 6144.0, False, (0, 13, 'center'), 1),
+        ('LLaMA 1', 2023, 2048.0, False, (-4, -17, 'right'), 1),
+        ('DeepSeek-V3', 2024, 2048.0, False, (4, -17, 'left'), 1),
+        ('Llama 3', 2024, 16384.0, False, (9, 4, 'left'), 2),
+    ]
     _, slope, intercept = (1.933702688, 0.286389701, -575.7588173)
     xs = np.linspace(2011.5, 2024.5, 100)
-    ax.plot(xs, 10 ** (intercept + slope * xs), '--', color=sp.C['neutral'], lw=1.5)
-    ax.text(2021.0, 40, 'fit: about 2× per year', color=sp.C['neutral'], fontsize=12, fontweight='bold', rotation=0, ha='center')
-    for name, yr, n, est, (dx, dy, ha) in rows:
-        ax.plot([yr], [n], 'o', ms=10, mfc='white' if est else sp.C['memory'], mec=sp.C['memory'], mew=2, zorder=5)
-        ax.annotate(name, (yr, n), xytext=(dx, dy), textcoords='offset points', ha=ha, va='center', fontsize=12, color=sp.C['memory'], fontweight='bold')
-    ax.set_yscale('log')
-    ax.set_ylim(1, 100000.0)
-    ax.set_xlim(2011.3, 2026.3)
-    ax.set_yticks([1, 10, 100, 1000, 10000])
-    ax.set_yticklabels(['1', '10', '100', '1,000', '10,000'])
-    ax.set_xticks([2012, 2014, 2016, 2018, 2020, 2022, 2024])
-    ax.set_ylabel('Accelerators')
-    ax.grid(axis='y', color=sp.C['grid'], linewidth=0.6)
-    ax.set_axisbelow(True)
-    sp.save(fig, out / 'cluster_counts.svg')
+    for step in (1, 2):
+        fig, ax = sp.plt.subplots(figsize=(5.7, 2.4))
+        a2 = 1.0 if step >= 2 else 0.0
+        ax.plot(xs, 10 ** (intercept + slope * xs), '--', color=sp.C['neutral'], lw=1.5, alpha=a2)
+        ax.text(2021.0, 40, 'fit: about 2× per year', color=sp.C['neutral'], fontsize=12, fontweight='bold', rotation=0, ha='center', alpha=a2)
+        for name, yr, n, est, (dx, dy, ha), first in rows:
+            a = 1.0 if step >= first else 0.0
+            col = sp.C['danger'] if name == 'Llama 3' else sp.C['memory']
+            ax.plot([yr], [n], 'o', ms=10, mfc='white' if est else col, mec=col, mew=2, zorder=5, alpha=a)
+            ax.annotate(name, (yr, n), xytext=(dx, dy), textcoords='offset points', ha=ha, va='center', fontsize=12, color=col, fontweight='bold', alpha=a)
+        ax.set_yscale('log')
+        ax.set_ylim(1, 100000.0)
+        ax.set_xlim(2011.3, 2026.3)
+        ax.set_yticks([1, 10, 100, 1000, 10000])
+        ax.set_yticklabels(['1', '10', '100', '1,000', '10,000'])
+        ax.set_xticks([2012, 2014, 2016, 2018, 2020, 2022, 2024])
+        ax.set_ylabel('Accelerators')
+        ax.grid(axis='y', color=sp.C['grid'], linewidth=0.6)
+        ax.set_axisbelow(True)
+        sp.save(fig, out / f'cluster_counts_step{step}.svg')
 cluster_counts()
 kit = Path(__file__).resolve().parents[3] / 'assets' / 'kit' / 'vol2'
 stack_svg = (kit / 'stack_build8.svg').read_text()

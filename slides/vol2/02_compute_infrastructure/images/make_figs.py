@@ -293,35 +293,41 @@ sp.save(fig, out / 'tp_links.svg')
 sp.hbars(out / 'rack_power.svg', [('Server rack', 12.0, 'neutral', '12 kW'), ('4 DGX H100', 33.5, 'compute', '33.5 kW'), ('Liquid class', 100.0, 'danger', '100 kW'), ('GB200 NVL72', 120.0, 'danger', '120 kW')], 'kW', log=False, xlabel='kW per rack', size=(4.2, 2.2))
 chips = load_series('vol2/02_compute_infrastructure/data/accelerator_power_ratings.csv').entries
 systems = [r for r in load_series('vol2/02_compute_infrastructure/data/ai_supercomputers.csv').entries if r['power_mw']]
-fig, (a1, a2) = plt.subplots(1, 2, figsize=(5.8, 2.6), gridspec_kw={'wspace': 0.45})
 cx = [r['release_year'] for r in chips]
 cy = [r['power_w'] for r in chips]
-a1.scatter(cx, cy, s=30, color=C['compute'], zorder=3)
-for r in chips:
-    if r['label'] in ('H100', 'B300'):
-        a1.annotate(f"{r['label']} {r['power_w']:,.0f} W", (r['release_year'], r['power_w']), xytext=(-6, 8), textcoords='offset points', ha='right', fontsize=12.5, fontweight='bold', color=C['compute'])
-a1.set_ylim(0, 1650)
-a1.set_xlim(2011, 2026.5)
-a1.set_xticks([2013, 2017, 2021, 2025])
-a1.set_ylabel('W per package')
-a1.set_title('One accelerator: 2×', fontsize=14.5, fontweight='bold', color=C['text'])
 sx = np.array([dyear(r['first_operational_date']) for r in systems])
 syv = np.array([r['power_mw'] for r in systems])
 o = np.argsort(sx)
-a2.scatter(sx, syv, s=8, color=C['neutral_l'], zorder=2)
 run = np.maximum.accumulate(syv[o])
-a2.step(sx[o], run, where='post', color=C['danger'], lw=2.2, zorder=3)
-a2.annotate('Frontier 40 MW', (2022.4, 40.0), xytext=(2013.0, 150), textcoords='data', ha='left', fontsize=12.5, fontweight='bold', color=C['danger'], arrowprops=dict(arrowstyle='-', color=C['danger'], lw=1))
-a2.annotate('352 MW', (2025.5, 352.0), xytext=(-4, 8), textcoords='offset points', ha='right', fontsize=12.5, fontweight='bold', color=C['danger'])
-a2.set_yscale('log')
-a2.set_xlim(2011, 2026.5)
-a2.set_ylim(0.3, 1500)
-a2.set_xticks([2013, 2017, 2021, 2025])
-a2.set_yticks([1, 10, 100, 1000], ['1', '10', '100', '1,000'])
-a2.minorticks_off()
-a2.set_ylabel('MW per system')
-a2.set_title('Largest AI system: 9×', fontsize=14.5, fontweight='bold', color=C['text'])
-sp.save(fig, out / 'power_trend.svg')
+for k in (1, 2):
+    fig, (a1, a2) = plt.subplots(1, 2, figsize=(5.8, 2.6), gridspec_kw={'wspace': 0.45})
+    a1.scatter(cx, cy, s=30, color=C['compute'], zorder=3)
+    for r in chips:
+        if r['label'] in ('H100', 'B300'):
+            a1.annotate(f"{r['label']} {r['power_w']:,.0f} W", (r['release_year'], r['power_w']), xytext=(-6, 8), textcoords='offset points', ha='right', fontsize=12.5, fontweight='bold', color=C['compute'])
+    a1.set_ylim(0, 1650)
+    a1.set_xlim(2011, 2026.5)
+    a1.set_xticks([2013, 2017, 2021, 2025])
+    a1.set_ylabel('W per package')
+    a1.set_title('One accelerator: 2×', fontsize=14.5, fontweight='bold', color=C['text'])
+    shown = k >= 2
+    al = 1.0 if shown else 0.0
+    a2.scatter(sx, syv, s=8, color=C['neutral_l'], zorder=2, alpha=al)
+    a2.step(sx[o], run, where='post', color=C['danger'], lw=2.2, zorder=3, alpha=al)
+    a2.annotate('Frontier 40 MW', (2022.4, 40.0), xytext=(2013.0, 150), textcoords='data', ha='left', fontsize=12.5, fontweight='bold', color=C['danger'], alpha=al, arrowprops=dict(arrowstyle='-', color=C['danger'], lw=1, alpha=al))
+    a2.annotate('352 MW', (2025.5, 352.0), xytext=(-4, 8), textcoords='offset points', ha='right', fontsize=12.5, fontweight='bold', color=C['danger'], alpha=al)
+    a2.set_yscale('log')
+    a2.set_xlim(2011, 2026.5)
+    a2.set_ylim(0.3, 1500)
+    a2.set_xticks([2013, 2017, 2021, 2025])
+    a2.set_yticks([1, 10, 100, 1000], ['1', '10', '100', '1,000'])
+    a2.minorticks_off()
+    a2.set_ylabel('MW per system', alpha=al)
+    a2.set_title('Largest AI system: 9×', fontsize=14.5, fontweight='bold', color=C['text'], alpha=al)
+    for s in ('left', 'bottom'):
+        a2.spines[s].set_alpha(al)
+    a2.tick_params(colors=C['text'] if shown else 'white')
+    sp.save(fig, out / f'power_trend_step{k}.svg')
 print(f'power_trend: {len(chips)} packages, {len(systems)} systems')
 fig, ax = plt.subplots(figsize=(3.8, 1.5))
 air_ls = 5.5 * 1000
@@ -338,17 +344,19 @@ ax.set_xticks([1, 100, 10000], ['1', '100', '10,000'])
 ax.minorticks_off()
 ax.set_xlabel('L/s for 100 kW, 15 K rise')
 sp.save(fig, out / 'cooling_flow.svg')
-doms = [('Building', 'fire, utility feed'), ('Hall, row', 'row power, coolant'), ('Rack', 'power shelf, switch'), ('Node', 'one GPU of 8'), ('GPU', 'an HBM error')]
-b = ''
-for i, (nm, what) in enumerate(doms):
-    x, y = (6 + i * 22, 6 + i * 84)
-    w, h = (508 - i * 44, 458 - i * 84)
-    shade = ['#f8fafc', '#f1f5f9', '#e2e8f0', '#EAF1F8', '#d6e2f0'][i]
-    stroke = V2['red'] if i == 0 else '#64748b' if i < 3 else V2['c1']
-    b += rect(x, y, w, h, shade, stroke, 2.5, 8)
-    b += text(x + 12, y + 36, nm, 31, V2['red_text'] if i == 0 else stroke, 'bold', 'start')
-    b += text(x + w - 12, y + 36, what, 27, '#334155', 'normal', 'end')
-svg_write(out / 'failure_domains.svg', b, w=520, h=470)
+doms = [('Building', 'fire, utility feed', 3), ('Hall, row', 'row power, coolant', 2), ('Rack', 'power shelf, switch', 2), ('Node', 'one GPU of 8', 1), ('GPU', 'an HBM error', 1)]
+for k in (1, 2, 3):
+    b = ''
+    for i, (nm, what, first) in enumerate(doms):
+        op = 1.0 if k >= first else 0.0
+        x, y = (6 + i * 22, 6 + i * 84)
+        w, h = (508 - i * 44, 458 - i * 84)
+        shade = ['#f8fafc', '#f1f5f9', '#e2e8f0', '#EAF1F8', '#d6e2f0'][i]
+        stroke = V2['red'] if i == 0 else '#64748b' if i < 3 else V2['c1']
+        b += rect(x, y, w, h, shade, stroke, 2.5, 8, op)
+        b += text(x + 12, y + 36, nm, 31, V2['red_text'] if i == 0 else stroke, 'bold', 'start', op)
+        b += text(x + w - 12, y + 36, what, 27, '#334155', 'normal', 'end', op)
+    svg_write(out / f'failure_domains_step{k}.svg', b, w=520, h=470)
 chain = [('Full\npeak', 5.4, 'neutral'), ('Local\n45%', 12.0, 'compute'), ('Scaling\n0.56', 21.4, 'network'), ('Checkpoint\n+3%', 22.1, 'memory'), ('Failures\n+10%', 24.3, 'danger'), ('Upkeep\n+5%', 25.5, 'neutral')]
 for k, upto in ((1, 2), (2, 3), (3, 6)):
     fig, ax = plt.subplots(figsize=(6.6, 2.5))
@@ -368,7 +376,7 @@ for k, upto in ((1, 2), (2, 3), (3, 6)):
     ax.set_ylabel('Hours of wall clock')
     ax.text(-0.4, 28.2, 'derived', fontsize=12.5, color=C['neutral'], fontweight='bold')
     sp.save(fig, out / f'pod_chain_step{k}.svg')
-sp.hbars(out / 'delivered.svg', [('Decode, batch 1', 0.34, 'memory', '0.34%'), ('Local training', 45.0, 'compute', '45%'), ('8,192-GPU run', 21.0, 'network', '21%')], '%', log=False, xlabel='Share of peak that becomes progress, %', size=(4.2, 1.9))
+sp.hbars(out / 'delivered.svg', [('Decode, batch 1', 0.34, 'memory', '0.34%'), ('Local training', 45.0, 'compute', '45%'), ('Llama 3 405B (16K)', 41.0, 'data', '41% MFU'), ('8,192-GPU scenario', 21.0, 'network', '21%')], '%', log=False, xlabel='Share of peak that becomes progress, %', size=(4.3, 2.15))
 _W, _A, _CAP = (43.75, 1.4, 80.0)
 for k in (1, 2, 3):
     fig, ax = plt.subplots(figsize=(3.4, 1.15))
@@ -390,23 +398,142 @@ _lo, _hi = (400.0, 700.0)
 _ts, _tf = (1.0, 100.0 / 10 ** 3)
 _ds, _df = (19.0, 187.0)
 _t0 = 0.5
-fig, (a1, a2) = plt.subplots(2, 1, figsize=(3.4, 1.85), sharex=True, gridspec_kw={'hspace': 0.3})
-for ramp, col in ((_ts, C['memory']), (_tf, C['danger'])):
-    a1.plot([0, _t0, _t0 + ramp, 2.2], [_lo, _lo, _hi, _hi], color=col, lw=2.2)
-a1.set_ylim(_lo - 80, _hi + 190)
-a1.set_yticks([_lo, _hi])
-a1.set_ylabel('W', fontsize=10)
-a1.text(_t0 + _ts + 0.05, _hi - 170, '1 µs edge', color=C['memory'], fontsize=10.5, fontweight='bold')
-a1.text(_t0 + _tf + 0.04, _hi + 25, '100 ns edge', color=C['danger'], fontsize=10.5, fontweight='bold', va='bottom')
-for ramp, d, col in ((_ts, _ds, C['memory']), (_tf, _df, C['danger'])):
-    a2.plot([0, _t0, _t0, _t0 + ramp, _t0 + ramp, 2.2], [0, 0, -d, -d, 0, 0], color=col, lw=2.2)
-a2.text(_t0 + _ts + 0.05, -_ds - 8, '−19 mV', color=C['memory'], fontsize=10.5, fontweight='bold', va='top')
-a2.text(_t0 + _tf + 0.06, -_df + 10, '−187 mV', color=C['danger'], fontsize=10.5, fontweight='bold', va='bottom')
-a2.set_ylim(-_df - 30, 30)
-a2.set_yticks([0, -round(_df, -2)])
-a2.set_ylabel('mV', fontsize=10)
-a2.set_xlim(0, 2.2)
-a2.set_xlabel('time (µs)', fontsize=10)
-for a in (a1, a2):
-    a.tick_params(labelsize=9.5)
-sp.save(fig, out / 'droop.svg')
+for k in (1, 2):
+    fig, (a1, a2) = plt.subplots(2, 1, figsize=(3.4, 1.85), sharex=True, gridspec_kw={'hspace': 0.3})
+    a1.plot([0, _t0, _t0 + _ts, 2.2], [_lo, _lo, _hi, _hi], color=C['memory'], lw=2.2)
+    a1.plot([0, _t0, _t0 + _tf, 2.2], [_lo, _lo, _hi, _hi], color=C['danger'], lw=2.2, alpha=1.0 if k >= 2 else 0.0)
+    a1.set_ylim(_lo - 80, _hi + 190)
+    a1.set_yticks([_lo, _hi])
+    a1.set_ylabel('W', fontsize=10)
+    a1.text(_t0 + _ts + 0.05, _hi - 170, '1 µs edge', color=C['memory'], fontsize=10.5, fontweight='bold')
+    a1.text(_t0 + _tf + 0.04, _hi + 25, '100 ns edge', color=C['danger'], fontsize=10.5, fontweight='bold', va='bottom', alpha=1.0 if k >= 2 else 0.0)
+    a2.plot([0, _t0, _t0, _t0 + _ts, _t0 + _ts, 2.2], [0, 0, -_ds, -_ds, 0, 0], color=C['memory'], lw=2.2)
+    a2.plot([0, _t0, _t0, _t0 + _tf, _t0 + _tf, 2.2], [0, 0, -_df, -_df, 0, 0], color=C['danger'], lw=2.2, alpha=1.0 if k >= 2 else 0.0)
+    a2.text(_t0 + _ts + 0.05, -_ds - 8, '−19 mV', color=C['memory'], fontsize=10.5, fontweight='bold', va='top')
+    a2.text(_t0 + _tf + 0.06, -_df + 10, '−187 mV', color=C['danger'], fontsize=10.5, fontweight='bold', va='bottom', alpha=1.0 if k >= 2 else 0.0)
+    a2.set_ylim(-_df - 30, 30)
+    a2.set_yticks([0, -round(_df, -2)])
+    a2.set_ylabel('mV', fontsize=10)
+    a2.set_xlim(0, 2.2)
+    a2.set_xlabel('time (µs)', fontsize=10)
+    for a in (a1, a2):
+        a.tick_params(labelsize=9.5)
+    sp.save(fig, out / f'droop_step{k}.svg')
+
+# Eta GPU-hours bar (replaces inline TikZ on peak-vs-sustained slide)
+for k in (1, 2):
+    fig, ax = plt.subplots(figsize=(5.8, 1.55))
+    ax.barh(1, 1000, 0.56, color=C['compute'])
+    ax.text(-35, 1, 'Plan from peak', ha='right', va='center', fontsize=13.5, fontweight='bold', color=C['text'])
+    ax.text(1040, 1, '1,000 GPU-hours', va='center', fontsize=13.5, fontweight='bold', color=C['compute'])
+    al = 1.0 if k >= 2 else 0.0
+    ax.barh(0, 1000, 0.56, color=C['compute'], alpha=al)
+    ax.barh(0, 1500, 0.56, left=1000, color=C['compute_l'], edgecolor=C['compute'], lw=1.4, alpha=al)
+    ax.text(-35, 0, 'At η = 0.4', ha='right', va='center', fontsize=13.5, fontweight='bold', color=C['text'], alpha=al)
+    ax.text(1750, 0, 'stalls, waits, overhead', ha='center', va='center', fontsize=12.5, fontweight='bold', color=C['text'], alpha=al)
+    ax.text(2540, 0, '2,500', va='center', fontsize=13.5, fontweight='bold', color=C['compute'], alpha=al)
+    ax.set_xlim(0, 2950)
+    ax.set_ylim(-0.55, 1.55)
+    ax.set_yticks([])
+    ax.set_xticks([])
+    for s in ('left', 'bottom'):
+        ax.spines[s].set_visible(False)
+    sp.save(fig, out / f'eta_hours_step{k}.svg')
+
+# Explore figure: vol2:fig-node-pcie-numa (4-step NUMA/PCIe/NVSwitch topology)
+def _node_numa(step):
+    b = ''
+    # NUMA domain frames
+    b += rect(16, 12, 410, 304, V2['frame_fill'], V2['frame'], 2, 10, dash='7 5')
+    b += rect(494, 12, 410, 304, V2['frame_fill'], V2['frame'], 2, 10, dash='7 5')
+    b += text(221, 39, 'Socket 0 (NUMA 0)', 26, '#334155', 'bold')
+    b += text(699, 39, 'Socket 1 (NUMA 1)', 26, '#334155', 'bold')
+    # Static grey topology links
+    g_x0 = [76, 172, 268, 364]
+    g_x1 = [554, 650, 746, 842]
+    b += '<line x1="184" y1="84" x2="224" y2="84" stroke="#94a3b8" stroke-width="3"/>\n'
+    b += '<line x1="406" y1="84" x2="514" y2="84" stroke="#94a3b8" stroke-width="3" stroke-dasharray="6 4"/>\n'
+    b += '<line x1="696" y1="84" x2="736" y2="84" stroke="#94a3b8" stroke-width="3"/>\n'
+    b += '<line x1="315" y1="110" x2="315" y2="146" stroke="#94a3b8" stroke-width="3"/>\n'
+    b += '<line x1="605" y1="110" x2="605" y2="146" stroke="#94a3b8" stroke-width="3"/>\n'
+    b += '<line x1="184" y1="170" x2="224" y2="170" stroke="#94a3b8" stroke-width="3"/>\n'
+    b += '<line x1="696" y1="170" x2="736" y2="170" stroke="#94a3b8" stroke-width="3"/>\n'
+    for gx in g_x0:
+        b += f'<line x1="315" y1="194" x2="{gx}" y2="238" stroke="#cbd5e1" stroke-width="2.5"/>\n'
+        b += f'<line x1="{gx}" y1="296" x2="{gx}" y2="344" stroke="#94a3b8" stroke-width="3"/>\n'
+    for gx in g_x1:
+        b += f'<line x1="605" y1="194" x2="{gx}" y2="238" stroke="#cbd5e1" stroke-width="2.5"/>\n'
+        b += f'<line x1="{gx}" y1="296" x2="{gx}" y2="344" stroke="#94a3b8" stroke-width="3"/>\n'
+    b += text(460, 62, 'UPI', 25, V2['red_text'] if step == 4 else '#475569', 'bold')
+
+    # Highlighted step paths (drawn over base wires, under boxes)
+    if step == 1:
+        b += f'<line x1="76" y1="296" x2="76" y2="344" stroke="{V2["c1"]}" stroke-width="7"/>\n'
+        b += f'<line x1="746" y1="296" x2="746" y2="344" stroke="{V2["c1"]}" stroke-width="7"/>\n'
+    elif step == 2:
+        b += f'<line x1="184" y1="84" x2="224" y2="84" stroke="{V2["green"]}" stroke-width="6.5"/>\n'
+        b += f'<line x1="315" y1="110" x2="315" y2="146" stroke="{V2["green"]}" stroke-width="6.5"/>\n'
+        b += f'<line x1="315" y1="194" x2="76" y2="238" stroke="{V2["green"]}" stroke-width="6.5"/>\n'
+    elif step == 3:
+        b += f'<line x1="184" y1="170" x2="224" y2="170" stroke="{V2["c2"]}" stroke-width="6.5"/>\n'
+        b += f'<line x1="315" y1="194" x2="76" y2="238" stroke="{V2["c2"]}" stroke-width="6.5"/>\n'
+    elif step == 4:
+        b += f'<line x1="696" y1="84" x2="736" y2="84" stroke="{V2["red"]}" stroke-width="6.5" stroke-dasharray="10 5"/>\n'
+        b += f'<line x1="406" y1="84" x2="514" y2="84" stroke="{V2["red"]}" stroke-width="6.5" stroke-dasharray="10 5"/>\n'
+        b += f'<line x1="315" y1="110" x2="315" y2="146" stroke="{V2["red"]}" stroke-width="6.5" stroke-dasharray="10 5"/>\n'
+        b += f'<line x1="315" y1="194" x2="76" y2="238" stroke="{V2["red"]}" stroke-width="6.5" stroke-dasharray="10 5"/>\n'
+
+    def box_style(active, role):
+        if not active:
+            return ('white', '#94a3b8', '#475569')
+        return {
+            'c1': (V2['c1_fill'], V2['c1'], V2['c1_text']),
+            'green': (V2['green_fill'], V2['green'], '#15803d'),
+            'c2': (V2['c2_fill'], V2['c2'], V2['c2_text']),
+            'red': (V2['red_fill'], V2['red'], V2['red_text']),
+        }[role]
+
+    role = {1: 'c1', 2: 'green', 3: 'c2', 4: 'red'}[step]
+    # Row 1: DRAM / CPU
+    for name, x, y, w, h, act in [
+        ('DRAM 0', 34, 58, 150, 52, step == 2),
+        ('CPU 0', 224, 58, 182, 52, step in (2, 4)),
+        ('CPU 1', 514, 58, 182, 52, step == 4),
+        ('DRAM 1', 736, 58, 150, 52, step == 4),
+    ]:
+        fc, ec, tc = box_style(act, role)
+        b += rect(x, y, w, h, fc, ec, 3 if act else 2, 6)
+        b += text(x + w / 2, y + 35, name, 26, tc, 'bold')
+    # Row 2: NIC / PCIe switch
+    for name, x, y, w, h, act in [
+        ('NIC N0-3', 34, 146, 150, 48, step == 3),
+        ('PCIe sw 0', 224, 146, 182, 48, step in (2, 3, 4)),
+        ('PCIe sw 1', 514, 146, 182, 48, False),
+        ('NIC N4-7', 736, 146, 150, 48, False),
+    ]:
+        fc, ec, tc = box_style(act, role)
+        b += rect(x, y, w, h, fc, ec, 3 if act else 2, 6)
+        b += text(x + w / 2, y + 33, name, 25, tc, 'bold')
+    # Row 3: 8 GPUs
+    for idx, gx in enumerate(g_x0 + g_x1):
+        act = (idx == 0) or (step == 1 and idx == 6)
+        fc, ec, tc = box_style(act, role)
+        b += rect(gx - 42, 238, 84, 58, fc, ec, 3.5 if act else 2, 6)
+        b += text(gx, 276, f'G{idx}', 27, tc, 'bold')
+    # Row 4: NVSwitch bar
+    fc, ec, tc = box_style(step == 1, 'c1')
+    b += rect(34, 344, 852, 52, fc, ec, 3.5 if step == 1 else 2, 8)
+    b += text(460, 379, 'NVSwitch fabric (450 GB/s per GPU, any-to-any)', 26, tc, 'bold')
+    # Caption banner
+    caps = {
+        1: ('1. NVSwitch G0 ↔ G6: 450 GB/s, zero PCIe or socket hops', V2['c1_text']),
+        2: ('2. Local NUMA 0 ingest: DRAM 0 → CPU 0 → PCIe sw 0 → G0', '#15803d'),
+        3: ('3. GPUDirect RDMA: NIC N0 → PCIe sw 0 → G0 (skips CPU and DRAM)', V2['c2_text']),
+        4: ('4. Cross-socket anti-pattern: DRAM 1 → CPU 1 → UPI → CPU 0 → G0', V2['red_text']),
+    }
+    cap, ccol = caps[step]
+    b += text(460, 434, cap, 26, ccol, 'bold')
+    svg_write(out / f'node_numa_step{step}.svg', b, w=920, h=452)
+
+for k in range(1, 5):
+    _node_numa(k)
