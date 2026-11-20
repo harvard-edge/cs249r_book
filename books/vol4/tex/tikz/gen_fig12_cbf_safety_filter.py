@@ -97,7 +97,7 @@ ax.set_title("(a)  State Space", fontsize=10.5, fontweight="bold", color=ink, pa
 # Schematic values: u_max = 3.0, a_cbf = [1, 2], b_cbf = 4.5, u_nom = [3.0, 3.75].
 # Componentwise clamp: u_clip = clamp(u_nom, -u_max, u_max) = [3.0, 3.0] on corner of U,
 # which still violates a_cbf^T u <= b_cbf (9.0 > 4.5).
-# True QP projection onto U cap C_safe: u* = [1.80, 1.35].
+# True QP projection onto U_safe: u* = [1.80, 1.35].
 # ════════════════════════════════════════════════════════════════════════
 ax = ax2
 u_max = 3.0
@@ -122,7 +122,7 @@ ax.set_xlim(-0.55, 5.15)
 ax.set_ylim(-0.55, 4.45)
 ax.set_aspect("equal")
 
-# Positive quadrant of U cap C_safe: vertices (0, 0), (3, 0), (3, 0.75), (0, 2.25)
+# Positive quadrant of U_safe: vertices (0, 0), (3, 0), (3, 0.75), (0, 2.25)
 y_at_0 = b_cbf / a_cbf[1]
 y_at_umax = (b_cbf - a_cbf[0] * u_max) / a_cbf[1]
 safe_poly = np.array([[0.0, 0.0], [u_max, 0.0], [u_max, y_at_umax], [0.0, y_at_0]])
@@ -146,8 +146,8 @@ ax.text(u_max, -0.16, r"$u_{\max}$", fontsize=9.5, color=softink, ha="center", v
 ax.plot([-0.08, 0.08], [u_max, u_max], color=softink, lw=1.0, zorder=3)
 ax.text(-0.14, u_max, r"$u_{\max}$", fontsize=9.5, color=softink, ha="right", va="center")
 
-# Feasible region label inside U cap C_safe (upper-left open region)
-ax.text(0.68, 1.40, r"$\mathcal{U} \cap \mathcal{C}_{\mathrm{safe}}$",
+# Feasible region label inside U_safe (upper-left open region)
+ax.text(0.68, 1.40, r"$\mathcal{U}_{\mathrm{safe}}$",
         fontsize=10.0, fontweight="bold", color=safegreen, ha="center", va="center")
 
 # CBF half-space boundary line: u1 + 2*u2 = 4.5
@@ -201,7 +201,7 @@ ax.text(
     fontsize=9.2, fontweight="bold", color=amber, ha="left", va="center",
 )
 
-# True QP projection u* onto U cap C_safe
+# True QP projection u* onto U_safe
 ax.annotate(
     "", xy=u_star, xytext=origin,
     arrowprops=dict(arrowstyle="-|>", color=safegreen, lw=2.1),

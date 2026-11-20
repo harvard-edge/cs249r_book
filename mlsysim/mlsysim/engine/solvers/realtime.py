@@ -756,7 +756,7 @@ class CommandAuthenticationModel(ForwardModel):
     carries the machine v x tau_fresh. Verified serially, n forged signed
     packets queued ahead of a valid veto finish it at (n + 1) t_verify; the
     fewest that push it past the deadline is n = floor(T_latest / t_verify),
-    sustained at n / ((n + 1) t_verify) packets per second (added 2026-10-20).
+    with sustained verifier saturation at ceil(1 / t_verify) packets per second (added 2026-10-20).
     """
 
     requires = ("clock", "verify_cycles", "speed", "spare", "deadline")

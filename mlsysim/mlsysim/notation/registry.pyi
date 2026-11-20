@@ -533,7 +533,6 @@ class NotationRegistry:
     BumplessTransferBlendRate: NotationSymbol  # first time derivative of the bumpless-transfer blend weight, zero at both ends of a fixed-endpoint blend ($\dot{\alpha}$) [1/s]
     BumplessTransferBlendSlope: NotationSymbol  # derivative of the bumpless-transfer blend weight with respect to normalized progress, whose peak sets the shortest blend window under a rate ceiling ($\alpha'$) [dimensionless]
     BumplessTransferProgress: NotationSymbol  # elapsed time since a bumpless transfer began, divided by the blending window, from zero to one ($\hat{t}$) [dimensionless]
-    BumplessTransferStartInstant: NotationSymbol  # instant at which a bumpless-transfer blend begins, the zero of its normalized progress ($t_{\text{start}}$) [s]
     BurstArrivalCount: NotationSymbol  # number of tasks that arrive together in one burst ($N_{\text{burst}}$)
     BurstSurvivalTime: NotationSymbol  # time a burst takes to heat a winding from its starting temperature to the insulation limit ($t_{\text{limit}}$) [s]
     BusBitRate: NotationSymbol  # bit rate of a classical single-rate fieldbus ($R_{\text{bit}}$) [bits/s]
@@ -4336,7 +4335,6 @@ class NotationRegistry:
     StoppingCrossoverSpeed: NotationSymbol  # speed at which travel during the pre-brake delay equals braking travel in the elementary stopping budget, twice the credible deceleration times the pre-brake delay ($v^{*}$) [m/s]
     StoppingDeadline: NotationSymbol  # latest instant at which authority can be revoked and a worst-case stop still ends within the verified clearance ($t_{\text{deadline,stop}}$) [s]
     StoppingDistance: NotationSymbol  # distance the machine travels from hazard detection to rest, including travel during the pre-brake delay ($d_{\text{stop}}$) [m]
-    StoppingDistanceBudget: NotationSymbol  # distance available for a stop, the clearance to the stop line less the reserve held back for uncertainty and residual clearance ($d_{\text{budget}}$) [m]
     StoppingDuration: NotationSymbol  # time from braking onset to standstill ($T_{\text{stop}}$) [s]
     StorageAccessFactor: NotationSymbol  # fraction of peak storage throughput a workload's access pattern achieves ($F_{\text{access}}$) [dimensionless]
     StorageBandwidth: NotationSymbol  # sustained rate at which the storage system delivers bytes to the input pipeline ($\text{BW}_{\text{storage}}$) [bytes/s]
@@ -4568,7 +4566,6 @@ class NotationRegistry:
     TensorRowModeSize: NotationSymbol  # size of the row mode of a decomposed three-mode tensor ($I$)
     TerminalFeedbackGain: NotationSymbol  # gain matrix of the local linear feedback law that keeps the terminal set invariant in model predictive control ($\mathbf{K}_f$)
     TerminalInvariantSet: NotationSymbol  # set of plant states from which an invariant fallback control law keeps the system safe indefinitely, the required endpoint of a receding horizon ($\mathcal{X}_{f}$)
-    TerminalPlantState: NotationSymbol  # predicted plant state at the final step of a model-predictive-control horizon ($\mathbf{x}_N$)
     TerminalTransitTime: NotationSymbol  # time a terminal move needs under the actuator velocity and acceleration limits ($t_{\text{transit}}$) [s]
     TerminalVoltageLimit: NotationSymbol  # largest magnitude of winding terminal voltage the inverter can apply ($V_{\max}$) [V]
     TerminationProtocol: NotationSymbol  # termination protocol of a trial: its execution deadline, goal region and outcome predicate ($\kappa$)
