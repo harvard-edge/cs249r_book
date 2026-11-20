@@ -324,8 +324,8 @@ Two of the book's lighthouse models, the recurring workloads each chapter tests 
 # │ How:     Registry hardware and model entries; training = 3x forward.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Hardware, Models
-from mlsysim.core.units import GiB, TB, TFLOP, GFLOPs, param, second
-from mlsysim.fmt import check, fmt_bandwidth, fmt_count, fmt_flop_rate, fmt_flops, fmt_memory_capacity
+from mlsysim.core.units import GB, GiB, TB, TFLOP, GFLOPs, param, second
+from mlsysim.fmt import check, fmt_bandwidth, fmt_count, fmt_flop_rate, fmt_flops, fmt_memory, fmt_memory_capacity
 
 # ┌── LEGO ───────────────────────────────────────────────
 class ReferenceMachine:
@@ -346,6 +346,7 @@ class ReferenceMachine:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     h100_mem_str = fmt_memory_capacity(h100.memory.capacity, unit=GiB, precision=0, commas=False)
+    h100_mem_decimal_str = fmt_memory(h100.memory.capacity, unit=GB, precision=1, commas=False)
     h100_bw_str = fmt_bandwidth(h100.memory.bandwidth, unit=TB / second, precision=2, commas=False)
     h100_peak_str = fmt_flop_rate(h100.compute.peak_flops, unit=TFLOP / second, precision=0, commas=False)
     resnet_fwd_gflop_str = fmt_flops(resnet.inference_flops, unit=GFLOPs, precision=1, commas=False)
@@ -355,7 +356,7 @@ class ReferenceMachine:
 
 ResNet-50\index{ResNet-50!input-pipeline case}, the book's compute-bound lighthouse, carries the chapter's input pipeline. Its home regime is compute-bound because a convolution reuses each weight at every spatial position, so one $224{\times}224$ image costs about `{python} ReferenceMachine.resnet_fwd_gflop_str` in the forward pass and about `{python} ReferenceMachine.resnet_train_gflop_str` once the backward pass is added, for only `{python} ReferenceMachine.resnet_params_m_str` parameters. Training it on a current data-center accelerator moves the limiting term upstream, because each image must be read, decoded, and augmented on the host before the accelerator sees it, and the data pipeline (@sec-model-training-data-pipeline-8e71) shows the accelerator consuming images faster than the host processors can prepare them. The two cases therefore cross regimes in opposite directions as GPT-2 leaves its bandwidth-bound home for arithmetic and memory capacity, while ResNet-50 leaves its compute-bound home for an input-bound one.
 
-Every number in the chapter uses one reference machine, an NVIDIA H100 with `{python} ReferenceMachine.h100_mem_str` of HBM delivering `{python} ReferenceMachine.h100_bw_str` and a dense 16-bit arithmetic peak of `{python} ReferenceMachine.h100_peak_str`. The H100 is a point-in-time instance of the data-center accelerator class whose design @sec-hardware-acceleration develops; its successors change the constants, not the reasoning.
+Every number in the chapter uses one reference machine, an NVIDIA H100 labeled `{python} ReferenceMachine.h100_mem_str` in binary units (`{python} ReferenceMachine.h100_mem_decimal_str` in decimal gigabytes, the unit used for tensor budgets in this chapter), delivering `{python} ReferenceMachine.h100_bw_str` of HBM bandwidth and a dense 16-bit arithmetic peak of `{python} ReferenceMachine.h100_peak_str`. The H100 is a point-in-time instance of the data-center accelerator class whose design @sec-hardware-acceleration develops; its successors change the constants, not the reasoning.
 
 The chapter follows GPT-2 XL's run from estimate to execution (@tbl-training-chapter-spine). The first half converts the run's operation count into time and energy, accounts for the arithmetic and bytes of one step, and assembles the pipeline that executes it, including the checkpoints that let a long run survive failure. The second half diagnoses a measured step, removes its limiting term one technique at a time until GPT-2 XL trains on a single accelerator, and closes with when and how to add accelerators.
 
@@ -1050,16 +1051,16 @@ Auxiliary state memory increases progressively from SGD (zero auxiliary state) t
 \renewcommand{\arraystretch}{1.25}
 ```
 
-| **Property**                    |         **SGD**          |     **Momentum**     |         **RMSprop**         |                 **Adam**                |
-|:--------------------------------|:------------------------:|:--------------------:|:---------------------------:|:---------------------------------------:|
-| **Memory Overhead**             |           None           |    Velocity terms    |      Squared gradients      |   Both velocity and squared gradients   |
-| **Parameter + optimizer state** |        1$\times$         |      2$\times$       |          2$\times$          |                3$\times$                |
-| **Dense State Access**          | Parameters and gradients |    Adds velocity     | Adds squared-gradient state |   Adds first- and second-moment state   |
-| **Update Work**                 |  Lowest auxiliary work   | Adds momentum update |    Adds adaptive scaling    | Adds moment updates and bias correction |
-| **Hardware Efficiency**         |          Varies          |        Varies        |            Varies           |                  Varies                 |
-| **Convergence Behavior**        |          Varies          |        Varies        |            Varies           |                  Varies                 |
+| **Property**                    |                           **SGD**                           |                        **Momentum**                       |                        **RMSprop**                        |                         **Adam/AdamW**                         |
+|:--------------------------------|:-----------------------------------------------------------:|:---------------------------------------------------------:|:---------------------------------------------------------:|:--------------------------------------------------------------:|
+| **Memory Overhead**             |                             None                            |                       Velocity terms                      |                     Squared gradients                     |                    First and second moments                    |
+| **Parameter + optimizer state** |                          1$\times$                          |                         2$\times$                         |                         2$\times$                         |                           3$\times$                            |
+| **Dense State Access**          |                   Parameters and gradients                  |                       Adds velocity                       |                Adds squared-gradient state                |              Adds first- and second-moment state               |
+| **Update Work**                 |                    Lowest auxiliary work                    |                    Adds momentum update                   |                   Adds adaptive scaling                   |            Adds moment updates and bias correction             |
+| **Hardware Efficiency**         | Bandwidth-bound; 12 bytes/param in FP32 (lowest update I/O) |          Bandwidth-bound; 20 bytes/param in FP32          |     Bandwidth-bound; 20 bytes/param in FP32 plus sqrt     |  Bandwidth-bound; 28 bytes/param in FP32 (fused kernels help)  |
+| **Convergence Behavior**        |  Uniform step size; sensitive to curvature and LR schedule  | Directional smoothing damps oscillations in steep valleys | Per-parameter scaling adapts to gradient-magnitude spread | Combines smoothing and adaptive scaling; AdamW decouples decay |
 
-: **Optimizer Memory Footprint**: Different optimization algorithms impose varying auxiliary-state costs due to the storage of intermediate values like velocities and squared gradients. The multiplier row counts parameters plus optimizer auxiliary state and excludes gradients and activations; full training memory must add those terms explicitly. These trade-offs govern resource-constrained deployments and large-scale model training. {#tbl-optimizer-properties tbl-colwidths="[26,10,13,17,34]"}
+: **Optimizer Memory and Update Properties**: Different optimization algorithms impose distinct auxiliary-state footprints, memory-bus traffic, and convergence mechanisms. The multiplier row counts FP32 parameters plus optimizer auxiliary state and excludes gradients and activations; full training memory must add those terms explicitly. Update traffic counts the reads and writes of one FP32 update pass (reading parameters, gradients, and auxiliary states, then writing updated parameters and states). AdamW carries the same moment buffers and traffic as Adam while decoupling weight decay from the adaptive gradient update; realized step counts remain workload and schedule dependent. {#tbl-optimizer-properties tbl-colwidths="[20,18,19,20,23]"}
 
 ```{=latex}
 \endgroup
@@ -1642,7 +1643,7 @@ class LlamaFinetuneMemory:
 
 ::: {#nbk-training-estimating-vram-requirements .callout-notebook title="Fine-tuning Llama 3 8B on one H100"}
 
-**Problem**: Can a `{python} LlamaFinetuneMemory.params_b_str`-parameter Llama 3 model be fine-tuned on one H100 with `{python} LlamaFinetuneMemory.capacity_str` (`{python} LlamaFinetuneMemory.capacity_gb_str` in decimal units) of HBM, first with every parameter trained and then with low-rank adapters?
+**Problem**: Can a `{python} LlamaFinetuneMemory.params_b_str`-parameter Llama 3 model be fine-tuned on one H100 with `{python} LlamaFinetuneMemory.capacity_str` binary (`{python} LlamaFinetuneMemory.capacity_gb_str` decimal) of HBM, first with every parameter trained and then with low-rank adapters?
 
 **Given**: The mixed-precision Adam recipe of @sec-model-training-optimization-algorithms-c6a9, a batch of `{python} LlamaFinetuneMemory.batch_str` sequences of `{python} LlamaFinetuneMemory.seq_str` tokens, and attention that never stores the quadratic score matrix.
 
@@ -1651,7 +1652,7 @@ class LlamaFinetuneMemory:
 1.  **Full fine-tuning, static state**: FP16 weights `{python} LlamaFinetuneMemory.weights_gb_str` + FP16 gradients `{python} LlamaFinetuneMemory.gradients_gb_str` + FP32 master weights `{python} LlamaFinetuneMemory.master_gb_str` + Adam moments `{python} LlamaFinetuneMemory.optimizer_gb_str` = `{python} LlamaFinetuneMemory.full_static_gb_str`, already beyond one accelerator before any activation is stored.
 2.  **Activations**: The per-layer estimate of @sec-model-training-activation-memory-requirements-f44c, without the quadratic attention term, gives `{python} LlamaFinetuneMemory.activations_gb_str` at this batch, so full fine-tuning needs about `{python} LlamaFinetuneMemory.full_total_gb_str` in all.
 3.  **Low-rank adapters**: Low-rank adaptation (LoRA)\index{LoRA!fine-tuning memory} [@hu2021lora] freezes the base weights and trains a pair of small matrices beside each adapted projection. The first matrix maps the projection's input width down to a small rank, and the second maps it back up, so their product has the shape of the full weight matrix and stands in for its update. A full update would train one value for every entry of that matrix, input width times output width; the pair trains only two thin strips, input width times rank plus rank times output width. With a rank in the tens against a width in the thousands, the adapters hold a small fraction of the matrix they adapt. Rank-`{python} LlamaFinetuneMemory.lora_rank_str` adapters on every query and value projection add `{python} LlamaFinetuneMemory.adapter_m_str` trainable parameters, `{python} LlamaFinetuneMemory.adapter_pct_str` of the model, whose gradients, master copies, and moments occupy `{python} LlamaFinetuneMemory.adapter_state_gb_str`.
-4.  **Adapter total**: Frozen FP16 weights `{python} LlamaFinetuneMemory.weights_gb_str` + adapter state `{python} LlamaFinetuneMemory.adapter_state_gb_str` + activations `{python} LlamaFinetuneMemory.activations_gb_str` ≈ `{python} LlamaFinetuneMemory.lora_total_gb_str`, leaving about `{python} LlamaFinetuneMemory.headroom_gb_str` for workspaces and allocator overhead.
+4.  **Adapter total**: Frozen FP16 weights `{python} LlamaFinetuneMemory.weights_gb_str` + adapter state `{python} LlamaFinetuneMemory.adapter_state_gb_str` + activations `{python} LlamaFinetuneMemory.activations_gb_str` ≈ `{python} LlamaFinetuneMemory.lora_total_gb_str`, leaving about `{python} LlamaFinetuneMemory.headroom_gb_str` of the `{python} LlamaFinetuneMemory.capacity_gb_str` decimal capacity for workspaces and allocator overhead.
 
 **Systems insight**: Full-parameter training of this model does not fit one accelerator; it requires partitioning its state across several accelerators, which @sec-model-training-data-parallelism-ad1c develops, or offloading state to host memory. Adapters change which terms of the memory budget are populated: the frozen weights stay resident, but gradients and optimizer state shrink to the adapters, and activations still follow the backward path through every frozen layer. Storing the frozen base weights in a 4-bit format shrinks the largest remaining term further [@dettmers2023qlora], a recipe distinct from the full-parameter mixed-precision training above.
 
@@ -1661,193 +1662,20 @@ Forward propagation, gradient computation, and parameter updates define *what* t
 
 ### Arithmetic intensity {#sec-model-training-arithmetic-intensity-training-bottlenecks-4446}
 
-During a single training step on the reference H100, a large dense matrix multiplication runs near the chip's Tensor Core peak while a standalone softmax or LayerNorm kernel stalls waiting for bytes from HBM. Arithmetic intensity\index{Arithmetic intensity!training operations}\index{Roofline model!training bottlenecks} explains that split by comparing the operations a kernel performs to the bytes it moves across the memory bus:
-$$
-\ArithmeticIntensity = \frac{\Operations}{\DataVolume}
-$$
-
-The roofline model plots the highest throughput a kernel can attain against its arithmetic intensity. Within that model, operations above the hardware ridge point have a compute-throughput ceiling, while those below it have a memory-bandwidth ceiling. Launch overhead, limited parallelism, and imperfect execution can keep measured performance below either ceiling. @Sec-hardware-acceleration-roofline-model-42ff develops the roofline model and the hardware ridge point, and @sec-appdx-machine-foundations-roofline-model-2529 works through the derivation.[^fn-ridge-point-precision]
-
-[^fn-ridge-point-precision]: **Ridge point and precision**\index{Ridge point!precision dependence}: The roofline ridge point, the arithmetic intensity threshold separating memory-bound from compute-bound operations, shifts with numerical precision. On the same accelerator, a lower-precision Tensor Core path can expose much more arithmetic throughput at roughly the same memory bandwidth, raising the ridge point substantially. Switching from 32-bit execution to BF16 mixed precision can therefore change which optimization technique yields returns, making precision selection inseparable from roofline analysis.
-
-::: {.column-margin .margin-pointer}
-↩ Arithmetic intensity, the ridge point, and the memory-bound and compute-bound regimes they separate are established informally in @sec-ml-systems-matching-workloads-hardware-bf91.
-:::
-
-@Tbl-training-arithmetic-intensity summarizes common tendencies rather than fixed measurements. Dense matrix multiplication can reuse operands enough to reach high arithmetic intensity, while standalone elementwise and reduction kernels often perform less work per byte moved. The target hardware's ridge point determines the resulting regime.
-
-| **Operation**            | **Arithmetic-intensity tendency**                             | **Classification condition**                         |
-|:-------------------------|:--------------------------------------------------------------|:-----------------------------------------------------|
-| **Dense MatMul (large)** | High when shapes and tiling provide substantial operand reuse | Compute-bound only when intensity exceeds the ridge  |
-| **Activation functions** | Usually low as standalone elementwise kernels                 | Often memory-sensitive unless fusion removes traffic |
-| **LayerNorm/BatchNorm**  | Reduction and elementwise work with multiple tensor passes    | Depends on fusion, shape, and target ridge point     |
-| **Attention softmax**    | Reduction and normalization over the attention axis           | Depends on materialization, tiling, and fusion       |
-
-: **Training Operation Classification Conditions**: Operation families follow common arithmetic-intensity tendencies, but classification requires comparing the measured implementation with the target hardware's ridge point. Memory-sensitive kernels may benefit from reducing traffic or increasing fusion, while compute-bound kernels benefit from additional arithmetic throughput. {#tbl-training-arithmetic-intensity tbl-colwidths="[34,33,33]"}
-
-Hardware efficiency during model training depends directly on kernel arithmetic intensity. @Fig-training-roofline bounds attainable throughput across training kernels on the H100's roofline, contrasting memory-bandwidth-bound operators (softmax, LayerNorm) along the sloped ceiling against compute-bound operators (dense MatMul) on the flat `{python} ReferenceMachine.h100_peak_str` peak.
-
-::: {#fig-training-roofline fig-env="figure" fig-pos="htb" fig-cap="**Illustrative Training Roofline**: The blue bandwidth slope and orange arithmetic ceiling bound attainable performance on the H100. Assumed operation coordinates illustrate how arithmetic intensity changes the active bound; they are not a profile of one GPT-2 execution. FlashAttention is shown moving right because it reduces HBM traffic. Whether a real attention kernel crosses the ridge depends on shape, precision, hardware, and implementation." fig-alt="Log-log H100 roofline with a blue sloped bandwidth ceiling, an orange horizontal compute ceiling, and neutral labeled points for Softmax, LayerNorm, standard attention, MatMul, and FlashAttention. An arrow connects standard attention to FlashAttention at higher arithmetic intensity. A note identifies the operation positions as assumed."}
-
-```{python}
-#| echo: false
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ TRAINING ROOFLINE (FIGURE)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @fig-training-roofline—hardware utilization and ridge point
-# │
-# │ Goal: Map GPT-2 training ops (MatMul, LayerNorm, Softmax, Attention) onto
-# │       roofline; show FlashAttention moving attention above ridge.
-# │ Show: Log-log roofline; memory-bound vs compute-bound regions; op scatter.
-# │ How: H100 peak specs; y = min(bw*x, peak_flops); book_style.setup_plot().
-# │ Provenance: Modeled H100 roofline min(peak_bw * intensity, peak_flops) from
-# │   mlsysim.Hardware.Cloud.H100 paired with assumed operator intensity anchors.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-# ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
-# │ Map GPT-2 training ops (MatMul, LayerNorm, Softmax, Attention) onto
-import numpy as np
-from binder.tools.figures import style as book_style
-
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(6.2, 3.6))
-# —Plot: Training Roofline Model ---
-
-# ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
-peak_flops = Hardware.Cloud.H100.compute.peak_flops.to(TFLOPs / second).magnitude  # 989 TFLOP/s
-peak_bw = Hardware.Cloud.H100.memory.bandwidth.to(TB / second).magnitude  # 3.35 TB/s
-x_max = 2000
-ridge = peak_flops / peak_bw
-
-# Shade regions
-
-# ┌── 3. RENDER ────────────────────────────────────────────────────────────────
-ax.axvspan(1, ridge, color=COLORS['BlueL'], alpha=0.35, lw=0)
-ax.axvspan(ridge, x_max, color=COLORS['OrangeL'], alpha=0.35, lw=0)
-
-x = np.logspace(0, np.log10(x_max), 100)
-y_mem = peak_bw * x
-y_compute = np.full_like(x, peak_flops)
-y = np.minimum(y_mem, y_compute)
-
-# Separate the two ceilings while retaining the same upper-bound model.
-ax.plot([1, ridge], [peak_bw, peak_flops], color=COLORS['BlueLine'], linewidth=2.5)
-ax.plot([ridge, x_max], [peak_flops, peak_flops], color=COLORS['OrangeLine'], linewidth=2.5)
-ax.set_title('Illustrative ceiling; operation positions are assumed', loc='left', fontsize=book_style.MIN_FONT_PT)
-ax.vlines(ridge, 1, peak_flops, colors=COLORS['BlueLine'], linestyles='--', alpha=0.6)
-
-# ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
-ax.text(
-    ridge * 0.9,
-    2,
-    f"Ridge: {ridge:.0f}",
-    rotation=90,
-    color=COLORS['BlueLine'],
-    fontsize=9,
-    ha='right',
-    bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=0.5),
-)
-ax.text(
-    40,
-    1200,
-    f"H100 FP16 dense\n({peak_flops:.0f} TFLOP/s)",
-    color=COLORS['OrangeLine'],
-    fontsize=9,
-    fontweight='bold',
-    ha='center',
-    bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=0.5),
-)
-
-ops = [
-    {'name': 'Softmax', 'x': 5, 'color': COLORS['primary'], 'offset': (22, -13)},
-    {'name': 'LayerNorm', 'x': 10, 'color': COLORS['primary'], 'offset': (25, -14)},
-    {'name': 'Std Attention', 'x': 50, 'color': COLORS['primary'], 'offset': (-35, 7)},
-    {'name': 'MatMul', 'x': 500, 'color': COLORS['primary'], 'offset': (-15, 9)},
-    {'name': 'FlashAttn', 'x': 900, 'color': COLORS['primary'], 'offset': (0, 14)},
-]
-for op in ops:
-    op['y'] = min(peak_bw * op['x'], peak_flops)  # place each point on the roofline
-
-for op in ops:
-    ax.scatter(op['x'], op['y'], color=op['color'], s=100, zorder=3, edgecolors='white')
-    ax.annotate(
-        op['name'],
-        (op['x'], op['y']),
-        xytext=op['offset'],
-        textcoords='offset points',
-        ha='center',
-        fontsize=9,
-        fontweight='normal',
-        color=op['color'],
-        bbox=dict(facecolor='white', alpha=0.7, edgecolor='none', pad=1),
-    )
-
-ax.annotate(
-    "",
-    xy=(900, peak_flops * 0.95),
-    xytext=(50, peak_bw * 50 * 0.95),
-    arrowprops=dict(arrowstyle="->", color=COLORS['primary'], shrinkA=7, shrinkB=5, lw=2.0),
-)
-ax.text(
-    700,
-    260,
-    "FlashAttention",
-    color=COLORS['primary'],
-    rotation=17,
-    fontsize=9,
-    fontweight='bold',
-    ha='right',
-    bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=0.5),
-)
-ax.text(
-    3,
-    3e1,
-    "Memory-bound",
-    color=COLORS['BlueLine'],
-    style='italic',
-    fontsize=9,
-    ha='center',
-    fontweight='bold',
-    bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=0.5),
-)
-ax.text(
-    770,
-    3e1,
-    "Compute-bound",
-    ha='center',
-    color=COLORS['OrangeLine'],
-    style='italic',
-    fontsize=9,
-    fontweight='bold',
-    bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=0.5),
-)
-
-ax.set_xscale('log')
-ax.set_yscale('log')
-ax.set_xlim(1, x_max)
-ax.set_ylim(1, 3000)
-ax.set_xlabel('Arithmetic Intensity (FLOP/byte)', fontsize=10)
-ax.set_ylabel('Attainable TFLOP/s', fontsize=10)
-plt.show()
-plt.close()
-```
-
-:::
-
 ```{python}
 #| echo: false
 #| label: attn-intensity-calc
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ ATTENTION ARITHMETIC INTENSITY CALCULATION
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Arithmetic Intensity section—attention layer intensity for
-# │          roofline analysis (GPT-2 Small variant)
+# │ Context: Arithmetic Intensity section—materialized attention score intensity
+# │          compared against the H100 system-balance threshold
 # │
-# │ Goal: Derive the arithmetic intensity of the attention mechanism.
-# │ Show: That GPT-2 Small attention falls below the H100 ridge point.
-# │ How: Apply the H/8 formula using standard transformer dimensions.
+# │ Goal: Derive the arithmetic intensity of materialized attention scores.
+# │ Show: That GPT-2 materialized attention falls far below the H100 threshold.
+# │ How: Apply the d_head/2 formula using standard transformer dimensions.
 # │
-# │
-# │ Note: The ridge-point values in the prose come from H100Ridge below.
+# │ Note: The system-balance values in the prose come from H100Ridge below.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.physics import calc_score_matrix_intensity
 from mlsysim.fmt import check, fmt, fmt_arithmetic_intensity
@@ -1885,8 +1713,8 @@ class AttentionIntensity:
 #| echo: false
 #| label: h100-ridge-calc
 # ┌── LEGO ───────────────────────────────────────────────
-# │ Goal: H100 roofline ridge point (peak FP16 rate / HBM bandwidth) for the
-# │       roofline prose, matching the ridge drawn in @fig-training-roofline.
+# │ Goal: H100 system-balance threshold (peak FP16 rate / HBM bandwidth) for
+# │       comparing materialized attention's operational intensity.
 from mlsysim.fmt import check, fmt_arithmetic_intensity, fmt_bandwidth, fmt_flop_rate
 
 class H100Ridge:
@@ -1907,27 +1735,13 @@ class H100Ridge:
     ridge_str = fmt_arithmetic_intensity(ridge, commas=False)
 ```
 
-On the reference machine the ridge in @fig-training-roofline sits at `{python} H100Ridge.ridge_str`, the H100's `{python} H100Ridge.peak_tflop_per_s_str` peak divided by its `{python} H100Ridge.bw_tb_per_s_str` of HBM bandwidth. The operation points in this diagram are illustrative placements that show how to interpret the model, not measured GPT-2 coordinates.
+During a single training step on the reference H100, a large dense matrix multiplication runs near the chip's Tensor Core peak while a standalone softmax or LayerNorm kernel stalls waiting for bytes from HBM. Arithmetic intensity\index{Arithmetic intensity!training operations}, $\ArithmeticIntensity = \Operations / \DataVolume$, explains that split by comparing a kernel's operations per byte moved against the machine's system balance ($\PeakRate / \Bandwidth$, the ridge point previewed in @sec-ml-systems-matching-workloads-hardware-bf91), which sits at `{python} H100Ridge.ridge_str` on the H100 (`{python} H100Ridge.peak_tflop_per_s_str` divided by `{python} H100Ridge.bw_tb_per_s_str`). Operations below that threshold are memory bound, whereas large dense matrix products can exceed it and become compute bound; @sec-hardware-acceleration-roofline-model-42ff develops the full roofline model, precision-dependent ceilings, and formal performance bounds (with a worked derivation in @sec-appdx-machine-foundations-roofline-model-2529).
 
-Consider a GPT-2 attention layer\index{Arithmetic intensity!attention layer} that materializes the $\SequenceLength{\times}\SequenceLength$ attention-score matrix in HBM. For each head, the $\AttentionQueryMatrix\AttentionKeyMatrix^T$ product performs $\SequenceLength^2\AttentionHeadDimension$ multiply-accumulates, or $2\SequenceLength^2\AttentionHeadDimension$ FLOPs. Writing the resulting $\SequenceLength{\times}\SequenceLength$ FP16 score matrix to HBM (2 bytes per element) and reading it back for the subsequent softmax kernel (another 2 bytes per element) moves $4\SequenceLength^2$ bytes. Dividing $2\SequenceLength^2\AttentionHeadDimension$ FLOPs by $4\SequenceLength^2$ bytes cancels $\SequenceLength^2$ and leaves an arithmetic intensity of $\AttentionHeadDimension/2$ FLOP/byte. For GPT-2 Small ($\HiddenDimension=$ `{python} AttentionIntensity.H_small_str` across `{python} AttentionIntensity.heads_small_str` heads, so $\AttentionHeadDimension=$ `{python} AttentionIntensity.head_dim_str`), this restricted accounting yields `{python} AttentionIntensity.attn_intensity_str`. The lighthouse GPT-2 XL gives the same answer, because its head dimension is also `{python} GPT2Compute.head_dim_str` and the ratio depends only on $\AttentionHeadDimension$. A complete kernel analysis must also count Q and K traffic, softmax work, additional reads and writes, cache reuse, and fusion. The $\mathcal{O}(\SequenceLength^2)$ materialized score traffic remains the term that FlashAttention targets.
-
-At `{python} H100Ridge.ridge_str`, the H100's ridge sits far to the right of the `{python} AttentionIntensity.attn_intensity_str` materialized attention estimate, so low-intensity operations such as attention softmax remain memory bound even when large matrix multiplications on the same device are compute bound.
-
-In @fig-training-roofline, the arrow from standard attention to FlashAttention[^fn-flashattention-tiling-sram] shows how tiling can shift transformer attention toward, and for favorable shapes across, the `{python} H100Ridge.ridge_str` ridge line onto the compute ceiling. By never materializing the full $\SequenceLength{\times}\SequenceLength$ attention matrix in HBM and instead processing tiles that fit in fast SRAM (tiling, the general technique developed in @sec-hardware-acceleration-tiling-principle), FlashAttention reduces auxiliary attention memory from $\mathcal{O}(\SequenceLength^2)$ to $\mathcal{O}(\SequenceLength)$ and sharply reduces HBM traffic. The original work reports up to 3$\times$ speedups on evaluated workloads [@dao2022], with gains depending on tensor shape, hardware, and baseline. The algorithm and the conditions under which it applies are examined in detail in @sec-model-training-flash-attention-ioaware-attention-optimization-3da0.
-
-[^fn-flashattention-tiling-sram]: **FlashAttention**\index{FlashAttention!I/O-aware design}: The core mechanism processes attention in small tiles that fit within the accelerator's fast on-chip SRAM, avoiding writes of the full intermediate $\SequenceLength{\times}\SequenceLength$ matrix to slower HBM. The exact HBM IO bound depends on tile size and SRAM capacity, but the practical effect is a large reduction in memory traffic and auxiliary activation storage.
-
-Batch size\index{Batch size!arithmetic intensity effect} also moves an operation along the intensity axis, because a larger batch spreads each weight load over more examples. Where the transition from memory-bound to compute-bound execution falls depends on the operation's shape, its precision, and the hardware (perspective \ref{psp-training-peak-flops-vs-sustained-performance}).
-
-::: {#psp-training-peak-flops-vs-sustained-performance .callout-perspective title="Peak FLOP/s vs. sustained performance"}
-
-Peak TFLOP/s is an arithmetic ceiling rather than a prediction of sustained application performance. For an implementation that is strictly bandwidth bound, raising only the arithmetic ceiling does not improve the roofline bound. Mixed-precision training\index{Mixed-precision training!FP16/BF16} can both enable faster arithmetic paths and reduce traffic for tensors actually stored and transferred at lower precision. The realized gain depends on kernel support, conversion overhead, numerical requirements, and which resource is the bottleneck. Roofline-guided optimization therefore measures the implementation before choosing fusion, precision changes, or additional compute.
-
+::: {.column-margin .margin-pointer}
+↩ Arithmetic intensity, the ridge point, and the memory-bound and compute-bound regimes they separate are established informally in @sec-ml-systems-matching-workloads-hardware-bf91.
 :::
 
-Roofline position therefore guides optimization strategy selection. For memory-bound operations, reducing data movement through kernel fusion, reduced precision, or algorithmic improvements like FlashAttention provides the largest gains. For compute-bound operations, increasing throughput through Tensor Cores and parallel execution matters more. The first case asks how to move fewer bytes, and the second asks how to keep more arithmetic units busy.
-
-Arithmetic-intensity analysis is how the silicon contract (principle \ref{pri-silicon-contract}) is checked in training. The silicon contract names the resource a workload is built to exploit; the analysis determines which physical resource actually constrains a particular implementation. Dense matrix multiplication reaches the compute-bound regime when tensor shapes provide sufficient data reuse, while standalone normalization and elementwise activation kernels remain memory bandwidth bound.
+That threshold directly exposes why standard transformer attention stalls. Consider a GPT-2 attention layer\index{Arithmetic intensity!attention layer} that materializes the $\SequenceLength{\times}\SequenceLength$ attention-score matrix in HBM. For each head, the $\AttentionQueryMatrix\AttentionKeyMatrix^T$ product performs $\SequenceLength^2\AttentionHeadDimension$ multiply-accumulates, or $2\SequenceLength^2\AttentionHeadDimension$ FLOPs. Writing the resulting $\SequenceLength{\times}\SequenceLength$ FP16 score matrix to HBM (2 bytes per element) and reading it back for the subsequent softmax kernel (another 2 bytes per element) moves $4\SequenceLength^2$ bytes. Dividing $2\SequenceLength^2\AttentionHeadDimension$ FLOPs by $4\SequenceLength^2$ bytes cancels $\SequenceLength^2$ and leaves an arithmetic intensity of $\AttentionHeadDimension/2$ FLOP/byte. For GPT-2 Small ($\HiddenDimension=$ `{python} AttentionIntensity.H_small_str` across `{python} AttentionIntensity.heads_small_str` heads, so $\AttentionHeadDimension=$ `{python} AttentionIntensity.head_dim_str`), this restricted accounting yields `{python} AttentionIntensity.attn_intensity_str`. The lighthouse GPT-2 XL gives the same answer, because its head dimension is also `{python} GPT2Compute.head_dim_str` and the ratio depends only on $\AttentionHeadDimension$. This restricted accounting omits Q and K traffic, softmax work, and cache reuse, isolating the $\mathcal{O}(\SequenceLength^2)$ materialized score traffic that FlashAttention targets. At `{python} AttentionIntensity.attn_intensity_str` against the H100's `{python} H100Ridge.ridge_str` threshold, materialized attention stays firmly memory bound even when surrounding matrix multiplications are compute bound; avoiding those $\mathcal{O}(\SequenceLength^2)$ HBM writes through on-chip SRAM tiling is the exact motivation for FlashAttention (@sec-model-training-flash-attention-ioaware-attention-optimization-3da0; general tiling mechanics are developed in @sec-hardware-acceleration-tiling-principle).
 
 Isolated operation costs (dense matrix multiplication FLOPs, memory-bound activations, and optimizer state allocations) account for what happens once tensors are resident in device memory, yet a perfectly tuned matrix multiplication still achieves nothing if the accelerator sits idle waiting for the next batch of data.
 
@@ -2557,6 +2371,7 @@ class GPT2DataPipeline:
     dataset = Models.Language.GPT2.training_dataset_size
     bpe_vocab = 50_257
     f_access = 0.1
+    raw_bytes_per_token = 4 * byte  # scenario assumption: ~4 UTF-8 bytes per English BPE token
     # Device service interval: one H100 step over the batch at the chapter's utilization
     effective_step_time = feed.compute_time.to(millisecond)
 
@@ -2567,6 +2382,8 @@ class GPT2DataPipeline:
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     tokens_per_batch = feed.tokens_per_batch
+    raw_text_batch = tokens_per_batch * raw_bytes_per_token
+    read_time = (raw_text_batch / random_access_bw).to(millisecond)
     tokenization_time = feed.tokenization_time
 
     batch_bytes = feed.batch_bytes  # int64
@@ -2594,9 +2411,16 @@ class GPT2DataPipeline:
         parallel_token_time + transfer_time < effective_step_time,
         "Parallel preparation and transfer must fit within the supplied device interval.",
     )
+    check(
+        abs(read_time.to(millisecond).magnitude - 0.19) < 0.01,
+        f"Expected ~0.19 ms storage read time for ~131 KB raw text at 0.70 GB/s, got {read_time}",
+    )
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     tokens_per_batch_str = fmt_count(tokens_per_batch, scale="K", precision=1, commas=False, label="token")
+    raw_bytes_per_token_str = fmt_count(raw_bytes_per_token.to(byte).magnitude, commas=False, label="byte")
+    raw_text_kb_str = fmt_memory(raw_text_batch, unit=KB, precision=1, commas=False)
+    read_ms_str = fmt_time(read_time, millisecond, precision=2, commas=False)
     batch_size_seq_str = fmt_count(batch_size, label="sequence", commas=False)
     batch_size_str = fmt_count(batch_size, commas=False)
     seq_len_token_str = fmt_count(seq_len, label="token", commas=True)
@@ -2642,7 +2466,7 @@ class StorageBandwidthNvme:
 
 **Stage trace**:
 
-1. **Raw text storage**: The WebText corpus contributes about `{python} GPT2DataPipeline.dataset_gb_str` of raw text. Sequential reads from NVMe SSD storage reach `{python} StorageBandwidthNvme.nvme_bw_gb_per_s_str`. Under document sampling with access factor `{python} GPT2DataPipeline.f_access_str`, random-access storage bandwidth drops to `{python} GPT2DataPipeline.random_access_gb_per_s_str`, giving $\StorageReadTime= \DataVolume / \EffectiveStorageThroughput\approx 0.1\text{ ms}$.
+1. **Raw text storage**: The WebText corpus contributes about `{python} GPT2DataPipeline.dataset_gb_str` of raw text. Sequential reads from NVMe SSD storage reach `{python} StorageBandwidthNvme.nvme_bw_gb_per_s_str`. Under document sampling with access factor `{python} GPT2DataPipeline.f_access_str`, random-access storage bandwidth drops to `{python} GPT2DataPipeline.random_access_gb_per_s_str`. At roughly `{python} GPT2DataPipeline.raw_bytes_per_token_str` per token for raw English text, a batch of `{python} GPT2DataPipeline.tokens_per_batch_str` reads $\DataVolume \approx$ `{python} GPT2DataPipeline.raw_text_kb_str`, giving $\StorageReadTime = \DataVolume / \EffectiveStorageThroughput \approx$ `{python} GPT2DataPipeline.read_ms_str`.
 2. **Tokenization**: A byte-pair encoding (BPE) tokenizer\index{Byte pair encoding!tokenization} (`{python} GPT2DataPipeline.bpe_vocab_str` vocabulary) converts text into token IDs. For batch size `{python} GPT2DataPipeline.b_assign_math` and sequence length `{python} GPT2DataPipeline.s_assign_math` (`{python} GPT2DataPipeline.tokens_per_batch_str` total), a single CPU core processing `{python} GPT2DataPipeline.token_rate_tokens_per_s_str` takes $\TokenizationTime\approx$ `{python} GPT2DataPipeline.tokenization_ms_str` per batch.
 3. **Batching and padding**: Padding and packing generate an int64 tensor of shape `{python} GPT2DataPipeline.batch_size_seq_str` $\times$ `{python} GPT2DataPipeline.seq_len_token_str`, producing `{python} GPT2DataPipeline.batch_kb_str` per batch.
 4. **PCIe transfer**: Transferring the tensor across the H100's PCIe Gen5 x16 link (`{python} GPT2DataPipeline.pcie_gb_per_s_str` bandwidth) takes $\BatchTransferTime=$ `{python} GPT2DataPipeline.transfer_ms_str`, making bus transfer negligible.
@@ -2854,18 +2678,18 @@ To avoid starving the accelerator, the average preprocessing service time per ba
 #| echo: false
 #| label: forward-pass-dimensions-calc
 # ┌─────────────────────────────────────────────────────────────────────────────
-# │ FORWARD PASS DIMENSIONS + WAVE QUANTIZATION
+# │ FORWARD PASS DIMENSIONS
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: §Forward Pass (Compute Operations), §Wave Quantization
-# │          (tbl-wave-quantization), §Backward Pass (bwd dims).
+# │ Context: §Forward Pass (Compute Operations), §Backward Pass (bwd dims).
 # │
-# │ Goal: Provide layer dimensions, convolution parameters, wave quantization
-# │       scenarios, and backward-pass dimension strings.
-# │ Show: Matrix operation sizes; wave quantization efficiency table;
+# │ Goal: Provide layer dimensions, convolution parameters, H100 SM count,
+# │       and backward-pass dimension strings.
+# │ Show: Matrix operation sizes, H100 SM wave granularity anchor, and
 # │       backward-pass tensor shapes.
-# │ How:  Hard-coded architectural dimensions; derived fmt_math strings.
+# │ How:  Architectural dimensions, registry SM count, derived fmt_math strings.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Hardware
 from mlsysim.fmt import fmt, fmt_count, fmt_flops, fmt_math, check, MarkdownStr
 
 class TrainingDimensions:
@@ -2873,6 +2697,7 @@ class TrainingDimensions:
     layer_dim_h = 512
     layer_dim_w = 1024
     layer_batch = 64
+    h100_sm_count = Hardware.Cloud.H100.compute.sm_count
 
     # Convolution parameters
     conv_batch = 64
@@ -2887,31 +2712,15 @@ class TrainingDimensions:
     bwd_grad_dims_str = MarkdownStr("64 × 112 × 112 × 64")
     bwd_kernel_dims_str = MarkdownStr("7 × 7 × 3 × 64")
 
-    # Wave Quantization Scenarios
-    wave_warp = 32
-    wave_batch_32 = 32
-    wave_batch_33 = 33
-    wave_batch_64 = 64
-    wave_batch_65 = 65
-
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     layer_macs_m = layer_dim_h * layer_dim_w * layer_batch / MILLION
     layer_flops_m = 2 * layer_macs_m
     conv_spatial = conv_h - conv_k + 1
     conv_ops_per_pos = conv_k * conv_k * conv_c
 
-    wave_warps_32 = (wave_batch_32 + wave_warp - 1) // wave_warp
-    wave_warps_33 = (wave_batch_33 + wave_warp - 1) // wave_warp
-    wave_warps_64 = (wave_batch_64 + wave_warp - 1) // wave_warp
-    wave_warps_65 = (wave_batch_65 + wave_warp - 1) // wave_warp
-    wave_util_33 = wave_batch_33 / (wave_warps_33 * wave_warp) * 100
-    wave_util_65 = wave_batch_65 / (wave_warps_65 * wave_warp) * 100
-    wave_time_33 = wave_warps_33 / wave_warps_32
-    wave_time_65 = wave_warps_65 / wave_warps_64
-
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(conv_ops_per_pos == 147, f"7x7x3 conv MACs should be 147, got {conv_ops_per_pos}")
-    check(wave_warps_33 == 2 and wave_warps_65 == 3, "Warp boundary examples should launch partially filled extra warps")
+    check(h100_sm_count == 132, f"Reference H100 should have 132 SMs, got {h100_sm_count}")
 
     # Formatted Outputs—layer + conv
     layer_dim_h_str = fmt(layer_dim_h, precision=0, commas=False)
@@ -2919,6 +2728,7 @@ class TrainingDimensions:
     layer_batch_str = fmt(layer_batch, precision=0, commas=False)
     layer_macs_str = fmt_count(layer_macs_m * MILLION, scale="million", scale_style="word", precision=1, commas=False, label="MAC")
     layer_mflop_str = fmt_flops(layer_flops_m * MFLOPs, unit=MFLOPs, precision=1, commas=False)
+    h100_sm_count_str = fmt(h100_sm_count, precision=0, commas=False)
     conv_batch_str = fmt(conv_batch, precision=0, commas=False)
     conv_h_str = fmt(conv_h, precision=0, commas=False)
     conv_width_str = fmt(conv_w, precision=0, commas=False)
@@ -2933,20 +2743,6 @@ class TrainingDimensions:
     )
     conv_filters_str = fmt(conv_filters, precision=0, commas=False)
     conv_spatial_str = fmt(conv_spatial, precision=0, commas=False)
-
-    # Formatted Outputs—wave quantization
-    wave_batch_32_str = fmt(wave_batch_32, precision=0, commas=False)
-    wave_batch_33_str = fmt(wave_batch_33, precision=0, commas=False)
-    wave_batch_64_str = fmt(wave_batch_64, precision=0, commas=False)
-    wave_batch_65_str = fmt(wave_batch_65, precision=0, commas=False)
-    wave_warps_32_value_str = fmt(wave_warps_32, precision=0, commas=False)
-    wave_warps_33_value_str = fmt(wave_warps_33, precision=0, commas=False)
-    wave_warps_64_value_str = fmt(wave_warps_64, precision=0, commas=False)
-    wave_warps_65_value_str = fmt(wave_warps_65, precision=0, commas=False)
-    wave_util_33_str = fmt_percent(wave_util_33 / 100, precision=1, commas=False, style='symbol')
-    wave_util_65_str = fmt_percent(wave_util_65 / 100, precision=1, commas=False, style='symbol')
-    wave_time_33_factor_mult_str = fmt_multiple(wave_time_33, precision=0, commas=False)
-    wave_time_65_factor_mult_str = fmt_multiple(wave_time_65, precision=1, commas=False)
 
     # MD Math strings
     layer_dims_math = fmt_math(f"{layer_dim_h} \\times {layer_dim_w}")
@@ -2964,41 +2760,7 @@ The operation counts in @sec-model-training-matrix-operations-1f21 become a sche
 
 A dense layer's FLOP count\index{Matrix multiplication!dense operations} is already fixed by its input width, output width, and batch size. Its execution time also depends on how that work fills the accelerator. A layer with dimensions of `{python} TrainingDimensions.layer_dims_math` at batch `{python} TrainingDimensions.layer_batch_str` supplies `{python} TrainingDimensions.layer_macs_str`, or `{python} TrainingDimensions.layer_mflop_str`; the kernel must divide this work among execution units without leaving a mostly empty final wave, a last round of work that occupies only a few of the execution units while the rest sit idle.
 
-Accelerators execute these parallel workloads by grouping execution threads into fixed-size units: warps\index{Warp!GPU execution unit}[^fn-warp-execution-model] of 32 threads on NVIDIA architectures, or wavefronts of 64 threads on AMD architectures. Warps run on streaming multiprocessors (SMs), the many identical compute cores replicated across a GPU (@sec-hardware-acceleration-evolution-simd-simt-architectures-e1fd). Execution efficiency therefore depends on choosing tensor dimensions that divide evenly into warps and into the operand shapes that specialized units like Tensor Cores require.
-
-[^fn-warp-execution-model]: **Warp**\index{Warp!etymology and hardware constraint}: From textile weaving, where a "warp" is the set of threads held taut on a loom while a shuttle weaves across them. NVIDIA adopted the term because GPU threads within a warp execute the same instruction in lockstep, analogous to parallel threads moving together on the loom. An NVIDIA warp contains 32 threads.
-
-::: {#psp-training-wave-quantization-tail-effects .callout-perspective title="Wave quantization and tail effects"}
-
-A common mistake in ML systems is ignoring the fixed execution granularity of GPU kernels. GPU execution is quantized into waves\index{Wave quantization!accelerator utilization}\index{Wave quantization!tail effects}\index{Batch size!hardware alignment} of work, but the relevant unit is the kernel's thread or tile mapping, not necessarily one sample per thread.
-
-Warps make the granularity concrete. In the illustrative special case where one independent work item maps to one thread, 32 items fill one warp while 33 items require a second, mostly empty warp. Neural-network kernels usually map each sample to many threads, so batch size alone does not determine this utilization.
-
-On a large GPU such as the NVIDIA H100 with 132 SMs, where each SM schedules groups of warps, the hardware processes thousands of threads in a single wave. If the total workload slightly exceeds a wave boundary (for example, 1.01 waves), the hardware must execute a second, nearly empty wave to completion before the next task begins.
-
-@Tbl-training-wave-quantization quantifies that one-item-per-thread illustration. It is not a general batch-size performance model.
-
-```{=latex}
-\begingroup
-\renewcommand{\arraystretch}{1.35}
-```
-
-| **Independent Work Items**                      |                    **Warps Needed**                   |              **Lane Utilization**              |                      **Relative Time**                      |
-|:------------------------------------------------|:-----------------------------------------------------:|:----------------------------------------------:|:-----------------------------------------------------------:|
-| `{python} TrainingDimensions.wave_batch_32_str` | `{python} TrainingDimensions.wave_warps_32_value_str` |                      100%                      |                          1$\times$                          |
-| `{python} TrainingDimensions.wave_batch_33_str` | `{python} TrainingDimensions.wave_warps_33_value_str` | `{python} TrainingDimensions.wave_util_33_str` | ~`{python} TrainingDimensions.wave_time_33_factor_mult_str` |
-| `{python} TrainingDimensions.wave_batch_64_str` | `{python} TrainingDimensions.wave_warps_64_value_str` |                      100%                      |                          1$\times$                          |
-| `{python} TrainingDimensions.wave_batch_65_str` | `{python} TrainingDimensions.wave_warps_65_value_str` | `{python} TrainingDimensions.wave_util_65_str` | ~`{python} TrainingDimensions.wave_time_65_factor_mult_str` |
-
-: **Illustrative Warp-Tail Arithmetic**: Under a one-work-item-per-thread mapping, counts just above a 32-thread boundary launch a partially filled warp, so 33 items use two warps while 64 fill the same two warps. Actual training kernels map tensors to threads and tiles in implementation-specific ways, often assigning many threads to each sample, so these values cannot be inferred from batch size alone. Profiling must identify the kernel's real mapping and wave boundaries. {#tbl-training-wave-quantization tbl-colwidths="[25,25,25,25]"}
-
-```{=latex}
-\endgroup
-```
-
-**Systems insight**: The table teaches the shape of the penalty, not its size for any real kernel. The actionable rule is to choose batch, sequence, and hidden dimensions that are multiples of the kernel's tile size and that divide into whole waves across the SMs, then benchmark the neighboring candidates. Profiling reveals partially filled warps or waves; batch size alone cannot.
-
-:::
+Kernels partition each matrix product into fixed-size tiles and schedule thread blocks across a GPU's streaming multiprocessors (SMs), the replicated compute cores whose execution model and tiling mechanics are developed in @sec-hardware-acceleration-evolution-simd-simt-architectures-e1fd and @sec-hardware-acceleration-tiling-principle. Because hardware dispatches thread blocks in full-chip waves (for example, multiples of the `{python} TrainingDimensions.h100_sm_count_str` SMs on an H100), a tile count that lands slightly past a wave boundary triggers wave quantization\index{Wave quantization!accelerator utilization}\index{Wave quantization!tail effects}\index{Batch size!hardware alignment}, leaving most SMs idle while the trailing wave completes. Aligning batch, sequence, and hidden dimensions with the kernel's tile size and SM wave granularity avoids these tail penalties, though profiling must verify the actual mapping because real kernels assign many threads to each sample rather than one sample per thread.
 
 Beyond dense matrix multiplication, distinct neural architectures introduce specialized computational patterns. Convolutional networks\index{Convolution!computational cost}, for instance, slide spatial filters across multichannel input tensors. Consider an input tensor of dimensions `{python} TrainingDimensions.conv_input_dims_math` (batch size $\times$ height $\times$ width $\times$ channels) processed by `{python} TrainingDimensions.conv_kernel_dims_math` kernels. Each position requires `{python} TrainingDimensions.conv_ops_per_pos_str`, and with `{python} TrainingDimensions.conv_filters_str` filters operating across the `{python} TrainingDimensions.conv_spatial_dims_math` output positions of a convolution with stride 1 and no padding, the arithmetic work reaches hundreds of millions of multiply-accumulate operations per image. ResNet-50's own first layer uses a stride of 2, which shrinks its output to 112 by 112, the size the memory analysis below uses. Accelerators usually execute these convolutions on the same matrix-multiply units as dense layers, after rearranging the input so that each filter application becomes part of one large matrix product.
 
@@ -3527,7 +3289,7 @@ class MFUExampleCalc:
     lost_pct_str = fmt_percent(round(lost_fraction, 2), precision=0, commas=False, style='prose')
 ```
 
-[^fn-mfu-hardware-utilization]: **Model FLOPs utilization (MFU)**\index{Model FLOPs utilization!PaLM benchmark}: The PaLM paper [@chowdhery2022palm] defined MFU as observed throughput divided by the theoretical maximum throughput at peak FLOPs. Its 540-billion-parameter run reported 46.2 percent MFU on 6,144 TPU v4 chips. The remainder is not credited by the model-FLOP numerator, and MFU alone does not identify how much came from memory traffic, communication, pipeline bubbles, recomputation, or other work.
+[^fn-mfu-hardware-utilization]: **Model FLOPs utilization (MFU)**\index{Model FLOPs utilization!PaLM benchmark}: The PaLM paper [@chowdhery2022palm] defined MFU as observed throughput divided by the theoretical maximum throughput at peak FLOPs. Its 540-billion-parameter run reported 46.2 percent MFU on 6,144 TPU v4 chips. The remainder is not credited by the model-FLOP numerator, and MFU alone does not identify how much came from memory traffic, communication, pipeline bubbles (idle gaps while stages wait on other stages or devices, @sec-model-training-model-parallelism-c97e), recomputation, or other work.
 
 ::: {#dfn-training-model-flops-utilization-mfu .callout-definition title="Model FLOPs utilization (MFU)"}
 
@@ -3612,7 +3374,7 @@ In the execution timeline captured by @fig-tf-bottleneck-trace, wide white inter
 
 :::
 
-Two classes of tools expose these signatures\index{Training profiler!bottleneck analysis}\index{Training profiler!timeline visualization}\index{GPU profiler!system-level analysis}\index{GPU profiler!kernel-level analysis}. Framework-level profilers record a timeline of operations, memory allocations, and input-pipeline stalls, which locates idle gaps and attributes them to host work. System- and kernel-level GPU profilers record kernel execution, memory transfers, synchronization points, and per-kernel counters such as achieved memory throughput and arithmetic-unit occupancy, which explains why a kernel that runs is slow. The method below uses the first class to find where time goes and the second to explain it.
+Two classes of tools expose these signatures\index{Training profiler!bottleneck analysis}\index{Training profiler!timeline visualization}\index{GPU profiler!system-level analysis}\index{GPU profiler!kernel-level analysis}. Framework-level profilers record a timeline of operations, memory allocations, and input-pipeline stalls, which locates idle gaps and attributes them to host work. System- and kernel-level GPU profilers record kernel execution, memory transfers, synchronization points, and per-kernel counters such as achieved memory throughput and arithmetic-unit occupancy (the share of execution slots kept active), which explains why a kernel that runs is slow. The method below uses the first class to find where time goes and the second to explain it.
 
 ::: {.column-margin .margin-pointer}
 ↪ How profilers and benchmark harnesses turn these measurements into reproducible results is developed in @sec-benchmarking-training-benchmarks-96da.
@@ -3730,13 +3492,13 @@ That diagnostic loop proceeds in three steps: profile the step to locate the lim
 
 First, profiling tools such as PyTorch Profiler\index{PyTorch!profiler}, TensorFlow Profiler\index{TensorFlow!profiler}, or NVIDIA Nsight Systems\index{NVIDIA Nsight Systems} record timestamps and hardware counters across each iteration. Traces capture kernel execution times on accelerator execution units, DMA transfers across PCIe or NVLink buses, and host CPU thread scheduling. Comparing elapsed time across these lanes isolates which subsystem sets the critical path. When data-loading intervals lie on the critical path and coincide with accelerator input waits, as in the modeled GPT-2 XL timeline above, the run is data-starved; speeding up matrix multiply kernels yields almost no wall-clock gain until input delivery keeps up.
 
-Second, each diagnosed bottleneck points to a specific remedy. When the accelerator idles waiting for batches, asynchronous prefetching and double-buffering over PCIe (keeping one batch in use while the next waits ready) overlap host data preparation with device compute. When kernel runtimes are bound by HBM bandwidth rather than arithmetic, kernel fusion and tiled algorithms such as FlashAttention keep intermediate activations in on-chip SRAM. When HBM capacity runs out, activation checkpointing discards and recomputes activations during the backward pass, or gradient accumulation splits each batch across sequential micro-batches to cap peak allocation. When streaming multiprocessors saturate with dense matrix math, 16-bit formats (FP16 or BF16) move eligible operations onto Tensor Cores, multiplying peak matrix throughput several-fold over FP32 CUDA cores (@tbl-precision-comparison) while halving the bytes moved per operand.
+Second, each diagnosed bottleneck points to a specific remedy. When the accelerator idles waiting for batches, asynchronous prefetching and double-buffering over PCIe (keeping one batch in use while the next waits ready) overlap host data preparation with device compute. When kernel runtimes are bound by HBM bandwidth rather than arithmetic, kernel fusion and tiled algorithms such as FlashAttention keep intermediate activations in on-chip SRAM. When HBM capacity runs out, activation checkpointing discards and recomputes activations during the backward pass, or gradient accumulation splits each batch across sequential micro-batches to cap peak allocation. When streaming multiprocessors saturate with dense matrix math, 16-bit formats (FP16 or BF16) move eligible operations onto Tensor Cores, multiplying peak matrix throughput several-fold over FP32 CUDA cores, the GPU's general-purpose scalar floating-point units (@tbl-precision-comparison), while halving the bytes moved per operand.
 
 Third, combining interventions requires checking their side effects on shared hardware resources. Asynchronous prefetching hides data movement latency behind computation, but double-buffered batch queues consume pinned host memory and device HBM. Other pairs reinforce one another: combining 16-bit mixed precision with activation checkpointing cuts activation memory enough to admit a larger per-device batch size, raising the arithmetic intensity of matrix multiplications on underfed Tensor Cores. After each change, a fresh profile verifies that the secondary resource cost has not created a new bottleneck.
 
-@Fig-optimization-flowchart formalizes this diagnostic playbook into a triage flowchart, using low accelerator activity and high memory allocation as signals for further investigation. Idle gaps require tracing input preparation, host work, and synchronization; capacity pressure motivates memory-saving techniques. When neither signal explains a missed target, kernel profiling distinguishes bandwidth, arithmetic, and launch limits.
+@Fig-optimization-flowchart formalizes this diagnostic playbook into a triage flowchart. Memory feasibility comes first: a configuration that fails with an out-of-memory (OOM) error must apply memory-saving techniques before a profile exists. Once the step fits, profiling separates idle gaps (tracing input preparation, host work, and synchronization) from post-profile capacity pressure that limits batch size; when neither signal explains a missed target, kernel profiling distinguishes bandwidth, arithmetic, and launch limits.
 
-::: {#fig-optimization-flowchart fig-env="figure" fig-pos="htb" fig-cap="**Training Optimization Decision Flowchart**: A heuristic path from profiling signals to candidate optimizations. Begin with accelerator activity and memory pressure, then investigate the limiting dependency or kernel resource before selecting an intervention. The 70 percent utilization and 90 percent memory thresholds are illustrative triage values rather than universal definitions of data-, memory-, or compute-bound execution." fig-alt="Heuristic flowchart starting from a profiled training run and using illustrative accelerator-utilization and memory-pressure thresholds to suggest candidate optimizations before re-profiling."}
+::: {#fig-optimization-flowchart fig-env="figure" fig-pos="htb" fig-cap="**Training Optimization Decision Flowchart**: A heuristic triage path enforcing feasibility before speed. Verify memory fit first so out-of-memory failures route directly to memory-saving techniques before profiling; once the step runs, use accelerator activity and memory pressure to select the next investigation before re-testing and re-profiling. The 70 percent utilization and 90 percent memory thresholds are illustrative triage values rather than universal definitions of data-, memory-, or compute-bound execution." fig-alt="Heuristic flowchart starting with a memory-fit check that routes out-of-memory failures directly to capacity-pressure fixes before profiling. Runs that fit proceed to Profile Training Run, then branch on illustrative 70 percent accelerator-utilization and 90 percent memory-pressure thresholds to investigate idle gaps, capacity pressure, or kernel limits before verifying fit and re-profiling."}
 
 ```{.tikz}
 \begin{tikzpicture}[font=\small\sffamily, line width=0.8pt]
@@ -3754,11 +3516,11 @@ Third, combining interventions requires checking their side effects on shared ha
   Flow/.style={->, >=latex, draw=black!65, line width=0.85pt},
   StartStop/.style={
     draw=VioletLine, fill=VioletL2, rounded corners=12pt,
-    minimum width=3.9cm, minimum height=0.9cm, align=center, font=\small\sffamily
+    minimum width=4.0cm, minimum height=0.9cm, align=center, font=\small\sffamily
   },
   Decision/.style={
-    draw=BlueLine, fill=cyan!10, diamond, aspect=2.2,inner sep= -1ex,
-    minimum width=4.3cm, minimum height=2cm, align=center, font=\small\sffamily
+    draw=BlueLine, fill=cyan!10, diamond, aspect=2.3, inner sep=0.5pt,
+    minimum width=4.5cm, minimum height=1.95cm, align=center, font=\small\sffamily
   },
   Bottleneck/.style={
     draw=GreenLine, fill=GreenL!50,
@@ -3766,42 +3528,52 @@ Third, combining interventions requires checking their side effects on shared ha
   },
   Action/.style={
     draw=RedLine, fill=magenta!10,
-    minimum width=3.5cm, minimum height=1.1cm, align=center, font=\small\sffamily
+    minimum width=3.5cm, minimum height=1.2cm, align=center, font=\small\sffamily
   },
   BranchLabel/.style={font=\scriptsize\sffamily, fill=white, inner sep=1.2pt}
 }
 
-% Nodes
-\node[StartStop] (profile) at (0,0) {Profile Training Run};
-\node[Decision,below =0.6 of profile] (util) {Accelerator\\ Util $<70\%$?};
-% Data Branch (Left)
-\node[Bottleneck, left=2.5 of util] (data) {Investigate\\Idle Gaps};
-\node[Action,below = 0.7 of data ] (prefetch)  {Trace Input, Host,\\\& Synchronization};
+% Feasibility Gate (Top)
+\node[Decision] (fit) at (0,0) {Step Fits\\in Memory?};
 
-% Memory Check (Center)
-\node[Decision,below=1.6 of util] (memq)  {OOM Errors or\\Mem $>90\%$?};
+% Profile Stage
+\node[StartStop] (profile) at (0,-2.15) {Profile Training Run};
 
-% Memory Branch (Left-Center)
-\node[Bottleneck,left =2.50 of memq] (memb)  {Capacity Pressure};
-\node[Action,below =0.7 of memb] (memact)  {Mixed Precision, \\Checkpointing,\\Accumulation};
-% Compute Branch (Right)
-\node[Bottleneck,right= 2.50 of memq] (compb) {Profile\\Kernel Limits};
-\node[Action,below =0.7 of compb] (compact) {Check Bandwidth,\\Arithmetic, Launches};
+% Utilization Check (Center)
+\node[Decision] (util) at (0,-4.4) {Accelerator\\Util $<70\%$?};
+
+% Data Branch (Right of util)
+\node[Bottleneck] (data) at (5.6,-4.4) {Investigate\\Idle Gaps};
+\node[Action] (prefetch) at (5.6,-6.2) {Trace Input, Host,\\\& Synchronization};
+
+% Post-Profile Memory Check (Center)
+\node[Decision] (memq) at (0,-8.5) {Mem $>90\%$\\(Limits Batch)?};
+
+% Memory Branch (Left — fed by both OOM gate and post-profile check)
+\node[Bottleneck] (memb) at (-5.6,-8.5) {Capacity Pressure};
+\node[Action] (memact) at (-5.6,-10.35) {Mixed Precision,\\Checkpointing,\\Accumulation};
+
+% Compute/Kernel Branch (Right of memq)
+\node[Bottleneck] (compb) at (5.6,-8.5) {Profile\\Kernel Limits};
+\node[Action] (compact) at (5.6,-10.35) {Check Bandwidth,\\Arithmetic, Launches};
+
 % End Node
-\node[StartStop,below =2.0 of memq] (reprofile) {Re-profile \& Iterate};
+\node[StartStop] (reprofile) at (0,-11.95) {Verify Fit \& Re-profile};
+
 % Main flow connections
+\draw[Flow] (fit.west) -| (memb.north) node[pos=0.18, above=2pt, BranchLabel] {No (OOM)};
+\draw[Flow] (fit.south) -- (profile.north) node[pos=0.45, right=2pt, BranchLabel] {Yes};
 \draw[Flow] (profile.south) -- (util.north);
-\draw[Flow] (util) --node[above=1pt,pos=0.2, BranchLabel] {Yes}(data) ;
-\draw[Flow] (util.south) -- (memq.north) node[pos=0.1, right=1pt,BranchLabel] {No};
+\draw[Flow] (util.east) -- (data.west) node[pos=0.42, above=2pt, BranchLabel] {Yes};
+\draw[Flow] (util.south) -- (memq.north) node[pos=0.22, right=2pt, BranchLabel] {No};
 \draw[Flow] (data.south) -- (prefetch.north);
-\draw[Flow] (memq) -- node[above=1pt,pos=0.2, BranchLabel] {Yes}(memb);
-\draw[Flow] (memq.east) --node[above=1pt,pos=0.2, BranchLabel] {No} (compb);
+\draw[Flow] (memq.west) -- (memb.east) node[pos=0.42, above=2pt, BranchLabel] {Yes};
+\draw[Flow] (memq.east) -- (compb.west) node[pos=0.42, above=2pt, BranchLabel] {No};
 \draw[Flow] (memb.south) -- (memact.north);
 \draw[Flow] (compb.south) -- (compact.north);
-\draw[Flow] (memact.south)--++(0,-0.5)|-(reprofile);
-\draw[Flow] (compact.south)--++(0,-0.5)|-(reprofile);
-%
-\draw[Flow] (prefetch.west)--++(-0.5,0)|-(reprofile);
+\draw[Flow] (memact.south) |- (reprofile.west);
+\draw[Flow] (compact.south) |- (reprofile.east);
+\draw[draw=black!65, line width=0.85pt] (prefetch.east) -- ++(0.65,0) |- (compact.south |- reprofile.east);
 \end{tikzpicture}
 
 ```
@@ -4283,7 +4055,7 @@ class PrecisionLadder:
     b200_fp16_over_fp32_mult_str = fmt_multiple(round(b200_fp16_over_fp32), precision=0)
 ```
 
-Mixed precision's throughput benefit is larger than its memory benefit. @Fig-precision-ladder plots peak dense throughput by number format across four generations of data center accelerators. From V100 to B200 the FP32 rate grew `{python} PrecisionLadder.fp32_growth_mult_str`, the FP16/BF16 tensor rate grew `{python} PrecisionLadder.fp16_growth_mult_str`, and the lowest supported format, 4-bit floating point (FP4) on B200, delivers `{python} PrecisionLadder.lowest_growth_mult_str` the V100's FP16 tensor rate. Hardware gains now arrive almost entirely through tensor units built for lower precision. On B200 the FP16/BF16 tensor path is `{python} PrecisionLadder.b200_fp16_over_fp32_mult_str` faster than FP32, so a training job that stays in FP32 leaves nearly all of the chip's arithmetic idle.
+Mixed precision's throughput benefit is larger than its memory benefit. @Fig-precision-ladder plots peak dense throughput by number format across four generations of data center accelerators, including TensorFloat-32 (TF32, a format that lets Tensor Cores accelerate FP32 matrix products by rounding inputs to a shorter mantissa). From V100 to B200 the FP32 rate grew `{python} PrecisionLadder.fp32_growth_mult_str`, the FP16/BF16 tensor rate grew `{python} PrecisionLadder.fp16_growth_mult_str`, and the lowest supported format, 4-bit floating point (FP4) on B200, delivers `{python} PrecisionLadder.lowest_growth_mult_str` the V100's FP16 tensor rate. Hardware gains now arrive almost entirely through tensor units built for lower precision. On B200 the FP16/BF16 tensor path is `{python} PrecisionLadder.b200_fp16_over_fp32_mult_str` faster than FP32, so a training job that stays in FP32 leaves nearly all of the chip's arithmetic idle.
 
 ::: {#fig-precision-ladder fig-env="figure" fig-pos="htb" fig-cap="**Peak Throughput by Number Format**: Peak dense throughput of four generations of data center accelerators in each number format they support, on a logarithmic axis. Each step down among the tensor formats roughly doubles the peak rate on the same silicon, the first step from FP32 onto the tensor paths gains far more, and nearly all of the generational gain arrives in the 16-bit and lower formats rather than in FP32. Vendor peak specifications [@nvidia2020v100datasheet; @nvidia2021a10080gb; @nvidia2023h100; @nvidia2024blackwell]." fig-alt="Grouped bar chart on a logarithmic axis for four accelerator generations, V100, A100, H100, and B200, in release order. FP32 bars rise only from 15.7 to 75 TFLOP/s. TF32 bars run 156, 494, and 1,125. FP16/BF16 tensor bars run 125, 312, 989, and 2,250. FP8 bars are 1,979 on H100 and 4,500 on B200, and an FP4 bar on B200 reaches 9,000. Each bar is labeled with its value."}
 
@@ -4643,7 +4415,7 @@ class MixedPrecisionThroughputCost:
 
 **Problem**: Holding utilization fixed, how much faster and cheaper is GPT-2 XL's run on one H100 when its matrix products run in BF16 instead of in 32-bit formats?
 
-**Peak rates by path**: FP32 on scalar units `{python} MixedPrecisionThroughputCost.rate_fp32_str`; TF32 (TensorFloat-32, which lets Tensor Cores run FP32 matrix products by rounding their inputs to a shorter mantissa) on Tensor Cores `{python} MixedPrecisionThroughputCost.rate_tf32_str`; BF16 on Tensor Cores `{python} MixedPrecisionThroughputCost.rate_bf16_str`.
+**Peak rates by path**: FP32 on scalar units `{python} MixedPrecisionThroughputCost.rate_fp32_str`; TF32 on Tensor Cores `{python} MixedPrecisionThroughputCost.rate_tf32_str`; BF16 on Tensor Cores `{python} MixedPrecisionThroughputCost.rate_bf16_str`.
 
 **Run time and cost** at `{python} GPT2RunTimeEnergy.eta_pct_str` utilization and `{python} MixedPrecisionThroughputCost.price_str` per accelerator:
 
@@ -4762,7 +4534,7 @@ Measured speedups across these generations reflect the software stacks, kernels,
 
 ### FlashAttention: IO-aware attention optimization {#sec-model-training-flash-attention-ioaware-attention-optimization-3da0}
 
-Mixed-precision training addresses two bottlenecks, compute throughput because Tensor Cores run faster on 16-bit operands, and memory capacity because each value uses fewer bytes. For transformer models, a third bottleneck often dominates, and the roofline analysis has already located it. Counting only its score-matrix traffic, materialized attention in GPT-2 Small reaches about `{python} AttentionIntensity.attn_intensity_str`, well left of the H100 ridge point in @fig-training-roofline, because its quadratic intermediate matrices are written to HBM during the forward pass and read back during backpropagation. Halving the bytes per value does not change that quadratic traffic, so even with reduced precision the compute units can sit idle while the processor waits for data.
+Mixed-precision training addresses two bottlenecks, compute throughput because Tensor Cores run faster on 16-bit operands, and memory capacity because each value uses fewer bytes. For transformer models, a third bottleneck often dominates, and the arithmetic-intensity calculation in @sec-model-training-arithmetic-intensity-training-bottlenecks-4446 has already located it. Counting only its score-matrix traffic, materialized attention in GPT-2 Small reaches about `{python} AttentionIntensity.attn_intensity_str`, far below the H100's `{python} H100Ridge.ridge_str` system-balance threshold, because its quadratic intermediate matrices are written to HBM during the forward pass and read back during backpropagation. Halving the bytes per value does not change that quadratic traffic, so even with reduced precision the compute units can sit idle while the processor waits for data.
 
 ```{python}
 #| echo: false
@@ -4817,9 +4589,9 @@ class GPT2FlashAttentionMemory:
     excess_gb_str = fmt_memory(round((excess).to(GB).magnitude) * GB, unit=GB, precision=0, commas=False)
 ```
 
-The same quadratic term dominates GPT-2 XL's memory. At batch `{python} StepToRunScale.gpt2_batch_str` and `{python} StepToRunScale.gpt2_seq_len_str` tokens, the stored score, probability, and dropout matrices account for about `{python} GPT2FlashAttentionMemory.score_term_gb_str` of the `{python} GPT2FlashAttentionMemory.act_stored_gb_str` of mixed-precision activations, about `{python} GPT2FlashAttentionMemory.score_share_pct_str`. An attention kernel that never stores them leaves `{python} GPT2FlashAttentionMemory.act_flash_gb_str` of activations; with the static state the step needs `{python} GPT2FlashAttentionMemory.total_flash_gb_str`, still about `{python} GPT2FlashAttentionMemory.excess_gb_str` more than the H100's `{python} GPT2FlashAttentionMemory.capacity_label_str` (`{python} GPT2FlashAttentionMemory.capacity_gb_str` in decimal units). Removing attention's traffic is therefore necessary but not sufficient.
+The same quadratic term dominates GPT-2 XL's memory. At batch `{python} StepToRunScale.gpt2_batch_str` and `{python} StepToRunScale.gpt2_seq_len_str` tokens, the stored score, probability, and dropout matrices account for about `{python} GPT2FlashAttentionMemory.score_term_gb_str` of the `{python} GPT2FlashAttentionMemory.act_stored_gb_str` of mixed-precision activations, about `{python} GPT2FlashAttentionMemory.score_share_pct_str`. An attention kernel that never stores them leaves `{python} GPT2FlashAttentionMemory.act_flash_gb_str` of activations; with the static state the step needs `{python} GPT2FlashAttentionMemory.total_flash_gb_str`, still about `{python} GPT2FlashAttentionMemory.excess_gb_str` more than the H100's `{python} GPT2FlashAttentionMemory.capacity_label_str` binary (`{python} GPT2FlashAttentionMemory.capacity_gb_str` decimal) capacity. Removing attention's traffic is therefore necessary but not sufficient.
 
-FlashAttention\index{FlashAttention!I/O-aware algorithm}\index{FlashAttention!memory bandwidth optimization}\index{Out-of-memory error!training constraint}\index{FlashAttention!origin and engineering insight} [@dao2022] addresses this bandwidth bottleneck by treating attention as an IO problem. Processing attention in SRAM-sized tiles avoids materializing the full $\SequenceLength{\times}\SequenceLength$ matrix in HBM and reduces traffic without changing the mathematical output, which is how the roofline preview moved attention rightward toward, and for favorable shapes past, the ridge.
+FlashAttention\index{FlashAttention!I/O-aware algorithm}\index{FlashAttention!memory bandwidth optimization}\index{Out-of-memory error!training constraint}\index{FlashAttention!origin and engineering insight} [@dao2022] addresses this bandwidth bottleneck by treating attention as an IO problem. Processing attention in SRAM-sized tiles avoids materializing the full $\SequenceLength{\times}\SequenceLength$ matrix in HBM and reduces traffic without changing the mathematical output, raising attention's operational intensity toward, and for favorable shapes past, the accelerator's system-balance threshold (@sec-hardware-acceleration-roofline-model-42ff develops the roofline model).
 
 #### The standard attention memory bottleneck {#sec-model-training-standard-attention-memory-bottleneck-6f39}
 
@@ -4882,7 +4654,7 @@ class AttentionMemoryCalc:
     matrix_dim_math = fmt_math(f"{seq_len}{{\\times}}{seq_len}")
 ```
 
-The memory bottleneck emerges from materializing the $\SequenceLength{\times}\SequenceLength$ intermediate matrices for scores and probabilities. For a sequence length of `{python} AttentionMemoryCalc.fa_seq_len_str` with head dimension $\AttentionHeadDimension =$ `{python} AttentionMemoryCalc.embed_dim_str` (typical for a single attention head), the attention score matrix alone requires `{python} AttentionMemoryCalc.attn_bytes_formula_str` bytes = `{python} AttentionMemoryCalc.attn_matrix_mb_str` in FP32. This section counts FP32 scores throughout, since autocast policies commonly keep softmax in FP32; at FP16 every figure halves, as in the roofline estimate and the earlier activation notebook, which counted FP16 probabilities, while the quadratic growth stays the same. With `{python} AttentionMemoryCalc.fa_n_heads_str`, this grows to `{python} AttentionMemoryCalc.total_attn_gb_str` for the intermediate attention matrices alone, not including the keys, queries, values, or output tensors.
+The memory bottleneck emerges from materializing the $\SequenceLength{\times}\SequenceLength$ intermediate matrices for scores and probabilities. For a sequence length of `{python} AttentionMemoryCalc.fa_seq_len_str` with head dimension $\AttentionHeadDimension =$ `{python} AttentionMemoryCalc.embed_dim_str` (typical for a single attention head), the attention score matrix alone requires `{python} AttentionMemoryCalc.attn_bytes_formula_str` bytes = `{python} AttentionMemoryCalc.attn_matrix_mb_str` in FP32. This section counts FP32 scores throughout, since autocast policies commonly keep softmax in FP32; at FP16 every figure halves, as in the arithmetic-intensity estimate (@sec-model-training-arithmetic-intensity-training-bottlenecks-4446) and the earlier activation notebook, which counted FP16 probabilities, while the quadratic growth stays the same. With `{python} AttentionMemoryCalc.fa_n_heads_str`, this grows to `{python} AttentionMemoryCalc.total_attn_gb_str` for the intermediate attention matrices alone, not including the keys, queries, values, or output tensors.
 
 GPU memory hierarchy creates the opportunity for I/O-aware attention. HBM\index{HBM!memory bandwidth} offers large off-chip capacity, while much smaller on-chip SRAM has substantially higher bandwidth and lower latency. Attention implementations that materialize the quadratic intermediates in HBM must write and later read them during backpropagation. Because that traffic grows with the square of sequence length, it takes a growing share of step time as sequences lengthen.
 
@@ -4908,17 +4680,17 @@ The key algorithmic insight relies on the structure of @eq-attention. Softmax no
 \caption{FlashAttention: tiled attention with online softmax}
 \begin{algorithmic}
 \Require queries $\AttentionQueryMatrix$, keys $\AttentionKeyMatrix$, values $\AttentionValuesMatrix$ for a length-$\SequenceLength$ sequence; tile size $\AttentionTileSize$
-\Ensure attention output $\AttentionHeadOutput$, without materializing the $\SequenceLength\times \SequenceLength$ score matrix
+\Ensure attention output $\AttentionHeadOutput$ and row statistics $(\SoftmaxRunningMaximum, \SoftmaxNormalizer)$ for backward recomputation, without materializing the $\SequenceLength\times \SequenceLength$ score matrix
 \For{each query tile $\AttentionQueryMatrix_i$}
-    \State in SRAM: $\AttentionOutputAccumulator_i \gets \ZeroVector$, $\SoftmaxRunningMaximum_i \gets -\infty$, $\SoftmaxNormalizer_i \gets 0$
+    \State load $\AttentionQueryMatrix_i$ into SRAM; initialize $\AttentionOutputAccumulator_i \gets \ZeroVector$, $\SoftmaxRunningMaximum_i \gets -\infty$, $\SoftmaxNormalizer_i \gets 0$
     \For{each key/value tile $(\AttentionKeyMatrix_j, \AttentionValuesMatrix_j)$}
-        \State load $\AttentionQueryMatrix_i, \AttentionKeyMatrix_j, \AttentionValuesMatrix_j$ into SRAM; $\AttentionScoreMatrix_{ij} \gets \AttentionQueryMatrix_i \AttentionKeyMatrix_j^T / \sqrt{\AttentionHeadDimension}$
+        \State load $\AttentionKeyMatrix_j, \AttentionValuesMatrix_j$ into SRAM; $\AttentionScoreMatrix_{ij} \gets \AttentionQueryMatrix_i \AttentionKeyMatrix_j^T / \sqrt{\AttentionHeadDimension}$
         \State $\UpdatedSoftmaxRunningMaximum_i \gets \max(\SoftmaxRunningMaximum_i,\operatorname{rowmax}(\AttentionScoreMatrix_{ij}))$ \Comment{new stable max}
         \State $\AttentionOutputAccumulator_i \gets \AttentionOutputAccumulator_i\odot e^{\SoftmaxRunningMaximum_i-\UpdatedSoftmaxRunningMaximum_i} + e^{\AttentionScoreMatrix_{ij}-\UpdatedSoftmaxRunningMaximum_i}\AttentionValuesMatrix_j$
         \State $\SoftmaxNormalizer_i \gets \SoftmaxNormalizer_i\odot e^{\SoftmaxRunningMaximum_i-\UpdatedSoftmaxRunningMaximum_i} + \operatorname{rowsum}(e^{\AttentionScoreMatrix_{ij}-\UpdatedSoftmaxRunningMaximum_i})$; $\SoftmaxRunningMaximum_i \gets \UpdatedSoftmaxRunningMaximum_i$
         \State discard $\AttentionScoreMatrix_{ij}$ \Comment{never written to HBM}
     \EndFor
-    \State $\AttentionHeadOutput_i \gets \AttentionOutputAccumulator_i / \SoftmaxNormalizer_i$; write $\AttentionHeadOutput_i$ to HBM
+    \State $\AttentionHeadOutput_i \gets \AttentionOutputAccumulator_i / \SoftmaxNormalizer_i$; write $\AttentionHeadOutput_i$ and row statistics $(\SoftmaxRunningMaximum_i, \SoftmaxNormalizer_i)$ to HBM
 \EndFor
 \end{algorithmic}
 \end{algorithm}
@@ -5124,7 +4896,7 @@ For transformer training with long sequences, FlashAttention is usually the firs
 
 In practice, deep learning frameworks handle much of FlashAttention's integration, but the decision still depends on layout, precision, and memory budget. PyTorch's `scaled_dot_product_attention` can dispatch to FlashAttention when hardware, inputs, and backend constraints permit; hand-written attention must use an eligible primitive. Three practical checks determine whether the fast path actually runs and pays off. First, tensor layouts must match library expectations (contiguous memory and the expected dimension ordering). Second, execution must use FP16 or BF16, because FlashAttention kernels target mixed precision. Finally, gradient checkpointing should be combined with FlashAttention whenever additional activation-memory savings are needed beyond the attention scores.
 
-The integration is often a single-line change, swapping a manual attention call for `F.scaled_dot_product_attention`, as @lst-flash-attention-comparison shows. The engineering decision is still the same one established by the roofline analysis: use the optimized primitive when the bottleneck is HBM traffic, and let the library manage the tiling and SRAM scheduling needed to remove it.
+The integration is often a single-line change, swapping a manual attention call for `F.scaled_dot_product_attention`, as @lst-flash-attention-comparison shows. The engineering decision is still the same one established by the arithmetic-intensity analysis: use the optimized primitive when the bottleneck is HBM traffic, and let the library manage the tiling and SRAM scheduling needed to remove it.
 
 #### IO-aware design beyond attention {#sec-model-training-systems-implications-broader-principles-c4f0}
 
@@ -5479,6 +5251,7 @@ class GPT2SegmentCheckpoint:
     ckpt_act_gb_str = fmt_memory(act_ckpt, unit=GB, precision=1, commas=False)
     act_flash_gb_str = fmt_memory(act_flash, unit=GB, precision=1, commas=False)
     ckpt_total_gb_str = fmt_memory(total_ckpt, unit=GB, precision=1, commas=False)
+    capacity_gb_str = fmt_memory(capacity, unit=GB, precision=1, commas=False)
     headroom_gb_str = fmt_memory(round((headroom).to(GB).magnitude) * GB, unit=GB, precision=0, commas=False)
     checkpoint_factor_mult_str = fmt_multiple(checkpoint_factor, precision=1, commas=False)
 ```
@@ -5494,7 +5267,7 @@ class GPT2SegmentCheckpoint:
 - Retained segment inputs: `{python} GPT2SegmentCheckpoint.boundary_gb_str`
 - Live reconstructed segment: `{python} GPT2SegmentCheckpoint.live_segment_gb_str`
 - Activation allowance: `{python} GPT2SegmentCheckpoint.ckpt_act_gb_str`, against `{python} GPT2SegmentCheckpoint.act_flash_gb_str` without checkpointing (`{python} GPT2SegmentCheckpoint.checkpoint_factor_mult_str` smaller)
-- Static state plus activations: `{python} GPT2SegmentCheckpoint.ckpt_total_gb_str`, leaving about `{python} GPT2SegmentCheckpoint.headroom_gb_str` of the H100's capacity
+- Static state plus activations: `{python} GPT2SegmentCheckpoint.ckpt_total_gb_str`, leaving about `{python} GPT2SegmentCheckpoint.headroom_gb_str` of the H100's `{python} GPT2SegmentCheckpoint.capacity_gb_str` decimal capacity
 
 **Systems insight**: Checkpointing admits the batch-32 step by replacing retained layer interiors with small boundary tensors and one live reconstructed segment. The remaining capacity must still hold output and loss buffers, temporary backward workspaces, and allocator overhead, which a runtime peak-memory measurement confirms. Gradient accumulation offers the alternative trade, keeping every activation of a smaller micro-batch and paying in update frequency instead of recomputation.
 
@@ -5820,7 +5593,7 @@ class GPT2WalkthroughCalc:
 
 **Step 1**: Establish the baseline memory footprint.
 
-The trace starts with GPT-2 XL at batch `{python} GPT2WalkthroughCalc.batch_size_str` and sequence length `{python} GPT2WalkthroughCalc.seq_len_str`, FP32 tensors throughout, standard attention, and a single-threaded synchronous data loader. Weights, gradients, and Adam moments take `{python} GPT2WalkthroughCalc.static_gb_str`, and FP32 activations take `{python} GPT2WalkthroughCalc.act_fp32_gb_str`, so the step needs `{python} GPT2WalkthroughCalc.total_fp32_gb_str`, about `{python} GPT2WalkthroughCalc.fp32_over_mult_str` the H100's `{python} GPT2WalkthroughCalc.capacity_label_str` (`{python} GPT2WalkthroughCalc.capacity_gb_str` in decimal units). The run fails the machine constraint before throughput matters.
+The trace starts with GPT-2 XL at batch `{python} GPT2WalkthroughCalc.batch_size_str` and sequence length `{python} GPT2WalkthroughCalc.seq_len_str`, FP32 tensors throughout, standard attention, and a single-threaded synchronous data loader. Weights, gradients, and Adam moments take `{python} GPT2WalkthroughCalc.static_gb_str`, and FP32 activations take `{python} GPT2WalkthroughCalc.act_fp32_gb_str`, so the step needs `{python} GPT2WalkthroughCalc.total_fp32_gb_str`, about `{python} GPT2WalkthroughCalc.fp32_over_mult_str` the H100's `{python} GPT2WalkthroughCalc.capacity_label_str` binary (`{python} GPT2WalkthroughCalc.capacity_gb_str` decimal) capacity. The run fails the machine constraint before throughput matters.
 
 **Step 2**: Apply mixed precision.
 
@@ -5849,18 +5622,18 @@ Eight worker processes, page-locked (pinned) host memory for asynchronous DMA tr
 \renewcommand{\arraystretch}{1.3}
 ```
 
-| **Metric**                |                  **FP32 baseline**                   |                     **Optimized**                      | **Technique applied**                                                                                       |
-|:--------------------------|:----------------------------------------------------:|:------------------------------------------------------:|:------------------------------------------------------------------------------------------------------------|
-| **Static training state** |     `{python} GPT2WalkthroughCalc.static_gb_str`     |      `{python} GPT2WalkthroughCalc.static_gb_str`      | Unchanged at 16 bytes per parameter                                                                         |
-| **Activations per step**  |    `{python} GPT2WalkthroughCalc.act_fp32_gb_str`    |    `{python} GPT2WalkthroughCalc.act_accum_gb_str`     | FP16, FlashAttention, two micro-batches of `{python} GPT2WalkthroughCalc.micro_batch_str`                   |
-| **Total memory**          | **`{python} GPT2WalkthroughCalc.total_fp32_gb_str`** | **`{python} GPT2WalkthroughCalc.total_accum_gb_str`**  | `{python} GPT2WalkthroughCalc.memory_reduction_mult_str` smaller                                            |
-| **Fits one H100**         |                          No                          |                          Yes                           | Capacity `{python} GPT2WalkthroughCalc.capacity_label_str` (`{python} GPT2WalkthroughCalc.capacity_gb_str`) |
-| **Accelerator busy time** |                         N/A                          |                   Whole step (ideal)                   | Prefetching, eight workers                                                                                  |
-| **Throughput**            |                         N/A                          |    `{python} GPT2WalkthroughCalc.tokens_per_s_str`     | At the assumed utilization                                                                                  |
-| **Run time**              |                         N/A                          |      `{python} GPT2WalkthroughCalc.run_days_str`       | One accelerator                                                                                             |
-| **Facility energy**       |                         N/A                          | `{python} GPT2WalkthroughCalc.facility_energy_kwh_str` | Accelerator power $\times$ PUE `{python} GPT2WalkthroughCalc.pue_str`                                       |
-| **Electricity cost**      |                         N/A                          |  `{python} GPT2WalkthroughCalc.electricity_cost_str`   | At `{python} GPT2WalkthroughCalc.electricity_rate_str`                                                      |
-| **Carbon**                |                         N/A                          |      `{python} GPT2WalkthroughCalc.carbon_t_str`       | Average grid intensity                                                                                      |
+| **Metric**                |                  **FP32 baseline**                   |                     **Optimized**                      | **Technique applied**                                                                                                      |
+|:--------------------------|:----------------------------------------------------:|:------------------------------------------------------:|:---------------------------------------------------------------------------------------------------------------------------|
+| **Static training state** |     `{python} GPT2WalkthroughCalc.static_gb_str`     |      `{python} GPT2WalkthroughCalc.static_gb_str`      | Unchanged at 16 bytes per parameter                                                                                        |
+| **Activations per step**  |    `{python} GPT2WalkthroughCalc.act_fp32_gb_str`    |    `{python} GPT2WalkthroughCalc.act_accum_gb_str`     | FP16, FlashAttention, two micro-batches of `{python} GPT2WalkthroughCalc.micro_batch_str`                                  |
+| **Total memory**          | **`{python} GPT2WalkthroughCalc.total_fp32_gb_str`** | **`{python} GPT2WalkthroughCalc.total_accum_gb_str`**  | `{python} GPT2WalkthroughCalc.memory_reduction_mult_str` smaller                                                           |
+| **Fits one H100**         |                          No                          |                          Yes                           | Capacity `{python} GPT2WalkthroughCalc.capacity_label_str` binary (`{python} GPT2WalkthroughCalc.capacity_gb_str` decimal) |
+| **Accelerator busy time** |                         N/A                          |                   Whole step (ideal)                   | Prefetching, eight workers                                                                                                 |
+| **Throughput**            |                         N/A                          |    `{python} GPT2WalkthroughCalc.tokens_per_s_str`     | At the assumed utilization                                                                                                 |
+| **Run time**              |                         N/A                          |      `{python} GPT2WalkthroughCalc.run_days_str`       | One accelerator                                                                                                            |
+| **Facility energy**       |                         N/A                          | `{python} GPT2WalkthroughCalc.facility_energy_kwh_str` | Accelerator power $\times$ PUE `{python} GPT2WalkthroughCalc.pue_str`                                                      |
+| **Electricity cost**      |                         N/A                          |  `{python} GPT2WalkthroughCalc.electricity_cost_str`   | At `{python} GPT2WalkthroughCalc.electricity_rate_str`                                                                     |
+| **Carbon**                |                         N/A                          |      `{python} GPT2WalkthroughCalc.carbon_t_str`       | Average grid intensity                                                                                                     |
 
 : **GPT-2 XL on One H100**: Memory figures are calculated from the model shape; the busy-time result follows from the tokenization and step-time scenario; run time, energy, cost, and carbon follow from the assumed utilization, the accelerator's thermal design power, and registry values for facility overhead, electricity price, and grid carbon intensity. The FP32 baseline does not fit, so it has no run to measure. {#tbl-training-gpt2-final-profile tbl-colwidths="[24,20,22,34]"}
 

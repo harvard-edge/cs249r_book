@@ -511,7 +511,7 @@ class NotationRegistry:
     BreakerOutcomeWindow: NotationSymbol  # rolling window of recent classified call outcomes in one circuit breaker's scope ($W$)
     BreakerTripThreshold: NotationSymbol  # failure fraction at or above which a circuit breaker trips to open ($r_{\text{trip}}$) [dimensionless]
     BridgeTraceResistance: NotationSymbol  # resistance of the circuit-board traces in a half-bridge's shoot-through path ($R_{\text{trace}}$) [Ohm]
-    BroadcastColumnElement: NotationSymbol  # one element of the broadcast column tensor ($A$) [dimensionless]
+    BroadcastColumnElement: NotationSymbol  # one element of the broadcast column tensor ($a$) [dimensionless]
     BroadcastColumnTensor: NotationSymbol  # column tensor of shape (3, 1) that broadcasting stretches across columns ($\mathbf{A}$)
     BroadcastCompletionTime: NotationSymbol  # time for one root device to send a payload to every other device in a collective group ($T_{\text{broadcast}}$) [s]
     BroadcastRowElement: NotationSymbol  # one element of the broadcast row tensor ($b$) [dimensionless]
@@ -3078,6 +3078,7 @@ class NotationRegistry:
     OutcomeStandardDeviation: NotationSymbol  # standard deviation of one user's outcome metric under the common-variance Normal approximation of an A/B test ($\sigma$) [dimensionless]
     OutgoingChannelCommand: NotationSymbol  # channel command of the source being retired at a bumpless transfer ($u_{\text{prior}}$) [varies]
     OutgoingCommandDerivative: NotationSymbol  # time derivative of the outgoing source command during a bumpless transfer ($\dot{u}_{\text{prior}}$) [varies]
+    OutputAdjointVector: NotationSymbol  # reverse-mode adjoint vector of an operation's output, passed backward into its vector-Jacobian product ($\bar{\mathbf{y}}$)
     OutputChannel: NotationSymbol  # one measured output of a multi-output system, a component of the measurement vector ($y$) [varies]
     OutputChannelCount: NotationSymbol  # number of channels, one per filter, in the feature map a convolution layer produces ($C_{\text{out}}$)
     OutputChannelIndex: NotationSymbol  # position of one output channel of a convolution layer ($k$)
@@ -4490,7 +4491,6 @@ class NotationRegistry:
     TangentSeedVector: NotationSymbol  # tangent vector seeded on a function's inputs for one forward-mode pass ($\dot{\mathbf{x}}$)
     TangentialContactShear: NotationSymbol  # friction component of a contact force, tangential to the contact plane ($\mathbf{f}_{k, \parallel}$) [N]
     TangentialSpeed: NotationSymbol  # speed at which a feature at a given range sweeps across a rotating sensor's view, angular rate times range ($v_{\text{tangential}}$) [m/s]
-    TapeIntermediateResult: NotationSymbol  # intermediate result of the autograd tape example, twice its input ($y_{\text{tape}}$) [dimensionless]
     TargetAcceptanceDifference: NotationSymbol  # difference in task acceptance probability between two system versions that a release comparison is planned to detect ($\Delta$) [dimensionless]
     TargetActionReturnEstimate: NotationSymbol  # target estimate of the action value, held fixed during one value-fitting update to form the Bellman target ($\hat{Q}$) [dimensionless]
     TargetActorParameters: NotationSymbol  # parameters of the target actor network, a slowly Polyak-averaged copy of the actor parameters ($\theta'$)

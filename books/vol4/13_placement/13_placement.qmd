@@ -555,14 +555,16 @@ where $\QueuedTransactionSet$ holds the transactions ahead of the read, ${\Queue
 # │       the memory controller rather than of the workload.
 # │ Show: one backlog of 88 transactions (360,448 bytes) plus three 37.5 ns row
 # │       conflicts waits 1.879 µs at the application SoC's 204 GB/s; a 4 KiB
-# │       snapshot then reads in 1.899 µs, inside the 40 µs allowance, which
-# │       absorbs 21 such backlogs; the declared 250 µs WCET is crossed after
-# │       more than 82 backlogs (155 µs read), refuting the declared bound,
-# │       while the deadline holds until more than 114 (215 µs read); priority
-# │       bypass cuts the read to 0.04 µs. Confined to one of 16 channels, a
-# │       backlog takes 28.4 µs: the allowance absorbs 1, the WCET 5. Bandwidth
-# │       queueing alone is a weak threat under interleaving;
-# │       @sec-placement-interference-mechanisms prices the strong one.
+# │       snapshot then reads in 0.020 µs (total 1.899 µs, inside the 40 µs
+# │       allowance, which absorbs 21 such backlogs); preserving the unloaded
+# │       135 µs tick (40 µs sense + 95 µs compute), the declared 250 µs WCET
+# │       leaves 115 µs for loaded-read queueing and is crossed after more than
+# │       61 backlogs, while the 310 µs execution ceiling leaves 175 µs and
+# │       holds until more than 93; priority bypass cuts the read to 0.04 µs.
+# │       Confined to one of 16 channels, a backlog takes 28.4 µs: the allowance
+# │       absorbs 1, the WCET 4. Bandwidth queueing alone is a weak threat under
+# │       interleaving; @sec-placement-interference-mechanisms prices the strong
+# │       one.
 # │ How: Scenarios.WarehouseSharedDieLoadedRead (SharedDramReadModel over
 # │      calc_axi_fifo_contention) with the unloaded tick's sub-costs; bandwidth
 # │      is the brain SoC's registry peak, served at the full aggregate rate
@@ -622,14 +624,17 @@ class PlacementLoadedRead:
     check(abs(queue.magnitude - 1.8794) < 5e-4, "360,448 bytes at 204 GB/s plus three 37.5 ns conflicts is 1.879 µs.")
     check(loaded_read < sense, "One backlog fits inside the sense allowance.")
     check(
-        abs(read_ceiling.magnitude - 215.0) < 1e-9,
-        "The deadline, less 90 µs of blocking and interference, leaves 215 µs for the read after 95 µs of compute.",
+        abs(read_ceiling.magnitude - 175.0) < 1e-9,
+        "The deadline, less 90 µs of blocking and interference and the 135 µs unloaded tick, leaves 175 µs of queueing headroom.",
     )
-    check(backlogs_sense == 21 and backlogs_deadline == 114, "The sense allowance absorbs 21 backlogs, the full-budget deadline 114.")
-    check(abs(wcet_read_ceiling.magnitude - 155.0) < 1e-9 and backlogs_wcet == 82, "The declared WCET leaves 155 µs for the read, 82 backlogs.")
+    check(backlogs_sense == 21 and backlogs_deadline == 93, "The sense allowance absorbs 21 backlogs, the full-budget deadline 93.")
+    check(
+        abs(wcet_read_ceiling.magnitude - 115.0) < 1e-9 and backlogs_wcet == 61,
+        "The declared WCET leaves 115 µs above the unloaded tick, 61 backlogs.",
+    )
     check(bypass_read < own_read * 3, "Priority bypass leaves one in-flight transaction ahead of the read.")
     check(n_channels == 16, "A 256-bit interface of 16-bit LPDDR5 channels has 16 channels.")
-    check(backlogs_sense_1ch == 1 and backlogs_wcet_1ch == 5, "Confined to one channel, the sense allowance absorbs 1 backlog and the WCET 5.")
+    check(backlogs_sense_1ch == 1 and backlogs_wcet_1ch == 4, "Confined to one channel, the sense allowance absorbs 1 backlog and the WCET 4.")
 
     # ┌── 4. OUTPUT ─────────────────────────────────────────────────────────
     sense_str = fmt_latency(sense, unit=microsecond, precision=0)
@@ -672,7 +677,7 @@ class PlacementLoadedRead:
 * Peak DRAM bandwidth $\PeakMemoryBandwidth =$ `{python} PlacementLoadedRead.bandwidth_str` GB/s (Datasheet), served at that aggregate rate because the controller interleaves addresses across all channels (Illustrative premise).
 * One backlog ahead of the read: a weight tile (`{python} PlacementLoadedRead.tile_tx_str` transactions), a camera transfer, and a telemetry record, `{python} PlacementLoadedRead.n_tx_str` transactions and `{python} PlacementLoadedRead.backlog_bytes_str` bytes, with `{python} PlacementLoadedRead.bank_switches_str` same-bank row conflicts (Illustrative), each costing $\RowPrechargeTime + \RowActivationDelay =$ `{python} PlacementLoadedRead.bank_switch_str` ns (Datasheet). The snapshot itself is `{python} PlacementLoadedRead.snapshot_bytes_str` bytes (Illustrative).
 
-**Math**: By @eq-placement-dram-queuing, one backlog waits `{python} PlacementLoadedRead.backlog_bytes_str` B $/$ `{python} PlacementLoadedRead.bandwidth_str` GB/s $+$ `{python} PlacementLoadedRead.bank_switches_str` $\times$ `{python} PlacementLoadedRead.bank_switch_str` ns $=$ `{python} PlacementLoadedRead.queue_str` $\MicroUnitPrefix\text{s}$, and the snapshot then reads in `{python} PlacementLoadedRead.own_read_str` $\MicroUnitPrefix\text{s}$. The number of backlogs $\AdmissibleBacklogCount$ that fit a read ceiling $\ReadTimeCeiling$ is $\lfloor (\ReadTimeCeiling - \SnapshotReadTime)/\MemoryBusQueueDelay \rfloor$. The sense allowance gives $\lfloor ($ `{python} PlacementLoadedRead.sense_us_str` $-$ `{python} PlacementLoadedRead.own_read_str` $)/$ `{python} PlacementLoadedRead.queue_str` $\rfloor =$ `{python} PlacementLoadedRead.backlogs_sense_str`. The declared bound leaves `{python} PlacementLoadedRead.wcet_read_ceiling_str` for the read after the `{python} PlacementLoadedRead.compute_after_sense_str` of later work, so it is crossed beyond `{python} PlacementLoadedRead.backlogs_wcet_str` backlogs. The deadline, less blocking and interference, leaves `{python} PlacementLoadedRead.exec_ceiling_str` for the tick and `{python} PlacementLoadedRead.read_ceiling_str` for the read, and it is crossed beyond `{python} PlacementLoadedRead.backlogs_deadline_str`. With validated priority bypass, only the one in-flight transaction waits ahead, and the read takes `{python} PlacementLoadedRead.bypass_read_str` $\MicroUnitPrefix\text{s}$.
+**Math**: By @eq-placement-dram-queuing, one backlog waits `{python} PlacementLoadedRead.backlog_bytes_str` B $/$ `{python} PlacementLoadedRead.bandwidth_str` GB/s $+$ `{python} PlacementLoadedRead.bank_switches_str` $\times$ `{python} PlacementLoadedRead.bank_switch_str` ns $=$ `{python} PlacementLoadedRead.queue_str` $\MicroUnitPrefix\text{s}$, and the snapshot then reads in `{python} PlacementLoadedRead.own_read_str` $\MicroUnitPrefix\text{s}$. The number of backlogs $\AdmissibleBacklogCount$ that fit a headroom budget $\ReadTimeCeiling$ is $\lfloor (\ReadTimeCeiling - \SnapshotReadTime)/\MemoryBusQueueDelay \rfloor$. The sense allowance gives $\lfloor ($ `{python} PlacementLoadedRead.sense_us_str` $-$ `{python} PlacementLoadedRead.own_read_str` $)/$ `{python} PlacementLoadedRead.queue_str` $\rfloor =$ `{python} PlacementLoadedRead.backlogs_sense_str`. Preserving the unloaded tick (`{python} PlacementMachine.unloaded_str` $=$ `{python} PlacementLoadedRead.sense_str` sense $+$ `{python} PlacementLoadedRead.compute_after_sense_str` compute), the declared bound leaves `{python} PlacementLoadedRead.wcet_read_ceiling_str` of shared-DRAM queueing headroom, so it is crossed beyond `{python} PlacementLoadedRead.backlogs_wcet_str` backlogs. The deadline, less blocking and interference, leaves `{python} PlacementLoadedRead.exec_ceiling_str` for the tick and `{python} PlacementLoadedRead.read_ceiling_str` of queueing headroom above the unloaded tick, and it is crossed beyond `{python} PlacementLoadedRead.backlogs_deadline_str`. With validated priority bypass, only the one in-flight transaction waits ahead, and the read takes `{python} PlacementLoadedRead.bypass_read_str` $\MicroUnitPrefix\text{s}$.
 
 **Result**: Between `{python} PlacementLoadedRead.backlogs_wcet_str` and `{python} PlacementLoadedRead.backlogs_deadline_str` backlogs, the tick still meets its deadline but exceeds $\PermissionTickWcet$. Within this stipulated FIFO model, the fixed isolated sub-costs remain unchanged, so the excess comes from shared-memory queueing. It refutes the placement's timing premise even though this tick was on time. A measured overrun would instead require distinguishing an underestimated baseline from interference, as @sec-placement-testing-separation explains.
 
@@ -682,7 +687,7 @@ class PlacementLoadedRead:
 
 Drawn to scale on one `{python} PlacementMachine.tick_str` period, the thresholds show how far the declared bound sits from the deadline and the period (@fig-13-loaded-tick). The unloaded tick ends at `{python} PlacementMachine.unloaded_str`. The next three rows carry the largest backlog counts that keep each bound: `{python} PlacementLoadedRead.backlogs_sense_str` for the `{python} PlacementLoadedRead.sense_str` sense allowance, `{python} PlacementLoadedRead.backlogs_wcet_str` for the declared `{python} PlacementLoadedRead.wcet_str`, and `{python} PlacementLoadedRead.backlogs_deadline_str` for the `{python} PlacementLoadedRead.deadline_str` deadline once `{python} PlacementLoadedRead.b_plus_i_str` is reserved for blocking and interference. The bottom row confines the traffic to one memory channel, where `{python} PlacementLoadedRead.backlogs_wcet_1ch_str` backlogs already reach the declared bound.
 
-::: {#fig-13-loaded-tick data-explore="original-v4-13-loaded-tick" data-explore-key="vol4:fig-13-loaded-tick" fig-env="figure" fig-pos="t" fig-cap="**How many backlogs one tick absorbs**: Each row is one permission tick on the rejected shared-die placement, drawn to scale on the 1 ms period, with the FIFO wait for queued backlogs ahead of the snapshot read followed by the `{python} PlacementLoadedRead.compute_after_sense_str` of constraint evaluation and drive-frame write. With addresses interleaved across the interface, `{python} PlacementLoadedRead.backlogs_sense_str` backlogs fit the sense allowance, `{python} PlacementLoadedRead.backlogs_wcet_str` the declared bound, and `{python} PlacementLoadedRead.backlogs_deadline_str` the deadline once blocking and interference take their `{python} PlacementLoadedRead.b_plus_i_str`; confined to one channel, `{python} PlacementLoadedRead.backlogs_wcet_1ch_str` already reach the declared bound. Every row still ends well inside the period, which is why the declared bound, not the period, is the test the placement must pass." fig-alt="Horizontal bar chart on a time axis from 0 to 1,000 microseconds with five rows. The top row is the unloaded tick: a 40 microsecond sense read and 95 microseconds of constraint evaluation and write, ending at 135. Below it, rows with 21, 82, and 114 queued backlogs show a hatched memory wait growing until the tick ends near 135, 250, and 309 microseconds. The bottom row, with 5 backlogs confined to one memory channel, ends near 237 microseconds. Vertical lines mark the end of the sense allowance at 40, the declared worst-case execution time at 250, the deadline at 400, and the next tick at 1,000 microseconds; a shaded band from 310 to 400 microseconds is reserved for blocking and interference."}
+::: {#fig-13-loaded-tick data-explore="original-v4-13-loaded-tick" data-explore-key="vol4:fig-13-loaded-tick" fig-env="figure" fig-pos="t" fig-cap="**How many backlogs one tick absorbs**: Each row is one permission tick on the rejected shared-die placement, drawn to scale on the 1 ms period, stacking the FIFO wait for queued backlogs and the DRAM snapshot read on top of the unloaded `{python} PlacementMachine.unloaded_str` tick (`{python} PlacementLoadedRead.sense_str` sense plus `{python} PlacementLoadedRead.compute_after_sense_str` of constraint evaluation and drive-frame write). With addresses interleaved across the interface, `{python} PlacementLoadedRead.backlogs_sense_str` backlogs fit the sense allowance, `{python} PlacementLoadedRead.backlogs_wcet_str` fit the declared bound, and `{python} PlacementLoadedRead.backlogs_deadline_str` fit the deadline once blocking and interference take their `{python} PlacementLoadedRead.b_plus_i_str`; confined to one channel, `{python} PlacementLoadedRead.backlogs_wcet_1ch_str` already reach the declared bound. Every row still ends well inside the period, which is why the declared bound, not the period, is the test the placement must pass." fig-alt="Horizontal bar chart on a time axis from 0 to 1,000 microseconds with five rows. The top row is the unloaded tick: a 40 microsecond sense read and 95 microseconds of constraint evaluation and write, ending at 135. Below it, rows with 21, 61, and 93 queued backlogs add a hatched shared-memory wait on top of the 135 microsecond unloaded tick so the ticks end near 174, 250, and 310 microseconds. The bottom row, with 4 backlogs confined to one memory channel, ends near 249 microseconds. Vertical lines mark the end of the sense allowance at 40, the declared worst-case execution time at 250, the deadline at 400, and the next tick at 1,000 microseconds; a shaded band from 310 to 400 microseconds is reserved for blocking and interference."}
 
 ```{python}
 #| label: plot-placement-loaded-tick
@@ -728,19 +733,20 @@ q, own = us(LR.queue), us(LR.own_read)
 q1, own1 = us(LR.queue_1ch), us(LR.own_read_1ch)
 
 # ┌── 2. EXECUTE ──────────────────────────────────────────────────────────────
-# (label, queued wait, snapshot read, compute after sense)
+# (label, queued wait, sense + snapshot read, compute after sense)
 rows = [
     ("unloaded", 0.0, sense, compute),
-    (f"{LR.backlogs_sense} backlogs", LR.backlogs_sense * q, own, compute),
-    (f"{LR.backlogs_wcet} backlogs", LR.backlogs_wcet * q, own, compute),
-    (f"{LR.backlogs_deadline} backlogs", LR.backlogs_deadline * q, own, compute),
-    (f"{LR.backlogs_wcet_1ch} backlogs,\none channel", LR.backlogs_wcet_1ch * q1, own1, compute),
+    (f"{LR.backlogs_sense} backlogs", LR.backlogs_sense * q, sense + own, compute),
+    (f"{LR.backlogs_wcet} backlogs", LR.backlogs_wcet * q, sense + own, compute),
+    (f"{LR.backlogs_deadline} backlogs", LR.backlogs_deadline * q, sense + own, compute),
+    (f"{LR.backlogs_wcet_1ch} backlogs,\none channel", LR.backlogs_wcet_1ch * q1, sense + own1, compute),
 ]
 ends = [w + r + c for _, w, r, c in rows]
 
 # ┌── 3. GUARD ────────────────────────────────────────────────────────────────
 check(abs(ends[0] - us(PM.unloaded)) < 1e-9, "The unloaded row is the 135 µs tick.")
-check(rows[1][1] + rows[1][2] <= sense, "The sense row's read fits the sense allowance.")
+check(rows[1][1] + own <= sense, "The sense row's DRAM read fits inside the 40 µs sense allowance.")
+check(ends[0] < ends[1] < ends[2] < ends[3], "Loaded tick ends increase strictly with backlog count.")
 check(ends[2] <= wcet < ends[2] + q, "The WCET row is the largest backlog count within the declared bound.")
 check(ends[3] <= ceiling < ends[3] + q, "The deadline row is the largest backlog count within the deadline less blocking and interference.")
 check(ends[4] <= wcet < ends[4] + q1, "The one-channel row is the largest count within the declared bound.")

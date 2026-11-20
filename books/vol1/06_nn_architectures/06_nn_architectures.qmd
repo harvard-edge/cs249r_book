@@ -1626,7 +1626,7 @@ A single equivariant stencil sees only its $\KernelSize{\times}\KernelSize$ wind
 
 A framework expresses a whole convolutional layer as one call (@lst-conv_layer_spatial). Behind that call, the underlying runtime must schedule memory traffic across cache hierarchies and lower sliding-window stencils onto matrix execution hardware.
 
-::: {#lst-conv_layer_spatial lst-cap="**Convolutional Layer Abstraction**: Framework-level convolution operations hide the complexity of sliding window computations, typically dispatching to cuDNN or MKL which internally handle im2col transformations or direct convolution algorithms."}
+::: {#lst-conv_layer_spatial lst-cap="**Convolutional Layer Abstraction**: Framework-level convolution operations hide the complexity of sliding window computations, typically dispatching to vendor-tuned math libraries (such as NVIDIA cuDNN or Intel MKL), which internally handle im2col lowering (detailed later in this section) or direct convolution algorithms."}
 
 ```{.python}
 def conv_layer_spatial(input, kernel, bias):
@@ -2950,7 +2950,7 @@ class QKVProjectionCosts:
     head_dim_str = fmt(head_dim, precision=0, commas=False)
 ```
 
-::: {#fig-attention-weightcalc fig-env="figure" fig-pos="htb" fig-cap="**QKV Projection Computation**: The embedding matrix ($6{\times}768$) multiplies with QKV weight matrices ($768{\times}2304$) plus bias to produce combined projections ($6{\times}2304$). The 2304 output columns hold the query, key, and value projections side by side, 768 each, colored as in @fig-attention; only the first token's output row is drawn. This single batched matrix multiplication, requiring $6{\times}768{\times}2304$ = `{python} QKVProjectionCosts.qkv_macs_str`, replaces three separate projection operations for efficiency. Adapted from Transformer Explainer [@cho2025]." fig-alt="Diagram of a 6-by-768 embedding matrix multiplied by a 768-by-2304 QKV weight matrix, with a 2304-element bias added to produce a 6-by-2304 output. Token labels are Data, visualization, em, powers, users, and to; the weight matrix and the first output row are split into cyan query, red key, and green value thirds, and the bias is gray."}
+::: {#fig-attention-weightcalc fig-env="figure" fig-pos="htb" fig-cap="**QKV Projection Computation**: In GPT-2 Small, the embedding matrix ($6{\times}768$) multiplies with QKV weight matrices ($768{\times}2304$) plus bias to produce combined projections ($6{\times}2304$). The 2304 output columns hold the query, key, and value projections side by side, 768 each, colored as in @fig-attention; only the first token's output row is drawn. This single batched matrix multiplication, requiring $6{\times}768{\times}2304$ = `{python} QKVProjectionCosts.qkv_macs_str`, replaces three separate projection operations for efficiency. Adapted from Transformer Explainer [@cho2025]." fig-alt="Diagram of a 6-by-768 embedding matrix multiplied by a 768-by-2304 QKV weight matrix, with a 2304-element bias added to produce a 6-by-2304 output. Token labels are Data, visualization, em, powers, users, and to; the weight matrix and the first output row are split into cyan query, red key, and green value thirds, and the bias is gray."}
 
 ```{.tikz}
 \begin{tikzpicture}[line join=round,font=\small\sffamily]
@@ -3587,7 +3587,7 @@ Generation splits into two phases with different machine profiles, drawn in @fig
 
 In code, self-attention is three projections of the same input followed by the attention operator, and multi-head attention runs several smaller copies side by side before a final projection (@lst-self_attention_layer). Writing both layers side by side shows how the multi-head variant partitions the hidden dimension across heads without changing the per-head attention kernel.
 
-::: {#lst-self_attention_layer lst-cap="**Self-Attention and Multi-Head Attention**: Self-attention (top) derives $\AttentionQueryMatrix$, $\AttentionKeyMatrix$, and $\AttentionValuesMatrix$ from the same input $\LayerInputMatrix$ through three projections, then computes attention as before. Multi-head attention (bottom) runs $\AttentionHeadCount$ parallel attention heads with dimension $\AttentionHeadDimension = \HiddenDimension/\AttentionHeadCount$, then concatenates and projects. For GPT-2 (`{python} QKVProjectionCosts.d_model_str`-dim, `{python} QKVProjectionCosts.heads_str` heads), each head operates on `{python} QKVProjectionCosts.head_dim_str` dimensions, partitioning the projected feature dimension across heads while enabling diverse relationship patterns."}
+::: {#lst-self_attention_layer lst-cap="**Self-Attention and Multi-Head Attention**: Self-attention (top) derives $\AttentionQueryMatrix$, $\AttentionKeyMatrix$, and $\AttentionValuesMatrix$ from the same input $\LayerInputMatrix$ through three projections, then computes attention as before. Multi-head attention (bottom) runs $\AttentionHeadCount$ parallel attention heads with dimension $\AttentionHeadDimension = \HiddenDimension/\AttentionHeadCount$, then concatenates and projects. For GPT-2 Small (`{python} QKVProjectionCosts.d_model_str`-dim, `{python} QKVProjectionCosts.heads_str` heads), each head operates on `{python} QKVProjectionCosts.head_dim_str` dimensions, partitioning the projected feature dimension across heads while enabling diverse relationship patterns."}
 
 ```{.python}
 def self_attention_layer(X, W_Q, W_K, W_V, d_head):
@@ -3691,7 +3691,7 @@ During single-token generation ($\BatchSize = 1$), however, each projection laye
 $$\GemvArithmeticIntensity= \frac{2\text{ FLOPs}}{2\text{ bytes}} = 1.0\text{ FLOP/byte}$$
 
 ::: {.column-margin .margin-pointer}
-↩ The 1.0 FLOP/byte intensity of batch-one GEMV in 16-bit precision, and 0.5 FLOP/byte in FP32, is established in @sec-neural-computation-performance-enhancement-techniques-692f.
+↩ The 0.5 FLOP/byte intensity of batch-one GEMV in FP32, and how batching raises it, is established in @sec-neural-computation-performance-enhancement-techniques-692f.
 :::
 
 ```{python}
@@ -4405,15 +4405,15 @@ The silicon is identical in all three cases, but the demands differ. Convolution
 
 Each of those costs is part of a family's cost signature, and each comes from a counting rule derived in that family's section. @Tbl-nn-architectures-cost-formulas collects the rules in exact form, so that a new model can be estimated on paper in the same order: count the weights, count the multiply-accumulates, count the bytes that must move or stay resident, then compare those counts with the machine.
 
-| **Building block**                  | **Weights**                                                                 | **Multiply-accumulates per example**                                                                                                                       | **Bytes that move or stay resident**                                                                  |
-|:------------------------------------|:----------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------------------------------------------------------------|:------------------------------------------------------------------------------------------------------|
-| **Dense layer**                     | $\LayerInputWidth \LayerOutputWidth$                                        | $\LayerInputWidth \LayerOutputWidth$                                                                                                                       | Every weight read once per batch, so weight-only intensity grows with batch size                      |
-| **Convolution layer**               | $\KernelSize^2 \InputChannelCount \OutputChannelCount$                      | $\FeatureMapHeight \FeatureMapWidth \KernelSize^2 \InputChannelCount \OutputChannelCount$                                                                  | Output activations, $\FeatureMapHeight \FeatureMapWidth \OutputChannelCount$ values per example       |
-| **Depthwise separable convolution** | $\KernelSize^2 \InputChannelCount + \InputChannelCount \OutputChannelCount$ | $\FeatureMapHeight \FeatureMapWidth (\KernelSize^2 \InputChannelCount + \InputChannelCount \OutputChannelCount)$                                           | Same activations as a standard layer for far fewer operations                                         |
-| **Recurrent step**                  | $\HiddenDimension^2 + \HiddenDimension \LayerInputWidth$                    | $\HiddenDimension^2 + \HiddenDimension \LayerInputWidth$ per step, $\SequenceLength$ steps in order (four times for an LSTM)                               | State of $\HiddenDimension$ values at inference; $\SequenceLength \HiddenDimension$ kept for training |
-| **Transformer block**               | $4\HiddenDimension^2 + 2\HiddenDimension \FeedForwardWidth$                 | $4\SequenceLength\HiddenDimension^2 + 2\SequenceLength^2\HiddenDimension + 2\SequenceLength\HiddenDimension\FeedForwardWidth$ for $\SequenceLength$ tokens | $\SequenceLength^2$ scores per head if materialized                                                   |
-| **Decoding one token**              | All of the model's weights                                                  | About one per weight                                                                                                                                       | Every weight read per step, plus a KV cache of $2\LayerCount\HiddenDimension$ values per token        |
-| **Embedding lookup**                | Rows $\times$ vector width                                                  | Almost none (rows are copied)                                                                                                                              | Whole table resident: rows $\times$ width $\times$ bytes per value                                    |
+| **Building block**                  | **Weights**                                                                 | **Multiply-accumulates per example**                                                                                                                       | **Bytes that move or stay resident**                                                                                                               |
+|:------------------------------------|:----------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------------------------------------------------------------|:---------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Dense layer**                     | $\LayerInputWidth \LayerOutputWidth$                                        | $\LayerInputWidth \LayerOutputWidth$                                                                                                                       | Every weight read once per batch, so weight-only intensity grows with batch size                                                                   |
+| **Convolution layer**               | $\KernelSize^2 \InputChannelCount \OutputChannelCount$                      | $\FeatureMapHeight \FeatureMapWidth \KernelSize^2 \InputChannelCount \OutputChannelCount$                                                                  | Output activations, $\FeatureMapHeight \FeatureMapWidth \OutputChannelCount$ values per example                                                    |
+| **Depthwise separable convolution** | $\KernelSize^2 \InputChannelCount + \InputChannelCount \OutputChannelCount$ | $\FeatureMapHeight \FeatureMapWidth (\KernelSize^2 \InputChannelCount + \InputChannelCount \OutputChannelCount)$                                           | Same output activations, plus an intermediate $\FeatureMapHeight \FeatureMapWidth \InputChannelCount$ feature map written and re-read unless fused |
+| **Recurrent step**                  | $\HiddenDimension^2 + \HiddenDimension \LayerInputWidth$                    | $\HiddenDimension^2 + \HiddenDimension \LayerInputWidth$ per step, $\SequenceLength$ steps in order (four times for an LSTM)                               | State of $\HiddenDimension$ values at inference; $\SequenceLength \HiddenDimension$ kept for training                                              |
+| **Transformer block**               | $4\HiddenDimension^2 + 2\HiddenDimension \FeedForwardWidth$                 | $4\SequenceLength\HiddenDimension^2 + 2\SequenceLength^2\HiddenDimension + 2\SequenceLength\HiddenDimension\FeedForwardWidth$ for $\SequenceLength$ tokens | $\SequenceLength^2$ scores per head if materialized                                                                                                |
+| **Decoding one token**              | All of the model's weights                                                  | About one per weight                                                                                                                                       | Every weight read per step, plus a KV cache of $2\LayerCount\HiddenDimension$ values per token                                                     |
+| **Embedding lookup**                | Rows $\times$ vector width                                                  | Almost none (rows are copied)                                                                                                                              | Whole table resident: rows $\times$ width $\times$ bytes per value                                                                                 |
 
 : **Cost Formulas by Building Block**: Counting rules for inference, one per building block, in the notation of the family sections. A FLOP count is twice the multiply-accumulate count; arithmetic intensity divides FLOPs by bytes moved; and a step can finish no faster than the larger of its FLOPs divided by the peak rate and its bytes divided by the bandwidth. For GPT-2 XL, the KV-cache rule gives `{python} GPT2ModernContext.kv_kb_per_token_str` per token in FP16, the figure quoted in the transformer section. {#tbl-nn-architectures-cost-formulas tbl-colwidths="[18,22,32,28]"}
 
@@ -4833,13 +4833,13 @@ The rows of @tbl-nn-architectures-machine-demands differ, but the operators insi
 %\renewcommand{\arraystretch}{1.25}
 ```
 
-| **Building Block**    | **Example Context** | **Problem Solved**               | **Now Used In**                                                                                  |
-|:----------------------|:--------------------|:---------------------------------|:-------------------------------------------------------------------------------------------------|
-| **GEMM**              | MLPs                | Universal function approximation | All architectures (feedforward layers)                                                           |
-| **Parameter Sharing** | CNNs                | Spatial efficiency               | Transformers (shared projections), RNNs (weight reuse across time)                               |
-| **Skip Connections**  | ResNets (CNNs)      | Gradient flow at depth           | Transformers, DenseNets, U-Nets, many modern deep networks                                       |
-| **Normalization**     | CNNs (BatchNorm)    | Activation stability             | LayerNorm (Transformers), RMSNorm (root-mean-square normalization), GroupNorm (grouped channels) |
-| **Gating**            | LSTMs (RNNs)        | Selective signal routing         | Transformers (mixture-of-experts routing), GRUs, highway networks                                |
+| **Building Block**    | **Example Context** | **Problem Solved**                         | **Now Used In**                                                                                  |
+|:----------------------|:--------------------|:-------------------------------------------|:-------------------------------------------------------------------------------------------------|
+| **GEMM**              | MLPs                | Dense linear projection and feature mixing | All architectures (dense, attention, recurrent, and lowered convolutional layers)                |
+| **Parameter Sharing** | CNNs                | Spatial efficiency                         | Transformers (shared projections), RNNs (weight reuse across time)                               |
+| **Skip Connections**  | ResNets (CNNs)      | Gradient flow at depth                     | Transformers, DenseNets, U-Nets, many modern deep networks                                       |
+| **Normalization**     | CNNs (BatchNorm)    | Activation stability                       | LayerNorm (Transformers), RMSNorm (root-mean-square normalization), GroupNorm (grouped channels) |
+| **Gating**            | LSTMs (RNNs)        | Selective signal routing                   | Transformers (mixture-of-experts routing), GRUs, highway networks                                |
 
 : **Cross-Architecture Building Blocks**: Engineering primitives illustrated by one architecture family and reused across many designs. The example contexts identify familiar applications rather than historical firsts. Each building block solves a recurring problem (gradient flow, activation stability, signal routing), though not every architecture uses every primitive. {#tbl-dl-evolution tbl-colwidths="[15,18,32,35]"}
 
@@ -5157,17 +5157,19 @@ class WildlifeModelSizing:
     os_buffers_mb_str = fmt_memory(os_buffers, unit=MB, precision=0, commas=False)
     memory_screen_subtotal_mb_str = fmt_memory(memory_screen_subtotal, unit=MB, precision=1, commas=False)
     edge_ram_mb_str = fmt_memory(edge_ram, unit=MB, precision=0, commas=False)
-    edge_int8_tops_value_str = fmt_magnitude(edge_int8_rate, unit=TOPS, precision=3, commas=False)
+    edge_int8_gops_value_str = fmt_magnitude(edge_int8_rate, unit=GOPS, precision=0, commas=False)
     edge_int8_gops_str = fmt_ops_rate(edge_int8_rate, unit=GOPS, precision=0, commas=False)
+    target_latency_ms_value_str = fmt_magnitude(target_latency, unit=millisecond, precision=0, commas=False)
     target_latency_ms_str = fmt_time(target_latency, unit="millisecond", precision=0, commas=False)
+    compute_latency_ms_value_str = fmt_magnitude(compute_latency, unit=millisecond, precision=0, commas=False)
     compute_latency_ms_str = fmt_time(compute_latency, unit="millisecond", precision=0, commas=False)
     inference_power_mw_str = fmt_power(inference_power, unit=milliwatt, precision=0, commas=False)
     inferences_per_day_str = fmt_rate(inferences_per_day, "inferences/day", precision=0, commas=False)
     energy_mj_str = fmt_energy(energy_per_inf, unit=mJ, precision=1, commas=False)
     energy_j_str = fmt_energy(energy_per_day, unit=J, precision=1, commas=False)
     compute_check_math = fmt_math(
-        f"\\frac{{{mnv2_mflop_value_str} \\times 10^6 \\text{{ INT8 ops}}}}{{{edge_int8_tops_value_str} \\times 10^{{12}} \\text{{ INT8 ops/s}}}} = "
-        f"{compute_latency_ms_str} \\text{{ latency}} \\ll {target_latency_ms_str} \\text{{ target}}"
+        f"\\frac{{{mnv2_mflop_value_str} \\times 10^6 \\text{{ INT8 ops}}}}{{{edge_int8_gops_value_str} \\times 10^9 \\text{{ INT8 ops/s}}}} = "
+        f"{compute_latency_ms_value_str} \\text{{ ms compute estimate}} < {target_latency_ms_value_str} \\text{{ ms target}}"
     )
     accuracy_target_pct_str = fmt_percent(accuracy_target, precision=0, commas=False, style='prose')
     species_count_str = fmt(species_count, precision=0, commas=False)
@@ -5210,8 +5212,8 @@ While MobileNetV1 demonstrates the viability of depthwise separable convolutions
 
 The fourth step, hardware sizing, checks the candidate against physical platform budgets. INT8 weights occupy `{python} WildlifeModelSizing.mnv2_int8_mb_str`, the network's largest activation tensor, a $112{\times}112{\times}72$ expansion inside its second bottleneck block, occupies `{python} WildlifeModelSizing.single_feature_map_mb_str` in INT8, and the scenario reserves `{python} WildlifeModelSizing.os_buffers_mb_str` for OS and runtime buffers. Their `{python} WildlifeModelSizing.memory_screen_subtotal_mb_str` subtotal is only a single-tensor screen. Peak memory must instead include the weights, the maximum sum of simultaneously live tensor bytes, kernel workspace, and OS and runtime buffers. Inputs and outputs can coexist, and a residual path retains its input while the branch executes. The scenario has not yet established that live-tensor peak or the required workspace, so the small subtotal supports candidacy without confirming a fit in `{python} WildlifeModelSizing.edge_ram_mb_str` of RAM.
 
-For the candidate system-on-chip (SoC), an ARM Cortex-A53 at 1.2 GHz with NEON SIMD, this planning calculation assumes sustained throughput of ~`{python} WildlifeModelSizing.edge_int8_gops_str` INT8:
-`{python} WildlifeModelSizing.compute_check_math`
+For the candidate system-on-chip (SoC), an ARM Cortex-A53 at 1.2 GHz with NEON SIMD (ARM's vector instruction extension for parallel packed arithmetic), this planning calculation assumes sustained throughput of ~`{python} WildlifeModelSizing.edge_int8_gops_str` INT8:
+`{python} WildlifeModelSizing.compute_check_math`. That compute-only estimate leaves headroom in the `{python} WildlifeModelSizing.target_latency_ms_str` budget for frame capture, downsampling, depthwise memory stalls, and runtime overhead, which must be measured on the target board.
 
 Active power is the last physical budget to check. At an estimated active inference draw of ~`{python} WildlifeModelSizing.inference_power_mw_str` over `{python} WildlifeModelSizing.compute_latency_ms_str`, each classification consumes `{python} WildlifeModelSizing.energy_mj_str`. For a trigger-based rate of `{python} WildlifeModelSizing.inferences_per_day_str`, model execution consumes `{python} WildlifeModelSizing.energy_j_str`/day. Full-system energy must also include image capture, sleep current, storage, and peripherals. Battery capacity, conversion losses, trigger frequency, and seasonal solar yield determine whether that daily budget supports six months of operation.
 
@@ -5432,6 +5434,8 @@ Teams budget transformer deployment based on model weight memory alone, overlook
 ## Summary {#sec-network-architectures-summary-e642}
 
 *Architecture is infrastructure.* Choosing among MLPs, CNNs, RNNs, transformers, and recommendation models (DLRM) shapes the physical terms in the serialized form of the iron law of ML systems ($\Time= \DataVolume/\Bandwidth + \Operations / (\PeakRate \cdot \EfficiencyHw) + \Latency$). Examining each architecture through the four-part lens (pattern processing needs, algorithmic structure, computational mapping, and system implications) connects mathematical inductive bias to work, state, and dependencies. Execution conditions and the target machine then determine which term limits hardware performance.
+
+Across those five families, nearly all arithmetic lowers onto one primitive: GEMM. Convolutions reach it through im2col or implicit GEMM, while pointwise $1{\times}1$ layers, fused RNN and LSTM gates, attention projections and products, and DLRM's dense MLPs execute as GEMM directly, which is why accelerators dedicate their silicon to matrix engines. What stays outside that path forms the memory-bound remainder: embedding gathers copy rows without arithmetic, depthwise filters act on one channel at a time, and elementwise steps such as residual additions, normalization, and softmax move bytes with little math.
 
 The durable tool is arithmetic intensity read against the machine's balance. Reuse raises $\ArithmeticIntensity = \Operations/\DataVolume$ and pushes a workload toward the compute term, as ResNet-50 does when batched; streamed weights lower it and expose the data term, as GPT-2 decoding does at small batch. Two families escape that single axis. A recurrent dependency chain sets a floor of $\SequenceLength$ ordered updates that neither term removes, and an oversized embedding table imposes a capacity decision that fixes which bandwidth the data term pays before any arithmetic begins. Low FLOP counts, as MobileNetV2 and KWS show, help only when the resulting operation shapes still keep the hardware's functional units busy.
 
