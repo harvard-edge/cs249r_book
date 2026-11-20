@@ -296,26 +296,28 @@ def drf(k):
     ax.set_ylabel('Share of the fleet')
     sp.save(fig, out / f'drf_step{k}.svg')
 
-def frag():
+def frag_steps():
     free = {0: [6, 7], 1: [2, 5, 7], 2: [0, 7], 3: [3, 4, 7], 4: [5, 6], 5: [1, 6, 7], 6: [3, 7], 7: [4, 5]}
     assert sum((len(f) for f in free.values())) == 19, "layout must match the scenario's free slots"
-    fig, ax = plt.subplots(figsize=(3.9, 3.4))
-    for n in range(8):
-        y = 7 - n
-        for s in range(8):
-            if s in free[n]:
-                ax.add_patch(Rectangle((s + 0.06, y + 0.06), 0.88, 0.88, fc='white', ec=V['gray'], lw=1.2, ls='--'))
-            else:
-                ax.add_patch(Rectangle((s + 0.06, y + 0.06), 0.88, 0.88, fc=V['c1_l'], ec=V['c1'], lw=1.0))
-        ax.text(-0.15, y + 0.5, f'node {n}', ha='right', va='center', fontsize=11, color=V['ink'])
-        ax.text(8.15, y + 0.5, f'{len(free[n])} free', ha='left', va='center', fontsize=11, color=V['gray'])
-    ax.add_patch(Rectangle((0.06, 8.25), 7.88, 0.8, fc=V['bad_l'], ec=V['bad'], lw=1.6, ls='--'))
-    ax.text(4, 8.65, 'pending: 8 GPUs, one node', ha='center', va='center', fontsize=10.5, color=V['bad'], fontweight='bold')
-    ax.text(4, -0.45, '19 of 64 free (30%)', ha='center', va='center', fontsize=13, color=V['ink'], fontweight='bold')
-    ax.set_xlim(-1.6, 9.4)
-    ax.set_ylim(-0.8, 9.2)
-    hide_axis(ax)
-    sp.save(fig, out / 'frag_grid.svg')
+    for k in (1, 2):
+        fig, ax = plt.subplots(figsize=(3.9, 3.45))
+        for n in range(8):
+            y = 7 - n
+            for s in range(8):
+                if s in free[n]:
+                    ax.add_patch(Rectangle((s + 0.06, y + 0.06), 0.88, 0.88, fc='white', ec=V['gray'], lw=1.2, ls='--'))
+                else:
+                    ax.add_patch(Rectangle((s + 0.06, y + 0.06), 0.88, 0.88, fc=V['c1_l'], ec=V['c1'], lw=1.0))
+            ax.text(-0.15, y + 0.5, f'node {n}', ha='right', va='center', fontsize=11, color=V['ink'])
+            ax.text(8.15, y + 0.5, f'{len(free[n])} free', ha='left', va='center', fontsize=11, color=V['gray'])
+        a2 = 1.0 if k >= 2 else 0.0
+        ax.add_patch(Rectangle((0.06, 8.25), 7.88, 0.8, fc=V['bad_l'], ec=V['bad'], lw=1.8, ls='--', alpha=a2))
+        ax.text(4, 8.65, 'pending: 8-GPU job (blocked)', ha='center', va='center', fontsize=9.0, color=V['bad'], fontweight='bold', alpha=a2)
+        ax.text(4, -0.45, '19 of 64 free (30%)' + (' $\\rightarrow$ 0 feasible nodes' if k >= 2 else ''), ha='center', va='center', fontsize=11.5, color=V['bad'] if k >= 2 else V['ink'], fontweight='bold')
+        ax.set_xlim(-1.6, 9.6)
+        ax.set_ylim(-0.85, 9.25)
+        hide_axis(ax)
+        sp.save(fig, out / f'frag_grid_step{k}.svg')
 
 def mg1(k, cs_kalos, path=None, sat=False):
     rho = np.linspace(0.05, 0.985 if sat else 0.95, 400)
@@ -532,22 +534,23 @@ def diurnal():
     demand = avg + (peak - avg) * np.cos((t - 14) / 24 * 2 * np.pi)
     reclaimed = np.clip(res - demand - buf, 0, None)
     print('diurnal mean demand', round(demand.mean(), 1), 'mean reclaimed', round(reclaimed.mean(), 1), 'peak', round(demand.max(), 1))
-    fig, ax = plt.subplots(figsize=(5.8, 2.5))
+    fig, ax = plt.subplots(figsize=(5.1, 2.35))
     ax.fill_between(t, 0, demand, color=C['data'], lw=0)
     ax.fill_between(t, demand, demand + buf, color=C['data_l'], lw=0, hatch='..', edgecolor=C['data'])
     ax.fill_between(t, demand + buf, demand + buf + reclaimed, color=C['memory'], alpha=0.75, lw=0)
     ax.axhline(res, color=C['text'], lw=1.4, ls='--')
-    ax.text(0.3, res + 10, 'static serving reservation: 400 GPUs', fontsize=11, color=C['text'], va='bottom')
-    ax.text(14, 95, 'serving demand\n(peak 283)', ha='center', va='center', fontsize=11, color='white', fontweight='bold')
-    ax.text(14, 345, 'surge buffer 117', ha='center', va='center', fontsize=11, color=C['data'])
+    ax.text(0.3, res + 10, 'static serving reservation: 400 GPUs', fontsize=11.5, color=C['text'], va='bottom')
+    ax.text(14, 95, 'serving demand\n(peak 283)', ha='center', va='center', fontsize=11.5, color='white', fontweight='bold')
+    ax.text(14, 345, 'surge buffer 117', ha='center', va='center', fontsize=11.5, color=C['data'])
     ax.text(3.0, 310, 'lent to\ntraining', ha='center', va='center', fontsize=12, color='white', fontweight='bold')
     ax.set_xlim(0, 24)
     ax.set_ylim(0, 470)
     ax.set_xticks([0, 6, 12, 18, 24])
-    ax.set_xticklabels(['0:00', '6:00', '12:00', '18:00', '24:00'])
+    ax.set_xticklabels(['0:00', '6:00', '12:00', '18:00', '24:00'], fontsize=11)
     ax.set_yticks([0, 200, 400])
-    ax.set_ylabel('GPUs')
-    ax.set_xlabel('Hour of day (illustrative shape; averages from Napkin Math 8.5)')
+    ax.tick_params(axis='y', labelsize=11)
+    ax.set_ylabel('GPUs', fontsize=11.5)
+    ax.set_xlabel('Hour of day (illustrative shape; Napkin Math 8.5)', fontsize=11.5)
     sp.save(fig, out / 'diurnal.svg')
 
 def quota():
@@ -609,7 +612,7 @@ if __name__ == '__main__':
         elastic(k)
         spot(k)
     mg1(1, cs, path=out / 'mg1_sat.svg', sat=True)
-    frag()
+    frag_steps()
     nccl()
     preempt()
     cascade()
