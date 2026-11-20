@@ -2189,7 +2189,7 @@ class NotationRegistry:
     InnerLayerFunction: NotationSymbol  # inner function of a composition, the layer applied before the outer one ($g$)
     InnerProductLeftComponent: NotationSymbol  # one component of the first vector in a dot product ($a$) [dimensionless]
     InnerProductLeftVector: NotationSymbol  # first of two vectors whose dot product measures their similarity ($\mathbf{a}$)
-    InnerProductRightComponent: NotationSymbol  # one component of the second vector in a dot product ($v$) [dimensionless]
+    InnerProductRightComponent: NotationSymbol  # one component of the second vector in a dot product ($b$) [dimensionless]
     InnerProductRightVector: NotationSymbol  # second of two vectors whose dot product measures their similarity ($\mathbf{b}$)
     InnovationBias: NotationSymbol  # systematic offset in a measurement innovation, such as the arrival-stamp travel of a misdated update ($b$) [varies]
     InnovationCovariance: NotationSymbol  # covariance of the measurement innovation ($\mathbf{S}$)
@@ -2205,7 +2205,7 @@ class NotationRegistry:
     InputFeatureIndex: NotationSymbol  # index of an input feature of a neuron or layer ($i$)
     InputFeatureVector: NotationSymbol  # input feature vector of one example, written as a row vector ($\mathbf{x}$)
     InputLieDerivativeOperator: NotationSymbol  # Lie derivative operator along the input matrix field, mapping a scalar function of the state to its sensitivity to the control input ($L_{\mathbf{g}}$)
-    InputNodePrimal: NotationSymbol  # value of the input node of a computational graph that holds input i ($v_{i-N}$) [dimensionless]
+    InputNodePrimal: NotationSymbol  # value of the input node of a computational graph that holds input m ($v_{m-N}$) [dimensionless]
     InputPipelineRate: NotationSymbol  # batches per second the host-side input pipeline supplies ($R_{\text{pipeline}}$) [batches/s]
     InputPipelineRatio: NotationSymbol  # time the input pipeline takes to produce a batch divided by the time the accelerator takes to train on it ($r_{\text{pipe}}$) [dimensionless]
     InputPipelineServiceRate: NotationSymbol  # end-to-end rate at which the input pipeline delivers data, set by its slowest stage under bounded buffering ($r_{\text{pipeline}}$) [bytes/s]
@@ -2827,7 +2827,7 @@ class NotationRegistry:
     MonitoredMetricMean: NotationSymbol  # established historical mean of a monitored metric, the center line of its control chart ($\mu$) [varies]
     MonitoredMetricStandardDeviation: NotationSymbol  # established historical standard deviation of a monitored metric, which sets its control limits ($\sigma$) [varies]
     MonitoringAlertCost: NotationSymbol  # monitoring cost of evaluating alert rules over an accounting window ($C_{\text{alert}}$) [USD]
-    MonitoringComputeCost: NotationSymbol  # monitoring cost of query and dashboard compute over an accounting window ($C_{\text{compute}}$) [USD]
+    MonitoringComputeCost: NotationSymbol  # monitoring cost of query and dashboard compute over an accounting window ($C_{\text{query}}$) [USD]
     MonitoringCostComponent: NotationSymbol  # any one of the four monitoring cost components (ingestion, storage, compute, alert) over an accounting window ($C_*$) [USD]
     MonitoringIngestionCost: NotationSymbol  # monitoring cost of ingesting telemetry over an accounting window ($C_{\text{ingest}}$) [USD]
     MonitoringStorageCost: NotationSymbol  # monitoring cost of storing retained telemetry over an accounting window ($C_{\text{storage}}$) [USD]
@@ -3812,7 +3812,7 @@ class NotationRegistry:
     RequiredScenarioSet: NotationSymbol  # set of scenario-table cells, the operating conditions deployment requires the dataset to support ($\mathcal{S}_{\text{req}}$)
     RequiredServiceRate: NotationSymbol  # service rate a server must sustain so peak arrivals keep utilization at the safe ceiling ($\mu_{\text{required}}$) [requests/s]
     RequiredTaskPairCount: NotationSymbol  # number of task pairs a paired comparison needs for its noninferiority gate to clear if the observed difference holds, scaled from the current count by the squared ratio of half-widths ($N'$)
-    RequiredUsersPerVariant: NotationSymbol  # number of users each variant of an A/B test needs to detect the minimum detectable effect at the chosen confidence and power ($n$)
+    RequiredUsersPerVariant: NotationSymbol  # number of users each variant of an A/B test needs to detect the minimum detectable effect at the chosen confidence and power ($n_{\text{variant}}$)
     ResampledReplacementToken: NotationSymbol  # token the target model samples from the normalized positive residual to replace the first rejected draft token, written for the fourth position of the illustrated round ($T_4'$)
     ReservedDeviceMemory: NotationSymbol  # device memory held back for the runtime, the operating system and the foreground application, unavailable to background adaptation ($M_{\text{reserve}}$) [bytes]
     ResetCalibrationTime: NotationSymbol  # time to recalibrate sensors and joint encoders between trials, part of the reset latency ($t_{\text{calibration}}$) [s]
@@ -4533,9 +4533,9 @@ class NotationRegistry:
     TargetUnitQuaternion: NotationSymbol  # unit quaternion of the target orientation a goal set is centered on ($\mathbf{q}_{\text{quat,target}}$) [dimensionless]
     TargetUpdateCount: NotationSymbol  # number of client updates a federated round waits for and aggregates ($K_{\text{target}}$)
     TargetUtilizationBatchSize: NotationSymbol  # smallest batch size whose serving utilization stays at or below the target utilization, under the linear batch service model ($B_{\text{util}}$)
-    TargetXPosition: NotationSymbol  # x coordinate of a proposed or admitted target position in the robot base frame ($x$) [m]
+    TargetXPosition: NotationSymbol  # x coordinate of a proposed or admitted target position in the robot base frame ($p_x$) [m]
     TargetYPosition: NotationSymbol  # y coordinate of a proposed or admitted target position in the robot base frame ($p_y$) [m]
-    TargetZPosition: NotationSymbol  # z coordinate of a proposed or admitted target position in the robot base frame ($z$) [m]
+    TargetZPosition: NotationSymbol  # z coordinate of a proposed or admitted target position in the robot base frame ($p_z$) [m]
     TaskAcceptanceLabel: NotationSymbol  # binary label recording whether one monitored task was accepted, one for acceptance ($x$) [dimensionless]
     TaskBlockingTime: NotationSymbol  # longest time a real-time task can wait for a lower-priority task to release a shared resource ($B$) [s]
     TaskContract: NotationSymbol  # five-part specification of a delegated task: goal, environment, permitted actions, available observations, and completion criteria ($\mathcal{C}$)
@@ -4718,11 +4718,11 @@ class NotationRegistry:
     TorusThirdAxisChipCount: NotationSymbol  # number of chips along the third axis of a torus pod ($Z$)
     TotalChipPower: NotationSymbol  # total power a chip dissipates, the sum of dynamic switching power and static leakage power ($P_{\text{total}}$) [W]
     TotalCollisionQueryTime: NotationSymbol  # total time of the clearance queries for every collision hull in one permission tick ($T_{\text{query\_total}}$) [s]
-    TotalDataCost: NotationSymbol  # total cost of a training dataset over its lifecycle ($C_{\text{total}}$) [USD]
+    TotalDataCost: NotationSymbol  # total cost of a training dataset over its lifecycle ($C_{\text{data}}$) [USD]
     TotalDelayPhaseShift: NotationSymbol  # phase that the combined compute, bus and zero-order-hold delays contribute near crossover ($\phi_{\text{total}}$) [rad]
     TotalEnergy: NotationSymbol  # total energy a workload consumes ($E_{\text{total}}$) [J]
     TotalExecutedTrialCount: NotationSymbol  # total number of trials a test campaign executed ($N_{\text{total}}$)
-    TotalFailureRecoveryTime: NotationSymbol  # wall-clock time from a failure until training is productive again, including replay of the work lost since the last checkpoint: detection, restart, checkpoint load and replay ($T_{\text{recovery}}$) [s]
+    TotalFailureRecoveryTime: NotationSymbol  # wall-clock time from a failure until training is productive again, including replay of the work lost since the last checkpoint: detection, restart, checkpoint load and replay ($T_{\text{downtime}}$) [s]
     TotalGateCharge: NotationSymbol  # total charge the gate driver moves into or out of a power switch's gate during one transition ($Q_g$) [A*s]
     TotalInterventionCount: NotationSymbol  # total number of interventions recorded across an evaluation campaign, human takeovers, permission-path clips and stops, and tripwires ($N_{\text{int}}$)
     TotalKineticEnergy: NotationSymbol  # total kinetic energy of a machine, its translational energy plus the rotational energy of its powertrain ($E_{k,\text{total}}$) [J]

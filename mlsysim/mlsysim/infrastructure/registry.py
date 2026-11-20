@@ -31,16 +31,16 @@ class FacilityCooling(Registry):
         metadata=Metadata(provenance=pc.NREL_ESIF_PUE, description="Warm-water liquid-cooled data center cooling profile (PUE 1.06, WUE 0.0)."),
     )
     BestAir = CoolingProfile(
-        name="Best Air-Cooled", pue=PUE_BEST_AIR, wue=WUE_EVAPORATIVE,
-        metadata=Metadata(provenance=pc.MICROSOFT_DESIGN_PUE_2022, description="Newest-generation hyperscale datacenter design cooling profile (PUE 1.12, WUE 1.8)."),
+        name="Best Air-Cooled", pue=PUE_BEST_AIR, wue=WUE_AIR_COOLED,
+        metadata=Metadata(provenance=pc.MICROSOFT_DESIGN_PUE_2022, description="Newest-generation hyperscale air-cooled datacenter design profile (PUE 1.12, WUE 0.5)."),
     )
     Typical = CoolingProfile(
         name="Industry Average (2022)", pue=PUE_TYPICAL, wue=WUE_EVAPORATIVE,
         metadata=Metadata(provenance=pc.UPTIME_PUE_2022, description="Global industry average datacenter cooling profile from Uptime Institute 2022 survey (PUE 1.55, WUE 1.8)."),
     )
     SimpleAir = CoolingProfile(
-        name="Simple Air-Cooled", pue=PUE_SIMPLE_AIR, wue=WUE_EVAPORATIVE,
-        metadata=Metadata(provenance=pc.LBNL_SMALL_SERVER_ROOMS_2013, description="Small air-conditioned server room cooling profile (PUE 1.5, WUE 1.8)."),
+        name="Simple Air-Cooled", pue=PUE_SIMPLE_AIR, wue=WUE_AIR_COOLED,
+        metadata=Metadata(provenance=pc.LBNL_SMALL_SERVER_ROOMS_2013, description="Small air-conditioned server room cooling profile (PUE 1.5, WUE 0.5)."),
     )
     Legacy = CoolingProfile(
         name="Industry Average (2023)", pue=PUE_LEGACY, wue=WUE_EVAPORATIVE,
@@ -164,3 +164,6 @@ class Infrastructure(Registry):
     Pricing = Pricing
     Capacity = Capacity
     AIR_COOLING_LIMIT_KW = AIR_COOLING_LIMIT_KW
+    WUE_AIR_COOLED = WUE_AIR_COOLED
+    WUE_EVAPORATIVE = WUE_EVAPORATIVE
+    WUE_LIQUID = WUE_LIQUID

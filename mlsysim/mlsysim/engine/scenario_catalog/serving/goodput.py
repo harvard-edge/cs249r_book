@@ -63,16 +63,16 @@ Llama2_70BRuntimeGoodput128 = _st.RuntimeGoodputScenario(
 
 Llama2_70BFleetMfu128 = _st.FleetMfuScenario(
     name="Llama 2 70B training MFU on one DGX H100 node and on 128 H100s",
-    description="The same work per GPU: 180 ms node steps at the node's batch, 245 ms steps on the "
-    "shared fleet with exposed cross-node gradient reduction.",
+    description="The same work per GPU (277 tokens/GPU): 181 ms node steps at the node's batch, "
+    "245 ms steps on the shared fleet with exposed cross-node gradient reduction.",
     workload=_Models.Language.Llama2_70B,
     hardware=_Hardware.Cloud.H100,
     node_devices=_Nodes.DGX_H100.accelerators_per_node,
     fleet_devices=Llama2_70BJobFailures128.n_devices,
-    node_tokens=2204,  # scenario assumption: node baseline tokens per step
-    fleet_tokens=35446,  # scenario assumption: 128-GPU tokens per step
-    node_step_time=Q_(180, "ms"),  # scenario assumption: node baseline, optimizer state offloaded to host
-    fleet_step_time=Q_(245, "ms"),  # scenario assumption: 128-GPU step on the shared fleet
+    node_tokens=2216,  # scenario assumption: 277 tokens/GPU x 8 GPUs
+    fleet_tokens=35456,  # exact 16x node_tokens (277 tokens/GPU x 128 GPUs, exact weak scaling)
+    node_step_time=Q_(181, "ms"),  # scenario assumption: node baseline, optimizer state offloaded to host
+    fleet_step_time=Q_(245, "ms"),  # scenario assumption: 128-GPU step on the shared fleet (181/245 = 73.9% -> 74%)
 )
 
 

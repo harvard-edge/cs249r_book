@@ -253,12 +253,16 @@ class DataParallelScaleOutModel(ForwardModel):
     """
     A data-parallel job inside one node and across nodes, from its one-device profile.
 
-    Every update reduces the full gradient: a ring AllReduce inside each node
-    on the fast link, and, with more than one node, a ring across all devices
-    on the inter-node link. Gradient accumulation runs ``accumulation_steps``
-    local steps per update, so the same exchange serves more compute and the
-    global batch grows. Speedup is the device count times the compute share of
-    each update; training time and cost follow from the one-device run.
+    Every update reduces the full gradient with a hierarchical ring AllReduce:
+    an intra-node ReduceScatter and AllGather on the fast intra-node link
+    (combined byte factor ``2(G-1)/G`` for ``G = devices_per_node``), and,
+    with more than one node, an inter-node ring AllReduce across the ``nodes``
+    nodes over one shared inter-node link per node (byte factor
+    ``2(M-1)/M`` for ``M = nodes``). Gradient accumulation runs
+    ``accumulation_steps`` local steps per update, so the same exchange serves
+    more compute and the global batch grows. Speedup is the device count times
+    the compute share of each update; training time and cost follow from the
+    one-device run.
     """
     requires = ("workload", "devices_per_node", "nodes")
     produces = DataParallelScaleOutResult
@@ -327,8 +331,8 @@ class DataParallelScaleOutModel(ForwardModel):
         intra_bytes = grad * calc_ring_allreduce_data_factor(devices_per_node)
         intra = calc_ring_allreduce_time(grad, devices_per_node, intra_bandwidth, zero).to("ms")
         if nodes > 1:
-            inter_bytes = grad * calc_ring_allreduce_data_factor(n)
-            inter = calc_ring_allreduce_time(grad, n, inter_bandwidth, zero).to("ms")
+            inter_bytes = grad * calc_ring_allreduce_data_factor(nodes)
+            inter = calc_ring_allreduce_time(grad, nodes, inter_bandwidth, zero).to("ms")
         else:
             inter_bytes, inter = 0 * grad, zero
         comm = intra + inter
