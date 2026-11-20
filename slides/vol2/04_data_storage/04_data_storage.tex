@@ -251,12 +251,12 @@
   \note{[1.5 min] [CORE] Real measurements. MLPerf Storage emulates accelerators that consume samples at a fixed compute time per sample and reports the read throughput a storage system sustains while keeping them at least 90 percent busy (70 percent for CosmoFlow). Left: each dot is one passing result; throughput rises in proportion to the number of emulated accelerators, the $N_{\text{GPU}}$ term. Right: medians per accelerator. 3D U-Net reads whole medical volumes and needs about 2.75 GB/s per emulated H100; ResNet-50 about 0.18. Emulating an H100 instead of an A100 raises demand 1.6 to 2 times on every workload, because the faster chip shortens $T_{\text{iteration}}$ while the bytes per batch stay the same. ENGAGE: what does that mean for a storage purchase planned for one accelerator generation? (Expected: it is undersized for the next.) WARN: these results measure storage systems under emulated load; no real GPUs trained.}
 \end{frame}
 
-\begin{frame}{Overlap turns read plus compute into the longer of the two}
+\begin{frame}{Overlap hides I/O only when upstream stages beat compute}
   \centering
-  \mlsyssteps[width=\textwidth,height=5.0cm,keepaspectratio]{stall_step}{2}\\[0.05cm]
+  \mlsyssteps[width=0.96\textwidth,height=4.8cm,keepaspectratio]{stall_step}{4}\\[0.05cm]
   {\small Data stall $= (T_{\text{step}} - T_{\text{compute}}) / T_{\text{step}}$: the share of each step spent waiting for input.}
-  \mlsyscredit{Data Storage, Napkin Math 4.5 and equation 4.}
-  \note{[2 min] [CORE] The data stall ratio. Compute takes 200 ms per batch; storage takes 250 ms to deliver one. Step 1: without overlap, the GPU waits for each read, then computes, 450 ms per step, 250 of them stalled, 55.6 percent. Step 2: overlapped, the loader reads batch $i+1$ while the GPU computes batch $i$, so a step costs the longer of the two, 250 ms, and the stall falls to 50 of 250 ms, 20 percent. Overlap cannot go further, because delivery is slower than compute on every step, so the only fixes are a faster stage or more parallel input streams. ENGAGE: a profiler shows the GPU idle 20 percent of the time; is storage to blame? (Expected: only if that idle time is spent waiting on the input queue; the same gap can be collectives or barriers, so measure them separately.) LINK: the Fleet Law has no input term; a stall like this is idle compute added on top of the communication and synchronization terms.}
+  \mlsyscredit{Data Storage, Napkin Math 4.5, \S4.4.1, and equation 4 (interactive Explore figure: Data Pipeline Overlap).}
+  \note{[2 min] [CORE] The data stall ratio and 3-stage pipeline. Compute takes 200 ms per batch. Step 1: sequential loading at 250 ms I/O takes 450 ms per step, 55.6 percent stalled while the GPU sits idle. Step 2: overlapping batch $i+1$'s read with batch $i$'s compute cuts the step to the longer of the two, 250 ms, but leaves a 50 ms gap (20 percent stalled) because delivery is slower than compute on every step. Step 3: when both Storage Read and CPU Prep are sized below 200 ms, a three-stage pipeline (Read, Prep, GPU Train) runs with three batches in flight at zero GPU stall. Step 4: steady state keeps three batches active at once. ENGAGE: a profiler shows the GPU idle 20 percent of the time; is storage to blame? (Expected: only if that idle time is spent waiting on the input queue; measure collectives separately.) LINK: the Fleet Law has no input term; any unhidden stall adds idle compute outside the law.}
 \end{frame}
 
 \begin{frame}[fragile]{Prefetch covers the p99 delay but drains under a deficit}
@@ -281,10 +281,10 @@ loader = DataLoader(dataset,
 
 \begin{frame}{GPUDirect Storage removes the host copy but keeps CPU control}
   \centering
-  \safeimg[width=\textwidth,height=4.9cm,keepaspectratio]{gds.pdf}\\[0.15cm]
-  {\small Illustrative, 64,000 images/s per node: \textbf{7.68 $\rightarrow$ 1.92} CPU-seconds per second.}
+  \mlsyssteps[width=\textwidth,height=4.8cm,keepaspectratio]{gds_step}{2}\\[0.12cm]
+  {\small\uncover<2->{Illustrative, 64,000 images/s per node: \textbf{7.68 $\rightarrow$ 1.92} CPU-seconds per second.}}
   \mlsyscredit{Data Storage, \S4.5, figure 6, and Napkin Math 4.6 (illustrative service times).}
-  \note{[1.5 min] [OPTIONAL] Left: the conventional path. The NVMe drive copies a block into a kernel buffer in host DRAM (DMA 1, direct memory access by the device); the CPU copies it into a pinned user buffer; the GPU's DMA engine pulls it into HBM (DMA 2). Right: GPUDirect Storage registers GPU memory so one DMA moves the payload from the drive into HBM; the CPU still issues and completes every request (dashed). It is the storage counterpart of RDMA from Lecture 3. The chapter's illustrative example: 64,000 small images per second per node at 120 microseconds of CPU each needs about 8 cores just for data movement; at 30 microseconds, about 2, freeing 6 cores for decoding and augmentation. ENGAGE: a pipeline decodes JPEGs on the CPU; does GDS help? (Expected: little; the drive must hold GPU-consumable data, and CPU decode is the limiting stage.) WARN: GDS does not remove media latency, network latency, or queueing. Land the segment: size demand with the equation, find the slowest stage, overlap it, and buffer the tail.}
+  \note{[1.5 min] [OPTIONAL] Step 1: the conventional path. The NVMe drive copies a block into a kernel buffer in host DRAM (DMA 1, direct memory access by the device); the CPU copies it into a pinned user buffer; the GPU's DMA engine pulls it into HBM (DMA 2). Step 2: GPUDirect Storage registers GPU memory so one DMA moves the payload from the drive into HBM; the CPU still issues and completes every request (dashed). It is the storage counterpart of RDMA from Lecture 3. The chapter's illustrative example: 64,000 small images per second per node at 120 microseconds of CPU each needs about 8 cores just for data movement; at 30 microseconds, about 2, freeing 6 cores for decoding and augmentation. ENGAGE: a pipeline decodes JPEGs on the CPU; does GDS help? (Expected: little; the drive must hold GPU-consumable data, and CPU decode is the limiting stage.) WARN: GDS does not remove media latency, network latency, or queueing. Land the segment: size demand with the equation, find the slowest stage, overlap it, and buffer the tail.}
 \end{frame}
 
 % =============================================================================
@@ -295,39 +295,28 @@ loader = DataLoader(dataset,
 \section{Shards}
 
 \begin{frame}{An open goes to one metadata server; bytes come from many}
-  \centering
-  \safeimg[width=0.97\textwidth,height=5.1cm,keepaspectratio]{pfs.pdf}\\[0.1cm]
-  {\small\texttt{lfs setstripe -c 100 -S 4M /lustre/shards}\enspace\textcolor{midgray}{100 targets, 4 MB stripes}}
-  \mlsyscredit{Data Storage, \S4.3.6, Definition 4.1, figure 2. Command: Lustre \texttt{lfs setstripe} (stripe count, stripe size).}
-  \note{[2 min] [CORE] A parallel file system such as Lustre splits two jobs. Step 1 of a read: the client asks the metadata server (MDS) where the file lives, and opens, stats, and locks go there too. Step 2: the client reads the file's stripes directly from many object storage servers (OSS) in parallel. A hundred OSS at 10 GB/s each give 1 TB/s, and adding servers adds bandwidth. The metadata server does not grow with them. It serves a few hundred thousand operations per second. The command at the bottom is real Lustre. It stripes every new file in a directory over 100 storage targets in 4 MB pieces, so one large shard can draw on many servers. ENGAGE: which resource does a dataset of one file per image stress? (Expected: the metadata server, one open per sample.) WARN: in Lustre, an object storage server is part of the file system; it is not cloud object storage such as S3.}
+  \begin{columns}[c]
+    \begin{column}{0.74\textwidth}
+      \centering\mlsyssteps[width=\textwidth,height=4.6cm,keepaspectratio]{pfs_step}{2}
+    \end{column}
+    \begin{column}{0.24\textwidth}
+      \centering\safeimg[width=\textwidth,height=3.9cm,keepaspectratio]{netapp-filer-disk-shelves.jpg}\\[0.04cm]
+      {\scriptsize\textcolor{midgray}{Disk shelves in a shared storage rack}}
+    \end{column}
+  \end{columns}
+  \vspace{0.08cm}
+  \centering{\small\texttt{lfs setstripe -c 100 -S 4M /lustre/shards}\enspace\textcolor{midgray}{100 targets, 4 MB stripes}}
+  \mlsyscredit{Data Storage, \S4.3.6, Definition 4.1, figure 2. Command: Lustre \texttt{lfs setstripe}. Photo: Victorgrigas, CC BY-SA 3.0, Wikimedia Commons.}
+  \note{[2 min] [CORE] A parallel file system such as Lustre splits two jobs. Step 1 of a read: the client asks the metadata server (MDS) where the file lives, and opens, stats, and locks go there too; the MDS serves a few hundred thousand operations per second. Step 2: the client reads the file's stripes directly from many object storage servers (OSS) in parallel. A hundred OSS at 10 GB/s each give 1 TB/s, and adding servers adds bandwidth, while the metadata server does not grow with them. The command at the bottom is real Lustre. It stripes every new file in a directory over 100 storage targets in 4 MB pieces, so one large shard draws on many servers. ENGAGE: which resource does a dataset of one file per image stress? (Expected: the metadata server, one open per sample.) WARN: in Lustre, an object storage server is part of the file system; it is not cloud object storage such as S3.}
 \end{frame}
 
 \begin{frame}{Why does a 500 GB/s file system deliver 5 GB/s?}
   \mlsysactivity{Diagnose}{3 min}
-  \begin{columns}[c]
-    \begin{column}{0.40\textwidth}
-      \begin{mlsyscard}{mlsysaccent}
-        \small 200 million JPEG files\\[0.06cm]
-        Data disks: nearly idle\\[0.06cm]
-        Loaders: waiting in \texttt{open()}\\[0.06cm]
-        Metadata server: queue full
-      \end{mlsyscard}
-      \vspace{0.15cm}
-      {\small\uncover<2->{\textbf{Fix:} package samples into large shards.}}
-    \end{column}
-    \begin{column}{0.56\textwidth}
-      \uncover<2->{%
-      \begin{mlsyscard}{errorstroke}
-        \small Every sample is a file, so every sample waits for an open at the one metadata server. The data servers sit idle: under 1\% of 500 GB/s.
-      \end{mlsyscard}
-      \vspace{0.15cm}
-      \begin{mlsyscard}{datastroke}
-        \small 50,000 tar shards: 4,000$\times$ fewer files, one open per 4,000 samples, plus a manifest so loaders skip per-file stats.
-      \end{mlsyscard}}
-    \end{column}
-  \end{columns}
+  \centering
+  \mlsyssteps[width=0.96\textwidth,height=4.7cm,keepaspectratio]{metadata_step}{2}\\[0.08cm]
+  {\small\uncover<2->{\textbf{Fix:} package samples into large shards (e.g.\ WebDataset) and ship a precomputed manifest.}}
   \mlsyscredit{Data Storage, Example 4.1 (the metadata meltdown) and \S4.3.5.}
-  \note{[3 min] [CORE] ENGAGE: pairs name the bottleneck and one fix in two minutes. Step 2: metadata-bound shard packaging. Every sample is a file, so every sample costs an open, a stat, and a close at the one metadata server; its queue saturates long before the data servers or links reach their byte rate, and the system delivers under 1 percent of its rating. The fix is packaging. Bundle the 200 million images into 50,000 tar shards (WebDataset, for example), 4,000 times fewer files, so each open is amortized over about 4,000 samples, and ship a precomputed manifest so loaders do not stat every file at startup. The running case does the same: about 2,000 shards of 3 GB, so one epoch issues about 2,000 opens instead of one per token. WARN: adding stripes or data servers does not help; striping spreads bytes of a large file, while aggregation reduces the number of files. FLEX: if students say "the network", ask why the data disks are idle.}
+  \note{[3 min] [CORE] ENGAGE: pairs name the bottleneck and one fix in two minutes. Step 1: 200 million JPEG files hit one metadata server with 1 open, stat, and close per image; loaders block in open() while 100 data disks sit under 1 percent busy (5 GB/s out of 500 GB/s). Step 2: bundle the 200 million images into 50,000 tar shards (WebDataset, for example), 4,000 times fewer files, so each open is amortized over 4,000 samples, and ship a precomputed manifest so loaders skip per-file stats at startup. The running case does the same: about 2,000 shards of 3 GB, so one epoch issues about 2,000 opens instead of one per token. WARN: adding stripes or data servers does not help; striping spreads bytes of a large file, while aggregation reduces the number of files. FLEX: if students say "the network", ask why the data disks are idle.}
 \end{frame}
 
 \begin{frame}{A production file system serves 6.6 TiB/s from 180 nodes}
@@ -349,14 +338,14 @@ loader = DataLoader(dataset,
 \begin{frame}{A hedged read pays only when its trigger sits in the tail}
   \centering
   {\small A step reading from 100 servers, each slow 1\% of the time, meets a slow read in 63\% of steps.}\\[0.15cm]
-  \safeimg[width=0.85\textwidth,height=2.5cm,keepaspectratio]{hedge_timeline.pdf}\\[0.05cm]
+  \mlsyssteps[width=0.85\textwidth,height=2.5cm,keepaspectratio]{hedge_timeline_step}{2}\\[0.05cm]
   \footnotesize
-  \begin{tabular}{@{}lll@{}}\toprule
+  \uncover<2->{\begin{tabular}{@{}lll@{}}\toprule
     \textbf{Second read sent} & \textbf{Extra reads} & \textbf{Effect} \\\midrule
     after the median delay & about half & loads the shared tier it fights \\
     after the p99 delay & about 1\% & cuts the slow-read wait \\
     to a replica in the same rack & any & waits on the same slow switch \\\bottomrule
-  \end{tabular}
+  \end{tabular}}
   \mlsyscredit{Data Storage, \S4.3.6 ($0.99^{100} = 0.366$); Dean and Barroso 2013.}
   \note{[1.5 min] [OPTIONAL] Hedged reads against storage tail latency. In synchronous training the next collective waits for every worker, so one late fetch on the critical path stretches the whole fleet's step. The number on top is a one-line preview; Lecture 10 works the fan-out arithmetic in full on a serving fleet. A hedged read sends a second request to another replica after a trigger delay and takes the first valid answer: the timeline shows the first read stuck on a slow server, the second read sent at the p99 delay, and the replica answering first. Read the table by row. A trigger at the median duplicates about half of all reads and adds load to the very tier that is slow. A trigger at the measured p99 duplicates only the 1 percent of reads that are already late, so the extra load is small and the slow tail is cut. A replica behind the same switch shares the cause of the delay, so replicas must sit in different failure domains, different racks behind different switches. ENGAGE: why not hedge every read at once? (Expected: doubled load on a shared tier.) Land the segment: package samples into shards so metadata stops binding, and protect the tail with prefetch and well-placed hedges.}
 \end{frame}
@@ -406,24 +395,25 @@ dcp.save(state, checkpoint_id="ckpt/31000")
         File system: 1 TB/s shared\\[0.1cm]
         One save every 600 s
       \end{mlsyscard}
-      \vspace{0.2cm}
+      \vspace{0.18cm}
       \normalsize\choice{A}{0.34 s}\quad\choice{B}{2.45 s}\quad\choice{C}{2.8 s}
     \end{column}
     \begin{column}{0.48\textwidth}
       \uncover<2->{\small
-      Local write: 9.6 GB $\div$ 28 GB/s $=$ \textbf{0.34 s}, the pause.\\[0.2cm]
-      Drain: 2,450 GB $\div$ 1 TB/s $=$ 2.45 s, in the background.\\[0.2cm]
-      0.34 s every 600 s $\approx$ \textbf{0.06\%} of the run.}
+      Local write: 9.6 GB $\div$ 28 GB/s $=$ \textbf{0.34 s}, the pause.\\[0.14cm]
+      Drain: 2,450 GB $\div$ 1 TB/s $=$ 2.45 s, in the background.\\[0.14cm]
+      0.34 s every 600 s $\approx$ \textbf{0.06\%} of the run.}\\[0.18cm]
+      \centering\safeimg[width=0.65\textwidth,height=1.7cm,keepaspectratio]{nvme-u2-ssd.jpg}
     \end{column}
   \end{columns}
-  \mlsyscredit{Data Storage, Napkin Math 4.7 (bandwidth lower bounds; snapshot, serialization, and coordination excluded).}
+  \mlsyscredit{Data Storage, Napkin Math 4.7 (bandwidth lower bounds; snapshot, serialization, and coordination excluded). Photo: Dmitry Nosachev, CC BY-SA 4.0, Wikimedia Commons.}
   \note{[3 min] [CORE] ENGAGE: pairs pick A, B, or C and justify it in two minutes. Most pick C, adding both phases, or B, because they think the file system sets the pace. Step 2: tiered staging. Each node writes its 9.6 GB to local NVMe at 28 GB/s in about 0.34 seconds; training resumes once every node's local write is done and the snapshot is no longer changing. A background process then copies the shards to the file system, 2,450 GB at 1 TB/s, about 2.45 seconds, while training runs. The pause is A: about 0.06 percent of a 10-minute interval. In Fleet Law terms the pause is a barrier every rank takes at the same step, so it adds to the synchronization term; the background copy costs step time only when it contends with collectives or input reads. WARN: these are byte-transfer lower bounds. Shared among ten jobs, the file system gives this job a tenth of its bandwidth, which is why staging matters more than this one number suggests.}
 \end{frame}
 
 \begin{frame}{The pause ends at $t_1$; the checkpoint is restorable at $t_3$}
   \centering
   \mlsyssteps[width=\textwidth,height=5.7cm,keepaspectratio]{staging_step}{3}
-  \mlsyscredit{Data Storage, \S4.6 and figure 8 (redrawn at slide size). GitLab 2017: War Story 4.1.}
+  \mlsyscredit{Data Storage, \S4.6 and figure 8 (redrawn; interactive Explore figure: Checkpoint Staging Pipeline). GitLab 2017: War Story 4.1.}
   \note{[3 min] [CORE] The checkpoint write path as four lanes in time. Step 1: at $t_0$ training pauses and each node writes its shard to local NVMe; at $t_1$ it resumes on live state. Step 2: between $t_1$ and $t_2$ the shards copy to the file system in the background. Until each copy lands, a node failure destroys that node's new shard, so the previous checkpoint must be kept. Step 3: the coordinator waits for every rank's shard, verifies checksums, and publishes a manifest, the list of the complete shard set, last, with an atomic create or rename. Only at $t_3$ is the new generation restorable. Lecture 7 owns those commit rules and the save interval; this lecture owns the path and the pause. ENGAGE: what can a crash between $t_2$ and $t_3$ leave behind? (Expected: garbage to clean up; a half checkpoint never looks valid.) WARN: GitLab in 2017 lost six hours of production writes because none of five backup paths could be restored; a checkpoint counts only if restores are tested. Land the segment: write each byte once, pause only for the local write, and declare a save done only when its manifest is published.}
 \end{frame}
 
@@ -436,14 +426,15 @@ dcp.save(state, checkpoint_id="ckpt/31000")
 
 \begin{frame}{Every versioned artifact names its inputs, code, and seed}
   \centering
-  \safeimg[width=0.98\textwidth,height=2.3cm,keepaspectratio]{versions.pdf}\\[0.1cm]
-  {\small Each stage commits one immutable artifact with its input and code versions; a run pins every shard hash and the shuffle seed.}\\[0.15cm]
+  \safeimg[width=0.98\textwidth,height=2.05cm,keepaspectratio]{versions.pdf}\\[0.12cm]
+  {\footnotesize Each stage commits one immutable artifact with its input and code versions; a run pins every shard hash and shuffle seed.}\par\vspace{0.22cm}
   \begin{columns}[c]
     \begin{column}{0.30\textwidth}
-      \centering\safeimg[width=\textwidth,height=2.1cm,keepaspectratio]{nersc-tape-library.jpg}
+      \centering\safeimg[width=\textwidth,height=2.0cm,keepaspectratio]{nersc-tape-library.jpg}
     \end{column}
     \begin{column}{0.66\textwidth}
-      \small Archive tier: the run's lineage, datasets plus retained checkpoints, about 116.8 TB at \$0.004/GB-month.
+      \small Archive tier: the run's lineage, datasets plus retained checkpoints, about 116.8 TB at \$0.004/GB-month.\\[0.12cm]
+      {\footnotesize\textcolor{midgray}{Synthetic data provenance (\S4.7.2): 1 TB kept becomes 1.4 TB at rest and 4.4 TB moved across three verifier passes.}}
     \end{column}
   \end{columns}
   \mlsyscredit{Data Storage, \S4.7, \S4.3.8, table 5, and Napkin Math 4.8. Photo: tape library at NERSC, Derrick Coetzee, CC0, Wikimedia Commons.}
@@ -501,8 +492,8 @@ dcp.save(state, checkpoint_id="ckpt/31000")
 
 \begin{frame}{Serving loads weights once per replica, in 350 s to 1.8 s}
   \centering
-  \safeimg[width=0.95\textwidth,height=4.8cm,keepaspectratio]{coldstart.pdf}\\[0.15cm]
-  {\small Rollout to 100 replicas: \textbf{35 TB} read at once, the checkpoint storm in reverse.}
+  \mlsyssteps[width=0.95\textwidth,height=4.7cm,keepaspectratio]{coldstart_step}{2}\\[0.12cm]
+  {\small\uncover<2->{Rollout to 100 replicas: \textbf{35 TB} read at once, the checkpoint storm in reverse.}}
   \mlsyscredit{Data Storage, \S4.9 (350 GB of FP16 weights; 100 GB/s object store; 1 TB/s file system).}
   \note{[1.5 min] [OPTIONAL] Serving-time storage. A serving replica reads its 350 GB of FP16 weights once, so its storage metric is cold-start time, the delay before a new replica serves. From one object-store client at 1 GB/s: 350 seconds. From the node's 4 GB/s file-system share: 87.5 s. From one fast NVMe drive: 25 s. Striped over eight drives: 6.2 s. A warm replica already in host DRAM: about 1.8 s, limited by the node's 200 GB/s shared by eight transfers. A rollout to 100 replicas reads 35 TB at once; the 1 TB/s file system could do it in 35 s only by starving every training job that shares it, so fleets stage versions locally and roll in groups. Retrieval adds dependent random reads: each disk-resident index hop costs about 100 microseconds, so IOPS binds. LINK: Lecture 10 develops cold start and the KV cache, the attention state a server keeps per request. Land the segment: record versions at every commit, key the writes, and price placements by the whole delivery bill.}
 \end{frame}
@@ -576,9 +567,10 @@ dcp.save(state, checkpoint_id="ckpt/31000")
 \end{frame}
 
 \begin{frame}{Read and explore}
-  \small
-  \begin{itemize}\setlength{\itemsep}{0.15cm}
+  \footnotesize
+  \begin{itemize}\setlength{\itemsep}{0.09cm}
     \item \textbf{Read:} Data Storage, \S4.3 to \S4.8, and the self-check questions; redo Napkin Math 4.7 for a 70B model on 64 nodes.
+    \item \textbf{Explore:} \emph{Data Pipeline Overlap} (\S4.4.1) and \emph{Checkpoint Staging Pipeline} (\S4.6.2) on mlsysbook.ai/vol2/.
     \item Aizman, Maltby, and Breuel, ``High Performance I/O for Large Scale Deep Learning,'' IEEE Big Data 2019.
     \item Dean and Barroso, ``The Tail at Scale,'' Communications of the ACM, 2013.
     \item Akidau et al., ``The Dataflow Model,'' PVLDB 2015.
