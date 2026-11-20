@@ -243,6 +243,8 @@ DenseParametersVsBandwidthSince2014 = _st.ParameterBandwidthGrowthScenario(
         _Hardware.Cloud.TPUv6,
         _Hardware.Cloud.MI325X,
         _Hardware.Cloud.B200,
+        _Hardware.Cloud.TPUv7,  # added 2026-11-20: 2025 points (Ironwood, Blackwell Ultra)
+        _Hardware.Cloud.B300,
     ],
     dense_models=[
         _Models.Vision.AlexNet,

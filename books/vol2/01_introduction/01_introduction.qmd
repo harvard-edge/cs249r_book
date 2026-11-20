@@ -429,8 +429,8 @@ Subsequent landmarks pushed cluster scale still further. PaLM\index{PaLM!TPU sca
 # │
 # │ Goal: Split training-compute growth into accelerator count, duration, and
 # │       per-accelerator delivered rate across standalone pretraining runs.
-# │ Show: ~4.0× per year = ~1.7× accelerators × ~1.3× duration × ~1.8× rate
-# │       (2012-2024); 58 percent of growth is more accelerators for longer.
+# │ Show: ~4.0× per year = ~1.7× accelerators × ~1.4× duration × ~1.7× rate
+# │       (2012 through Sep 2026); 60 percent of growth is more accelerators for longer.
 # │ How: Log-linear fits on data/notable_model_training_runs.csv standalone rows
 # │      (standalone_hw_valid == 1) carrying all three factors;
 # │      compute = count × hours × 3600 × rate.
@@ -440,7 +440,7 @@ import datetime as dt
 import math
 import numpy as np
 from mlsysim import Literature, load_series, viz
-from mlsysim.fmt import check, fmt_int, fmt_multiple, fmt_percent
+from mlsysim.fmt import MarkdownStr, check, fmt_int, fmt_multiple, fmt_percent
 
 def _decimal_year(s):
     d = dt.date.fromisoformat(s)
@@ -454,7 +454,8 @@ class TrainingComputeGrowth:
     """Decomposition of training-compute growth into count, duration, and rate."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    first_year, last_year = "2012", "2024"  # Epoch AI notable models, 2012-2024
+    # Window extended 2026-11-20 to the end of the 2026-10-12 snapshot (last row 2026-09-09).
+    first_year, last_year = "2012", "2026"  # Epoch AI notable models, 2012 through the snapshot
     all_rows = _in_window(viz.load_series("vol2/01_introduction/data/notable_model_training_runs.csv").entries, first_year, last_year)  # figure rows
     _runs = [r for r in all_rows if r["hardware_quantity"] and r["training_time_hours"] and r["standalone_hw_valid"] == 1]
 
@@ -471,12 +472,15 @@ class TrainingComputeGrowth:
     rate_share = math.log(rate_g) / math.log(compute_g)
     fleet_share = (math.log(count_g) + math.log(duration_g)) / math.log(compute_g)
     _origin = next(r for r in all_rows if r["model"] == "AlexNet")["training_compute_flop"]
-    span_orders = math.log10(max(r["training_compute_flop"] for r in all_rows) / _origin)
+    _largest = max(all_rows, key=lambda r: r["training_compute_flop"])
+    span_orders = math.log10(_largest["training_compute_flop"] / _origin)
+    _last_date = dt.date.fromisoformat(max(r["date"] for r in all_rows))
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(count_g * duration_g * rate_g / compute_g - 1) < 1e-6, "The three factors must multiply to the compute trend.")
-    check(0.55 <= fleet_share <= 0.62, f"Prose states 58 percent of growth is count and duration, got {fleet_share:.3f}.")
-    check(7 <= span_orders <= 8.5, f"Caption and @sec-sustainable-ai say seven to eight orders from AlexNet, got {span_orders:.1f}.")
-    check(run_count == 125, f"Decomposition rests on 125 standalone runs in 2012-2024, got {run_count}.")
+    check(0.55 <= fleet_share <= 0.62, f"Prose states about 60 percent of growth is count and duration, got {fleet_share:.3f}.")
+    check(9 <= span_orders < 10, f"Caption says about nine orders from AlexNet (as @sec-sustainable-ai), got {span_orders:.1f}.")
+    check(run_count == 132, f"Decomposition rests on 132 standalone runs, 2012 through the snapshot, got {run_count}.")
+    check(_largest["model"] == "GPT-6 Astra" and run_count == 132, "fig-alt names GPT-6 Astra and 132 runs; update it with the data.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     run_count_str = fmt_int(run_count)
@@ -486,11 +490,13 @@ class TrainingComputeGrowth:
     rate_mult_str = fmt_multiple(rate_g, precision=1)
     rate_share_pct_str = fmt_percent(round(rate_share, 2), precision=0, style="prose")
     fleet_share_pct_str = fmt_percent(round(fleet_share, 2), precision=0, style="prose")
+    last_month_str = MarkdownStr(_last_date.strftime("%B %Y"))
+    largest_model = _largest["model"]
 ```
 
-Epoch AI's database of notable models records, for each training run it can document, the compute the run consumed together with how many accelerators it used and for how long [@epochai2026notable]. Plotted run by run, training compute climbs steadily on a logarithmic scale, and it separates early single-node vision models from multi-node transformer training (@fig-training-compute-trend, panel a). Because training compute for a standalone run is the product of the accelerator count, the training duration, and the rate each accelerator delivers, the same records also show where the growth came from once fine-tunes and actor-learner runs with uncounted compute are excluded. Across the `{python} TrainingComputeGrowth.run_count_str` standalone runs from 2012 through 2024 that report all three, compute grew about `{python} TrainingComputeGrowth.compute_mult_str` per year. The accelerator count grew `{python} TrainingComputeGrowth.count_mult_str` per year, the duration `{python} TrainingComputeGrowth.duration_mult_str`, and the delivered rate per accelerator, which folds in both faster hardware and better utilization, `{python} TrainingComputeGrowth.rate_mult_str` (@fig-training-compute-trend, panel b). A higher delivered rate per accelerator supplied `{python} TrainingComputeGrowth.rate_share_pct_str` of that growth. More accelerators running for longer supplied the remaining `{python} TrainingComputeGrowth.fleet_share_pct_str`, and that majority share must come from the fleet rather than from any single accelerator.
+Epoch AI's database of notable models records, for each training run it can document, the compute the run consumed together with how many accelerators it used and for how long [@epochai2026notable]. Plotted run by run, training compute climbs steadily on a logarithmic scale, and it separates early single-node vision models from multi-node transformer training (@fig-training-compute-trend, panel a). Because training compute for a standalone run is the product of the accelerator count, the training duration, and the rate each accelerator delivers, the same records also show where the growth came from once fine-tunes and actor-learner runs with uncounted compute are excluded. Across the `{python} TrainingComputeGrowth.run_count_str` standalone runs from 2012 through `{python} TrainingComputeGrowth.last_month_str` that report all three, compute grew about `{python} TrainingComputeGrowth.compute_mult_str` per year. The accelerator count grew `{python} TrainingComputeGrowth.count_mult_str` per year, the duration `{python} TrainingComputeGrowth.duration_mult_str`, and the delivered rate per accelerator, which folds in both faster hardware and better utilization, `{python} TrainingComputeGrowth.rate_mult_str` (@fig-training-compute-trend, panel b). A higher delivered rate per accelerator supplied `{python} TrainingComputeGrowth.rate_share_pct_str` of that growth. More accelerators running for longer supplied the remaining `{python} TrainingComputeGrowth.fleet_share_pct_str`, and that majority share must come from the fleet rather than from any single accelerator.
 
-::: {#fig-training-compute-trend fig-env="figure" fig-pos="htb" fig-cap="**Where Training-Compute Growth Comes From**: (a) Training compute of notable models published from 2012 through 2024 on a logarithmic axis, colored by domain, spanning about eight orders of magnitude from AlexNet to the largest runs; the dashed line is a least-squares fit. (b) Annual growth factors fitted to the `{python} TrainingComputeGrowth.run_count_str` standalone runs that report accelerator count and training duration, excluding fine-tunes that inherit parent pretraining FLOPs and distributed RL runs whose hardware counts omit actor CPUs. Compute growth is the product of the other three bars, and the bar lengths are drawn on a logarithmic scale so each factor's share of the growth reads directly as its length. The delivered rate per accelerator includes both hardware speed and utilization. Data from @epochai2026notable; many values are Epoch AI estimates." fig-alt="Two stacked panels. Top: log-scale scatter of training compute from about 10 to the 14 to 10 to the 26 FLOPs against publication dates from 2012 to 2024, with language models in blue, vision models in green, and other domains in gray, and a dashed fitted line rising through them. AlexNet and Gemini 1.0 Ultra are labeled. Bottom: four horizontal bars of annual growth factor on a logarithmic axis across 125 standalone runs. Training compute grows about 4.0 times per year; accelerator count about 1.7 times, training duration about 1.3 times, and delivered rate per accelerator about 1.8 times."}
+::: {#fig-training-compute-trend fig-env="figure" fig-pos="htb" fig-cap="**Where Training-Compute Growth Comes From**: (a) Training compute of notable models published from 2012 through `{python} TrainingComputeGrowth.last_month_str` on a logarithmic axis, colored by domain, spanning about nine orders of magnitude from AlexNet to the largest runs; the dashed line is a least-squares fit. (b) Annual growth factors fitted to the `{python} TrainingComputeGrowth.run_count_str` standalone runs that report accelerator count and training duration, excluding fine-tunes that inherit parent pretraining FLOPs and distributed RL runs whose hardware counts omit actor CPUs. Compute growth is the product of the other three bars, and the bar lengths are drawn on a logarithmic scale so each factor's share of the growth reads directly as its length. The delivered rate per accelerator includes both hardware speed and utilization. Data from @epochai2026notable; many values are Epoch AI estimates." fig-alt="Two stacked panels. Top: log-scale scatter of training compute from about 10 to the 14 to 10 to the 27 FLOPs against publication dates from 2012 to 2026, with language models in blue, vision models in green, and other domains in gray, and a dashed fitted line rising through them. AlexNet and the largest run, GPT-6 Astra, are labeled. Bottom: four horizontal bars of annual growth factor on a logarithmic axis across 132 standalone runs. Training compute grows about 4.0 times per year; accelerator count about 1.7 times, training duration about 1.4 times, and delivered rate per accelerator about 1.7 times."}
 
 ```{python}
 #| echo: false
@@ -505,9 +511,9 @@ Epoch AI's database of notable models records, for each training run it can docu
 # │ Provenance:
 # │   - Dataset (modeled): vol2/01_introduction/data/notable_model_training_runs.csv
 # │     (@epochai2026notable; @sevilla2022; snapshot 2026-10-12).
-# │   - Computation: panel (a) plots all N=407 rows in [2012, 2024] with positive
+# │   - Computation: panel (a) plots all N=468 rows in [2012, 2026] with positive
 # │     training_compute_flop and fits OLS on log10(FLOP) vs. decimal year;
-# │     panel (b) fits log10 OLS slopes across n=125 standalone runs
+# │     panel (b) fits log10 OLS slopes across n=132 standalone runs
 # │     (standalone_hw_valid == 1) carrying FLOP, hardware_quantity, and
 # │     training_time_hours so compute_g = count_g * duration_g * rate_g.
 # │
@@ -531,10 +537,10 @@ for _name, _col in _groups:
     )
 _xs = np.array([_decimal_year(r["date"]) for r in _C.all_rows])
 _k, _b = np.polyfit(_xs, np.log10([r["training_compute_flop"] for r in _C.all_rows]), 1)
-_xx = np.linspace(2012, 2025, 50)
+_xx = np.linspace(2012, 2026.8, 50)
 a1.plot(_xx, 10 ** (_k * _xx + _b), "--", color=COLORS["primary"], lw=1.1, zorder=4)
 for _r in _C.all_rows:
-    if _r["model"] in ("AlexNet", "Gemini 1.0 Ultra"):
+    if _r["model"] in ("AlexNet", _C.largest_model):
         a1.annotate(
             _r["model"],
             (_decimal_year(_r["date"]), _r["training_compute_flop"]),
@@ -547,7 +553,7 @@ for _r in _C.all_rows:
             zorder=5,
         )
 a1.set_yscale("log")
-a1.set_xlim(2011.5, 2025.2)
+a1.set_xlim(2011.5, 2027.2)
 a1.set_xlabel("Publication date")
 a1.set_ylabel("Training compute (FLOPs, log scale)")
 a1.set_title("(a) Training compute of notable models", fontsize=10, loc="left")
@@ -2926,7 +2932,7 @@ where $\UsefulModelFlops$ is useful work in FLOPs. The three energy terms cover 
 # │       -> 0.91 s; TP 0.90 -> 0.11 s; DP exchange 0.21 -> 0.22 s, 85 percent
 # │       hidden; bubble 0.53 s at both; compute-time fraction (= scaling
 # │       efficiency) 83 -> 57 percent; DP fabric energy ~2.9 kJ -> ~25 kJ per
-# │       step; 8,921 -> 12,983 GPU-seconds per step. All modeled.
+# │       step; 8,918 -> 12,946 GPU-seconds per step. All modeled.
 # │ How: Scenarios.DenseLLMPretrainingStep / ...8K result breakdown
 # │      (DistributedModel); exposed DP = step - compute - TP - bubble;
 # │      energy = ring bits per GPU x GPUs x
@@ -3008,10 +3014,12 @@ class ReferenceStepAtScale:
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     small_gpus_str = fmt_count(small.fleet.total_accelerators)
     large_gpus_str = fmt_count(large.fleet.total_accelerators)
-    small_step_str = fmt_time(small_step, second, precision=1)
-    large_step_str = fmt_time(large_step, second, precision=1)
+    # Step times to two decimals and compute times to three significant figures, so the
+    # printed ratios reproduce: 8.71 / 1.58 = 5.5x, 7.25 / 8.71 = 83%, 0.908 / 1.58 = 57%.
+    small_step_str = fmt_time(small_step, second, precision=2)
+    large_step_str = fmt_time(large_step, second, precision=2)
     small_compute_str = fmt_time(small_compute, second, precision=2)
-    large_compute_str = fmt_time(large_compute, second, precision=2)
+    large_compute_str = fmt_time(large_compute, second, precision=3)
     small_tp_str = fmt_time(small_tp, second, precision=2)
     large_tp_str = fmt_time(large_tp, second, precision=2)
     small_dp_str = fmt_time(small_dp, second, precision=2)
@@ -3388,7 +3396,7 @@ A per-GPU MTTF of `{python} Gpt4TrainingScenario.gpu_mtbf_hours_str` describes a
 # │ How: speed_m_s = km/h × 1000 / 3600; distance = speed_m_s × delay_s.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt_length, fmt_rate, fmt_time
+from mlsysim.fmt import check, fmt_length, fmt_percent, fmt_rate, fmt_time
 from mlsysim.core.units import meter
 
 class EdgeLatencyDistance:
@@ -3400,6 +3408,9 @@ class EdgeLatencyDistance:
     meters_per_km = 1000
     seconds_per_hour = 3600
     ms_per_second = 1000
+    cloud_accuracy = 0.95  # scenario assumption: the cloud-optimized model's accuracy
+    cloud_latency_ms = 50  # scenario assumption: its latency in the cloud
+    throttled_latency_ms = 200  # scenario assumption: the same model on a thermally throttled edge device
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     speed_m_s = speed_kmh * meters_per_km / seconds_per_hour
@@ -3413,9 +3424,12 @@ class EdgeLatencyDistance:
     speed_kmh_str = fmt_rate(speed_kmh, "km/h", precision=0, commas=False)
     delay_ms_str = fmt_time(delay_ms, 'millisecond', precision=0, commas=True)
     distance_m_str = fmt_length(distance_m * meter, unit=meter, precision=2, commas=False)
+    cloud_accuracy_str = fmt_percent(cloud_accuracy, precision=0, commas=False, style="prose")
+    cloud_latency_str = fmt_time(cloud_latency_ms, 'millisecond', precision=0, commas=False)
+    throttled_latency_str = fmt_time(throttled_latency_ms, 'millisecond', precision=0, commas=False)
 ```
 
-The fallacy treats edge systems as resource-constrained cloud systems\index{Edge deployment!scaled-down cloud fallacy}. Edge devices face qualitatively different constraints. For example, an autonomous vehicle traveling at `{python} EdgeLatencyDistance.speed_kmh_str` covers `{python} EdgeLatencyDistance.distance_m_str` during every `{python} EdgeLatencyDistance.delay_ms_str` of processing delay, adding that distance to its reaction distance. While cloud deployments scale to kilowatts, a phone-class device of the kind Archetype C models sustains only a few watts. A cloud-optimized model with 95 percent accuracy and 50 ms latency might be unusable on an edge device where thermal throttling increases latency to 200 ms and drains the battery in under an hour.
+The fallacy treats edge systems as resource-constrained cloud systems\index{Edge deployment!scaled-down cloud fallacy}. Edge devices face qualitatively different constraints. For example, an autonomous vehicle traveling at `{python} EdgeLatencyDistance.speed_kmh_str` covers `{python} EdgeLatencyDistance.distance_m_str` during every `{python} EdgeLatencyDistance.delay_ms_str` of processing delay, adding that distance to its reaction distance. While cloud deployments scale to kilowatts, a phone-class device of the kind Archetype C models sustains only a few watts. A cloud-optimized model with `{python} EdgeLatencyDistance.cloud_accuracy_str` accuracy and `{python} EdgeLatencyDistance.cloud_latency_str` latency might be unusable on an edge device where thermal throttling increases latency to `{python} EdgeLatencyDistance.throttled_latency_str` and drains the battery in under an hour.
 
 :::
 

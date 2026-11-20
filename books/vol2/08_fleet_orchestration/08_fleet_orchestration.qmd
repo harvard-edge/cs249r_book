@@ -1371,7 +1371,37 @@ When a spine switch fails or an optical link degrades and begins retransmitting,
 
 Cluster topology is an operating state, not a fixed schematic. Hardware failures, maintenance windows, and thermal throttling change the paths and effective capacity available to the scheduler. A spine switch failure in a redundant Clos network can leave connectivity intact while removing capacity. The effect on our 175B parameter model's data-parallel AllReduce depends on rerouting, concurrent traffic, and how much bandwidth the job was using. If the failure increases exposed communication time, the scheduler must compare continuing at reduced throughput with the cost of moving to a healthier allocation. A degraded link can also pass binary up/down probes while cutting delivered bandwidth, so the scheduler needs performance evidence such as retransmission counts and collective bandwidth, the link-level telemetry of @sec-network-fabrics-link-telemetry, as well as reachability.
 
-A checkpoint-and-restart migration spends time saving state, releasing the old allocation, obtaining a new one, and restoring execution. Its value depends on measured transition cost and remaining work. If migration takes 10 minutes and removes a sustained 20 percent throughput loss, each later minute of training recovers a fifth of a minute of progress, so the move pays back in less than an hour of subsequent training. That comparison assumes a healthy destination is available and the gain persists. A practical policy also accounts for queue delay and requires evidence that placement causes the slowdown, such as rising collective time on the affected path, before it moves the job.
+```{python}
+#| echo: false
+#| label: defrag-migration-payback
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ DEFRAGMENTATION MIGRATION PAYBACK
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: The checkpoint-and-restart migration paragraph below.
+# │ Goal: Payback of a migration that removes a sustained throughput loss.
+# │ Show: 10 min cost, 20 percent loss removed, 50 min of later training to repay.
+# │ How: payback = cost / loss share. (Added 2026-11-20; worked in prose before.)
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt_percent, fmt_time
+from mlsysim.core.units import minute
+
+class MigrationPayback:
+    """Training time a migration needs to repay its transition cost."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    cost = 10 * minute  # scenario assumption: checkpoint, reallocate, restore
+    loss_removed = 0.20  # scenario assumption: sustained throughput loss the move removes
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    payback = (cost / loss_removed).to(minute)
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(payback < 60 * minute, "Prose says the move pays back in less than an hour.")
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    cost_str = fmt_time(cost, minute, precision=0, commas=False, style="word")
+    loss_pct_str = fmt_percent(loss_removed, precision=0, commas=False, style="prose")
+    payback_str = fmt_time(payback, minute, precision=0, commas=False, style="word")
+```
+
+A checkpoint-and-restart migration spends time saving state, releasing the old allocation, obtaining a new one, and restoring execution. Its value depends on measured transition cost and remaining work. If migration takes `{python} MigrationPayback.cost_str` and removes a sustained `{python} MigrationPayback.loss_pct_str` throughput loss, each later minute of training recovers that share of a minute of progress, so the move pays back after `{python} MigrationPayback.payback_str` of subsequent training. That comparison assumes a healthy destination is available and the gain persists. A practical policy also accounts for queue delay and requires evidence that placement causes the slowdown, such as rising collective time on the affected path, before it moves the job.
 
 ::: {#exmp-fleet-orchestration-health-checks .callout-example title="Performance-aware health checks (2021)"}
 
@@ -3531,7 +3561,42 @@ Gang scheduling prevents partial-allocation deadlock for a rigid synchronous gro
 
 **Pitfall**: *Setting static quotas based on peak demand.*
 
-Organizations commonly set team quotas to handle worst-case demand, reasoning that teams need guaranteed access during crunch periods. If Team A's peak demand is 500 GPUs and Team B's is 300 GPUs, the cluster needs 800 GPUs with static quotas. In practice, peaks rarely coincide. A 600-GPU cluster can accommodate either peak when the other team's simultaneous demand leaves enough capacity, but it cannot guarantee both peaks concurrently. Hierarchical fair-share with borrowing uses that statistical opportunity only when the declared guarantees fit physical capacity and borrowed work can yield within the reclamation contract. In this example, sizing static quotas to the sum of the peaks provisions 800 GPUs where a 600-GPU shared cluster with borrowing covers either peak. The extra 200, a quarter of the larger cluster, are guarantees that sit unused whenever the peaks do not coincide.
+```{python}
+#| echo: false
+#| label: static-quota-peaks
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ STATIC QUOTAS SIZED TO SUMMED PEAKS
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Pitfall "Setting static quotas based on peak demand" below.
+# │ Goal: Capacity for summed peaks against a shared cluster that covers either.
+# │ Show: 500 + 300 = 800 GPUs; a 600-GPU shared cluster; 200 idle, a quarter.
+# │ How: sums and shares. (Added 2026-11-20; worked in prose before.)
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt_count, fmt_percent
+
+class QuotaPeaks:
+    """Static quotas for two teams' peaks against one shared cluster."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    peak_a = 500  # scenario assumption: Team A's peak GPUs
+    peak_b = 300  # scenario assumption: Team B's peak GPUs
+    shared = 600  # scenario assumption: shared cluster that covers either peak
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    static = peak_a + peak_b
+    idle = static - shared
+    idle_share = idle / static
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(shared >= max(peak_a, peak_b) and shared < static, "The shared cluster covers either peak but not both.")
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    peak_a_str = fmt_count(peak_a, commas=False, label="GPU")
+    peak_b_str = fmt_count(peak_b, commas=False, label="GPU")
+    static_str = fmt_count(static, commas=False, label="GPU")
+    shared_num_str = fmt_count(shared, commas=False)
+    idle_num_str = fmt_count(idle, commas=False)
+    idle_share_pct_str = fmt_percent(idle_share, precision=0, commas=False, style="prose")
+```
+
+Organizations commonly set team quotas to handle worst-case demand, reasoning that teams need guaranteed access during crunch periods. If Team A's peak demand is `{python} QuotaPeaks.peak_a_str` and Team B's is `{python} QuotaPeaks.peak_b_str`, the cluster needs `{python} QuotaPeaks.static_str` with static quotas. In practice, peaks rarely coincide. A `{python} QuotaPeaks.shared_num_str`-GPU cluster can accommodate either peak when the other team's simultaneous demand leaves enough capacity, but it cannot guarantee both peaks concurrently. Hierarchical fair-share with borrowing uses that statistical opportunity only when the declared guarantees fit physical capacity and borrowed work can yield within the reclamation contract. In this example, sizing static quotas to the sum of the peaks provisions `{python} QuotaPeaks.static_str` where a `{python} QuotaPeaks.shared_num_str`-GPU shared cluster with borrowing covers either peak. The extra `{python} QuotaPeaks.idle_num_str`, `{python} QuotaPeaks.idle_share_pct_str` of the larger cluster, are guarantees that sit unused whenever the peaks do not coincide.
 
 :::
 

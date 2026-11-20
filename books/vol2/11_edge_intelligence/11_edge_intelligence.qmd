@@ -296,7 +296,43 @@ Before paying that device and coordination cost, an engineering team should test
 
 : **Alternatives to On-Device Learning**: Simpler personalization mechanisms can satisfy many adaptation requirements without local gradient updates, so on-device learning should be reserved for cases where privacy, latency, connectivity, or measured quality requirements rule out these options. {#tbl-edge-ondevice-learning-alternatives tbl-colwidths="[24,44,32]"}
 
-The decision to implement on-device learning should follow evidence that simpler alternatives cannot meet the deployment requirements, such as restrictions on transferring training data or unreliable connectivity when adaptation is needed. Latency is the requirement most often mistaken for such evidence. For applications whose foreground deadlines are shorter than the network round-trip time, cloud inference is architecturally infeasible. Camera processing under 33 ms, voice response under 500 ms, AR/VR motion-to-photon latency under 20 ms, or safety-critical control under 10 ms all face network round-trip times typically ranging from 50 to 200 ms. When the network cannot meet the foreground deadline, inference must remain local. A fixed model also executes offline, however, so the deadline settles where the model runs and leaves open where it learns. Local training earns its engineering investment only when a measured adaptation gain justifies its added resource and operational costs.
+```{python}
+#| echo: false
+#| label: edge-latency-deadlines
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ FOREGROUND DEADLINES AGAINST NETWORK ROUND TRIPS
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: The paragraph below on when cloud inference is infeasible.
+# │ Goal: The interaction deadlines and the round-trip range they are compared with.
+# │ Show: camera 33 ms (one 30 fps frame), voice 500 ms, AR/VR 20 ms motion-to-photon,
+# │       control 10 ms, against 50-200 ms network round trips.
+# │ How: Domain conventions, stated once. (Added 2026-11-20; typed in prose before.)
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt_range, fmt_time
+from mlsysim.core.units import millisecond, second
+
+class EdgeDeadlines:
+    """Interaction deadlines a local learner must meet, against network round trips."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    camera_frame_rate = 30  # convention: frames per second for camera processing
+    voice = 500 * millisecond  # convention: conversational voice response
+    motion_to_photon = 20 * millisecond  # convention: AR/VR motion-to-photon comfort limit
+    control = 10 * millisecond  # convention: safety-critical control loop
+    rtt_low, rtt_high = 50, 200  # convention: typical network round trip, ms
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    camera = (1 / camera_frame_rate * second).to(millisecond)
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(camera.magnitude < rtt_low, "The camera deadline must fall below the fastest round trip.")
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    camera_str = fmt_time(round(camera.magnitude) * millisecond, millisecond, precision=0, commas=False)
+    voice_str = fmt_time(voice, millisecond, precision=0, commas=False)
+    motion_str = fmt_time(motion_to_photon, millisecond, precision=0, commas=False)
+    control_str = fmt_time(control, millisecond, precision=0, commas=False)
+    rtt_low_num_str = fmt_range(rtt_low, rtt_high, precision=0, commas=False, unit="ms")
+```
+
+The decision to implement on-device learning should follow evidence that simpler alternatives cannot meet the deployment requirements, such as restrictions on transferring training data or unreliable connectivity when adaptation is needed. Latency is the requirement most often mistaken for such evidence. For applications whose foreground deadlines are shorter than the network round-trip time, cloud inference is architecturally infeasible. Camera processing under `{python} EdgeDeadlines.camera_str`, voice response under `{python} EdgeDeadlines.voice_str`, AR/VR motion-to-photon latency under `{python} EdgeDeadlines.motion_str`, or safety-critical control under `{python} EdgeDeadlines.control_str` all face network round-trip times typically of `{python} EdgeDeadlines.rtt_low_num_str`. When the network cannot meet the foreground deadline, inference must remain local. A fixed model also executes offline, however, so the deadline settles where the model runs and leaves open where it learns. Local training earns its engineering investment only when a measured adaptation gain justifies its added resource and operational costs.
 
 ### Where adaptation pays {#sec-edge-intelligence-realworld-application-domains-c4e4}
 
@@ -1976,8 +2012,8 @@ class EdgeRoundUploadTime:
     uplink_low = upload.links["low"]
     uplink_high = upload.links["high"]
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    upload_slow = upload.transfer_time("low").to(second)
-    upload_fast = upload.transfer_time("high").to(second)
+    upload_slow = (payload / uplink_low).to(second)
+    upload_fast = (payload / uplink_high).to(second)
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(abs(payload.to(MB).magnitude - 50) < 1e-9, f"Expected 50 MB payload, got {payload}")
     check(abs(upload_slow.to(second).magnitude - 400) < 1e-6, f"Slow upload drifted: {upload_slow}")
@@ -2173,7 +2209,30 @@ Scheduling must also bound how long a round waits on its slowest participants. N
 *Enough valid reports let the round close before its slowest clients finish.*
 :::
 
-To reduce waiting for stragglers, production federated learning (FL) systems employ **over-selection**\index{Over-selection!definition}. The server selects a candidate pool size $\CandidateClientCount$ larger than the target number of updates $\TargetUpdateCount$ (the production system of @bonawitz2019towards selects about 130 percent of the target, $\CandidateClientCount \approx 1.3 \times \TargetUpdateCount$). When enough valid reports arrive, the server can form an aggregate from $\TargetUpdateCount$ completed updates rather than wait for every selected device. Completion then depends on how quickly the target number of valid reports arrives, but over-selection alone does not guarantee that the target is reached. A round deadline and an explicit acceptance or abandonment rule handle insufficient completion, while secure aggregation adds a participation floor and dropout recovery (@sec-edge-intelligence-federated-privacy-a1ed) with which fast-report selection must remain compatible.
+```{python}
+#| echo: false
+#| label: fl-over-selection
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ FEDERATED OVER-SELECTION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: The over-selection paragraph below.
+# │ Show: about 130 percent of the target, a factor of 1.3.
+# │ How: the production system of @bonawitz2019towards, as the prose cites it.
+# │      (Added 2026-11-20; typed in prose before.)
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt, fmt_percent
+
+class OverSelection:
+    """Candidate pool as a multiple of the target update count (@bonawitz2019towards)."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    factor = 1.3  # bonawitz2019towards: selects about 130 percent of the target
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    pct_str = fmt_percent(factor, precision=0, commas=False, style="prose")
+    factor_str = fmt(factor, precision=1, commas=False)
+```
+
+To reduce waiting for stragglers, production federated learning (FL) systems employ **over-selection**\index{Over-selection!definition}. The server selects a candidate pool size $\CandidateClientCount$ larger than the target number of updates $\TargetUpdateCount$ (the production system of @bonawitz2019towards selects about `{python} OverSelection.pct_str` of the target, $\CandidateClientCount \approx$ `{python} OverSelection.factor_str` $\times \TargetUpdateCount$). When enough valid reports arrive, the server can form an aggregate from $\TargetUpdateCount$ completed updates rather than wait for every selected device. Completion then depends on how quickly the target number of valid reports arrives, but over-selection alone does not guarantee that the target is reached. A round deadline and an explicit acceptance or abandonment rule handle insufficient completion, while secure aggregation adds a participation floor and dropout recovery (@sec-edge-intelligence-federated-privacy-a1ed) with which fast-report selection must remain compatible.
 
 Accepting the first completed reports to arrive also discards those of the slowest selected devices, which are disproportionately the constrained cohorts that admission already thinned. Over-selection with a round deadline can therefore concentrate the participation bias just described, so shorter rounds must be evaluated against cohort coverage and wall-clock time to the declared quality target. Because these scheduling decisions set convergence rate, model generalization, energy consumption, and user experience together, poor scheduling produces excessive stragglers, overfitting to narrow client segments, or wasted computation.
 

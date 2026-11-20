@@ -547,6 +547,12 @@ class ValidateCommand:
             Scope("duplicates", "_run_duplicate_labels"),
             Scope("orphans", "_run_unreferenced_labels"),
             Scope("fig-labels", "_run_fig_label_underscores", default=False),
+            # Added 2026-11-20: an HTML comment between a {#fig-} div opener and
+            # its image makes Quarto put the image inside \caption{}, which
+            # fails the PDF ("Missing number, treated as zero"); Vol III
+            # 06_long_term_memory hit it. Put such comments above the div.
+            Scope("fig-div-comment", "_run_fig_div_comment",
+                  note="no HTML comment between a {#fig-} div opener and its image"),
         ],
         "headers": [
             # ids: vol1 complete; opt-in scope for vol2/3/4 as sections are finalized.
@@ -788,7 +794,7 @@ class ValidateCommand:
             # cleanup script corrupted 38 sites across both volumes and every
             # existing gate passed; see _run_latex_balance.
             Scope("latex-balance", "_run_latex_balance",
-                  note="unbalanced $, bare \\left}/\\right}, unclosed \\{"),
+                  note="unbalanced $, bare \\left}/\\right}, unclosed \\{, $ split around {python}"),
             # render-audit builds every chapter (~10 min). Manual stage only;
             # default=False ensures `binder check math` stays under 1s.
             Scope("render-audit", "_run_math_render_audit", default=False),
@@ -6250,6 +6256,43 @@ class ValidateCommand:
     # ------------------------------------------------------------------
     # Figure label underscores  (ported from check_fig_references.py)
     # ------------------------------------------------------------------
+
+    def _run_fig_div_comment(self, root: Path) -> ValidationRunResult:
+        """Flag a {#fig-} div whose image is preceded by an HTML comment."""
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+        opener = re.compile(r"^:::+\s*\{#fig-")
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            in_code = False
+            for idx, line in enumerate(lines):
+                if line.strip().startswith("```"):
+                    in_code = not in_code
+                    continue
+                if in_code or not opener.match(line):
+                    continue
+                j = idx + 1
+                if j >= len(lines) or not lines[j].lstrip().startswith("<!--"):
+                    continue
+                while j < len(lines) and "-->" not in lines[j]:
+                    j += 1
+                if j + 1 < len(lines) and lines[j + 1].lstrip().startswith("!["):
+                    issues.append(ValidationIssue(
+                        file=self._relative_file(file), line=idx + 2,
+                        code="fig_div_comment_before_image",
+                        message=("An HTML comment sits between the figure div opener and its "
+                                 "image, so the PDF puts the image inside the caption and fails. "
+                                 "Move the comment above the ::: {#fig-...} line."),
+                        severity="error", context=lines[idx + 1].strip()[:120],
+                    ))
+        return ValidationRunResult(
+            name="fig-div-comment",
+            description="HTML comment before a figure image",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
 
     def _run_fig_label_underscores(self, root: Path) -> ValidationRunResult:
         """Find figure references containing underscores (invalid in Quarto)."""
@@ -14229,6 +14272,13 @@ class ValidateCommand:
     # literal dollar is written `\\$` there. Collapse that doubling before
     # applying the rule above.
     _LB_ATTR_LINE = re.compile(r"\b(fig|tbl|lst)-(cap|alt)\s*=")
+    # Added 2026-11-20: a math `$` written directly before an inline value
+    # (`$`{python} x`$`) splits one equation around the substitution. After
+    # the value is inserted the `$` sits before a digit, which Pandoc does not
+    # accept as a closing delimiter; MathJax tolerated it, but the Vol II PDF
+    # failed with "Missing $ inserted" (16_responsible_ai equal-opportunity
+    # notebook). Build the whole expression as a `_math` export instead.
+    _LB_SPLIT_MATH = re.compile(r"(?<!\\)\$`\{python\}")
     _LB_LEFTRIGHT_BARE = re.compile(r"\\(left|right)\s*([{}])")
     _LB_DISPLAY = re.compile(r"\$\$")
 
@@ -14271,6 +14321,20 @@ class ValidateCommand:
                     continue
                 if in_code and not in_tikz:
                     continue
+
+                # Rule 0 — math split around an inline {python} value.
+                if not in_code and self._LB_SPLIT_MATH.search(raw):
+                    issues.append(ValidationIssue(
+                        file=rel, line=idx, code="latex_split_math_inline",
+                        message=(
+                            "A math `$` touches an inline `{python}` value, so one "
+                            "equation is split around the substitution. It renders "
+                            "in HTML but breaks the PDF. Export the whole "
+                            "expression from the cell with fmt_math as a `_math` "
+                            "string."
+                        ),
+                        severity="error", context=raw.strip()[:120],
+                    ))
 
                 line = self._lb_strip(raw)
 

@@ -1,0 +1,262 @@
+{
+  "schema": "mlsysim-gpu-energy-plan/1",
+  "declared": "2026-11-19",
+  "purpose": "Board energy of single-GPU Llama-3.1-8B serving and ResNet-50 training with two seeds on the same board, measured against MLSys·im's two device-power assumptions (rated TDP and Engine.solve's energy-proportional rule) with the protocol of ../../gpu-energy/. Each container measures the plans in seed-2193/ and seed-2198/ on one GPU, one after the other, so the two seeds can be compared on one board.",
+  "declaration_note": "seed-2193/plan.json and seed-2198/plan.json differ only in seed. Their devices, workloads, engine settings, configurations and efficiencies are those of ../../gpu-energy-boards/, whose seed is 2193. None is fitted to measurements. Commit both files before any run: each run manifest records its plan's SHA-256, and the analysis refuses runs measured under a different plan.",
+  "analysis_note": "Declared before any run, after ../../gpu-energy-boards/board_energy.csv showed that on the same day the seed-2198 runs of ../../gpu-energy-workloads/ used 1-4% less decode energy on average than the seed-2193 runs of ../../gpu-energy-boards/, on all three devices. analyze_gpu_energy.py reports each plan's runs as for the other tests. compare_gpu_energy_seeds.py pairs the two runs of each container and writes seed_pairs.csv and seed_summary.csv. The questions are: (1) for each device and configuration, the mean over boards of the energy per unit of work with seed 2198 over that with seed 2193 on the same board, and on how many boards it is below 1; (2) the same mean for the containers that measured seed 2193 first and for those that measured seed 2198 first; (3) the spread between boards within each seed, and whether the boards keep their order from lowest to highest energy with both seeds; (4) whether the ratio in (1) accounts for the gap between ../../gpu-energy-workloads/ and ../../gpu-energy-boards/. The answers are reported whichever way they go.",
+  "runs_note": "Four containers per device, launched together with GPU_ENERGY_DATA=gpu-energy-seeds/seed-2193 and GPU_ENERGY_PAIR=gpu-energy-seeds/seed-2198. Each measures both plans on one GPU, one after the other: seed 2193 first in the first and third container of each device, seed 2198 first in the second and fourth. A container that the runner refuses because the device does not match expected_name is excluded with both its runs and launched again, until each device has four pairs. Every pair is used, whichever board it lands on.",
+  "boundary": "GPU board only, as reported by NVML. Excludes host CPU, DRAM, NICs, fans outside the board, power-supply losses, and facility overhead (PUE).",
+  "split_note": "Every configuration is held out: nothing is fitted to these runs.",
+  "trials": 10,
+  "warmup_trials": 1,
+  "phase_min_seconds": 5.0,
+  "idle_seconds": 5.0,
+  "sample_interval_s": 0.05,
+  "counter_probe_seconds": 2.0,
+  "seed": 2193,
+  "devices": {
+    "H100": {
+      "registry": "Hardware.Cloud.H100",
+      "modal_gpu": "H100!",
+      "expected_name": "NVIDIA H100 80GB HBM3"
+    },
+    "A100": {
+      "registry": "Hardware.Cloud.A100",
+      "modal_gpu": "A100-80GB",
+      "expected_name": "NVIDIA A100-SXM4-80GB"
+    },
+    "H200": {
+      "registry": "Hardware.Cloud.H200",
+      "modal_gpu": "H200",
+      "expected_name": "NVIDIA H200"
+    }
+  },
+  "workloads": {
+    "llama31_8b": {
+      "kind": "generate",
+      "registry": "Models.Language.Llama3_8B",
+      "hf_model": "NousResearch/Meta-Llama-3.1-8B",
+      "hf_revision": "1f47e50cdbe801ad8a5174156ec3a0655108fb9f",
+      "weights_sha256": {
+        "model-00001-of-00004.safetensors": "f8b9704ab09cdeb097aa4a0a24bca96f906eec36bad63ab495bc21475058601b",
+        "model-00002-of-00004.safetensors": "c28b25e7541751056ee126627e007f8d4288319733285e9f7b17b9ff6eb313f0",
+        "model-00003-of-00004.safetensors": "d8e9504dd4e4a146d484c52a97584ec14dac92237c46b064934af67a85e7d383",
+        "model-00004-of-00004.safetensors": "e4486f35c040f683f7d790354f66c169c109eb9fa0954a4a35d7c458a108405d"
+      },
+      "weights_note": "An ungated mirror of meta-llama/Llama-3.1-8B, used under the Llama 3.1 Community License. At these revisions its config, generation config, tokenizer, and weight index are byte-identical to meta-llama/Llama-3.1-8B@d04e592bb4f6aa9cfee91e2e20afa771667e1d4b (equal git blob ids), and its four weight shards match that revision's sizes and the SHA-256 of unsloth/Meta-Llama-3.1-8B. Meta does not publish the shard hashes without a license acceptance. The download is checked against weights_sha256 before any GPU starts.",
+      "precision": "fp16",
+      "engine": "vLLM offline engine (LLM.generate), one GPU, CUDA graphs for decode, greedy, ignore_eos, random prompt tokens, all requests of a batch submitted together",
+      "attention_backend": "FLASH_ATTN",
+      "vllm": {
+        "max_model_len": 2560,
+        "max_num_seqs": 16,
+        "max_num_batched_tokens": 32768,
+        "gpu_memory_utilization": 0.85,
+        "swap_space": 0,
+        "enforce_eager": false,
+        "enable_prefix_caching": false,
+        "enable_chunked_prefill": false
+      },
+      "efficiency": 0.5,
+      "model_seq_len": "mean_context",
+      "model_seq_len_note": "ServingModel is evaluated at seq_len = prompt_tokens + output_tokens // 2, the mean context length over the decode phase, for ITL; prefill uses seq_len = prompt_tokens."
+    },
+    "resnet50_train": {
+      "kind": "train",
+      "registry": "Models.Vision.ResNet50",
+      "precision": "fp16",
+      "engine": "torchvision resnet50, SGD, torch.autocast fp16, channels_last, synthetic on-device data",
+      "warmup_steps": 10,
+      "steps": 150
+    }
+  },
+  "configs": [
+    {
+      "id": "h100-llama31-8b-b1-p128",
+      "device": "H100",
+      "workload": "llama31_8b",
+      "batch": 1,
+      "prompt_tokens": 128,
+      "output_tokens": 512,
+      "split": "heldout"
+    },
+    {
+      "id": "h100-llama31-8b-b1-p2048",
+      "device": "H100",
+      "workload": "llama31_8b",
+      "batch": 1,
+      "prompt_tokens": 2048,
+      "output_tokens": 512,
+      "split": "heldout"
+    },
+    {
+      "id": "h100-llama31-8b-b8-p128",
+      "device": "H100",
+      "workload": "llama31_8b",
+      "batch": 8,
+      "prompt_tokens": 128,
+      "output_tokens": 512,
+      "split": "heldout"
+    },
+    {
+      "id": "h100-llama31-8b-b8-p2048",
+      "device": "H100",
+      "workload": "llama31_8b",
+      "batch": 8,
+      "prompt_tokens": 2048,
+      "output_tokens": 512,
+      "split": "heldout"
+    },
+    {
+      "id": "h100-llama31-8b-b16-p128",
+      "device": "H100",
+      "workload": "llama31_8b",
+      "batch": 16,
+      "prompt_tokens": 128,
+      "output_tokens": 512,
+      "split": "heldout"
+    },
+    {
+      "id": "h100-llama31-8b-b16-p2048",
+      "device": "H100",
+      "workload": "llama31_8b",
+      "batch": 16,
+      "prompt_tokens": 2048,
+      "output_tokens": 512,
+      "split": "heldout"
+    },
+    {
+      "id": "h100-resnet50-train-b256",
+      "device": "H100",
+      "workload": "resnet50_train",
+      "batch": 256,
+      "efficiency": 0.13,
+      "split": "heldout"
+    },
+    {
+      "id": "a100-llama31-8b-b1-p128",
+      "device": "A100",
+      "workload": "llama31_8b",
+      "batch": 1,
+      "prompt_tokens": 128,
+      "output_tokens": 512,
+      "split": "heldout"
+    },
+    {
+      "id": "a100-llama31-8b-b1-p2048",
+      "device": "A100",
+      "workload": "llama31_8b",
+      "batch": 1,
+      "prompt_tokens": 2048,
+      "output_tokens": 512,
+      "split": "heldout"
+    },
+    {
+      "id": "a100-llama31-8b-b8-p128",
+      "device": "A100",
+      "workload": "llama31_8b",
+      "batch": 8,
+      "prompt_tokens": 128,
+      "output_tokens": 512,
+      "split": "heldout"
+    },
+    {
+      "id": "a100-llama31-8b-b8-p2048",
+      "device": "A100",
+      "workload": "llama31_8b",
+      "batch": 8,
+      "prompt_tokens": 2048,
+      "output_tokens": 512,
+      "split": "heldout"
+    },
+    {
+      "id": "a100-llama31-8b-b16-p128",
+      "device": "A100",
+      "workload": "llama31_8b",
+      "batch": 16,
+      "prompt_tokens": 128,
+      "output_tokens": 512,
+      "split": "heldout"
+    },
+    {
+      "id": "a100-llama31-8b-b16-p2048",
+      "device": "A100",
+      "workload": "llama31_8b",
+      "batch": 16,
+      "prompt_tokens": 2048,
+      "output_tokens": 512,
+      "split": "heldout"
+    },
+    {
+      "id": "a100-resnet50-train-b256",
+      "device": "A100",
+      "workload": "resnet50_train",
+      "batch": 256,
+      "efficiency": 0.26,
+      "split": "heldout"
+    },
+    {
+      "id": "h200-llama31-8b-b1-p128",
+      "device": "H200",
+      "workload": "llama31_8b",
+      "batch": 1,
+      "prompt_tokens": 128,
+      "output_tokens": 512,
+      "split": "heldout"
+    },
+    {
+      "id": "h200-llama31-8b-b1-p2048",
+      "device": "H200",
+      "workload": "llama31_8b",
+      "batch": 1,
+      "prompt_tokens": 2048,
+      "output_tokens": 512,
+      "split": "heldout"
+    },
+    {
+      "id": "h200-llama31-8b-b8-p128",
+      "device": "H200",
+      "workload": "llama31_8b",
+      "batch": 8,
+      "prompt_tokens": 128,
+      "output_tokens": 512,
+      "split": "heldout"
+    },
+    {
+      "id": "h200-llama31-8b-b8-p2048",
+      "device": "H200",
+      "workload": "llama31_8b",
+      "batch": 8,
+      "prompt_tokens": 2048,
+      "output_tokens": 512,
+      "split": "heldout"
+    },
+    {
+      "id": "h200-llama31-8b-b16-p128",
+      "device": "H200",
+      "workload": "llama31_8b",
+      "batch": 16,
+      "prompt_tokens": 128,
+      "output_tokens": 512,
+      "split": "heldout"
+    },
+    {
+      "id": "h200-llama31-8b-b16-p2048",
+      "device": "H200",
+      "workload": "llama31_8b",
+      "batch": 16,
+      "prompt_tokens": 2048,
+      "output_tokens": 512,
+      "split": "heldout"
+    },
+    {
+      "id": "h200-resnet50-train-b256",
+      "device": "H200",
+      "workload": "resnet50_train",
+      "batch": 256,
+      "efficiency": 0.13,
+      "split": "heldout",
+      "efficiency_note": "No H200 anchor exists. The H100 value is used: the registry gives both the same 989 TFLOP/s dense FP16 peak."
+    }
+  ]
+}

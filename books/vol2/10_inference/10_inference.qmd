@@ -1480,7 +1480,7 @@ The execution-only feasibility condition is $\BatchServiceTime(\BatchSize) \le \
 # │ How: X(B) = B / (T_fixed + B * T_var).
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt, fmt_int
+from mlsysim.fmt import check, fmt, fmt_int, fmt_math
 
 class BatchingEfficiency:
     # ┌── 1. LOAD ──────────────────────────────────────────
@@ -1499,6 +1499,17 @@ class BatchingEfficiency:
     # ┌── 4. OUTPUT ────────────────────────────────────────
     bec_llm_knee_str = fmt_int(b_knee_llm, commas=False)
     bec_vision_knee_str = fmt_int(b_knee_vis, commas=False)
+
+    # The two times of each case, read from its scenario (added 2026-11-20; typed in the notebook before).
+    def _times(case):
+        f = case.fixed_time.to("millisecond").magnitude
+        v = case.per_request_time.to("millisecond").magnitude
+        return fmt_math(rf"\BatchFixedOverheadTime= {f:g}\text{{ ms}}, \MarginalRequestServiceTime= {v:g}\text{{ ms}}"), fmt_math(
+            rf"\BatchSize\approx {f:g}\text{{ ms}}/{v:g}\text{{ ms}} ="
+        )
+
+    vis_times_math, vis_knee_math = _times(vis)
+    llm_times_math, llm_knee_math = _times(llm)
 ```
 
 ::: {#nbk-inference-batching-efficiency-curve .callout-notebook title="The batching efficiency curve"}
@@ -1508,11 +1519,11 @@ class BatchingEfficiency:
 **Math**:
 The knee occurs where the variable compute cost $(\BatchSize\times \MarginalRequestServiceTime)$ starts to exceed the fixed overhead $(\BatchFixedOverheadTime)$.
 
-1. **Vision Model** $(\BatchFixedOverheadTime= 2\text{ ms}, \MarginalRequestServiceTime= 1\text{ ms})$:
-   - Knee: $\BatchSize\approx 2\text{ ms}/1\text{ ms} =$ `{python} BatchingEfficiency.bec_vision_knee_str`.
+1. **Vision Model** (`{python} BatchingEfficiency.vis_times_math`):
+   - Knee: `{python} BatchingEfficiency.vis_knee_math` `{python} BatchingEfficiency.bec_vision_knee_str`.
    - **Result**: This simplified latency model reaches its first overhead-amortization knee at a small batch. It does not locate hardware saturation; measuring throughput at larger batches tests whether additional concurrency still helps.
-2. **LLM Decode** $(\BatchFixedOverheadTime= 40\text{ ms}, \MarginalRequestServiceTime= 0.5\text{ ms})$:
-   - Knee: $\BatchSize\approx 40\text{ ms}/0.5\text{ ms} =$ `{python} BatchingEfficiency.bec_llm_knee_str`.
+2. **LLM Decode** (`{python} BatchingEfficiency.llm_times_math`):
+   - Knee: `{python} BatchingEfficiency.llm_knee_math` `{python} BatchingEfficiency.bec_llm_knee_str`.
    - **Result**: The larger fixed cost in this decode example moves the overhead-amortization knee to a larger batch.
    - **Where 0.5 ms comes from**: It is an assumed marginal cost per added sequence, dominated by reading that sequence's own KV state at a moderate context length. Unlike the weight stream, that read is private to each sequence, so it grows with batch size instead of being shared.
    - **Where 40 ms comes from**: It is roughly the time to stream the model's `{python} InferenceSetup.llama70b_fp16_gb_str` of FP16 weights through one H100's `{python} InferenceSetup.h100_mem_bw_tb_per_s_str` of HBM bandwidth, the aggregate weight traffic of one decode step expressed in single-device time. No single H100 holds those weights. The reference replica of @sec-performance-engineering-memory-wall spreads them over eight GPUs, which divides both $\BatchFixedOverheadTime$ and $\MarginalRequestServiceTime$ by the tensor-parallel degree and leaves their ratio, and therefore the knee, unchanged.
