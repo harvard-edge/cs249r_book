@@ -9034,33 +9034,40 @@ class ValidateCommand:
         )
 
     def _run_cross_chapter_callout_ref(self, root: Path) -> ValidationRunResult:
-        """Flag \\ref{} to callout ids (nbk/ws/chk/lhs/psp/exmp) defined in a different file."""
+        """Flag \\ref{} to callout ids (nbk/ws/chk/lhs/psp/exmp, plus dfn/thrm in vol2-vol4) defined in a different file."""
         start = time.time()
         files = self._qmd_files(root)
         issues: List[ValidationIssue] = []
         defs = {}
-        def_pat = re.compile(r"\{#((?:nbk|ws|chk|lhs|psp|exmp)-[\w-]+)")
-        ref_pat = re.compile(r"\\ref\{((?:nbk|ws|chk|lhs|psp|exmp)-[\w-]+)\}")
+        def_pat = re.compile(r"\{#((?:nbk|ws|chk|lhs|psp|exmp|dfn|thrm)-[\w-]+)")
+        ref_pat = re.compile(r"\\ref\{((?:nbk|ws|chk|lhs|psp|exmp|dfn|thrm)-[\w-]+)\}")
         texts = {f: self._read_text(f) for f in files}
         for f, t in texts.items():
             for m in def_pat.finditer(t):
                 defs[m.group(1)] = f
         # 2026-10-12: enforced for vol1 only. 2026-10-13: vol2-vol4 refs fixed
-        # (117 at the time), so every volume is enforced.
+        # (117 at the time), so every volume is enforced for callouts.
+        # 2026-11-20: dfn|thrm added for vol2-vol4 (vol1 still has 6 legacy dfn cross-refs).
         enforced_volumes = {"vol1", "vol2", "vol3", "vol4"}
+        dfn_thrm_enforced_volumes = {"vol2", "vol3", "vol4"}
         for f, t in texts.items():
-            if not enforced_volumes & set(Path(f).parts):
+            f_parts = set(Path(f).parts)
+            if not enforced_volumes & f_parts:
                 continue
+            enforce_dfn_thrm = bool(dfn_thrm_enforced_volumes & f_parts)
             for idx, line in enumerate(t.splitlines(), 1):
                 for m in ref_pat.finditer(line):
-                    d = defs.get(m.group(1))
+                    label = m.group(1)
+                    if not enforce_dfn_thrm and label.startswith(("dfn-", "thrm-")):
+                        continue
+                    d = defs.get(label)
                     if d is not None and d != f:
                         issues.append(
                             ValidationIssue(
                                 file=self._relative_file(f),
                                 line=idx,
                                 code="cross_chapter_callout_ref",
-                                message=f"\\ref{{{m.group(1)}}} is defined in {self._relative_file(d)}; cite its section with @sec- instead.",
+                                message=f"\\ref{{{label}}} is defined in {self._relative_file(d)}; cite its section with @sec- instead.",
                                 severity="error",
                                 context=line.strip()[:100],
                             )

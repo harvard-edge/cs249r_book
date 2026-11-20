@@ -1602,7 +1602,6 @@ class NotationRegistry:
     ExpertCount: NotationSymbol  # number of expert subnetworks in one mixture-of-experts layer ($N_{\text{experts}}$)
     ExpertDiscountedStateVisitationDistribution: NotationSymbol  # normalized discounted distribution of states the expert demonstrator policy visits ($d^{\pi^*}$)
     ExpertIndex: NotationSymbol  # index of one expert in a mixture-of-experts layer ($e$)
-    ExpertSelectionProbability: NotationSymbol  # probability that a given token is routed to one particular expert ($p_e$) [dimensionless]
     ExpertStateVisitationDistribution: NotationSymbol  # distribution of states the expert demonstrator visits, the expected fraction of time steps its demonstrations spend in each ($p^{\pi^*}$)
     ExpertTokenCount: NotationSymbol  # number of token assignments a router sends to one expert in one layer ($B_e$)
     ExploitCandidateFraction: NotationSymbol  # fraction of generated candidates that contain an unmodeled edge case or exploit through which an invalid candidate passes the verifier ($p_{\text{exp}}$) [dimensionless]
@@ -1692,7 +1691,7 @@ class NotationRegistry:
     FeatureMapHeight: NotationSymbol  # height, in pixels, of the image or feature map a convolution layer reads ($H_{\text{img}}$)
     FeatureMapRowCoordinate: NotationSymbol  # row coordinate of a position in a feature map, as a loop nest or parallel schedule traverses it ($y$)
     FeatureMapWidth: NotationSymbol  # width, in pixels, of the image or feature map a convolution layer reads ($W_{\text{img}}$)
-    FeatureRecordTime: NotationSymbol  # time at which a feature record became available, which a point-in-time join requires to be no later than the observation timestamp ($t$) [s]
+    FeatureRecordTime: NotationSymbol  # time at which a feature record became available, which a point-in-time join requires to be no later than the observation timestamp ($T_{\text{avail}}$) [s]
     FeatureRetentionWindow: NotationSymbol  # length of feature history a feature store keeps so it can answer point-in-time queries ($T_{\text{retention}}$) [s]
     FeatureUpdateInterval: NotationSymbol  # interval between successive updates of one feature value in a feature store ($T_{\text{update}}$) [s]
     FeatureUpdateLag: NotationSymbol  # time since a served feature value was last materialized, the behavior it omits ($T_{\text{staleness}}$) [s]
@@ -1836,7 +1835,6 @@ class NotationRegistry:
     FrictionCoefficientFloor: NotationSymbol  # lowest friction coefficient a braking or contact premise assumes the surface provides ($\mu_{\min}$) [dimensionless]
     FrictionPyramidMatrix: NotationSymbol  # matrix of linear inequalities whose feasible set is an inner polyhedral approximation of one contact's friction cone ($\mathbf{F}$)
     FrobeniusNorm: NotationSymbol  # label marking a matrix norm as the Frobenius norm, the square root of the sum of squared entries ($F$)
-    FrozenBackboneFunction: NotationSymbol  # function the frozen pretrained layers compute, to which a residual adapter's output is added ($f$)
     FrozenFeatureEncoder: NotationSymbol  # fixed pretrained feature encoder that maps an input to the embedding stored for replay ($f$)
     FrustumFeature: NotationSymbol  # feature lifted to one depth hypothesis of a camera ray, the cell's feature weighted by that bin's depth probability ($\mathbf{c}_{u, v, k}$)
     FullBatchLoss: NotationSymbol  # training loss averaged over all examples of one effective batch ($\mathcal{L}_B$)

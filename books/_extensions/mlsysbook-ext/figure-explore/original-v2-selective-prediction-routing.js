@@ -18,7 +18,7 @@ window.MLSysFigureLessons["original-v2-selective-prediction-routing"]=async(root
  const canvas=document.createElement('div');canvas.className='mlsys-exp-canvas';canvas.tabIndex=0;canvas.setAttribute('aria-label','Original chapter diagram with synchronized state overlay.');canvas.append(svg);
  const readout=document.createElement('p');readout.className='mlsys-exp-readout';
  const invariant=document.createElement('p');invariant.className='mlsys-exp-invariant';
- const steps=[{"label": "Score an incoming request", "description": "An incoming request x (at 1,000 req/s arrival rate) enters the primary Model, which emits prediction f(x) alongside a calibrated confidence and OOD competence score s(x)."}, {"label": "Accept high-competence traffic at τ = 0.55", "description": "With threshold τ = 0.55, a request scoring s(x) = 0.91 ≥ τ takes the green Answer path; 90% coverage leaves 0.082 selective risk and 100 req/s fallback load."}, {"label": "Escalate borderline traffic to Route", "description": "Raising τ to 0.72 lowers selective risk to 0.041 at 78% coverage; a borderline request with s(x) = 0.66 < 0.72 diverts to the violet Route path (stronger model or human reviewer), growing fallback load to 220 req/s."}, {"label": "Abstain on out-of-distribution inputs", "description": "An out-of-distribution request scoring s(x) = 0.18 falls far below τ = 0.72 and routes to the red Abstain path, returning a validated safe default within the latency budget."}, {"label": "Raise τ to 0.85 and budget fallback capacity", "description": "Tightening τ to 0.85 slides the operating point down the risk-coverage curve to 0.019 risk and 62% coverage—sending 38% of traffic (380 req/s) into Route and Abstain queues that must absorb the load."}];
+ const steps=[{"label": "Score an incoming request", "description": "An incoming request x (at 1,000 req/s arrival rate) enters the primary Model, which emits prediction f(x) alongside a calibrated confidence and OOD competence score κ(x)."}, {"label": "Accept high-competence traffic at τ = 0.55", "description": "With threshold τ = 0.55, a request scoring κ(x) = 0.91 ≥ τ takes the green Answer path; 90% coverage leaves 0.082 selective risk and 100 req/s fallback load."}, {"label": "Escalate borderline traffic to Route", "description": "Raising τ to 0.72 lowers selective risk to 0.041 at 78% coverage; a borderline request with κ(x) = 0.66 < 0.72 diverts to the violet Route path (stronger model or human reviewer), growing fallback load to 220 req/s."}, {"label": "Abstain on out-of-distribution inputs", "description": "An out-of-distribution request scoring κ(x) = 0.18 falls far below τ = 0.72 and routes to the red Abstain path, returning a validated safe default within the latency budget."}, {"label": "Raise τ to 0.85 and budget fallback capacity", "description": "Tightening τ to 0.85 slides the operating point down the risk-coverage curve to 0.019 risk and 62% coverage—sending 38% of traffic (380 req/s) into Route and Abstain queues that must absorb the load."}];
 
  const boxDefs=[[20,105,96,56,'#64748b'],[146,88,138,90,'#1F407A'],[314,93,112,80,'#7C3AED'],[472,30,200,52,'#16A34A'],[472,107,200,52,'#7C3AED'],[472,184,200,52,'#DC2626']];
  const hi=boxDefs.map(([x,y,w,h,c])=>add('rect',{x:x-2,y:y-2,width:w+4,height:h+4,rx:4,fill:c,'fill-opacity':'.10',stroke:c,'stroke-width':2,visibility:'hidden'}));
@@ -36,10 +36,10 @@ window.MLSysFigureLessons["original-v2-selective-prediction-routing"]=async(root
  const activeBoxes=[[0,1],[2,3],[2,4],[2,5],[2,4,5]];
  const colors=['#1F407A','#16A34A','#7C3AED','#DC2626','#7C3AED'];
  const readouts=[
-  'Arrival rate λ = 1,000 req/s · Model emits prediction f(x) + competence score s(x)',
-  'τ = 0.55 · s(x) = 0.91 ≥ τ → Answer · coverage = 90%, selective risk = 0.082, fallback = 100 req/s',
-  'τ = 0.72 · s(x) = 0.66 < τ → Route (reviewer/stronger model) · coverage = 78%, risk = 0.041, fallback = 220 req/s',
-  'τ = 0.72 · s(x) = 0.18 ≪ τ → Abstain (validated safe default) · OOD hazard contained',
+  'Arrival rate λ = 1,000 req/s · Model emits prediction f(x) + competence score κ(x)',
+  'τ = 0.55 · κ(x) = 0.91 ≥ τ → Answer · coverage = 90%, selective risk = 0.082, fallback = 100 req/s',
+  'τ = 0.72 · κ(x) = 0.66 < τ → Route (reviewer/stronger model) · coverage = 78%, risk = 0.041, fallback = 220 req/s',
+  'τ = 0.72 · κ(x) = 0.18 ≪ τ → Abstain (validated safe default) · OOD hazard contained',
   'Raise τ → 0.85 · coverage = 62%, selective risk = 0.019 · fallback load = (1 − 0.62) × 1,000 = 380 req/s'
  ];
  function paint(from,to,p){
@@ -51,9 +51,9 @@ window.MLSysFigureLessons["original-v2-selective-prediction-routing"]=async(root
   tauDot.setAttribute('cx',lerp(curvePts[from][0],curvePts[to][0],p));
   tauDot.setAttribute('cy',lerp(curvePts[from][1],curvePts[to][1],p));
   badge.setAttribute('fill',colors[idx]);
-  badge.textContent=['s(x) computed','Fallback: 100 req/s (10%)','Fallback: 220 req/s (22%)','Safe default emitted','Fallback: 380 req/s (38%)'][idx];
+  badge.textContent=['κ(x) computed','Fallback: 100 req/s (10%)','Fallback: 220 req/s (22%)','Safe default emitted','Fallback: 380 req/s (38%)'][idx];
   readout.textContent=readouts[idx];
-  invariant.textContent='Fallback capacity law: λ_fallback = (1 − coverage(τ)) × λ_arrival must fit secondary model/reviewer SLAs.';
+  invariant.textContent='Fallback capacity law: λ_fallback = (1 − coverage(τ)) × λ_arrival must fit secondary model/reviewer SLOs.';
   root.dataset.values=JSON.stringify({step:idx,tau:[0.55,0.55,0.72,0.72,0.85][idx],fallback_rps:[100,100,220,220,380][idx]});
  }
 
