@@ -788,7 +788,7 @@ class ValidateCommand:
             # cleanup script corrupted 38 sites across both volumes and every
             # existing gate passed; see _run_latex_balance.
             Scope("latex-balance", "_run_latex_balance",
-                  note="unbalanced $, bare \\left}/\\right}, unclosed \\{"),
+                  note="unbalanced $, bare \\left}/\\right}, unclosed \\{, $ split around {python}"),
             # render-audit builds every chapter (~10 min). Manual stage only;
             # default=False ensures `binder check math` stays under 1s.
             Scope("render-audit", "_run_math_render_audit", default=False),
@@ -14222,6 +14222,13 @@ class ValidateCommand:
     # literal dollar is written `\\$` there. Collapse that doubling before
     # applying the rule above.
     _LB_ATTR_LINE = re.compile(r"\b(fig|tbl|lst)-(cap|alt)\s*=")
+    # Added 2026-11-20: a math `$` written directly before an inline value
+    # (`$`{python} x`$`) splits one equation around the substitution. After
+    # the value is inserted the `$` sits before a digit, which Pandoc does not
+    # accept as a closing delimiter; MathJax tolerated it, but the Vol II PDF
+    # failed with "Missing $ inserted" (16_responsible_ai equal-opportunity
+    # notebook). Build the whole expression as a `_math` export instead.
+    _LB_SPLIT_MATH = re.compile(r"(?<!\\)\$`\{python\}")
     _LB_LEFTRIGHT_BARE = re.compile(r"\\(left|right)\s*([{}])")
     _LB_DISPLAY = re.compile(r"\$\$")
 
@@ -14264,6 +14271,20 @@ class ValidateCommand:
                     continue
                 if in_code and not in_tikz:
                     continue
+
+                # Rule 0 — math split around an inline {python} value.
+                if not in_code and self._LB_SPLIT_MATH.search(raw):
+                    issues.append(ValidationIssue(
+                        file=rel, line=idx, code="latex_split_math_inline",
+                        message=(
+                            "A math `$` touches an inline `{python}` value, so one "
+                            "equation is split around the substitution. It renders "
+                            "in HTML but breaks the PDF. Export the whole "
+                            "expression from the cell with fmt_math as a `_math` "
+                            "string."
+                        ),
+                        severity="error", context=raw.strip()[:120],
+                    ))
 
                 line = self._lb_strip(raw)
 
