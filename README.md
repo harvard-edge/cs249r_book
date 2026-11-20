@@ -990,7 +990,7 @@ These people have improved the textbooks, the software, and the teaching materia
   <tbody>
     <tr>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/profvjreddi"><img src="https://avatars.githubusercontent.com/profvjreddi?v=4?s=50" width="50px;" alt="Vijay Janapa Reddi"/><br /><sub><b>Vijay Janapa Reddi</b></sub></a><br />🪲 🧑‍💻 🎨 ✍️ 🧪 🛠️</td>
-      <td align="center" valign="top" width="14.29%"><a href="https://github.com/Mjrovai"><img src="https://avatars.githubusercontent.com/Mjrovai?v=4?s=50" width="50px;" alt="Marcelo Rovai"/><br /><sub><b>Marcelo Rovai</b></sub></a><br />✍️ 🧑‍💻 🎨 </td>
+      <td align="center" valign="top" width="14.29%"><a href="https://github.com/Mjrovai"><img src="https://avatars.githubusercontent.com/Mjrovai?v=4?s=50" width="50px;" alt="Marcelo Rovai"/><br /><sub><b>Marcelo Rovai</b></sub></a><br />🧑‍💻 🎨 ✍️ 🧪 </td>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/Shashank-Tripathi-07"><img src="https://avatars.githubusercontent.com/u/178375647?v=4?v=4?s=50" width="50px;" alt="Rocky"/><br /><sub><b>Rocky</b></sub></a><br />🪲 🧑‍💻 🎨 ✍️</td>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/farhan523"><img src="https://avatars.githubusercontent.com/u/62025759?v=4?v=4?s=50" width="50px;" alt="Farhan Asghar"/><br /><sub><b>Farhan Asghar</b></sub></a><br />🪲 🧑‍💻 🎨</td>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/Nishitha-Rajesh"><img src="https://avatars.githubusercontent.com/u/222974421?v=4?v=4?s=50" width="50px;" alt="Nishitha-Rajesh"/><br /><sub><b>Nishitha-Rajesh</b></sub></a><br />🪲 🧑‍💻 ✍️</td>
