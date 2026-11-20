@@ -54,6 +54,20 @@ ResNet-50 training again on new boards. `make publication-check` runs
 `analyze_gpu_energy.py --check --root paper/data/gpu-energy-workloads` on it,
 and its README reports the results and the changes made after measuring began.
 
+`gpu-energy-boards/` is a third declared test with the same runner, protocol
+and analysis, and the seed of `gpu-energy/`. It measures Llama-3.1-8B and
+ResNet-50 training on four more boards each of the H100, A100 and H200, to
+find out how much energy differs between boards of one GPU.
+`../scripts/compare_gpu_energy_boards.py` collects each run's energy from all
+three tests into `gpu-energy-boards/board_energy.csv` and compares them.
+`make publication-check` runs both scripts on it with `--check`.
+
+`gpu-energy-seeds/` is a fourth declared test with two plans that differ only
+in seed. Each container measures both on one GPU, so the seed can be compared
+on the same board. `../scripts/compare_gpu_energy_seeds.py` pairs the runs, and
+`make publication-check` runs it and the analysis of both plans with
+`--check`.
+
 `serverless-gpu-energy/` has per-run GPU energy measurements from Modal
 serverless GPUs (T4 to B200): idle power with a model loaded, cold starts,
 keep-warm windows, pausing a training job, and 148 power runs of seven

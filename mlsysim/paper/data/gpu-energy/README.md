@@ -78,6 +78,15 @@ board boundary only. The 95% intervals describe trial-to-trial noise, and the
 say about board-to-board spread. The data do not test a scheduling decision (see
 below).
 
+**Later tests.** `../gpu-energy-workloads/`, `../gpu-energy-boards/` and
+`../gpu-energy-seeds/` measured these configurations on more boards. Over the
+eight H100 and eight A100 boards of the first three tests, none of the four
+decode configurations where the A100 wins on every pairing here has a winner
+on every pairing: the H100 uses less on 25 to 47 of 64 pairings. The H100's
+five prefill wins and its training win hold on all 64. The two H100 boards
+here used the most decode energy of all 16 H100 runs in the four tests, in
+every configuration.
+
 Changes made after measuring began are listed here and in the plan. After the
 pilot measured the 100 ms counter refresh, training steps went from 50 to 150
 (`revision_note` in the plan). After the A100 runs, two descriptive columns were
