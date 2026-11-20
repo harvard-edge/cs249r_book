@@ -1039,7 +1039,7 @@ class EdgeAdaptationTierProfile(Registry):
         description="Upper interaction count for few-shot personalization examples.",
     )
     FederatedLoraUpdate = sourced_qty(
-        50 * MiB,
+        50 * MB,
         pc.EDGE_ADAPTATION_TIER_PROFILE,
         name="Federated LoRA adapter update",
         description="Reference LoRA adapter update payload for mobile federated coordination.",

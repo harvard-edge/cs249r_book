@@ -2529,11 +2529,32 @@ class CoresetRunScenario(BaseScenario):
 
     @property
     def saving_over_score_energy(self) -> float:
-        """Dimensionless run energy avoided divided by one scoring pass energy.
+        """Dimensionless gross run energy avoided divided by one scoring pass energy.
 
         Equation:
             return (self.run_saving_energy / self.score_energy()).to('').magnitude"""
         return (self.run_saving_energy / self.score_energy()).to("").magnitude
+
+    def net_saving_time(self, scorer: Optional[Workload] = None) -> Quantity:
+        """Hours saved across the run after deducting one full-pool scoring pass.
+
+        Equation:
+            return self.saving(scorer).to('hour')"""
+        return self.saving(scorer).to("hour")
+
+    def net_saving_energy(self, scorer: Optional[Workload] = None) -> Quantity:
+        """MJ saved across the run after deducting one full-pool scoring pass.
+
+        Equation:
+            return (self.run_saving_energy - self.score_energy(scorer)).to('MJ')"""
+        return (self.run_saving_energy - self.score_energy(scorer)).to("MJ")
+
+    def net_saving_over_score_energy(self, scorer: Optional[Workload] = None) -> float:
+        """Dimensionless net run energy saved (after paying the scoring pass) divided by scoring energy.
+
+        Equation:
+            return (self.net_saving_energy(scorer) / self.score_energy(scorer)).to('').magnitude"""
+        return (self.net_saving_energy(scorer) / self.score_energy(scorer)).to("").magnitude
 
     @property
     def archive_bytes(self) -> Quantity:

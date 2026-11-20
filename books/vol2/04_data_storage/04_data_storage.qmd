@@ -335,8 +335,8 @@ class StorageAccessPatternFacts:
     ckpt_total_gb_str = fmt_qty_int(ckpt_total, GB)
     checkpoint_interval_min_str = fmt_time(checkpoint_interval, minute, precision=0, commas=False, style='word')
     ckpt_node_count_str = fmt_count(ckpt_node_count, commas=True, label="node")
-    ckpt_shard_gb_str = fmt_qty_int(ckpt_shard, GB, commas=False)
-    ckpt_burst_tb_str = fmt_memory(ckpt_burst, unit=TB, precision=1, commas=False)
+    ckpt_shard_gb_str = fmt_memory(ckpt_shard, unit=GB, precision=1, commas=False)
+    ckpt_burst_tb_str = fmt_memory(ckpt_burst, unit=TB, precision=2, commas=False)
     rollout_replicas_str = fmt_int(rollout_replicas)
     rollout_total_tb_str = fmt_memory(rollout_total, unit=TB, precision=0, commas=False)
 ```
@@ -346,7 +346,7 @@ The second inversion is working set size\index{Working set size!full-corpus trai
 
 Other training policies create different locality. Multi-task or curriculum learning\index{Curriculum learning!data locality}, hard-example mining, and filtered sampling access some subsets more frequently during particular phases. This temporary working set lets the NVMe tier exploit locality. Large-scale pretraining jobs that repeatedly scan a fixed corpus remain the scenario for the hierarchy derived here; systems serving another sampling policy should measure its reuse distribution before adopting the same cache design.
 
-The third inversion is write pattern\index{Write pattern!bursty writes}. Transactional systems generate continuous streams of small writes, each immediately durable. ML systems generate occasional large writes when saving checkpoints. A `{python} StorageAccessPatternFacts.gpt3_params_b_str` parameter model checkpoint, including optimizer state, occupies roughly `{python} StorageAccessPatternFacts.ckpt_total_gb_str`. Saving it every `{python} StorageAccessPatternFacts.checkpoint_interval_min_str` generates concentrated bursts that saturate bandwidth for seconds, followed by long idle periods. These synchronized bursts, called checkpoint storms\index{Checkpoint storm!write bursts} and defined formally in definition \ref{dfn-data-storage-checkpoint-storm}, must be absorbed by the shared file system without disrupting ongoing training reads. The bursty write pattern is particularly challenging because all nodes in the cluster write their checkpoint shards simultaneously. If `{python} StorageAccessPatternFacts.ckpt_node_count_str` each write `{python} StorageAccessPatternFacts.ckpt_shard_gb_str`, the parallel file system receives `{python} StorageAccessPatternFacts.ckpt_burst_tb_str` of writes in a single burst, which blocks training if the job writes synchronously to that tier. Local staging and asynchronous replication can shorten this pause, as @sec-storage-checkpointing develops. When checkpoint and gradient traffic share one fabric, traffic isolation also keeps the burst from delaying the job's collectives.
+The third inversion is write pattern\index{Write pattern!bursty writes}. Transactional systems generate continuous streams of small writes, each immediately durable. ML systems generate occasional large writes when saving checkpoints. A `{python} StorageAccessPatternFacts.gpt3_params_b_str` parameter model checkpoint, including optimizer state, occupies roughly `{python} StorageAccessPatternFacts.ckpt_total_gb_str`. Saving it every `{python} StorageAccessPatternFacts.checkpoint_interval_min_str` generates concentrated bursts that saturate bandwidth for seconds, followed by long idle periods. These synchronized bursts, called checkpoint storms\index{Checkpoint storm!write bursts}, must be absorbed by the shared file system without disrupting ongoing training reads. The bursty write pattern is particularly challenging because all nodes in the cluster write their checkpoint shards simultaneously. If `{python} StorageAccessPatternFacts.ckpt_node_count_str` each write roughly `{python} StorageAccessPatternFacts.ckpt_shard_gb_str`, the parallel file system receives `{python} StorageAccessPatternFacts.ckpt_burst_tb_str` of writes in a single burst, which blocks training if the job writes synchronously to that tier. Local staging and asynchronous replication can shorten this pause, as @sec-storage-checkpointing develops. When checkpoint and gradient traffic share one fabric, traffic isolation also keeps the burst from delaying the job's collectives.
 
 ::: {.column-margin .margin-pointer}
 ↩ Traffic isolation and quality-of-service mechanisms are established in @sec-network-fabrics-qos.
@@ -1297,7 +1297,7 @@ class NvmeTierContext:
 
 ### Tier 2 local NVMe {#sec-storage-tier2-nvme}
 
-When the working set exceeds host DRAM, the system falls to Tier 2: the local NVMe\index{NVMe!ML storage tier} drives attached directly to the compute node. NVMe[^fn-nvme-storage-protocol] provides a high-performance protocol designed specifically for solid-state drives, achieving `{python} NvmeTierContext.nvme_bw_gb_per_s_str` of sequential throughput per drive. NVMe's deep queues and PCIe lanes, rather than faster flash, explain why it delivers 10$\times$ to 50$\times$ the throughput of SATA SSDs (capped near `{python} NvmeTierContext.sata_ssd_bw_mb_per_s_str` by the link) with identical NAND flash, provided the loader keeps many asynchronous reads outstanding. With four drives in a RAID-0 configuration, a single node can sustain roughly `{python} NvmeTierContext.raid0_bw_gb_per_s_str` of sequential reads before overhead, sufficient to stream the `{python} NvmeTierContext.tokenized_text_tb_str` serialized dataset from local disk in about `{python} NvmeTierContext.tokenized_local_stream_min_str` under ideal sequential conditions.
+When the working set exceeds host DRAM, the system falls to Tier 2: the local NVMe\index{NVMe!ML storage tier} drives attached directly to the compute node. NVMe[^fn-nvme-storage-protocol] provides a high-performance protocol designed specifically for solid-state drives, achieving `{python} NvmeTierContext.nvme_bw_gb_per_s_str` of sequential throughput per drive. NVMe's deep queues and PCIe lanes, rather than faster flash, explain why it delivers 10$\times$ to 25$\times$ the per-drive throughput of SATA SSDs (capped near `{python} NvmeTierContext.sata_ssd_bw_mb_per_s_str` by the link) with identical NAND flash, provided the loader keeps many asynchronous reads outstanding. With four drives in a RAID-0 configuration, a single node can sustain roughly `{python} NvmeTierContext.raid0_bw_gb_per_s_str` of sequential reads before overhead, sufficient to stream the `{python} NvmeTierContext.tokenized_text_tb_str` serialized dataset from local disk in about `{python} NvmeTierContext.tokenized_local_stream_min_str` under ideal sequential conditions.
 
 [^fn-nvme-storage-protocol]: **NVMe (Non-Volatile Memory Express)**\index{NVMe!queue parallelism}: A storage protocol designed for SSDs, connecting directly to the CPU via PCIe lanes. Its many deep command queues, replacing the single 32-command queue of the older SATA interface, are what allow a multi-worker ML data loader to keep enough requests outstanding to saturate the drive's bandwidth.
 
@@ -2121,7 +2121,7 @@ class ArchiveLineageContext:
     compressed_text_tb_str = fmt_memory(compressed_text, unit=TB, precision=0, commas=False)
     tokenized_text_tb_str = fmt_memory(tokenized_text, unit=TB, precision=0, commas=False)
 ```
-For the 175B model training run, the archive tier holds the complete training lineage: the raw `{python} ArchiveLineageContext.compressed_text_tb_str` compressed source corpus, the `{python} ArchiveLineageContext.tokenized_text_tb_str` serialized shard set, all preprocessing scripts, the final checkpoint, and a sampled subset of intermediate checkpoints. Capacity must include every retained full checkpoint as well as both corpus representations; @tbl-data-storage-175b-footprint computes that total for the declared retention policy. The asymmetry between archive cost and compute cost makes retention inexpensive relative to the run it documents; failures to archive usually reflect missing lifecycle ownership, unclear retention policy, or retrieval-process neglect rather than raw capacity cost.
+For the 175B model training run, the archive tier holds the complete training lineage: the raw `{python} ArchiveLineageContext.compressed_text_tb_str` compressed source corpus, the `{python} ArchiveLineageContext.tokenized_text_tb_str` serialized shard set, all preprocessing scripts, the final checkpoint, and a sampled subset of intermediate checkpoints. Capacity must include every retained full checkpoint as well as both corpus representations; @sec-storage-checkpoint-retention specifies the running example's retention policy and totals the resulting archive footprint. The asymmetry between archive cost and compute cost makes retention inexpensive relative to the run it documents; failures to archive usually reflect missing lifecycle ownership, unclear retention policy, or retrieval-process neglect rather than raw capacity cost.
 
 Archive storage services offer multiple retrieval speed tiers, each with different pricing. In an S3 Glacier-style service, standard retrieval may complete within hours at moderate cost, expedited retrieval may complete within minutes at a higher cost, and bulk retrieval may trade still more latency for the lowest retrieval price [@awsS3GlacierRetrieval]. The choice of retrieval tier depends on the urgency of the use case. Forensic analysis of a production incident warrants faster retrieval; annual compliance audits can use slower bulk retrieval. Designing the lifecycle policy\index{Lifecycle policy!storage tiering} requires understanding the storage cost, the expected retrieval frequency, and the urgency for each class of data.
 
@@ -2939,9 +2939,9 @@ The image job shows what staging buys when steps are short. Its `{python} Prefet
 A training cluster the size of the book's reference cluster runs `{python} StorageFuelLineContext.ref_accels_str` GPUs with 128-image batches (`{python} TextImageBandwidth.image_size_kb_str` per image after compression, 150 ms per iteration).
 
 - [ ] **Bandwidth requirement**: with the pipeline bandwidth requirement of @eq-pipeline-throughput, which scales accelerator count and target utilization by bytes per iteration, calculate the required aggregate storage bandwidth at 90 percent target utilization.
-- [ ] **Checkpoint contention**: determine whether 800 GB/s aggregate parallel-file-system bandwidth is sufficient, then recalculate when checkpoint writes consume 20 percent of that bandwidth.
+- [ ] **Checkpoint contention**: determine whether 100 GB/s aggregate parallel-file-system bandwidth is sufficient, then recalculate when checkpoint writes consume 20 percent of that bandwidth.
 - [ ] **Prefetch depth**: calculate the minimum prefetch buffer depth in batches needed to absorb 300 ms p99 object-storage latency.
-- [ ] **Host memory**: calculate total prefetch buffer memory when each decoded batch occupies 10 MB in host DRAM at the depth calculated in (3).
+- [ ] **Host memory**: calculate total prefetch buffer memory per eight-GPU node and across the fleet when each decoded batch occupies 20 MB in host DRAM at that depth.
 
 :::
 
@@ -3676,8 +3676,9 @@ class CheckpointStormCalc:
     per_node_shard_gb_str = fmt_memory(per_node_shard, unit=GB, precision=1, commas=False)
     local_bw_gb_per_s_str = fmt_bandwidth(local_bw, unit=GB / second, precision=0, commas=False)
     local_write_s_str = fmt_time(local_write, second, precision=2, commas=False, style='word')
-    total_pfs_tb_str = fmt_memory(total_checkpoint, unit=TB, precision=1, commas=False)
-    pfs_copy_s_str = fmt_time(pfs_copy, second, precision=1, commas=False, style='word')
+    total_pfs_tb_str = fmt_memory(total_checkpoint, unit=TB, precision=2, commas=False)
+    pfs_copy_s_str = fmt_time(pfs_copy, second, precision=2, commas=False, style='word')
+    pfs_copy_s_attr_str = fmt_time(pfs_copy, second, precision=2, commas=False, style='word', attributive=True)
     per_node_pfs_bw_gb_per_s_str = fmt_bandwidth(per_node_pfs_bw, unit=GB / second, precision=1, commas=False)
     overhead_pct_str = fmt_percent(overhead_pct / 100, precision=2, commas=False, style='prose')
     local_drive_count_str = fmt(local_drive_count, precision=0, commas=False)
@@ -3699,7 +3700,7 @@ class CheckpointStormCalc:
 4. **Training pause**\index{Checkpointing!training pause}: At least `{python} CheckpointStormCalc.local_write_s_str` for the local NVMe write under this model. The PFS copy overlaps with the next training iteration.
 5. **Overhead lower bound**\index{Checkpointing!overhead}: `{python} CheckpointStormCalc.local_write_s_str` pause every `{python} CheckpointStormCalc.checkpoint_interval_s_str` $\approx$ `{python} CheckpointStormCalc.overhead_pct_str` training time lost to checkpointing.
 
-**Systems insight**: Under these `{python} CheckpointStormCalc.pfs_aggregate_bw_tb_per_s_str` aggregate-PFS assumptions, tiered staging reduces checkpoint overhead from about a `{python} CheckpointStormCalc.pfs_copy_s_str` PFS-direct write to a sub-second local write. The training pause can end at the local snapshot boundary before durable publication, but actual pause includes snapshot creation, serialization, and coordination in addition to this byte-transfer lower bound.
+**Systems insight**: Under these `{python} CheckpointStormCalc.pfs_aggregate_bw_tb_per_s_str` aggregate-PFS assumptions, tiered staging reduces checkpoint overhead from about a `{python} CheckpointStormCalc.pfs_copy_s_attr_str` PFS-direct write to a sub-second local write. The training pause can end at the local snapshot boundary before durable publication, but actual pause includes snapshot creation, serialization, and coordination in addition to this byte-transfer lower bound.
 
 :::
 
@@ -3730,13 +3731,11 @@ The exposed pause and the durability boundary therefore fall at different moment
 # │          @sec-storage-distributed-checkpoint
 # │ Goal: Prompt parameters for the checkpoint storage design exercise, and the
 # │       cost of a synchronous pause at the modeled 175B step (~4.64 s).
-from mlsysim.fmt import check, fmt, fmt_bandwidth, fmt_count, fmt_percent, fmt_time
+from mlsysim.fmt import check, fmt, fmt_bandwidth, fmt_count, fmt_memory, fmt_params, fmt_percent, fmt_time
 
 class CheckpointStorageDesignPrompt:
     nodes = Systems.Clusters.Production_2K_NDR.count  # the chapter's 256-node running cluster
     checkpoint_interval = ReferenceStats.StorageTrainingCorpus.CheckpointInterval
-    local_nvme_bw = Systems.Storage.LocalNvmeGen4_7T68x4.aggregate_bandwidth
-    pfs_aggregate_bw = Systems.Storage.PfsOneTbPerSecond.bandwidth
     step_time = StorageFuelLineContext.step_time  # modeled 175B step on the running cluster
     pause = 1 * second  # scenario assumption: checkpoint pause budget
     pause_step_fraction = (pause / step_time).to("").magnitude
@@ -3744,15 +3743,33 @@ class CheckpointStorageDesignPrompt:
     check(0.2 < pause_step_fraction < 0.25, "Prose says a one-second pause costs about a fifth (22 percent) of one step")
     check(0.0015 < pause_interval_fraction < 0.0018, "Prose says the pause is about 0.17 percent of the save interval")
 
+    # Fresh model/cluster scale for Checkpoint 4 (distinct from the solved 175B/256-node notebook)
+    ex_model_params = Scenarios.Llama2_70BCheckpointStorm1K.workload.parameters
+    ex_nodes = Systems.Clusters.Training_1K.count  # 128-node (1,024-GPU) reference cluster
+    ex_ckpt_total = memory_from_params(ex_model_params, CHECKPOINT_RESUME_BYTES_PER_PARAM)
+    ex_interval = 15 * minute  # scenario assumption: exercise save interval
+    ex_local_nvme_bw = 2 * Hardware.Tech.Storage.NvmeGen4.bandwidth  # scenario assumption: two Gen4 NVMe drives per node
+    ex_pfs_bw = 250 * (GB / second)  # scenario assumption: shared PFS aggregate write allocation
+    ex_per_node_shard = ex_ckpt_total / ex_nodes
+    ex_local_write = (ex_per_node_shard / ex_local_nvme_bw).to(second)
+    ex_per_node_pfs_bw = ex_pfs_bw / ex_nodes
+    ex_pfs_copy = (ex_ckpt_total / ex_pfs_bw).to(second)
+    check(abs(ex_ckpt_total.to(GB).magnitude - 980) < 1e-6, "70B resumable checkpoint must equal 980 GB")
+    check(ex_nodes == 128, "Exercise runs on the 128-node reference cluster")
+    check(ex_local_write < ex_pfs_copy, "Local NVMe write must beat direct PFS write")
+
     # ┌── 4. OUTPUT ───────────────────────────────────────
     nodes_str = fmt_count(nodes, commas=True, label="node")
-    checkpoint_interval_min_str = fmt_time(checkpoint_interval, minute, precision=0, commas=False, style='word')
-    local_nvme_bw_gb_per_s_str = fmt_bandwidth(local_nvme_bw, unit=GB / second, precision=0, commas=False)
-    pfs_aggregate_tb_per_s_str = fmt_bandwidth(pfs_aggregate_bw, unit=TB / second, precision=0, commas=False)
     step_time_s_attr_str = fmt_time(step_time, second, precision=2, commas=False, style='word', attributive=True)
     pause_str = fmt_time(pause, second, precision=0, attributive=True, style='word')
     pause_step_fraction_pct_str = fmt_percent(round(pause_step_fraction, 2), precision=0, style='prose')  # "about"
     pause_interval_fraction_pct_str = fmt_percent(round(pause_interval_fraction, 4), precision=2, style='prose')
+    ex_params_b_str = fmt_params(ex_model_params, scale="B", precision=0, commas=False)
+    ex_nodes_str = fmt_count(ex_nodes, commas=True, label="node")
+    ex_ckpt_total_gb_str = fmt_memory(ex_ckpt_total, unit=GB, precision=0, commas=True)
+    ex_interval_min_str = fmt_time(ex_interval, minute, precision=0, commas=False, style='word')
+    ex_local_nvme_bw_gb_per_s_str = fmt_bandwidth(ex_local_nvme_bw, unit=GB / second, precision=0, commas=False)
+    ex_pfs_bw_gb_per_s_str = fmt_bandwidth(ex_pfs_bw, unit=GB / second, precision=0, commas=False)
 ```
 
 ### Synchronous and asynchronous checkpoint writes {#sec-storage-distributed-checkpoint}
@@ -3818,11 +3835,11 @@ For the running job, a restore test reads a retained generation's shards back, c
 
 ::: {#chk-data-storage-checkpoint-storage-design .callout-checkpoint title="Checkpoint storage design"}
 
-A training cluster of `{python} CheckpointStorageDesignPrompt.nodes_str` saves a 175B-parameter model checkpoint every `{python} CheckpointStorageDesignPrompt.checkpoint_interval_min_str`. Each checkpoint is `{python} CheckpointModelIntro.ckpt_total_gb_str` total, distributed across all nodes.
+A training cluster of `{python} CheckpointStorageDesignPrompt.ex_nodes_str` (the size of the book's reference cluster) saves a `{python} CheckpointStorageDesignPrompt.ex_params_b_str`-parameter resumable checkpoint every `{python} CheckpointStorageDesignPrompt.ex_interval_min_str`. Each write-once checkpoint is `{python} CheckpointStorageDesignPrompt.ex_ckpt_total_gb_str` total, distributed evenly across all nodes.
 
 - [ ] **Per-node state**: calculate the per-node checkpoint size.
-- [ ] **Local write**: calculate $\CheckpointWriteTime$ for the local write when each node writes to local NVMe at `{python} CheckpointStorageDesignPrompt.local_nvme_bw_gb_per_s_str`.
-- [ ] **Async copy**: calculate the per-node write bandwidth and async-copy time when the parallel file system provides `{python} CheckpointStorageDesignPrompt.pfs_aggregate_tb_per_s_str` aggregate and all `{python} CheckpointStorageDesignPrompt.nodes_str` write simultaneously.
+- [ ] **Local write**: calculate $\CheckpointWriteTime$ for the local write when each node writes to local NVMe at `{python} CheckpointStorageDesignPrompt.ex_local_nvme_bw_gb_per_s_str`.
+- [ ] **Async copy**: calculate the per-node write bandwidth and async-copy time when the parallel file system provides `{python} CheckpointStorageDesignPrompt.ex_pfs_bw_gb_per_s_str` aggregate and all `{python} CheckpointStorageDesignPrompt.ex_nodes_str` write simultaneously.
 - [ ] **Tiered staging**: explain why tiered staging (local NVMe first, then async PFS copy) is faster than writing directly to PFS.
 
 :::
@@ -4037,7 +4054,7 @@ Checkpoints, training shards, and the lineage that binds them now each have a pl
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: @sec-storage-economics—egress, IOPS, and retrieval iceberg costs
-from mlsysim import GB, Infrastructure, TB, USD, ureg
+from mlsysim import GB, Infrastructure, KB, TB, USD, ureg
 from mlsysim.fmt import check, fmt, fmt_count, fmt_memory, fmt_usd
 from mlsysim.core.units import month
 
@@ -4052,18 +4069,29 @@ class StorageIcebergCosts:
     egress_rate = bill.egress_rate
     s3_rate = bill.storage_rate  # chapter-wide S3 tier
     glacier_retrieval_rate = bill.retrieval_rate
+    small_file_size = 10 * KB  # scenario assumption: small-file corpus (100M x 10 KB = 1 TB)
     # ┌── 2. EXECUTE ──────────────────────────────────────
     egress_10epoch = bill.result.egress_cost * USD
     get_request_cost = bill.result.request_cost * USD
+    get_request_10epoch = get_request_cost * epochs
     storage_monthly = (dataset * s3_rate * month).to(USD)
+    small_corpus = file_count * small_file_size
+    small_storage_monthly = (small_corpus * s3_rate * month).to(USD)
     glacier_retrieval = bill.result.archive_retrieval_cost * USD
     # ┌── 3. GUARD ────────────────────────────────────────
     check(egress_10epoch.magnitude > storage_monthly.magnitude, "Egress should dwarf monthly storage")
     check(abs(dataset.to(TB).magnitude - ObjectStorageCost.dataset_size_tb) < 1e-9, "Iceberg and tier-cost cells must price the same dataset")
+    check(abs(small_corpus.to(TB).magnitude - 1) < 1e-9, "100M 10-KB files should total 1 TB")
+    check(abs((get_request_cost / small_storage_monthly).to("").magnitude - 2) < 1e-9, "One GET pass on 100M 10-KB files must double monthly storage")
+    check(get_request_10epoch.magnitude > 12 * small_storage_monthly.magnitude, "Ten GET passes on 100M 10-KB files must exceed annual storage")
     # ┌── 4. OUTPUT ───────────────────────────────────────
     egress_10epoch_usd_str = fmt_usd(egress_10epoch.magnitude, precision=0)
     get_request_usd_str = fmt_usd(get_request_cost.to(USD).magnitude, precision=0)
+    get_request_10epoch_usd_str = fmt_usd(get_request_10epoch.to(USD).magnitude, precision=0)
     storage_monthly_usd_str = fmt_usd(storage_monthly.magnitude, precision=0)
+    small_file_kb_str = fmt_memory(small_file_size, unit=KB, precision=0, commas=False)
+    small_corpus_tb_str = fmt_memory(small_corpus, unit=TB, precision=0, commas=False)
+    small_storage_monthly_usd_str = fmt_usd(small_storage_monthly.magnitude, precision=0)
     glacier_retrieval_usd_str = fmt_usd(glacier_retrieval.magnitude, precision=0)
     file_count_str = fmt_count(file_count, scale="M", precision=0)
     dataset_tb_str = fmt_memory(dataset, unit=TB, precision=0, commas=False)
@@ -4134,7 +4162,7 @@ The economic analysis changes further when accounting for the opportunity cost o
 The visible cost of storage (\$/GB/month) is the tip of the iceberg. Below the surface lie costs that often exceed the storage cost itself:
 
 - **Egress fees**\index{Egress fee!cloud storage}: The ten-epoch egress charge of `{python} StorageIcebergCosts.egress_10epoch_usd_str` computed above already exceeds a year of storage.
-- **Request fees**\index{IOPS!charges}: Object storage charges per-request fees. S3 Standard GET requests cost about `{python} StorageIcebergCosts.get_rate_per_1k_usd_str` per `{python} StorageIcebergCosts.get_request_unit_str`, so a dataset of `{python} StorageIcebergCosts.file_count_str` individual files, read once, costs about `{python} StorageIcebergCosts.get_request_usd_str` in GET request fees before data transfer or retrieval charges, even though the storage cost is `{python} StorageIcebergCosts.storage_monthly_usd_str`/month.
+- **Request fees**\index{IOPS!charges}: Object storage charges per-request fees that scale with file count and passes rather than bytes stored. S3 Standard GET requests cost about `{python} StorageIcebergCosts.get_rate_per_1k_usd_str` per `{python} StorageIcebergCosts.get_request_unit_str`, so one pass over `{python} StorageIcebergCosts.file_count_str` individual files costs about `{python} StorageIcebergCosts.get_request_usd_str` in GET fees. That charge is modest beside `{python} StorageIcebergCosts.storage_monthly_usd_str`/month for the `{python} StorageIcebergCosts.dataset_tb_str` corpus, yet for `{python} StorageIcebergCosts.file_count_str` small `{python} StorageIcebergCosts.small_file_kb_str` files (`{python} StorageIcebergCosts.small_corpus_tb_str`, stored for `{python} StorageIcebergCosts.small_storage_monthly_usd_str`/month) a single pass already doubles the monthly storage bill, and reading that dataset over `{python} StorageIcebergCosts.epochs_str` epochs reaches `{python} StorageIcebergCosts.get_request_10epoch_usd_str` before counting write or listing requests. Packing small files into large shards collapses both request fees and metadata overhead.
 - **Idle accelerator cost**\index{Idle compute!accelerator cost}: The `{python} StorageCostExtremes.idle_loss_daily_usd_str` per day of lost compute computed above dwarfs any storage saving.
 - **Retrieval fees**\index{Retrieval fee!archive storage}: Archive storage charges retrieval fees (`{python} StorageIcebergCosts.glacier_retrieval_rate_gb_str` for Glacier) in addition to egress. Restoring a `{python} StorageIcebergCosts.dataset_tb_str` dataset from Glacier costs `{python} StorageIcebergCosts.glacier_retrieval_usd_str` in retrieval fees plus `{python} ObjectStorageCost.egress_once_usd_str` in egress.
 

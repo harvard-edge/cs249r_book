@@ -3,8 +3,8 @@
 Every value the sheet prints is computed here from mlsysim, as in the chapter's LEGO cells,
 and written as \\setnum{key}{value} to edge_intelligence_studysheet_numbers.tex next to this file.
 Inputs the sheet chooses for its own examples and questions are marked ASSUMED.
-MB is decimal (10^6 bytes). Phone RAM and the adapter payload are binary in the registry
-(GiB, MiB); the sheet prints both forms.
+MB is decimal (10^6 bytes). Phone RAM is binary in the registry (GiB);
+the sheet prints both forms for RAM and decimal MB for wire payloads.
 """
 import math
 from pathlib import Path
@@ -75,7 +75,7 @@ def numbers() -> dict:
     t_lo, t_hi = pay_mbit / lo, pay_mbit / hi
     assert abs(t_lo - up.transfer_time("low").to(second).magnitude) < 1e-6
     deadline_min = 5  # ASSUMED round upload deadline
-    n.update(payloadmib=f"{up.payload.to('MiB').magnitude:.0f}", payloadmb=f"{pay_mb:.1f}",
+    n.update(payloadmb=f"{pay_mb:.0f}",
              payloadmbit=f"{pay_mbit:.0f}", bitsperbyte=f"{bits_per_byte}", linkslow=f"{lo:.0f}", linkfast=f"{hi:.0f}",
              uploadslows=f"{t_lo:.0f}", uploadslowmin=f"{t_lo / 60:.1f}", uploadfasts=f"{t_hi:.0f}",
              deadlinemin=f"{deadline_min}")
