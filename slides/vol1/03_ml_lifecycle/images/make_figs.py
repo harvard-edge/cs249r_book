@@ -338,8 +338,17 @@ def cost(step):
 for s in (1, 2, 3):
     cost(s)
 _cm = {'Minute': 1, 'Day': 1440, 'Week': 10080, 'Month': 43800.0, 'Quarter': 131400.0}
+_cad_rows = [
+    ('Minute', _cm['Minute'], 'danger', 'camera misconfigured'),
+    ('Day', _cm['Day'], 'memory', 'referral rate, confidence'),
+    ('Week', _cm['Week'], 'memory', 'labeled accuracy, drift tests'),
+    ('Month', _cm['Month'], 'neutral', 'population coverage'),
+    ('Quarter', _cm['Quarter'], 'neutral', 'architecture review'),
+]
 with sp.plt.rc_context({'xtick.labelsize': 14}):
-    sp.hbars(out / 'cadences.svg', [('Quarter', _cm['Quarter'], 'neutral', 'architecture review'), ('Month', _cm['Month'], 'neutral', 'population coverage'), ('Week', _cm['Week'], 'memory', 'labeled accuracy, drift tests'), ('Day', _cm['Day'], 'memory', 'referral rate, confidence'), ('Minute', _cm['Minute'], 'danger', 'camera misconfigured')], 'min', size=(5.4, 2.6), xlabel='How long each signal takes to trust (minutes, log scale)')
+    for s, nshow in ((1, 1), (2, 2), (3, 5)):
+        sp.hbars(out / f'cadences_step{s}.svg', _cad_rows, 'min', step=nshow, size=(5.4, 2.6),
+                 xlabel='How long each signal takes to trust (minutes, log scale)')
 
 def shrink_demo():
     from PIL import Image, ImageDraw
