@@ -24,6 +24,8 @@
 \RequirePackage{calc}
 \RequirePackage{colortbl}
 \RequirePackage{booktabs, tabularx, array}
+\RequirePackage{qrcode}                 % chapter link in the header (build.py passes \SheetURL)
+\RequirePackage[hidelinks]{hyperref}
 
 % ---- the book's notation macros (books/shared/_includes/_macros.tex, generated from the registry)
 \InputIfFileExists{_macros.tex}{}{\ClassError{studysheet}{_macros.tex not found; run tools/build_notation.py}{}}
@@ -66,7 +68,9 @@
 \renewcommand{\footrulewidth}{0.4pt}
 \renewcommand{\footrule}{{\color{rulegray}\hrule width\headwidth height\footrulewidth}}
 \fancyfoot[L]{\parbox[b]{0.68\textwidth}{\raggedright\sheetsans\fontsize{6.8}{8}\selectfont\color{muted}\cs@sources}}
-\fancyfoot[R]{\sheetsans\fontsize{6.8}{8}\selectfont\color{muted}Machine Learning Systems \textperiodcentered{} mlsysbook.ai}
+\fancyfoot[R]{\sheetsans\fontsize{6.8}{8}\selectfont\color{muted}Free online at
+  \href{https://mlsysbook.ai}{\textcolor{accent}{mlsysbook.ai}} \textperiodcentered{}
+  \href{https://github.com/harvard-edge/cs249r_book}{star it on GitHub}}
 
 % ---- headers: \frontside, \backside
 \newcommand{\cs@header}{%
@@ -75,7 +79,15 @@
     {\sheetsans\fontsize{20}{22}\selectfont\bfseries \cs@title}
   \end{minipage}\hfill
   \begin{minipage}[b]{0.36\linewidth}\raggedleft
-    {\sheetsans\fontsize{7.2}{9}\selectfont\color{muted}\cs@book\\Volume \cs@roman}
+    \def\cs@which{{\sheetsans\fontsize{7.2}{9}\selectfont\color{muted}\cs@book\\Volume \cs@roman}}%
+    \ifdefined\SheetURL
+      % Chapter link: the QR code and its label both open the chapter online (build.py passes \SheetURL).
+      % Two lines, as without the link, and a smashed code, so the header keeps its height.
+      \parbox[b]{\dimexpr\linewidth-0.42in-5pt\relax}{\raggedleft\sheetsans\fontsize{7.2}{9}\selectfont
+        {\color{muted}\cs@book}\\{\color{muted}Volume \cs@roman{} \textperiodcentered{}}
+        \href{\SheetURL}{\textcolor{accent}{Scan to read the chapter}}}%
+      \hspace{5pt}\smash{\raisebox{\depth}{\href{\SheetURL}{\qrcode[height=0.42in, level=L, nolink]{\SheetURL}}}}%
+    \else\cs@which\fi
   \end{minipage}\par\vspace{4pt}
   {\color{accent}\hrule height 1.6pt}\vspace{8pt}}
 \newcommand{\frontside}{\cs@header}

@@ -84,10 +84,22 @@ def ensure_macros() -> None:
         subprocess.run([sys.executable, str(ROOT / "tools" / "build_notation.py")], cwd=ROOT, check=True)
 
 
+def chapter_url(tex: Path) -> str:
+    """The chapter's page on the book site: the volume's site-url plus <chapter>/<chapter>.html.
+
+    Read from books/config/_quarto-html-volN.yml, as slides/tools/lectures.py does, so the sheet's
+    QR code and the slides site point at the same page."""
+    import yaml
+    vol, chapter = tex.parents[1].name, tex.parent.name
+    config = yaml.safe_load((BOOKS / "config" / f"_quarto-html-{vol}.yml").read_text())
+    base = str((config.get("website") or {}).get("site-url") or f"https://mlsysbook.ai/{vol}/")
+    return f"{base.rstrip('/')}/{chapter}/{chapter}.html"
+
+
 def compile_tex(tex: Path, out: Path, volume: int) -> dict:
     out.mkdir(parents=True, exist_ok=True)
     env = {**os.environ, "TEXINPUTS": f"{tex.parent}//:{HERE}//:{INCLUDES}//:"}
-    first_line = rf"\def\SheetAccent{{{accent(volume)}}}\input{{{tex.name}}}"
+    first_line = rf"\def\SheetAccent{{{accent(volume)}}}\def\SheetURL{{{chapter_url(tex)}}}\input{{{tex.name}}}"
     subprocess.run(["lualatex", "-interaction=nonstopmode", "-halt-on-error", f"-jobname={tex.stem}",
                     f"-output-directory={out}", first_line], cwd=tex.parent, capture_output=True, text=True, env=env)
     logf = out / f"{tex.stem}.log"
