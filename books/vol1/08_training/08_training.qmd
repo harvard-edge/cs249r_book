@@ -1135,7 +1135,10 @@ class GPT2Optimizer:
     total_static_fp32_gb_str = fmt_memory(total_static_fp32, unit=GB, precision=0, commas=False)
     total_static_amp_gb_str = fmt_memory(total_static_amp, unit=GB, precision=0, commas=False)
     h100_mem_capacity_gb_str = fmt_memory_capacity(h100_mem, unit=GiB, precision=0, commas=False)
-    h100_share_pct_str = fmt_percent(round(fp32.capacity_share, 2), precision=0, commas=False, style="prose")
+    # Share of the labeled "80 GB", as the prose shows it (24 GB / 80 GB), the convention the
+    # registry's labeled-capacity shares use; the physical share of 80 GiB is about 2 points lower.
+    h100_labeled_gb = h100_mem.to(GiB).magnitude  # the "80" in the vendor's "80 GB"
+    h100_share_pct_str = fmt_percent(round(total_static_fp32.to(GB).magnitude / h100_labeled_gb, 2), precision=0, commas=False, style="prose")
     adam_update_bytes_str = fmt_count(fp32.update_bytes_per_parameter.to(byte).magnitude, commas=False, label="byte")
 
 # Note: Use GPT2Optimizer.param_fp32_gb_str directly.
@@ -1401,8 +1404,10 @@ class GPT2ActivationMemory:
     params_value = params.to(GB).magnitude
     check(total_act_value >= params_value, f"Activations ({total_act_value:.1f}G) should exceed Params ({params_value:.1f}G).")
     check(ckpt_peak > h100_mem, "Selective recomputation scenario should remain above raw H100 capacity before workspace")
-    over_ratio = state.training_capacity_multiple
-    check(3.4 < over_ratio < 3.8, f"Prose says the peak is about 3.6x the H100, got {over_ratio:.2f}.")
+    # Multiple of the labeled "80 GB", as the prose shows it (310.9 GB / 80 GB), the convention
+    # the registry's labeled-capacity shares use.
+    over_ratio = peak.to(GB).magnitude / h100_mem.to(GiB).magnitude
+    check(3.7 < over_ratio < 4.1, f"Prose says the peak is about 3.9x the labeled H100 capacity, got {over_ratio:.2f}.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     batch_size_str = fmt(batch_size, precision=0, commas=False)
@@ -2699,7 +2704,8 @@ class ResNetFeedH100:
     sustained_fraction = a100_feed.sustained_fraction
     h100_ceiling = h100_feed.ceiling_rate.to("count/second").magnitude
     h100_demand = h100_feed.sustained_rate.to("count/second").magnitude
-    workers_needed = math.ceil(h100_demand / worker_img_s)
+    # From the demand as printed (rounded to 100 images/s), so the reader's division gives the same count.
+    workers_needed = math.ceil(round(h100_demand, -2) / worker_img_s)
     a100_workers_needed = math.ceil(a100_sustained_img_s / worker_img_s)
     cores_per_accel = h100_feed.host_workers
     supply = h100_feed.host_supply.to("count/second").magnitude
@@ -4513,12 +4519,13 @@ class MixedPrecisionMemory:
     master_fp32 = amp.master_weights
     static_mp = amp.total
     total_mp = amp.training_total
-    mp_over_capacity = amp.training_capacity_multiple
+    # Multiple of the labeled "80 GB", as the prose shows it (311 GB / 80 GB).
+    mp_over_capacity = total_mp.to(GB).magnitude / capacity.to(GiB).magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(total_mp < total_fp32, "Mixed precision must reduce the total.")
     check(abs((static_mp - (p_fp32 + g_fp32 + opt_fp32)).to(GB).magnitude) < 0.01, "Static state must be 16 bytes per parameter in both recipes.")
-    check(3.4 < mp_over_capacity < 3.8, f"Prose says the mixed-precision total is about 3.6x the H100, got {mp_over_capacity:.2f}.")
+    check(3.7 < mp_over_capacity < 4.1, f"Prose says the mixed-precision total is about 3.9x the labeled H100 capacity, got {mp_over_capacity:.2f}.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     gpt2_b_str = fmt_params(gpt2.parameters)
