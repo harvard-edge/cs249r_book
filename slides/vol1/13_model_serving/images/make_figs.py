@@ -49,16 +49,17 @@ def stacked_row(ax, y, parts, show=True, labels=True, fs=11):
         left += v
     return left
 for k in (1, 2):
-    fig, ax = plt.subplots(figsize=(5.8, 1.9))
-    total = stacked_row(ax, 1, stages_now)
-    ax.text(total + 0.12, 1, '8.6 ms', va='center', fontsize=13, fontweight='bold', color=C['text'])
-    t2 = stacked_row(ax, 0, stages_fast, labels=True)
-    ax.text(t2 + 0.12, 0, '???' if k == 1 else '5.5 ms: 1.6× faster', va='center', fontsize=13, fontweight='bold', color=C['danger'])
+    fig, ax = plt.subplots(figsize=(5.4, 1.55))
+    total = stacked_row(ax, 1, stages_now, fs=13.5)
+    ax.text(total + 0.12, 1, '8.6 ms', va='center', fontsize=14.5, fontweight='bold', color=C['text'])
+    t2 = stacked_row(ax, 0, stages_fast, labels=True, fs=13.5)
+    ax.text(t2 + 0.12, 0, '???' if k == 1 else '5.5 ms: 1.6× faster', va='center', fontsize=14.5, fontweight='bold', color=C['danger'])
     ax.set_yticks([1, 0])
-    ax.set_yticklabels(['Today', 'Model 10× faster'], fontsize=12, fontweight='bold')
-    ax.set_xlim(0, 11.5)
+    ax.set_yticklabels(['Today', 'Model 10× faster'], fontsize=14, fontweight='bold')
+    ax.set_xlim(0, 11.8)
     ax.set_ylim(-0.5, 1.5)
-    ax.set_xlabel('One ResNet-50 request (ms; modeled model, assumed host phases)', fontsize=11)
+    ax.tick_params(axis='x', labelsize=13.5)
+    ax.set_xlabel('One ResNet-50 request (ms; modeled model, assumed host phases)', fontsize=13.5)
     ax.spines['left'].set_visible(False)
     ax.tick_params(axis='y', length=0)
     sp.save(fig, out / f'budget_step{k}.svg')
@@ -96,8 +97,8 @@ for k in (1, 2, 3):
     ax.set_xlabel('ms since the request arrived (8.6 ms total)', fontsize=11)
     tag(ax, 'After Model Serving, fig. 3: forward pass modeled, host assumed', y=-0.34)
     sp.save(fig, out / f'timeline_step{k}.svg')
-for k in (1, 2):
-    fig, axes = plt.subplots(2, 1, figsize=(5.8, 2.9), gridspec_kw={'hspace': 0.9})
+for k in (1, 2, 3):
+    fig, axes = plt.subplots(2, 1, figsize=(5.8, 2.95), gridspec_kw={'hspace': 0.95})
     ax = axes[0]
     TOT = PRE + COPY + FWD + POST
     for i in range(3):
@@ -106,28 +107,67 @@ for k in (1, 2):
         ax.barh(1, COPY, left=t0 + PRE, color=C['network'], height=0.6, edgecolor='white')
         ax.barh(0, FWD, left=t0 + PRE + COPY, color=C['compute'], height=0.6, edgecolor='white')
         ax.barh(1, POST, left=t0 + PRE + COPY + FWD, color=C['neutral'], height=0.6)
+        ax.text(t0 + PRE / 2, 1, f'R{i + 1}', ha='center', va='center', fontsize=9.5, color='white', fontweight='bold')
+        ax.text(t0 + PRE + COPY + FWD / 2, 0, f'R{i + 1}', ha='center', va='center', fontsize=9.5, color='white', fontweight='bold')
     ax.text(26.2, 0, 'GPU busy 41%', va='center', fontsize=12, fontweight='bold', color=C['compute'])
-    ax.set_title('Serial: one request at a time', fontsize=12, loc='left', color=C['text'], fontweight='bold')
+    ax.set_title('Serial: one request at a time (8.6 ms each)', fontsize=12, loc='left', color=C['text'], fontweight='bold')
     ax2 = axes[1]
-    show = k == 2
-    for i in range(6):
-        ax2.barh(1, PRE, left=i * PRE, color=C['data'], height=0.6, edgecolor='white', alpha=1.0 if show else 0.0)
-        if PRE + COPY + i * PRE + FWD <= 26.0:
-            ax2.barh(0, FWD, left=PRE + COPY + i * PRE, color=C['compute'], height=0.6, edgecolor='white', alpha=1.0 if show else 0.0)
-    ax2.text(26.2, 0, 'GPU busy 78%', va='center', fontsize=12, fontweight='bold', color=C['compute'], alpha=1.0 if show else 0.0)
-    ax2.set_title('Pipelined: host prepares the next request', fontsize=12, loc='left', color=C['text'], fontweight='bold', alpha=1.0 if show else 0.0)
+    if k >= 2:
+        n_host = 2 if k == 2 else 6
+        n_gpu = 1 if k == 2 else 5
+        for i in range(n_host):
+            ax2.barh(1, PRE, left=i * PRE, color=C['data'], height=0.6, edgecolor='white')
+            ax2.text(i * PRE + PRE / 2, 1, f'R{i + 1}', ha='center', va='center', fontsize=9.5, color='white', fontweight='bold')
+        for i in range(n_gpu):
+            if PRE + COPY + i * PRE + FWD <= 27.5:
+                ax2.barh(0, FWD, left=PRE + COPY + i * PRE, color=C['compute'], height=0.6, edgecolor='white')
+                ax2.text(PRE + COPY + i * PRE + FWD / 2, 0, f'R{i + 1}', ha='center', va='center', fontsize=9.5, color='white', fontweight='bold')
+        if k == 2:
+            ax2.text(10.0, 0.5, 'Overlap: CPU decodes R2 while GPU runs R1', va='center', ha='left', fontsize=11, fontweight='bold', color=C['data'])
+            ax2.set_title('Overlap: host prepares R2 during R1 forward pass', fontsize=12, loc='left', color=C['text'], fontweight='bold')
+        else:
+            ax2.text(27.2, 0, 'GPU busy 78%\n(1 req / 4.5 ms)', va='center', fontsize=11, fontweight='bold', color=C['compute'])
+            ax2.set_title('Steady-state pipelined: host stage (4.5 ms) sets throughput', fontsize=12, loc='left', color=C['text'], fontweight='bold')
     for a in axes:
         a.set_yticks([1, 0])
         a.set_yticklabels(['Host CPU', 'GPU'], fontsize=11, fontweight='bold')
-        a.set_xlim(0, 34)
+        a.set_xlim(0, 35)
         a.set_ylim(-0.5, 1.5)
         a.spines['left'].set_visible(False)
         a.tick_params(axis='y', length=0)
     axes[1].set_xlabel('Time (ms; modeled, book reference request)', fontsize=10)
-    if not show:
+    if k < 2:
         for t in ax2.get_yticklabels():
             t.set_alpha(0.0)
     sp.save(fig, out / f'pipeline_step{k}.svg')
+
+# Vector replacement for aitax_fig6.png using exact printed means (Richins et al., Fig. 6)
+fig, ax = plt.subplots(figsize=(7.4, 1.10))
+aitax_parts = [
+    ('Ingest\n18.8', 18.8, 'neutral', False),
+    ('Detect\n74.8 ms', 74.8, 'compute', True),
+    ('Brokers (36%)\n126.1 ms', 126.1, 'danger', True),
+    ('Identify\n131.5 ms', 131.5, 'compute', True),
+]
+left = 0.0
+for lab, v, ck, inside in aitax_parts:
+    ax.barh(0, v, left=left, height=0.68, color=C[ck], edgecolor='white', linewidth=1.6)
+    if inside:
+        ax.text(left + v / 2, 0, lab, ha='center', va='center', color='white', fontsize=14, fontweight='bold')
+    else:
+        ax.annotate('Ingest 18.8 ms', (left + v / 2, 0.34), xytext=(left + 2, 0.58),
+                    fontsize=14, fontweight='bold', color=C['neutral'], ha='left',
+                    arrowprops=dict(arrowstyle='-', color=C['neutral'], lw=1.1))
+    left += v
+ax.text(left + 7, 0, '351.2 ms\nAI: 59%', va='center', ha='left', fontsize=14.5, fontweight='bold', color=C['text'])
+ax.set_xlim(0, 428)
+ax.set_ylim(-0.48, 0.85)
+ax.set_yticks([])
+ax.spines['left'].set_visible(False)
+ax.set_xticks([0, 100, 200, 300, 351])
+ax.tick_params(axis='x', labelsize=14)
+ax.set_xlabel('Measured face-recognition latency (ms; Richins et al., AI Tax Fig. 6)', fontsize=14)
+sp.save(fig, out / 'aitax_bar.svg')
 S = 3.528119406
 U = [0.5, 0.7, 0.8, 0.9, 0.95]
 U_EX = 0.7

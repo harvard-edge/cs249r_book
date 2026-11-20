@@ -207,24 +207,69 @@ for k in (1, 2, 3, 4):
         p.append(text(362, y + 64, 'sees: ' + sees, 22, C['text'], anchor='start'))
         p.append(text(362, y + 88, 'fires: ' + fires, 22, C['text'], 'bold', 'start'))
     save_svg(p, f'layers_step{k}.svg')
-fig, ax = plt.subplots(figsize=(5.4, 2.3))
 rows = [('New feature column', 10.0, '65%'), ('Out-of-domain category', 6.0, '66%'), ('Missing feature column', 6.0, '53%'), ('Data completely missing', 3.0, '65%'), ('Feature in too few examples', 3.0, '82%')]
-for i, (lab, v, fx) in enumerate(rows):
-    y = len(rows) - 1 - i
-    ax.barh(y, v, color=C['data'], height=0.62)
-    ax.text(v + 0.25, y, f'{v:.0f}%', va='center', fontsize=12, color=C['data'], fontweight='bold')
-    ax.text(-0.3, y, lab, ha='right', va='center', fontsize=12, color=C['text'])
-    ax.text(15.2, y, fx, ha='center', va='center', fontsize=12, color=C['neutral'])
-ax.text(15.2, len(rows) - 0.35, 'fixed', ha='center', va='bottom', fontsize=11, color=C['neutral'], fontweight='bold')
-ax.set_xlim(0, 16.5)
-ax.set_ylim(-0.6, len(rows) - 0.1)
-ax.set_yticks([])
-ax.set_xticks([0, 5, 10])
-ax.set_xticklabels(['0%', '5%', '10%'])
-ax.spines['left'].set_visible(False)
-ax.set_xlabel('Share of 700+ pipelines where the check fired, 30 days', fontsize=11)
-axis_clean(ax)
-sp.save(fig, out / 'breck_bars.svg')
+for k in (1, 2):
+    fig, ax = plt.subplots(figsize=(4.8, 2.35))
+    for i, (lab, v, fx) in enumerate(rows):
+        y = len(rows) - 1 - i
+        ax.barh(y, v, color=C['data'], height=0.62)
+        ax.text(v + 0.28, y, f'{v:.0f}%', va='center', fontsize=11.5, color=C['data'], fontweight='bold')
+        ax.text(-0.3, y, lab, ha='right', va='center', fontsize=11.5, color=C['text'])
+        if k >= 2:
+            ax.text(14.8, y, fx, ha='center', va='center', fontsize=11.5, color=C['danger'] if fx == '53%' else C['neutral'], fontweight='bold' if fx == '53%' else 'normal')
+    if k >= 2:
+        ax.axvline(12.6, color=C['grid'], lw=1.2, ls='--')
+        ax.text(14.8, len(rows) - 0.35, 'fixed', ha='center', va='bottom', fontsize=11, color=C['neutral'], fontweight='bold')
+    ax.set_xlim(0, 16.5)
+    ax.set_ylim(-0.6, len(rows) - 0.1)
+    ax.set_yticks([])
+    ax.set_xticks([0, 5, 10])
+    ax.set_xticklabels(['0%', '5%', '10%'])
+    ax.spines['left'].set_visible(False)
+    ax.set_xlabel('Share of 700+ pipelines where the check fired, 30 days', fontsize=10.5)
+    axis_clean(ax)
+    sp.save(fig, out / f'breck_bars_step{k}.svg')
+
+# 2-step Observability budget & cardinality figure (Napkin Math 14.5, exact MLSysIM numbers)
+for k in (1, 2):
+    p = svg_open(900, 420)
+    # Top band (Step 1+): Trace sampling at 1M req/s
+    p.append(text(18, 30, '1. Trace sampling at 1M req/s (1 KB/req): sampling cuts volume', 21.5, C['text'], 'bold', 'start'))
+    p.append(rect(18, 46, 540, 134, '#FAFAFA', '#CCCCCC', 1.8, 8))
+    p.append(text(34, 84, 'All traces', 21.5, C['text'], 'bold', 'start'))
+    p.append(rect(182, 60, 260, 34, C['danger'], C['danger'], 0, 4))
+    p.append(text(454, 84, '1.0 GB/s', 21.5, C['danger'], 'bold', 'start'))
+    p.append(text(34, 140, '1-in-60 traces', 21.5, C['text'], 'bold', 'start'))
+    p.append(rect(182, 116, 12, 34, C['data'], C['data'], 0, 3))
+    p.append(text(206, 140, '16.7 MB/s  (60× reduction)', 21.5, C['data'], 'bold', 'start'))
+    # Right policy box
+    p.append(rect(576, 46, 306, 134, C['data_l'], C['data'], 2.2, 8))
+    p.append(text(729, 78, 'Outcome-based sampling', 21.5, C['data'], 'bold'))
+    p.append(text(729, 114, 'Keep 100% of errors', 21.5, C['text'], 'bold'))
+    p.append(text(729, 148, 'Keep 1% of successes', 21.5, C['text']))
+    if k >= 2:
+        # Bottom band (Step 2): Single-node monthly monitoring budget ($261.42/mo) + cardinality trap
+        p.append(text(18, 214, '2. Monthly budget for 1 ML node (3 variants × 50 metrics = 150 series, 15 s): ~$261/mo', 21.5, C['text'], 'bold', 'start'))
+        p.append(rect(18, 230, 540, 174, '#FAFAFA', '#CCCCCC', 1.8, 8))
+        # Bars proportional to $253.44, $7.78, $0.21 (scale max 260 -> 148 px)
+        items = [
+            ('Queries (12,672/mo)', 253.44, 148, '$253.44 (97%)', C['compute']),
+            ('Ingest (25.9M pts)', 7.78, 12, '$7.78 (3%)', C['memory']),
+            ('Storage (0.21 GB)', 0.21, 5, '$0.21 (0.1%)', C['neutral']),
+        ]
+        for idx, (lab, _, bw, val_s, col) in enumerate(items):
+            yy = 248 + idx * 50
+            p.append(text(30, yy + 25, lab, 20.5, C['text'], 'bold', 'start'))
+            p.append(rect(236, yy + 4, bw, 30, col, col, 0, 4))
+            p.append(text(236 + bw + 8, yy + 25, val_s, 20.5, col, 'bold', 'start'))
+        # Right cardinality warning card
+        p.append(rect(576, 230, 306, 174, C['danger_l'], C['danger'], 2.2, 8))
+        p.append(text(729, 264, 'Cardinality explosion', 22, C['danger'], 'bold'))
+        p.append(text(729, 298, 'user_id / request_id', 20.5, C['text'], 'bold'))
+        p.append(text(729, 326, 'multiply series linearly', 20.5, C['text']))
+        p.append(text(729, 356, '(hashing does not cut it).', 20.5, C['neutral']))
+        p.append(text(729, 386, 'Fix: bucket + tiered TTL', 20.5, C['danger'], 'bold'))
+    save_svg(p, f'obs_budget_step{k}.svg')
 
 def logtable(p, x, y, title, cols, row, col):
     w = 380

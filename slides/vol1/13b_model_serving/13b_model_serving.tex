@@ -235,14 +235,23 @@
 \begin{frame}{Measured: better scheduling and memory move the knee right}
   \begin{columns}[c]
     \begin{column}{0.66\textwidth}
-      \centering\includegraphics[width=\textwidth,height=6.0cm,keepaspectratio]{vllm_fig12a.png}
+      \centering
+      \begin{tikzpicture}
+        \node[anchor=south west, inner sep=0] (img) at (0,0)
+          {\includegraphics[width=\textwidth,height=6.0cm,keepaspectratio]{vllm_fig12a.png}};
+        \begin{scope}[x={(img.south east)}, y={(img.north west)}]
+          \draw<1|handout:0>[RedLine, line width=1.6pt, rounded corners=3pt] (0.27,0.31) rectangle (0.59,0.65);
+          \draw<2-|handout:1>[BlueLine, line width=1.8pt, rounded corners=3pt] (0.54,0.31) rectangle (0.84,0.65);
+          \node<2-|handout:1>[font=\scriptsize\bfseries, text=BlueLine, fill=white, draw=BlueLine, rounded corners=2pt, inner sep=2pt] at (0.69,0.57) {1.7--2.7$\times$ right};
+        \end{scope}
+      \end{tikzpicture}
     \end{column}
     \begin{column}{0.32\textwidth}
       \small
       The knee is the load a server can sustain.\\[0.2cm]
       \textcolor{midgray}{\textbf{FasterTransformer}}: no iteration-level scheduling.\\[0.1cm]
       \textbf{Orca}: continuous batching; reserves contiguous cache.\\[0.1cm]
-      \textbf{\textcolor{figmemory}{vLLM}}: continuous batching with a paged cache: \textbf{1.7 to 2.7$\times$} the rate of Orca (Oracle).
+      \uncover<2->{\textbf{\textcolor{figmemory}{vLLM}}: continuous batching with a paged cache: \textbf{1.7 to 2.7$\times$} the rate of Orca (Oracle).}
     \end{column}
   \end{columns}
   \mlsyscredit{Kwon et al., ``PagedAttention'' (vLLM), SOSP 2023, arXiv 2309.06180, Fig.~12a (OPT-13B, one A100, ShareGPT), cropped; legend rows rearranged.}
@@ -265,7 +274,7 @@
       \uncover<3->{\footnotesize Chunked: first token near 52 ms against 44.0. Measured: 2.6 to 3.7$\times$ the capacity of vLLM (Sarathi-Serve).}
     \end{column}
   \end{columns}
-  \mlsyscredit{Derived from Model Serving, \S13.11.3 and \S13.10.4 (Llama 3 8B, 4 GB INT4 weights, 41.3 ms per 1,000-token prefill at 40\% of peak, linear in tokens; 20 ms TPOT). Agrawal et al., ``Sarathi-Serve,'' OSDI 2024, abstract.}
+  \mlsyscredit{Derived from Model Serving, \S13.11.3 and \S13.10.4 (interactive Explore figure: Chunked Prefill; Llama 3 8B, 4 GB INT4, 20 ms TPOT). Agrawal et al., ``Sarathi-Serve,'' OSDI 2024.}
   \note{[3.5 min] [CORE] ENGAGE: one minute; what binds? Take answers before step 2. Step 1: Llama 3 8B, INT4 weights, one H100, 32 conversations decoding. Each step reads 4 GB of weights and 32 caches of 1,256 tokens, 9.3 GB: 2.8 ms, far under 20 ms. Step 2: a 1,000-token prompt arrives, and continuous batching runs its prefill in the same step: 41.3 plus 2.8, 44.0 ms. All 32 streams wait 44.0 ms for their next token. This is the benchmark slide's p99 gap; Sarathi-Serve measured such generation stalls in vLLM. Step 3: split the prompt into four chunks of 250 tokens, one per step: 10.3 ms of prefill plus 2.8 ms, 13.1 ms, under the target. The new request's first token comes after four steps, about 52 ms instead of 44.0: chunking spends TTFT slack to protect TPOT. Measured: Sarathi-Serve served 2.6 times more load on Mistral-7B and up to 3.7 times on Yi-34B than vLLM under the same tail-latency limits. ENGAGE: what sets the largest safe chunk? (Expected: TPOT minus the decode step, over prefill time per token: 417 tokens, derived; the chapter uses 512.) WARN: step times are derived floors. Land the segment: the TPOT target caps the batch; continuous batching fills it; chunking protects it.}
 \end{frame}
 
@@ -294,12 +303,13 @@
     \begin{column}{0.58\textwidth}
       \centering
       \only<1-2|handout:0>{}%
-      \only<3|handout:0>{\safeimg[width=\textwidth,height=4.6cm,keepaspectratio]{kv_budget_8b.pdf}}%
-      \only<4-|handout:1>{\safeimg[width=\textwidth,height=4.6cm,keepaspectratio]{kv_budget.pdf}}
+      \only<3|handout:0>{\safeimg[width=\textwidth,height=4.6cm,keepaspectratio]{kv_budget_step1.pdf}}%
+      \only<4|handout:0>{\safeimg[width=\textwidth,height=4.6cm,keepaspectratio]{kv_budget_step2.pdf}}%
+      \only<5-|handout:1>{\safeimg[width=\textwidth,height=4.6cm,keepaspectratio]{kv_budget_step3.pdf}}
     \end{column}
   \end{columns}
-  \mlsyscredit{Model Serving, \S13.10.5 (Llama 3 8B, derived lines) and figure 8 (redrawn; 327,680 B per token assumed for the 70B class). 80 GB on the datasheet is 85.9 GB in decimal units.}
-  \note{[3.5 min] [CORE] ENGAGE: two minutes with a neighbor. Lecture 6b derived the 131 KB per token for Llama 3.1 8B, which has Llama 3 8B's layers and heads and a longer window; take it as given. Step 2: an 8,192-token conversation holds 131,072 bytes times 8,192, 1.07 GB. The weights leave 69.8 GB, room for about 65 conversations before any runtime workspace. The common error is forgetting the weights (80). Step 3: the estimate as a picture. Each line is one batch size of Llama 3 8B conversations; the cache grows linearly with context, and 65 conversations reach the 69.8 GB budget at 8,192 tokens (65 times 1.07 GB is 69.8 GB, derived). Step 4: a larger model, announced in the figure's title. A 70-billion-parameter-class model with 4-bit weights leaves 50.6 GB for cache. Each token costs 2.5 times the 8B model's cache, so 32 conversations fill the budget near 4,800 tokens. The slope assumes 80 layers and 8 key-value heads of 128, our assumption, which reproduces the chapter's crossing. Measured split from vLLM: a 13B model on a 40 GB A100 spends about 65 percent of memory on weights and close to 30 percent on cache. WARN: memory caps how many conversations share each weight read; every extra thousand tokens of context costs conversations. FLEX: [CORE].}
+  \mlsyscredit{Model Serving, \S13.10.5 (interactive Explore figure: KV Cache Growth; Llama 3 8B derived, 70B class redrawn at 327,680 B/token). 80 GiB = 85.9 GB decimal.}
+  \note{[3.5 min] [CORE] ENGAGE: two minutes with a neighbor. Lecture 6b derived the 131 KB per token for Llama 3.1 8B, which has Llama 3 8B's layers and heads and a longer window; take it as given. Step 2: an 8,192-token conversation holds 1.07 GB. The weights leave 69.8 GB, room for about 65 conversations before any runtime workspace. The common error is forgetting the weights (80). Step 3: the estimate as a picture. Each line is one batch size of Llama 3 8B; 65 conversations reach 69.8 GB at 8,192 tokens (derived). Step 4: a 70B-class model with 4-bit weights leaves 50.6 GB for cache; 32 conversations fill it near 4,800 tokens (327,680 B/token assumed). Step 5: releasing or evicting 16 chats halves concurrency and doubles surviving context to 9,651 tokens (9.7K). Measured split from vLLM: a 13B model on a 40 GB A100 spends about 65 percent on weights and 30 percent on cache. WARN: memory caps how many conversations share each weight read; every extra thousand tokens of context costs conversations. FLEX: [CORE].}
 \end{frame}
 
 \begin{frame}{Reserving for the longest answer wastes most of the cache}
@@ -316,10 +326,12 @@
       \centering\mlsyssteps[width=\textwidth,height=5.6cm,keepaspectratio]{paging_step}{4}
     \end{column}
     \begin{column}{0.26\textwidth}
+      \centering\mlsysphoto[width=\textwidth,height=1.9cm,keepaspectratio]{nvidia-h100-pcie-four.jpg}\\[0.04cm]
+      {\scriptsize Shared HBM3 pool: ref-counted blocks return on exit.}\\[0.18cm]
       \uncover<5->{\begin{mlsyscard}{GreenLine}\small\textbf{Measured, vLLM}\\[0.05cm]OPT-13B, one A100\\ batch 13.6 $\rightarrow$ \textbf{30.4}\\ 2.2$\times$\end{mlsyscard}}
     \end{column}
   \end{columns}
-  \mlsyscredit{After Kwon et al., ``PagedAttention'' (vLLM), SOSP 2023, \S4.3 and Fig.~6 (block size 4 here; 16 by default). Bars: Fig.~13a, OPT-13B, ShareGPT.}
+  \mlsyscredit{After Kwon et al., SOSP 2023, \S4.3, Figs.~6, 13a (interactive Explore figure: Paged KV Mapping; block size 4 here, 16 default). Photo: Geekerwan, CC BY 3.0, Commons.}
   \note{[3 min] [CORE] PagedAttention borrows the operating system's paging (first built on the Atlas computer, 1962). The cache lives in fixed-size blocks, and a block table maps each request's logical blocks to physical blocks anywhere in memory. Step 1: a 7-token prompt fills logical block 0 and three slots of block 1; the table maps them to physical blocks 7 and 1. One slot is free. Step 2: decode makes ``fathers''; it fills the free slot, and the table's count goes to 4. Step 3: the next token needs a new block; any free block will do, here 3. Step 4: request B's blocks interleave in the same pool. No region is reserved ahead, no hole is too small, and each sequence wastes at most its last, partly filled block. The attention kernel reads the blocks through the table directly. Step 5: measured: the average batch on the same GPU grew from 13.6 requests (Orca with Oracle) to 30.4, 2.2 times. ENGAGE: what happens to a request's blocks when it ends? (Expected: they return to the free pool for the next step.) WARN: paging decides where blocks live; the model decides how many a sequence needs. FLEX: [CORE].}
 \end{frame}
 
@@ -391,7 +403,7 @@
 \begin{frame}{A GPU running both phases serves fewer requests than either alone}
   \begin{columns}[c]
     \begin{column}{0.62\textwidth}
-      \centering\safeimg[width=\textwidth,height=3.6cm,keepaspectratio]{distserve_bars.pdf}
+      \centering\mlsyssteps[width=\textwidth,height=3.6cm,keepaspectratio]{distserve_bars_step}{2}
     \end{column}
     \begin{column}{0.36\textwidth}
       \centering\safeimg[width=\textwidth,height=2.4cm,keepaspectratio]{nvidia-a100.png}\\[0.08cm]
@@ -430,7 +442,7 @@
 \begin{frame}{Splitting costs one cache transfer and frees the hardware choice}
   \begin{columns}[c]
     \begin{column}{0.58\textwidth}
-      \centering\safeimg[width=\textwidth,height=4.2cm,keepaspectratio]{split_link.pdf}\\[0.1cm]
+      \centering\mlsyssteps[width=\textwidth,height=4.2cm,keepaspectratio]{split_link_step}{2}\\[0.1cm]
       {\footnotesize 1.13 GB per 512-token OPT-66B request. Measured transfer: under 0.1\% of latency (DistServe); 0.8\% of the request, about 5 ms on H100 (Splitwise).}
     \end{column}
     \begin{column}{0.40\textwidth}
@@ -549,6 +561,7 @@
   \small
   \begin{itemize}\setlength{\itemsep}{0.02cm}
     \item \textbf{Read:} Model Serving, \S13.10 and \S13.11.3; Checkpoints 13.5 and 13.6; Napkin Math 13.5 and equation 15 by hand.
+    \item \textbf{Explore:} \emph{Chunked Prefill}, \emph{KV Cache Growth}, and \emph{Paged KV Mapping} (\S13.10) on mlsysbook.ai/vol1/.
     \item Yu et al., ``Orca,'' OSDI 2022: iteration-level scheduling.
     \item Kwon et al., ``PagedAttention'' (vLLM), SOSP 2023: the block table.
     \item Agrawal et al., ``Sarathi-Serve,'' OSDI 2024: chunked prefill.
