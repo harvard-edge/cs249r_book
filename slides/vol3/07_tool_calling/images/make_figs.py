@@ -285,7 +285,7 @@ def delayed():
         s.save(f'delayed_step{k}')
 
 def opid():
-    for k in (1, 2):
+    for k in (1, 2, 3):
         s = Svg(1100, 380)
         s.rect(8, 6, 340, 368, 'sys', rx=12, fill='#faf5ff')
         s.text(24, 34, 'Runtime', 22, ROLE['sys'][2], anchor='start', weight='bold')
@@ -297,17 +297,23 @@ def opid():
         s.arrow(0, 0, 0, 0, 'violet', path='M28,252 L16,252 L16,166 L26,166')
         s.arrow(178, 284, 178, 304, 'red', dash=True)
         s.box(28, 306, 300, 62, 'white', 'Unresolved', 'attempts used up', fs=22, sfs=20, dash=True)
-        if k == 2:
+        if k >= 2:
             s.rect(372, 6, 720, 368, 'tool', rx=12, fill='#fffbeb')
             s.text(388, 34, 'Endpoint', 22, ROLE['tool'][2], anchor='start', weight='bold')
             s.arrow(328, 166, 398, 166, 'violet')
             s.box(400, 126, 250, 80, 'tool', 'Look up op ID', 'caller, scope, args', fs=22, sfs=20)
-            outs = [('Completed', 'return kept result', 'memory', 48), ('Still running', 'return pending', 'struct', 128), ('Args differ', 'reject the reuse', 'fault', 208), ('Not found', 'execute + record', 'tool', 288)]
+            outs = [('Completed', 'return kept result', 'memory', 48), ('Still running', 'return pending (409)', 'struct', 128), ('Not found', 'execute + record', 'tool', 288)]
+            if k >= 3:
+                outs.append(('Args differ', 'reject reuse (422)', 'fault', 208))
             for t, sub, role, y in outs:
                 s.arrow(0, 0, 0, 0, 'gray', path=f'M650,166 L680,166 L680,{y + 32} L708,{y + 32}')
                 s.box(710, y, 362, 64, role, t, sub, fs=22, sfs=20)
             s.text(525, 330, 'effect + record:', 20, GRAY)
             s.text(525, 356, 'one transaction', 20, GRAY)
+        if k >= 3:
+            s.rect(392, 224, 266, 74, 'memory', rx=8)
+            s.text(525, 254, 'Replay, pending, or', 20, ROLE['memory'][2], weight='bold')
+            s.text(525, 282, 'mismatch: no new effect', 20, ROLE['memory'][2], weight='bold')
         s.save(f'opid_step{k}')
 
 def headtail():
