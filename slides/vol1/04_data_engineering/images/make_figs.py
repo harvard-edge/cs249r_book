@@ -131,9 +131,9 @@ def clips(x, y, who, size=44, gap=9):
         s += txt(x + j * (size + gap) + size / 2, y + size / 2, name, 24, True, 'white')
     return s
 
-def leak_file():
+def leak_file(k):
     A, B, Cc = SPK
-    s = txt(20, 18, 'Split by file', 24, True, anchor='start')
+    s = txt(20, 18, 'Split by file (leaks speakers)', 24, True, C['danger'], anchor='start')
     s += txt(205, 52, 'Training split', 22, True)
     s += txt(700, 52, 'Test split', 22, True)
     s += box(20, 72, 370, 70, '#F7F7F7', '#BBBBBB', rx=10)
@@ -142,33 +142,53 @@ def leak_file():
     s += clips(574, 85, [A, B, Cc])
     s += txt(475, 95, 'every test', 20, True, C['danger'])
     s += txt(475, 120, 'voice heard', 20, True, C['danger'])
-    svg(out / 'leak_file.svg', s, h=155)
-leak_file()
+    if k >= 2:
+        s += txt(20, 174, 'Split by speaker key (sealed boundary)', 24, True, C['data'], anchor='start')
+        s += box(20, 200, 370, 70, C['data_l'], C['data'], rx=10)
+        s += clips(34, 213, [A, A, A, B, B])
+        s += box(560, 200, 280, 70, C['data_l'], C['data'], rx=10)
+        s += clips(574, 213, [Cc, Cc])
+        s += txt(475, 223, 'unseen voices', 20, True, C['data'])
+        s += txt(475, 248, 'in test', 20, True, C['data'])
+    svg(out / f'leak_file_step{k}.svg', s, h=288)
+for k in (1, 2):
+    leak_file(k)
 
 def skew(k):
-    s = txt(20, 22, 'Training', 26, True, C['data'], 'start')
-    s += box(20, 45, 190, 85, C['data_l'], C['data'], 'Clip', 24)
-    s += arrow(210, 87, 290, 87)
-    s += box(290, 45, 320, 85, C['data_l'], C['data'], 'Normalize with\ntraining mean, std', 23)
-    s += arrow(610, 87, 690, 87)
-    s += box(690, 45, 190, 85, C['data_l'], C['data'], 'Model learns', 24)
-    s += txt(20, 192, 'Serving', 26, True, C['memory'], 'start')
-    s += box(20, 215, 190, 85, C['memory_l'], C['memory'], 'Same clip', 24)
-    s += arrow(210, 257, 290, 257)
-    if k == 1:
-        s += box(290, 215, 320, 85, C['danger_l'], C['danger'], "Normalize with\nthis batch's mean, std", 23)
-        s += arrow(610, 257, 690, 257)
-        s += box(690, 215, 190, 85, C['danger_l'], C['danger'], 'Different\ninput', 24)
-        s += txt(450, 350, 'Same code, different state: no error, wrong numbers.', 25, True, C['danger'])
-    else:
-        s += box(290, 215, 320, 85, C['data_l'], C['data'], 'Normalize with saved\ntraining mean, std', 23)
-        s += arrow(610, 257, 690, 257)
-        s += box(690, 215, 190, 85, C['data_l'], C['data'], 'Same\ninput', 24)
-        s += arrow(450, 130, 450, 215, C['data'])
-        s += txt(462, 172, 'persisted with the model', 21, True, C['data'], 'start')
-        s += txt(450, 350, 'Fit on the training split once; reuse everywhere.', 25, True, C['data'])
-    svg(out / f'skew_step{k}.svg', s, h=380)
-for k in (1, 2):
+    tr = np.array([10.0, 20.0, 30.0])
+    sv = np.array([50.0, 70.0, 90.0])
+    x_q = 50.0
+    mu_t, sd_t = float(np.mean(tr)), float(np.std(tr))
+    mu_s, sd_s = float(np.mean(sv)), float(np.std(sv))
+    z_ok = (x_q - mu_t) / sd_t
+    z_bad = (x_q - mu_s) / sd_s
+    skew_sig = abs(z_ok - z_bad)
+    s = txt(20, 20, '1. Fit on training split only (val, test, serving excluded)', 23, True, C['data'], 'start')
+    s += box(20, 44, 205, 86, C['data_l'], C['data'], 'Train split\n[10, 20, 30]', 22)
+    s += arrow(225, 87, 290, 87)
+    s += box(290, 44, 330, 86, C['data_l'], C['data'], f'Fit once on train\nμ = {mu_t:.1f},  σ = {sd_t:.2f}', 22, True)
+    s += arrow(620, 87, 685, 87)
+    s += box(685, 44, 195, 86, C['data_l'], C['data'], f'x = 50\nz = {z_ok:+.2f}', 22, True)
+    if k == 2:
+        s += txt(20, 194, '2. Anti-pattern: refit on incoming serving batch', 23, True, C['danger'], 'start')
+        s += box(20, 218, 205, 86, C['danger_l'], C['danger'], 'Serving batch\n[50, 70, 90]', 22)
+        s += arrow(225, 261, 290, 261, C['danger'])
+        s += box(290, 218, 330, 86, C['danger_l'], C['danger'], f'Refit on batch\nμ = {mu_s:.1f},  σ = {sd_s:.2f}', 22, True)
+        s += arrow(620, 261, 685, 261, C['danger'])
+        s += box(685, 218, 195, 86, C['danger_l'], C['danger'], f'x = 50\nz = {z_bad:+.2f}', 22, True, C['danger'])
+        s += txt(450, 360, f'Same code, different state: {skew_sig:.2f}σ silent skew (no error raised).', 23, True, C['danger'])
+    elif k == 3:
+        s += txt(20, 194, '3. Replay frozen artifact (all paths)', 22, True, C['memory'], 'start')
+        s += box(20, 218, 205, 86, C['memory_l'], C['memory'], 'Any path\nraw x = 50', 22)
+        s += arrow(225, 261, 290, 261, C['data'])
+        s += box(290, 218, 330, 86, C['data_l'], C['data'], f'Apply saved state\nμ = {mu_t:.1f},  σ = {sd_t:.2f}', 22, True)
+        s += arrow(620, 261, 685, 261, C['data'])
+        s += box(685, 218, 195, 86, C['data_l'], C['data'], f'x = 50\nz = {z_ok:+.2f}', 22, True, C['data'])
+        s += arrow(455, 130, 455, 218, C['data'])
+        s += txt(470, 168, 'frozen artifact bundled with model', 20, True, C['data'], 'start')
+        s += txt(450, 360, '0.00σ skew: identical preprocessing state across all three paths.', 23, True, C['data'])
+    svg(out / f'skew_step{k}.svg', s, h=395)
+for k in (1, 2, 3):
     skew(k)
 
 def pipeline(k):
@@ -200,7 +220,7 @@ def _err_key(name):
     return 'err_' + ''.join((c for c in name.lower() if c.isalnum()))
 bars_lines(out / 'label_errors.svg', [('QuickDraw (images)', 10.12, 'memory', '10.12%'), ('CIFAR-100 (images)', 5.85, 'memory', '5.85%'), ('ImageNet val (images)', 5.83, 'memory', '5.83%'), ('IMDB (text)', 2.9, 'compute', '2.90%'), ('AudioSet (audio)', 1.35, 'network', '1.35%'), ('MNIST (images)', 0.15, 'memory', '0.15%')], log=False, xlim=(0, 13), size=(5.8, 2.8), xlabel='Test-set labels found to be wrong (%)')
 
-def cascades():
+def cascades(step):
     from matplotlib.path import Path as MPath
     from matplotlib.patches import PathPatch, FancyArrowPatch
     cols = {'blue': C['memory'], 'red': C['danger'], 'green': C['data'], 'orange': '#CC5500', 'violet': '#7030A0'}
@@ -209,17 +229,19 @@ def cascades():
     fig = plt.figure(figsize=(7.0, 2.3))
     ax = fig.add_axes([0.0, 0.22, 0.64, 0.76])
     ax.plot([0, 10], [0, 0], color='#BBBBBB', lw=2.5, zorder=1)
+    a2 = 1.0 if step >= 2 else 0.0
+    a3 = 1.0 if step >= 3 else 0.0
     for a, b, ck, o, i, heavy in arcs:
         x0, x1 = (px[a], px[b])
         d = 0.3915 * (x1 - x0)
         oo, ii = (np.radians(o), np.radians(i))
         verts = [(x0, 0), (x0 + d * np.cos(oo), d * np.sin(oo)), (x1 + d * np.cos(ii), d * np.sin(ii)), (x1, 0)]
-        ax.add_patch(PathPatch(MPath(verts, [1, 4, 4, 4]), fill=False, ec=cols[ck], lw=2.6 if heavy else 1.4, zorder=2))
+        ax.add_patch(PathPatch(MPath(verts, [1, 4, 4, 4]), fill=False, ec=cols[ck], lw=2.6 if heavy else 1.4, alpha=a2, zorder=2))
     for k in (5, 6):
-        ax.add_patch(FancyArrowPatch((px[k] - 1.15, 1.05), (px[k] - 0.12, 0.18), arrowstyle='simple,head_width=12,head_length=10,tail_width=5', color=cols['violet'], alpha=0.55, lw=0, zorder=3))
+        ax.add_patch(FancyArrowPatch((px[k] - 1.15, 1.05), (px[k] - 0.12, 0.18), arrowstyle='simple,head_width=12,head_length=10,tail_width=5', color=cols['violet'], alpha=0.55 * a3, lw=0, zorder=3))
     for x0, x1 in ((px[1], 0.8), (px[6], 9.1)):
         rp = MPath([(x0, 0.12), (x0, 2.0), (x0, 2.7), (x1, 2.7)], [1, 2, 3, 3])
-        ax.add_patch(FancyArrowPatch(path=rp, arrowstyle='-|>,head_width=4,head_length=7', color=cols['red'], lw=1.6, ls=(0, (4, 3)), zorder=3))
+        ax.add_patch(FancyArrowPatch(path=rp, arrowstyle='-|>,head_width=4,head_length=7', color=cols['red'], lw=1.6, ls=(0, (4, 3)), alpha=a3, zorder=3))
     ax.scatter(px, [0] * 7, s=28, color=C['text'], zorder=4)
     names = ['Problem\nstatement', 'Collect,\nlabel', 'Analyze,\nclean', 'Select\nmodel', 'Train\nmodel', 'Evaluate\nmodel', 'Deploy\nmodel']
     for x, nm in zip(px, names):
@@ -231,16 +253,17 @@ def cascades():
     lg = [('blue', 'Interacting with physical\nworld brittleness'), ('red', 'Inadequate application-\ndomain expertise'), ('green', 'Conflicting reward\nsystems'), ('orange', 'Poor cross-organizational\ndocumentation')]
     y = 0.95
     for ck, t in lg:
-        fig.text(0.655, y - 0.035, '●', color=cols[ck], fontsize=13, va='center')
-        fig.text(0.683, y, t, fontsize=10.5, va='top', color=C['text'], linespacing=1.1)
+        fig.text(0.655, y - 0.035, '●', color=cols[ck], fontsize=13, va='center', alpha=a2)
+        fig.text(0.683, y, t, fontsize=10.5, va='top', color=C['text'], linespacing=1.1, alpha=a2)
         y -= 0.165
-    fig.add_artist(FancyArrowPatch((0.655, y - 0.035), (0.693, y - 0.035), transform=fig.transFigure, arrowstyle='simple,head_width=9,head_length=7,tail_width=4', color=cols['violet'], alpha=0.8, lw=0))
-    fig.text(0.703, y - 0.035, 'Impact of the cascade', fontsize=10.5, va='center', color=C['text'])
+    fig.add_artist(FancyArrowPatch((0.655, y - 0.035), (0.693, y - 0.035), transform=fig.transFigure, arrowstyle='simple,head_width=9,head_length=7,tail_width=4', color=cols['violet'], alpha=0.8 * a3, lw=0))
+    fig.text(0.703, y - 0.035, 'Impact of the cascade', fontsize=10.5, va='center', color=C['text'], alpha=a3)
     y -= 0.11
-    fig.add_artist(FancyArrowPatch((0.655, y - 0.035), (0.693, y - 0.035), transform=fig.transFigure, arrowstyle='-|>,head_width=3,head_length=5', ls=(0, (3, 2)), color=cols['red'], lw=1.6))
-    fig.text(0.703, y - 0.035, 'Abandon or restart', fontsize=10.5, va='center', color=C['text'])
-    sp.save(fig, out / 'cascades.svg')
-cascades()
+    fig.add_artist(FancyArrowPatch((0.655, y - 0.035), (0.693, y - 0.035), transform=fig.transFigure, arrowstyle='-|>,head_width=3,head_length=5', ls=(0, (3, 2)), color=cols['red'], lw=1.6, alpha=a3))
+    fig.text(0.703, y - 0.035, 'Abandon or restart', fontsize=10.5, va='center', color=C['text'], alpha=a3)
+    sp.save(fig, out / f'cascades_step{step}.svg')
+for k in (1, 2, 3):
+    cascades(k)
 print('figures written')
 
 def synthetic_audio():
@@ -299,15 +322,19 @@ def synthetic_audio():
         sp.save(fig, out / f'synthetic_audio_step{k}.svg')
 synthetic_audio()
 
-def forced_alignment():
+def forced_alignment(k):
     G, GL, O, OL = (C['data'], C['data_l'], C['compute'], C['compute_l'])
     heads = ['Sentence audio\n+ transcript', 'Forced alignment\nfinds word edges', 'Cut 1 s clips\nfor each keyword', 'Train the\nkeyword model']
     s = ''
     xs = [10, 237, 464, 691]
+    show_n = {1: 2, 2: 3, 3: 4}[k]
     for j, (x, h) in enumerate(zip(xs, heads)):
-        s += box(x, 8, 200, 74, GL, G, h, 21, True)
-        if j < 3:
-            s += arrow(x + 200, 45, x + 227, 45, '#666666', 3)
+        if j < show_n:
+            s += box(x, 8, 200, 74, GL, G, h, 21, True)
+            if j + 1 < show_n:
+                s += arrow(x + 200, 45, x + 227, 45, '#666666', 3)
+        else:
+            s += box(x, 8, 200, 74, '#FAFAFA', '#DDDDDD', '', 21, False, dash=True)
     s += box(10, 112, 200, 150, '#F7F7F7', '#999999', '', rx=8)
     s += txt(110, 150, '“he gazed up', 22, False, C['text'])
     s += txt(110, 182, 'the steep bank”', 22, False, C['text'])
@@ -322,12 +349,19 @@ def forced_alignment():
             s += box(x, 126 + r * 46, wd, 36, OL if hl else 'white', O if hl else '#999999', w, 19, hl, rx=4)
             x += wd + 5
     s += txt(337, 228, 'edges found', 20, True, '#666666')
-    s += box(464, 112, 200, 150, '#F7F7F7', '#999999', '', rx=8)
-    s += box(504, 132, 120, 50, OL, O, 'bank', 24, True, rx=4)
-    s += txt(564, 204, 'one 1 s clip', 20, True, '#666666')
-    s += txt(564, 232, 'labeled “bank”', 20, True, '#666666')
-    s += box(691, 112, 200, 150, GL, G, '', rx=8)
-    for m, ln in enumerate(['23.4M clips', '340K keywords', '50 languages']):
-        s += txt(791, 146 + m * 40, ln, 23, True, C['text'])
-    svg(out / 'forced_alignment.svg', s, w=900, h=270)
-forced_alignment()
+    if show_n >= 3:
+        s += box(464, 112, 200, 150, '#F7F7F7', '#999999', '', rx=8)
+        s += box(504, 132, 120, 50, OL, O, 'bank', 24, True, rx=4)
+        s += txt(564, 204, 'one 1 s clip', 20, True, '#666666')
+        s += txt(564, 232, 'labeled “bank”', 20, True, '#666666')
+    else:
+        s += box(464, 112, 200, 150, '#FAFAFA', '#DDDDDD', '', rx=8, dash=True)
+    if show_n >= 4:
+        s += box(691, 112, 200, 150, GL, G, '', rx=8)
+        for m, ln in enumerate(['23.4M clips', '340K keywords', '50 languages']):
+            s += txt(791, 146 + m * 40, ln, 23, True, C['text'])
+    else:
+        s += box(691, 112, 200, 150, '#FAFAFA', '#DDDDDD', '', rx=8, dash=True)
+    svg(out / f'forced_alignment_step{k}.svg', s, w=900, h=270)
+for k in (1, 2, 3):
+    forced_alignment(k)
