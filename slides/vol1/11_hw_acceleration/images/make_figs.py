@@ -46,10 +46,11 @@ energy_rows = [('INT8 add', 0.03, 'compute', '0.03 pJ'), ('FP32 add', 0.9, 'comp
 for k, shown in ((1, 3), (2, 4), (3, 5)):
     sp.hbars(out / f'energy_step{k}.svg', energy_rows, 'pJ', step=shown, xlabel='Energy per operation or access (pJ, log scale; 45 nm)', size=(5.8, 2.3))
 sp.hbars(out / 'tensorcore.svg', [(f'P100 ({2016})', 21.2, 'neutral', '21.2'), (f'V100 ({2017})', 125.0, 'compute', '125: about 6×')], 'TFLOP/s', log=False, xlabel='Peak FP16 (TFLOP/s)', size=(2.6, 1.3))
+import html
 FONT = 'font-family="Helvetica, Arial, sans-serif"'
 
 def svg_text(x, y, s, size=20, weight='400', fill=C['text'], anchor='middle'):
-    return f'<text x="{x}" y="{y}" {FONT} font-size="{size}" font-weight="{weight}" fill="{fill}" text-anchor="{anchor}" dominant-baseline="central">{s}</text>'
+    return f'<text x="{x}" y="{y}" {FONT} font-size="{size}" font-weight="{weight}" fill="{fill}" text-anchor="{anchor}" dominant-baseline="central">{html.escape(str(s), quote=False)}</text>'
 
 def units_svg(step):
     lanes = [('Vector unit', 'ReLU, residual add', C['memory'], C['memory_l'], 'ResNet-50: after every conv'), ('Matrix unit', 'convolution, projections', C['compute'], C['compute_l'], 'Both: most of the arithmetic'), ('Special-function unit', 'softmax exp, GELU, rsqrt', C['network'], C['network_l'], 'GPT-2 XL: every step')]
@@ -328,4 +329,86 @@ for k in (1, 2):
     sp.save(fig, out / f'ridge_rise_step{k}.svg')
 sp.hbars(out / 'int8peak.svg', [('FP16', 989.0, 'compute', '989 TFLOP/s'), ('INT8', 1979.0, 'danger', '1,979 TOPS: 2×')], '', log=False, xlabel='H100 dense peak', size=(2.9, 1.5))
 sp.hbars(out / 'int8floor.svg', [('FP16', 8.291203236, 'compute', '8 µs'), ('INT8', 4.143506822, 'danger', '4 µs')], '', log=False, xlabel='ResNet-50 arithmetic, one image', size=(2.9, 1.5))
+
+# 3-step 2:4 Structured Sparsity GEMM hardware datapath (matching vol1:fig-2-4-gemm, §11.4.5)
+def sparse24_hw_svg(step):
+    w_vals = [2, 0, 0, 3, 0, 4, 5, 0]
+    x_vals = [1, 2, 3, 4, 5, 6, 7, 8]
+    packed_w = [2, 3, 4, 5]
+    meta_tags = ['00 (0)', '11 (3)', '01 (1)', '10 (2)']
+    sel_x = [1, 4, 6, 7]
+    prods = [2, 12, 24, 35]
+    parts = [
+        '<svg xmlns="http://www.w3.org/2000/svg" width="900" height="360" viewBox="0 0 900 360">',
+        '<rect width="900" height="360" fill="white"/>',
+        '<defs>',
+    ]
+    for col in (C['compute'], C['memory'], C['data'], C['neutral']):
+        parts.append(f'<marker id="sh_{col[1:]}" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="{col}"/></marker>')
+    parts.append('</defs>')
+
+    def sbox(x, y, w, h, fc, ec, lw=2.0, rx=5, dash=''):
+        d = f' stroke-dasharray="{dash}"' if dash else ''
+        return f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="{rx}" fill="{fc}" stroke="{ec}" stroke-width="{lw}"{d}/>'
+
+    def sarr(x1, y1, x2, y2, col, lw=2.5):
+        return f'<line x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}" stroke="{col}" stroke-width="{lw}" marker-end="url(#sh_{col[1:]})"/>'
+
+    # Step 1: 8-element 2:4 weight vector (two groups of 4) + input vector x (always shown)
+    parts.append(svg_text(18, 26, 'Weights w (two 2:4 groups)', 20, '700', C['compute'], 'start'))
+    parts.append(svg_text(520, 26, 'Dense: 8 MACs = 73', 19, '700', C['neutral'], 'end'))
+    # Group boxes
+    parts.append(sbox(18, 44, 244, 54, '#FFF8F0', C['compute'], 1.8, 6, '5,3'))
+    parts.append(sbox(276, 44, 244, 54, '#FFF8F0', C['compute'], 1.8, 6, '5,3'))
+    for i, wv in enumerate(w_vals):
+        gx = 28 + i * 58 + (16 if i >= 4 else 0)
+        nz = wv != 0
+        parts.append(sbox(gx, 52, 48, 38, C['compute_l'] if nz else '#F5F5F5', C['compute'] if nz else '#BBBBBB', 2.2 if nz else 1.4, 4, '' if nz else '4,3'))
+        parts.append(svg_text(gx + 24, 71, str(wv), 21, '700' if nz else '400', C['compute'] if nz else '#999999'))
+
+    parts.append(svg_text(18, 120, 'Input activations x', 20, '700', C['memory'], 'start'))
+    for i, xv in enumerate(x_vals):
+        gx = 28 + i * 58 + (16 if i >= 4 else 0)
+        hl = (step >= 2 and i in (0, 3, 5, 6))
+        parts.append(sbox(gx, 134, 48, 38, C['memory_l'] if hl else '#F3F6FA', C['memory'] if hl else '#8A96A8', 2.4 if hl else 1.4, 4))
+        parts.append(svg_text(gx + 24, 153, str(xv), 21, '700' if hl else '400', C['memory'] if hl else C['text']))
+        parts.append(svg_text(gx + 24, 188, f'x[{i}]', 19, '700' if hl else '400', C['memory'] if hl else C['neutral']))
+
+    # Step 2+: Packed values + 2-bit position tags + Hardware MUX
+    if step >= 2:
+        parts.append(sarr(528, 71, 562, 71, C['compute'], 2.8))
+        parts.append(svg_text(725, 26, 'Packed 2:4 values + 2-bit tags', 20, '700', C['compute'], 'middle'))
+        for idx, (pw, tag) in enumerate(zip(packed_w, meta_tags)):
+            px = 568 + idx * 80
+            parts.append(sbox(px, 44, 72, 36, C['compute_l'], C['compute'], 2.2, 5))
+            parts.append(svg_text(px + 36, 62, str(pw), 21, '700', C['compute']))
+            parts.append(sbox(px, 86, 72, 30, '#FFF4E5', '#C2741E', 1.5, 4))
+            parts.append(svg_text(px + 36, 101, tag, 19, '700', C['text']))
+
+        # Hardware 4:2 MUX box
+        parts.append(sarr(528, 153, 562, 153, C['memory'], 2.8))
+        parts.append(sbox(568, 130, 312, 46, C['memory_l'], C['memory'], 2.4, 6))
+        parts.append(svg_text(724, 153, '4:2 MUX selects x = [1, 4, 6, 7]', 19.5, '700', C['memory']))
+        # Arrow from tags to MUX
+        parts.append(sarr(724, 118, 724, 129, C['compute'], 2.0))
+
+    # Step 3: 4 Sparse MACs + sum = 73 + bottom takeaway banner
+    if step >= 3:
+        parts.append(sarr(725, 178, 725, 202, C['data'], 2.8))
+        parts.append(sbox(18, 206, 864, 66, '#F7FBF8', C['data'], 2.2, 7))
+        parts.append(svg_text(40, 239, '4 Sparse MACs:', 21, '700', C['data'], 'start'))
+        for idx, (pw, sx, pr) in enumerate(zip(packed_w, sel_x, prods)):
+            mx = 220 + idx * 126
+            parts.append(sbox(mx, 218, 114, 42, C['data_l'], C['data'], 1.8, 5))
+            parts.append(svg_text(mx + 57, 239, f'{pw}×{sx} = {pr}', 19, '700', C['text']))
+        parts.append(svg_text(738, 239, '→  Sum = 73', 22, '700', C['data'], 'start'))
+
+        parts.append(sbox(18, 288, 864, 54, C['data_l'], C['data'], 2.2, 8))
+        parts.append(svg_text(450, 315, 'Same sum (73 = 73) in half the MACs (4 vs. 8); fixed 2:4 pattern keeps tensor lanes full.', 20, '700', C['data']))
+
+    parts.append('</svg>')
+    return '\n'.join(parts)
+
+for k in (1, 2, 3):
+    (out / f'sparse24_hw_step{k}.svg').write_text(sparse24_hw_svg(k))
 print('figures written')

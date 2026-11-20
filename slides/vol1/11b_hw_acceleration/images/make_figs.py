@@ -24,6 +24,7 @@ import contextlib, io
 C = sp.C
 plt = sp.plt
 out = Path(__file__).parent
+import html
 FONT = 'font-family="Helvetica, Arial, sans-serif"'
 
 def svg_text(x, y, s, size=20, weight='400', fill=C['text'], anchor='middle', opacity=1.0):
@@ -33,12 +34,13 @@ def svg_text(x, y, s, size=20, weight='400', fill=C['text'], anchor='middle', op
     for i, piece in enumerate(parts):
         if not piece:
             continue
+        esc = html.escape(piece, quote=False)
         if i % 2 == 0:
-            body.append(piece)
+            body.append(esc)
         else:
             sub = round(size * 0.68)
             shift = round(size * 0.28)
-            body.append(f'<tspan dy="{shift}" font-size="{sub}">{piece}</tspan><tspan dy="-{shift}"></tspan>')
+            body.append(f'<tspan dy="{shift}" font-size="{sub}">{esc}</tspan><tspan dy="-{shift}"></tspan>')
     return f'''<text x="{x}" y="{y}" {FONT} font-size="{size}" font-weight="{weight}" fill="{fill}" text-anchor="{anchor}" dominant-baseline="central" opacity="{opacity}">{''.join(body)}</text>'''
 
 def svg_open(width, height, colors=()):
@@ -109,26 +111,30 @@ def hook_fig(step):
     sp.save(fig, out / f'hook_step{step}.svg')
 for k in (1, 2):
     hook_fig(k)
-fig, ax = plt.subplots(figsize=(5.8, 2.6))
-n = len(BOEHM)
-for i, (label, value, color_key, tag) in enumerate(BOEHM):
-    y = n - 1 - i
-    ax.barh(y, value, color=C[color_key], height=0.66)
-    ax.text(-0.01, y, label, transform=ax.get_yaxis_transform(), ha='right', va='center', fontsize=12.5, fontweight='bold', color=C['text'])
-    text = f'{value:,.0f}' + (f'   {tag}' if tag else '')
-    ax.text(value * 1.12, y, text, va='center', fontsize=12.5, fontweight='bold', color=C[color_key])
-ax.set_xscale('log')
-ax.set_xlim(100, 2000000.0)
-ax.set_ylim(-0.6, n - 0.4)
-ax.set_yticks([])
-ax.minorticks_off()
-ax.set_xticks([100, 1000, 10000, 100000])
-ax.set_xticklabels(['100', '1,000', '10,000', '100,000'])
-ax.spines['left'].set_visible(False)
-ax.grid(axis='x', color=C['grid'], linewidth=0.6)
-ax.set_axisbelow(True)
-ax.set_xlabel('GFLOP/s, same multiply, same GPU (log scale)')
-sp.save(fig, out / 'ladder.svg')
+ladder_steps = {1: 2, 2: 6, 3: len(BOEHM)}
+for k in (1, 2, 3):
+    fig, ax = plt.subplots(figsize=(5.8, 2.6))
+    n = len(BOEHM)
+    upto = ladder_steps[k]
+    for i, (label, value, color_key, tag) in enumerate(BOEHM):
+        y = n - 1 - i
+        a = 1.0 if i < upto else 0.0
+        ax.barh(y, value, color=C[color_key], height=0.66, alpha=a)
+        ax.text(-0.01, y, label, transform=ax.get_yaxis_transform(), ha='right', va='center', fontsize=12.5, fontweight='bold', color=C['text'], alpha=a)
+        text = f'{value:,.0f}' + (f'   {tag}' if tag else '')
+        ax.text(value * 1.12, y, text, va='center', fontsize=12.5, fontweight='bold', color=C[color_key], alpha=a)
+    ax.set_xscale('log')
+    ax.set_xlim(100, 2000000.0)
+    ax.set_ylim(-0.6, n - 0.4)
+    ax.set_yticks([])
+    ax.minorticks_off()
+    ax.set_xticks([100, 1000, 10000, 100000])
+    ax.set_xticklabels(['100', '1,000', '10,000', '100,000'])
+    ax.spines['left'].set_visible(False)
+    ax.grid(axis='x', color=C['grid'], linewidth=0.6)
+    ax.set_axisbelow(True)
+    ax.set_xlabel('GFLOP/s, same multiply, same GPU (log scale)')
+    sp.save(fig, out / f'ladder_step{k}.svg')
 
 def trace_svg(step):
     t = step - 2
@@ -282,23 +288,92 @@ ax.set_axisbelow(True)
 ax.set_xlabel('Energy advantage of row stationary (AlexNet)')
 sp.save(fig, out / 'eyeriss.svg')
 
-def layertile_mats_svg():
-    """The three matrices with one 128-row weight tile (static picture)."""
-    parts = svg_open(380, 292)
-    parts.append(rect(20, 10, 150, 200, 'white', C['compute'], 2.5, 2))
-    for y in (110, 160):
-        parts.append(f'''<line x1="20" y1="{y}" x2="170" y2="{y}" stroke="{C['compute']}" stroke-width="1.5" stroke-dasharray="6,4"/>''')
-    parts.append(rect(20, 60, 150, 50, C['compute_l'], C['compute'], 3, 2))
-    parts.append(svg_text(95, 85, '128 rows', 26, '700', C['compute']))
+def layertile_mats_svg(step):
+    """3-step animated matrix tiling matching vol1:fig-tiling-diagram (§11.7.5)."""
+    parts = svg_open(380, 296, (C['compute'], C['data']))
+    # W matrix
+    parts.append(rect(20, 10, 150, 200, C['danger_l'] if step == 1 else 'white', C['danger'] if step == 1 else C['compute'], 2.5, 2))
+    if step == 1:
+        parts.append(svg_text(95, 96, '256 KB', 25, '700', C['danger']))
+        parts.append(svg_text(95, 126, '(> 228 KB)', 23, '700', C['danger']))
+    if step >= 2:
+        for y in (60, 110, 160):
+            parts.append(f'''<line x1="20" y1="{y}" x2="170" y2="{y}" stroke="{C['compute']}" stroke-width="1.5" stroke-dasharray="6,4"/>''')
+        ty = 10 if step == 2 else 60
+        parts.append(rect(20, ty, 150, 50, C['compute_l'], C['compute'], 3, 2))
+        parts.append(svg_text(95, ty + 25, '64 KB tile', 24, '700', C['compute']))
+    if step >= 3:
+        parts.append(rect(20, 10, 150, 50, '#F5F5F5', C['neutral'], 1.5, 2))
+        parts.append(svg_text(95, 35, 'tile 0 done', 23, '700', C['neutral']))
+        parts.append(svg_text(95, 185, 'tiles 2–3', 23, '700', C['compute']))
     parts.append(svg_text(192, 60, '×', 34, '700', C['text']))
     parts.append(rect(215, 10, 40, 100, C['memory_l'], C['memory'], 2.5, 2))
     parts.append(svg_text(277, 60, '=', 34, '700', C['text']))
     parts.append(rect(300, 10, 40, 200, 'white', C['data'], 2.5, 2))
-    parts.append(rect(300, 60, 40, 50, C['data_l'], C['data'], 3, 2))
+    if step >= 2:
+        parts.append(rect(300, 10 if step == 2 else 60, 40, 50, C['data_l'], C['data'], 3, 2))
+    if step >= 3:
+        parts.append(rect(300, 10, 40, 50, '#EBF7EE', C['data'], 1.5, 2))
     for x, y, name, dims, col in ((95, 240, 'W', '512 × 256', C['compute']), (235, 140, 'X', '256 × 32', C['memory']), (320, 240, 'Z', '512 × 32', C['data'])):
         parts.append(svg_text(x, y, name, 28, '700', col))
         parts.append(svg_text(x, y + 34, dims, 24, '700', col))
-    write_svg('layertile_mats.svg', parts)
+    write_svg(f'layertile_mats_step{step}.svg', parts)
+
+def coalesce_svg(step):
+    """3-step memory coalescing & pointer chase matching vol1:fig-irregular-address-transactions (§11.5.3)."""
+    parts = svg_open(900, 360, (C['data'], C['danger'], C['memory'], C['compute']))
+    # 4 memory sectors of 16 B each (each holding 4 x 4-byte words)
+    sec_w, sec_h = 196, 46
+    # Panel (a) Coalesced (always shown)
+    parts.append(svg_text(20, 24, '(a) Adjacent loads: 4 threads read [0, 4, 8, 12] (4 B each)', 20, '700', C['data'], 'start'))
+    parts.append(svg_text(882, 24, '1 sector (16 B) → 100% useful', 20, '700', C['data'], 'end'))
+    for s in range(4):
+        sx = 20 + s * 218
+        used = (s == 0)
+        parts.append(rect(sx, 42, sec_w, sec_h, C['data_l'] if used else '#F5F5F5', C['data'] if used else '#CCCCCC', 2.6 if used else 1.4, 5))
+        for w in range(4):
+            wx = sx + 6 + w * 46
+            addr = s * 16 + w * 4
+            if used:
+                parts.append(rect(wx, 48, 42, 34, C['data'], C['data'], 1.0, 3))
+                parts.append(svg_text(wx + 21, 65, str(addr), 20, '700', 'white'))
+            else:
+                parts.append(rect(wx, 48, 42, 34, 'white', '#DDDDDD', 1.0, 3))
+                parts.append(svg_text(wx + 21, 65, str(addr), 20, '400', '#999999'))
+        parts.append(svg_text(sx + sec_w / 2, 104, f'S{s}: {s*16}–{s*16+15}', 20, '700' if used else '400', C['data'] if used else '#888888'))
+
+    # Panel (b) Strided (step >= 2)
+    if step >= 2:
+        parts.append(svg_text(20, 140, '(b) Strided loads: 4 threads read [0, 16, 32, 48]', 20, '700', C['danger'], 'start'))
+        parts.append(svg_text(882, 140, '4 sectors (64 B) → 25% useful (4× traffic)', 20, '700', C['danger'], 'end'))
+        for s in range(4):
+            sx = 20 + s * 218
+            parts.append(rect(sx, 158, sec_w, sec_h, C['danger_l'], C['danger'], 2.4, 5))
+            for w in range(4):
+                wx = sx + 6 + w * 46
+                addr = s * 16 + w * 4
+                hit = (w == 0)
+                parts.append(rect(wx, 164, 42, 34, C['danger'] if hit else '#FFF0F0', C['danger'] if hit else '#E5B4B4', 1.2, 3))
+                parts.append(svg_text(wx + 21, 181, str(addr), 20, '700' if hit else '400', 'white' if hit else '#B87474'))
+            parts.append(svg_text(sx + sec_w / 2, 220, '4 B used / 12 B lost', 19.5, '700', C['danger']))
+
+    # Panel (c) Dependent pointer / index chase (step >= 3)
+    if step >= 3:
+        parts.append(svg_text(20, 256, '(c) Dependent index chase (sparse / embedding lookup): serializes latency', 20, '700', C['compute'], 'start'))
+        steps_c = [('Load index', 'idx = 8', C['memory'], C['memory_l']), ('Compute addr', 'addr = 32', C['compute'], C['compute_l']), ('Wait HBM 378 ns', 'sector 2', C['danger'], C['danger_l']), ('Load payload', 'val = 9', C['data'], C['data_l'])]
+        for idx, (t1, t2, ec, fc) in enumerate(steps_c):
+            bx = 16 + idx * 222
+            parts.append(rect(bx, 274, 196, 68, fc, ec, 2.2, 6))
+            parts.append(svg_text(bx + 98, 296, t1, 20, '700', ec))
+            parts.append(svg_text(bx + 98, 324, t2, 20, '700', C['text']))
+            if idx < 3:
+                parts.append(arrow(bx + 198, 308, bx + 220, 308, C['compute'], 2.5))
+
+    write_svg(f'coalesce_step{step}.svg', parts)
+
+for k in (1, 2, 3):
+    layertile_mats_svg(k)
+    coalesce_svg(k)
 
 def layertile_cost_svg(step):
     """Step 1 blank (keeps the slot), step 2 capacity, step 3 traffic."""
@@ -335,7 +410,6 @@ def layertile_cost_svg(step):
     parts.append(svg_text(x0 + 250, 335, '47× fewer', 28, '700', C['data'], 'start'))
     parts.append('</g>')
     write_svg(f'layertile_cost_step{step}.svg', parts)
-layertile_mats_svg()
 for k in (1, 2, 3):
     layertile_cost_svg(k)
 tile_rows = [('No reuse', 0.5, 'danger', '0.5'), ('128 × 128 tiles', 64.0, 'memory', '64'), ('256 × 128 tiles', 85.33333333, 'memory', '85'), ('Load each once', 1365.333333, 'compute', '1,365')]

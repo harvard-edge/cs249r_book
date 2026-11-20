@@ -438,21 +438,50 @@ for k in (1, 2):
     sp.save(fig, out / f'pareto_step{k}.svg')
 chu = [('MobileNetV1', 54.7, 3.72), ('MobileNetV2', 38.8, 4.97), ('MobileNetV3 Large', 20.3, 4.51), ('MobileNet-EdgeTPU', 59.3, 4.29)]
 col = {'MobileNetV1': 'memory', 'MobileNetV2': 'neutral', 'MobileNetV3 Large': 'data', 'MobileNet-EdgeTPU': 'network'}
-fig, ax = plt.subplots(figsize=(5.8, 2.2))
 cpu_rank = {n: i for i, (n, _, _) in enumerate(sorted(chu, key=lambda r: r[1]))}
 dsp_rank = {n: i for i, (n, _, _) in enumerate(sorted(chu, key=lambda r: r[2]))}
-for n, cpu, dsp in chu:
-    y0, y1 = (3 - cpu_rank[n], 3 - dsp_rank[n])
-    ax.plot([0, 1], [y0, y1], color=C[col[n]], lw=3, marker='o', ms=10)
-    ax.text(-0.09, y0, f'{n}  {cpu:.1f} ms', ha='right', va='center', fontsize=11, fontweight='bold', color=C[col[n]])
-    ax.text(1.09, y1, f'{dsp:.2f} ms  {n}', ha='left', va='center', fontsize=11, fontweight='bold', color=C[col[n]])
-ax.text(0, 3.6, 'CPU (float)', ha='center', fontsize=12, fontweight='bold')
-ax.text(1, 3.6, 'DSP', ha='center', fontsize=12, fontweight='bold')
-ax.text(0.5, -0.75, 'fastest at top; top-1 75.1 to 76.2% for all four', ha='center', fontsize=10, color=C['neutral'])
-ax.set_xlim(-1.4, 2.4)
-ax.set_ylim(-0.9, 3.9)
-ax.axis('off')
-sp.save(fig, out / 'lottery.svg')
+for k in (1, 2):
+    fig, ax = plt.subplots(figsize=(5.8, 2.2))
+    # Invisible corner anchors keep exact bounding box across step 1 and step 2
+    ax.plot([-1.35, 2.35], [-0.85, 3.85], alpha=0.0)
+    for n, cpu, dsp in chu:
+        y0, y1 = (3 - cpu_rank[n], 3 - dsp_rank[n])
+        ax.plot([0], [y0], 'o', ms=10, color=C[col[n]])
+        ax.text(-0.09, y0, f'{n}  {cpu:.1f} ms', ha='right', va='center', fontsize=11, fontweight='bold', color=C[col[n]])
+        if k >= 2:
+            ax.plot([0, 1], [y0, y1], color=C[col[n]], lw=3)
+            ax.plot([1], [y1], 'o', ms=10, color=C[col[n]])
+            ax.text(1.09, y1, f'{dsp:.2f} ms  {n}', ha='left', va='center', fontsize=11, fontweight='bold', color=C[col[n]])
+    ax.text(0, 3.6, 'CPU (float)', ha='center', fontsize=12, fontweight='bold')
+    if k >= 2:
+        ax.text(1, 3.6, 'DSP', ha='center', fontsize=12, fontweight='bold')
+    ax.text(0.5, -0.75, 'fastest at top; top-1 75.1 to 76.2% for all four', ha='center', fontsize=10, color=C['neutral'])
+    ax.set_xlim(-1.4, 2.4)
+    ax.set_ylim(-0.9, 3.9)
+    ax.axis('off')
+    sp.save(fig, out / f'lottery_step{k}.svg')
+
+# Log-exponent visual for Verification Gap slide (F26)
+fig, ax = plt.subplots(figsize=(4.2, 1.25))
+ax.barh(1, 4.7, color=C['memory'], height=0.52)
+ax.barh(0, 362508, color=C['danger'], height=0.52)
+ax.text(-0.02, 1, 'ImageNet val set', transform=ax.get_yaxis_transform(), ha='right', va='center', fontsize=13, fontweight='bold', color=C['text'])
+ax.text(-0.02, 0, '224×224 RGB space', transform=ax.get_yaxis_transform(), ha='right', va='center', fontsize=13, fontweight='bold', color=C['text'])
+ax.text(4.7 * 1.6, 1, 'exp 4.7 (50K images)', va='center', fontsize=13, fontweight='bold', color=C['memory'])
+ax.text(362508 * 1.6, 0, 'exp 362,508', va='center', fontsize=13, fontweight='bold', color=C['danger'])
+ax.set_xscale('log')
+ax.set_xlim(1, 3e7)
+ax.set_ylim(-0.55, 1.55)
+ax.set_yticks([])
+ax.set_xticks([10, 1000, 100000])
+ax.set_xticklabels(['10', '1,000', '100,000'])
+ax.tick_params(labelsize=13)
+ax.minorticks_off()
+ax.spines['left'].set_visible(False)
+ax.grid(axis='x', color=C['grid'], lw=0.6)
+ax.set_axisbelow(True)
+ax.set_xlabel('Base-10 exponent of image count (log scale)', fontsize=13)
+sp.save(fig, out / 'verif_gap.svg')
 bins = [(20, 0.65, 0.6), (30, 0.85, 0.8), (50, 0.97, 0.84)]
 for k in (1, 2, 3):
     fig, ax = plt.subplots(figsize=(3.4, 2.6))
