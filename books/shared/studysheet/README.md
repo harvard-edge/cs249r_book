@@ -16,7 +16,10 @@ answers printed upside down at the foot of the back.
 
 There is one template for all four volumes. A sheet names its volume with `\sheetvolume{N}`. The
 accent color is the volume's `accentcolor` from `books/volN/tex/theme-colors.tex`, read at build
-time, so a sheet always matches its book. Math uses the book's notation macros
+time, so a sheet always matches its book. Each sheet's header carries a QR code and a link to its chapter online
+(`build.py` passes the chapter URL, read from the book's own HTML config, as `\SheetURL`); the
+footer points to the free book and the GitHub repository. Every printed or forwarded copy leads
+back to the book. Math uses the book's notation macros
 (`books/shared/_includes/_macros.tex`).
 
 ## Numbers

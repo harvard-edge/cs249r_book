@@ -133,3 +133,14 @@ def test_volume_list_covers_every_sheet_in_book_order(vol):
     assert all(build.chapter_title(t) and "{" not in build.chapter_title(t) for t in sheets)
     assert set(parts) >= {t.parent.name for t in sheets}, "every sheet's chapter is in the sidebar"
     assert build.volume_url(vol).endswith(f"MLSysBook-StudySheets-Vol{vol[3:]}.pdf")
+
+
+# The header QR code (added 2026-11-20) links each sheet to its chapter online.
+
+@pytest.mark.parametrize("tex", SHEETS, ids=lambda p: p.stem)
+def test_sheet_links_to_a_chapter_the_book_renders(tex):
+    vol, chapter = tex.parents[1].name, tex.parent.name
+    url = build.chapter_url(tex)
+    assert url.startswith("https://") and url.endswith(f"/{chapter}/{chapter}.html")
+    config = (REPO_ROOT / f"books/config/_quarto-html-{vol}.yml").read_text()
+    assert f"{vol}/{chapter}/{chapter}.qmd" in config, f"{chapter} is not in the {vol} HTML render list"
