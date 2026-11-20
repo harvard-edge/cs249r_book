@@ -307,26 +307,37 @@ def battery():
 
 def tiny_energy():
     from mlsysim import load_series
-    keep = {'Syntiant Core 2\n(KWS, low-energy)': 'Syntiant Core 2, keyword spotting', 'STM32N6 NPU\n(KWS, low-power)': 'STM32N6 NPU, keyword spotting', 'STM32N6 NPU\n(IC, high-perf)': 'STM32N6 NPU, image classification', 'Google Coral\nEdge TPU': 'Google Coral Edge TPU', 'Jetson AGX Orin\n(ResNet-50)': 'Jetson AGX Orin, ResNet-50'}
-    rows = [(keep[d['name'].replace('\\n', '\n')], d['energy_uj']) for d in load_series(HERE / 'data' / 'edge_inference_benchmarks.csv').entries if d['name'].replace('\\n', '\n') in keep]
+    keep = {
+        'Syntiant Core 2\n(KWS, low-energy)': 'Syntiant Core 2, KWS (low-energy)',
+        'Syntiant Core 2\n(KWS, high-perf)': 'Syntiant Core 2, KWS (high-perf)',
+        'Syntiant Core 2\n(VWW)': 'Syntiant Core 2, visual wake words',
+        'Syntiant Core 2\n(IC)': 'Syntiant Core 2, image classification',
+        'STM32N6 NPU\n(KWS, low-power)': 'STM32N6 NPU, KWS (low-power)',
+        'STM32N6 NPU\n(VWW, high-perf)': 'STM32N6 NPU, VWW (high-perf)',
+    }
+    rows = [
+        (keep[d['name'].replace('\\n', '\n')], d['energy_uj'])
+        for d in load_series(HERE / 'data' / 'edge_inference_benchmarks.csv').entries
+        if d.get('source_status') == 'source_matched' and d['name'].replace('\\n', '\n') in keep
+    ]
     rows.sort(key=lambda r: r[1])
-    fig, ax = plt.subplots(figsize=(5.9, 2.5))
+    fig, ax = plt.subplots(figsize=(5.9, 2.8))
     t_lo, t_hi = ((lambda q, u: q.to(u).magnitude)(q, 'microjoule') for q in (Q_(2.0, 'J'), Q_(3.0, 'J')))
     ax.axvspan(t_lo, t_hi, color=C['danger_l'], zorder=0)
-    ax.text(t_lo * 1.2, 2.0, 'one second\nof training\nat 2 to 3 W', ha='center', va='center', fontsize=13.2, color=C['danger'], fontweight='bold')
+    ax.text((t_lo * t_hi) ** 0.5, (len(rows) - 1) / 2.0, 'one second\nof phone\ntraining\n(2 to 3 W)', ha='center', va='center', fontsize=12.5, color=C['danger'], fontweight='bold')
     for i, (lab, e) in enumerate(rows):
         y = len(rows) - 1 - i
         ax.scatter(e, y, s=70, color=C['compute'], zorder=3)
         txt = f'{e:,.0f} µJ' if e < 1000 else f'{e / 1000:,.1f} mJ'
-        ax.text(e * 1.5, y, txt, va='center', fontsize=13.2, color=C['compute'], fontweight='bold')
-        ax.text(12, y, lab, ha='right', va='center', fontsize=13.2, color=TXT)
+        ax.text(e * 1.5, y, txt, va='center', fontsize=12.5, color=C['compute'], fontweight='bold')
+        ax.text(12, y, lab, ha='right', va='center', fontsize=12.5, color=TXT)
     ax.set_xscale('log')
-    ax.set_xlim(15, 12000000.0)
+    ax.set_xlim(15, 14000000.0)
     ax.set_ylim(-0.6, len(rows) - 0.4)
     ax.set_yticks([])
     ax.set_xticks([100.0, 10000.0, 1000000.0])
-    ax.set_xticklabels(['100 µJ', '10 mJ', '1 J'], fontsize=13.2)
-    ax.set_xlabel('Energy per inference (log scale)', fontsize=13.2)
+    ax.set_xticklabels(['100 µJ', '10 mJ', '1 J'], fontsize=12.5)
+    ax.set_xlabel('Energy per MCU inference vs. one phone training second (log scale)', fontsize=12.5)
     out(fig, 'tiny_energy')
 
 def round_timeline():
