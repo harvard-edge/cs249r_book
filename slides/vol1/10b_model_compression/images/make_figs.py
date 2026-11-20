@@ -236,6 +236,8 @@ for k in (1, 2):
     ax.set_xlim(0.01, 20000)
     ax.set_ylim(-0.6, 3.6)
     ax.set_yticks([])
+    ax.set_xticks([0.01, 0.1, 1, 10, 100, 1000, 10000])
+    ax.set_xticklabels(['0.01', '0.1', '1', '10', '100', '1k', '10k'])
     ax.minorticks_off()
     ax.spines['left'].set_visible(False)
     ax.grid(axis='x', color=C['grid'], linewidth=0.6)
@@ -321,48 +323,140 @@ for k in (1, 2):
     sp.save(fig, out / f'rounderr_step{k}.svg')
 zp_rows = [dict(label='Symmetric weights (z = 0)', value=59.1, color='danger', text='59.1'), dict(label='Asymmetric weights (z ≠ 0)', value=70.3, color='data', text='70.3'), dict(label='Float', value=70.9, color='neutral', text='70.9')]
 bars_save(out / 'zeropoint.svg', zp_rows, [1, 1, 1], xlim=(0, 82), size=(6.6, 1.25), label_size=15, text_size=15, axis_size=14, xlabel='MobileNet-v1 top-1 (%), INT8 post-training, per-channel weights')
-fig, axes = plt.subplots(1, 2, figsize=(5.9, 1.75))
-for ax, (lo, hi, qlo, qhi, zq, title, ck) in zip(axes, ((-1.0, 1.0, -127, 127, 0, f'Symmetric: z = {0}', 'memory'), (-0.5, 1.5, -128, 127, -64, 'Asymmetric: z = -64'.replace('-', '−'), 'data'))):
-    ax.plot([0, 1], [1, 1], color=C['text'], lw=1.5)
-    ax.plot([0, 1], [0, 0], color=C['neutral'], lw=1.5)
-    xr0 = (0 - lo) / (hi - lo)
-    xq0 = (zq - qlo) / (qhi - qlo)
-    for xr, xq, lab, qlab, hl in ((0, 0, f'α = {lo:g}', f'{qlo}', False), (xr0, xq0, '0', f'{zq}', True), (1, 1, f'β = {hi:g}', f'{qhi}', False)):
-        col = C['danger'] if hl else C[ck]
-        ax.annotate('', (xq, 0.06), (xr, 0.94), arrowprops=dict(arrowstyle='-|>', color=col, lw=1.6))
-        ax.plot([xr], [1], 'o', ms=7, color=col)
-        ax.plot([xq], [0], 's', ms=6, color=col)
-        ax.text(xr, 1.18, lab.replace('-', '−'), ha='center', fontsize=12, fontweight='bold', color=col)
-        ax.text(xq, -0.42, qlab.replace('-', '−'), ha='center', fontsize=12, fontweight='bold', color=col)
-    ax.text(0.5, 1.62, title, ha='center', fontsize=13, fontweight='bold', color=C[ck])
-    ax.set_xlim(-0.12, 1.12)
-    ax.set_ylim(-0.55, 1.85)
-    ax.axis('off')
-axes[0].text(-0.16, 1, 'real', ha='right', va='center', fontsize=12, fontweight='bold')
-axes[0].text(-0.16, 0, 'INT8', ha='right', va='center', fontsize=12, fontweight='bold', color=C['neutral'])
-fig.tight_layout(w_pad=2.0)
-sp.save(fig, out / 'calranges.svg')
-hist_px = [238, 228, 218, 200, 175, 145, 115, 90, 70, 52, 40, 30, 23, 18, 14, 11, 9, 7, 6, 4, 3]
-hist = np.array(hist_px) / 240
-for k in (1,):
+import csv
+# 2-step calibration range comparison matching vol1:fig-calibration-ranges (§10.3.3)
+# Step 1: mapping geometry; Step 2: trace test input x = 1.2 (clips on symmetric -> err 0.20; exact on asymmetric -> q = 89)
+for k in (1, 2):
+    fig, axes = plt.subplots(1, 2, figsize=(5.8, 1.95))
+    panels = [
+        (-1.0, 1.0, -127, 127, 0, 'Symmetric: z = 0', 'memory', 1.2, 1.0, 127, 'x = 1.2 clips (q = 127)', 'danger'),
+        (-0.5, 1.5, -128, 127, -64, 'Asymmetric: z = −64', 'data', 1.2, 1.2, 89, 'x = 1.2 fits (q = 89, err 0)', 'data'),
+    ]
+    for ax, (lo, hi, qlo, qhi, zq, title, ck, xtest, xclip, qtest, note_s, nck) in zip(axes, panels):
+        ax.plot([0, 1], [1, 1], color=C['text'], lw=1.6)
+        ax.plot([0, 1], [0, 0], color=C['neutral'], lw=1.6)
+        xr0 = (0 - lo) / (hi - lo)
+        xq0 = (zq - qlo) / (qhi - qlo)
+        for xr, xq, lab, qlab, hl in ((0, 0, f'α={lo:g}', f'{qlo}', False), (xr0, xq0, '0', f'{zq}', True), (1, 1, f'β={hi:g}', f'{qhi}', False)):
+            col = C['danger'] if hl else C[ck]
+            ax.annotate('', (xq, 0.06), (xr, 0.94), arrowprops=dict(arrowstyle='-|>', color=col, lw=1.8))
+            ax.plot([xr], [1], 'o', ms=7.5, color=col)
+            ax.plot([xq], [0], 's', ms=6.5, color=col)
+            ax.text(xr, 1.22, lab.replace('-', '−'), ha='center', fontsize=14, fontweight='bold', color=col)
+            ax.text(xq, -0.38, qlab.replace('-', '−'), ha='center', fontsize=14, fontweight='bold', color=col)
+        a2 = 1.0 if k >= 2 else 0.0
+        xr_t = (xtest - lo) / (hi - lo)
+        xr_c = (xclip - lo) / (hi - lo)
+        xq_t = (qtest - qlo) / (qhi - qlo)
+        ax.plot([min(xr_t, 1.13)], [1], 'D', ms=8, color=C[nck], zorder=6, alpha=a2)
+        if xtest > hi:
+            ax.annotate('', (1.02, 1.0), (1.13, 1.0), arrowprops=dict(arrowstyle='-|>', color=C['danger'], lw=1.8, alpha=a2))
+        else:
+            ax.annotate('', (xq_t, 0.07), (xr_c, 0.93), arrowprops=dict(arrowstyle='-|>', color=C['data'], lw=1.8, ls='--', alpha=a2))
+            ax.plot([xq_t], [0], 'D', ms=7, color=C['data'], zorder=6, alpha=a2)
+        ax.text(0.5, -0.86, note_s, ha='center', fontsize=13.5, fontweight='bold', color=C[nck], alpha=a2)
+        ax.text(0.5, 1.66, title, ha='center', fontsize=15, fontweight='bold', color=C[ck])
+        ax.set_xlim(-0.18, 1.22)
+        ax.set_ylim(-1.05, 1.94)
+        ax.axis('off')
+    axes[0].text(-0.20, 1, 'real', ha='right', va='center', fontsize=14, fontweight='bold')
+    axes[0].text(-0.20, 0, 'INT8', ha='right', va='center', fontsize=14, fontweight='bold', color=C['neutral'])
+    fig.tight_layout(w_pad=1.2)
+    sp.save(fig, out / f'calranges_step{k}.svg')
+
+# Real Wu et al. (2020) ResNet-50 layer1.0.conv2 post-ReLU activation profile (32,904,484 values)
+_WU_CSV = Path(__file__).resolve().parents[4] / 'books' / 'vol1' / '10_model_compression' / 'data' / 'wu2020_resnet50_activation_profile.csv'
+_wu_bins = []
+with _WU_CSV.open(encoding='utf-8') as _f:
+    for _row in csv.DictReader(line for line in _f if not line.startswith('#')):
+        _wu_bins.append((float(_row['bin_left']), float(_row['bin_right']), float(_row['bin_center']), int(_row['count'])))
+_wu_total = sum(c for _, _, _, c in _wu_bins)
+
+def _eval_clip_rmse(beta):
+    s = beta / 255.0
+    sq_q = 0.0
+    sq_c = 0.0
+    for _, _, mid, cnt in _wu_bins:
+        if cnt == 0:
+            continue
+        if mid > beta:
+            sq_c += cnt * ((mid - beta) ** 2)
+        else:
+            q = min(255, max(0, round(mid / s)))
+            sq_q += cnt * ((mid - q * s) ** 2)
+    return (np.sqrt(sq_q / _wu_total), np.sqrt(sq_c / _wu_total), np.sqrt((sq_q + sq_c) / _wu_total))
+
+# 3-step real histogram matching vol1:fig-resnet-activations-histogram (§10.3.3)
+for k in (1, 2, 3):
     fig, ax = plt.subplots(figsize=(5.8, 2.45))
-    for i, h in enumerate(hist):
-        tail = 0.1 * i >= 1.1 - 1e-09
-        ax.bar(0.1 * i + 0.05, h, width=0.092, color=C['danger_l'] if tail else C['memory_l'], edgecolor=C['danger'] if tail else C['memory'], lw=0.8)
-    if k == 1:
-        cut, full = (1.1, 2.5)
-        ax.axvline(cut, color=C['data'], lw=1.8, ls='--')
-        ax.text(cut + 0.03, 0.9, 'clip at 1.1?', fontsize=12, fontweight='bold', color=C['data'])
-        ax.axvline(full, color=C['neutral'], lw=1.8, ls='--')
-        ax.text(full - 0.03, 0.9, 'cover all: 2.5', fontsize=12, fontweight='bold', color=C['neutral'], ha='right')
-        ax.annotate('rare tail', (1.65, 0.07), (1.75, 0.45), fontsize=12, fontweight='bold', color=C['danger'], arrowprops=dict(arrowstyle='-|>', color=C['danger'], lw=1.4))
-    ax.set_xlim(0, 2.55)
-    ax.set_ylim(0, 1.05)
-    ax.set_yticks([])
-    ax.spines['left'].set_visible(False)
-    ax.set_xticks([0, 0.5, 1.0, 1.5, 2.0, 2.5])
-    ax.set_xlabel('Activation value, one ResNet-50 layer (illustrative)')
+    for left, right, mid, cnt in _wu_bins:
+        if cnt <= 0:
+            continue
+        if k == 3 and mid > 0.50:
+            fc = C['compute_l']
+            ec = C['compute']
+        elif mid > 1.394:
+            fc = C['danger_l']
+            ec = C['danger']
+        else:
+            fc = C['memory_l']
+            ec = C['memory']
+        ax.bar(mid, cnt, width=(right - left) * 0.94, color=fc, edgecolor=ec, lw=0.4)
+    # Step 1: Max threshold (always shown)
+    ax.axvline(2.0922, color=C['danger'], lw=1.9, ls='--')
+    ax.text(2.06, 4.2e6, 'Max: 2.09\nRMSE 0.00241', color=C['danger'], fontsize=10.5, fontweight='bold', ha='right', va='top')
+    # Step 2: Entropy & 99.99% thresholds
+    a2 = 1.0 if k >= 2 else 0.0
+    ax.axvline(1.3940, color=C['data'], lw=2.0, ls='--', alpha=a2)
+    ax.text(1.43, 1.3e5, 'KL-entropy: 1.39\nRMSE 0.00158\n(−34%)', color=C['data'], fontsize=10.5, fontweight='bold', ha='left', va='top', alpha=a2)
+    ax.axvline(1.1221, color=C['memory'], lw=1.8, ls=':', alpha=a2)
+    ax.text(1.09, 4.2e6, '99.99%: 1.12\nRMSE 0.00161', color=C['memory'], fontsize=10.5, fontweight='bold', ha='right', va='top', alpha=a2)
+    # Step 3: Over-clip at 0.50
+    a3 = 1.0 if k >= 3 else 0.0
+    ax.axvline(0.50, color=C['compute'], lw=2.0, ls='-', alpha=a3)
+    ax.text(0.53, 8.0e3, 'Over-clip: 0.50\nRMSE 0.0390 (24.6×)', color=C['compute'], fontsize=10.5, fontweight='bold', ha='left', va='top', alpha=a3, bbox=dict(facecolor='white', edgecolor='none', pad=1.0, alpha=0.92 if k >= 3 else 0.0))
+    ax.set_yscale('log')
+    ax.set_xlim(0.0, 2.22)
+    ax.set_ylim(0.5, 1.1e7)
+    ax.set_yticks([1, 1e2, 1e4, 1e6])
+    ax.set_xticks([0.0, 0.5, 1.0, 1.5, 2.0])
+    ax.set_ylabel('Count (log)')
+    ax.set_xlabel('Post-ReLU activation value, ResNet-50 layer1.0.conv2 (32.9M values)')
+    ax.grid(axis='y', color=C['grid'], lw=0.5)
+    ax.set_axisbelow(True)
     sp.save(fig, out / f'calhist_step{k}.svg')
+
+# Real U-shaped Rounding vs Clipping RMSE curve (for F15 left column alongside Wu et al. Table 5)
+betas = np.linspace(0.45, 2.12, 85)
+rq_arr, rc_arr, rt_arr = zip(*[_eval_clip_rmse(b) for b in betas])
+fig, ax = plt.subplots(figsize=(3.75, 2.6))
+ax.plot(betas, rq_arr, '--', color=C['memory'], lw=1.8)
+ax.plot(betas, rc_arr, ':', color=C['compute'], lw=2.0)
+ax.plot(betas, rt_arr, '-', color=C['text'], lw=2.5)
+_, _, rt_050 = _eval_clip_rmse(0.50)
+_, _, rt_999 = _eval_clip_rmse(1.1221)
+_, _, rt_ent = _eval_clip_rmse(1.3940)
+_, _, rt_max = _eval_clip_rmse(2.0922)
+for b_val, rt, ck in ((0.50, rt_050, 'compute'), (1.1221, rt_999, 'memory'), (1.3940, rt_ent, 'data'), (2.0922, rt_max, 'danger')):
+    ax.plot([b_val], [rt], 'o', ms=7.5, color=C[ck], mec='white', mew=1.2, zorder=5)
+ax.text(0.56, 0.044, '0.50 (24.6×)', fontsize=11.5, fontweight='bold', color=C['compute'], ha='left', va='center')
+ax.text(0.84, 0.017, 'clipping\n(tail loss)', fontsize=11, fontweight='bold', color=C['compute'], ha='left', va='center')
+ax.annotate('99.99%', (1.1221, rt_999), xytext=(1.02, 0.0062), fontsize=11, fontweight='bold', color=C['memory'], ha='center', arrowprops=dict(arrowstyle='->', color=C['memory'], lw=1.2))
+ax.annotate('entropy\n(min)', (1.3940, rt_ent), xytext=(1.55, 0.0062), fontsize=11, fontweight='bold', color=C['data'], ha='center', arrowprops=dict(arrowstyle='->', color=C['data'], lw=1.2))
+ax.text(2.05, 0.0036, 'max', fontsize=11.5, fontweight='bold', color=C['danger'], ha='right', va='bottom')
+ax.text(1.78, 0.00043, 'rounding\n(linear in β)', fontsize=11, color=C['memory'], fontweight='bold', ha='center', va='bottom')
+ax.set_yscale('log')
+ax.set_xlim(0.42, 2.20)
+ax.set_ylim(3.2e-4, 0.085)
+ax.set_yticks([1e-3, 1e-2])
+ax.set_yticklabels(['0.001', '0.01'])
+ax.set_xticks([0.5, 1.0, 1.5, 2.0])
+ax.tick_params(labelsize=11.5)
+ax.set_xlabel('Clipping threshold β (UINT8)', fontsize=12)
+ax.set_ylabel('Reconstruction RMSE (log)', fontsize=12)
+ax.grid(color=C['grid'], lw=0.5)
+ax.set_axisbelow(True)
+sp.save(fig, out / 'clip_rmse.svg')
 pc_series = [('Float', 'neutral', [71.9, 75.2]), ('INT8 per-tensor', 'danger', [0.1, 75.0]), ('INT8 per-channel', 'data', [69.8, 75.1]), ('INT8 per-channel + QAT', 'memory', [71.1, 75.0])]
 for k in (1, 2):
     fig, ax = plt.subplots(figsize=(5.8, 2.5))

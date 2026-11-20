@@ -97,32 +97,34 @@ def icr_bars():
     sp.hbars(out / 'icr_bars.svg', [('All data', full / full, 'neutral', 'baseline'), ('Half, EL2N', half / full, 'data', '1.8×')], '', log=False, size=(3.9, 1.0), fontsize=15)
 
 def warmup():
-    """Linear pacing (chapter Sec. 9.4.1): epoch j of a W-epoch warmup serves
+    """2-step linear pacing (chapter Sec. 9.4.1): epoch j of a W-epoch warmup serves
     the easiest j/W of the D samples, so the warmup serves D(W+1)/2 in place
     of W*D. W = 10 is an illustrative choice: 5.5 D of 10 D."""
     W = 10
     j = np.arange(1, W + 1)
     frac = j / W
     assert abs(frac.sum() - (W + 1) / 2) < 1e-09
-    fig, ax = plt.subplots(figsize=(5.8, 2.5))
-    ax.bar(j, np.ones(W), color='white', edgecolor=C['neutral'], lw=1.2, ls='--', width=0.75)
-    ax.bar(j, frac, color=C['data'], width=0.75)
     post = np.arange(W + 1, W + 4)
-    ax.bar(post, np.ones(3), color=C['neutral_l'], edgecolor=C['neutral'], lw=1, width=0.75)
-    ax.text(W + 2, 1.06, 'full data', ha='center', fontsize=11, color=C['neutral'])
-    ax.text(1.0, 1.24, 'Warmup serves 5.5 D samples in place of 10 D', fontsize=13, fontweight='bold', color=C['data'])
-    ax.text(1.0, 1.1, 'dashed: what full-data epochs would serve', fontsize=11, color=C['neutral'])
-    ax.set_xticks(list(j) + list(post))
-    ax.set_xticklabels([str(v) for v in j] + ['', '', ''])
-    ax.set_xlim(0.4, W + 3.6)
-    ax.set_ylim(0, 1.38)
-    ax.set_yticks([0, 0.5, 1.0])
-    ax.set_yticklabels(['0', 'D/2', 'D'])
-    ax.set_xlabel(f'Epoch (warmup W = {W}, illustrative)')
-    ax.set_ylabel('Samples served')
-    ax.grid(axis='y', color=C['grid'], lw=0.6)
-    ax.set_axisbelow(True)
-    sp.save(fig, out / 'warmup.svg')
+    for k in (1, 2):
+        fig, ax = plt.subplots(figsize=(5.8, 2.55))
+        ax.bar(j, np.ones(W), color='white', edgecolor=C['neutral'], lw=1.2, ls='--', width=0.75)
+        ax.bar(j, frac, color=C['data'], width=0.75)
+        ax.text(0.65, 1.32, 'Step 1: 5.5 D served vs. 10 D (45% less warmup)', fontsize=11.5, fontweight='bold', color=C['data'])
+        ax.text(0.65, 1.14, 'dashed: full-data epochs', fontsize=10.5, color=C['neutral'])
+        a2 = 1.0 if k >= 2 else 0.0
+        ax.bar(post, np.ones(3), color=C['compute_l'], edgecolor=C['compute'], lw=1.5, width=0.75, alpha=a2)
+        ax.text(W + 2, 1.06, 'full D\n(measure)', ha='center', va='bottom', fontsize=10.5, fontweight='bold', color=C['compute'], alpha=a2)
+        ax.set_xticks(list(j) + list(post))
+        ax.set_xticklabels([str(v) for v in j] + ['11', '12', '13'])
+        ax.set_xlim(0.4, W + 3.7)
+        ax.set_ylim(0, 1.48)
+        ax.set_yticks([0, 0.5, 1.0])
+        ax.set_yticklabels(['0', 'D/2', 'D'])
+        ax.set_xlabel(f'Epoch (warmup W = {W}, illustrative; post-warmup epochs train on full D)')
+        ax.set_ylabel('Samples served')
+        ax.grid(axis='y', color=C['grid'], lw=0.6)
+        ax.set_axisbelow(True)
+        sp.save(fig, out / f'warmup_step{k}.svg')
 
 def tokens_per_param():
     """GPT-2 XL appears twice: its unique tokens (WebText) and its training
@@ -225,7 +227,29 @@ def svp():
     sp.hbars(out / 'svp_coreset.svg', [('Target trains on all of CIFAR10', 1.0, 'neutral', '1.0'), ('Proxy removes 50%, target trains', 1 / 1.6, 'data', '1.6× faster, same final accuracy')], '', log=False, xlabel='End-to-end training time (relative)', size=(5.8, 1.6))
 
 def fixmatch():
-    sp.hbars(out / 'fixmatch.svg', [(f"{_VALS[f'fm_labels_{k}']} labels", _NUMS[f'fm_acc_{k}'], 'data', f"{_VALS[f'fm_acc_{k}']}%") for k in ('40', '250', '4k')], '', log=False, xlabel='CIFAR-10 test accuracy (%); full labeled set: 50,000', size=(5.8, 2.0))
+    rows = [
+        ('4,000 labels (8%)', _NUMS['fm_acc_4k'], 'neutral', f"{_VALS['fm_acc_4k']}%", 1),
+        ('250 labels (0.5%)', _NUMS['fm_acc_250'], 'data', f"{_VALS['fm_acc_250']}%  (16× fewer labels)", 1),
+        ('40 labels (4 / class)', _NUMS['fm_acc_40'], 'compute', f"{_VALS['fm_acc_40']}%  (1,250× fewer)", 2),
+    ]
+    for k in (1, 2):
+        fig, ax = plt.subplots(figsize=(5.8, 2.2))
+        for i, (lab, v, ck, txt, req) in enumerate(rows):
+            y = 2 - i
+            a = 1.0 if k >= req else 0.0
+            ax.barh(y, v, color=C[ck], height=0.58, alpha=a)
+            ax.text(-1.5, y, lab, ha='right', va='center', fontsize=12, fontweight='bold', color=C['text'], alpha=a)
+            ax.text(v + 1.5, y, txt, va='center', fontsize=12, fontweight='bold', color=C[ck], alpha=a, bbox=dict(facecolor='white', edgecolor='none', pad=1.2, alpha=0.88 if a > 0 else 0.0))
+        ax.axvline(_NUMS['fm_acc_4k'], color=C['neutral'], lw=1.2, ls=':')
+        ax.set_xlim(0, 142)
+        ax.set_ylim(-0.55, 2.55)
+        ax.set_yticks([])
+        ax.set_xticks([0, 25, 50, 75, 100])
+        ax.spines['left'].set_visible(False)
+        ax.grid(axis='x', color=C['grid'], lw=0.6)
+        ax.set_axisbelow(True)
+        ax.set_xlabel('CIFAR-10 test accuracy (%); full labeled set: 50,000')
+        sp.save(fig, out / f'fixmatch_step{k}.svg')
 
 def echo():
     r, e2 = (1.923809524, 2.0)

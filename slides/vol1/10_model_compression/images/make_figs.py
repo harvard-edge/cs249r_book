@@ -99,8 +99,9 @@ def bars(path, rows, shown, log=False, xlim=None, xlabel=None, size=sp.SIZE, vli
 def svg(path, w, h, body):
     Path(path).write_text(f'<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}" font-family="{FONT}">\n<rect width="{w}" height="{h}" fill="white"/>\n{body}</svg>\n')
 
+import html
 def text(x, y, s, size=22, color=C['text'], weight='normal', anchor='start'):
-    return f'<text x="{x}" y="{y}" font-size="{size}" fill="{color}" font-weight="{weight}" text-anchor="{anchor}">{s}</text>\n'
+    return f'<text x="{x}" y="{y}" font-size="{size}" fill="{color}" font-weight="{weight}" text-anchor="{anchor}">{html.escape(str(s), quote=False)}</text>\n'
 
 def box(x, y, w, h, fill, stroke, sw=2, rx=6, dash=None):
     d = f' stroke-dasharray="{dash}"' if dash else ''
@@ -363,24 +364,129 @@ for k in (1, 2):
     msg = 'Dense: 16 multiply-accumulates' if k == 1 else 'Sparse: 6 products + 6 column indices'
     body += text(20, 360, msg, 26, C['compute'] if k == 1 else C['memory'], 'bold')
     svg(out / f'spmv_step{k}.svg', 600, 380, body)
-fig, ax = plt.subplots(figsize=(5.8, 2.6))
-ax.axvspan(80, 90, color=C['danger_l'])
-ax.text(85, 1.85, 'unstructured kernel\ncan lose to dense\nuntil 80 to 90%', ha='center', va='center', fontsize=12, fontweight='bold', color=C['danger'])
-for x, lab, ck, y in ((50.0, 'CSR bytes: 50%', 'memory', 1.05), (66.7, 'COO bytes: 66.7%', 'memory', 0.5), (50, '2:4 pattern: exactly 50%,\nhardware path', 'data', -1.05)):
-    ax.plot([x], [0], 'o', ms=10, color=C[ck], zorder=5)
-    ax.plot([x, x], [0, y - 0.2 if y > 0 else y + 0.35], color=C[ck], lw=1.2)
-    ax.text(x, y, lab, ha='center', va='center', fontsize=12, fontweight='bold', color=C[ck])
-ax.axhline(0, color=C['text'], lw=1.5)
-ax.set_xlim(0, 100)
-ax.set_ylim(-1.6, 2.6)
-ax.set_yticks([])
-for side in ('left', 'bottom'):
-    ax.spines[side].set_visible(False)
-ax.set_xticks([0, 25, 50, 75, 100])
-ax.set_xticklabels(['0%', '25%', '50%', '75%', '100%'])
-ax.tick_params(axis='x', length=0, pad=-6)
-ax.set_xlabel('Share of weights that are zero')
-sp.save(fig, out / 'breakeven.svg')
+for k in (1, 2):
+    fig, ax = plt.subplots(figsize=(5.8, 2.6))
+    a2 = 1.0 if k >= 2 else 0.0
+    ax.axvspan(80, 90, color=C['danger_l'], alpha=a2)
+    ax.text(85, 1.85, 'unstructured kernel\ncan lose to dense\nuntil 80 to 90%', ha='center', va='center', fontsize=12, fontweight='bold', color=C['danger'], alpha=a2)
+    for x, lab, ck, y, req in ((50.0, 'CSR bytes: 50%', 'memory', 1.05, 1), (66.7, 'COO bytes: 66.7%', 'memory', 0.45, 1), (50.0, '2:4 pattern: exactly 50%,\nhardware path', 'data', -1.05, 2)):
+        a = 1.0 if k >= req else 0.0
+        ax.plot([x], [0], 'o', ms=10, color=C[ck], zorder=5, alpha=a)
+        ax.plot([x, x], [0, y - 0.2 if y > 0 else y + 0.35], color=C[ck], lw=1.2, alpha=a)
+        ax.text(x, y, lab, ha='center', va='center', fontsize=12, fontweight='bold', color=C[ck], alpha=a)
+    ax.axhline(0, color=C['text'], lw=1.5)
+    ax.set_xlim(0, 100)
+    ax.set_ylim(-1.6, 2.6)
+    ax.set_yticks([])
+    for side in ('left', 'bottom'):
+        ax.spines[side].set_visible(False)
+    ax.set_xticks([0, 25, 50, 75, 100])
+    ax.set_xticklabels(['0%', '25%', '50%', '75%', '100%'])
+    ax.tick_params(axis='x', length=0, pad=-6)
+    ax.set_xlabel('Share of weights that are zero')
+    sp.save(fig, out / f'breakeven_step{k}.svg')
+
+# 3-step Block-Sparse GEMM diagram matching vol1:fig-block-sparse-gemm (§10.2.1 / §10.4.2)
+# 3x3 grid of 3x3 dense tiles (all stored weights = 1), 6 nonzero tiles at (0,0),(0,1),(1,0),(1,2),(2,1),(2,2)
+# X0=[1,2,3] (sum 6), X1=[4,5,6] (sum 15), X2=[7,8,9] (sum 24) -> Y0=[21,21,21], Y1=[30,30,30], Y2=[39,39,39]
+BS_COORDS = [(0, 0), (0, 1), (1, 0), (1, 2), (2, 1), (2, 2)]
+for step in (1, 2, 3):
+    body = ''
+    # Left: 3x3 grid of 3x3 tiles (each tile 54x54 with 6px gap)
+    body += text(115, 28, 'W: 3×3 grid of 3×3 tiles', 21, C['text'], 'bold', 'middle')
+    gx0, gy0, ts, gap = 22, 46, 56, 7
+    for r in range(3):
+        for c in range(3):
+            x = gx0 + c * (ts + gap)
+            y = gy0 + r * (ts + gap)
+            nz = (r, c) in BS_COORDS
+            hl = (step == 2 and (r, c) == (1, 2))
+            if hl:
+                fc, ec, sw = C['compute_l'], C['compute'], 3.2
+            elif nz:
+                fc, ec, sw = C['memory_l'], C['memory'], 2.2
+            else:
+                fc, ec, sw = '#F7F7F7', '#BBBBBB', 1.5
+            body += box(x, y, ts, ts, fc, ec, sw, 4, None if nz else '5,3')
+            # Draw subtle 3x3 inner sub-grid lines on nonzero tiles
+            if nz:
+                for d in (1, 2):
+                    lx = x + d * ts / 3
+                    ly = y + d * ts / 3
+                    body += f'<line x1="{lx:.1f}" y1="{y}" x2="{lx:.1f}" y2="{y + ts}" stroke="{ec}" stroke-width="0.7" opacity="0.45"/>\n'
+                    body += f'<line x1="{x}" y1="{ly:.1f}" x2="{x + ts}" y2="{ly:.1f}" stroke="{ec}" stroke-width="0.7" opacity="0.45"/>\n'
+                body += text(x + ts / 2, y + ts / 2 + 7, f'({r},{c})', 19, ec, 'bold', 'middle')
+            else:
+                body += text(x + ts / 2, y + ts / 2 + 7, '0', 20, '#AAAAAA', 'normal', 'middle')
+    body += text(115, 256, '6 dense tiles; 3 empty', 20, C['neutral'], 'bold', 'middle')
+
+    # Arrow -> Packed tiles + coordinate index
+    body += arrow(222, 138, 258, 138, C['neutral'], 3)
+    body += text(364, 28, 'Packed tiles + 6 coords', 21, C['memory'], 'bold', 'middle')
+    px0, py0, pts = 268, 48, 48
+    for idx, (r, c) in enumerate(BS_COORDS):
+        col_i, row_i = idx % 2, idx // 2
+        tx = px0 + col_i * 58
+        ty = py0 + row_i * 60
+        hl = (step == 2 and (r, c) == (1, 2))
+        fc = C['compute_l'] if hl else C['memory_l']
+        ec = C['compute'] if hl else C['memory']
+        body += box(tx, ty, pts, pts, fc, ec, 3.0 if hl else 2.0, 4)
+        body += text(tx + pts / 2, ty + pts / 2 + 7, f'{r},{c}', 19, ec, 'bold', 'middle')
+        # Coordinate index badge column to the right
+        ix = 398
+        iy = 48 + idx * 30
+        body += box(ix, iy, 68, 25, C['compute_l'] if hl else '#FFF4E5', C['compute'] if hl else '#D9822B', 2.4 if hl else 1.4, 3)
+        body += text(ix + 34, iy + 18, f'({r},{c})', 18, C['compute'] if hl else C['text'], 'bold', 'middle')
+    body += text(364, 256, '1 coord per 9 weights', 20, C['memory'], 'bold', 'middle')
+
+    # Step 2+: Activation X slices and dense tile multiply -> Output Y blocks
+    if step >= 2:
+        body += text(536, 28, 'Input X', 21, C['text'], 'bold', 'middle')
+        x_slices = [('X0', '[1,2,3]', 0), ('X1', '[4,5,6]', 1), ('X2', '[7,8,9]', 2)]
+        for name, vals_s, ci in x_slices:
+            yy = 48 + ci * 64
+            hl = (step == 2 and ci == 2)
+            body += box(484, yy, 104, 54, C['compute_l'] if hl else '#F3F6FA', C['compute'] if hl else '#7A869A', 2.8 if hl else 1.8, 5)
+            body += text(536, yy + 22, name, 20, C['compute'] if hl else C['text'], 'bold', 'middle')
+            body += text(536, yy + 44, vals_s, 18, C['text'], 'normal', 'middle')
+
+        # Multiply connector
+        body += arrow(594, 138, 634, 138, C['compute'] if step == 2 else C['data'], 3)
+        body += text(614, 122, '×', 26, C['compute'] if step == 2 else C['data'], 'bold', 'middle')
+
+        # Output Y blocks
+        body += text(758, 28, 'Output Y (all-1 tiles)', 21, C['data'], 'bold', 'middle')
+        if step == 2:
+            y_rows = [
+                ('Y0', '6 + 15 = 21', False),
+                ('Y1', '6 + 24 = 30', True),
+                ('Y2', 'pending...', False),
+            ]
+        else:
+            y_rows = [
+                ('Y0', '[21, 21, 21]', False),
+                ('Y1', '[30, 30, 30]', False),
+                ('Y2', '[39, 39, 39]', False),
+            ]
+        for ri, (name, val_s, hl) in enumerate(y_rows):
+            yy = 48 + ri * 64
+            fc = C['compute_l'] if hl else (C['data_l'] if step == 3 or ri < 2 else '#F7F7F7')
+            ec = C['compute'] if hl else (C['data'] if step == 3 or ri < 2 else '#BBBBBB')
+            body += box(642, yy, 234, 54, fc, ec, 2.8 if hl else 2.0, 5)
+            body += text(678, yy + 34, name, 21, ec, 'bold', 'middle')
+            body += text(784, yy + 34, val_s, 20, C['text'], 'bold' if (hl or step == 3) else 'normal', 'middle')
+        if step == 2:
+            body += text(758, 256, 'W(1,2) × X2 adds +24 to Y1', 19, C['compute'], 'bold', 'middle')
+        else:
+            body += text(758, 256, '54 vs 81 MACs (3 skipped)', 19, C['data'], 'bold', 'middle')
+
+    # Step 3: Green takeaway banner
+    if step >= 3:
+        body += box(22, 284, 854, 54, C['data_l'], C['data'], 2.2, 8)
+        body += text(449, 318, 'Dense 3×3 inner tiles amortize index cost and keep SIMD / tensor lanes busy.', 21, C['data'], 'bold', 'middle')
+
+    svg(out / f'blocksparse_step{step}.svg', 900, 354, body)
 mlp_rows = [dict(label='MLP block', value=8.0, color='compute', text='8d²: about two thirds'), dict(label='Q, K, V, O projections', value=4.0, color='memory', text='4d²: just under a third'), dict(label='LayerNorm', value=0.05, color='neutral', text='almost none')]
 bars(out / 'mlpshare.svg', mlp_rows, [1, 1, 1], xlim=(0, 14), size=(5.0, 1.9), xticks=[(0, '0'), (4.0, '4d²'), (8.0, '8d²')], xlabel='Multiply-accumulates per token, per layer')
 import datetime as dt
@@ -484,25 +590,28 @@ ax.set_axisbelow(True)
 ax.set_xlabel('Relative to width 1.0, dense (median of 1,000 runs)')
 sp.save(fig, out / 'cpu_measure.svg')
 _cliff_color = {'Pruning + quantization': 'data', 'Pruning only': 'compute', 'Quantization only': 'memory', 'SVD': 'danger'}
+_cliff_step = {'SVD': 1, 'Quantization only': 1, 'Pruning only': 2, 'Pruning + quantization': 3}
 CLIFF = {name: (ck, [(r['size_pct'], r['accuracy_change']) for r in load_series('slides/vol1/10_model_compression/images/data/han2016_compression_methods.csv').entries if r['method'] == name]) for name, ck in _cliff_color.items()}
-fig, ax = plt.subplots(figsize=(5.8, 2.7))
 label_at = {'Pruning + quantization': (2.2, 0.3, 'left'), 'Pruning only': (10.0, 0.3, 'left'), 'Quantization only': (15.3, 0.3, 'left'), 'SVD': (17.2, -3.6, 'left')}
-for name, (ck, pts) in CLIFF.items():
-    xs, ys = zip(*pts)
-    ax.plot(xs, ys, color=C[ck], lw=2.6)
-    ax.plot(xs[1:], ys[1:], 'o', ms=5, color=C[ck], mfc='white', mew=1.8)
-    lx, ly, ha = label_at[name]
-    ax.text(lx, ly, name, color=C[ck], fontsize=12, fontweight='bold', ha=ha)
-ax.axhline(0, color=C['neutral'], lw=1)
-ax.set_xlim(2, 20)
-ax.set_ylim(-4.5, 0.9)
-ax.set_xticks([2, 5, 10, 15, 20])
-ax.set_xticklabels(['2%', '5%', '10%', '15%', '20%'])
-ax.set_yticks([-4, -3, -2, -1, 0])
-ax.set_yticklabels(['-4', '-3', '-2', '-1', '0'])
-ax.set_xlabel('Model size kept (% of original)')
-ax.set_ylabel('Accuracy change (points)')
-ax.grid(color=C['grid'], lw=0.6)
-ax.set_axisbelow(True)
-sp.save(fig, out / 'cliff_methods.svg')
+for k in (1, 2, 3):
+    fig, ax = plt.subplots(figsize=(5.8, 2.7))
+    for name, (ck, pts) in CLIFF.items():
+        a = 1.0 if k >= _cliff_step[name] else 0.0
+        xs, ys = zip(*pts)
+        ax.plot(xs, ys, color=C[ck], lw=2.6, alpha=a)
+        ax.plot(xs[1:], ys[1:], 'o', ms=5, color=C[ck], mfc='white', mew=1.8, alpha=a)
+        lx, ly, ha = label_at[name]
+        ax.text(lx, ly, name, color=C[ck], fontsize=12, fontweight='bold', ha=ha, alpha=a)
+    ax.axhline(0, color=C['neutral'], lw=1)
+    ax.set_xlim(2, 20)
+    ax.set_ylim(-4.5, 0.9)
+    ax.set_xticks([2, 5, 10, 15, 20])
+    ax.set_xticklabels(['2%', '5%', '10%', '15%', '20%'])
+    ax.set_yticks([-4, -3, -2, -1, 0])
+    ax.set_yticklabels(['-4', '-3', '-2', '-1', '0'])
+    ax.set_xlabel('Model size kept (% of original)')
+    ax.set_ylabel('Accuracy change (points)')
+    ax.grid(color=C['grid'], lw=0.6)
+    ax.set_axisbelow(True)
+    sp.save(fig, out / f'cliff_methods_step{k}.svg')
 print('figures written')
