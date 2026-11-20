@@ -93,8 +93,8 @@ for k in (1, 2, 3, 4):
     ax.spines['left'].set_visible(False)
     ax.set_xlabel('Milliseconds, one chat request (Llama 2 70B, median, no batching)')
     sp.save(fig, out / f'ttft_step{k}.svg')
-PHASE_PRE = [('GPT-2 XL,\n512 tokens', 3.882709808, '3.9'), ('Llama 3 8B,\n1,000 tokens', 41.93186047, '41.9')]
-PHASE_DEC = [('GPT-2 XL', 0.8955223881, 'memory', '0.9 ms'), ('Llama 3 8B,\nINT4', 1.567649681, 'memory', '1.2 floor, 1.57'), ('GPT-2 XL,\neager', 8.64, 'neutral', '8.6 ms')]
+PHASE_PRE = [('GPT-2 XL,\n512 tokens', 3.882709808, '3.9'), ('Llama 3 8B,\n1,000 tokens', 41.2692, '41.3')]
+PHASE_DEC = [('GPT-2 XL', 0.8955223881, 'memory', '0.9 ms'), ('Llama 3 8B,\nINT4', 1.2476, 'memory', '1.2 floor, 1.25'), ('GPT-2 XL,\neager', 8.64, 'neutral', '8.6 ms')]
 FS = 9
 for k in (1, 2, 3, 4):
     fig = plt.figure(figsize=cm(10.4, 5.0))
@@ -128,10 +128,10 @@ for k in (1, 2, 3, 4):
         a_.set_ylim(-0.5, 2.5 if a_ is bx else 1.5)
         a_.tick_params(axis='x', labelsize=8, pad=1)
     a4 = 1.0 if k >= 4 else 0.0
-    tp = 1.567649681
+    tp = 1.2476
     cx.barh(0, tp, color=C['memory'], height=0.8, alpha=a4)
     cx.barh(0, 20 - tp, left=tp, color=C['data_l'], edgecolor=C['data'], hatch='//', height=0.8, lw=0, alpha=a4)
-    cx.text(10.8, 0, '18.4 ms: room to share this read (derived)', ha='center', va='center', fontsize=FS - 0.5, fontweight='bold', color=C['data'], alpha=a4, bbox=dict(facecolor='white', edgecolor='none', pad=1, alpha=a4))
+    cx.text(10.6, 0, '18.8 ms: room to share this read (derived)', ha='center', va='center', fontsize=FS - 0.5, fontweight='bold', color=C['data'], alpha=a4, bbox=dict(facecolor='white', edgecolor='none', pad=1, alpha=a4))
     cx.text(-0.3, 0, 'Llama 3 8B,\n20 ms TPOT', ha='right', va='center', fontsize=FS - 0.5, fontweight='bold', alpha=a4)
     cx.set_xlim(0, 20)
     cx.set_ylim(-0.6, 0.6)
@@ -285,7 +285,7 @@ for k in range(1, 8):
             summary(ax, 'done at step 100; 350 of 400 slot-steps used (87.5%)', C['data'])
     save_slot(fig, out / f'cb_step{k}.svg')
 DEC = 2.771058455
-PRE = 41.93186047
+PRE = 41.2692
 for k in (1, 2, 3):
     fig, (ax, bx) = plt.subplots(1, 2, figsize=cm(9.9, 4.4), sharey=True, gridspec_kw={'wspace': 0.1})
     fig.subplots_adjust(left=0.2, right=0.99, top=0.88, bottom=0.12)
@@ -294,14 +294,14 @@ for k in (1, 2, 3):
         tall = i == 4
         a = 1.0 if not tall or k >= 2 else 0.0
         ax.bar(i, v, color=C['compute'] if tall else C['memory'], width=0.75, alpha=a)
-    ax.text(4, DEC + PRE + 1.5, '44.7 ms', ha='center', fontsize=9, fontweight='bold', color=C['compute'], alpha=1.0 if k >= 2 else 0.0)
+    ax.text(4, DEC + PRE + 1.5, '44.0 ms', ha='center', fontsize=9, fontweight='bold', color=C['compute'], alpha=1.0 if k >= 2 else 0.0)
     ax.set_title('Whole prompt in one step', fontsize=8.5, loc='left', fontweight='bold', pad=3)
     right = [DEC] * 2 + [DEC + PRE / 4] * 4 + [DEC] * 3
     a3 = 1.0 if k >= 3 else 0.0
     for i, v in enumerate(right):
         chunk = 2 <= i <= 5
         bx.bar(i, v, color=C['compute'] if chunk else C['memory'], width=0.75, alpha=a3)
-    bx.text(4.0, 27, f'{4} chunks of 250:\n13.3 ms each', ha='center', fontsize=8.5, fontweight='bold', color=C['compute'], alpha=a3)
+    bx.text(4.0, 27, f'{4} chunks of 250:\n13.1 ms each', ha='center', fontsize=8.5, fontweight='bold', color=C['compute'], alpha=a3)
     bx.set_title('Four chunks', fontsize=8.5, loc='left', fontweight='bold', alpha=a3, pad=3)
     for a_, show in ((ax, True), (bx, k >= 3)):
         a_.axhline(20, color=C['danger'], lw=1.8, ls='--', alpha=1.0 if show else 0.0)
