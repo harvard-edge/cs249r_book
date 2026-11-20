@@ -5,7 +5,7 @@ editor must decide whether to update the tiers or the solver."""
 
 import pytest
 
-from mlsysim import Literature, ReferenceStats, Scenarios
+from mlsysim import Literature, ReferenceStats, Scenarios, Systems
 from mlsysim.core.units import BYTES_ADAM_STATE, BYTES_FP16, BYTES_FP32, GiB
 from mlsysim.core.provenance import ProvenanceKind
 from mlsysim.solvers import DistributedModel
@@ -18,7 +18,8 @@ MODELED_TIERS = {256: T.Eff256Gpu, 1024: T.Eff1024Gpu, 8192: T.Eff8192Gpu}
 def _reference_sweep_efficiency(n_gpus: int) -> float:
     scenario = Scenarios.DenseLLMPretrainingReference
     model = scenario.workload
-    fleet = scenario.system
+    # NDR fabric (2026-11-20): the tiers match the Frontier_8K step the chapters model.
+    fleet = Systems.Clusters.Training_1K_NDR
     gpus_per_node = fleet.node.accelerators_per_node
     hbm = fleet.node.accelerator.memory.capacity
     state_bytes = 2 * BYTES_FP16 + BYTES_FP32 + BYTES_ADAM_STATE
