@@ -547,6 +547,12 @@ class ValidateCommand:
             Scope("duplicates", "_run_duplicate_labels"),
             Scope("orphans", "_run_unreferenced_labels"),
             Scope("fig-labels", "_run_fig_label_underscores", default=False),
+            # Added 2026-11-20: an HTML comment between a {#fig-} div opener and
+            # its image makes Quarto put the image inside \caption{}, which
+            # fails the PDF ("Missing number, treated as zero"); Vol III
+            # 06_long_term_memory hit it. Put such comments above the div.
+            Scope("fig-div-comment", "_run_fig_div_comment",
+                  note="no HTML comment between a {#fig-} div opener and its image"),
         ],
         "headers": [
             # ids: vol1 complete; opt-in scope for vol2/3/4 as sections are finalized.
@@ -6250,6 +6256,43 @@ class ValidateCommand:
     # ------------------------------------------------------------------
     # Figure label underscores  (ported from check_fig_references.py)
     # ------------------------------------------------------------------
+
+    def _run_fig_div_comment(self, root: Path) -> ValidationRunResult:
+        """Flag a {#fig-} div whose image is preceded by an HTML comment."""
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+        opener = re.compile(r"^:::+\s*\{#fig-")
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            in_code = False
+            for idx, line in enumerate(lines):
+                if line.strip().startswith("```"):
+                    in_code = not in_code
+                    continue
+                if in_code or not opener.match(line):
+                    continue
+                j = idx + 1
+                if j >= len(lines) or not lines[j].lstrip().startswith("<!--"):
+                    continue
+                while j < len(lines) and "-->" not in lines[j]:
+                    j += 1
+                if j + 1 < len(lines) and lines[j + 1].lstrip().startswith("!["):
+                    issues.append(ValidationIssue(
+                        file=self._relative_file(file), line=idx + 2,
+                        code="fig_div_comment_before_image",
+                        message=("An HTML comment sits between the figure div opener and its "
+                                 "image, so the PDF puts the image inside the caption and fails. "
+                                 "Move the comment above the ::: {#fig-...} line."),
+                        severity="error", context=lines[idx + 1].strip()[:120],
+                    ))
+        return ValidationRunResult(
+            name="fig-div-comment",
+            description="HTML comment before a figure image",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
 
     def _run_fig_label_underscores(self, root: Path) -> ValidationRunResult:
         """Find figure references containing underscores (invalid in Quarto)."""
