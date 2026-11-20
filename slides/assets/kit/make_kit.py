@@ -106,7 +106,8 @@ VOLUMES = {
                                        (16, "Responsible AI", "Governance & Sustainability")]),
             ("Close", [(17, "Conclusion", "all")]),
         ],
-        course_cols=[[0, 1], [2], [3], [4, 5]], course_slot=(15, 5.85)),
+        course_cols=[[0, 1], [2], [3], [4, 5]], course_slot=(15, 5.85),
+        divstack=True),
 }
 
 # Volumes III and IV use a few more keys, all optional:
@@ -160,6 +161,7 @@ VOLUMES[3] = dict(
     ],
     course_cols=[[0, 1, 2], [3, 4], [5, 6, 7]], course_slot=(15, 6.2),
     card_tags=False,
+    divstack=True,
 )
 VOLUMES[4] = dict(
     stack=["World", "Boundary", "Body", "Nervous System", "Brain"],
@@ -195,7 +197,7 @@ VOLUMES[4] = dict(
     card_labels={"Nervous System": "Nervous System",
                  "Boundary and Brain": "Boundary, Brain",
                  "Governance": "Governance"},
-    records=True, budget=True,
+    records=True, budget=True, divstack=True,
 )
 
 # Volume IV's record chain (course plan, "The golden thread"; the book's
@@ -710,30 +712,89 @@ def dam(accent, hl=None):
 
 # ---------------------------------------------------------------- divider stack
 def divstack(accent, highlight=None):
-    """The stack for the section-divider slot (Volume I). Drawn for its
-    placed size, 5 cm tall in a right-hand column, so a 22-unit label lands
-    near 9.5 pt. highlight: a layer name, BAR, or 'all' (every layer lit,
-    for lectures that span the stack)."""
+    """The stack for the section-divider slot (all volumes). Drawn for its
+    placed size, 5 cm tall in a right-hand column, so labels land near 8.5 to
+    10 pt without colliding with the left-hand divider text (w/h <= 0.92).
+    highlight: a layer name, list of names, BAR, ENVELOPE name, or 'all'."""
     n = len(STACK)
-    x0, y0, bw, bh, gap = 4, 6, 214, 38, 6
+    hls = set(highlight) if isinstance(highlight, (list, tuple)) else {highlight}
+    all_lit = highlight == "all"
+    gi = STACK.index(GAP_BELOW) if GAP_BELOW in STACK else None
+
+    # Compact per-volume sizing that fits w/h <= 0.92 at 5 cm height.
+    if n >= 8:
+        fs, bh, gap = 19, 36, 5
+        bw = max(214, int(max(tw(name, fs) for name in STACK)) + 26)
+    elif ENVELOPE:
+        fs, bh, gap = 21, 40, 7
+        bw = max(226, int(max(tw(name, fs) for name in STACK)) + 28)
+    elif n <= 6:
+        fs, bh, gap = 22, 42, 7
+        bw = max(210, int(max(tw(name, fs) for name in STACK)) + 28)
+    else:
+        fs, bh, gap = 22, 38, 6
+        bw = 214
+
+    pgap = 28 if gi is not None else 0
+    epad = 10 if ENVELOPE else 0
+    ehead = 36 if ENVELOPE else 0
+    x0 = 4 + epad
+    ytop_env = 6
+    y0 = ytop_env + ehead if ENVELOPE else 6
+
+    def ylayer(i):
+        y = y0 + (n - 1 - i) * (bh + gap)
+        if gi is not None and i < gi:
+            y += pgap
+        return y
+
     out = []
     for i, name in enumerate(STACK):
-        y = y0 + (n - 1 - i) * (bh + gap)
-        on = highlight == "all" or name == highlight
+        y = ylayer(i)
+        on = all_lit or name in hls
         out.append(rect(x0, y, bw, bh, accent, opacity=1.0 if on else 0.10, rx=6))
-        out.append(text(x0 + 14, y + bh / 2, name.replace("&", "&amp;"), size=22,
-                        weight=700, fill=C["white"] if on else "#7A7A7A"))
-    w = x0 + bw
+        out.append(text(x0 + 13, y + bh / 2, name.replace("&", "&amp;"), size=fs,
+                        weight=700, fill=C["white"] if on else "#6E6E6E"))
+    if gi is not None:
+        cy = ylayer(gi) + bh + (gap + pgap) / 2
+        dim = not all_lit and highlight is not None and not (hls & {STACK[gi], STACK[gi - 1]})
+        col = "#9A9A9A" if dim else C["gray"]
+        out.append(f'<line x1="{x0}" y1="{cy}" x2="{x0 + bw}" y2="{cy}" '
+                   f'stroke="{col}" stroke-width="2.2" stroke-dasharray="7,5"/>\n')
+        pw = 166
+        out.append(rect(x0 + (bw - pw) / 2, cy - 11, pw, 22, C["white"], rx=4))
+        out.append(text(x0 + bw / 2, cy, "Proposal boundary", size=16, weight=700,
+                        fill=col, anchor="middle"))
+
+    w = x0 + bw + epad
     if DATA:
-        dx, dh = x0 + bw + 8, n * bh + (n - 1) * gap
-        on = highlight in ("all", BAR)
+        dx, dh = x0 + bw + 8, n * bh + (n - 1) * gap + pgap
+        on = all_lit or BAR in hls
         out.append(rect(dx, y0, 46, dh, accent, opacity=1.0 if on else 0.10, rx=6))
         cx, cy = dx + 23, y0 + dh / 2
-        out.append(text(cx, cy, BAR.upper(), size=20, weight=700,
-                        fill=C["white"] if on else "#7A7A7A", anchor="middle",
-                        extra=f' letter-spacing="3" transform="rotate(-90 {cx} {cy})"'))
+        bar_fs = 18 if len(BAR) > 6 else 20
+        out.append(text(cx, cy, BAR.upper(), size=bar_fs, weight=700,
+                        fill=C["white"] if on else "#6E6E6E", anchor="middle",
+                        extra=f' letter-spacing="2.5" transform="rotate(-90 {cx} {cy})"'))
         w = dx + 46
-    h = y0 + n * bh + (n - 1) * gap + 6
+
+    ebot = ylayer(0) + bh + epad
+    if ENVELOPE:
+        ename, elabel, _ = ENVELOPE
+        on = all_lit or ename in hls
+        ex, ew = x0 - epad, bw + 2 * epad
+        col = accent if on else "#8A8A8A"
+        if on:
+            out.append(rect(ex, ytop_env, ew, ehead - 6, accent, rx=8))
+            out.append(rect(ex, ytop_env, ew, ebot - ytop_env, "none", accent, 3.2, rx=10))
+        else:
+            out.append(rect(ex, ytop_env, ew, ebot - ytop_env, "none", col, 2.0,
+                            rx=10, extra=' stroke-dasharray="8,5"'))
+        hy = ytop_env + (ehead - 6) / 2
+        out.append(text(x0 + 4, hy, elabel, size=18, weight=700,
+                        fill=C["white"] if on else col))
+
+    h = ebot + 6
     return svg("".join(out), w=w + 4, h=h, label="ML system stack")
 
 
@@ -1147,9 +1208,12 @@ def main():
     vol = VOLUMES[args.volume]
     if vol.get("divstack"):
         # The section-divider stack (theme option dividerstack): one file per
-        # layer and mark, plus every layer lit for lectures spanning the stack.
-        for name in STACK + ([BAR] if DATA else []):
+        # layer, mark (bar/envelope), extra multi-layer highlight, plus every
+        # layer lit for lectures spanning the stack.
+        for name in STACK + marks:
             figs[f"divstack_{layer_slug(name)}"] = divstack(accent, highlight=name)
+        for slug, names in EXTRA.items():
+            figs[f"divstack_{slug}"] = divstack(accent, highlight=names)
         figs["divstack_all"] = divstack(accent, highlight="all")
     if vol.get("records"):
         figs["record_chain"] = record_chain(accent)
