@@ -47,6 +47,31 @@ the package's two device-power assumptions: rated TDP and `Engine.solve`'s
 energy-proportional rule. `gpu-energy/README.md` documents the protocol and
 the measurement boundary.
 
+`gpu-energy-workloads/` is a second declared test with the same runner,
+protocol and analysis and a new seed, 2198. It adds Llama-2-7B, Llama-2-13B and
+Mixtral-8x7B, adds the H200 as a third GPU, and measures Llama-3.1-8B and
+ResNet-50 training again on new boards. Its README reports the results and the
+changes made after measuring began.
+
+`gpu-energy-boards/` is a third declared test with the same runner, protocol
+and analysis, and the seed of `gpu-energy/`. It measures Llama-3.1-8B and
+ResNet-50 training on four more boards each of the H100, A100 and H200, to
+find out how much energy differs between boards of one GPU.
+`../scripts/compare_gpu_energy_boards.py` collects each run's energy from all
+three tests into `gpu-energy-boards/board_energy.csv` and compares them.
+
+`gpu-energy-seeds/` is a fourth declared test with two plans that differ only
+in seed. Each container measures both on one GPU, so the seed can be compared
+on the same board. `../scripts/compare_gpu_energy_seeds.py` pairs the runs.
+
+The per-trial records (`trials.jsonl`, about 34 MB) of these three tests are
+not committed, to keep the repository small. Each run's `manifest.json` stays
+and records the SHA-256 of its `trials.jsonl`, so a copy of the records can be
+checked against it. The records are in the commits of pull request #2208 on
+GitHub. With them in place, `analyze_gpu_energy.py --check --root <folder>`
+and the two comparison scripts with `--check` replay the committed summaries;
+`make publication-check` replays `gpu-energy/` only.
+
 `serverless-gpu-energy/` has per-run GPU energy measurements from Modal
 serverless GPUs (T4 to B200): idle power with a model loaded, cold starts,
 keep-warm windows, pausing a training job, and 148 power runs of seven
