@@ -23,28 +23,42 @@ for k, step in ((1, 2), (2, None)):
 sp.hbars_steps(out / 'decode', [('Read 3 GB of weights (HBM)', 0.8955223881, 'memory', '0.9 ms'), ('Launch 576 kernels', 2.88, 'neutral', '2.9 ms'), ('Eager: dispatch + launch', 8.64, 'danger', '8.6 ms')], 'ms', log=False, xlabel='Time for one decoding step on an H100 (ms)')
 
 def dispatch_share(path, k):
-    rows = [('Small op\n(1 μs kernel)', 15, 1), ('Large op\n(100 μs kernel)', 15, 100)]
-    fig, ax = plt.subplots(figsize=sp.SHORT)
-    for i, (label, disp, kern) in enumerate(rows):
-        y = 1 - i
-        ax.text(-0.01, y, label, transform=ax.get_yaxis_transform(), ha='right', va='center', fontsize=13, fontweight='bold', color=C['text'])
-        if i >= k:
+    rows = [
+        ('Small op\n(1 μs kernel)', 15, 1, '16 μs'),
+        ('Large op\n(100 μs kernel)', 15, 100, '115 μs'),
+        ('5 fused ops\n(compiled)', 5, 4, '9 μs vs. 55 μs eager'),
+    ]
+    fig, ax = plt.subplots(figsize=(5.8, 2.55))
+    n = len(rows)
+    for i, (label, disp, kern, note_txt) in enumerate(rows):
+        y = n - 1 - i
+        shown = i < k
+        ax.text(-0.01, y, label, transform=ax.get_yaxis_transform(), ha='right', va='center', fontsize=12, fontweight='bold', color=C['text'] if shown else 'white')
+        if not shown:
             continue
-        d = 100 * disp / (disp + kern)
-        ax.barh(y, d, color=C['neutral'], height=0.62)
-        ax.barh(y, 100 - d, left=d, color=C['compute'], height=0.62)
-        ax.text(d / 2, y, f'dispatch {d:.0f}%' if d > 30 else f'{d:.0f}%', ha='center', va='center', fontsize=12, fontweight='bold', color='white')
-        if 100 - d > 30:
-            ax.text(d + (100 - d) / 2, y, f'kernel {100 - d:.0f}%', ha='center', va='center', fontsize=12, fontweight='bold', color='white')
+        d = 100.0 * disp / (disp + kern)
+        k_pct = 100.0 - d
+        bar_col = C['data'] if i == 2 else C['compute']
+        ax.barh(y, d, color=C['neutral'], height=0.58)
+        ax.barh(y, k_pct, left=d, color=bar_col, height=0.58)
+        d_lab = ('launch ' if i == 2 else 'dispatch ') + f'{d:.0f}%' if d > 30 else f'{d:.0f}%'
+        ax.text(d / 2, y, d_lab, ha='center', va='center', fontsize=11.5, fontweight='bold', color='white')
+        if k_pct > 28:
+            k_lab = ('fused ' if i == 2 else 'kernel ') + f'{k_pct:.0f}%'
+            ax.text(d + k_pct / 2, y, k_lab, ha='center', va='center', fontsize=11.5, fontweight='bold', color='white')
         else:
-            ax.text(101.5, y, f'kernel {100 - d:.0f}%', ha='left', va='center', fontsize=12, fontweight='bold', color=C['compute'])
-    ax.set_xlim(0, 100)
-    ax.set_ylim(-0.6, 1.6)
+            ax.text(101.5, y, f'kernel {k_pct:.0f}%', ha='left', va='center', fontsize=11.5, fontweight='bold', color=bar_col)
+        if i == 2:
+            ax.text(101.5, y, note_txt, ha='left', va='center', fontsize=11, fontweight='bold', color=C['data'])
+    ax.set_xlim(0, 140)
+    ax.set_xticks([0, 25, 50, 75, 100])
+    ax.set_xticklabels(['0%', '25%', '50%', '75%', '100%'])
+    ax.set_ylim(-0.6, n - 0.35)
     ax.set_yticks([])
     ax.spines['left'].set_visible(False)
-    ax.set_xlabel('Share of the step (15 μs dispatch per operation, model)')
+    ax.set_xlabel('Share of step time (eager: 15 μs/op; compiled 5-op region: 5 μs launch + 4 μs fused)')
     sp.save(fig, path)
-for k in (1, 2):
+for k in (1, 2, 3):
     dispatch_share(out / f'dispatch_share_step{k}.svg', k)
 
 def pt2_speedups(path, k):
@@ -151,4 +165,172 @@ def resnet_measured(path, k):
     sp.save(fig, path)
 for k in (1, 2):
     resnet_measured(out / f'resnet_measured_step{k}.svg', k)
+
+# =============================================================================
+# Explore Figure Diagrams: Tensor Memory Layout (§7.5.1) & Allocator Blocks (§7.4.3)
+# =============================================================================
+FONT = 'font-family="Helvetica, Arial, sans-serif"'
+
+def _svg(path, body, w=920, h=430):
+    path.write_text(
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}" width="{w}" height="{h}">\n'
+        f'<rect width="{w}" height="{h}" fill="white"/>\n' + body + '\n</svg>\n'
+    )
+
+import html
+def _txt(x, y, s, size=20, bold=False, color='#1A1A2E', anchor='middle'):
+    b = ' font-weight="bold"' if bold else ''
+    return f'<text x="{x}" y="{y}" {FONT} font-size="{size}"{b} fill="{color}" text-anchor="{anchor}" dominant-baseline="central">{html.escape(str(s), quote=False)}</text>'
+
+def _rect(x, y, w, h, fill, stroke, sw=2.2, rx=6, dash=''):
+    d = f' stroke-dasharray="{dash}"' if dash else ''
+    return f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="{rx}" fill="{fill}" stroke="{stroke}" stroke-width="{sw}"{d}/>'
+
+def tensor_layout():
+    """4-step build matching vol1:fig-tensor-memory-layout (§7.5.1)."""
+    row_mem = [1, 2, 3, 4, 5, 6]
+    col_mem = [1, 4, 2, 5, 3, 6]
+    for step in (1, 2, 3, 4):
+        s = []
+        # Left: 2x3 logical view (or 3x2 transposed view on step 4)
+        if step < 4:
+            s.append(_txt(145, 24, 'Logical 2 × 3 tensor', 22, True, C['text']))
+            vals = [[1, 2, 3], [4, 5, 6]]
+            for r in range(2):
+                for c in range(3):
+                    x, y = 55 + c * 62, 52 + r * 62
+                    hl = (step == 2 and r == 1 and c == 0) or (step == 3 and r == 0)
+                    fc = C['compute_l'] if hl else C['memory_l']
+                    ec = C['compute'] if hl else C['memory']
+                    s.append(_rect(x, y, 56, 56, fc, ec, 2.4 if hl else 1.6))
+                    s.append(_txt(x + 28, y + 28, str(vals[r][c]), 24, True, C['compute'] if hl else C['text']))
+            s.append(_txt(145, 198, 'shape (2, 3)', 21, False, C['neutral']))
+        else:
+            s.append(_txt(145, 24, 'Transposed t.T (3 × 2)', 22, True, C['data']))
+            vals_t = [[1, 4], [2, 5], [3, 6]]
+            for r in range(3):
+                for c in range(2):
+                    x, y = 86 + c * 62, 50 + r * 50
+                    s.append(_rect(x, y, 56, 44, C['data_l'], C['data'], 2.0))
+                    s.append(_txt(x + 28, y + 22, str(vals_t[r][c]), 23, True, C['data']))
+            s.append(_txt(145, 218, '0 bytes copied!', 21, True, C['data']))
+
+        # Right top: Row-major 1D memory
+        s.append(_txt(320, 24, 'Row-major (PyTorch default): strides = [3, 1]', 21, True, C['memory'], 'start'))
+        for idx, v in enumerate(row_mem):
+            x, y = 320 + idx * 92, 50
+            if step == 2 and idx == 3:
+                fc, ec, tc = C['compute_l'], C['compute'], C['compute']
+            elif step == 3 and idx in (0, 1, 2):
+                fc, ec, tc = C['data_l'], C['data'], C['data']
+            elif step == 4:
+                fc, ec, tc = C['data_l'], C['data'], C['text']
+            else:
+                fc, ec, tc = '#F4F7FA', C['memory'], C['text']
+            s.append(_rect(x, y, 84, 52, fc, ec, 2.4 if fc != '#F4F7FA' else 1.6))
+            s.append(_txt(x + 42, y + 26, str(v), 24, True, tc))
+            s.append(_txt(x + 42, y + 68, f'[{idx}]', 20, False, C['neutral']))
+
+        # Right bottom: Column-major OR Zero-copy metadata swap on step 4
+        if step < 4:
+            s.append(_txt(320, 158, 'Column-major (Fortran): strides = [1, 2]', 21, True, C['network'], 'start'))
+            for idx, v in enumerate(col_mem):
+                x, y = 320 + idx * 92, 184
+                if step == 2 and idx == 1:
+                    fc, ec, tc = C['compute_l'], C['compute'], C['compute']
+                elif step == 3 and idx in (0, 2, 4):
+                    fc, ec, tc = C['danger_l'], C['danger'], C['danger']
+                else:
+                    fc, ec, tc = '#F8F4FA', C['network'], C['text']
+                s.append(_rect(x, y, 84, 52, fc, ec, 2.4 if fc != '#F8F4FA' else 1.6))
+                s.append(_txt(x + 42, y + 26, str(v), 24, True, tc))
+                s.append(_txt(x + 42, y + 68, f'[{idx}]', 20, False, C['neutral']))
+        else:
+            s.append(_txt(320, 156, 't.T metadata view: shape (3, 2), strides = [1, 3]', 21, True, C['data'], 'start'))
+            # Show strided read order of t.T across the SAME 1D storage (keeps step continuity >= 55 primitives!)
+            t_order = [(1, '[0]'), (4, '[3]'), (2, '[1]'), (5, '[4]'), (3, '[2]'), (6, '[5]')]
+            for idx, (v, addr) in enumerate(t_order):
+                x, y = 320 + idx * 92, 182
+                s.append(_rect(x, y, 84, 52, C['data_l'], C['data'], 2.2))
+                s.append(_txt(x + 42, y + 26, str(v), 24, True, C['data']))
+                s.append(_txt(x + 42, y + 68, addr, 20, True, C['compute']))
+
+        # Bottom summary banner
+        banners = {
+            1: (C['memory'], C['memory_l'], '1D storage is flat: shape and strides map (i, j) to memory.'),
+            2: (C['compute'], C['compute_l'], 'offset = i*s0 + j*s1: (1,0)=4 at [3] row-major vs. [1] col-major.'),
+            3: (C['danger'], C['danger_l'], 'Row 0: [0,1,2] coalesces; strided [0,2,4] wastes cache lines.'),
+            4: (C['data'], C['data_l'], 'Zero-copy .T swaps strides in O(1); .contiguous() copies bytes.'),
+        }
+        bc, bf, btxt = banners[step]
+        s.append(_rect(20, 290, 860, 62, bf, bc, 2.2, 8))
+        s.append(_txt(450, 321, btxt, 21, True, bc))
+        _svg(out / f'tensor_layout_step{step}.svg', '\n'.join(s), w=900, h=365)
+
+tensor_layout()
+
+def allocator_blocks():
+    """4-step build matching vol1:fig-allocator-live-cached-blocks (§7.4.3).
+    12-unit pool: A(4), B(4), C(4) -> free B, carve D(2) -> free A (4+2=6 free, split by D) -> E(6) OOM!"""
+    for step in (1, 2, 3, 4):
+        s = []
+        # Pool frame: 12 units across x = 48..852 (each unit = 67 px)
+        ux = 67
+        ox, oy, bh = 48, 108, 84
+        s.append(_txt(450, 26, 'GPU caching allocator pool (12 units reserved from CUDA driver)', 22, True, C['text']))
+        # Unit index ticks
+        for u in range(13):
+            x = ox + u * ux
+            s.append(f'<line x1="{x}" y1="{oy + bh}" x2="{x}" y2="{oy + bh + 9}" stroke="#888888" stroke-width="1.5"/>')
+            if u < 12:
+                s.append(_txt(x + ux / 2, oy + bh + 25, str(u), 20, False, C['neutral']))
+
+        if step == 1:
+            blocks = [(0, 4, 'A (4, live)', C['memory_l'], C['memory']),
+                      (4, 4, 'B (4, live)', C['memory_l'], C['memory']),
+                      (8, 4, 'C (4, live)', C['memory_l'], C['memory'])]
+            metrics = 'Allocated: 12  |  Cached free: 0  |  Reserved: 12'
+            note_col, note_bg, note = C['memory'], C['memory_l'], 'Step 1: live tensors A, B, and C fill all 12 pool units.'
+        elif step == 2:
+            blocks = [(0, 4, 'A (4, live)', C['memory_l'], C['memory']),
+                      (4, 2, 'D (2)', C['compute_l'], C['compute']),
+                      (6, 2, 'free 2', '#F3F4F6', '#666666'),
+                      (8, 4, 'C (4, live)', C['memory_l'], C['memory'])]
+            metrics = 'Allocated: 10  |  Cached free: 2  |  Reserved: 12'
+            note_col, note_bg, note = C['compute'], C['compute_l'], 'Step 2: B freed to cache; D(2) carved, leaving 2 free.'
+        elif step == 3:
+            blocks = [(0, 4, 'free (4)', C['data_l'], C['data']),
+                      (4, 2, 'D (2)', C['compute_l'], C['compute']),
+                      (6, 2, 'free 2', C['data_l'], C['data']),
+                      (8, 4, 'C (4, live)', C['memory_l'], C['memory'])]
+            metrics = 'Allocated: 6  |  Cached free: 6 (4+2)  |  Reserved: 12'
+            note_col, note_bg, note = C['data'], C['data_l'], 'Step 3: A freed; 6 units free in cache, split 4 + 2 by D.'
+        else:
+            blocks = [(0, 4, 'free (4)', C['data_l'], C['data']),
+                      (4, 2, 'D (2)', C['compute_l'], C['compute']),
+                      (6, 2, 'free 2', C['data_l'], C['data']),
+                      (8, 4, 'C (4, live)', C['memory_l'], C['memory'])]
+            metrics = 'Request E (6 contiguous): max free = 4 < 6 → CUDA OOM'
+            note_col, note_bg, note = C['danger'], C['danger_l'], 'Step 4: E(6) fails with OOM despite 6 free units (fragmented).'
+
+        for start, width, lab, fc, ec in blocks:
+            x, w = ox + start * ux + 2, width * ux - 4
+            dash = '7,4' if 'free' in lab else ''
+            s.append(_rect(x, oy, w, bh, fc, ec, 2.5, 6, dash))
+            s.append(_txt(x + w / 2, oy + bh / 2, lab, 21, True, ec))
+
+        if step == 4:
+            # Red incoming request bar hovering above slots 0..6
+            s.append(_rect(ox + 2, 52, 6 * ux - 4, 42, C['danger_l'], C['danger'], 2.5, 6))
+            s.append(_txt(ox + 3 * ux, 73, 'Request E (6 units): blocked by D(2)', 20, True, C['danger']))
+
+        # Metrics bar
+        mcol = C['danger'] if step == 4 else C['text']
+        s.append(_txt(450, 248, metrics, 21, True, mcol))
+        # Bottom banner
+        s.append(_rect(20, 282, 860, 62, note_bg, note_col, 2.2, 8))
+        s.append(_txt(450, 313, note, 21, True, note_col))
+        _svg(out / f'allocator_blocks_step{step}.svg', '\n'.join(s), w=900, h=360)
+
+allocator_blocks()
 print('figures written')
