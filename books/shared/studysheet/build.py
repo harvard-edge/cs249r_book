@@ -12,6 +12,16 @@ The volume's accent color is read from the book itself, `books/volN/tex/theme-co
     python3 books/shared/studysheet/build.py vol1             # one volume
     python3 books/shared/studysheet/build.py path/to/x_studysheet.tex
 PDFs go to books/_build/studysheets/volN/.
+
+Publishing (the studysheets-*.yml workflows; no LaTeX needed for --manifest or --live-volumes):
+
+    build.py --stage DIR [volN ...]   # after a build: flat volN_<stem>_studysheet.pdf files plus one
+                                      # MLSysBook-StudySheets-VolN.pdf per volume, in book order
+    build.py --manifest PATH          # the book's chapter -> sheet URL map (HTML pre-render)
+    build.py --live-volumes           # print LIVE_VOLUMES for the workflows
+
+Released volumes are served from the `studysheets-latest` release; every volume, released or not,
+is in the `studysheets-dev` prerelease, which the dev preview links to for unreleased volumes.
 """
 from __future__ import annotations
 
@@ -30,11 +40,19 @@ OUT = BOOKS / "_build" / "studysheets"
 MIN_FREE_PT = 24.0            # every column ends with at least this much free space (studysheet.md)
 MAX_IDEA_LINES = 3           # each key idea at most 3 printed lines (studysheet.md)
 
+# Volumes whose sheets are published live. Matches LIVE_VOLUMES in slides-publish-live.yml and the
+# release gate in shared/config/site-head.html (Volumes III and IV staging-only, 2026-10-23).
+# To release a volume, add it here; the workflows read this list through --live-volumes.
+LIVE_VOLUMES = ("vol1", "vol2")
+VOLUMES = ("vol1", "vol2", "vol3", "vol4")
+RELEASES = "https://github.com/harvard-edge/cs249r_book/releases/download"
+LIVE_TAG, DEV_TAG = "studysheets-latest", "studysheets-dev"
+
 
 def sheets(scope: str | None = None) -> list[Path]:
     if scope and scope.endswith(".tex"):
         return [Path(scope).resolve()]
-    vols = [scope] if scope else ["vol1", "vol2", "vol3", "vol4"]
+    vols = [scope] if scope else list(VOLUMES)
     return sorted(p for v in vols for p in (BOOKS / v).glob("*/*_studysheet.tex"))
 
 
@@ -106,11 +124,72 @@ def build(tex: Path) -> dict:
     return compile_tex(tex, OUT / f"vol{volume}", volume)
 
 
+def asset_name(tex: Path) -> str:
+    """Release asset name: GitHub releases are flat, so the volume prefixes the file."""
+    return f"{tex.parents[1].name}_{tex.stem}.pdf"
+
+
+def sheet_url(tex: Path) -> str:
+    vol = tex.parents[1].name
+    return f"{RELEASES}/{LIVE_TAG if vol in LIVE_VOLUMES else DEV_TAG}/{asset_name(tex)}"
+
+
+def book_order(vol: str) -> list[Path]:
+    """The volume's sheets in the chapter order of its PDF config (the canonical order)."""
+    config = (BOOKS / "config" / f"_quarto-pdf-{vol}.yml").read_text()
+    order = []
+    for chapter in re.findall(rf"^\s*-\s*{vol}/(\d+_[^/\s]+)/\1\.qmd\s*$", config, flags=re.M):
+        for tex in sorted((BOOKS / vol / chapter).glob("*_studysheet.tex")):
+            if tex not in order:
+                order.append(tex)
+    missing = [t for t in sheets(vol) if t not in order]
+    if missing:
+        raise SystemExit(f"{vol}: sheets for chapters not in _quarto-pdf-{vol}.yml: {[rel(t) for t in missing]}")
+    return order
+
+
+def write_manifest(path: Path) -> None:
+    """{volN: {chapter_folder: {"url": ...}}} for every sheet; read by inject_slides.lua and lectures.py."""
+    import json
+    manifest = {vol: {t.parent.name: {"url": sheet_url(t)} for t in sheets(vol)} for vol in VOLUMES}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(manifest, indent=2) + "\n")
+    print(f"build.py: {sum(len(v) for v in manifest.values())} study sheets -> {path}")
+
+
+def stage(dest: Path, vols: list[str]) -> None:
+    """Copy built PDFs to flat release names and combine each volume in book order."""
+    import shutil
+    dest.mkdir(parents=True, exist_ok=True)
+    for vol in vols:
+        pdfs = []
+        for tex in book_order(vol):
+            pdf = OUT / vol / f"{tex.stem}.pdf"
+            if not pdf.exists():
+                raise SystemExit(f"{rel(pdf)} missing; build {vol} first")
+            shutil.copy2(pdf, dest / asset_name(tex))
+            pdfs.append(pdf)
+        combined = dest / f"MLSysBook-StudySheets-Vol{vol[3:]}.pdf"
+        subprocess.run(["pdfunite", *map(str, pdfs), str(combined)], check=True)
+        print(f"{vol}: {len(pdfs)} sheets -> {rel(combined)}")
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("scope", nargs="?", help="volN, or a *_studysheet.tex path; default every sheet")
+    ap.add_argument("scope", nargs="*", help="volN, or a *_studysheet.tex path; default every sheet")
+    ap.add_argument("--manifest", type=Path, help="write the book's chapter -> sheet URL manifest and exit")
+    ap.add_argument("--stage", type=Path, help="stage built PDFs for a release into this folder and exit")
+    ap.add_argument("--live-volumes", action="store_true", help="print the live volumes and exit")
+    args = ap.parse_args()
+    if args.live_volumes:
+        raise SystemExit(print(" ".join(LIVE_VOLUMES)))
+    if args.manifest:
+        raise SystemExit(write_manifest(args.manifest))
+    if args.stage:
+        raise SystemExit(stage(args.stage, args.scope or list(VOLUMES)))
     bad = 0
-    for tex in sheets(ap.parse_args().scope):
+    targets = [t for s in (args.scope or [None]) for t in sheets(s)]
+    for tex in targets:
         rep = build(tex)
         probs = problems(rep)
         bad += bool(probs)
