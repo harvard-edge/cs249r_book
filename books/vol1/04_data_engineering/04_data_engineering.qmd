@@ -989,7 +989,7 @@ class KWSDesignSpaceTradeoffs:
 | **Cloud $\rightarrow$ local inference**                  | up to `{python} KWSDesignSpaceTradeoffs.local_accuracy_risk_pct_str` detection-rate risk | `{python} KWSDesignSpaceTradeoffs.cloud_latency_ms_str` $\rightarrow$ `{python} KWSDesignSpaceTradeoffs.local_latency_ms_str` | `{python} KWSDesignSpaceTradeoffs.cloud_inference_cost_usd_per_query_str` $\rightarrow$ `{python} KWSDesignSpaceTradeoffs.local_inference_cost_usd_per_query_str` | cloud-scale $\rightarrow$ `{python} KWSDesignSpaceTradeoffs.local_model_memory_kb_str` |
 | **Real only $\rightarrow$ added synthetic augmentation** | +`{python} KWSDesignSpaceTradeoffs.synthetic_robustness_gain_pct_str` robustness         |                                                            Minimal                                                            |                            `{python} KWSDesignSpaceTradeoffs.synthetic_cost_savings_mult_str` cheaper per example than real collection                            |                                        Minimal                                         |
 
-: **KWS Data Engineering Design Space**: Illustrative scenario inputs price each design choice along four axes (quality, latency, cost, and memory); the entries are not measurements from one system and should not be combined as additive effects. Each row moves from a baseline (left of the arrow) to an alternative, and every entry gives the effect of that move. Higher sampling rates double raw-audio storage and processing, while more training examples multiply labeling and storage requirements. Actual quality and latency must be measured on the target pipeline. {#tbl-kws-design-space tbl-colwidths="[30,22,16,16,16]"}
+: **KWS Data Engineering Design Space**: Illustrative scenario inputs price each design choice along four axes (quality, latency, cost, and memory); the entries are not measurements from one system and should not be combined as additive effects. Each row moves from a baseline (left of the arrow) to an alternative, and every entry gives the effect of that move; quality changes are in percentage points. Higher sampling rates double raw-audio storage and processing, while more training examples multiply labeling and storage requirements. Actual quality and latency must be measured on the target pipeline. {#tbl-kws-design-space tbl-colwidths="[30,22,16,16,16]"}
 
 Because the device runs inside a milliwatt power envelope and a tens-of-kilobytes SRAM budget, an engineering team cannot pick the most accurate option in every row of @tbl-kws-design-space at once. Instead, the team must divide a fixed data budget across labeling, storage, and governance so the detector reaches its accuracy target without outgrowing the hardware. Notebook \ref{nbk-data-engineering-optimizing-kws-design-space} allocates the data budget and proposes a candidate design for a smart-speaker deployment: how many labels the budget buys, which feature representation the device can afford, and which data options are meant to close the remaining gap. The acquisition, labeling, processing, and delivery decisions that follow supply the evidence needed to accept or reject it.
 
@@ -2582,7 +2582,7 @@ Schema and latency alerts expose structural and timing failures, but a shift in 
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Scenarios
-from mlsysim.fmt import fmt, fmt_math, check
+from mlsysim.fmt import fmt, fmt_math, fmt_display_math, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class KSTest:
@@ -2605,6 +2605,12 @@ class KSTest:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     ks_dcrit_str = fmt(d_crit, precision=3, commas=False)
+    coeff_str = fmt(coeff, precision=2, commas=False)
+    observed_math = fmt_math(f"\\KolmogorovSmirnovStatistic = {test.observed_statistic:.2f}")
+    dcrit_math = fmt_display_math(
+        f"\\KolmogorovSmirnovCriticalThreshold\\approx {coeff}\\sqrt{{({n_train} + {n_serving})/({n_train} \\cdot {n_serving})}}."
+    )
+    check(test.observed_statistic > d_crit, "The worked example's observed gap must exceed the critical value.")
     sample_sizes_math = fmt_math(f"\\DriftTestSampleSize_0 = \\DriftTestSampleSize_t = {n_train}")
 ```
 
@@ -2618,11 +2624,11 @@ class KSTest:
 2.  **Calculate statistic** $(\KolmogorovSmirnovStatistic)$: Find the maximum absolute difference between the CDFs. Let $\TrainingEmpiricalCdf(\MonitoredFeatureLevel)$ and $\ServingEmpiricalCdf(\MonitoredFeatureLevel)$ denote the empirical cumulative distribution functions of the training baseline $(\TrainingDistribution)$ and current serving $(\CurrentDistribution)$ datasets, evaluated at value $\MonitoredFeatureLevel$.
     $$\KolmogorovSmirnovStatistic= \max_{\MonitoredFeatureLevel}|\TrainingEmpiricalCdf(\MonitoredFeatureLevel) - \ServingEmpiricalCdf(\MonitoredFeatureLevel)|$$
 
-3.  **Determine significance**: For two independent samples, compare $\KolmogorovSmirnovStatistic$ to the critical value $\KolmogorovSmirnovCriticalThreshold$ based on training-baseline sample size $\DriftTestSampleSize_0$ and serving sample size $\DriftTestSampleSize_t$. The coefficient 1.36 is the large-sample approximation for significance level $\SignificanceLevel = 0.05$, which means that if both samples came from the same distribution, a maximum difference above the critical value would arise by chance about 5 percent of the time.
+3.  **Determine significance**: For two independent samples, compare $\KolmogorovSmirnovStatistic$ to the critical value $\KolmogorovSmirnovCriticalThreshold$ based on training-baseline sample size $\DriftTestSampleSize_0$ and serving sample size $\DriftTestSampleSize_t$. The coefficient `{python} KSTest.coeff_str` is the large-sample approximation for significance level $\SignificanceLevel = 0.05$, which means that if both samples came from the same distribution, a maximum difference above the critical value would arise by chance about 5 percent of the time.
     $$\KolmogorovSmirnovCriticalThreshold\approx 1.36\sqrt{\frac{\DriftTestSampleSize_0 + \DriftTestSampleSize_t}{\DriftTestSampleSize_0 \DriftTestSampleSize_t}}$$
 **Result**: With sample sizes `{python} KSTest.sample_sizes_math`, the critical value is approximately `{python} KSTest.ks_dcrit_str`:
-$$\KolmogorovSmirnovCriticalThreshold\approx 1.36\sqrt{(1000 + 1000)/(1000 \cdot 1000)}.$$
-An observed maximum difference of $\KolmogorovSmirnovStatistic= 0.08$ exceeds the critical value, so a gap this large is unlikely to be sampling noise and the test flags drift.
+`{python} KSTest.dcrit_math`
+An observed maximum difference of `{python} KSTest.observed_math` exceeds the critical value, so a gap this large is unlikely to be sampling noise and the test flags drift.
 
 **Systems insight**: A drift test is useful only if crossing the threshold starts an investigation or retraining workflow rather than becoming another dashboard number.
 
@@ -5062,11 +5068,38 @@ The microphone change in that scenario is drift. Production audio stopped resemb
 ↪ How drift signals and outcome evidence trigger retraining only when its expected benefit exceeds its cost is developed in @sec-ml-operations-retraining-decision-framework-e33d.
 :::
 
+```{python}
+#| echo: false
+#| label: psi-bands
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ PSI CONVENTION BANDS
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: The PSI paragraph below and the data-debt metrics table.
+# │ Goal: Print the common PSI warning and investigation cutoffs from the
+# │       registry the operations chapter and the data appendix also read.
+# │ Show: 0.1 and 0.25.  (Added 2026-11-20; these were typed in prose.)
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Ops
+from mlsysim.fmt import check, fmt
+
+class PsiBands:
+    """Conventional PSI bands, read from the monitoring registry."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    warn = Ops.Monitoring.PsiWarnThreshold
+    critical = Ops.Monitoring.PsiCriticalThreshold
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(0 < warn < critical, "The PSI warning band must sit below the investigation band.")
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    warn_str = fmt(warn, precision=1, commas=False)
+    critical_str = fmt(critical, precision=2, commas=False)
+```
+
 The degradation equation (@eq-degradation) models accuracy after deployment as the accuracy at launch minus a fitted sensitivity times the divergence between the production and training distributions. Two summary statistics make that divergence term $\StatisticalDivergence$ actionable in production (formalized in @sec-appdx-data-foundations-measuring-drift-divergence-a6dd). The **population stability index (PSI)**\index{Population stability index!definition} quantifies changes in categorical or binned&nbsp;feature distributions. **Kullback-Leibler (KL) divergence**\index{Kullback-Leibler divergence!definition} measures how far the current distribution departs from the baseline [@kullback1951]. For each value, it takes the logarithm of how much more or less likely that value is now than at baseline, then averages those logarithms weighted by how often each value occurs now, so identical distributions score zero and values that have become much more common dominate the score. KL divergence is asymmetric, and it becomes infinite wherever the current distribution places probability that the baseline lacks, so monitors must fix its direction and smooth empty bins.
 
 These two metrics and the K-S test of Notebook \ref{nbk-data-engineering-detecting-drift-with-k-s-test} encode different distributional assumptions and scales, and none by itself supplies a universal cutoff. Teams calibrate metric-specific thresholds against a deployment baseline and monitor them over time. Crossing a threshold signals that the live distribution has moved far enough to warrant investigation and outcome checks; input divergence alone does not establish whether accuracy improved or degraded, or by how much.
 
-PSI illustrates how one such binned comparison is constructed, discretizing a continuous feature into reference bins (typically deciles of baseline $\TrainingDistribution$) and computing $\PopulationStabilityScore = \sum_{\ReferenceBinIndex}\left( \CurrentDistribution(\ReferenceBinIndex) - \TrainingDistribution(\ReferenceBinIndex) \right) \ln\left(\frac{\CurrentDistribution(\ReferenceBinIndex)}{\TrainingDistribution(\ReferenceBinIndex)}\right)$. Each bin's two factors share a sign, so every shifting bin adds to the index. Practitioners commonly treat $\PopulationStabilityScore < 0.1$ as stable, $0.1 \le \PopulationStabilityScore \le 0.25$ as moderate shift, and $\PopulationStabilityScore > 0.25$ as a prompt for investigation; these bands are conventions to calibrate against the deployment baseline, not physical limits.
+PSI illustrates how one such binned comparison is constructed, discretizing a continuous feature into reference bins (typically deciles of baseline $\TrainingDistribution$) and computing $\PopulationStabilityScore = \sum_{\ReferenceBinIndex}\left( \CurrentDistribution(\ReferenceBinIndex) - \TrainingDistribution(\ReferenceBinIndex) \right) \ln\left(\frac{\CurrentDistribution(\ReferenceBinIndex)}{\TrainingDistribution(\ReferenceBinIndex)}\right)$. Each bin's two factors share a sign, so every shifting bin adds to the index. Practitioners commonly treat $\PopulationStabilityScore$ below `{python} PsiBands.warn_str` as stable, from `{python} PsiBands.warn_str` to `{python} PsiBands.critical_str` as moderate shift, and above `{python} PsiBands.critical_str` as a prompt for investigation; these bands are conventions to calibrate against the deployment baseline, not physical limits.
 
 ::: {.column-margin}
 ![](images/svg/vol1_data_engineering_margin_002.svg){width="100%" fig-alt="A vertical three-item list pairs each distribution component with its drift type: p(x) covariate, p(y) label, and p(y|x) concept; each item has a gray dot, shading from light at the top to dark at the bottom."}
@@ -5119,16 +5152,16 @@ Code-level debt can at least be approximated with code complexity metrics; data 
 \renewcommand{\arraystretch}{1.45}
 ```
 
-| **Debt Category** | **Metric**                       | **Warning Threshold** |   **Critical Threshold**   |
-|:------------------|:---------------------------------|:---------------------:|:--------------------------:|
-| **Documentation** | % datasets with data cards       |         < 80%         |           < 50%            |
-| **Documentation** | % columns with descriptions      |         < 90%         |           < 70%            |
-| **Schema**        | Schema version branches          |          > 3          |            > 10            |
-| **Schema**        | % transformations with try/catch |         > 20%         |           > 50%            |
-| **Quality**       | Known label error rate           |          > 1%         |            > 5%            |
-| **Quality**       | Documented bias metrics          |      Not measured     | Measured but not mitigated |
-| **Freshness**     | Days since last retraining       |       > 90 days       |         > 365 days         |
-| **Freshness**     | PSI vs. training baseline        |         > 0.1         |           > 0.25           |
+| **Debt Category** | **Metric**                       |     **Warning Threshold**      |       **Critical Threshold**       |
+|:------------------|:---------------------------------|:------------------------------:|:----------------------------------:|
+| **Documentation** | % datasets with data cards       |             < 80%              |               < 50%                |
+| **Documentation** | % columns with descriptions      |             < 90%              |               < 70%                |
+| **Schema**        | Schema version branches          |              > 3               |                > 10                |
+| **Schema**        | % transformations with try/catch |             > 20%              |               > 50%                |
+| **Quality**       | Known label error rate           |              > 1%              |                > 5%                |
+| **Quality**       | Documented bias metrics          |          Not measured          |     Measured but not mitigated     |
+| **Freshness**     | Days since last retraining       |           > 90 days            |             > 365 days             |
+| **Freshness**     | PSI vs. training baseline        | > `{python} PsiBands.warn_str` | > `{python} PsiBands.critical_str` |
 
 : **Data Debt Metrics**: The thresholds are illustrative triggers for detecting data debt accumulation across four categories. Warning thresholds indicate debt requiring attention in upcoming planning cycles; critical thresholds indicate debt requiring immediate remediation to prevent system degradation. The days-since-retraining row is a review trigger, not evidence of degradation. Crossing it prompts the comparison of elapsed time with the measured shift interval that freshness debt calls for. The PSI row uses common operational drift-monitoring bands, while the remaining rows should be calibrated to the risk tolerance and failure cost of the specific ML system. {#tbl-data-debt-metrics}
 

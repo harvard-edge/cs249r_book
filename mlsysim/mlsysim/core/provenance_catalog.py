@@ -914,6 +914,18 @@ NVIDIA_DLE_RESNET50_A100_TRAINING = Provenance(
     ),
 )
 
+MLPERF_TRAINING_RESNET50_QUALITY_TARGET = Provenance(
+    id="prov:mlperf-training-resnet50-quality-target",
+    kind=ProvenanceKind.INDUSTRY_REPORT,
+    ref=(
+        "MLCommons, MLPerf Training Rules, benchmark table: Vision / Image classification / "
+        "ResNet-50 v1.5, quality target 75.90% classification (top-1 on ImageNet validation)"
+    ),
+    url="https://github.com/mlcommons/training_policies/blob/master/training_rules.adoc",
+    verified="2026-11-20",
+    notes="The accuracy a training submission must reach before its time is counted.",
+)
+
 MLPERF_TRAINING_V31_RESNET50_H100 = Provenance(
     id="prov:mlperf-training-v31-resnet50-h100",
     kind=ProvenanceKind.INDUSTRY_REPORT,

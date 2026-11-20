@@ -3645,6 +3645,46 @@ For a kernel whose data reuse stays fixed, that widening gap between compute and
 
 :::
 
+```{python}
+#| echo: false
+#| label: roofline-table-conv-range
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ ROOFLINE TABLE: DENSE CONV2D INTENSITY RANGE
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @tbl-roofline-operations, Conv2D (Dense) row.
+# │
+# │ Goal: Give the row the span of ResNet-50's own convolutions at FP16, from the
+# │       stage-2 1x1 expansion to the stage-3 3x3 that the conv notebook below
+# │       analyzes, so the table and the later notebooks cannot disagree.
+# │ Show: about 51 to 563 FLOP/byte, either side of the 295 FLOP/byte FP16 ridge.
+# │ How: traffic_intensity of the same Scenarios the INT8-crossing cell uses.
+# │      (Added 2026-11-20; the row was a typed 50-200 that the notebooks exceed.)
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Hardware, Scenarios
+from mlsysim.fmt import check, fmt_range
+from mlsysim.core.units import flop, byte
+
+class RooflineConvRange:
+    """Span of ResNet-50 dense convolution intensities at FP16, batch 32."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    low_layer = Scenarios.ResNet50Stage2ExpansionBatch32  # stage-2 1x1 expansion
+    high_layer = Scenarios.ResNet50Stage3ConvBatch32  # stage-3 3x3, the conv notebook's layer
+    h100 = Hardware.Cloud.H100
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    lo = low_layer.traffic_intensity
+    hi = high_layer.traffic_intensity
+    ridge = (h100.compute.precision_flops["fp16_dense"] / h100.memory.bandwidth).to(flop / byte).magnitude
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(lo < ridge < hi, "Dense Conv2D must straddle the H100 FP16 ridge, as the table row says.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    conv_range_str = fmt_range(round(lo), round(hi), precision=0, commas=False, unit="FLOP/byte")
+```
+
 Against that higher ridge, operations such as depthwise convolution\index{Depthwise Convolution!low arithmetic intensity}, embedding lookup\index{Embedding Lookup!memory-bound operation}, LayerNorm\index{LayerNorm!memory-bound operation}, and softmax\index{Softmax!memory-bound operation} serve as low-intensity reference points that commonly fall below the HBM ridge on compute-dense accelerators under the stated traffic models. @Tbl-roofline-operations maps common neural network operations to their representative roofline regimes and to the lighthouse workload that exercises each. Classification depends on the implementation, memory interface, and target path; profiling distinguishes a bandwidth ceiling from latency, limited parallelism, or other execution constraints.
 
 ```{=latex}
@@ -3652,14 +3692,14 @@ Against that higher ridge, operations such as depthwise convolution\index{Depthw
 \renewcommand{\arraystretch}{1.5}
 ```
 
-| Operation                                  | Arithmetic Intensity   | **Classification**                              | **Lighthouse example**      |
-|:-------------------------------------------|:-----------------------|:------------------------------------------------|:----------------------------|
-| **Conv2D (Dense)**                         | 50--200 FLOP/byte      | Straddles ridge; high-reuse cases compute-bound | ResNet-50                   |
-| **Dense MatMul (large batch, well-tiled)** | ~150--1,000+ FLOP/byte | Compute-bound once above the target's ridge     | GPT-2 (batched projections) |
-| **Depthwise conv**\index{Depthwise conv}   | 10--20 FLOP/byte       | Below modeled HBM ridge                         | MobileNet                   |
-| Attention Softmax                          | Convention-dependent   | Below modeled HBM ridge                         | GPT-2 (Generation)          |
-| LayerNorm                                  | 1--2 FLOP/byte         | Below modeled HBM ridge                         | GPT-2/Llama                 |
-| Embedding lookup                           | $<1$ FLOP/byte         | Below modeled HBM ridge                         | DLRM                        |
+| Operation                                  | Arithmetic Intensity                        | **Classification**                              | **Lighthouse example**      |
+|:-------------------------------------------|:--------------------------------------------|:------------------------------------------------|:----------------------------|
+| **Conv2D (Dense)**                         | `{python} RooflineConvRange.conv_range_str` | Straddles ridge; high-reuse cases compute-bound | ResNet-50                   |
+| **Dense MatMul (large batch, well-tiled)** | ~150--1,000+ FLOP/byte                      | Compute-bound once above the target's ridge     | GPT-2 (batched projections) |
+| **Depthwise conv**\index{Depthwise conv}   | 10--20 FLOP/byte                            | Below modeled HBM ridge                         | MobileNet                   |
+| Attention Softmax                          | Convention-dependent                        | Below modeled HBM ridge                         | GPT-2 (Generation)          |
+| LayerNorm                                  | 1--2 FLOP/byte                              | Below modeled HBM ridge                         | GPT-2/Llama                 |
+| Embedding lookup                           | $<1$ FLOP/byte                              | Below modeled HBM ridge                         | DLRM                        |
 
 : **Operations on the Roofline**: Neural network layers span a wide range of arithmetic intensities. Large, well-tiled convolutions and batched GEMMs can be compute-bound, while MobileNet depthwise layers, attention softmax, normalization, and DLRM embeddings are often memory-bound. To see how these intensity values translate into real performance predictions, a transformer layer provides a complete arithmetic-intensity calculation across its major sub-operations. {#tbl-roofline-operations tbl-colwidths="[25,25,25,25]"}
 

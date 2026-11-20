@@ -82,9 +82,9 @@ def numbers() -> dict:
              npuframe=f"{cam.accelerator_frame.to('ms').magnitude:.0f}")
 
     # ---- Mistake 2: paper vs measured speedup (chapter: TheoryPracticeSpeedup, an illustrative scenario)
-    paper = Scenarios.PrunedInt8PaperVsMeasured
+    paper = Scenarios.PrunedInt8PaperVsRealized
     n.update(prunex=f"{paper.factors['pruning']:.0f}", quantx=f"{paper.factors['quantization']:.0f}",
-             paperx=f"{paper.paper:.0f}", measuredx=f"{paper.measured:.1f}")
+             paperx=f"{paper.paper:.0f}", measuredx=f"{paper.realized:.1f}")
 
     # ---- Key idea 3: break-even for 16-bit values with 16-bit indices (chapter: MobileNetCompressionAnchor)
     i16 = BYTES_INT16.to("byte").magnitude
