@@ -1067,6 +1067,7 @@ class HbmMemoryBudget:
 
     # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
     hbm_capacity_gb_str = fmt_memory_capacity(hbm_capacity, unit=GiB, precision=0, commas=False)
+    hbm_capacity_decimal_str = fmt_memory(hbm_capacity, unit=GB, precision=1, commas=False)  # the share divides by this
     replica_gpus_str = fmt(replica_gpus, precision=0, commas=False)
     weight_per_gpu_gb_str = fmt_memory(weight_per_gpu, unit=GB, precision=1, commas=False)
     optimizer_per_gpu_gb_str = fmt_memory(optimizer_per_gpu, unit=GB, precision=1, commas=False)
@@ -1082,9 +1083,9 @@ class HbmMemoryBudget:
         commas=False,
     )
     total_pct_range_str = fmt_percent_range(
-        total_min_pct / 100,
-        total_max_pct / 100,
-        precision=1,
+        round(total_min_pct) / 100,  # whole percents: 55.8 / 85.9 = 65, 67.8 / 85.9 = 79
+        round(total_max_pct) / 100,
+        precision=0,
         commas=False,
         style="prose",
     )
@@ -1102,7 +1103,7 @@ class HbmMemoryBudget:
 
 : **HBM Memory Budget for 175B-Parameter Training**: Per-GPU allocation when one replica of a 175B model and its unsharded mixed-precision Adam state is split across `{python} StorageFuelLineContext.replica_gpus_str` GPUs, `{python} StorageFuelLineContext.tp_degree_str` ways inside each node and across a pipeline of `{python} StorageFuelLineContext.pp_degree_str` nodes. The weight, optimizer, master-weight, and gradient rows are each GPU's 1/`{python} HbmMemoryBudget.replica_gpus_str` slice. The resulting budget occupies most of an `{python} HbmMemoryBudget.hbm_capacity_gb_str` HBM device, leaving limited buffer for the incoming data pipeline. Any delay in fetching the next batch from host memory risks starving the accelerator. {#tbl-hbm-memory-budget}
 
-Even with aggressive partitioning, the total memory footprint reaches `{python} HbmMemoryBudget.total_range_str` in decimal gigabytes, about `{python} HbmMemoryBudget.total_pct_range_str` of the HBM pool (the device's nominal `{python} HbmMemoryBudget.hbm_capacity_gb_str` is a binary capacity, slightly larger than 80 decimal gigabytes). The remaining headroom shrinks further once fragmentation and framework workspaces are included, and that headroom is all the incoming data pipeline has to work with. An input batch and its activations occupy HBM for one training step, while model weights and optimizer state persist across steps. Prefetching the next batch therefore competes with the live training footprint for scarce capacity; a deeper input queue is useful only if the memory budget can accommodate it.
+Even with aggressive partitioning, the total memory footprint reaches `{python} HbmMemoryBudget.total_range_str` in decimal gigabytes, about `{python} HbmMemoryBudget.total_pct_range_str` of the HBM pool (the device's nominal `{python} HbmMemoryBudget.hbm_capacity_gb_str` is a binary capacity, `{python} HbmMemoryBudget.hbm_capacity_decimal_str` in decimal gigabytes). The remaining headroom shrinks further once fragmentation and framework workspaces are included, and that headroom is all the incoming data pipeline has to work with. An input batch and its activations occupy HBM for one training step, while model weights and optimizer state persist across steps. Prefetching the next batch therefore competes with the live training footprint for scarce capacity; a deeper input queue is useful only if the memory budget can accommodate it.
 
 From the data pipeline's perspective, Tier 0 is not a storage tier to be managed but a constraint to be satisfied. The pipeline's purpose is to ensure that the batch the accelerator needs *next* is already resident in HBM before the *current* batch's computation completes. If it arrives late, the accelerator stalls. If it arrives early, it consumes HBM that could hold activations. The tension between "just in time" and "just too late" defines the pipeline's buffer management strategy, quantified in @sec-storage-pipeline-equation.
 

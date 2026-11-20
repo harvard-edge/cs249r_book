@@ -1641,13 +1641,46 @@ The boundary between what resides in HBM and what resides in DDR is a design par
 ↪ Memory-efficient sharding of optimizer, gradient, and parameter state is developed in @sec-distributed-training-systems-systems-memoryefficient-data-parallelism-zero-fsdp-0e69.
 :::
 
+```{python}
+#| echo: false
+#| label: hbm-overflow-checkpoint
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ HBM CAPACITY OVERFLOW (CHECKPOINT)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: The capacity-overflow item of the checkpoint below.
+# │ Goal: A 70B-parameter model's FP16 weights against one H100's labeled HBM.
+# │ Show: 140 GB of weights, 80 GB of HBM, 60 GB left to place elsewhere.
+# │ How: parameters x FP16 bytes; the labeled capacity the item prints.
+# │      (Added 2026-11-20; the three numbers were typed.)
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Hardware
+from mlsysim.fmt import check, fmt_memory, fmt_memory_capacity
+from mlsysim.core.units import BYTES_FP16, GB, GiB
+
+class HbmOverflowCheck:
+    """FP16 weights of a 70B model against one H100's labeled memory."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    params = 70e9  # scenario assumption: a generic 70B-parameter model
+    h100 = Hardware.Cloud.H100
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    weights = (params * BYTES_FP16).to(GB)
+    overflow = (weights - h100.memory.labeled_capacity).to(GB)  # against the "80 GB" the item prints
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(overflow.magnitude > 0, "The weights must exceed one H100's memory.")
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    weights_gb_str = fmt_memory(weights, unit=GB, precision=0, commas=False)
+    hbm_gb_str = fmt_memory_capacity(h100.memory.capacity, unit=GiB, precision=0, commas=False)
+    overflow_gb_str = fmt_memory(overflow, unit=GB, precision=0, commas=False)
+```
+
 ::: {#chk-compute-infrastructure-hbm-memory-wall .callout-checkpoint title="HBM and the memory wall"}
 
 These questions check whether the physical benefits of 3D-stacked memory are clear:
 
 - [ ] **HBM vs. DDR5**: explain why HBM achieves higher bandwidth than DDR5 despite having a lower clock frequency.
 - [ ] **Off-package signaling cost**: explain why off-package DDR memory has higher energy per bit and how vertical stacking (TSVs) reduces that cost.
-- [ ] **Capacity overflow**: locate where the remaining 60 GB must reside when an H100 has 80 GB of HBM and a 70B parameter model requires 140 GB for FP16 weights.
+- [ ] **Capacity overflow**: locate where the remaining `{python} HbmOverflowCheck.overflow_gb_str` must reside when an H100 has `{python} HbmOverflowCheck.hbm_gb_str` of HBM and a 70B parameter model requires `{python} HbmOverflowCheck.weights_gb_str` for FP16 weights.
 - [ ] **Bandwidth not capacity**: classify the claim as true or false: HBM's primary benefit is increasing the total memory capacity available to the GPU.
 
 :::
@@ -5439,7 +5472,9 @@ class InfraFrontierStragglerRecap23:
     _step = Scenarios.DenseLLMPretrainingStep  # shared 175B reference step on 1,024 GPUs
     eff_256 = ReferenceStats.TrainingScaleProfiles.Eff256Gpu
     eff_1k = _step.result.scaling_efficiency  # modeled efficiency of the shared reference step
-    eff_8k = ReferenceStats.TrainingScaleProfiles.Eff8192Gpu
+    # The same modeled job on the 8,192-GPU NDR cluster this paragraph names, as the introduction
+    # models it (not the HDR sweep tier), so both chapters print one efficiency and one speedup.
+    eff_8k = Scenarios.DenseLLMPretrainingStep8K.result.scaling_efficiency
     gpus_1k = _step.fleet.total_accelerators
     gpus_8k = Systems.Clusters.Frontier_8K.total_accelerators
 
@@ -5466,7 +5501,7 @@ class InfraFrontierStragglerRecap23:
     gpus_8k_str = fmt(gpus_8k, precision=0, commas=True)
     hardware_ratio_mult_str = fmt_multiple(hardware_ratio, precision=0, commas=False)
     speedup_1k_to_8k_mult_str = fmt_multiple(speedup_1k_to_8k, precision=1, commas=False)
-    idle_share_8k_pct_str = fmt_percent(idle_share_8k, precision=0, style="prose")
+    idle_share_8k_pct_str = fmt_percent(1 - round(eff_8k, 2), precision=0, style="prose")  # 1 - the printed 0.57
 ```
 
 Amdahl's law\index{Amdahl's law!parallel scaling limit} bounds speedup when a fixed workload has a fixed serial fraction. Distributed training also incurs communication, pipeline, and I/O costs that can change with partitioning and scale; these are not all an invariant serial fraction. For a `{python} InfraFrontierStragglerRecap23.frontier_params_b_str`-parameter model with `{python} InfraFrontierStragglerRecap23.gradients_fp16_gb_str` of gradients, the AllReduce at each training step must combine contributions across the participating group. It can do so through ring or tree exchanges; direct transfers between every pair are not required.
