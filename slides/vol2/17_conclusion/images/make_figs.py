@@ -91,33 +91,35 @@ tail_rows = [('One random leaf', 10.0, 'memory', '10 ms'), ('95% of all leaves',
 sp.hbars(out / 'tail_measured.svg', tail_rows, 'ms', log=False, size=(5.8, 1.9))
 import numpy as np
 mttf_h = 50000.0
-fig, ax = plt.subplots(figsize=(5.8, 2.75))
 ns = np.logspace(2, 4.6, 100)
-ax.plot(ns, mttf_h / ns, color=C['memory'], lw=2.5)
-ax.text(150, mttf_h / 150 * 1.5, 'model: 50,000 h / N', color=C['memory'], fontsize=12, fontweight='bold')
 pts = [(1024.0, 48.828125, '1,024: 48.8 h'), (2048.0, 24.4140625, '2,048: 24.4 h')]
-for (x, y, lab), off, ha, va in zip(pts, [(-8, -6), (8, 6)], ['right', 'left'], ['top', 'bottom']):
-    ax.plot([x], [y], 'o', ms=9, color=C['memory'], mec='white', mew=1.5, zorder=5)
-    ax.annotate(lab, (x, y), xytext=off, textcoords='offset points', ha=ha, va=va, fontsize=13, color=C['memory'], fontweight='bold')
-x = 16384.0
+x_llama = 16384.0
 llama_h = 1296.0 / 419.0
-ax.plot([x], [llama_h], 'D', ms=9, color=C['danger'], zorder=6)
-ax.annotate('Llama 3, measured: 3.1 h', (x, 3.1), xytext=(-14, -16), textcoords='offset points', ha='right', va='top', fontsize=12, color=C['danger'], fontweight='bold')
-ax.plot([x], [1.8], 'o', ms=8, mfc='white', mec=C['danger'], mew=2, zorder=6)
-ax.annotate('projected: 1.8 h', (x, 1.8), xytext=(-14, -22), textcoords='offset points', ha='right', va='top', fontsize=12, color=C['danger'])
-ax.set_xscale('log')
-ax.set_yscale('log')
-ax.set_xlim(100, 40000.0)
-ax.set_ylim(0.25, 800)
-ax.set_xticks([100, 1000, 10000])
-ax.set_xticklabels(['100', '1,000', '10,000'])
-ax.set_yticks([1, 10, 100])
-ax.set_yticklabels(['1 h', '10 h', '100 h'])
-ax.minorticks_off()
-ax.set_xlabel('GPUs the job needs at once')
-ax.set_ylabel('Hours between interruptions')
-ax.grid(color=C['grid'], lw=0.6)
-sp.save(fig, out / 'mtbi.svg')
+for k in (1, 2):
+    fig, ax = plt.subplots(figsize=(5.8, 2.75))
+    ax.plot(ns, mttf_h / ns, color=C['memory'], lw=2.5)
+    ax.text(150, mttf_h / 150 * 1.5, 'model: 50,000 h / N', color=C['memory'], fontsize=12, fontweight='bold')
+    for (x, y, lab), off, ha, va in zip(pts, [(-8, -6), (8, 6)], ['right', 'left'], ['top', 'bottom']):
+        ax.plot([x], [y], 'o', ms=9, color=C['memory'], mec='white', mew=1.5, zorder=5)
+        ax.annotate(lab, (x, y), xytext=off, textcoords='offset points', ha=ha, va=va, fontsize=13, color=C['memory'], fontweight='bold')
+    a2 = 1.0 if k >= 2 else 0.0
+    ax.plot([x_llama], [llama_h], 'D', ms=9, color=C['danger'], zorder=6, alpha=a2)
+    ax.annotate('Llama 3, measured: 3.1 h', (x_llama, 3.1), xytext=(-14, -16), textcoords='offset points', ha='right', va='top', fontsize=12, color=C['danger'], fontweight='bold', alpha=a2)
+    ax.plot([x_llama], [1.8], 'o', ms=8, mfc='white', mec=C['danger'], mew=2, zorder=6, alpha=a2)
+    ax.annotate('projected: 1.8 h', (x_llama, 1.8), xytext=(-14, -22), textcoords='offset points', ha='right', va='top', fontsize=12, color=C['danger'], alpha=a2)
+    ax.set_xscale('log')
+    ax.set_yscale('log')
+    ax.set_xlim(100, 40000.0)
+    ax.set_ylim(0.25, 800)
+    ax.set_xticks([100, 1000, 10000])
+    ax.set_xticklabels(['100', '1,000', '10,000'])
+    ax.set_yticks([1, 10, 100])
+    ax.set_yticklabels(['1 h', '10 h', '100 h'])
+    ax.minorticks_off()
+    ax.set_xlabel('GPUs the job needs at once')
+    ax.set_ylabel('Hours between interruptions')
+    ax.grid(color=C['grid'], lw=0.6)
+    sp.save(fig, out / f'mtbi_step{k}.svg')
 fig, ax = plt.subplots(figsize=(2.9, 1.35))
 bars = [('run time', 1 + -0.4964585305, '−50%'), ('accel.-hours', 1 + 0.007082939005, '+0.7%')]
 for i, (lab, r, txt) in enumerate(bars):
@@ -135,44 +137,49 @@ ax.set_xticks([])
 for s in ('left', 'top', 'right', 'bottom'):
     ax.spines[s].set_visible(False)
 sp.save(fig, out / 'expand_bars.svg')
-fig, ax = plt.subplots(figsize=(5.8, 2.6))
 ns = np.logspace(np.log10(128), np.log10(16384), 100)
 ov = [0.5902918299, 0.6049357445, 0.6199429442, 0.6353224413, 0.6510834719, 0.6672355008, 0.6837882281, 0.7007515942, 0.7181357862, 0.7359512438, 0.754208666, 0.7729190169, 0.7920935328, 0.8117437286, 0.8318814049, 0.8525186552, 0.8736678728, 0.8953417586, 0.9175533285, 0.9403159213, 0.9636432067, 0.9875491937, 1.012048239, 1.037155054, 1.062884717, 1.08925268, 1.116274777, 1.143967236, 1.172346688, 1.201430175, 1.231235163, 1.261779551, 1.293081682, 1.325160353, 1.35803483, 1.391724854, 1.426250658, 1.461632975, 1.497893054, 1.53505267, 1.57313414, 1.612160331, 1.652154681, 1.693141208, 1.735144526, 1.778189859, 1.822303057, 1.867510611, 1.913839672, 1.96131806, 2.009974289, 2.059837577, 2.11093787, 2.163305855, 2.216972982, 2.271971478, 2.328334372, 2.386095514, 2.445289589, 2.505952146, 2.568119615, 2.63182933, 2.697119551, 2.764029486, 2.832599318, 2.902870226, 2.974884408, 3.048685113, 3.12431666, 3.201824469, 3.281255086, 3.362656211, 3.446076729, 3.531566737, 3.619177575, 3.708961855, 3.800973497, 3.895267757, 3.991901262, 4.090932043, 4.192419572, 4.296424796, 4.403010174, 4.512239714, 4.624179012, 4.738895291, 4.856457443, 4.976936068, 5.100403517, 5.226933938, 5.356603315, 5.489489521, 5.625672357, 5.765233607, 5.908257081, 6.054828671, 6.205036398, 6.358970466, 6.516723319, 6.678389693]
-ax.plot(ns, ov, color=C['network'], lw=2.5)
-for gpus, pct_key, ov_n, off, ha in [('ref_gpus', 'ov_ref_pct', 0.01669597423, (-10, 10), 'right'), ('exp_gpus', 'ov_exp_pct', 0.0236116732, (10, -18), 'left')]:
-    n, v = ({'right': 1024.0, 'left': 2048.0}[ha], 100 * ov_n)
-    ax.plot([n], [v], 'o', ms=9, color=C['network'], mec='white', mew=1.5, zorder=5)
-    ax.annotate(f"{ {'right': '1,024', 'left': '2,048'}[ha]} GPUs: { {'right': '1.7', 'left': '2.4'}[ha]}%", (n, v), xytext=off, textcoords='offset points', ha=ha, fontsize=12, color=C['network'], fontweight='bold')
-ax.text(4200, 4.6, '×1.41 per doubling\n(grows as √N)', fontsize=12, color=C['text'], ha='center')
-ax.set_xscale('log')
-ax.set_xlim(128, 16384)
-ax.set_ylim(0, 7.5)
-ax.set_xticks([128, 1024.0, 2048.0, 16384])
-ax.set_xticklabels(['128', '1,024', '2,048', '16,384'])
-ax.minorticks_off()
-ax.set_xlabel('GPUs (independent GPU failures only)')
-ax.set_ylabel('Checkpoint + rework (%)')
-ax.grid(color=C['grid'], lw=0.6)
-sp.save(fig, out / 'overhead.svg')
-fig, ax = plt.subplots(figsize=(5.8, 2.7))
+for k in (1, 2):
+    fig, ax = plt.subplots(figsize=(5.8, 2.6))
+    ax.plot(ns, ov, color=C['network'], lw=2.5)
+    for idx, (gpus, pct_key, ov_n, off, ha) in enumerate([('ref_gpus', 'ov_ref_pct', 0.01669597423, (-10, 10), 'right'), ('exp_gpus', 'ov_exp_pct', 0.0236116732, (10, -18), 'left')]):
+        a = 1.0 if (idx == 0 or k >= 2) else 0.0
+        n, v = ({'right': 1024.0, 'left': 2048.0}[ha], 100 * ov_n)
+        ax.plot([n], [v], 'o', ms=9, color=C['network'], mec='white', mew=1.5, zorder=5, alpha=a)
+        ax.annotate(f"{ {'right': '1,024', 'left': '2,048'}[ha]} GPUs: { {'right': '1.7', 'left': '2.4'}[ha]}%", (n, v), xytext=off, textcoords='offset points', ha=ha, fontsize=12, color=C['network'], fontweight='bold', alpha=a)
+    ax.text(4200, 4.6, '×1.41 per doubling\n(grows as √N)', fontsize=12, color=C['text'], ha='center', alpha=1.0 if k >= 2 else 0.0)
+    ax.set_xscale('log')
+    ax.set_xlim(128, 16384)
+    ax.set_ylim(0, 7.5)
+    ax.set_xticks([128, 1024.0, 2048.0, 16384])
+    ax.set_xticklabels(['128', '1,024', '2,048', '16,384'])
+    ax.minorticks_off()
+    ax.set_xlabel('GPUs (independent GPU failures only)')
+    ax.set_ylabel('Checkpoint + rework (%)')
+    ax.grid(color=C['grid'], lw=0.6)
+    sp.save(fig, out / f'overhead_step{k}.svg')
 gs = [256, 512, 768, 1024]
 tp = [49.0, 95.1, 136.7, 176.9]
 mid = {'gpus': 512.0, 'megascale_tokens_s': 95100.0, 'megascale_mfu_pct': 63.5, 'megatron_mfu_pct': 49.9}
 ideal = [mid['megascale_tokens_s'] / 1000.0 * g_ / mid['gpus'] for g_ in gs]
-ax.plot(gs, ideal, ls='--', color=C['neutral'], lw=1.8)
-ax.text(1090, 12, 'dashed: linear from 512', color=C['neutral'], fontsize=11, ha='right', va='bottom')
-ax.plot(gs, tp, 'o-', color=C['compute'], lw=2.5, ms=9, mec='white', mew=1.5)
-for g_, t in zip(gs, tp):
-    ax.annotate(f'{t:.1f}k', (g_, t), xytext=(10, -14), textcoords='offset points', fontsize=11, color=C['compute'], fontweight='bold')
-ax.annotate('512 to 1,024 GPUs: 1.86× (linear: 2×)', (1024, tp[-1]), xytext=(256, 175), textcoords='data', fontsize=12, color=C['text'], fontweight='bold')
-ax.set_xlim(200, 1100)
-ax.set_ylim(0, 215)
-ax.set_xticks(gs)
-ax.set_xticklabels([f'{g_:,}' for g_ in gs])
-ax.set_xlabel('GPUs (batch 768, 175B model)')
-ax.set_ylabel('Tokens/s (thousands)')
-ax.grid(color=C['grid'], lw=0.6)
-sp.save(fig, out / 'megascale.svg')
+for k in (1, 2):
+    fig, ax = plt.subplots(figsize=(5.8, 2.7))
+    ax.plot(gs, ideal, ls='--', color=C['neutral'], lw=1.8)
+    ax.text(1090, 12, 'dashed: linear from 512', color=C['neutral'], fontsize=11, ha='right', va='bottom')
+    n_show = 2 if k == 1 else 4
+    ax.plot(gs[:n_show], tp[:n_show], 'o-', color=C['compute'], lw=2.5, ms=9, mec='white', mew=1.5)
+    for i, (g_, t) in enumerate(zip(gs, tp)):
+        a = 1.0 if i < n_show else 0.0
+        ax.annotate(f'{t:.1f}k', (g_, t), xytext=(10, -14), textcoords='offset points', fontsize=11, color=C['compute'], fontweight='bold', alpha=a)
+    ax.annotate('512 to 1,024 GPUs: 1.86× (linear: 2×)', (1024, tp[-1]), xytext=(256, 175), textcoords='data', fontsize=12, color=C['text'], fontweight='bold', alpha=1.0 if k >= 2 else 0.0)
+    ax.set_xlim(200, 1100)
+    ax.set_ylim(0, 215)
+    ax.set_xticks(gs)
+    ax.set_xticklabels([f'{g_:,}' for g_ in gs])
+    ax.set_xlabel('GPUs (batch 768, 175B model)')
+    ax.set_ylabel('Tokens/s (thousands)')
+    ax.grid(color=C['grid'], lw=0.6)
+    sp.save(fig, out / f'megascale_step{k}.svg')
 fig, ax = plt.subplots(figsize=(5.8, 2.6))
 mult, step = (0.9659363289, 2.0)
 xs = [1.0, 2.0, 4.0, 8.0, 16.0]
@@ -213,5 +220,6 @@ g.text(260, 200, 'one task,', 28, SLATE)
 g.text(260, 238, 'many steps', 28, SLATE)
 g.write('agent_loop', 1)
 moe_rows = [('MoE, all experts resident', 1342.0, 'memory', '1,342 GB'), ('Dense 400B, read per step', 800.0, 'neutral', '800 GB'), ('MoE, active per token', 74.0, 'compute', '74 GB')]
-sp.hbars(out / 'moe_bytes.svg', moe_rows, '', log=False, size=(5.8, 1.9))
+for k, step in ((1, 2), (2, 3)):
+    sp.hbars(out / f'moe_bytes_step{k}.svg', moe_rows, '', log=False, step=step, size=(5.8, 1.9))
 print('figures written')
