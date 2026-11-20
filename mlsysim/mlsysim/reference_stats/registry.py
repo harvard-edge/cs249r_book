@@ -186,7 +186,7 @@ class TrainingScaleProfiles(Registry):
         description="Modeled for the 175B reference job; pipeline fill and drain become visible (~6% of step).",
     )
     Eff8192Gpu = sourced(
-        0.56,
+        0.57,
         pc.SCALING_EFFICIENCY_REFERENCE_JOB_MODELED,
         name="Scaling efficiency (8192 GPUs)",
         description="Modeled for the 175B reference job at a fixed GPT-3 batch; pipeline bubble dominates (~33% of step). Production runs with larger batches and interleaved pipelines retain more (MegaScale).",

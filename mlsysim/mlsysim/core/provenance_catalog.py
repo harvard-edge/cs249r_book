@@ -2197,16 +2197,17 @@ MIDSCALE_TRAINING_CARBON_SCENARIO = _est(
 SCALING_EFFICIENCY_REFERENCE_JOB_MODELED = Provenance(
     id="prov:scaling-efficiency-reference-job-modeled",
     kind=ProvenanceKind.DERIVED,
-    ref="MLSysIM DistributedModel sweep of Scenarios.DenseLLMPretrainingReference",
+    ref="MLSysIM DistributedModel sweep of Scenarios.DenseLLMPretrainingReference on Systems.Clusters.Training_1K_NDR",
     notes=(
-        "GPT-3 175B on DGX H100 + HDR InfiniBand; TP8 x PP8 (64-GPU replica); fixed global batch "
+        "GPT-3 175B on DGX H100 + NDR InfiniBand (moved from HDR 2026-11-20 so the tiers match the 8,192-GPU "
+        "Frontier_8K step the chapters model); TP8 x PP8 (64-GPU replica); fixed global batch "
         "1,536 sequences (Brown et al. 2020 Table 2.1), one sequence per micro-batch, overlap_comm=True, "
-        "efficiency=LocalComputeEfficiency 0.45, fp16. Raw 0.8738 (256), 0.8293 (1,024), 0.5619 (8,192), "
+        "efficiency=LocalComputeEfficiency 0.45, fp16. Raw 0.8738 (256), 0.8318 (1,024), 0.5733 (8,192), "
         "rounded to 2 dp. Same sweep as vol2 fig-fleet-orchestration-scaling-efficiency-curve. Published "
         "strong-scaling retention is higher with larger batch and interleaved pipelines: MegaScale Table 2 "
         "is 0.90 from 256 to 1,024 and 0.93 from 3,072 to 12,288 GPUs."
     ),
-    verified="2026-09-29",
+    verified="2026-11-20",
 )
 
 # --- Accelerator life cycle (2026-10-13) ---
