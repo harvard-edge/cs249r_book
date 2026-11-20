@@ -7,10 +7,10 @@ Every value is from the rendered chapter (Volume II, Introduction) unless noted:
     (a chosen scenario input); 200 Gb/s InfiniBand (25 GB/s): about 28 s,
     compute-time fraction 4.1 percent; 100 Gb/s Ethernet: 56 s, 2.1 percent.
   - Growth decomposition (Sec. 1.1, figure 1b): fitted here from MLSysIM's
-    copy of Epoch AI's notable-model records (146 runs, 2012 to 2024 that
-    report count and duration): compute 3.9x per year = count 1.6x x
-    duration 1.3x x delivered rate per accelerator 2.0x; count and duration
-    give 51 percent of the exponent.
+    copy of Epoch AI's notable-model records (132 standalone runs, 2012
+    through September 2026, that report count and duration): compute 4.0x
+    per year = count 1.7x x duration 1.4x x delivered rate per accelerator
+    1.7x; count and duration give 60 percent of the exponent.
   - Scaling law (Sec. 1.3.3, theorem 1.1): the parameter term A / N^alpha of
     the Hoffmann et al. (2022) parametric fit, A = 406.4, alpha = 0.34, read
     from MLSysIM's Chinchilla registry. Halving it needs 2^(1/0.34) = 7.7x
@@ -78,7 +78,25 @@ def hook(path, k, size=(3.4, 1.3), fs=11, stack=False):
 hook(out / 'hook_step1.svg', 1)
 hook(out / 'hook_step2.svg', 2)
 hook(out / 'hook_synth.svg', 2, size=(3.1, 1.8), fs=15, stack=True)
-g_compute, g_count, g_dur, g_rate = (3.929954488, 1.594722735, 1.262843216, 1.951429651)
+# Same fit as the chapter's TrainingComputeGrowth cell: standalone runs
+# (standalone_hw_valid == 1) carrying compute, count, and hours, 2012 through
+# the end of the Epoch snapshot; log-linear OLS slope per factor.
+import datetime as _dt
+from mlsysim.core.series_loader import load_series
+def _dec_year(s):
+    d = _dt.date.fromisoformat(s)
+    return d.year + (d.timetuple().tm_yday - 1) / 365.25
+_runs = [r for r in load_series('vol2/01_introduction/data/notable_model_training_runs.csv').entries
+         if r['training_compute_flop'] and '2012' <= r['date'][:4] <= '2026'
+         and r['hardware_quantity'] and r['training_time_hours'] and r['standalone_hw_valid'] == 1]
+def _annual(value):
+    return float(10 ** np.polyfit([_dec_year(r['date']) for r in _runs], np.log10([value(r) for r in _runs]), 1)[0])
+g_compute = _annual(lambda r: r['training_compute_flop'])
+g_count = _annual(lambda r: r['hardware_quantity'])
+g_dur = _annual(lambda r: r['training_time_hours'])
+g_rate = _annual(lambda r: r['training_compute_flop'] / (r['hardware_quantity'] * r['training_time_hours'] * 3600))
+fleet_share = (np.log(g_count) + np.log(g_dur)) / np.log(g_compute)
+assert len(_runs) == 132 and abs(g_count * g_dur * g_rate / g_compute - 1) < 1e-6, 'slide text quotes 132 runs'
 fig, ax = plt.subplots(figsize=(4.4, 2.1))
 rows = [('Training compute', g_compute, C['neutral']), ('Accelerator count', g_count, C1), ('Training duration', g_dur, C1), ('Rate per accelerator', g_rate, C['compute'])]
 for i, (lab, v, col) in enumerate(rows):
@@ -86,7 +104,7 @@ for i, (lab, v, col) in enumerate(rows):
     ax.barh(y, np.log10(v), color=col, height=0.6)
     ax.text(-0.005, y, lab, ha='right', va='center', fontsize=13, fontweight='bold', color=C['text'])
     ax.text(np.log10(v) + 0.01, y, f'{v:.1f}× per year', va='center', fontsize=13, fontweight='bold', color=col)
-ax.text(0, -0.95, 'blue bars together give 51% of the growth', color=C1, fontsize=12, fontweight='bold', ha='left', va='center')
+ax.text(0, -0.95, f'blue bars together give {round(fleet_share * 100)}% of the growth', color=C1, fontsize=12, fontweight='bold', ha='left', va='center')
 ax.set_xlim(0, 0.95)
 ax.set_ylim(-1.4, 3.5)
 ax.set_yticks([])
