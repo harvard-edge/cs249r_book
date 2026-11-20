@@ -23,7 +23,8 @@ Two outputs, both written at build time:
    in slides/volN.qmd: one row per chapter, grouped under the book's parts
    (the sections of the book's sidebar in the same HTML config),
    each lecture linking to its PDF, its PowerPoint file, and its source
-   folder, and each chapter row linking to the chapter in the book. Runs as
+   folder, and each chapter row linking to the chapter in the book and to
+   its study sheet (books/shared/studysheet/build.py names the sheet URL). Runs as
    the slides site's Quarto pre-render, so the page never carries a
    hand-typed deck list.
 
@@ -43,6 +44,8 @@ import json
 import re
 import sys
 from pathlib import Path
+
+import importlib.util
 
 import yaml
 
@@ -109,6 +112,15 @@ def book_chapters(vol: str) -> dict:
     return out
 
 
+def study_sheets(vol: str) -> dict:
+    """Map chapter folder -> study-sheet URL, from the sheet build's own manifest logic."""
+    spec = importlib.util.spec_from_file_location("studysheet_build",
+                                                  BOOKS / "shared" / "studysheet" / "build.py")
+    build = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(build)
+    return {tex.parent.name: build.sheet_url(tex) for tex in build.sheets(vol)}
+
+
 def deck_info(deck: Path, tex: Path) -> dict:
     data = {}
     m = deck / "lecture_map.yml"
@@ -140,6 +152,7 @@ def lecture_links(vol: str, deck: str) -> dict:
 def volume(vol: str, slides_page: str) -> list:
     """The chapters of one volume in order, each with its book URL and lectures."""
     book = book_chapters(vol)
+    sheets = study_sheets(vol)
     by_num = {}
     for deck in sorted((ROOT / vol).iterdir()):
         tex = deck / f"{deck.name}.tex"
@@ -173,6 +186,7 @@ def volume(vol: str, slides_page: str) -> list:
                              "slides_url": f"{slides_page}#{lec_anchor}"})
         chapters.append({"num": n, "chapter": decks[0]["chapter"], "title": title,
                          "book_url": book.get(decks[0]["chapter"], ""),
+                         "sheet_url": sheets.get(decks[0]["chapter"], ""),
                          "anchor": anchor, "slides_url": f"{slides_page}#{anchor}",
                          "lectures": lectures})
     return chapters
@@ -192,6 +206,9 @@ def chapter_html(ch: dict) -> list:
     esc = html.escape
     read = (f'<a class="ch-read" href="{ch["book_url"]}">Read the chapter</a>'
             if ch["book_url"] else "")
+    if ch.get("sheet_url"):
+        read += f'<a class="ch-read" href="{ch["sheet_url"]}">Study sheet</a>'
+
     rows = [f'  <div class="ch" id="{ch["anchor"]}"><div class="ch-num">{ch["num"]}</div>'
             '<div class="ch-body">']
     lectures = ch["lectures"]
