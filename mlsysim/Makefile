@@ -54,5 +54,13 @@ modeling-docs-check: ## Check NumPy docstrings, model contracts, examples, and s
 publication-check: ## Verify displayed paper values, timing receipts, and benchmark anchors (repository checkout)
 	PYTHONPATH=. $(PYTHON) paper/scripts/generate_paper_values.py --check
 	PYTHONPATH=. $(PYTHON) paper/scripts/validate_anchors.py
+	PYTHONPATH=. $(PYTHON) paper/scripts/analyze_gpu_energy.py --check
+	PYTHONPATH=. $(PYTHON) paper/scripts/analyze_gpu_energy.py --check --root paper/data/gpu-energy-workloads
+	PYTHONPATH=. $(PYTHON) paper/scripts/analyze_gpu_energy.py --check --root paper/data/gpu-energy-boards
+	PYTHONPATH=. $(PYTHON) paper/scripts/compare_gpu_energy_boards.py --check
+	PYTHONPATH=. $(PYTHON) paper/scripts/analyze_gpu_energy.py --check --root paper/data/gpu-energy-seeds/seed-2193
+	PYTHONPATH=. $(PYTHON) paper/scripts/analyze_gpu_energy.py --check --root paper/data/gpu-energy-seeds/seed-2198
+	PYTHONPATH=. $(PYTHON) paper/scripts/compare_gpu_energy_seeds.py --check
+	PYTHONPATH=. $(PYTHON) paper/scripts/build_measured_gpu_energy.py --check
 
 check: lint test calibration-check modeling-docs-check ## Run package release checks

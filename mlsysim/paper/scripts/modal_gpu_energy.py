@@ -1,0 +1,316 @@
+"""Run measure_gpu_energy.py on Modal and copy each run into paper/data/<folder>/runs/.
+
+The measurement does not depend on Modal. The runner works the same on any
+single NVIDIA GPU. Requirements: ``pip install modal`` and
+``modal setup``. The plan's weights come from ungated repositories, so no
+Hugging Face token is needed. ``GPU_ENERGY_DATA`` picks the folder under
+paper/data that holds the plan, and defaults to ``gpu-energy``.
+
+    modal run paper/scripts/modal_gpu_energy.py                       # every device, twice
+    modal run paper/scripts/modal_gpu_energy.py --devices H100 --repeats 1 \\
+        --configs h100-llama-b16-p2048 --label pilot                  # a pilot
+    GPU_ENERGY_DATA=gpu-energy-workloads modal run paper/scripts/modal_gpu_energy.py
+    GPU_ENERGY_DATA=gpu-energy-seeds/seed-2193 GPU_ENERGY_PAIR=gpu-energy-seeds/seed-2198 \\
+        modal run paper/scripts/modal_gpu_energy.py --repeats 4  # both plans in each container
+
+A vLLM engine keeps its GPU memory until its process exits, so each run serves
+one language model. When a device has configurations for several language
+models, each model gets its own run and container. Training configurations join
+the device's first language-model run. When the plan has more than one language
+model, every run folder names its model.
+
+``GPU_ENERGY_PAIR`` names a second plan folder with the same devices and
+configurations. Each container then measures both plans on the same GPU, one
+after the other, and writes one run into each folder under the same name. The
+order alternates between the containers of each device and model: the first
+measures ``GPU_ENERGY_DATA``'s plan first, the second the other plan first,
+and so on.
+
+Each run also saves its files in the volume under ``gpu-energy-results/<folder>/<run>/``,
+with the runner's exit code beside it in ``<run>.exit_code``. If the local client
+loses its connection, copy a run into ``runs/`` with
+``modal volume get mlsysim-hf-cache gpu-energy-results/<folder>/<run> paper/data/<folder>/runs/``.
+Tested with Modal 1.6.3.
+
+One command does the whole matrix without spending GPU time on anything but
+measurement. A CPU-only container first downloads the pinned weights into a
+Modal volume (a no-op once they are there) and checks every shard against the
+plan's SHA-256. Then every requested run starts at once, each in its own GPU
+container, and reads the weights offline (``HF_HUB_OFFLINE=1``), so no GPU
+container downloads anything.
+
+GPU strings below must equal ``devices.<key>.modal_gpu`` in the plan (a test
+checks this). ``H100!`` stops Modal from substituting an H200 for an H100
+request. The runner also refuses to measure if the reported device name differs
+from the plan's ``expected_name``.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import tempfile
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+
+import modal
+
+HERE = Path(__file__).resolve().parent
+DATA = HERE.parent / "data" / os.environ.get("GPU_ENERGY_DATA", "gpu-energy")
+PLAN = DATA / "plan.json"
+RUNS = DATA / "runs"
+# An optional second plan, measured in the same container as the first.
+PAIR = HERE.parent / "data" / os.environ["GPU_ENERGY_PAIR"] if os.environ.get("GPU_ENERGY_PAIR") else None
+REMOTE = "/root/gpu-energy"
+CACHE = "/cache"
+# Each run also saves its files here, so a lost connection to the local client does not lose a run.
+RESULTS = f"{CACHE}/gpu-energy-results"
+
+image = (
+    modal.Image.debian_slim(python_version="3.11")
+    .pip_install(
+        # vllm 0.6.4.post1 requires exactly this torch and torchvision.
+        "vllm==0.6.4.post1",
+        "torch==2.5.1",
+        "torchvision==0.20.1",
+        "transformers==4.46.3",
+        "nvidia-ml-py==12.560.30",
+    )
+    .env({"HF_HOME": f"{CACHE}/huggingface"})
+    .add_local_file(HERE / "measure_gpu_energy.py", f"{REMOTE}/measure_gpu_energy.py")
+    .add_local_file(HERE / "gpu_energy_protocol.py", f"{REMOTE}/gpu_energy_protocol.py")
+    .add_local_file(PLAN, f"{REMOTE}/plan.json")
+)
+if PAIR is not None:
+    image = image.add_local_file(PAIR / "plan.json", f"{REMOTE}/pair-plan.json")
+app = modal.App("mlsysim-gpu-energy", image=image)
+cache = modal.Volume.from_name("mlsysim-hf-cache", create_if_missing=True)
+GPU_OPTIONS = dict(
+    timeout=4 * 3600,
+    # One run per container. A reused container could still hold the previous run's files.
+    single_use_containers=True,
+    # Reserve host CPU: vLLM schedules every decode step on the CPU, so a starved
+    # container would slow decode. The manifest records the CPU limit the run saw.
+    cpu=8.0,
+    memory=32768,
+    volumes={CACHE: cache},
+)
+
+
+@app.function(cpu=2.0, memory=4096, timeout=3600, volumes={CACHE: cache})
+def prefetch(models: list[dict]) -> list[str]:
+    """Download pinned weights, config, and tokenizer into the volume and verify the shards, on a CPU container."""
+    import hashlib
+
+    from huggingface_hub import snapshot_download
+
+    paths = []
+    for model in models:
+        # *.json covers config, generation config, tokenizer, and the weight index.
+        # tokenizer.model is the SentencePiece tokenizer of repos without a tokenizer.json.
+        # A consolidated original/ checkpoint, if the repo has one, is skipped.
+        path = Path(snapshot_download(model["repo"], revision=model["revision"],
+                                      allow_patterns=["*.json", "*.safetensors", "tokenizer.model"]))
+        for name, expected in model["weights_sha256"].items():
+            digest = hashlib.sha256()
+            with open(path / name, "rb") as handle:
+                for block in iter(lambda: handle.read(1 << 24), b""):
+                    digest.update(block)
+            if digest.hexdigest() != expected:
+                raise SystemExit(f"{model['repo']}/{name}: sha256 {digest.hexdigest()} is not the plan's {expected}")
+        paths.append(f"{path} ({len(model['weights_sha256'])} shards verified)")
+    cache.commit()
+    return paths
+
+
+def _measure(device_key: str, configs: list[str], name: str = "", pair_name: str = "",
+             pair_first: bool = False) -> dict[str, bytes]:
+    """Run the runner and return its files. With ``pair_name``, also run the paired plan, whose files get a "pair/" prefix."""
+    plans = [(f"{REMOTE}/plan.json", name, "")]
+    if pair_name:
+        plans.insert(0 if pair_first else 1, (f"{REMOTE}/pair-plan.json", pair_name, "pair/"))
+    returned = {}
+    for plan_path, run_name, prefix in plans:
+        # A fresh folder per run, so a run can never return files another run left behind.
+        out = Path(tempfile.mkdtemp(prefix="run-")) / "run"
+        command = ["python", f"{REMOTE}/measure_gpu_energy.py", "--plan", plan_path,
+                   "--device", device_key, "--out", str(out)]
+        for config in configs:
+            command += ["--config", config]
+        code = _run(command, out / "manifest.json")
+        files = {p.name: p.read_bytes() for p in sorted(out.iterdir()) if p.is_file()} if out.exists() else {}
+        if run_name:
+            # A failed copy must not lose the run, which is still returned below.
+            try:
+                saved = Path(RESULTS) / run_name
+                saved.mkdir(parents=True, exist_ok=True)
+                for file_name, data in files.items():
+                    (saved / file_name).write_bytes(data)
+                (saved.parent / f"{saved.name}.exit_code").write_text(f"{code}\n")
+                cache.commit()
+            except Exception as exc:
+                print(f"could not save a copy in the volume: {exc!r}")
+        files["exit_code.txt"] = f"{code}\n".encode()
+        returned.update({prefix + file_name: data for file_name, data in files.items()})
+    return returned
+
+
+def _run(command: list[str], manifest: Path) -> int:
+    """Run the runner offline and return its exit code."""
+    offline = {**os.environ, "HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1"}
+    process = subprocess.Popen(command, env=offline)
+    finished_at = None
+    while process.poll() is None:
+        time.sleep(5)
+        if finished_at is None and manifest.exists() and "finished_utc" in manifest.read_text():
+            finished_at = time.monotonic()
+        # The run is complete once its manifest says so. A process that then hangs
+        # on exit (vLLM sometimes does) is killed so it does not run to the timeout.
+        if finished_at is not None and time.monotonic() - finished_at > 120:
+            process.kill()
+            process.wait()
+    return 0 if finished_at is not None else process.returncode
+
+
+@app.function(gpu="H100!", **GPU_OPTIONS)
+def measure_h100(configs: list[str], name: str = "", pair_name: str = "",
+                 pair_first: bool = False) -> dict[str, bytes]:
+    return _measure("H100", configs, name, pair_name, pair_first)
+
+
+@app.function(gpu="A100-80GB", **GPU_OPTIONS)
+def measure_a100(configs: list[str], name: str = "", pair_name: str = "",
+                 pair_first: bool = False) -> dict[str, bytes]:
+    return _measure("A100", configs, name, pair_name, pair_first)
+
+
+# More host memory for the H200: it is the one device that loads Mixtral-8x7B's 93 GB of weights.
+@app.function(gpu="H200", **{**GPU_OPTIONS, "memory": 65536})
+def measure_h200(configs: list[str], name: str = "", pair_name: str = "",
+                 pair_first: bool = False) -> dict[str, bytes]:
+    return _measure("H200", configs, name, pair_name, pair_first)
+
+
+FUNCTIONS = {"H100": measure_h100, "A100": measure_a100, "H200": measure_h200}
+
+
+def _runs_for(plan: dict, configs: list[dict]) -> list[tuple[str, list[dict]]]:
+    """Split one device's configurations into runs that each serve one language model.
+
+    Training configurations join the first run. With one language model this is a
+    single run with every configuration, as before.
+    """
+    kind = {name: w["kind"] for name, w in plan["workloads"].items()}
+    models = [w for w in plan["workloads"] if kind[w] == "generate" and any(c["workload"] == w for c in configs)]
+    training = [c for c in configs if kind[c["workload"]] != "generate"]
+    if not models:
+        return [("", training)]
+    runs = [(w, [c for c in configs if c["workload"] == w]) for w in models]
+    runs[0] = (runs[0][0], training + runs[0][1])
+    return runs
+
+
+def _plan_jobs(plan: dict, devices: list[str], repeats: int, selected: list[str], label: str,
+               stamp: str) -> list[tuple[str, list[str], list[dict], str]]:
+    """Return (device, config ids for the runner, configurations, run folder name) for every run.
+
+    An empty id list lets the runner measure every configuration of the device.
+    Explicit ids keep the plan's order.
+    """
+    language_models = [w for w, spec in plan["workloads"].items() if spec["kind"] == "generate"]
+    jobs = []
+    for key in devices:
+        mine = [c for c in plan["configs"] if c["device"] == key and (not selected or c["id"] in selected)]
+        if not mine:
+            continue
+        runs = _runs_for(plan, mine)
+        for k in range(1, repeats + 1):
+            for model, group in runs:
+                name = model.replace("_", "-") if len(language_models) > 1 else ""
+                folder = "-".join(p for p in (label, key.lower(), name, stamp, str(k)) if p)
+                ids = [c["id"] for c in mine if c in group] if selected or len(runs) > 1 else []
+                jobs.append((key, ids, group, folder))
+    return jobs
+
+
+def _pair_first(runs: list[tuple]) -> list[bool]:
+    """For each job, in job order, whether the paired plan runs first.
+
+    ``runs`` gives each job's device and workloads. The order alternates between
+    jobs of the same device and workloads, so every model gets both orders.
+    """
+    seen: dict[tuple, int] = {}
+    order = []
+    for run in runs:
+        seen[run] = seen.get(run, 0) + 1
+        order.append(seen[run] % 2 == 0)
+    return order
+
+
+@app.local_entrypoint()
+def main(devices: str = "", repeats: int = 2, configs: str = "", label: str = ""):
+    """Measure every requested device ``repeats`` times. ``devices`` defaults to every device in the plan."""
+    plan = json.loads(PLAN.read_text())
+    devices = devices or ",".join(plan["devices"])
+    selected = [c for c in configs.split(",") if c]
+    unknown = sorted(set(selected) - {c["id"] for c in plan["configs"]})
+    if unknown:
+        raise SystemExit(f"unknown configs: {', '.join(unknown)}")
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    if PAIR is not None:
+        pair_plan = json.loads((PAIR / "plan.json").read_text())
+        if pair_plan["devices"] != plan["devices"] or pair_plan["configs"] != plan["configs"]:
+            raise SystemExit(f"{PAIR} must have the same devices and configurations as {DATA}")
+    jobs = []
+    for key, ids, group, folder in _plan_jobs(plan, [d for d in devices.split(",") if d], repeats, selected,
+                                              label, stamp):
+        target = RUNS / folder
+        # checked before any GPU time, so a name clash costs nothing
+        for path in (target, PAIR / "runs" / folder) if PAIR is not None else (target,):
+            if path.exists():
+                raise SystemExit(f"{path} already exists")
+        jobs.append((key, ids, group, target))
+    if not jobs:
+        raise SystemExit("nothing to run")
+    llm_workloads = {c["workload"] for _, _, mine, _ in jobs for c in mine
+                     if plan["workloads"][c["workload"]]["kind"] == "generate"}
+    if llm_workloads:
+        models = [{"repo": plan["workloads"][w]["hf_model"], "revision": plan["workloads"][w]["hf_revision"],
+                   "weights_sha256": plan["workloads"][w]["weights_sha256"]} for w in sorted(llm_workloads)]
+        print("weights in the volume:", prefetch.remote(models))
+    data_root = HERE.parent / "data"
+    calls = []
+    runs = [(key, tuple(sorted({c["workload"] for c in group}))) for key, _, group, _ in jobs]
+    for (key, ids, _, target), pair_first in zip(jobs, _pair_first(runs)):
+        targets = {"": target}
+        if PAIR is not None:
+            targets["pair/"] = PAIR / "runs" / target.name
+        for path in targets.values():
+            path.mkdir(parents=True)
+        names = {prefix: str(path.relative_to(data_root).parent.parent / path.name) for prefix, path in targets.items()}
+        call = FUNCTIONS[key].spawn(ids, names[""], names.get("pair/", ""), PAIR is not None and pair_first)
+        calls.append((call, targets, names))
+    print(f"started {len(calls)} containers:", ", ".join(targets[""].name for _, targets, _ in calls))
+    failed = 0
+    for call, targets, names in calls:
+        try:
+            files = call.get()
+        except Exception as exc:  # the container died and returned nothing
+            for path in targets.values():
+                path.rmdir()
+            print(f"{targets[''].name}: no result ({exc!r}). A copy may be in the volume at "
+                  + " and ".join(f"gpu-energy-results/{name}" for name in names.values()) + ".")
+            failed += len(targets)
+            continue
+        for prefix, target in targets.items():
+            mine = {name[len(prefix):]: data for name, data in files.items()
+                    if name.startswith(prefix) and "/" not in name[len(prefix):]}
+            code = int(mine.pop("exit_code.txt").decode())
+            for name, data in mine.items():
+                (target / name).write_bytes(data)
+            print(f"{target.relative_to(data_root)}: wrote {len(mine)} files (runner exit code {code})")
+            failed += code != 0
+    if failed:
+        raise SystemExit(f"{failed} run(s) did not finish cleanly")
