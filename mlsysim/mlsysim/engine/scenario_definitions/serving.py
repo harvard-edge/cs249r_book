@@ -457,7 +457,7 @@ class FleetMfuScenario(BaseScenario):
     >>> from mlsysim import Scenarios
     >>> case = Scenarios.Llama2_70BFleetMfu128
     >>> round(float(case.node_useful_work.to('flop').magnitude), 3)
-    925680000000000.0"""
+    930720000000000.0"""
 
     # Retain the public class identity used by Pydantic schemas and pickle.
     __module__ = "mlsysim.engine.scenario_types"

@@ -88,7 +88,10 @@ def calc_inertial_coast_errors(gyro_noise_density, gyro_bias, accel_noise_densit
     Notes
     -----
     Equation: heading_noise = ``N_g*sqrt(T)``; heading_bias = ``b_g*T``; position_noise =
-    ``N_a*sqrt(T**3/3)``; position_bias = ``b_a*T**2/2``.
+    ``N_a*sqrt(T**3/3)``; position_bias = ``b_a*T**2/2``. Evaluating directly on
+    one-sided datasheet noise densities ``N_g`` and ``N_a`` gives a conservative
+    ``sqrt(2)`` upper bound relative to the IEEE Std 952 two-sided PSD convention
+    (``q_c = N_1**2 / 2``).
 
     Assumptions: White independent rate/acceleration noise and constant biases over the
     interval.

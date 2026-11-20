@@ -717,9 +717,9 @@ class GustafsonExample:
 
 *   With $\WorkerCount=1$, speedup is 1.
 *   With $\WorkerCount=$ `{python} GustafsonExample.n_8_g_str`, Scaled Speedup is `{python} GustafsonExample.n_8_g_str` − `{python} GustafsonSetup.s_g_str` $\times$ (`{python} GustafsonExample.n_8_g_minus_1_str`) = `{python} GustafsonExample.n_8_g_str` − `{python} GustafsonExample.gustafson_8_serial_str` = `{python} GustafsonExample.gustafson_8_speedup_mult_str`.
-*   With $\WorkerCount=$ `{python} GustafsonExample.n_1000_str`, Scaled Speedup is `{python} GustafsonExample.n_1000_str` − `{python} GustafsonSetup.s_g_str` $\times$ (`{python} GustafsonExample.n_1000_minus_1_str`) ≈ `{python} GustafsonExample.gustafson_1000_speedup_mult_str`.
+*   With $\WorkerCount=$ `{python} GustafsonExample.n_1000_str` (an asymptotic illustration of Gustafson's formula), Scaled Speedup is `{python} GustafsonExample.n_1000_str` − `{python} GustafsonSetup.s_g_str` $\times$ (`{python} GustafsonExample.n_1000_minus_1_str`) ≈ `{python} GustafsonExample.gustafson_1000_speedup_mult_str`.
 
-In weak scaling, efficiency remains high because the useful work (training the model) scales up to dwarf the fixed overheads. @Sec-model-training-singlenode-multigpu-training-c87f shows how data-parallel training uses weak scaling to keep accelerators busy as the cluster grows.
+In weak scaling, efficiency remains high because the useful work scales up to dwarf fixed overheads. @Sec-benchmarking-scalability-parallelism-1124 contrasts strong and weak scaling for multi-accelerator training benchmarks; inside a single node of up to eight GPUs, @sec-model-training-singlenode-multigpu-training-c87f develops the data-parallel mechanics that keep each accelerator fed.
 
 ### The training-time equation {#sec-appdx-machine-foundations-training-time-equation-7c3e}
 
@@ -1122,32 +1122,47 @@ How much bandwidth, compute, and memory capacity sit on either side of those lin
 # │ Context: @sec-appdx-machine-foundations-ai-hardware-cheat-sheet-modern-reference-4dc1
 # │          (@tbl-accelerator-classes-ref and the paragraph after it)
 # │
-# │ Goal: Summarize each hardware class as order-of-magnitude ranges over
-# │       representative registry devices, not as any one product's datasheet.
-# │ Show: Peak rate, memory bandwidth, capacity, power, and ridge point ranges
-# │       per class, rounded to one significant figure; the cross-class span.
-# │ How: Min and max over representative Hardware.* entries per class; dated
-# │      per-product values live in System Assumptions.
+# │ Goal: Summarize each hardware class as min-max ranges over representative
+# │       registry devices, not as any one product's datasheet.
+# │ Show: Dense peak rate (native class precision), memory bandwidth, nameplate
+# │       capacity (on-chip SRAM for MCUs), power, and ridge-point ranges per
+# │       class, plus the cross-class span.
+# │ How: Exact or outward-bracketed min and max over representative Hardware.*
+# │      entries per class; dated per-product values live in System Assumptions.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 import math
 from mlsysim import Hardware
-from mlsysim.core.units import flop, byte, second, TFLOPs, MFLOPs, TB, GB, MB, watt, milliwatt
-from mlsysim.fmt import fmt_int, fmt_power, fmt_qty_range, check
+from mlsysim.core.units import (
+    flop,
+    byte,
+    second,
+    TFLOPs,
+    MFLOPs,
+    TOPS,
+    TB,
+    GB,
+    MB,
+    KB,
+    watt,
+    milliwatt,
+    labeled_capacity,
+)
+from mlsysim.fmt import fmt_int, fmt_power, fmt_qty_range, fmt_range, check
 
-def _sig1_bounds(quantities, unit):
-    """Return (lo, hi) of a class's values in one unit, rounded to one significant figure."""
-
-    def _sig1(q):
-        m = q.magnitude
-        return round(m, -math.floor(math.log10(abs(m)))) * q.units
-
-    values = [q.to(unit) for q in quantities]
-    return _sig1(min(values)), _sig1(max(values))
+def _bracket_bounds(quantities, unit, ndigits=0):
+    """Return outward-rounded (lo, hi) in one unit so the interval brackets every device."""
+    scale = 10**ndigits
+    values = [q.to(unit).magnitude for q in quantities]
+    lo = math.floor(min(values) * scale + 1e-9) / scale
+    hi = math.ceil(max(values) * scale - 1e-9) / scale
+    if ndigits == 0:
+        lo, hi = int(lo), int(hi)
+    return lo * unit, hi * unit
 
 # ┌── LEGO ───────────────────────────────────────────────
 class AcceleratorClasses:
-    """Order-of-magnitude ranges for datacenter, edge, mobile, and microcontroller hardware."""
+    """Representative hardware-class ranges for datacenter, edge, mobile, and microcontroller devices."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     # Representative devices per class (registry entries, not a product survey).
@@ -1157,42 +1172,53 @@ class AcceleratorClasses:
     mcu = [Hardware.Tiny.ESP32_S3, Hardware.Tiny.STM32F4, Hardware.Tiny.nRF52840, Hardware.Tiny.HimaxWE1]
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    # Dense native class rates: FP16/BF16 for datacenter, dense INT8 for edge & mobile, FP32 for MCU.
     dc_peak = [h.compute.peak_flops for h in datacenter]
-    edge_peak = [h.compute.peak_flops for h in edge]
+    edge_peak = [h.compute.precision_flops.get("int8", h.compute.peak_flops) for h in edge]
     mobile_peak = [h.compute.peak_flops for h in mobile]
     mcu_peak = [h.compute.peak_flops for h in mcu]
     dc_power = [h.tdp for h in datacenter if h.tdp is not None]
     mcu_power = [h.tdp for h in mcu if h.tdp is not None]
     dc_ridge = [h.ridge_point().to(flop / byte) for h in datacenter]
-    mobile_ridge = [h.ridge_point().to(flop / byte) for h in mobile]
+    edge_ridge = [(p / h.memory.bandwidth).to(flop / byte) for p, h in zip(edge_peak, edge)]
+    mobile_ridge = [(p / h.memory.bandwidth).to(flop / byte) for p, h in zip(mobile_peak, mobile)]
     mcu_ridge = [h.ridge_point().to(flop / byte) for h in mcu]
-    dc_peak_lo, dc_peak_hi = _sig1_bounds([h.compute.peak_flops for h in datacenter], TFLOPs / second)
-    dc_bw_lo, dc_bw_hi = _sig1_bounds([h.memory.bandwidth for h in datacenter], TB / second)
-    dc_cap_lo, dc_cap_hi = _sig1_bounds([h.memory.capacity for h in datacenter], GB)
-    dc_power_lo, dc_power_hi = _sig1_bounds([h.tdp for h in datacenter if h.tdp is not None], watt)
-    dc_ridge_lo, dc_ridge_hi = _sig1_bounds([h.ridge_point() for h in datacenter], flop / byte)
-    edge_peak_lo, edge_peak_hi = _sig1_bounds([h.compute.peak_flops for h in edge], TFLOPs / second)
-    edge_bw_lo, edge_bw_hi = _sig1_bounds([h.memory.bandwidth for h in edge], GB / second)
-    edge_cap_lo, edge_cap_hi = _sig1_bounds([h.memory.capacity for h in edge], GB)
-    edge_power_lo, edge_power_hi = _sig1_bounds([h.tdp for h in edge if h.tdp is not None], watt)
-    edge_ridge_lo, edge_ridge_hi = _sig1_bounds([h.ridge_point() for h in edge], flop / byte)
-    mobile_peak_lo, mobile_peak_hi = _sig1_bounds([h.compute.peak_flops for h in mobile], TFLOPs / second)
-    mobile_bw_lo, mobile_bw_hi = _sig1_bounds([h.memory.bandwidth for h in mobile], GB / second)
-    mobile_cap_lo, mobile_cap_hi = _sig1_bounds([h.memory.capacity for h in mobile], GB)
-    mobile_power_lo, mobile_power_hi = _sig1_bounds([h.tdp for h in mobile if h.tdp is not None], watt)
-    mobile_ridge_lo, mobile_ridge_hi = _sig1_bounds([h.ridge_point() for h in mobile], flop / byte)
-    mcu_peak_lo, mcu_peak_hi = _sig1_bounds([h.compute.peak_flops for h in mcu], MFLOPs / second)
-    mcu_bw_lo, mcu_bw_hi = _sig1_bounds([h.memory.bandwidth for h in mcu], MB / second)
-    mcu_cap_lo, mcu_cap_hi = _sig1_bounds([h.memory.capacity for h in mcu], MB)
-    mcu_power_lo, mcu_power_hi = _sig1_bounds([h.tdp for h in mcu if h.tdp is not None], milliwatt)
-    mcu_ridge_lo, mcu_ridge_hi = _sig1_bounds([h.ridge_point() for h in mcu], flop / byte)
+    dc_peak_lo, dc_peak_hi = _bracket_bounds(dc_peak, TFLOPs / second)
+    dc_bw_lo, dc_bw_hi = _bracket_bounds([h.memory.bandwidth for h in datacenter], TB / second, ndigits=1)
+    dc_cap_lo, dc_cap_hi = _bracket_bounds([h.memory.labeled_capacity for h in datacenter], GB)
+    dc_power_lo, dc_power_hi = _bracket_bounds(dc_power, watt)
+    dc_ridge_lo, dc_ridge_hi = _bracket_bounds(dc_ridge, flop / byte)
+    edge_peak_lo, edge_peak_hi = _bracket_bounds(edge_peak, TOPS)
+    edge_bw_lo, edge_bw_hi = _bracket_bounds([h.memory.bandwidth for h in edge], GB / second)
+    edge_cap_lo, edge_cap_hi = _bracket_bounds([h.memory.labeled_capacity for h in edge], GB)
+    edge_power_lo, edge_power_hi = _bracket_bounds([h.tdp for h in edge if h.tdp is not None], watt)
+    edge_ridge_lo, edge_ridge_hi = _bracket_bounds(edge_ridge, flop / byte)
+    mobile_peak_lo, mobile_peak_hi = _bracket_bounds(mobile_peak, TOPS)
+    mobile_bw_lo, mobile_bw_hi = _bracket_bounds([h.memory.bandwidth for h in mobile], GB / second)
+    mobile_cap_lo, mobile_cap_hi = _bracket_bounds([h.memory.labeled_capacity for h in mobile], GB)
+    mobile_power_lo, mobile_power_hi = _bracket_bounds([h.tdp for h in mobile if h.tdp is not None], watt)
+    mobile_ridge_lo, mobile_ridge_hi = _bracket_bounds(mobile_ridge, flop / byte)
+    mcu_peak_lo, mcu_peak_hi = _bracket_bounds(mcu_peak, MFLOPs / second)
+    mcu_bw_lo, mcu_bw_hi = _bracket_bounds([h.memory.bandwidth for h in mcu], MB / second)
+    mcu_sram = [labeled_capacity(h.memory.sram_capacity) for h in mcu if h.memory.sram_capacity is not None]
+    mcu_cap_lo, mcu_cap_hi = _bracket_bounds(mcu_sram, KB)
+    mcu_power_lo, mcu_power_hi = _bracket_bounds(mcu_power, milliwatt)
+    mcu_ridge_lo, mcu_ridge_hi = _bracket_bounds(mcu_ridge, flop / byte, ndigits=2)
     peak_span_orders = math.floor(math.log10((max(dc_peak) / min(mcu_peak)).to("").magnitude))
     power_span_orders = math.floor(math.log10((max(dc_power) / min(mcu_power)).to("").magnitude))
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(
-        min(dc_ridge) > 50 * (flop / byte) and min(mobile_ridge) > 50 * (flop / byte),
-        "Datacenter and mobile ridges should sit in the hundreds of FLOP/byte",
+        min(dc_ridge) > 100 * (flop / byte)
+        and min(edge_ridge) > 100 * (flop / byte)
+        and max(edge_ridge) < 1000 * (flop / byte)
+        and min(mobile_ridge) > 100 * (flop / byte)
+        and max(mobile_ridge) < 1000 * (flop / byte),
+        "Datacenter, edge, and mobile ridges should sit in the hundreds of ops/byte",
+    )
+    check(
+        mobile_peak_lo <= min(mobile_peak) and max(mobile_peak) <= mobile_peak_hi,
+        "Mobile peak range must bracket every representative device",
     )
     check(max(mcu_ridge) < 10 * (flop / byte), "Microcontroller ridge should sit within a few FLOP/byte")
     check(peak_span_orders >= 6, f"Expected at least six orders of magnitude in peak rate, got {peak_span_orders}")
@@ -1206,23 +1232,23 @@ class AcceleratorClasses:
     dc_power_str = fmt_qty_range(dc_power_lo, dc_power_hi, unit=watt, commas=True)
     dc_ridge_str = fmt_qty_range(dc_ridge_lo, dc_ridge_hi, unit=flop / byte, commas=True)
 
-    edge_peak_str = fmt_qty_range(edge_peak_lo, edge_peak_hi, unit=TFLOPs / second, commas=True)
+    edge_peak_str = fmt_qty_range(edge_peak_lo, edge_peak_hi, unit=TOPS, commas=True)
     edge_bw_str = fmt_qty_range(edge_bw_lo, edge_bw_hi, unit=GB / second, commas=True)
     edge_cap_str = fmt_qty_range(edge_cap_lo, edge_cap_hi, unit=GB, commas=True)
     edge_power_str = fmt_qty_range(edge_power_lo, edge_power_hi, unit=watt, commas=True)
-    edge_ridge_str = fmt_qty_range(edge_ridge_lo, edge_ridge_hi, unit=flop / byte, commas=True)
+    edge_ridge_str = fmt_range(edge_ridge_lo.magnitude, edge_ridge_hi.magnitude, precision=0, commas=True, unit="OP/byte")
 
-    mobile_peak_str = fmt_qty_range(mobile_peak_lo, mobile_peak_hi, unit=TFLOPs / second, commas=True)
+    mobile_peak_str = fmt_qty_range(mobile_peak_lo, mobile_peak_hi, unit=TOPS, commas=True)
     mobile_bw_str = fmt_qty_range(mobile_bw_lo, mobile_bw_hi, unit=GB / second, commas=True)
     mobile_cap_str = fmt_qty_range(mobile_cap_lo, mobile_cap_hi, unit=GB, commas=True)
     mobile_power_str = fmt_power(mobile_power_lo, unit=watt, precision=0, commas=True)
-    mobile_ridge_str = fmt_qty_range(mobile_ridge_lo, mobile_ridge_hi, unit=flop / byte, commas=True)
+    mobile_ridge_str = fmt_range(mobile_ridge_lo.magnitude, mobile_ridge_hi.magnitude, precision=0, commas=True, unit="OP/byte")
 
     mcu_peak_str = fmt_qty_range(mcu_peak_lo, mcu_peak_hi, unit=MFLOPs / second, commas=True)
     mcu_bw_str = fmt_qty_range(mcu_bw_lo, mcu_bw_hi, unit=MB / second, commas=True)
-    mcu_cap_str = fmt_qty_range(mcu_cap_lo, mcu_cap_hi, unit=MB, commas=True)
+    mcu_cap_str = fmt_qty_range(mcu_cap_lo, mcu_cap_hi, unit=KB, commas=True)
     mcu_power_str = fmt_qty_range(mcu_power_lo, mcu_power_hi, unit=milliwatt, commas=True)
-    mcu_ridge_str = fmt_qty_range(mcu_ridge_lo, mcu_ridge_hi, unit=flop / byte, commas=True)
+    mcu_ridge_str = fmt_qty_range(mcu_ridge_lo, mcu_ridge_hi, unit=flop / byte, precision=2, commas=True)
 
     peak_span_orders_str = fmt_int(peak_span_orders, commas=False)
     power_span_orders_str = fmt_int(power_span_orders, commas=False)
@@ -1237,9 +1263,9 @@ A model trained on a 700 W data center accelerator cannot be dropped onto a batt
 | **Mobile SoC**             | `{python} AcceleratorClasses.mobile_peak_str` | `{python} AcceleratorClasses.mobile_bw_str` | `{python} AcceleratorClasses.mobile_cap_str` | `{python} AcceleratorClasses.mobile_power_str` | `{python} AcceleratorClasses.mobile_ridge_str` |
 | **Microcontroller**        |   `{python} AcceleratorClasses.mcu_peak_str`  |   `{python} AcceleratorClasses.mcu_bw_str`  |  `{python} AcceleratorClasses.mcu_cap_str`   |  `{python} AcceleratorClasses.mcu_power_str`   |  `{python} AcceleratorClasses.mcu_ridge_str`   |
 
-: **Accelerator Classes**: Order-of-magnitude ranges across representative devices in each class, rounded to one significant figure. Peak rate is the dense rate at each device's native ML precision (FP16 or BF16 for data center accelerators, mostly INT8 for edge, mobile, and microcontroller parts), so compare rates within a class rather than across classes. The ridge point is peak rate divided by memory bandwidth. {#tbl-accelerator-classes-ref tbl-colwidths="[20,16,16,16,14,18]"}
+: **Accelerator Classes**: Ranges bracketing representative devices in each class, using vendor nameplate capacities (and on-chip SRAM for microcontrollers). Peak rate is the dense rate at each class's native ML precision (FP16 or BF16 for data center accelerators, INT8 for edge modules and mobile SoCs, and FP32 for microcontrollers), so compare rates within a class rather than across classes. The ridge point is peak rate divided by memory bandwidth (in FLOP/byte for floating-point rows and OP/byte for INT8 rows). {#tbl-accelerator-classes-ref tbl-colwidths="[20,16,16,16,14,18]"}
 
-Two patterns stand out across these classes. First, they span roughly `{python} AcceleratorClasses.peak_span_orders_str` orders of magnitude in peak rate and `{python} AcceleratorClasses.power_span_orders_str` in power, so a model sized for one class rarely runs unchanged on another. Second, ridge points sit in the hundreds of FLOP per byte from data center to mobile, which leaves the same low-intensity operations bandwidth bound on all three. A microcontroller's ridge, by contrast, sits within a few FLOP per byte, which makes nearly every layer of a keyword-spotting model compute bound and shifts the limiting constraint to the power budget. @Sec-hardware-acceleration-choosing-accelerator-6b2d applies these classes to the choice of accelerator. Moving between classes also changes which numerical formats the hardware supports natively, and numerical precision\index{Precision!numerical format trade-offs} directly controls *how much* data must move.
+Two patterns stand out across these classes. First, they span roughly `{python} AcceleratorClasses.peak_span_orders_str` orders of magnitude in peak rate and `{python} AcceleratorClasses.power_span_orders_str` in power, so a model sized for one class rarely runs unchanged on another. Second, ridge points sit in the hundreds of operations per byte from data center to mobile, which leaves the same low-intensity operations bandwidth bound on all three. A microcontroller's ridge, by contrast, sits within a few FLOP per byte, which makes nearly every layer of a keyword-spotting model compute bound and shifts the limiting constraint to the power budget. @Sec-hardware-acceleration-choosing-accelerator-6b2d applies these classes to the choice of accelerator. Moving between classes also changes which numerical formats the hardware supports natively, and numerical precision\index{Precision!numerical format trade-offs} directly controls *how much* data must move.
 
 ## Numerical Representations {#sec-appdx-machine-foundations-numerical-representations-c889}
 

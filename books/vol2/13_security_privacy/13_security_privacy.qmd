@@ -614,7 +614,7 @@ Attack surfaces, threat vectors, and the defense mapping together enumerate what
 
 A team that spends months hardening against physical laser fault injection while leaving a public inference API without query budgets or loading untrusted pickle checkpoints (a Python file format that can run arbitrary code when loaded) from a public hub leaves its highest-probability attack paths wide open. Prioritization ranks the enumerated threats by how likely each is in the deployment and how much damage it would cause. Impact is not purely technical. Regulatory obligations raise the cost of some failures, as when an erasure request under the European Union's General Data Protection Regulation (GDPR)[^fn-gdpr-privacy-regulation] obliges the operator to trace personal data through derived datasets, logs, and deployed artifacts. A prioritization matrix based on likelihood and impact turns the threat model into an allocation decision. Teams automate defenses for threats that are both likely and damaging, prepare for rare but severe failures, and avoid spending scarce engineering time on low-value controls.
 
-[^fn-gdpr-privacy-regulation]: **GDPR (General Data Protection Regulation)**\index{GDPR!ML systems}: Article 17 establishes a right to erasure under specified grounds and exceptions. For an ML pipeline, responding to an applicable request requires tracing personal data through source records, derived datasets, logs, and deployed artifacts. Whether a trained model requires remediation depends on the data it retains and the applicable obligation; deleting a source row does not establish that every derived copy or learned disclosure has been removed. Retraining and machine unlearning are possible technical responses whose effectiveness requires separate validation.
+[^fn-gdpr-privacy-regulation]: **GDPR (General Data Protection Regulation)**\index{GDPR!ML systems}: Article 17 establishes a right to erasure under specified grounds and exceptions. For an ML pipeline, responding to an applicable request requires tracing personal data through source records, derived datasets, logs, and deployed artifacts. Whether a trained model requires remediation depends on the data it retains and the applicable obligation; deleting a source row does not establish that every derived copy or learned disclosure has been removed. Retraining and machine unlearning (methods that seek to remove specific records' influence from trained weights without full retraining, developed in @sec-responsible-ai-machine-unlearning-cdf1) are possible technical responses whose effectiveness requires separate validation.
 
 Penalties make the regulatory part of impact concrete. In healthcare, where ML systems routinely handle patient data, a breach can violate the Health Insurance Portability and Accountability Act (HIPAA),\index{HIPAA!enforcement}\index{HIPAA!ML compliance} with significant legal and ethical consequences. Globally, for personal data within its territorial and material scope, GDPR authorizes fines up to 2 percent of total worldwide annual turnover when an organization fails to implement appropriate security measures, and up to 4 percent for violations of its core processing principles or data-subject rights [@gdpr2016].
 
@@ -1796,7 +1796,11 @@ The attack challenged the assumption that training data would be "forgotten" aft
 
 Filtering, deduplication, and manual review can reduce exposure, and output filters can screen known sensitive patterns, but empirical screening does not prove that no sensitive string remains recoverable. Differential privacy addresses a different requirement by bounding how much a protected contribution changes the distribution of released results. It does not prohibit every reproduction of text that appears in training, especially information shared across many records. Its contribution bound and the utility effects of filtering or private training must therefore be evaluated separately.
 
-The result demonstrates why training-data controls need layered mitigations rather than storage access control alone [@carlini2021extracting]. Those layers can include filtering of personally identifiable information (PII), deduplication, extraction-style memorization audits, membership-inference testing, and differential privacy when a formal bound is required. Machine unlearning and policy controls address related lifecycle questions, but their guarantees require separate evidence and validation.
+The result demonstrates why training-data controls need layered mitigations rather than storage access control alone [@carlini2021extracting]. Those layers can include filtering of personally identifiable information (PII), deduplication, extraction-style memorization audits, membership-inference testing, and differential privacy when a formal bound is required. Machine unlearning (removing specific records' influence from trained weights without full retraining) and policy controls address related lifecycle questions, but their guarantees require separate evidence and validation.
+
+::: {.column-margin .margin-pointer}
+↪ Machine unlearning methods and their retraining-cost trade-offs are developed in @sec-responsible-ai-machine-unlearning-cdf1.
+:::
 
 ### Data poisoning {#sec-security-privacy-data-poisoning-351f}
 
@@ -1878,10 +1882,6 @@ Whether crafted examples become poisoning depends on the data boundary. Web scra
 :::
 
 Mitigating poisoning requires controls from data admission through model evaluation, and @sec-robust-ai-data-poisoning-defenses-d070 develops those defenses and the evidence for them. Because targeted and backdoor attacks can preserve aggregate validation accuracy, clean evaluation cannot certify integrity. The provenance bound on trust (principle \ref{pri-provenance-bounds-trust}) makes source verification and lineage necessary evidence about what entered training, but a verified source can still supply harmful records. Validation and anomaly detection examine those records, while robust training can limit their influence under a specified contamination model. Release evaluation must then test the targeted behaviors that ordinary accuracy metrics can miss.
-
-::: {.column-margin .margin-pointer}
-↪ Poisoning defenses, from data sanitization to robust training, are developed in @sec-robust-ai-data-poisoning-defenses-d070.
-:::
 
 ### Adversarial attacks {#sec-security-privacy-adversarial-attacks-9f84}
 
@@ -3189,20 +3189,20 @@ class TEEMemoryFootprint:
     r50_fp32 = Scenarios.ResNet50Fp32InSgxEnclave
     r50_int8 = Scenarios.ResNet50Int8InSgxEnclave
     sgx_epc_q = r50_fp32.capacity
+    sgx_epc_labeled_q = r50_fp32.hardware.memory.labeled_capacity
 
     # ┌── 2. EXECUTE ───────────────────────────────────────
     resnet18_fp32_q = r18_fp32.weight_bytes
     resnet18_int8_q = r18_int8.weight_bytes
     resnet50_fp32_q = r50_fp32.weight_bytes
     resnet50_int8_q = r50_int8.weight_bytes
-    resnet50_fp32_epc_ratio = r50_fp32.capacity_share
+    # Share of the labeled "128 MB", as the prose and margin figure print it (102.2 MB / 128 MB).
+    resnet50_fp32_epc_ratio = (resnet50_fp32_q / sgx_epc_labeled_q).to("").magnitude
 
     # ┌── 3. GUARD ─────────────────────────────────────────
     # vol2_security_privacy_margin_001.svg and its fig-alt type this size.
     check(abs(resnet50_fp32_q.to(MB).magnitude - 102.2) < 0.05, "Margin SVG says 102.2 MB.")
-    # 0.76 (not 0.80): the SGX EPC is 128 MiB (Intel quotes EPC in binary), so
-    # 102.2 MB of FP32 weights is 0.76 of the true 134.2 MB enclave, not 0.80.
-    check(abs(resnet50_fp32_epc_ratio - 0.76) < 0.01, "ResNet-50 EPC share changed")
+    check(abs(resnet50_fp32_epc_ratio - 0.799) < 0.005, "ResNet-50 EPC share changed")
 
     # ┌── 4. OUTPUT ────────────────────────────────────────
     resnet18_fp32_mb_str = fmt_memory(resnet18_fp32_q, unit=MB, precision=1, commas=False)
@@ -3216,7 +3216,7 @@ class TEEMemoryFootprint:
 Security features scale differently than computational resources. Protected memory capacity, not host memory, sets how much of a model can remain resident inside a TEE without paging. On an older Intel SGX configuration with a `{python} TEEMemoryFootprint.sgx_epc_mb_str` enclave page cache (the protected resident memory), ResNet-50's FP32 weights alone would fill about `{python} TEEMemoryFootprint.resnet50_fp32_epc_pct_str` of it. A ResNet-18 model is about `{python} TEEMemoryFootprint.resnet18_fp32_mb_str` with FP32 weights or `{python} TEEMemoryFootprint.resnet18_int8_mb_str` with INT8 weights, while ResNet-50 is about `{python} TEEMemoryFootprint.resnet50_fp32_mb_str` with FP32 weights or `{python} TEEMemoryFootprint.resnet50_int8_mb_str` with INT8 weights before activations and runtime buffers. The fleet's reference model sits far beyond that scale. The FP16 weights of the Archetype A (GPT-4/Llama-3) model occupy as many bytes as the `{python} ReferenceClusterAttackSurface.grad_total_gb_str` gradient it reduces each step, orders of magnitude more than an enclave page cache. Fleet-scale confidential computing therefore draws its boundary around a whole confidential virtual machine, an entire guest protected from the host, rather than an application enclave.
 
 ::: {.column-margin}
-![](images/svg/vol2_security_privacy_margin_001.svg){width="100%" fig-alt="Two blue bars against a red dashed limit line marking the 128-mebibyte EPC: ResNet-50 FP32 weights at 102.2 MB reach about three quarters of the way to the line, and ResNet-18 INT8 weights at 11.7 MB form a short stub."}
+![](images/svg/vol2_security_privacy_margin_001.svg){width="100%" fig-alt="Two blue bars against a red dashed limit line marking the 128 MB EPC: ResNet-50 FP32 weights at 102.2 MB reach about four-fifths of the way to the line, and ResNet-18 INT8 weights at 11.7 MB form a short stub."}
 
 *FP32 ResNet-50 weights alone nearly fill an older enclave page cache.*
 :::
@@ -3845,7 +3845,7 @@ Synthetic data generation still faces both utility and privacy limits. On the ut
 
 Consider a hospital that wants to share synthetic data for ML research. It trains a GAN on 10,000 patient records containing demographics, lab results, and diagnoses, seeking to preserve useful relationships among those features. The hospital applies differential privacy during training and uses a tested accountant, specifying whether the protected contribution is one record or all records from one patient. Before release, it evaluates clinical fidelity and subgroup utility, since an acceptable overall score can hide poor performance for rare conditions. Memorization tests supply additional empirical evidence, while the formal guarantee comes from the accounted mechanism. DP limits the effect of a protected contribution; it does not prevent learning population patterns or all sensitive inferences based on them.
 
-Across federated learning, differential privacy, homomorphic encryption, secure multiparty computation, and synthetic data, the privacy-preserving approaches differ in the guarantees they offer and in their system-level implications. Production designs often combine them, for example by applying differential privacy inside a federated setup or by reserving homomorphic encryption for the few inference stages whose inputs justify its cost. The choice of mechanism therefore depends on computational constraints, deployment architecture, and regulatory requirements. Once the formal machinery of differential privacy is in place, these methods can be weighed on privacy guarantee, runtime overhead, operational maturity, and use case fit together rather than as independent properties (@tbl-privacy-technique-comparison).
+Across federated learning, differential privacy, homomorphic encryption, secure multiparty computation, and synthetic data, the privacy-preserving approaches differ in the guarantees they offer and in their system-level implications. Production designs often combine them, for example by applying differential privacy inside a federated setup or by reserving homomorphic encryption for the few inference stages whose inputs justify its cost. The choice of mechanism therefore depends on computational constraints, deployment architecture, and regulatory requirements. Once the formal machinery of differential privacy is in place, these methods can be weighed on privacy guarantee, runtime overhead, operational maturity, and use case fit together rather than as independent properties (@sec-security-privacy-dp-decision-framework-c4a8).
 
 The defense stack now covers each tier, from hardware roots of trust through deployment, runtime, and model-design controls to the data path, where federation, secure aggregation, encrypted computation, and synthetic data each move raw records or individual updates away from a particular observer. Data locality, message hiding, encrypted computation, and synthesis alone do not bound what the released model reveals. A secure training cluster and confidential links can still publish a model that exposes memorized examples, as the GPT-2 case showed, because the leak travels through an authorized output rather than an unauthorized access. Closing that gap requires a guarantee stated about the release itself, with the protected contribution, the randomization, and the accumulated loss across releases all made explicit.
 
@@ -3859,7 +3859,7 @@ Differential privacy constrains a randomized training or analysis mechanism so t
 
 ***Differential privacy***\index{Differential privacy!definition} is a mathematical guarantee that bounds changes in the output distribution of a randomized algorithm under a specified change to one protected contribution. The neighboring relation defines that contribution and the permitted change. Approximate differential privacy permits a multiplicative bound and additive slack, formalized by the $(\PrivacyBudget, \PrivacyAdditiveSlack)$ bound $\Pr[\RandomizedMechanism(\NeighboringDataset) \in \MechanismOutputSet] \leq e^{\PrivacyBudget} \Pr[\RandomizedMechanism(\AdjacentNeighboringDataset) \in \MechanismOutputSet] + \PrivacyAdditiveSlack$ for adjacent datasets $\NeighboringDataset$ and $\AdjacentNeighboringDataset$ and any measurable output set $\MechanismOutputSet$ [@dwork2006calibrating; @dwork2014].
 
-1.  **Significance**: The privacy budget $\PrivacyBudget$ converts an algorithmic property into an engineering currency that can be allocated, composed, and depleted. Production reports and benchmark studies show that privacy budgets are deployment-specific: Apple describes local-DP telemetry deployments with per-event $\PrivacyBudget$ values chosen by use case, while DP-SGD studies show accuracy and compute trade-offs across benchmark tasks [@apple2017learningprivacy; @abadi2016deep; @bu2020gaussian; @de2022dp]. Smaller $\PrivacyBudget$ raises the noise floor and degrades classification accuracy along the empirical frontier plotted in @fig-privacy-utility-frontier, where CIFAR-10 suffers double-digit accuracy drops even at $\PrivacyBudget= 8$. DP-SGD can also reduce training throughput because per-sample gradient clipping works against the batch-level parallelism that makes accelerator training efficient.
+1.  **Significance**: The privacy budget $\PrivacyBudget$ converts an algorithmic property into an engineering currency that can be allocated, composed, and depleted. Production reports and benchmark studies show that privacy budgets are deployment-specific: Apple describes local-DP telemetry deployments with per-event $\PrivacyBudget$ values chosen by use case, while DP-SGD studies show accuracy and compute trade-offs across benchmark tasks [@apple2017learningprivacy; @abadi2016deep; @bu2020gaussian; @de2022dp]. Smaller $\PrivacyBudget$ raises the noise floor and degrades classification accuracy along the empirical frontier examined in @sec-security-privacy-privacy-utility-tradeoff-b3e7, where CIFAR-10 trained from scratch suffers double-digit accuracy drops even at $\PrivacyBudget= 8$. DP-SGD can also reduce training throughput because per-sample gradient clipping works against the batch-level parallelism that makes accelerator training efficient.
 2.  **Distinction**: Unlike de-identification, which removes identifiers from records and fails against re-identification through auxiliary data, and unlike statistical disclosure control, which depends on the attacker's model, differential privacy is a property of the algorithm, not of the data. Its guarantee holds against any adversary, including one with arbitrary side information about other records in the dataset.
 3.  **Common pitfall**: A frequent misconception is that an $\PrivacyBudget$ label applies independently to every data access. Sequential composition of $\ComposedMechanismCount$ DP mechanisms, each with privacy loss $\PrivacyBudget_0$, yields total loss at most $\ComposedMechanismCount\PrivacyBudget_0$ under basic composition, with tighter bounds available from mechanism-specific accountants (@sec-security-privacy-privacy-budget-composition-edbe). A system that runs DP-SGD steps or answers interactive DP queries against sensitive data must therefore track cumulative loss and stop or redesign the release when the allocated budget is exhausted. Rotating cryptographic keys does not reset privacy loss, while querying a fixed DP-trained model is post-processing and incurs no additional training privacy loss.
 
@@ -4282,10 +4282,13 @@ account for private-data-dependent selection; retuning does not erase prior rele
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: @fig-privacy-utility-frontier and the paragraphs that read it
 # │
-# │ Goal: Measure each published DP result against its matched-architecture
-# │       non-private baseline: MNIST single-digit epsilon gap, CIFAR-10
-# │       from-scratch WideResNet gaps (De et al. 2022), CIFAR-100-pretrained
-# │       2-conv CNN gap (Abadi et al. 2016), and ImageNet-pretrained WRN-28-10.
+# │ Goal: Measure published DP results against matched-architecture non-private
+# │       baselines where reported: Abadi et al. (2016) MNIST MLP single-digit
+# │       epsilon gap, CIFAR-10 from-scratch WideResNet gaps (De et al. 2022),
+# │       CIFAR-100-pretrained 2-conv CNN gap (Abadi et al. 2016), and
+# │       ImageNet-pretrained WRN-28-10; also report the Bu et al. (2020)
+# │       2-conv MNIST CNN sweep at its moments-accountant epsilon (no
+# │       non-private baseline row in Table 1).
 # │ How: data/bu_gdp_mnist_noisysgd.csv, data/abadi_dpsgd_accuracy.csv, and
 # │      data/de_dpsgd_cifar10.csv via viz.load_series().
 # └─────────────────────────────────────────────────────────────────────────────
@@ -4293,14 +4296,15 @@ from mlsysim import viz
 from mlsysim.fmt import check, fmt, fmt_int, fmt_math
 
 class PrivacyUtilityGaps:
-    """Matched-architecture accuracy gaps between published DP-SGD runs and non-private baselines."""
+    """Published DP-SGD accuracies and matched-architecture non-private baseline gaps."""
 
     # ┌── 1. LOAD (CSV series) ─────────────────────────────────────────────
     bu = viz.load_series("vol2/13_security_privacy/data/bu_gdp_mnist_noisysgd.csv")
     abadi = viz.load_series("vol2/13_security_privacy/data/abadi_dpsgd_accuracy.csv")
     de = viz.load_series("vol2/13_security_privacy/data/de_dpsgd_cifar10.csv")
 
-    abadi_mnist = [r for r in abadi.entries if r["dataset"] == "MNIST"]
+    bu_mnist = sorted(bu.entries, key=lambda r: r["ma_epsilon"])
+    abadi_mnist = sorted((r for r in abadi.entries if r["dataset"] == "MNIST"), key=lambda r: r["epsilon"])
     abadi_cifar = sorted((r for r in abadi.entries if r["dataset"] == "CIFAR-10"), key=lambda r: r["epsilon"])
     de_wrn16 = sorted((r for r in de.entries if r["architecture"] == "WRN-16-4" and r["pretraining"] == "none"), key=lambda r: r["epsilon"])
     de_wrn40 = sorted((r for r in de.entries if r["architecture"] == "WRN-40-4" and r["pretraining"] == "none"), key=lambda r: r["epsilon"])
@@ -4308,10 +4312,14 @@ class PrivacyUtilityGaps:
 
     # ┌── 2. EXECUTE (matched-architecture gaps) ───────────────────────────
     mnist_base = abadi_mnist[0]["nonprivate_baseline_pct"]
-    mnist_points = [(r["clt_epsilon"], r["test_accuracy_pct"]) for r in bu.entries] + [(r["epsilon"], r["accuracy_pct"]) for r in abadi_mnist]
-    single_digit = [(e, a) for e, a in mnist_points if 1 <= e < 10]
+    single_digit = [(r["epsilon"], r["accuracy_pct"]) for r in abadi_mnist if 1 <= r["epsilon"] < 10]
     mnist_gap_max = mnist_base - min(a for e, a in single_digit)
     single_digit_eps_min = min(e for e, a in single_digit)
+
+    bu_ma_min_eps = bu_mnist[0]["ma_epsilon"]
+    bu_ma_max_eps = bu_mnist[-1]["ma_epsilon"]
+    bu_acc_min = bu_mnist[0]["test_accuracy_pct"]
+    bu_acc_max = bu_mnist[-1]["test_accuracy_pct"]
 
     cifar_eps = 8.0
     abadi_e2 = next(r["accuracy_pct"] for r in abadi_cifar if r["epsilon"] == 2)
@@ -4336,15 +4344,20 @@ class PrivacyUtilityGaps:
     pre_e8 = (lambda rows=de_pre, eps=cifar_eps: next(r["accuracy_pct"] for r in rows if r["epsilon"] == eps))()
 
     # ┌── 3. GUARD (prose claims) ──────────────────────────────────────────
-    check(len(single_digit) == 5, f"single-digit MNIST points {len(single_digit)}")
+    check(len(single_digit) == 2, f"Abadi single-digit MNIST MLP points {len(single_digit)}")
     check(eps_ratio == 4, f"'a budget four times looser' needs ratio 4, got {eps_ratio}")
-    check(cifar_gap_lo / mnist_gap_max >= 3, "'several times the MNIST accuracy cost'")
+    check(cifar_gap_lo / mnist_gap_max >= 3, "'several times the MNIST MLP accuracy cost'")
     check(6 <= abadi_cnn_gap <= 8, f"Abadi matched 2-conv CNN gap should be ~7 pp, got {abadi_cnn_gap}")
+    check(1 < bu_ma_min_eps < 2 and bu_ma_max_eps > 30, f"Bu MA epsilon range unexpected: {bu_ma_min_eps}..{bu_ma_max_eps}")
 
     # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
     mnist_gap_max_str = fmt(mnist_gap_max, precision=1, commas=False)
     mnist_base_str = fmt(mnist_base, precision=1, commas=False)
     single_digit_eps_min_str = fmt(single_digit_eps_min, precision=0, commas=False)
+    bu_ma_min_str = fmt(bu_ma_min_eps, precision=2, commas=False)
+    bu_ma_max_str = fmt(bu_ma_max_eps, precision=1, commas=False)
+    bu_acc_min_str = fmt(bu_acc_min, precision=0, commas=False)
+    bu_acc_max_str = fmt(bu_acc_max, precision=0, commas=False)
     cifar_eps_str = fmt(cifar_eps, precision=0, commas=False)
     abadi_e2_str = fmt(abadi_e2, precision=0, commas=False)
     abadi_e4_str = fmt(abadi_e4, precision=0, commas=False)
@@ -4368,11 +4381,11 @@ class PrivacyUtilityGaps:
     pre_e8_str = fmt(pre_e8, precision=1, commas=False)
 ```
 
-Measuring the accuracy cost of those clipping and noise adjustments across benchmarks reveals that the penalty scales sharply with task difficulty, model capacity, and pretraining. A compact multilayer perceptron (MLP) on MNIST absorbs single-digit $\PrivacyBudget$ with only a minor accuracy loss, whereas larger convolutional networks trained from scratch on CIFAR-10 without external pretraining lose more than ten percentage points even at looser single-digit budgets [@abadi2016deep; @bu2020gaussian; @de2022dp]. That contrast shows why every differentially private accuracy claim must be compared against a matched architecture and data regime rather than a cross-architecture SOTA number.
+Measuring the accuracy cost of those clipping and noise adjustments across benchmarks reveals that the penalty scales sharply with task difficulty, model capacity, and pretraining. A compact multilayer perceptron (MLP) on MNIST absorbs single-digit $\PrivacyBudget$ with only a minor accuracy loss, whereas larger convolutional networks trained from scratch on CIFAR-10 without external pretraining lose more than ten percentage points even at looser single-digit budgets [@abadi2016deep; @de2022dp]. That contrast shows why every differentially private accuracy claim must be compared against a matched architecture and data regime rather than a cross-architecture SOTA number.
 
-@Fig-privacy-utility-frontier collects those published MNIST and CIFAR-10 curves on a logarithmic axis [@abadi2016deep; @bu2020gaussian; @de2022dp]. The plotted MNIST runs stay within `{python} PrivacyUtilityGaps.mnist_gap_max_str` percentage points of the `{python} PrivacyUtilityGaps.mnist_base_str` percent non-private MLP baseline at every plotted single-digit budget down to $\PrivacyBudget =$ `{python} PrivacyUtilityGaps.single_digit_eps_min_str`. On CIFAR-10, two distinct experimental regimes illustrate why architecture and pretraining must stay explicit. In @abadi2016deep, a compact two-convolution CNN whose convolutional layers were pretrained on public CIFAR-100 reaches `{python} PrivacyUtilityGaps.abadi_e2_str`, `{python} PrivacyUtilityGaps.abadi_e4_str`, and `{python} PrivacyUtilityGaps.cifar_abadi_str` percent at $\PrivacyBudget = 2, 4,$ and `{python} PrivacyUtilityGaps.cifar_eps_str`, about `{python} PrivacyUtilityGaps.abadi_cnn_gap_str` percentage points below the roughly `{python} PrivacyUtilityGaps.abadi_cnn_base_str` percent non-private baseline of that same CNN setup at $\PrivacyBudget =$ `{python} PrivacyUtilityGaps.cifar_eps_str`. Training WideResNets from scratch on CIFAR-10 without any extra public data, @de2022dp reach `{python} PrivacyUtilityGaps.cifar_wrn16_str` percent on WRN-16-4 and `{python} PrivacyUtilityGaps.cifar_de_str` percent on WRN-40-4 at $\PrivacyBudget =$ `{python} PrivacyUtilityGaps.cifar_eps_str` (with group normalization, large batches, and augmentation multiplicity), roughly `{python} PrivacyUtilityGaps.cifar_gap_lo_str` to `{python} PrivacyUtilityGaps.cifar_gap_hi_str` percentage points below their matched `{python} PrivacyUtilityGaps.wrn16_base_str` to `{python} PrivacyUtilityGaps.wrn40_base_str` percent non-private WideResNet baselines, still several times the MNIST accuracy cost at a budget four times looser. Selecting a budget therefore requires specifying the architecture, pretraining boundary, adjacency relation, additive slack, and accountant alongside $\PrivacyBudget$.
+@Fig-privacy-utility-frontier collects those published MNIST and CIFAR-10 curves on a logarithmic moments-accountant and Rényi-DP $\PrivacyBudget$ axis [@abadi2016deep; @bu2020gaussian; @de2022dp]. On MNIST, the single-hidden-layer MLP of @abadi2016deep stays within `{python} PrivacyUtilityGaps.mnist_gap_max_str` percentage points of its `{python} PrivacyUtilityGaps.mnist_base_str` percent non-private baseline at every plotted single-digit budget down to $\PrivacyBudget =$ `{python} PrivacyUtilityGaps.single_digit_eps_min_str`; the two-convolution MNIST CNN of @bu2020gaussian (plotted using its reported moments-accountant $\PrivacyBudget$, with no non-private baseline row reported in its accuracy table) rises from `{python} PrivacyUtilityGaps.bu_acc_min_str` percent at $\PrivacyBudget =$ `{python} PrivacyUtilityGaps.bu_ma_min_str` to `{python} PrivacyUtilityGaps.bu_acc_max_str` percent at $\PrivacyBudget =$ `{python} PrivacyUtilityGaps.bu_ma_max_str`. On CIFAR-10, two distinct experimental regimes illustrate why architecture and pretraining must stay explicit. In @abadi2016deep, a compact two-convolution CNN whose convolutional layers were pretrained on public CIFAR-100 reaches `{python} PrivacyUtilityGaps.abadi_e2_str`, `{python} PrivacyUtilityGaps.abadi_e4_str`, and `{python} PrivacyUtilityGaps.cifar_abadi_str` percent at $\PrivacyBudget = 2, 4,$ and `{python} PrivacyUtilityGaps.cifar_eps_str`, about `{python} PrivacyUtilityGaps.abadi_cnn_gap_str` percentage points below the roughly `{python} PrivacyUtilityGaps.abadi_cnn_base_str` percent non-private baseline of that same CNN setup at $\PrivacyBudget =$ `{python} PrivacyUtilityGaps.cifar_eps_str`. Training WideResNets from scratch on CIFAR-10 without any extra public data, @de2022dp reach `{python} PrivacyUtilityGaps.cifar_wrn16_str` percent on WRN-16-4 and `{python} PrivacyUtilityGaps.cifar_de_str` percent on WRN-40-4 at $\PrivacyBudget =$ `{python} PrivacyUtilityGaps.cifar_eps_str` (with group normalization, large batches, and augmentation multiplicity), roughly `{python} PrivacyUtilityGaps.cifar_gap_lo_str` to `{python} PrivacyUtilityGaps.cifar_gap_hi_str` percentage points below their matched `{python} PrivacyUtilityGaps.wrn16_base_str` to `{python} PrivacyUtilityGaps.wrn40_base_str` percent non-private WideResNet baselines, still several times the MNIST MLP accuracy cost at a budget four times looser. Selecting a budget therefore requires specifying the architecture, pretraining boundary, adjacency relation, additive slack, and accountant alongside $\PrivacyBudget$.
 
-::: {#fig-privacy-utility-frontier fig-env="figure" fig-pos="htb" fig-cap="**Published Privacy-Utility Results**: Test accuracy across privacy budgets $\PrivacyBudget$ ($\PrivacyAdditiveSlack = 10^{-5}$) [@abadi2016deep; @bu2020gaussian; @de2022dp], paired with each regime's matched-architecture non-private baseline. MNIST stays within `{python} PrivacyUtilityGaps.mnist_gap_max_str` percentage points of its `{python} PrivacyUtilityGaps.mnist_base_str` percent MLP baseline at single-digit $\PrivacyBudget \ge 2$. On CIFAR-10 trained from scratch without external data, WideResNets reach `{python} PrivacyUtilityGaps.cifar_wrn16_str` percent (WRN-16-4) and `{python} PrivacyUtilityGaps.cifar_de_str` percent (WRN-40-4) at $\PrivacyBudget = 8$, about `{python} PrivacyUtilityGaps.cifar_gap_lo_str` to `{python} PrivacyUtilityGaps.cifar_gap_hi_str` points below their roughly 95 percent non-private WideResNet baselines; the earlier two-convolution CNN of @abadi2016deep, pretrained on public CIFAR-100, reaches `{python} PrivacyUtilityGaps.abadi_e2_str` to `{python} PrivacyUtilityGaps.cifar_abadi_str` percent against its `{python} PrivacyUtilityGaps.abadi_cnn_base_str` percent matched CNN baseline (about a `{python} PrivacyUtilityGaps.abadi_cnn_gap_str`-point gap at $\PrivacyBudget = 8$)." fig-alt="Test accuracy versus privacy budget epsilon on a logarithmic axis from 0.3 to 60, with vertical axis from 54 to 102 percent. Blue circles connected by a line show MNIST results from Bu 2020 rising from 95.0 to 98.0 percent, and blue triangles show MNIST results from Abadi 2016 at 90, 95, and 97 percent below a dashed 98.3 percent MNIST MLP baseline. Orange curves show CIFAR-10 trained from scratch by De 2022 across epsilon 1 to 8: filled diamonds for WRN-40-4 rising from 56.4 to 81.4 percent and open diamonds for WRN-16-4 rising from 56.8 to 79.5 percent, with a vertical double arrow at epsilon 8 marking roughly 14 to 15 points below the dashed 95 percent WideResNet baseline. Violet squares show Abadi 2016 CIFAR-10 (2-conv CNN with CIFAR-100 pretrained conv layers) at 67, 70, and 73 percent across epsilon 2, 4, and 8 below a short dashed 80 percent matched CNN baseline."}
+::: {#fig-privacy-utility-frontier fig-env="figure" fig-pos="htb" fig-cap="**Published Privacy-Utility Results**: Test accuracy across moments-accountant and Rényi-DP privacy budgets $\PrivacyBudget$ ($\PrivacyAdditiveSlack = 10^{-5}$) [@abadi2016deep; @bu2020gaussian; @de2022dp], paired with each study's matched-architecture non-private baseline where reported. On MNIST, the MLP of @abadi2016deep stays within `{python} PrivacyUtilityGaps.mnist_gap_max_str` percentage points of its `{python} PrivacyUtilityGaps.mnist_base_str` percent non-private baseline at single-digit $\PrivacyBudget \ge 2$, while the two-convolution MNIST CNN of @bu2020gaussian (plotted at its reported moments-accountant $\PrivacyBudget$, with no non-private baseline reported in its table) rises from `{python} PrivacyUtilityGaps.bu_acc_min_str` to `{python} PrivacyUtilityGaps.bu_acc_max_str` percent. On CIFAR-10 trained from scratch without external data, WideResNets reach `{python} PrivacyUtilityGaps.cifar_wrn16_str` percent (WRN-16-4) and `{python} PrivacyUtilityGaps.cifar_de_str` percent (WRN-40-4) at $\PrivacyBudget = 8$, about `{python} PrivacyUtilityGaps.cifar_gap_lo_str` to `{python} PrivacyUtilityGaps.cifar_gap_hi_str` points below their roughly 95 percent non-private WideResNet baselines; the earlier two-convolution CNN of @abadi2016deep, pretrained on public CIFAR-100, reaches `{python} PrivacyUtilityGaps.abadi_e2_str` to `{python} PrivacyUtilityGaps.cifar_abadi_str` percent against its `{python} PrivacyUtilityGaps.abadi_cnn_base_str` percent matched CNN baseline (about a `{python} PrivacyUtilityGaps.abadi_cnn_gap_str`-point gap at $\PrivacyBudget = 8$)." fig-alt="Test accuracy versus moments-accountant and Rényi-DP privacy budget epsilon on a logarithmic axis from 0.3 to 60, with vertical axis from 54 to 103.5 percent. Filled blue triangles show MNIST MLP results from Abadi 2016 at 90, 95, and 97 percent across epsilon 0.5, 2, and 8 below a matched dashed 98.3 percent MNIST MLP baseline spanning epsilon 0.35 to 9. Open blue circles connected by a solid line show MNIST two-convolution CNN results from Bu 2020 rising from 95 to 98 percent across moments-accountant epsilon 1.19 to 32.4, with no baseline line drawn above them. Orange curves show CIFAR-10 trained from scratch by De 2022 across epsilon 1 to 8: filled diamonds for WRN-40-4 rising from 56.4 to 81.4 percent and open diamonds for WRN-16-4 rising from 56.8 to 79.5 percent, with a vertical double arrow at epsilon 8 marking roughly 14 to 15 points below the dashed 95.0 to 95.5 percent WideResNet baseline. Violet squares show Abadi 2016 CIFAR-10 (2-conv CNN with CIFAR-100 pretrained conv layers) at 67, 70, and 73 percent across epsilon 2, 4, and 8 below a short dashed 80 percent matched CNN baseline."}
 
 ```{python}
 #| echo: false
@@ -4382,11 +4395,12 @@ Measuring the accuracy cost of those clipping and noise adjustments across bench
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: @fig-privacy-utility-frontier -- DP accuracy vs epsilon
 # │
-# │ Goal: Plot published MNIST and CIFAR-10 DP-SGD curves alongside their
-# │       matched-architecture non-private baselines without conflating models
-# │       or public pretraining boundaries.
+# │ Goal: Plot published MNIST and CIFAR-10 DP-SGD curves on a consistent
+# │       moments/RDP accountant axis alongside matched-architecture
+# │       non-private baselines where reported, without conflating models or
+# │       public pretraining boundaries.
 # │ Provenance: vol2/13_security_privacy/data/bu_gdp_mnist_noisysgd.csv
-# │             (@bu2020gaussian), data/abadi_dpsgd_accuracy.csv
+# │             (@bu2020gaussian, ma_epsilon), data/abadi_dpsgd_accuracy.csv
 # │             (@abadi2016deep), and data/de_dpsgd_cifar10.csv (@de2022dp)
 # │             via PrivacyUtilityGaps; measured published benchmark accuracies
 # │             and matched-architecture non-private baselines at delta = 1e-5.
@@ -4399,10 +4413,10 @@ from binder.tools.figures import style as book_style
 fig, ax, COLORS, plt = book_style.setup_plot(figsize=(6.4, 3.9))
 _G = PrivacyUtilityGaps
 
-bu_eps = np.array(_G.bu.column("clt_epsilon"))
-bu_acc = np.array(_G.bu.column("test_accuracy_pct"))
-abadi_m_eps = np.array([r["epsilon"] for r in sorted(_G.abadi_mnist, key=lambda r: r["epsilon"])])
-abadi_m_acc = np.array([r["accuracy_pct"] for r in sorted(_G.abadi_mnist, key=lambda r: r["epsilon"])])
+bu_eps = np.array([r["ma_epsilon"] for r in _G.bu_mnist])
+bu_acc = np.array([r["test_accuracy_pct"] for r in _G.bu_mnist])
+abadi_m_eps = np.array([r["epsilon"] for r in _G.abadi_mnist])
+abadi_m_acc = np.array([r["accuracy_pct"] for r in _G.abadi_mnist])
 
 abadi_c_eps = np.array([r["epsilon"] for r in _G.abadi_cifar])
 abadi_c_acc = np.array([r["accuracy_pct"] for r in _G.abadi_cifar])
@@ -4413,10 +4427,23 @@ wrn16_eps = np.array([r["epsilon"] for r in _G.de_wrn16])
 wrn16_acc = np.array([r["accuracy_pct"] for r in _G.de_wrn16])
 
 # ┌── RENDER ───────────────────────────────────────────────────────────────────
-# MNIST: Bu 2020 curve + Abadi 2016 triangles + matched 98.3% MLP baseline
-ax.axhline(y=_G.mnist_base, color=COLORS["BlueLine"], linestyle="--", alpha=0.45, linewidth=1.1, zorder=1)
-ax.plot(bu_eps, bu_acc, color=COLORS["BlueLine"], marker="o", markersize=5.5, linewidth=1.9, zorder=3)
+# MNIST: Abadi 2016 MLP triangles + matched 98.3% MLP baseline segment (epsilon 0.5-8)
+ax.plot([0.35, 9.0], [_G.mnist_base, _G.mnist_base], color=COLORS["BlueLine"], linestyle="--", alpha=0.5, linewidth=1.1, zorder=1)
 ax.plot(abadi_m_eps, abadi_m_acc, color=COLORS["BlueLine"], marker="^", markersize=6.5, linestyle="none", zorder=3)
+
+# MNIST: Bu 2020 2-conv CNN (moments-accountant epsilon; no non-private row in Table 1)
+ax.plot(
+    bu_eps,
+    bu_acc,
+    color=COLORS["BlueLine"],
+    marker="o",
+    markersize=5.5,
+    mfc="white",
+    mec=COLORS["BlueLine"],
+    mew=1.4,
+    linewidth=1.7,
+    zorder=3,
+)
 
 # CIFAR-10 from scratch (no extra data): De 2022 WRN-40-4 & WRN-16-4 + matched ~95% WRN baseline
 ax.axhline(y=_G.wrn40_base, color=COLORS["OrangeLine"], linestyle="--", alpha=0.5, linewidth=1.1, zorder=1)
@@ -4441,25 +4468,25 @@ ax.plot(abadi_c_eps, abadi_c_acc, color=COLORS["VioletLine"], marker="s", marker
 
 # ┌── DECORATE ─────────────────────────────────────────────────────────────────
 ax.set_xscale("log")
-ax.set_xlabel("Privacy budget $\\epsilon$ (log scale)")
+ax.set_xlabel("Privacy budget $\\epsilon$ (moments/RDP accountant, log scale)")
 ax.set_ylabel("Test accuracy (%)")
 ax.set_xlim(0.3, 60)
 ax.set_xticks([0.5, 1, 2, 4, 8, 20, 50])
 ax.set_xticklabels(["0.5", "1", "2", "4", "8", "20", "50"])
 ax.xaxis.set_minor_formatter(plt.NullFormatter())
-ax.set_ylim(54, 102.5)
+ax.set_ylim(54, 103.5)
 
 lab = dict(fontsize=9)
-ax.text(0.33, _G.mnist_base + 0.45, f"MNIST MLP baseline ({_G.mnist_base_str}%)", color=COLORS["BlueLine"], ha="left", va="bottom", **lab)
-ax.text(11.5, 98.7, "MNIST (Bu 2020)", color=COLORS["BlueLine"], ha="left", va="bottom", **lab)
-ax.text(0.56, 89.6, "MNIST (Abadi 2016)", color=COLORS["BlueLine"], ha="left", va="center", **lab)
+ax.text(0.33, _G.mnist_base + 0.6, f"MNIST MLP baseline ({_G.mnist_base_str}%, Abadi 2016)", color=COLORS["BlueLine"], ha="left", va="bottom", **lab)
+ax.text(55, 99.4, "MNIST 2-conv CNN (Bu 2020)", color=COLORS["BlueLine"], ha="right", va="bottom", **lab)
+ax.text(0.56, 89.6, "MNIST MLP (Abadi 2016)", color=COLORS["BlueLine"], ha="left", va="center", **lab)
 
 ax.text(
-    0.33,
-    _G.wrn40_base - 0.7,
-    f"CIFAR-10 WRN baseline (~{_G.wrn16_base_str}–{_G.wrn40_base_str}%)",
+    55,
+    _G.wrn40_base - 0.8,
+    f"WRN baseline (~{_G.wrn16_base_str}–{_G.wrn40_base_str}%)",
     color=COLORS["OrangeLine"],
-    ha="left",
+    ha="right",
     va="top",
     **lab,
 )
@@ -4496,7 +4523,7 @@ ax.annotate(
 )
 ax.text(
     gx * 1.12,
-    (_G.wrn40_base + _G.cifar_de) / 2 + 0.8,
+    (_G.wrn40_base + _G.cifar_de) / 2 - 0.2,
     f"~{_G.cifar_gap_lo_str}–{_G.cifar_gap_hi_str} pp gap\n(from scratch)",
     color=COLORS["OrangeLine"],
     ha="left",
@@ -4612,7 +4639,7 @@ Deploying homomorphic encryption or a red-team harness while model checkpoints s
 
 The maturity layers are cumulative. Access controls and encrypted channels close paths that model-interface defenses do not cover, such as an exposed registry. Privacy analysis begins with the original training data and continues through fine-tuning, personalization, and telemetry feedback loops. When DP is required, the release budget becomes a system resource covering the relevant training, selection, and evaluation mechanisms that access protected data. Model-integrity controls protect the artifact path: signed manifests, key management, hash checks, and release gates connect the loaded model to the approved version, subject to the enforcement boundary remaining intact.
 
-Adversarial evaluation tests deliberate, adaptive behavior in addition to accidental failures. Query monitoring and output limiting constrain extraction attempts, while robustness evaluation and red-team exercises test whether an attacker can induce unsafe behavior. Trusted execution environments and certified robustness defenses protect different boundaries, so each needs a threat model that justifies its costs and assumptions. Governance defines obligations and evidence requirements from the start, rather than entering only after technical controls. Audit logs, compliance mappings, incident records, and reproducible checks then help assess whether those obligations remain satisfied as the model, data, and traffic change.
+Adversarial evaluation tests deliberate, adaptive behavior in addition to accidental failures. Query monitoring and output limiting constrain extraction attempts, while robustness evaluation and red-team exercises test whether an attacker can induce unsafe behavior. Trusted execution environments and certified robustness defenses (which provide a provable guarantee that predictions hold within a stated perturbation radius, developed in @sec-robust-ai-certified-defenses) protect different boundaries, so each needs a threat model that justifies its costs and assumptions. Governance defines obligations and evidence requirements from the start, rather than entering only after technical controls. Audit logs, compliance mappings, incident records, and reproducible checks then help assess whether those obligations remain satisfied as the model, data, and traffic change.
 
 Different domains traverse the model differently. A healthcare deployment prioritizes privacy accounting and governance evidence before broad patient-facing use. A financial fraud system emphasizes access control, model integrity, and abuse monitoring because extraction and evasion directly change loss exposure. An autonomous system emphasizes adversarial robustness and incident evidence because safety depends on behavior under distribution shift and physical-world perturbations. The point is not to follow a universal implementation calendar; it is to make the threat model determine which control boundary must mature next.
 

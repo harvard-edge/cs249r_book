@@ -2225,8 +2225,8 @@ Modern architectures balance depth against width. A network with `{python} Depth
 
 :::
 
-The cost side of that trade-off follows from counting. For a fully connected network with layer widths running from $\LayerWidth_0$ (the input) to $\FinalLayerWidth$ (the output), each layer $\LayerIndex$ holds a $\PreviousLayerWidth{\times}\CurrentLayerWidth$ weight matrix and $\CurrentLayerWidth$ biases, and its forward pass performs one MAC per weight for every example. Training must also retain each layer's output for every example in a batch of $\BatchSize$, because the backward pass reuses those outputs (@sec-neural-computation-backpropagation-algorithm-steps-6871), so the parameter count $\Parameters$, the forward operations per example $\Operations$ (two FLOPs per MAC), and the retained activation memory $\ActivationMemory$ follow @eq-depth-width-cost:
-$$ \Parameters = \sum_{\LayerIndex=1}^{\LayerCount} (\PreviousLayerWidth + 1)\,\CurrentLayerWidth, \qquad \Operations = 2\sum_{\LayerIndex=1}^{\LayerCount} \PreviousLayerWidth\,\CurrentLayerWidth, \qquad \ActivationMemory \propto \BatchSize \sum_{\LayerIndex=1}^{\LayerCount} \CurrentLayerWidth $$ {#eq-depth-width-cost}
+The cost side of that trade-off follows from counting. For a fully connected network with layer widths running from $\LayerWidth_0$ (the input) to $\FinalLayerWidth$ (the output), each layer $\LayerIndex$ holds a $\PreviousLayerWidth{\times}\CurrentLayerWidth$ weight matrix and $\CurrentLayerWidth$ biases, and its forward pass performs one MAC per weight for every example. Training must also retain the input batch and each layer's output for every example in a batch of $\BatchSize$, because the backward pass reuses those values (@sec-neural-computation-backpropagation-algorithm-steps-6871), so the parameter count $\Parameters$, the forward operations per example $\Operations$ (two FLOPs per MAC), and the retained activation memory $\ActivationMemory$ follow @eq-depth-width-cost:
+$$ \Parameters = \sum_{\LayerIndex=1}^{\LayerCount} (\PreviousLayerWidth + 1)\,\CurrentLayerWidth, \qquad \Operations = 2\sum_{\LayerIndex=1}^{\LayerCount} \PreviousLayerWidth\,\CurrentLayerWidth, \qquad \ActivationMemory \propto \BatchSize \sum_{\LayerIndex=0}^{\LayerCount} \CurrentLayerWidth $$ {#eq-depth-width-cost}
 
 When every hidden layer has the same width $\HiddenDimension$, the sums collapse. Parameters and operations grow as $\LayerCount\HiddenDimension^2$, linear in depth and quadratic in width, while retained activations grow as $\BatchSize\LayerCount\HiddenDimension$, linear in both. @Fig-depth-width-scaling plots the two sweeps on the running network's input and output widths. Holding the network at two hidden layers and doubling their width from `{python} DepthWidthCost.width_lo_str` to `{python} DepthWidthCost.width_hi_str` multiplies MACs per example by `{python} DepthWidthCost.width_double_mult_str`, short of four only because the input layer's share still grows linearly. Holding the width at `{python} DepthWidthCost.fixed_width_str` and doubling depth from `{python} DepthWidthCost.depth_lo_str` to `{python} DepthWidthCost.depth_hi_str` hidden layers multiplies MACs by `{python} DepthWidthCost.depth_double_mult_str` and retained activations by `{python} DepthWidthCost.retained_double_mult_str`.
 
@@ -3216,7 +3216,7 @@ Gradient descent assumes the gradient is already in hand, but the loss alone doe
 
 ***Backpropagation***\index{Backpropagation!definition}\index{Backpropagation!gradient computation}\index{Gradient!backpropagation} is the gradient-computation algorithm training systems use to apply the chain rule to a computational graph, using recorded operations and saved or recomputed forward-pass values to compute the gradient of the loss with respect to every parameter in a single backward traversal.
 
-1.  **Significance**: For dense layers that require both parameter and input gradients, the backward pass costs on the order of twice the forward-pass FLOPs (a ratio derived from the layer equations later in this section). It also requires retaining or recomputing the intermediate values needed by the chain rule. For a model with $\LayerCount$ layers, batch size $\BatchSize$, and layer widths $\LayerWidth_1,\ldots,\FinalLayerWidth$, the stored activations scale, in a simplified count, as $\mathcal{O}\!\left(\BatchSize\sum_{\LayerIndex=1}^{\LayerCount} \LayerWidth_{\LayerIndex}\right)$. Gradients and optimizer state add further memory, so a model that fits on one accelerator for inference may not fit there for training.
+1.  **Significance**: For dense layers that require both parameter and input gradients, the backward pass costs on the order of twice the forward-pass FLOPs (a ratio derived from the layer equations later in this section). It also requires retaining or recomputing the intermediate values needed by the chain rule. For a model with $\LayerCount$ layers, batch size $\BatchSize$, and layer widths $\LayerWidth_0,\ldots,\FinalLayerWidth$ (from input to output), the stored activations scale, in a simplified count, as $\mathcal{O}\!\left(\BatchSize\sum_{\LayerIndex=0}^{\LayerCount} \LayerWidth_{\LayerIndex}\right)$. Gradients and optimizer state add further memory, so a model that fits on one accelerator for inference may not fit there for training.
 2.  **Distinction**: Numerical differentiation requires a perturbed evaluation for each of the model's $\Parameters$ parameters. Reverse-mode automatic differentiation computes all $\Parameters$ gradients in one backward traversal whose cost is proportional to the computational graph, avoiding $\Parameters$ separate forward passes.
 3.  **Common pitfall**: A frequent misconception is that backpropagation is learning. It is a gradient computation algorithm; gradient descent performs the actual parameter update. Confusing the two hides which one sets activation storage and which sets optimizer state.
 
@@ -3543,7 +3543,7 @@ $$\frac{\partial \LossFunction}{\partial \WeightMatrix^{(1)}} = \InputFeatureVec
 
 :::
 
-In practice an autograd\index{Autograd!automatic differentiation} engine performs this bookkeeping, recording each operation during the forward pass and keeping the values its backward rule needs (@sec-ml-frameworks-execution-problem-e1e1). What it keeps is the activation memory that the worked example below quantifies.
+In practice an autograd\index{Autograd!automatic differentiation} engine performs this bookkeeping, recording each operation during the forward pass and keeping the values its backward rule needs (@sec-ml-frameworks-framework-implementation-automatic-differentiation-1407). What it keeps is the activation memory that the worked example below quantifies.
 
 #### Worked example: Training vs. inference memory {#sec-neural-computation-memory-training-vs-inference}
 
@@ -3838,7 +3838,7 @@ class ParameterGrowth:
 
 The running network is the smallest case in this chapter. @Fig-parameter-growth plots the parameter counts of `{python} ParameterGrowth.model_count_str` notable models published since 1950. Until about 2010 the count doubled roughly every `{python} ParameterGrowth.early_doubling_str` months; after 2010, as deep learning took hold, it doubled about every `{python} ParameterGrowth.late_doubling_str` months, and the largest models now hold more than a trillion parameters. Every dense parameter carries the same three obligations as the running network's weights (it is stored, read on every forward pass, and updated during training), so the per-parameter bookkeeping counted for a small digit classifier is the arithmetic that sets the memory and bandwidth budgets of the models in later chapters. The parameter climb parallels the growth in training compute that @fig-ai-training-compute-growth traced.
 
-::: {#fig-parameter-growth fig-env="figure" fig-pos="htb" fig-cap="**Parameter Counts of Notable Models, 1950 to the Present**: Each point plots the total stored parameter count of one notable model (counting all expert parameters for mixture-of-experts architectures), colored by domain, against publication date on a logarithmic axis. Dashed lines are least-squares fits before and after 2010; the steeper second segment coincides with the rise of deep learning. Data from @epochai2026notable." fig-alt="Scatter plot of parameter counts on a logarithmic axis from about 10 to above 1 trillion against publication dates from 1950 to 2026. Gray, blue, green, and red points mark other, vision, games, and language models. A shallow dashed fit from 1950 to 2010 is labeled with its doubling time, and a steeper dashed fit from 2010 onward rises through dense clusters of red language models above 100 billion. Perceptron Mark I, LeNet-5, AlexNet, GPT-3, PaLM, and Kimi K2 are labeled."}
+::: {#fig-parameter-growth fig-env="figure" fig-pos="htb" fig-cap="**Parameter Counts of Notable Models, 1950 to the Present**: Each point plots the total stored parameter count of one notable model (counting all subnetworks in mixture-of-experts architectures, which activate only a subset per input), colored by domain, against publication date on a logarithmic axis. Dashed lines are least-squares fits before and after 2010; the steeper second segment coincides with the rise of deep learning. Data from @epochai2026notable." fig-alt="Scatter plot of parameter counts on a logarithmic axis from about 10 to above 1 trillion against publication dates from 1950 to 2026. Gray, blue, green, and red points mark other, vision, games, and language models. A shallow dashed fit from 1950 to 2010 is labeled with its doubling time, and a steeper dashed fit from 2010 onward rises through dense clusters of red language models above 100 billion. Perceptron Mark I, LeNet-5, AlexNet, GPT-3, PaLM, and Kimi K2 are labeled."}
 
 ```{python}
 #| echo: false
@@ -4226,7 +4226,7 @@ A single pass through the entire training dataset is called an epoch\index{Epoch
 \end{algorithm}
 ```
 
-The mini-batch loop makes the batch size $\BatchSize$ a hardware unit of work. A larger $\BatchSize$ can improve matrix utilization and accelerator occupancy but raises activation memory. Because the update fires once per batch rather than once per example, $\BatchSize$ also sets the gradient-update cadence.
+The mini-batch loop makes the batch size $\BatchSize$ a hardware unit of work. A larger $\BatchSize$ can improve matrix utilization and accelerator occupancy (the share of the accelerator's parallel execution slots kept active) but raises activation memory. Because the update fires once per batch rather than once per example, $\BatchSize$ also sets the gradient-update cadence.
 
 The inner loop in @algo-minibatch-sgd is the unit that the hardware repeatedly executes, and its comments carry the chapter's cost accounting line by line. The forward line spends the MACs of @tbl-nn-computation-mnist-params for every example in the batch and leaves activations behind. The backward line spends up to twice that and consumes those activations. The update line does little arithmetic but touches every parameter, so its cost is set by bytes moved rather than operations performed. (In the algorithm, $\DatasetSize$ counts training examples, the $\text{Samples/Task}$ factor of the iron law. It is not the iron law's data term $\DataVolume$, which counts bytes moved.) Notebook \ref{nbk-nn-computation-epoch-time-energy} evaluates one full epoch of this loop in seconds and joules on two machines, charging every operation the fixed dispatch cost whose mechanism @sec-ml-frameworks-dispatch-tax develops.
 
@@ -4290,18 +4290,34 @@ class EpochTimeEnergy:
     ovh_share_acc = run.overhead_share_accelerator
     move_vs_arith_b32 = run.movement_to_arithmetic_energy
     move_vs_arith_b1 = run.movement_to_arithmetic_energy_batch1
+    # Uncached optimizer-update traffic omitted from the forward-intensity step model above:
+    # plain SGD reads weights and gradients and writes weights (3 parameter tensors);
+    # Adam reads weights, gradients, and two moments and writes weights and two moments (7 tensors).
+    param_bytes = epoch.network.result.parameter_bytes
+    sgd_opt_bytes = 3 * param_bytes
+    adam_opt_bytes = 7 * param_bytes
+    total_cpu_sgd = ((steps * (step_bytes + sgd_opt_bytes)) / bw_cpu).to(millisecond) + ovh_epoch_cpu
+    total_acc_sgd = ((steps * (step_bytes + sgd_opt_bytes)) / bw_acc).to(millisecond) + ovh_epoch_acc
+    total_cpu_adam = ((steps * (step_bytes + adam_opt_bytes)) / bw_cpu).to(millisecond) + ovh_epoch_cpu
+    total_acc_adam = ((steps * (step_bytes + adam_opt_bytes)) / bw_acc).to(millisecond) + ovh_epoch_acc
+    ovh_share_acc_adam = (ovh_epoch_acc / total_acc_adam).to("").magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(rate["cpu"] < rate["acc"], "The accelerator should have the higher attainable rate.")
     check(ovh_share_acc > 0.9, f"Overhead should dominate the accelerator epoch, got {ovh_share_acc:.2f}")
     check(move_vs_arith_b1 > move_vs_arith_b32 > 1, "Data movement should dominate energy, more so at batch 1.")
     check(total_cpu < total_acc, "At this scale the CPU should finish the epoch first.")
+    check(total_cpu_sgd < total_acc_sgd, "Uncached SGD traffic should narrow but keep the CPU lead.")
+    check(total_cpu_adam > total_acc_adam, "Uncached Adam traffic should reverse the CPU lead.")
+    check(ovh_share_acc_adam > 0.99, f"Accelerator should remain >99% overhead-bound under Adam, got {ovh_share_acc_adam:.3f}")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     _ms = lambda q: round(q.to(millisecond).magnitude) * millisecond  # whole milliseconds for prose
     steps_str = fmt(steps, precision=0, commas=True)
     flops_step_mflop_str = fmt_flops(flops_step, unit=MFLOPs, precision=1, commas=False)
     step_bytes_mb_str = fmt_memory(step_bytes, unit=MB, precision=2, commas=False)
+    sgd_opt_mb_str = fmt_memory(sgd_opt_bytes, unit=MB, precision=1, commas=False)
+    adam_opt_mb_str = fmt_memory(adam_opt_bytes, unit=MB, precision=1, commas=False)
     bw_cpu_str = fmt_bandwidth(bw_cpu, unit=GB / second, precision=0, commas=False)
     bw_acc_str = fmt_bandwidth(bw_acc, unit=TB / second, precision=2, commas=False)
     work_cpu_ms_str = fmt_time(_ms(work_epoch_cpu), unit="millisecond", precision=0, commas=False)
@@ -4314,7 +4330,12 @@ class EpochTimeEnergy:
     ovh_acc_ms_str = fmt_time(ovh_epoch_acc, unit="millisecond", precision=1, commas=False)
     total_cpu_ms_str = fmt_time(_ms(total_cpu), unit="millisecond", precision=0, commas=False)
     total_acc_ms_str = fmt_time(_ms(total_acc), unit="millisecond", precision=0, commas=False)
+    total_cpu_sgd_ms_str = fmt_time(_ms(total_cpu_sgd), unit="millisecond", precision=0, commas=False)
+    total_acc_sgd_ms_str = fmt_time(_ms(total_acc_sgd), unit="millisecond", precision=0, commas=False)
+    total_cpu_adam_ms_str = fmt_time(_ms(total_cpu_adam), unit="millisecond", precision=0, commas=False)
+    total_acc_adam_ms_str = fmt_time(_ms(total_acc_adam), unit="millisecond", precision=0, commas=False)
     ovh_share_acc_str = fmt_percent(ovh_share_acc, precision=1, commas=False, style="prose")
+    ovh_share_acc_adam_str = fmt_percent(ovh_share_acc_adam, precision=1, commas=False, style="prose")
     e_dram_pj_value_str = fmt_magnitude(e_dram_byte, unit=pJ / byte, precision=0, commas=False)
     e_fp32_pj_value_str = fmt_magnitude(e_fp32_flop * flop, unit=pJ, precision=1, commas=False)
     move_b32_mult_str = fmt_multiple(move_vs_arith_b32, precision=1, commas=False)
@@ -4325,11 +4346,11 @@ class EpochTimeEnergy:
 
 **Problem**: How long does one training epoch of the running network take on a desktop CPU and on a data-center accelerator, which term of the iron law sets that time, and where does the energy go?
 
-**Background**: One epoch at batch `{python} MnistEpochLocal.batch_size_str` is `{python} EpochTimeEnergy.steps_str` steps of about `{python} EpochTimeEnergy.flops_step_mflop_str` and `{python} EpochTimeEnergy.step_bytes_mb_str` of memory traffic each, the forward work of @tbl-nn-computation-mnist-params scaled by the training-step ratio derived earlier. At batch `{python} MnistEpochLocal.batch_size_str` the network's arithmetic intensity sits below both machines' ridge points (@fig-mnist-roofline), so each step streams at the memory-bandwidth limit: `{python} EpochTimeEnergy.bw_cpu_str` on the desktop CPU and `{python} EpochTimeEnergy.bw_acc_str` on the H100 accelerator. Every operation a step launches also pays a fixed cost: about `{python} EpochTimeEnergy.dispatch_us_str` for the framework to dispatch it and, on the accelerator, about `{python} EpochTimeEnergy.launch_us_str` more to launch it, across `{python} EpochTimeEnergy.ops_per_step_str` operations per step.
+**Background**: One epoch at batch `{python} MnistEpochLocal.batch_size_str` is `{python} EpochTimeEnergy.steps_str` steps of about `{python} EpochTimeEnergy.flops_step_mflop_str` and `{python} EpochTimeEnergy.step_bytes_mb_str` of memory traffic each, the forward work of @tbl-nn-computation-mnist-flops scaled by the training-step ratio derived earlier. That traffic figure and the energy ratios below model only forward and backward matrix traffic at the forward-pass arithmetic intensity, omitting uncached optimizer-update traffic (about `{python} EpochTimeEnergy.sgd_opt_mb_str` per step for plain SGD or `{python} EpochTimeEnergy.adam_opt_mb_str` for Adam). At batch `{python} MnistEpochLocal.batch_size_str` the network's arithmetic intensity sits below both machines' ridge points (@fig-mnist-roofline), so each step streams at the memory-bandwidth limit: `{python} EpochTimeEnergy.bw_cpu_str` on the desktop CPU and `{python} EpochTimeEnergy.bw_acc_str` on the H100 accelerator. Every operation a step launches also pays a fixed cost: about `{python} EpochTimeEnergy.dispatch_us_str` for the framework to dispatch it and, on the accelerator, about `{python} EpochTimeEnergy.launch_us_str` more to launch it, across `{python} EpochTimeEnergy.ops_per_step_str` operations per step.
 
-**Solution**: The arithmetic and data movement of a whole epoch take about `{python} EpochTimeEnergy.work_cpu_ms_str` on the CPU and `{python} EpochTimeEnergy.work_acc_ms_str` on the accelerator, a `{python} EpochTimeEnergy.acc_work_speedup_mult_str` advantage. The fixed per-operation costs add about `{python} EpochTimeEnergy.ovh_cpu_ms_str` on the CPU and `{python} EpochTimeEnergy.ovh_acc_ms_str` on the accelerator, so the totals come to about `{python} EpochTimeEnergy.total_cpu_ms_str` and `{python} EpochTimeEnergy.total_acc_ms_str`. On the accelerator, `{python} EpochTimeEnergy.ovh_share_acc_str` of the epoch is overhead, and the CPU finishes first. Energy tells a parallel story. The energy constants introduced alongside the iron law [@horowitz2014] are about `{python} EpochTimeEnergy.e_dram_pj_value_str` pJ per byte moved from dynamic random-access memory (DRAM) and `{python} EpochTimeEnergy.e_fp32_pj_value_str` pJ per FP32 operation (the average of a multiply and an add). With those constants, moving a step's bytes costs `{python} EpochTimeEnergy.move_b32_mult_str` the energy of its arithmetic at batch `{python} MnistEpochLocal.batch_size_str`, and `{python} EpochTimeEnergy.move_b1_mult_str` at batch 1.
+**Solution**: The arithmetic and data movement of a whole epoch take about `{python} EpochTimeEnergy.work_cpu_ms_str` on the CPU and `{python} EpochTimeEnergy.work_acc_ms_str` on the accelerator, a `{python} EpochTimeEnergy.acc_work_speedup_mult_str` advantage. The fixed per-operation costs add about `{python} EpochTimeEnergy.ovh_cpu_ms_str` on the CPU and `{python} EpochTimeEnergy.ovh_acc_ms_str` on the accelerator, so the totals come to about `{python} EpochTimeEnergy.total_cpu_ms_str` and `{python} EpochTimeEnergy.total_acc_ms_str`. On the accelerator, `{python} EpochTimeEnergy.ovh_share_acc_str` of the epoch is overhead, and the CPU finishes first. Including uncached optimizer-update traffic narrows that CPU lead under plain SGD (`{python} EpochTimeEnergy.total_cpu_sgd_ms_str` vs. `{python} EpochTimeEnergy.total_acc_sgd_ms_str`) and reverses it under Adam (`{python} EpochTimeEnergy.total_cpu_adam_ms_str` vs. `{python} EpochTimeEnergy.total_acc_adam_ms_str`), while leaving `{python} EpochTimeEnergy.ovh_share_acc_adam_str` of the accelerator epoch in fixed overhead. Energy tells a parallel story. The energy constants introduced alongside the iron law [@horowitz2014] are about `{python} EpochTimeEnergy.e_dram_pj_value_str` pJ per byte moved from dynamic random-access memory (DRAM) and `{python} EpochTimeEnergy.e_fp32_pj_value_str` pJ per FP32 operation (the average of a multiply and an add). With those constants, moving a step's bytes costs `{python} EpochTimeEnergy.move_b32_mult_str` the energy of its arithmetic at batch `{python} MnistEpochLocal.batch_size_str`, and `{python} EpochTimeEnergy.move_b1_mult_str` at batch 1, before uncached optimizer traffic pushes data movement higher still.
 
-**Systems insight**: At this scale the third term of the iron law, fixed overhead, decides the run, and the accelerator's bandwidth advantage disappears behind it; a network this small trains at least as fast on a CPU. Larger models, larger batches, and fewer, fused operations shift the balance back toward the work terms, which is how frameworks gain their speed (@sec-ml-frameworks). The energy result anticipates why reuse, batching, and narrower formats matter as much to power as to time (@sec-introduction-iron-law-ml-systems-c32a).
+**Systems insight**: At this scale the third term of the iron law, fixed overhead, decides the run, and the accelerator's bandwidth advantage disappears behind it; a network this small runs in roughly the same time on a CPU (and faster when its small working set stays in CPU cache). Larger models, larger batches, and fewer, fused operations shift the balance back toward the work terms, which is how frameworks gain their speed (@sec-ml-frameworks). The energy result anticipates why reuse, batching, and narrower formats matter as much to power as to time (@sec-introduction-iron-law-ml-systems-c32a).
 
 :::
 
@@ -4582,7 +4603,7 @@ minimum height=13mm,minimum width=22mm,\ifboxdashed dashed\fi](\picname){};
 
 :::
 
-These differences determine which hardware each phase runs on and how it is deployed. Training clusters rely on high-bandwidth, high-memory accelerators backed by hundreds of watts per socket and dedicated data-center cooling.[^fn-training-gpu-power] Inference deployments on constrained hardware\index{Constrained hardware!inference deployment} prioritize bounded tail latency (the latency of the slowest few percent of requests) and energy efficiency across diverse platforms. Mobile devices execute on low-power neural processing units (typically 2–4 W), edge servers employ dedicated inference accelerators,[^fn-edge-tpu-efficiency] and cloud instances use reduced numerical precision to saturate dedicated matrix-multiply units (NVIDIA's versions are called Tensor Cores\index{Tensor Core!reduced-precision matrix units}). At scale, production serving introduces operational requirements that do not arise in isolated training runs, including dynamic request batching, load balancing, and failure isolation. @Tbl-forward-pass-comparison contrasts how the two phases execute the same forward equations under different state rules.
+These differences determine which hardware each phase runs on and how it is deployed. Training clusters rely on high-bandwidth, high-memory accelerators backed by hundreds of watts per socket and dedicated data-center cooling.[^fn-training-gpu-power] Inference deployments on constrained hardware\index{Constrained hardware!inference deployment} prioritize bounded tail latency and energy efficiency across diverse platforms. Mobile devices execute on low-power neural processing units (typically 2–4 W), edge servers employ dedicated inference accelerators,[^fn-edge-tpu-efficiency] and cloud instances use reduced numerical precision to saturate dedicated matrix-multiply units such as NVIDIA Tensor Cores\index{Tensor Core!reduced-precision matrix units}. At scale, production serving introduces operational requirements that do not arise in isolated training runs, including dynamic request batching, load balancing, and failure isolation. @Tbl-forward-pass-comparison contrasts how the two phases execute the same forward equations under different state rules.
 
 ::: {.column-margin .margin-pointer}
 ↪ Tensor Cores, which execute a small matrix multiply-accumulate per instruction and set the reduced-precision peak rates quoted for data center GPUs, are developed in @sec-hardware-acceleration-tensor-cores-771f.
@@ -4599,36 +4620,41 @@ from mlsysim.fmt import check, fmt_multiple, fmt_ops_rate, fmt_power
 class GpuSpecsFootnote:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     h_edge_tpu = Hardware.Edge.Coral
+    h_jetson = Hardware.Edge.JetsonAGXOrin
     a100_tdp_w_value = Hardware.Cloud.A100.tdp.to(watt).magnitude
     h100_tdp_w_value = Hardware.Cloud.H100.tdp.to(watt).magnitude
     mobile_inference_tdp_high_w_value = ReferenceStats.MobilePower.MobileNpuPeak.to(watt).magnitude
     edge_tpu_tops_value = h_edge_tpu.compute.peak_flops.to(TOPS).magnitude
     edge_tpu_tdp_w_value = h_edge_tpu.tdp.to(watt).magnitude
-    jetson_orin_tops_value = Hardware.Edge.JetsonAGXOrin.compute.precision_flops["int8"].to(TOPS).magnitude
-    jetson_orin_tdp_low_w_value = Hardware.Edge.JetsonAGXOrin.tdp_min.to(watt).magnitude
-    jetson_orin_tdp_high_w_value = Hardware.Edge.JetsonAGXOrin.tdp_max.to(watt).magnitude
+    jetson_orin_tops_value = h_jetson.compute.precision_flops["int8"].to(TOPS).magnitude
+    jetson_orin_sparse_tops_value = h_jetson.compute.precision_flops["int8_sparse"].to(TOPS).magnitude
+    jetson_orin_tdp_low_w_value = h_jetson.tdp_min.to(watt).magnitude
+    jetson_orin_tdp_high_w_value = h_jetson.tdp_max.to(watt).magnitude
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     training_mobile_ratio = a100_tdp_w_value / mobile_inference_tdp_high_w_value
     edge_throughput_ratio = jetson_orin_tops_value / edge_tpu_tops_value
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(training_mobile_ratio >= 100, f"Training GPU should be >=100x mobile power, got {training_mobile_ratio:.1f}x")
-    check(edge_throughput_ratio > 60, f"Jetson Orin should be >60x Edge TPU throughput, got {edge_throughput_ratio:.1f}x")
+    check(30 < edge_throughput_ratio < 40, f"Jetson Orin dense INT8 should be ~34x Edge TPU throughput, got {edge_throughput_ratio:.1f}x")
+    check(jetson_orin_sparse_tops_value == 2 * jetson_orin_tops_value, "Jetson Orin sparse INT8 should be 2x dense INT8")
+    check(jetson_orin_tdp_high_w_value == h_jetson.tdp.to(watt).magnitude, "Jetson Orin top mode should match nominal TDP")
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     a100_tdp_w_str = fmt_power(Hardware.Cloud.A100.tdp, unit=watt, precision=0, commas=False)
     h100_tdp_w_str = fmt_power(Hardware.Cloud.H100.tdp, unit=watt, precision=0, commas=False)
     training_mobile_ratio_mult_str = fmt_multiple(training_mobile_ratio, precision=0, commas=False)
     edge_tpu_tops_str = fmt_ops_rate(h_edge_tpu.compute.peak_flops, unit=TOPS, precision=0, commas=False)
     edge_tpu_tdp_w_str = fmt_power(h_edge_tpu.tdp, unit=watt, precision=0, commas=False)
-    jetson_orin_tops_str = fmt_ops_rate(Hardware.Edge.JetsonAGXOrin.compute.precision_flops["int8"], unit=TOPS, precision=0, commas=False)
-    jetson_orin_tdp_low_w_str = fmt_power(Hardware.Edge.JetsonAGXOrin.tdp_min, unit=watt, precision=0, commas=False)
-    jetson_orin_tdp_high_w_str = fmt_power(Hardware.Edge.JetsonAGXOrin.tdp_max, unit=watt, precision=0, commas=False)
-    edge_throughput_ratio_mult_str = fmt_multiple(edge_throughput_ratio, precision=1, commas=False)
+    jetson_orin_tops_str = fmt_ops_rate(h_jetson.compute.precision_flops["int8"], unit=TOPS, precision=1, commas=False)
+    jetson_orin_sparse_tops_str = fmt_ops_rate(h_jetson.compute.precision_flops["int8_sparse"], unit=TOPS, precision=0, commas=False)
+    jetson_orin_tdp_low_w_str = fmt_power(h_jetson.tdp_min, unit=watt, precision=0, commas=False)
+    jetson_orin_tdp_high_w_str = fmt_power(h_jetson.tdp_max, unit=watt, precision=0, commas=False)
+    edge_throughput_ratio_mult_str = fmt_multiple(round(edge_throughput_ratio), precision=0, commas=False)
     mobile_inference_tdp_high_w_str = fmt_power(ReferenceStats.MobilePower.MobileNpuPeak, unit=watt, precision=0, commas=False)
 ```
 
 [^fn-training-gpu-power]: **Training GPU power budget**\index{GPU!training, power budget}: The "high-memory" requirement is driven by the need to hold parameters, gradients, optimizer state, and activations simultaneously. The corresponding power draw dictates the "dedicated data-center cooling infrastructure," as a single high-end training GPU consumes `{python} GpuSpecsFootnote.a100_tdp_w_str`--`{python} GpuSpecsFootnote.h100_tdp_w_str`. Even compared with a `{python} GpuSpecsFootnote.mobile_inference_tdp_high_w_str` mobile inference chip, that is at least `{python} GpuSpecsFootnote.training_mobile_ratio_mult_str` the power budget.
 
-[^fn-edge-tpu-efficiency]: **Edge inference accelerators**\index{Edge inference!power tiers}: Google's edge Tensor Processing Unit (TPU), the Edge TPU (Google Coral)\index{Edge TPU!inference efficiency}, operates in the mobile/embedded tier at about `{python} GpuSpecsFootnote.edge_tpu_tdp_w_str`, delivering `{python} GpuSpecsFootnote.edge_tpu_tops_str` through an INT8 datapath. Edge servers sit in a different tier: Jetson AGX Orin\index{Jetson AGX Orin!edge inference} reaches `{python} GpuSpecsFootnote.jetson_orin_tops_str` at `{python} GpuSpecsFootnote.jetson_orin_tdp_low_w_str`--`{python} GpuSpecsFootnote.jetson_orin_tdp_high_w_str`, about `{python} GpuSpecsFootnote.edge_throughput_ratio_mult_str` more throughput but with wired-power assumptions.
+[^fn-edge-tpu-efficiency]: **Edge inference accelerators**\index{Edge inference!power tiers}: Google's edge Tensor Processing Unit (TPU), the Edge TPU (Google Coral)\index{Edge TPU!inference efficiency}, operates in the mobile/embedded tier at about `{python} GpuSpecsFootnote.edge_tpu_tdp_w_str`, delivering `{python} GpuSpecsFootnote.edge_tpu_tops_str` of dense INT8 throughput. Edge servers sit in a different tier: Jetson AGX Orin\index{Jetson AGX Orin!edge inference} reaches `{python} GpuSpecsFootnote.jetson_orin_tops_str` of dense aggregate INT8 throughput at its `{python} GpuSpecsFootnote.jetson_orin_tdp_high_w_str` peak mode (within a `{python} GpuSpecsFootnote.jetson_orin_tdp_low_w_str`--`{python} GpuSpecsFootnote.jetson_orin_tdp_high_w_str` configurable power envelope; NVIDIA's `{python} GpuSpecsFootnote.jetson_orin_sparse_tops_str` headline rating assumes structured sparsity), about `{python} GpuSpecsFootnote.edge_throughput_ratio_mult_str` the dense throughput of Coral under wired-power assumptions.
 
 ```{python}
 #| echo: false

@@ -1009,12 +1009,15 @@ def test_placement_shared_dram_read():
     assert r.backlog_wait.to('us').magnitude == pytest.approx(1.8794, abs=0.0005)
     assert r.snapshot_read.to('us').magnitude == pytest.approx(0.0201, abs=0.0005)
     assert r.bypass_read.to('us').magnitude == pytest.approx(0.0402, abs=0.0005)
-    assert (r.backlogs_sense, r.backlogs_wcet, r.backlogs_deadline) == (21, 82, 114)
-    assert r.end_deadline.to('us').magnitude == pytest.approx(309.27, abs=0.01)
+    assert r.read_ceiling_wcet.to('us').magnitude == pytest.approx(115.0)
+    assert r.read_ceiling_deadline.to('us').magnitude == pytest.approx(175.0)
+    assert (r.backlogs_sense, r.backlogs_wcet, r.backlogs_deadline) == (21, 61, 93)
+    assert r.unloaded_end < r.end_sense < r.end_wcet < r.end_deadline
+    assert r.end_deadline.to('us').magnitude == pytest.approx(309.80, abs=0.01)
     one = Scenarios.WarehouseSharedDieLoadedReadOneChannel
     o = one.result
     assert o.backlog_wait.to('us').magnitude == pytest.approx(28.38, abs=0.01)
-    assert (o.backlogs_sense, o.backlogs_wcet) == (1, 5)
+    assert (o.backlogs_sense, o.backlogs_wcet) == (1, 4)
 
 def test_placement_stall_shares_and_droop():
     assert Scenarios.WarehouseTickMshrStallShare.breakeven_share == pytest.approx(0.042593, abs=1e-06)
@@ -1129,7 +1132,8 @@ def test_supervisory_intervention_takeover_budgets():
     assert b.step_jerk.m_as('m/s**3') == pytest.approx(2000.0)
     auth = s.WarehouseRemoteCommandAuthentication.result
     assert auth.verify_time.m_as('ms') == pytest.approx(1.8) and auth.mac_time.m_as('us') == pytest.approx(4.96275)
-    assert auth.forged_to_miss == 55 and auth.forged_to_miss_after_admission == 20 and (auth.forged_rate == 546)
+    assert auth.forged_to_miss == 55 and auth.forged_to_miss_after_admission == 20 and (auth.forged_rate == 556)
+    assert auth.forged_rate >= (1 / auth.verify_time).to('1/s').magnitude
     assert auth.spare_after_freshness.m_as('mm') == pytest.approx(1.0075)
     import math
     vals = sorted((r['mean_takeover_time_s'] for r in load_series('slides/vol4/14_intervention/images/data/zhang2019_mean_takeover_times.csv').entries))
@@ -1678,4 +1682,54 @@ def test_chat_service_day_scenario():
     """One day of ChatGPT prompts at the Gemini median prompt (added 2026-10-20)."""
     from mlsysim import Literature, ReferenceStats
     assert float(ReferenceStats.TextTokenization.WordsPerToken) == 0.75
+
+
+def test_dev_review_wave1_upstream_fixes():
+    """Regression guards for Wave 1 developmental-review upstream fixes across Vols I-IV."""
+    from mlsysim import Infrastructure, Systems
+
+    # V1-09-F1: net savings after deducting scoring pass on ResNet50HalfCoresetEpochH100
+    ep = Scenarios.ResNet50HalfCoresetEpochH100
+    assert ep.net_saving_time().m_as("hour") == pytest.approx(ep.saving().m_as("hour"))
+    assert ep.net_saving_time().m_as("hour") == pytest.approx(1.5671, abs=1e-3)
+    assert ep.net_saving_energy().m_as("MJ") == pytest.approx(3.9491, abs=1e-3)
+    assert ep.net_saving_over_score_energy() == pytest.approx(134.0, abs=0.1)
+    assert ep.net_saving_energy() < ep.run_saving_energy
+
+    # V1-11-F1: Gpt2DecodeH100OverServerCpuBandwidth uses 200 GB/s server host DRAM
+    bw = Scenarios.Gpt2DecodeH100OverServerCpuBandwidth
+    assert bw.baseline_rate.m_as("GB/s") == pytest.approx(200.0)
+    assert bw.gain == pytest.approx(16.75)
+    assert bw.speedup == pytest.approx(1.0 / (0.20 + 0.80 / 16.75))
+
+    # V2-12-F2: OwnVsRentDgxH100Node uses rack IT power / 4 (no double-counted cooling)
+    own = Scenarios.OwnVsRentDgxH100Node
+    expected_it_node = Systems.Racks.DGX_H100_4Node.it_power / Systems.Racks.DGX_H100_4Node.nodes_per_rack
+    assert own.power.m_as("kW") == pytest.approx(expected_it_node.m_as("kW"))
+    assert own.owned_cost_per_year.m_as("USD") == pytest.approx(4155.04, abs=1.0)
+    assert own.breakeven_utilization == pytest.approx(0.4240, abs=1e-3)
+
+    # V2-06-F1: DataParallelScaleOutModel uses hierarchical M-node inter-node ring (2*(M-1)/M = 1.5)
+    dp4 = Scenarios.Gpt2DataParallelFourNodes10GbE.result
+    assert dp4.intra_time.m_as("ms") == pytest.approx(11.67, abs=0.05)
+    assert dp4.inter_time.m_as("ms") == pytest.approx(3600.0, abs=1.0)
+    assert dp4.communication_time.m_as("ms") == pytest.approx(3611.67, abs=1.0)
+    assert dp4.efficiency == pytest.approx(1800.0 / (1800.0 + 3611.67), abs=1e-3)
+
+    # V2-09-F1: Llama2_70BFleetMfu128 maintains exact constant integer tokens per GPU (277)
+    mfu = Scenarios.Llama2_70BFleetMfu128
+    assert mfu.node_tokens == 277 * mfu.node_devices
+    assert mfu.fleet_tokens == mfu.node_tokens * (mfu.fleet_devices // mfu.node_devices)
+    assert mfu.node_step_time.m_as("ms") == pytest.approx(181.0)
+    assert mfu.fleet_step_time.m_as("ms") == pytest.approx(245.0)
+    assert mfu.scaling_efficiency == pytest.approx(181.0 / 245.0, rel=1e-9)
+    assert round(mfu.node_mfu, 2) == pytest.approx(0.65)
+    assert round(mfu.fleet_mfu, 2) == pytest.approx(0.48)
+
+    # V2-APP-F1: Air-cooled WUE (0.5 L/kWh) < evaporative WUE (1.8 L/kWh)
+    assert float(Infrastructure.FacilityCooling.BestAir.wue) == pytest.approx(0.5)
+    assert float(Infrastructure.FacilityCooling.SimpleAir.wue) == pytest.approx(0.5)
+    assert float(Infrastructure.FacilityCooling.Typical.wue) == pytest.approx(1.8)
+    assert float(Infrastructure.WUE_AIR_COOLED) < float(Infrastructure.WUE_EVAPORATIVE)
+
 

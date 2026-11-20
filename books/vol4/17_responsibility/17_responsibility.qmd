@@ -54,7 +54,7 @@ A machine's logs can show, tick by tick, what it sensed, proposed, and admitted,
 - Explain why reconstructing what a machine did does not establish who answers for it, and trace an admitted action back to the decisions that allowed it
 - Evaluate whether a human role gives its holder the time, information, and authority to act, using the takeover budget and supervisor utilization
 - Specify the stages of operating permission, what each stage allows and must report, and what withdraws it
-- Calculate how a gap in per-frame detection between groups of people becomes a gap in stopping distance and impact energy, and size a per-group evaluation whose confidence interval can resolve that gap
+- Calculate how a gap in per-frame detection between groups of people becomes a gap in stopping distance and impact energy, and size a per-group evaluation with enough statistical power to resolve that gap
 - Distinguish risk borne by people who chose the machine from risk borne by people who did not, and specify exposure reporting for each group
 - Bound personal-data exposure for recorded people through event-triggered retention and purpose limits, and quantify the supervisory and exception-handling worker burden a deployment shifts onto facility staff
 - Design an approval record that names an owner for every decision behind an admitted action, so that a missing owner blocks release
@@ -364,9 +364,9 @@ class SupervisorLoad:
 
 Even when the machine waits at standstill for that remote assistant, an assistant who serves many machines is a server in a queue, and queueing theory says how busy that person is. If help requests arrive from the whole fleet at rate $\ArrivalRate$ and each holds the assistant for a mean time $\IntervalMean$, the share of time the assistant is busy, the utilization, is
 $$\ServingUtilization = \ArrivalRate\,\IntervalMean.$$ {#eq-responsibility-supervisor-load}
-A request that arrives while the assistant is busy waits. Under the simplest queueing model, with random arrivals and random service times, the mean wait before service begins is
+A request that arrives while the assistant is busy waits. Under the simplest single-server queueing model (Poisson arrivals and exponentially distributed service times, the M/M/1 queue), the mean wait before service begins is
 $$\QueueWaitTime = \frac{\ServingUtilization\,\IntervalMean}{1-\ServingUtilization}.$$ {#eq-responsibility-supervisor-wait}
-The wait grows without bound as $\ServingUtilization$ approaches one. Worse, a request arriving while the assistant is busy, which happens with probability $\ServingUtilization$ in this model, gets no human attention at all until the request ahead of it is finished.
+The wait grows without bound as $\ServingUtilization$ approaches one, and more variable, heavy-tailed human rescue times make both the mean and the 99th-percentile wait longer still. Worse, a request arriving while the assistant is busy, which happens with probability $\ServingUtilization$ in this model, gets no human attention at all until the request ahead of it is finished.
 
 ::: {#nbk-responsibility-supervisor-load .callout-notebook title="One assistant, twenty machines"}
 
@@ -377,7 +377,7 @@ The wait grows without bound as $\ServingUtilization$ approaches one. Worse, a r
 * Requests per machine: `{python} SupervisorLoad.assist_rate_str` per operating hour (Illustrative); mean service time $\IntervalMean =$ `{python} SupervisorLoad.t_service_s_str` (Illustrative).
 * Machines served: `{python} SupervisorLoad.n_small_str`, `{python} SupervisorLoad.n_mid_str`, or `{python} SupervisorLoad.n_large_str` (Illustrative).
 
-**Math**: By @eq-responsibility-supervisor-load, `{python} SupervisorLoad.n_mid_str` machines give $\ServingUtilization =$ `{python} SupervisorLoad.rho_mid_str`, and @eq-responsibility-supervisor-wait gives a mean wait $\QueueWaitTime =$ `{python} SupervisorLoad.wq_mid_str`. One request in a hundred waits longer than `{python} SupervisorLoad.p99_mid_min_str`. With `{python} SupervisorLoad.n_small_str` machines the figures are `{python} SupervisorLoad.rho_small_str` and `{python} SupervisorLoad.wq_small_str`; with `{python} SupervisorLoad.n_large_str` they are `{python} SupervisorLoad.rho_large_str` and `{python} SupervisorLoad.wq_large_str`, about `{python} SupervisorLoad.wq_large_min_str`.
+**Math**: By @eq-responsibility-supervisor-load, `{python} SupervisorLoad.n_mid_str` machines give $\ServingUtilization =$ `{python} SupervisorLoad.rho_mid_str`, and @eq-responsibility-supervisor-wait gives a mean wait $\QueueWaitTime =$ `{python} SupervisorLoad.wq_mid_str`. Under the same M/M/1 model, one request in a hundred waits longer than `{python} SupervisorLoad.p99_mid_min_str`. With `{python} SupervisorLoad.n_small_str` machines the figures are `{python} SupervisorLoad.rho_small_str` and `{python} SupervisorLoad.wq_small_str`; with `{python} SupervisorLoad.n_large_str` they are `{python} SupervisorLoad.rho_large_str` and `{python} SupervisorLoad.wq_large_str`, about `{python} SupervisorLoad.wq_large_min_str`.
 
 **Result**: The assistant is busy `{python} SupervisorLoad.rho_mid_pct_str` of the time, and a typical request waits minutes. Adding machines past that point makes the wait grow much faster than the fleet.
 
@@ -560,6 +560,7 @@ class DetectionShortfall:
     a_brake = AISLE.a_brake  # category: illustrative (credible loaded deceleration)
     m = RM.loaded_mass  # category: derived (registry loaded mass)
     t_frame = SHORTFALL.frame_period  # category: datasheet (navigation camera frame rate)
+    tau_delay = AISLE.tau_delay  # category: derived (the machine's pre-brake delay)
     p_miss = SHORTFALL.all_miss_probability  # category: chosen (allowed probability of missing a person in every frame)
     p_ref = SHORTFALL.reference  # category: illustrative (per-frame detection, best-detected group)
     p_lows = SHORTFALL.groups  # category: illustrative (per-frame detection, three lower-detection groups)
@@ -594,6 +595,7 @@ class DetectionShortfall:
     a_brake_str = fmt_acceleration(a_brake, precision=0)
     m_str = fmt_mass(m, unit=kilogram, precision=0)
     t_frame_str = fmt_latency(t_frame, unit=millisecond, precision=1)
+    tau_delay_str = fmt_latency(tau_delay, unit=millisecond, precision=1)
     p_miss_math = fmt_math(f"10^{{{round(math.log10(p_miss))}}}")
     p_ref_str = fmt(p_ref, precision=2)
     p_low_str = fmt(p_low, precision=2)
@@ -657,7 +659,7 @@ Evaluating that shortfall across three lower per-frame detection rates (@tbl-17-
 
 The stopping trajectories in @fig-17-detection-shortfall show why a small range loss produces such a sharp contact speed. Once braking begins, both groups follow the same constant-deceleration parabola, which drops most steeply in the final centimeters before standstill. Delaying brake onset for the lowest-detection group shifts that parabola forward along the aisle, cutting off its steepest final drop so the machine crosses the person's position before shedding that speed.
 
-::: {#fig-17-detection-shortfall fig-env="figure" fig-pos="htb" fig-cap="**One Stop, Two Groups of People**: Speed of the running machine against distance traveled from the moment a person enters the detector's view, for a stop sized so that it ends just short of a person in the best-detected group. Under the independent-frame model and stated all-frames miss-probability threshold, the reference group requires a `{python} DetectionShortfall.n_ref_str`-frame detection window; a group seen in `{python} DetectionShortfall.worst_p_pct_str` of frames requires `{python} DetectionShortfall.worst_n_str` frames. The stop profiles charge those detection-window allowances before braking; the longer allowance leaves the machine still moving when it reaches the person. The impact speed and energy follow from the distance lost, not from the recall gap alone." fig-alt="Line plot of speed in meters per second against distance in meters. Both curves start at 1.3 meters per second. The reference curve stays flat through the detection and reaction distance, then falls along a braking parabola to zero exactly at a vertical dashed line marking the person. The second curve stays flat about 0.11 meters longer before braking, then falls along the same parabola shape and crosses the person line at about 0.66 meters per second, marked with a red point labeled impact, 0.66 meters per second, 80 joules."}
+::: {#fig-17-detection-shortfall fig-env="figure" fig-pos="htb" fig-cap="**One Stop, Two Groups of People**: Speed of the running machine against distance traveled from the moment a person enters the detector's view, for a stop sized so that it ends just short of a person in the best-detected group. Under the independent-frame model and stated all-frames miss-probability threshold, the reference group requires a `{python} DetectionShortfall.n_ref_str`-frame detection window; a group seen in `{python} DetectionShortfall.worst_p_pct_str` of frames requires `{python} DetectionShortfall.worst_n_str` frames. The stop profiles charge those detection-window allowances plus the machine's `{python} DetectionShortfall.tau_delay_str` pre-brake delay before braking; the longer allowance leaves the machine still moving when it reaches the person. The impact speed and energy follow from the distance lost, not from the recall gap alone." fig-alt="Line plot of speed in meters per second against distance in meters. Both curves start at 1.3 meters per second. The reference curve stays flat through the detection and reaction distance, then falls along a braking parabola to zero exactly at a vertical dashed line marking the person. The second curve stays flat about 0.11 meters longer before braking, then falls along the same parabola shape and crosses the person line at about 0.66 meters per second, marked with a red point labeled impact, 0.66 meters per second, 80 joules."}
 
 ```{python}
 #| echo: false
@@ -780,6 +782,7 @@ class SubgroupIntervals:
     lo_l_str, hi_l_str = fmt(lo_l, precision=3), fmt(hi_l, precision=3)
     width_ratio_mult_str = fmt_multiple(round(width_ratio), precision=0)  # "about N times"
     p_a_str, p_b_str = fmt(p_a, precision=2), fmt(p_b, precision=2)
+    alpha_str = fmt(alpha, precision=2)
     power_pct_str = fmt_percent(power, precision=0, style="prose")
     n_needed_str = fmt_int(n_needed)
     share_needed_pct_str = fmt_percent(round(share_needed, 2), precision=0, style="prose")  # whole percent
@@ -791,7 +794,11 @@ A detection gap can be managed only if it can be measured, and measuring it per 
 ↩ The exact binomial bound, and why a few observed failures drop it sharply, are established in @sec-evaluation-bounds-with-failures.
 :::
 
-Telling a detection rate of `{python} SubgroupIntervals.p_a_str` from one of `{python} SubgroupIntervals.p_b_str` with `{python} SubgroupIntervals.power_pct_str` statistical power (an `{python} SubgroupIntervals.power_pct_str` probability of detecting a real gap of that size) takes about `{python} SubgroupIntervals.n_needed_str` people in each group, about `{python} SubgroupIntervals.share_needed_pct_str` of the whole evaluation set for every group the evaluation must resolve. A group that makes up a few percent of the people a site employs will not reach that count by chance; the evaluation has to recruit it deliberately. The same arithmetic sets how long field monitoring must run before a per-group detection rate can be trusted, and it is why the sample size for each group belongs in the plan before data collection begins, not in the report after it.
+Telling a detection rate of `{python} SubgroupIntervals.p_a_str` from one of `{python} SubgroupIntervals.p_b_str` at a two-sided significance level $\HypothesisTestSignificanceLevel =$ `{python} SubgroupIntervals.alpha_str` with `{python} SubgroupIntervals.power_pct_str` statistical power (an `{python} SubgroupIntervals.power_pct_str` probability of detecting a real gap of that size, so a two-sided 95 percent confidence interval for the difference excludes zero) takes about `{python} SubgroupIntervals.n_needed_str` people in each group, about `{python} SubgroupIntervals.share_needed_pct_str` of the whole evaluation set for every group the evaluation must resolve. A group that makes up a few percent of the people a site employs will not reach that count by chance; the evaluation has to recruit it deliberately. The same arithmetic sets how long field monitoring must run before a per-group detection rate can be trusted, and it is why the sample size for each group belongs in the plan before data collection begins, not in the report after it.
+
+::: {.column-margin .margin-pointer}
+↩ Sizing a two-proportion comparison by statistical power (whose arcsine formula agrees with the pooled normal approximation used here to within about 1 percent on this gap) is established in @sec-evaluation-policy-comparison.
+:::
 
 ### Where the measurement lives {#sec-responsibility-measurement-home}
 
@@ -803,9 +810,9 @@ If per-group detection rates live only in a research benchmark report, the relea
 
 ::: {#chk-responsibility-detection-gap .callout-checkpoint title="Detection gaps and sample sizes"}
 
-- [ ] **Conversion**: A detector reaches a person kneeling between racks two frames later than a standing person. Can you compute, at the running machine's aisle speed, loaded mass, and credible deceleration, the impact speed and energy if the stop was sized for standing workers?
+- [ ] **Conversion**: A detector reaches a person kneeling between racks three frames later than a standing person. Can you compute, at the running machine's aisle speed, loaded mass, and credible deceleration, the impact speed and energy if the stop was sized for standing workers?
 - [ ] **Remedy**: Can you compare three remedies (a lower speed near racks, a sensor that does not depend on the person's pose, and a zone rule that keeps the machine out while people kneel there) by what each costs and what evidence each needs?
-- [ ] **Sample**: Can you size an evaluation that distinguishes 0.95 from 0.92 detection at 80 percent power, and say what share of a 10,000-person test set each group must be?
+- [ ] **Sample**: Can you size an evaluation that distinguishes 0.95 from 0.90 detection at two-sided $\HypothesisTestSignificanceLevel = 0.05$ and 80 percent power, and say what share of a 10,000-person test set each group must be?
 
 :::
 
@@ -1092,7 +1099,7 @@ The approval record has seven blocks, a header that binds it to the release and 
 ↪ **Byte layout:** The approval record's fields, their encodings, and the check the release gate applies to each are given in @sec-appendix-systems-wire-responsibility.
 :::
 
-The release check reads the approval record as a standing condition of the manifest (@tbl-appendix-systems-wire-responsibility). Five record checks return `REFUSE` the way an unknown physical premise does: a `permit_stage` configuration digest that disagrees with the manifest or a `validity_window` expired on the real-time clock, an admitted action class with a missing or expired decision owner, a human role cited as a countermeasure carrying a verdict of `INFEASIBLE` or `UNKNOWN`, missing `reporting_duties` for the stage, or an exposed group the design relies on detecting with no per-group `exposure` entry. By contrast, an expired `data_declarations` entry or failed access-and-retention audit suspends the offending record capture or restricts operation when capture can be decoupled from actuation, returning `REFUSE` only when actuation cannot proceed without that capture. Recorded `labor` hours inform governance review without blocking motion.
+The release check reads the approval record as a standing condition of the manifest. Beyond identifier, digest, and signature verification, five content checks return `REFUSE` the way an unknown physical premise does: a permission-stage configuration digest that disagrees with the manifest or a validity window expired on the real-time clock, an admitted action class with a missing or expired decision owner, a human role cited as a countermeasure carrying a verdict of `INFEASIBLE` or `UNKNOWN`, missing reporting duties for the stage, or an exposed group the design relies on detecting with no per-group exposure entry. By contrast, an expired declaration in the records-about-people block or a failed access-and-retention audit suspends the offending record capture or restricts operation when capture can be decoupled from actuation, returning `REFUSE` only when actuation cannot proceed without that capture. Recorded labor hours inform governance review without blocking motion.
 
 Every finding returns its premise to the adjudicator with the cause logged. Because a decision whose owner leaves the organization expires with that person's role, the approval record is kept current the same way the standing conditions are: by checking, on a declared schedule, that every premise still holds.
 
@@ -1139,7 +1146,7 @@ A design that lists the remote assistant as the response to a person stepping ou
 
 A pooled rate is dominated by the largest group. At `{python} SubgroupIntervals.n_small_str` people, a smaller group's exact interval is about `{python} SubgroupIntervals.width_ratio_mult_str` wider than the rest of the set's, too wide to resolve a gap of three points in detection. A group detected two frames later at the aisle speed loses `{python} DetectionShortfall.dr_mm_str` of clearance and is struck at `{python} DetectionShortfall.v_imp_str`.
 
-**Detection must be reported per group, with a sample large enough for its interval to resolve the gap that matters, and converted into meters and joules.**
+**Detection must be reported per group, with a sample large enough to resolve the gap that matters, and converted into meters and joules.**
 :::
 
 ::: {.fallacy-pitfall}
@@ -1182,13 +1189,13 @@ The same discipline applies to the people around the machine. A human role count
 
 Five quantitative relationships turn those human and per-group premises into checkable bounds (@tbl-17-key-equations), linking fleet size to remote-assistant wait time and extra detection frames to lost clearance and contact energy.
 
-| Equation                                                                                                                                                           | What it bounds or decides                                                                                          | Derived in                          |
-|:-------------------------------------------------------------------------------------------------------------------------------------------------------------------|:-------------------------------------------------------------------------------------------------------------------|:------------------------------------|
-| $\ServingUtilization = \ArrivalRate\,\IntervalMean$                                                                                                                | The share of time one remote assistant is busy, which caps how many machines that person can serve                 | @eq-responsibility-supervisor-load  |
-| $\QueueWaitTime = \ServingUtilization\,\IntervalMean/(1-\ServingUtilization)$                                                                                      | The mean wait before a help request receives a person's attention, which no hazard faster than minutes can rely on | @eq-responsibility-supervisor-wait  |
-| $\ReliableDetectionFrameCount = \left\lceil \ln \DetectorMissProbability / \ln(1-\PerFrameDetectionProbability) \right\rceil$                                      | The frames a person must stay in view before the design may count on detecting them, for one group                 | @eq-responsibility-detection-frames |
-| $\DetectionRangeShortfall = \SpeedAtDetection\,\CameraFramePeriod\,\FiniteChange\ReliableDetectionFrameCount$                                                      | The clearance a less-detected group loses before braking begins                                                    | @eq-responsibility-range-shortfall  |
-| $\ImpactSpeed = \sqrt{2\,\CredibleBrakingDeceleration\,\DetectionRangeShortfall},\ \KineticEnergy = \Mass\,\CredibleBrakingDeceleration\,\DetectionRangeShortfall$ | The impact speed and energy a stop sized for the best-detected group delivers to a less-detected one               | @eq-responsibility-impact           |
+| Equation                                                                                                                                                           | What it bounds or decides                                                                                                | Derived in                          |
+|:-------------------------------------------------------------------------------------------------------------------------------------------------------------------|:-------------------------------------------------------------------------------------------------------------------------|:------------------------------------|
+| $\ServingUtilization = \ArrivalRate\,\IntervalMean$                                                                                                                | The share of time one remote assistant is busy, which caps how many machines that person can serve                       | @eq-responsibility-supervisor-load  |
+| $\QueueWaitTime = \ServingUtilization\,\IntervalMean/(1-\ServingUtilization)$                                                                                      | The mean M/M/1 wait before a help request receives a person's attention, which no hazard faster than minutes can rely on | @eq-responsibility-supervisor-wait  |
+| $\ReliableDetectionFrameCount = \left\lceil \ln \DetectorMissProbability / \ln(1-\PerFrameDetectionProbability) \right\rceil$                                      | The frames a person must stay in view before the design may count on detecting them, for one group                       | @eq-responsibility-detection-frames |
+| $\DetectionRangeShortfall = \SpeedAtDetection\,\CameraFramePeriod\,\FiniteChange\ReliableDetectionFrameCount$                                                      | The clearance a less-detected group loses before braking begins                                                          | @eq-responsibility-range-shortfall  |
+| $\ImpactSpeed = \sqrt{2\,\CredibleBrakingDeceleration\,\DetectionRangeShortfall},\ \KineticEnergy = \Mass\,\CredibleBrakingDeceleration\,\DetectionRangeShortfall$ | The impact speed and energy a stop sized for the best-detected group delivers to a less-detected one                     | @eq-responsibility-impact           |
 
 : **Key equations of responsibility for physical AI**: Each equation, what it bounds or decides about a person's role or a group's exposure, and where it is derived. {#tbl-17-key-equations tbl-colwidths="[44,38,18]"}
 
@@ -1197,7 +1204,7 @@ Five quantitative relationships turn those human and per-group premises into che
 * **Reconstruction is not attribution:** A log shows what was admitted. Only a record of decisions, each with a named owner, shows who made the admission possible, and those decisions must be recorded on purpose because the machine does not make them.
 * **A role no person can perform assigns blame, not protection:** Test every human role the safety argument cites for time, information, and authority, including the queue one person serves, and let only feasible roles count as countermeasures.
 * **Permission is staged and can be withdrawn:** Each stage covers a configuration, a domain, and reporting duties. It is left on evidence gathered at that stage and withdrawn for a configuration change, an incident, or a withheld record.
-* **Measure fairness in meters and joules:** Convert per-group detection into the distance lost before braking and the impact it causes, and size each group's sample so its interval can resolve the gap.
+* **Measure fairness in meters and joules:** Convert per-group detection into the distance lost before braking and the impact it causes, and size each group's sample with enough statistical power to resolve the gap.
 * **Count the people who did not choose the machine:** Report exposure per group and per location, and give the people who bear the risk legible motion and signals backed by measured detection.
 * **Records and labor about people carry their own premises:** Declare each record's purpose, retention, and readers, and account for the work a deployment moves onto people and the uses of their data it bars.
 * **A missing owner refuses like an unknown premise:** The approval record is a standing condition of release; entries that cannot close go to the residual-claims register with a restriction and an owner.

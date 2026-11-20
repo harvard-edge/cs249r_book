@@ -625,15 +625,15 @@ class SharedDramReadResult(SolverResult):
     loaded_read: Quantity  # one backlog plus the snapshot read
     sense_left: Quantity  # sense allowance less the loaded read
     bypass_read: Quantity  # priority bypass: one in-flight transaction, then the read
-    read_ceiling_wcet: Quantity  # declared WCET less the compute after sensing
-    read_ceiling_deadline: Quantity  # execution ceiling less the compute after sensing
-    backlogs_sense: int  # most backlogs whose wait still fits the sense allowance
-    backlogs_wcet: int  # most backlogs inside the declared WCET
-    backlogs_deadline: int  # most backlogs inside the execution ceiling
+    read_ceiling_wcet: Quantity  # declared WCET less the unloaded tick (sense + compute)
+    read_ceiling_deadline: Quantity  # execution ceiling less the unloaded tick (sense + compute)
+    backlogs_sense: int  # most backlogs whose wait + snapshot read fits one sense allowance
+    backlogs_wcet: int  # most backlogs added on top of the unloaded tick inside the declared WCET
+    backlogs_deadline: int  # most backlogs added on top of the unloaded tick inside the execution ceiling
     unloaded_end: Quantity  # sense allowance + compute after sensing
-    end_sense: Quantity  # tick end at backlogs_sense
-    end_wcet: Quantity  # tick end at backlogs_wcet
-    end_deadline: Quantity  # tick end at backlogs_deadline
+    end_sense: Quantity  # unloaded tick + snapshot read + backlogs_sense wait
+    end_wcet: Quantity  # unloaded tick + snapshot read + backlogs_wcet wait
+    end_deadline: Quantity  # unloaded tick + snapshot read + backlogs_deadline wait
 
 
 class ThermalThrottleResult(SolverResult):
