@@ -1,7 +1,7 @@
 ---
 number-offset: [12]
 concepts: evaluation_concepts.yml
-notation-local: [\AcceptanceIntervalLowerLimit, \AcceptanceIntervalUpperLimit, \AcceptedSampleCount, \BatchCostPerAcceptedTask, \BetweenTaskStandardDeviation, \BudgetedAcceptanceProbability, \CandidateAvailabilityProbability, \CandidateCheckingCost, \CandidateGenerationCost, \CandidateWinCount, \ChanceAnnotatorAgreement, \DiscordantPairCount, \DiscordantPairFraction, \FirstRaterCategoryFraction, \FunctionInputVariable, \InterAnnotatorAgreement, \MinimumDetectableEffect, \NoninferiorityTolerance, \ObservedAnnotatorAgreement, \ObservedSignificanceLevel, \PairedAcceptanceDifference, \PassingRunCount, \PerTaskRunCount, \RatingCategory, \RequiredTaskPairCount, \SecondRaterCategoryFraction, \SequentialCandidateCount, \SequentialCostPerAcceptedTask, \TargetRepeatedRunConsistency, \TaskIndex, \WilsonIntervalCenter, \WithinTaskRunStandardDeviation]
+notation-local: [\AcceptanceIntervalLowerLimit, \AcceptanceIntervalUpperLimit, \AcceptedSampleCount, \BatchCostPerAcceptedTask, \BetweenTaskStandardDeviation, \BudgetedAcceptanceProbability, \CandidateAvailabilityProbability, \CandidateCheckingCost, \CandidateGenerationCost, \CandidateWinCount, \ChanceAnnotatorAgreement, \DiscordantPairCount, \DiscordantPairFraction, \FirstRaterCategoryFraction, \FunctionInputVariable, \InterAnnotatorAgreement, \NoninferiorityTolerance, \ObservedAnnotatorAgreement, \ObservedSignificanceLevel, \PairedAcceptanceDifference, \PassingRunCount, \PerTaskRunCount, \RatingCategory, \RequiredTaskPairCount, \SecondRaterCategoryFraction, \SequentialCandidateCount, \SequentialCostPerAcceptedTask, \TargetRepeatedRunConsistency, \TaskIndex, \WilsonIntervalCenter, \WithinTaskRunStandardDeviation]
 ---
 
 # Agent Evaluation {#sec-vol3-evaluation}
@@ -525,16 +525,68 @@ In contrast to sampling from a broader task population, evaluating a fixed bench
 
 Once independent task units are defined, reporting an uncertainty interval around their sample mean still requires care, because when a safety or reliability check records zero violations across 50 sampled tasks, the textbook Wald confidence interval collapses to zero width and falsely claims that future violations are impossible. In general, when an evaluation protocol executes a single run across each of $\EvaluationSampleCount$ independently sampled tasks and observes $\AcceptedSampleCount$ acceptances, the empirical proportion $\EstimatedAcceptanceProbability=\AcceptedSampleCount/\EvaluationSampleCount$ (the $\PerTaskRunCount=1$ case of the task-averaged estimate) estimates the true population acceptance probability. A confidence interval quantifies the uncertainty from that finite sample size. It does not account for grader error, unhandled task timeouts, test-set contamination, or shifts in the underlying task distribution, which demand independent operational controls.
 
-The standard Wald interval, $\EstimatedAcceptanceProbability\pm \ConfidenceCriticalQuantile\sqrt{\EstimatedAcceptanceProbability(1-\EstimatedAcceptanceProbability)/\EvaluationSampleCount}$, breaks down in the extreme-probability regimes characteristic of safety and reliability gating. Empirical variance vanishes when every observed run succeeds or fails. Near the boundaries, the formula can also produce impossible interval endpoints below zero or above one.[^fn-wald-interval-coverage] The **Wilson score interval**\index{Wilson score interval!definition} [@wilson1927probable] avoids both failures by using the hypothesized rate, not the observed one, in the variance:[^fn-wilson-score-inversion]
+```{python}
+#| echo: false
+#| label: calc-vol3-evaluation-single-interval
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ SINGLE-PROPORTION INTERVAL WIDTH AND CLEAN-RECORD BOUND (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-vol3-evaluation-wilson and @fig-vol3-sample-size-confidence-intervals.
+# │ Goal: Quantify the 0-of-50 Wilson upper bound and 1/sqrt(N) single-rate scaling.
+# │ Show: Zero-event Wilson upper limit, N=100 half-widths, and N for +/-2-point target.
+# │ How:  Scenarios.FiftyTaskIntervals (Wilson at 0 of 50) and
+# │       Scenarios.AcceptanceRatePlanning (ProportionPlanningModel).
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
+from mlsysim.fmt import fmt, fmt_int, fmt_percent, check
 
-$$\WilsonIntervalCenter=\frac{\AcceptedSampleCount+\ConfidenceCriticalQuantile^2/2}{\EvaluationSampleCount+\ConfidenceCriticalQuantile^2},\qquad
-[\AcceptanceIntervalLowerLimit,\AcceptanceIntervalUpperLimit]=\WilsonIntervalCenter\pm\frac{\ConfidenceCriticalQuantile}{\EvaluationSampleCount+\ConfidenceCriticalQuantile^2}\sqrt{\frac{\AcceptedSampleCount(\EvaluationSampleCount-\AcceptedSampleCount)}{\EvaluationSampleCount}+\frac{\ConfidenceCriticalQuantile^2}{4}}.$$ {#eq-wilson-interval}
+class SingleIntervalScale:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    intervals = Scenarios.FiftyTaskIntervals
+    plan = Scenarios.AcceptanceRatePlanning
+    small_n = plan.planning_tasks
+    target_half_width = plan.target_half_width
 
-Here $\ConfidenceCriticalQuantile$ is the standard normal quantile for the selected two-sided confidence level. For zero acceptances in 50 independent tasks, @eq-wilson-interval gives a lower limit of zero and an upper limit of $\ConfidenceCriticalQuantile^2/(50+\ConfidenceCriticalQuantile^2)$, which panel B of @fig-vol3-sample-size-confidence-intervals marks. Read with the outcomes reversed, the same arithmetic prices a clean record: zero observed violations in 50 tasks remains consistent with a violation rate up to that limit.
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    z = intervals.result.z_critical
+    zero_upper = intervals.result.wilson[0][1]
+    planned = plan.result
+    half_small = planned.half_width
+    wilson_half_small = planned.wilson_half_width
+    n_for_target = planned.samples_for_target
+
+    # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────
+    check(intervals.trials == 50 and abs(zero_upper - z * z / (50 + z * z)) < 1e-12, "Wilson zero-count algebra")
+    check(abs(zero_upper - 0.07135) < 0.0005, "0-of-50 Wilson upper limit near 7.13 percent")
+    check(abs(half_small - 0.098) < 0.0005, "Half-width at N=100, p=0.5")
+    check(abs(wilson_half_small - half_small) < 0.003, "Wilson close to normal at p=0.5")
+    check(n_for_target == 2401, "Tasks for a 2-point half-width")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────────────────────────────
+    zero_upper_str = fmt_percent(zero_upper, precision=2, style="prose")
+    small_n_str = fmt_int(small_n)
+    half_small_pp_str = fmt(100 * half_small, precision=1)
+    wilson_half_pp_str = fmt(100 * wilson_half_small, precision=1)
+    target_pp_str = fmt(100 * target_half_width, precision=0)
+    n_for_target_str = fmt_int(n_for_target)
+```
+
+The standard Wald interval, $\EstimatedAcceptanceProbability\pm \IntervalNormalQuantile\sqrt{\EstimatedAcceptanceProbability(1-\EstimatedAcceptanceProbability)/\EvaluationSampleCount}$, breaks down in the extreme-probability regimes characteristic of safety and reliability gating. Empirical variance vanishes when every observed run succeeds or fails. Near the boundaries, the formula can also produce impossible interval endpoints below zero or above one.[^fn-wald-interval-coverage] The **Wilson score interval**\index{Wilson score interval!definition} [@wilson1927probable] avoids both failures by using the hypothesized rate, not the observed one, in the variance:[^fn-wilson-score-inversion]
+
+$$\WilsonIntervalCenter=\frac{\AcceptedSampleCount+\IntervalNormalQuantile^2/2}{\EvaluationSampleCount+\IntervalNormalQuantile^2},\qquad
+[\AcceptanceIntervalLowerLimit,\AcceptanceIntervalUpperLimit]=\WilsonIntervalCenter\pm\frac{\IntervalNormalQuantile}{\EvaluationSampleCount+\IntervalNormalQuantile^2}\sqrt{\frac{\AcceptedSampleCount(\EvaluationSampleCount-\AcceptedSampleCount)}{\EvaluationSampleCount}+\frac{\IntervalNormalQuantile^2}{4}}.$$ {#eq-wilson-interval}
+
+Here $\IntervalNormalQuantile=\SignificanceCriticalQuantile$ is the lower-tail standard-normal quantile at $1-\StatisticalSignificanceLevel/2$ for two-sided confidence level $1-\StatisticalSignificanceLevel$ ($\IntervalNormalQuantile\approx 1.96$ at $\StatisticalSignificanceLevel=0.05$). For zero acceptances in 50 independent tasks, @eq-wilson-interval gives a lower limit of zero and an upper limit of $\IntervalNormalQuantile^2/(50+\IntervalNormalQuantile^2)$, or `{python} SingleIntervalScale.zero_upper_str` at 95 percent confidence, which panel B of @fig-vol3-sample-size-confidence-intervals marks. Read with the outcomes reversed, the same arithmetic prices a clean record: zero observed violations in 50 tasks remains consistent with a violation rate up to `{python} SingleIntervalScale.zero_upper_str`.
 
 [^fn-wald-interval-coverage]: **Wald Interval Coverage**: A systematic study of binomial intervals found that the Wald interval's actual coverage oscillates erratically with both $\EvaluationSampleCount$ and $\AcceptanceProbability$, stays poor at sample sizes that textbook rules of thumb call safe, and recommended the Wilson interval for small samples [@brown2001interval]. Agent evaluation lives in exactly that regime: suites of tens of tasks, and violation rates near zero, where a nominal 95 percent Wald interval can promise far more than it delivers. \index{Wald interval!coverage failure}
 
-[^fn-wilson-score-inversion]: **Wilson score inversion**\index{Wilson score interval!test inversion}: At two-sided confidence level $1-\StatisticalSignificanceLevel$, the score interval contains the values $\AcceptanceProbability\in[0,1]$ satisfying $\EvaluationSampleCount(\EstimatedAcceptanceProbability-\AcceptanceProbability)^2\le \ConfidenceCriticalQuantile^2\AcceptanceProbability(1-\AcceptanceProbability)$. Solving this quadratic inequality gives the endpoints: the variance uses the hypothesized $\AcceptanceProbability$, rather than fixing it at $\EstimatedAcceptanceProbability$ as in the Wald construction [@guthrie2020nisthandbook, sec. 7.2.4.1].
+[^fn-wilson-score-inversion]: **Wilson score inversion**\index{Wilson score interval!test inversion}: At two-sided confidence level $1-\StatisticalSignificanceLevel$, the score interval contains the values $\AcceptanceProbability\in[0,1]$ satisfying $\EvaluationSampleCount(\EstimatedAcceptanceProbability-\AcceptanceProbability)^2\le \IntervalNormalQuantile^2\AcceptanceProbability(1-\AcceptanceProbability)$. Solving this quadratic inequality gives the endpoints: the variance uses the hypothesized $\AcceptanceProbability$, rather than fixing it at $\EstimatedAcceptanceProbability$ as in the Wald construction [@guthrie2020nisthandbook, sec. 7.2.4.1].
+
+Across interior rates, the confidence interval half-width for a single proportion scales as $\IntervalNormalQuantile\sqrt{\AcceptanceProbability(1-\AcceptanceProbability)/\EvaluationSampleCount}$, reaching its maximum at $\AcceptanceProbability=0.5$. Because precision improves only as $1/\sqrt{\EvaluationSampleCount}$, halving the margin of error requires a fourfold increase in evaluation tasks. At $\AcceptanceProbability=0.5$ and 95 percent confidence, `{python} SingleIntervalScale.small_n_str` independent tasks give a half-width of about `{python} SingleIntervalScale.half_small_pp_str` percentage points (the Wilson interval gives `{python} SingleIntervalScale.wilson_half_pp_str`), and a half-width of `{python} SingleIntervalScale.target_pp_str` points needs `{python} SingleIntervalScale.n_for_target_str` tasks. The half-width curves in @fig-vol3-sample-size-confidence-intervals flatten long before they reach the `{python} SingleIntervalScale.target_pp_str`-point half-width target, and near zero or full acceptance only the Wilson interval stays inside $[0,1]$ with a nonzero width.
+
+::: {#fig-vol3-sample-size-confidence-intervals fig-env="figure" fig-pos="htb" fig-cap="**How Many Tasks an Interval Needs**: Panel A plots the normal-approximation half-width at 95 percent confidence against the number of independent tasks for three acceptance probabilities. At $\AcceptanceProbability=0.5$, `{python} SingleIntervalScale.small_n_str` tasks give about ±`{python} SingleIntervalScale.half_small_pp_str` points, and `{python} SingleIntervalScale.n_for_target_str` tasks reach the dashed ±`{python} SingleIntervalScale.target_pp_str`-point target. Panel B compares Wald and Wilson intervals, in percent, for 50 tasks. With no acceptances, the Wald interval collapses to zero width, while the Wilson upper limit is `{python} SingleIntervalScale.zero_upper_str`. With two acceptances, the Wald lower limit falls below zero, an impossible probability. At 25 acceptances the two intervals nearly coincide." fig-alt="Two panels. Panel A: line chart of normal-approximation half-width in points, from 0 to 20, against independent tasks from 0 to 2,500, with a solid dark curve for p equal to 0.5, a dashed curve for 0.2, and a dotted light curve for 0.05, each labeled at its right end. All three fall steeply and then flatten. Two points on the p equal to 0.5 curve are labeled, 100 tasks at plus or minus 9.8 points and 2,401 tasks where the curve meets a dashed horizontal line at 2 points. Panel B: three rows of horizontal intervals at 50 tasks, each with a gray Wald interval above a blue Wilson interval and the bracketed limits printed at the right. With 0 of 50 accepted, Wald is a single point at zero, labeled zero width, and Wilson extends from 0 to 7.13 percent. With 2 of 50, the Wald interval, from minus 1.43 to 9.43 percent, extends into a red-shaded region below zero, while the Wilson interval, from 1.10 to 13.46 percent, stays above zero. With 25 of 50, the two intervals nearly coincide around 50 percent."}
+![](images/svg/sample_size_confidence_intervals.svg)
+:::
 
 These binary examples assume complete verdicts. If an evaluation sweep leaves trials unresolved due to timeouts, infrastructure failures, or grader crashes, the evaluation team must prespecify a handling protocol before examining the data, such as the default of @sec-vol3-evaluation-contract-verdicts that counts them as not accepted and reports both-outcome bounds. Simply discarding uncompleted tasks introduces severe survivorship bias, skewing results toward trivial tasks that execute rapidly and pass without contention.
 
@@ -631,7 +683,7 @@ plt.close()
 
 :::
 
-With standard errors near two points, two systems need a gap of about `{python} RankTies.needed_gap_str` points before independent intervals separate them, and `{python} RankTies.tied_str` of the `{python} RankTies.n_pairs_str` neighboring pairs fall short of it. A leaderboard rank is therefore a weak signal for deciding whether one configuration improves on another.
+With standard errors near two points, two systems need a gap of about `{python} RankTies.needed_gap_str` points before an independent-samples test separates them, and `{python} RankTies.tied_str` of the `{python} RankTies.n_pairs_str` neighboring pairs fall short of it. A leaderboard rank is therefore a weak signal for deciding whether one configuration improves on another.
 
 ### Paired outcome comparison {#sec-vol3-evaluation-paired}
 
@@ -662,29 +714,27 @@ A release decision usually asks a magnitude question instead of an equality ques
 #| label: calc-vol3-evaluation-paired-comparison
 #| echo: false
 # PAIRED ACCEPTANCE DIFFERENCE (LEGO)
-# Goal: Estimate one rate and compare paired configurations at a fixed endpoint.
+# Goal: Compare paired configurations at a fixed endpoint.
 # Scope: Illustrative independent task pairs, complete verdicts, fixed protocol.
 # How: Scenarios.RepairCandidatePairedComparison (PairedComparisonModel: Newcombe
-#      method 10, exact McNemar) and Scenarios.FiftyTaskIntervals (Wilson at 0 of 50).
+#      method 10, exact McNemar).
 from mlsysim import Scenarios
 from mlsysim.physics import calc_newcombe_paired_difference
-from mlsysim.fmt import fmt, fmt_int, fmt_percent, check
+from mlsysim.fmt import fmt, fmt_int, check
 
 class PairedAcceptance:
     # 1. LOAD: prespecified illustrative counts, nominal level, and tolerance.
     scenario = Scenarios.RepairCandidatePairedComparison
     n11, b, c, n00 = scenario.both, scenario.baseline_only, scenario.candidate_only, scenario.neither
     tolerance = scenario.tolerance  # acceptable loss chosen before seeing outcomes
-    intervals = Scenarios.FiftyTaskIntervals
+    z = Scenarios.FiftyTaskIntervals.result.z_critical
 
     # 2. EXECUTE: two-sided interval and exact conditional equality test.
     result = scenario.result
-    z = intervals.result.z_critical
     n = result.pairs
     delta, lower, upper = result.difference, result.lower, result.upper
     exact_p = result.exact_p
     noninferiority = result.noninferior
-    zero_upper = intervals.result.wilson[0][1]
     # Planning: lower half-width scales as 1/sqrt(N); what N clears the margin?
     lower_width = result.lower_width
     n_if_gain_holds = result.pairs_if_gain_holds
@@ -695,7 +745,6 @@ class PairedAcceptance:
     check(abs(delta - 0.04) < 1e-12, "Candidate-minus-baseline direction")
     check(abs(lower - (-0.032062854)) < 1e-8 and abs(upper - 0.111211210) < 1e-8, "Worksheet interval")
     check(not noninferiority and lower < 0 < upper, "Inconclusive gate and superiority")
-    check(intervals.trials == 50 and abs(zero_upper - z * z / (50 + z * z)) < 1e-12, "Wilson zero-count algebra")
     check(n < n_if_gain_holds < 2 * n < n_if_no_gain, "Planning counts ordered")
     for cells, expected in [((20, 2, 12, 16), (0.0562, 0.3292)), ((27, 0, 0, 27), (-0.0351, 0.0351))]:
         _, lo, hi = calc_newcombe_paired_difference(cells[0], cells[2], cells[1], cells[3], z)
@@ -704,7 +753,6 @@ class PairedAcceptance:
     # 4. OUTPUT: all formatted exports are consumed below.
     n_str = fmt_int(n)
     b_str, c_str = fmt_int(b), fmt_int(c)
-    zero_upper_str = fmt_percent(zero_upper, precision=2, style="prose")
     delta_pp_str = fmt_int(round(100 * delta))
     lower_pp_str = fmt(100 * lower, precision=2)
     upper_pp_str = fmt(100 * upper, precision=2)
@@ -728,18 +776,12 @@ class PairedAcceptance:
 
 :::
 
-These planning counts follow from standard scaling laws. For a single proportion, the confidence interval half-width scales as $\ConfidenceCriticalQuantile\sqrt{\AcceptanceProbability(1-\AcceptanceProbability)/\EvaluationSampleCount}$, reaching its maximum at $\AcceptanceProbability=0.5$. Because precision improves only as $1/\sqrt{\EvaluationSampleCount}$, halving the margin of error requires a fourfold increase in evaluation tasks. Detecting a difference between two configurations is considerably more demanding than estimating a single rate. For two independent arms with average acceptance probability $\PooledAcceptanceProbability$, minimum detectable difference $\MinimumDetectableEffect$, two-sided significance $\StatisticalSignificanceLevel$, and power $1-\StatisticalFalseNegativeRate$, a standard planning estimate of the tasks needed per arm is
-
-$$\TasksPerComparisonArm\approx\frac{2\,(\SignificanceCriticalQuantile+\StatisticalPowerQuantile)^2\,\PooledAcceptanceProbability(1-\PooledAcceptanceProbability)}{\MinimumDetectableEffect^2}.$$ {#eq-vol3-eval-planning-power}
-
-Here $\SignificanceCriticalQuantile$ and $\StatisticalPowerQuantile$ denote the lower-tail standard-normal quantiles at $1-\StatisticalSignificanceLevel/2$ and $1-\StatisticalFalseNegativeRate$ ($\SignificanceCriticalQuantile\approx 1.96$ and $\StatisticalPowerQuantile\approx 0.84$ at $\StatisticalSignificanceLevel=0.05$ and $1-\StatisticalFalseNegativeRate=0.80$). @Sec-vol3-appendix-math-bootstrap derives the fuller equal-arm form, which keeps the pooled variance under the null but uses each arm's own variance under the alternative, and states its assumptions; @eq-vol3-eval-planning-power replaces the alternative variance with the pooled one. Because the denominator scales with $\MinimumDetectableEffect^2$, resolving a small improvement on uncorrelated arms requires thousands of tasks unless paired evaluation removes the shared task-to-task variance.
-
 ```{python}
 #| label: calc-vol3-evaluation-sample-size-scale
 #| echo: false
-# HOW MANY TASKS A CLAIM NEEDS (LEGO)
-# Goal: Give the magnitude of one-rate precision, two-arm detection, and pairing.
-# Scope: Planning approximations at hypothetical rates; independent tasks.
+# HOW MANY TASKS A COMPARISON NEEDS (LEGO)
+# Goal: Give the magnitude of two-arm detection and pairing variance reduction.
+# Scope: Planning approximations at hypothetical rates; independent task pairs.
 # How: Scenarios.AcceptanceRatePlanning (ProportionPlanningModel) and the paired
 #      variance of Scenarios.RepairCandidatePairedComparison.
 from statistics import NormalDist
@@ -750,18 +792,12 @@ class SampleSizeScale:
     # 1. LOAD: worst-case rate, targets, and the worked paired table's cells.
     plan = Scenarios.AcceptanceRatePlanning
     paired = Scenarios.RepairCandidatePairedComparison  # the worked paired-outcome table
-    p_half = plan.rate
-    small_n = plan.planning_tasks
-    target_half_width = plan.target_half_width
     alpha, power = plan.significance, plan.power
     z_alpha, z_beta = plan.z_alpha, plan.z_beta  # rounded quantiles for these targets
     delta_large, delta_small = plan.differences
 
-    # 2. EXECUTE: one-rate half-widths, two-arm counts, paired variance.
+    # 2. EXECUTE: two-arm planning counts and paired variance.
     planned = plan.result
-    half_small = planned.half_width
-    wilson_half_small = planned.wilson_half_width
-    n_for_target = planned.samples_for_target
     arm_large = planned.per_arm[delta_large]
     arm_small = planned.per_arm[delta_small]
     arm_large_n, arm_small_n = round(arm_large), round(arm_small)
@@ -775,9 +811,6 @@ class SampleSizeScale:
     # 3. GUARD: scaling law, published-formula arithmetic, and pairing algebra.
     check(abs(NormalDist().inv_cdf(1 - alpha / 2) - z_alpha) < 0.005, "Rounded significance quantile")
     check(abs(NormalDist().inv_cdf(power) - z_beta) < 0.005, "Rounded power quantile")
-    check(abs(half_small - 0.098) < 0.0005, "Half-width at N=100, p=0.5")
-    check(abs(wilson_half_small - half_small) < 0.003, "Wilson close to normal at p=0.5")
-    check(n_for_target == 2401, "Tasks for a 2-point half-width")
     check(abs(arm_large - 2450) < 1e-6 and abs(arm_small - 9800) < 1e-6, "Two-arm planning counts")
     check(abs(arm_small / arm_large - 4) < 1e-9, "Halving the difference quadruples N")
     check(abs(discordant - 0.2) < 1e-12 and abs(diff - 0.04) < 1e-12, "Worked-table discordance")
@@ -785,13 +818,8 @@ class SampleSizeScale:
     check(abs(paired_half - 0.0713) < 0.0005, "Matches the worked interval's scale")
 
     # 4. OUTPUT
-    small_n_str = fmt_int(small_n)
     alpha_str = fmt_percent(alpha, precision=0, style="prose")
     power_str = fmt_percent(power, precision=0, style="prose")
-    half_small_pp_str = fmt(100 * half_small, precision=1)
-    wilson_half_pp_str = fmt(100 * wilson_half_small, precision=1)
-    target_pp_str = fmt(100 * target_half_width, precision=0)
-    n_for_target_str = fmt_int(n_for_target)
     delta_large_pp_str = fmt(100 * delta_large, precision=0)
     delta_small_pp_str = fmt(100 * delta_small, precision=0)
     arm_large_str = fmt_int(arm_large_n)
@@ -802,13 +830,13 @@ class SampleSizeScale:
     independent_mult_str = fmt_multiple(independent_mult, precision=1)
 ```
 
-At $\AcceptanceProbability=0.5$ and 95 percent confidence, `{python} SampleSizeScale.small_n_str` independent tasks give a half-width of about `{python} SampleSizeScale.half_small_pp_str` percentage points (the Wilson interval gives `{python} SampleSizeScale.wilson_half_pp_str`), and a half-width of `{python} SampleSizeScale.target_pp_str` points needs `{python} SampleSizeScale.n_for_target_str` tasks. With a `{python} SampleSizeScale.alpha_str` two-sided significance target and `{python} SampleSizeScale.power_str` power at $\PooledAcceptanceProbability=0.5$, @eq-vol3-eval-planning-power asks for about `{python} SampleSizeScale.arm_large_str` tasks per arm to detect a `{python} SampleSizeScale.delta_large_pp_str`-point difference and `{python} SampleSizeScale.arm_small_str` per arm for a `{python} SampleSizeScale.delta_small_pp_str`-point difference. The half-width curves in @fig-vol3-sample-size-confidence-intervals flatten long before they reach the `{python} SampleSizeScale.target_pp_str`-point half-width target, and near zero or full acceptance only the Wilson interval stays inside $[0,1]$ with a nonzero width.
+These planning counts follow from the same $1/\sqrt{\EvaluationSampleCount}$ scaling that governs a single proportion (@sec-vol3-evaluation-wilson), yet detecting a difference between two configurations is considerably more demanding than estimating a single rate. For two independent arms with average acceptance probability $\PooledAcceptanceProbability$, minimum detectable difference $\MinimumDetectableEffect$, two-sided significance $\StatisticalSignificanceLevel$, and power $1-\StatisticalFalseNegativeRate$, a standard planning estimate of the tasks needed per arm is
 
-::: {#fig-vol3-sample-size-confidence-intervals fig-env="figure" fig-pos="htb" fig-cap="**How Many Tasks an Interval Needs**: Panel A plots the normal-approximation half-width at 95 percent confidence against the number of independent tasks for three acceptance probabilities. At $\AcceptanceProbability=0.5$, `{python} SampleSizeScale.small_n_str` tasks give about ±`{python} SampleSizeScale.half_small_pp_str` points, and `{python} SampleSizeScale.n_for_target_str` tasks reach the dashed ±`{python} SampleSizeScale.target_pp_str`-point target. Panel B compares Wald and Wilson intervals, in percent, for 50 tasks. With no acceptances, the Wald interval collapses to zero width, while the Wilson upper limit is `{python} PairedAcceptance.zero_upper_str`. With two acceptances, the Wald lower limit falls below zero, an impossible probability. At 25 acceptances the two intervals nearly coincide." fig-alt="Two panels. Panel A: line chart of normal-approximation half-width in points, from 0 to 20, against independent tasks from 0 to 2,500, with a solid dark curve for p equal to 0.5, a dashed curve for 0.2, and a dotted light curve for 0.05, each labeled at its right end. All three fall steeply and then flatten. Two points on the p equal to 0.5 curve are labeled, 100 tasks at plus or minus 9.8 points and 2,401 tasks where the curve meets a dashed horizontal line at 2 points. Panel B: three rows of horizontal intervals at 50 tasks, each with a gray Wald interval above a blue Wilson interval and the bracketed limits printed at the right. With 0 of 50 accepted, Wald is a single point at zero, labeled zero width, and Wilson extends from 0 to 7.13 percent. With 2 of 50, the Wald interval, from minus 1.43 to 9.43 percent, extends into a red-shaded region below zero, while the Wilson interval, from 1.10 to 13.46 percent, stays above zero. With 25 of 50, the two intervals nearly coincide around 50 percent."}
-![](images/svg/sample_size_confidence_intervals.svg)
-:::
+$$\TasksPerComparisonArm\approx\frac{2\,(\SignificanceCriticalQuantile+\StatisticalPowerQuantile)^2\,\PooledAcceptanceProbability(1-\PooledAcceptanceProbability)}{\MinimumDetectableEffect^2}.$$ {#eq-vol3-eval-planning-power}
 
-Pairing preserves within-task dependence, reducing the variance of the difference when candidate and baseline outcomes have positive covariance. Each task's candidate-minus-baseline outcome takes the value $-1$, $0$, or $+1$, so with discordant fraction $\DiscordantPairFraction$ the paired estimate has variance $(\DiscordantPairFraction-\PairedAcceptanceDifference^2)/\EvaluationSampleCount$. The worked table has `{python} SampleSizeScale.discordant_str` discordant pairs, which puts the paired variance at about `{python} SampleSizeScale.paired_share_str` of the variance two independent arms would have at the same acceptance rates. The same precision therefore needs well under half as many tasks. On the worked table this normal-approximation variance gives a symmetric half-width of about ±`{python} SampleSizeScale.paired_half_pp_str` points, which can be computed by hand and sits close to the `{python} PairedAcceptance.lower_width_pp_str`-point lower half-width of the asymmetric method-10 interval in notebook \ref{nbk-vol3-evaluation-wilson-superiority}. Estimation, detection, and noninferiority thus need different counts, and a paired plan also rests on an assumed discordance rate that the study must later report as observed.
+Here $\SignificanceCriticalQuantile$ and $\StatisticalPowerQuantile$ denote the lower-tail standard-normal quantiles at $1-\StatisticalSignificanceLevel/2$ and $1-\StatisticalFalseNegativeRate$ ($\SignificanceCriticalQuantile\approx 1.96$ and $\StatisticalPowerQuantile\approx 0.84$ at $\StatisticalSignificanceLevel=0.05$ and $1-\StatisticalFalseNegativeRate=0.80$). @Sec-vol3-appendix-math-bootstrap derives the fuller equal-arm form, which keeps the pooled variance under the null but uses each arm's own variance under the alternative, and states its assumptions; @eq-vol3-eval-planning-power replaces the alternative variance with the pooled one. Because the denominator scales with $\MinimumDetectableEffect^2$, resolving a small improvement on uncorrelated arms requires thousands of tasks unless paired evaluation removes the shared task-to-task variance. With a `{python} SampleSizeScale.alpha_str` two-sided significance target and `{python} SampleSizeScale.power_str` power at $\PooledAcceptanceProbability=0.5$, @eq-vol3-eval-planning-power asks for about `{python} SampleSizeScale.arm_large_str` tasks per arm to detect a `{python} SampleSizeScale.delta_large_pp_str`-point difference and `{python} SampleSizeScale.arm_small_str` per arm for a `{python} SampleSizeScale.delta_small_pp_str`-point difference.
+
+Pairing preserves within-task dependence, reducing the variance of the difference when candidate and baseline outcomes have positive covariance. Each task's candidate-minus-baseline outcome takes the value $-1$, $0$, or $+1$, so with discordant fraction $\DiscordantPairFraction$ the paired estimate has variance $(\DiscordantPairFraction-\PairedAcceptanceDifference^2)/\EvaluationSampleCount$. The worked table has `{python} SampleSizeScale.discordant_str` discordant pairs, which puts the paired variance at about `{python} SampleSizeScale.paired_share_str` of the variance two independent arms would have at the same acceptance rates. The same precision therefore needs well under half as many tasks per arm. On the worked table this normal-approximation variance gives a symmetric half-width of about ±`{python} SampleSizeScale.paired_half_pp_str` points, which can be computed by hand and sits close to the `{python} PairedAcceptance.lower_width_pp_str`-point lower half-width of the asymmetric method-10 interval in notebook \ref{nbk-vol3-evaluation-wilson-superiority}. Estimation, detection, and noninferiority thus need different counts, and a paired plan also rests on an assumed discordance rate that the study must later report as observed.
 
 ::: {.column-margin}
 ![](images/svg/vol3_eval_margin_paired_variance.svg){width="100%" fig-alt="Two horizontal bars. A gray bar labeled independent arms is full length and labeled 100 percent. A purple bar labeled paired tasks is well under half as long, with its percentage printed inside and the word variance beside it."}
@@ -1076,7 +1104,7 @@ Single-run success rates evaluate an agent executing an isolated task once. Real
 ::: {.fallacy-pitfall}
 **Pitfall**: *Comparing two systems by whether their separate confidence intervals overlap.*
 
-Checking whether two marginal confidence intervals overlap is an overly conservative and statistically flawed criterion for comparing candidate releases. Separate Wilson score intervals quantify candidate and baseline success rates in isolation, but deployment decisions hinge on the distribution of their paired differences across identical task inputs (@sec-vol3-evaluation-paired). Positive within-task covariance reduces the variance of the difference. In the benchmark comparison, exploiting that covariance retains only about `{python} SampleSizeScale.paired_share_str` of the variance present in two independent arms. Evaluating the systems as unpaired cohorts forces teams to run roughly `{python} SampleSizeScale.independent_mult_str` as many tasks to achieve identical statistical power. Teams should preserve task-level pairing throughout the evaluation harness, specify the required noninferiority margin before running the benchmark, and decide releases based on the lower bound of the paired confidence interval.
+Checking whether two marginal confidence intervals overlap is an overly conservative and statistically flawed criterion for comparing candidate releases. Separate Wilson score intervals quantify candidate and baseline success rates in isolation, but deployment decisions hinge on the distribution of their paired differences across identical task inputs (@sec-vol3-evaluation-paired). Positive within-task covariance reduces the variance of the difference. In the benchmark comparison, exploiting that covariance retains only about `{python} SampleSizeScale.paired_share_str` of the variance present in two independent arms. Evaluating the systems as unpaired cohorts forces teams to run roughly `{python} SampleSizeScale.independent_mult_str` as many tasks per arm to achieve identical statistical power. Teams should preserve task-level pairing throughout the evaluation harness, specify the required noninferiority margin before running the benchmark, and decide releases based on the lower bound of the paired confidence interval.
 :::
 
 ::: {.fallacy-pitfall}
@@ -1105,15 +1133,15 @@ The comparison of `candidate_v2` against `baseline_v1` shows the consequence of 
 
 The quantitative decisions developed across this chapter rely on the mathematical relationships summarized in @tbl-vol3-13_evaluation-key-equations. Each formulation either sizes the empirical evidence required to support a claim about a configuration or prices the acceptance that evidence reports.
 
-| Equation                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | What it bounds or decides                                                                                                                                                                                   | Where derived                  |
-|:---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:-------------------------------|
-| $\operatorname{Var}(\EstimatedAcceptanceProbability)=\BetweenTaskStandardDeviation^2/\EvaluationSampleCount+\WithinTaskRunStandardDeviation^2/(\EvaluationSampleCount \PerTaskRunCount)$                                                                                                                                                                                                                                                                                               | Variance components used with fixture and run costs to allocate new tasks versus repeats; past $\PerTaskRunCount=\WithinTaskRunStandardDeviation^2/\BetweenTaskStandardDeviation^2$ the task term dominates | @eq-variance-decomposition     |
-| $[\AcceptanceIntervalLowerLimit,\AcceptanceIntervalUpperLimit]=\WilsonIntervalCenter\pm\frac{\ConfidenceCriticalQuantile}{\EvaluationSampleCount+\ConfidenceCriticalQuantile^2}\sqrt{\frac{\AcceptedSampleCount(\EvaluationSampleCount-\AcceptedSampleCount)}{\EvaluationSampleCount}+\frac{\ConfidenceCriticalQuantile^2}{4}}$, with $\AcceptanceIntervalUpperLimit=\ConfidenceCriticalQuantile^2/(\EvaluationSampleCount+\ConfidenceCriticalQuantile^2)$ at $\AcceptedSampleCount=0$ | The range of one acceptance or violation rate, including what a clean record of $\EvaluationSampleCount$ tasks still permits                                                                                | @eq-wilson-interval            |
-| $\InterAnnotatorAgreement=(\ObservedAnnotatorAgreement-\ChanceAnnotatorAgreement)/(1-\ChanceAnnotatorAgreement)$                                                                                                                                                                                                                                                                                                                                                                       | Agreement between two raters beyond marginal chance frequencies, measuring rater consistency rather than ground-truth correctness                                                                           | @sec-vol3-evaluation-grading   |
-| $\EstimatedPairedAcceptanceDifference=(\CandidateOnlyAcceptedTaskCount-\BaselineOnlyAcceptedTaskCount)/\EvaluationSampleCount$, variance $(\DiscordantPairFraction-\PairedAcceptanceDifference^2)/\EvaluationSampleCount$, gate $\PairedDifferenceLowerLimit>-\NoninferiorityTolerance$                                                                                                                                                                                                | The paired acceptance difference and whether it establishes noninferiority at a declared tolerance                                                                                                          | @sec-vol3-evaluation-paired    |
-| $\TasksPerComparisonArm\approx 2(\SignificanceCriticalQuantile+\StatisticalPowerQuantile)^2\,\PooledAcceptanceProbability(1-\PooledAcceptanceProbability)/\MinimumDetectableEffect^2$                                                                                                                                                                                                                                                                                                  | Tasks per independent arm needed to detect a difference $\MinimumDetectableEffect$ at a stated significance and power                                                                                       | @eq-vol3-eval-planning-power   |
-| $\operatorname{pass@}\IndependentAttemptCount=\mathbb{E}_i[1-(1-\AttemptPassProbability_i)^{\IndependentAttemptCount}]$ and $\operatorname{pass}^{\IndependentAttemptCount}=\mathbb{E}_i[\AttemptPassProbability_i^{\IndependentAttemptCount}]$                                                                                                                                                                                                                                        | Candidate availability in a pool of $\IndependentAttemptCount$ runs vs. consistency over $\IndependentAttemptCount$ recurrences of one task                                                                 | @eq-pass-at-k; @eq-pass-pow-k  |
-| $\BatchCostPerAcceptedTask=\IndependentAttemptCount(\CandidateGenerationCost+\CandidateCheckingCost)/\CandidateAvailabilityProbability_{\IndependentAttemptCount}$ and $\SequentialCostPerAcceptedTask=(\CandidateGenerationCost+\CandidateCheckingCost)/\AttemptPassProbability$                                                                                                                                                                                                      | Cost per accepted task under batch vs. sequential selection, where underlying generator yield sets the sequential cost rather than retry limits                                                             | @eq-cost-per-accepted-task-iid |
+| Equation                                                                                                                                                                                                                                                                                                                                                                                                                                                           | What it bounds or decides                                                                                                                                                                                   | Where derived                  |
+|:-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:-------------------------------|
+| $\operatorname{Var}(\EstimatedAcceptanceProbability)=\BetweenTaskStandardDeviation^2/\EvaluationSampleCount+\WithinTaskRunStandardDeviation^2/(\EvaluationSampleCount \PerTaskRunCount)$                                                                                                                                                                                                                                                                           | Variance components used with fixture and run costs to allocate new tasks versus repeats; past $\PerTaskRunCount=\WithinTaskRunStandardDeviation^2/\BetweenTaskStandardDeviation^2$ the task term dominates | @eq-variance-decomposition     |
+| $[\AcceptanceIntervalLowerLimit,\AcceptanceIntervalUpperLimit]=\WilsonIntervalCenter\pm\frac{\IntervalNormalQuantile}{\EvaluationSampleCount+\IntervalNormalQuantile^2}\sqrt{\frac{\AcceptedSampleCount(\EvaluationSampleCount-\AcceptedSampleCount)}{\EvaluationSampleCount}+\frac{\IntervalNormalQuantile^2}{4}}$, with $\AcceptanceIntervalUpperLimit=\IntervalNormalQuantile^2/(\EvaluationSampleCount+\IntervalNormalQuantile^2)$ at $\AcceptedSampleCount=0$ | The range of one acceptance or violation rate, including what a clean record of $\EvaluationSampleCount$ tasks still permits                                                                                | @eq-wilson-interval            |
+| $\InterAnnotatorAgreement=(\ObservedAnnotatorAgreement-\ChanceAnnotatorAgreement)/(1-\ChanceAnnotatorAgreement)$                                                                                                                                                                                                                                                                                                                                                   | Agreement between two raters beyond marginal chance frequencies, measuring rater consistency rather than ground-truth correctness                                                                           | @sec-vol3-evaluation-grading   |
+| $\EstimatedPairedAcceptanceDifference=(\CandidateOnlyAcceptedTaskCount-\BaselineOnlyAcceptedTaskCount)/\EvaluationSampleCount$, variance $(\DiscordantPairFraction-\PairedAcceptanceDifference^2)/\EvaluationSampleCount$, gate $\PairedDifferenceLowerLimit>-\NoninferiorityTolerance$                                                                                                                                                                            | The paired acceptance difference and whether it establishes noninferiority at a declared tolerance                                                                                                          | @sec-vol3-evaluation-paired    |
+| $\TasksPerComparisonArm\approx 2(\SignificanceCriticalQuantile+\StatisticalPowerQuantile)^2\,\PooledAcceptanceProbability(1-\PooledAcceptanceProbability)/\MinimumDetectableEffect^2$                                                                                                                                                                                                                                                                              | Tasks per independent arm needed to detect a difference $\MinimumDetectableEffect$ at a stated significance and power                                                                                       | @eq-vol3-eval-planning-power   |
+| $\operatorname{pass@}\IndependentAttemptCount=\mathbb{E}_i[1-(1-\AttemptPassProbability_i)^{\IndependentAttemptCount}]$ and $\operatorname{pass}^{\IndependentAttemptCount}=\mathbb{E}_i[\AttemptPassProbability_i^{\IndependentAttemptCount}]$                                                                                                                                                                                                                    | Candidate availability in a pool of $\IndependentAttemptCount$ runs vs. consistency over $\IndependentAttemptCount$ recurrences of one task                                                                 | @eq-pass-at-k; @eq-pass-pow-k  |
+| $\BatchCostPerAcceptedTask=\IndependentAttemptCount(\CandidateGenerationCost+\CandidateCheckingCost)/\CandidateAvailabilityProbability_{\IndependentAttemptCount}$ and $\SequentialCostPerAcceptedTask=(\CandidateGenerationCost+\CandidateCheckingCost)/\AttemptPassProbability$                                                                                                                                                                                  | Cost per accepted task under batch vs. sequential selection, where underlying generator yield sets the sequential cost rather than retry limits                                                             | @eq-cost-per-accepted-task-iid |
 
 : **Key equations of agent evaluation**: Each relation holds under the sampling, independence, and complete-verdict assumptions stated where it is derived; none replaces the acceptance contract or the four-verdict rule. {#tbl-vol3-13_evaluation-key-equations}
 
@@ -1146,7 +1174,7 @@ As systems shifted toward autonomous execution, static classification metrics yi
 
 ## Exercises {#sec-vol3-13_evaluation-exercises}
 
-Each problem states its constraints and ends in a decision about what the evidence supports or what to collect next. Givens are hypothetical unless a lighthouse profile supplies them, and every interval is a nominal 95 percent interval with $\ConfidenceCriticalQuantile=\SignificanceCriticalQuantile=1.96$.
+Each problem states its constraints and ends in a decision about what the evidence supports or what to collect next. Givens are hypothetical unless a lighthouse profile supplies them, and every interval is a nominal 95 percent interval with $\IntervalNormalQuantile=\SignificanceCriticalQuantile=1.96$.
 
 ```{python}
 #| label: calc-vol3-evaluation-exercises
@@ -1188,7 +1216,7 @@ class EvaluationExerciseGivens:
 
 **4. Paired evidence for the offline gate (Intermediate).** A repair-agent comparison runs one baseline and one candidate trial on each of 200 independently sampled tasks, with complete verdicts: both accepted on 120 tasks, only the baseline on $\BaselineOnlyAcceptedTaskCount=6$, only the candidate on $\CandidateOnlyAcceptedTaskCount=16$, and neither on 58. The declared tolerance is $\NoninferiorityTolerance=2$ percentage points. (a) Compute $\EstimatedPairedAcceptanceDifference$, the discordant fraction $\DiscordantPairFraction$, and a normal-approximation paired interval from the variance $(\DiscordantPairFraction-\PairedAcceptanceDifference^2)/\EvaluationSampleCount$. Decide whether the candidate is noninferior and whether it is superior. (b) Compute each configuration's separate Wilson interval, and show what a team that required non-overlapping intervals would have decided. (c) Compute the ratio of independent-arm variance to paired variance at these acceptance rates, and the number of tasks per independent arm that would match the paired precision. (d) Compute the exact two-sided McNemar value. Explain how it can sit just above 0.05 while the paired interval excludes zero, and state which result the declared gate uses.
 
-**5. Choose the generator, not the cap (Intermediate).** The repair agent selects sequentially, stopping at the first candidate that passes an exact checker costing $\CandidateCheckingCost=\$0.04$ per candidate. Generator A passes with $\AcceptanceProbability=0.3$ at $\CandidateGenerationCost=\$0.05$ per candidate; generator B passes with $\AcceptanceProbability=0.5$ at $\CandidateGenerationCost=\$0.12$. (a) Compute $\SequentialCostPerAcceptedTask$ for each generator. (b) The task deadline allows at most 4 sequential candidates, and the contract requires availability $\CandidateAvailabilityProbability_{\IndependentAttemptCount}\ge 0.90$ within that cap. Determine which generator meets it, and the smallest cap generator A would need. (c) A teammate proposes generator A with all candidates generated and checked in parallel at the cap from (b) so that the deadline holds. Compute $\BatchCostPerAcceptedTask$ for that design and compare it with generator B under sequential selection. (d) The team replaces the checker with the full regression suite at $\CandidateCheckingCost=\$0.20$. Recompute both sequential costs, find the checking cost at which the two generators tie, and state the design rule the crossover illustrates.
+**5. Choose the generator, not the cap (Intermediate).** The repair agent selects sequentially, stopping at the first candidate that passes an exact checker costing $\CandidateCheckingCost=\$0.04$ per candidate. Generator A passes with $\AttemptPassProbability=0.3$ at $\CandidateGenerationCost=\$0.05$ per candidate; generator B passes with $\AttemptPassProbability=0.5$ at $\CandidateGenerationCost=\$0.12$. (a) Compute $\SequentialCostPerAcceptedTask$ for each generator. (b) The task deadline allows at most 4 sequential candidates, and the contract requires availability $\CandidateAvailabilityProbability_{\IndependentAttemptCount}\ge 0.90$ within that cap. Determine which generator meets it, and the smallest cap generator A would need. (c) A teammate proposes generator A with all candidates generated and checked in parallel at the cap from (b) so that the deadline holds. Compute $\BatchCostPerAcceptedTask$ for that design and compare it with generator B under sequential selection. (d) The team replaces the checker with the full regression suite at $\CandidateCheckingCost=\$0.20$. Recompute both sequential costs, find the checking cost at which the two generators tie, and state the design rule the crossover illustrates.
 
 **6. Second lighthouse: the support agent's consistency (Intermediate).** The support agent answers a refund-policy question correctly on `{python} EvaluationExerciseGivens.p_support_str` of single runs, and the same customer asks it in 5 separate sessions. A wrong answer that a customer has read cannot be retried, and a human handoff costs `{python} EvaluationExerciseGivens.handoff_str` per session. (a) Compute pass$^{\IndependentAttemptCount}$ over the 5 sessions, the single-run rate that would hold 90 percent consistency, and the factor by which the single-run failure rate must fall. For contrast, compute pass@$3$ at the same single-run rate, the quantity a repair agent with a checker in the loop could use. (b) A policy-grounded model judge now screens each answer before delivery, with false-acceptance rate $\VerifierFalseAcceptanceRate=0.20$ on invalid answers and false-rejection rate $\VerifierFalseRejectionRate=0.05$ on valid answers, and every rejected answer goes to a human handoff. Per session, compute the probability that a wrong answer reaches the customer, the handoff probability, and the expected handoff cost; then compute the probability that all 5 sessions deliver no wrong answer. (c) Find the largest $\VerifierFalseAcceptanceRate$ that holds 90 percent over the 5 sessions, and the expected handoff cost per session at that rate. (d) Contrast the constraint that binds this agent's evaluation claim with the one that binds the repair agent's, and state which grader measurement the support agent's release record must therefore carry.
 

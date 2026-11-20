@@ -284,7 +284,6 @@ class NotationRegistry:
     AutomatedResetTime: NotationSymbol  # time an automated fixture takes to restore a physical rig to its initial configuration between trials ($t_{\text{reset,auto}}$) [s]
     AutomatonStateSet: NotationSymbol  # finite set of states of an output-constraint automaton ($Q$)
     AutomatonTransitionFunction: NotationSymbol  # transition function of an output-constraint automaton, mapping a state and a byte to the next state ($\delta$)
-    AutonomousExecutionComputeCost: NotationSymbol  # direct token and compute cost of running a proposed action autonomously, paid under either escalation decision ($C_{\text{compute}}$) [USD]
     AutoscalingDecisionTime: NotationSymbol  # time an autoscaler takes to decide on a scaling action once a load change is detected ($T_{\text{decide}}$) [s]
     AutoscalingDetectionTime: NotationSymbol  # time an autoscaler's metrics take to reveal a load change ($T_{\text{detect}}$) [s]
     AutoscalingResponseTime: NotationSymbol  # time an autoscaler takes from a load change to new capacity serving, detection plus decision plus provisioning plus warmup ($T_{\text{response}}$) [s]
@@ -447,7 +446,6 @@ class NotationRegistry:
     BlendedInputTokenPrice: NotationSymbol  # average price per input token when a share of input tokens is billed at the cached rate and the rest at the uncached rate ($c_{\text{in}}$) [USD/token]
     BlendingTransitionWindow: NotationSymbol  # duration of the smooth blend from one latched command to the next during a bumpless transfer ($\tau_{\text{blend}}$) [s]
     BlindTravelDistance: NotationSymbol  # distance a machine travels during the pre-brake delay, before retarding force begins ($d_{\text{blind}}$) [m]
-    BlockCheckTime: NotationSymbol  # time to run the check on one generated block ($T_{\text{ver}}$) [s]
     BlockCoordinateX: NotationSymbol  # integer x component of a voxel block coordinate ($b_x$)
     BlockCoordinateY: NotationSymbol  # integer y component of a voxel block coordinate ($b_y$)
     BlockCoordinateZ: NotationSymbol  # integer z component of a voxel block coordinate ($b_z$)
@@ -518,7 +516,7 @@ class NotationRegistry:
     BroadcastRowTensor: NotationSymbol  # row tensor of shape (1, 4) that broadcasting stretches across rows ($\mathbf{B}$)
     BroadcastTableSize: NotationSymbol  # size in bytes of the small table a broadcast join sends to every worker ($s_{\text{table}}$) [bytes]
     BspLearningRate: NotationSymbol  # learning rate a bulk-synchronous data-parallel run uses at the same effective batch size ($\eta_{\text{BSP}}$) [dimensionless]
-    BudgetEvaluationTime: NotationSymbol  # wall-clock time at which a task's budget account is evaluated, the argument of its settled charges and reserved funds in the conservation invariant ($\tau$) [s]
+    BudgetEvaluationTime: NotationSymbol  # wall-clock time at which a task's budget account is evaluated, the argument of its settled charges and reserved funds in the conservation invariant ($t_{\text{eval}}$) [s]
     BudgetFreeBalance: NotationSymbol  # unreserved monetary balance of one budget account node, from which new reservations and allocations are drawn ($F$) [USD]
     BudgetNodeIndex: NotationSymbol  # index of one node, the root task or a delegated child, in a delegation tree whose budget account the runtime keeps ($k$)
     BudgetReservedFunds: NotationSymbol  # monetary funds a budget account withholds for outstanding liabilities, delegated allocations and protected finalization ($R$) [USD]
@@ -675,7 +673,6 @@ class NotationRegistry:
     CaseThermalCapacitance: NotationSymbol  # heat capacity of the motor frame and housing node in a multi-node motor thermal network ($C_{\text{case}}$) [J/K]
     CaseThermalTimeConstant: NotationSymbol  # thermal time constant of the motor case stage of a multi-node motor thermal model ($\tau_{\text{th,case}}$) [s]
     CatalogDefinitionTokens: NotationSymbol  # total tokens of tool definitions a staging policy sends across all its model calls, excluding other request content ($S_{\text{catalog}}$) [tokens]
-    CatalogStagingCallCount: NotationSymbol  # number of model calls whose requests stage tool definitions, over which a catalog's token cost is counted ($N$)
     CategoryRecordCount: NotationSymbol  # number of retained records in one trajectory category of a curated corpus ($n$)
     CausalInterventionMask: NotationSymbol  # binary mask over a recorded intervention trajectory that is one where a step may serve as an imitation target and zero elsewhere ($\mathcal{M}$) [dimensionless]
     CausalMediator: NotationSymbol  # mediator variable of a structural causal model, a variable on a causal path from the protected attribute to the decision ($M$)
@@ -708,7 +705,6 @@ class NotationRegistry:
     ChassisThermalResistance: NotationSymbol  # thermal resistance of conduction through a metal enclosure to the ambient air ($R_{\text{th,chassis}}$) [K/W]
     CheapConfigurationAttemptCost: NotationSymbol  # all-in monetary cost of one attempt by the cheaper, lightweight agent configuration ($c_{\text{small}}$) [USD]
     CheapConfigurationPassProbability: NotationSymbol  # probability that one attempt by the cheaper, lightweight agent configuration is accepted ($p_{\text{small}}$) [dimensionless]
-    CheckIntervalStepCount: NotationSymbol  # number of generation steps between consecutive verification checks, the size of one checked block ($m$)
     CheckPassProbability: NotationSymbol  # probability that one admission predicate passes a candidate record, conditional on every earlier predicate in the route having passed ($p^{\text{chk}}$) [dimensionless]
     CheckSlotTime: NotationSymbol  # expected verifier slot time one admission predicate consumes for a record that reaches it ($T$) [s]
     CheckedSignal: NotationSymbol  # trajectory signal a pre-execution checker compares with its limit, such as one joint's position, velocity or torque ($x$) [varies]
@@ -907,7 +903,6 @@ class NotationRegistry:
     ComputeUnitCost: NotationSymbol  # monetary cost of one unit of AI compute, the price axis of a demand curve in a rebound analysis ($P$) [USD/FLOP]
     ConcordantTaskCount: NotationSymbol  # number of sampled tasks on which the baseline and candidate configurations receive the same verdict in a paired comparison ($n$)
     ConcurrentTrajectories: NotationSymbol  # mean number of admitted trajectories present at once ($N_{\text{traj}}$)
-    ConditionalDamageProbability: NotationSymbol  # true conditional probability that a proposed action produces the modeled damaging outcome, given observable features ($p$) [dimensionless]
     ConditionalDistribution: NotationSymbol  # probability distribution of the label given an input, the input-to-label relationship that concept drift changes ($p(y \mid x)$)
     ConditionalFlowMap: NotationSymbol  # map that carries a source noise sample to its point on the straight conditional path at a given flow time ($\psi$)
     ConditionalVelocityField: NotationSymbol  # velocity along one conditional flow-matching path given its endpoint sample ($v$)
@@ -1126,9 +1121,6 @@ class NotationRegistry:
     DailyAccountQueryCount: NotationSymbol  # number of queries one API account issues in a day, compared against a static extraction-alert threshold ($q_{\text{daily}}$)
     DailyQueryVolume: NotationSymbol  # number of queries, requests or transactions a deployed model serves per day ($Q_{\text{day}}$) [queries/day]
     DamageEventCount: NotationSymbol  # number of trials in a campaign that ended in physical damage or collision ($N_{\text{damage}}$)
-    DamageProbabilityTolerance: NotationSymbol  # largest true conditional damage probability at which a policy allows automatic execution ($\epsilon$) [dimensionless]
-    DamageProbabilityUpperBound: NotationSymbol  # upper confidence bound on the conditional probability that an action produces the modeled damage ($p_U$) [dimensionless]
-    DamagingOutcomeIndicator: NotationSymbol  # binary indicator that a proposed action would produce the modeled damaging outcome if executed automatically ($Y$) [dimensionless]
     DampedLeastSquaresPseudoinverse: NotationSymbol  # damped least-squares inverse of the manipulator Jacobian, the Jacobian transpose times the inverse of the Jacobian Gram matrix plus the squared damping times the identity ($\mathbf{J}_{\lambda}^\dagger$)
     DampedStepConfiguration: NotationSymbol  # joint configuration a damped-least-squares inverse-kinematics step moves to ($\mathbf{q}_\lambda$)
     DampingRatio: NotationSymbol  # damping ratio of a second-order system, damping over twice the square root of stiffness times mass ($\zeta$) [dimensionless]
@@ -1189,7 +1181,6 @@ class NotationRegistry:
     DedicatedHourlyFixedCost: NotationSymbol  # complete hourly fixed cost of a dedicated deployment: amortized hardware leases, failover headroom and operations ($C_{\text{fixed}}$) [USD/h]
     DedicatedVariableTokenCost: NotationSymbol  # variable operating cost per output token on a dedicated deployment ($c_{\text{ded}}$) [USD/token]
     DefectiveActionProbability: NotationSymbol  # probability that one proposed action, such as a fleet configuration change, is wrong ($p_{\text{bad}}$) [dimensionless]
-    DefinitionSerializedSize: NotationSymbol  # mean number of tokens one staged tool definition contributes to the final serialized request ($S$) [tokens]
     DeflectionComplianceAllowance: NotationSymbol  # clearance reserved for structural deflection, payload deflection and drivetrain compliance before any tracking error is observable ($\delta_{\text{deflect}}$) [m]
     DegradedFrictionCoefficient: NotationSymbol  # tire-floor friction coefficient on a degraded surface ($\mu_{\text{fault}}$) [dimensionless]
     DegradedStepTime: NotationSymbol  # time of one training step on an allocation degraded by a straggler ($T_{\text{slow}}$) [s]
@@ -1202,9 +1193,7 @@ class NotationRegistry:
     DelegationTokenMultiple: NotationSymbol  # ratio of the tokens a delegated multi-agent design spends per attempt to the tokens a single agent spends per attempt ($r$) [dimensionless]
     DeliveredActuatorTorque: NotationSymbol  # torque an actuator actually delivers at a given time, as measured in telemetry ($\tau_{\text{act}}$) [N*m]
     DeliveredCapacityFraction: NotationSymbol  # fraction of a dedicated deployment's latency-feasible reference output rate that the workload actually delivers ($u$) [dimensionless]
-    DemandCap: NotationSymbol  # finite cap on a modeled demand, such as an enforced turn limit, above which demand is not admitted ($x_{\max}$) [varies]
     DemandPriceElasticity: NotationSymbol  # magnitude of the price elasticity of demand, the percentage change in quantity demanded per percentage change in unit cost ($\epsilon_{\text{elast}}$) [dimensionless]
-    DemandThreshold: NotationSymbol  # demand level at which a tail probability is evaluated ($x$) [varies]
     DemonstratedTargetA: NotationSymbol  # regression target a demonstration gives when it picks the first of two identical mugs ($\mathbf{y}_A$) [m]
     DemonstratedTargetB: NotationSymbol  # regression target a demonstration gives when it picks the second of two identical mugs ($\mathbf{y}_B$) [m]
     DemonstrationActionDistribution: NotationSymbol  # conditional distribution of the actions demonstrators took given an observation, the target a behavioral cloning decoder models ($p$)
@@ -1517,17 +1506,12 @@ class NotationRegistry:
     ErrorFeedbackResidual: NotationSymbol  # per-worker accumulator of compression error not yet transmitted, added to the next gradient before it is compressed ($\mathbf{e}$)
     ErrorFeedbackResidualElement: NotationSymbol  # error-feedback residual of one gradient element, the untransmitted remainder carried to the next step ($e$) [varies]
     ErrorGrowthRate: NotationSymbol  # maximum rate at which the true state can diverge from a stored estimate, the slope of a linear error-growth law ($r$) [m/s]
-    ErrorRecoveryCost: NotationSymbol  # cost of recovering from one detected error, independent of the check interval ($C_{\text{recovery}}$) [varies]
-    EscalationDecision: NotationSymbol  # choice between automatic execution and human review for one proposed action ($d$)
-    EscalationLossMatrix: NotationSymbol  # loss of each escalation decision under each damaging-outcome value, one row per decision and one column per outcome ($\mathbf{L}$)
-    EscalationThresholdProbability: NotationSymbol  # estimated damage probability above which human review has lower modeled expected cost than automatic execution, the review-to-damage cost ratio ($p_{\text{threshold}}$) [dimensionless]
     EstimateEpoch: NotationSymbol  # instant a published state estimate describes, which prediction may advance past the evidence epoch ($t_{\text{est}}$) [s]
     EstimatedAcceptanceProbability: NotationSymbol  # sample estimate of a configuration's acceptance probability from an evaluation, such as accepted trials over assigned trials or the task-averaged share of accepted runs ($\hat{p}$) [dimensionless]
     EstimatedAccuracy: NotationSymbol  # accuracy of a model estimated from a finite evaluation set, the fraction of evaluated examples it gets right ($\hat{p}$) [dimensionless]
     EstimatedCandidateUtility: NotationSymbol  # utility a learned scorer reports for one candidate, its true utility plus an independent scoring error ($\hat{U}$) [dimensionless]
     EstimatedCleanActionChunk: NotationSymbol  # estimate of the clean action chunk that the reverse process recovers from a noisy chunk and the predicted noise ($\hat{\mathbf{A}}$)
     EstimatedCoriolisMatrix: NotationSymbol  # model estimate of the Coriolis and centrifugal matrix that computed torque control uses ($\hat{\mathbf{C}}$)
-    EstimatedDamageProbability: NotationSymbol  # runtime estimate of the probability that a proposed action produces the modeled damaging outcome, given observable features ($\hat{p}$) [dimensionless]
     EstimatedDivergenceInstant: NotationSymbol  # estimate of the divergence instant: the first threshold crossing found by searching back from the takeover ($\hat{t}_{\text{div}}$) [s]
     EstimatedForceSensorBias: NotationSymbol  # estimator's estimate of the force-sensor bias ($\hat{b}$) [N]
     EstimatedGravitationalTorque: NotationSymbol  # model estimate of the gravitational joint torques that computed torque control uses ($\hat{\mathbf{g}}$)
@@ -1586,14 +1570,12 @@ class NotationRegistry:
     ExpectedCategoryFrequency: NotationSymbol  # number of observations one category of a categorical feature is expected to hold under the baseline distribution, in a chi-square goodness-of-fit test ($n_i^{\text{exp}}$) [dimensionless]
     ExpectedCheckingTime: NotationSymbol  # expected verifier slot time spent per attempted record under a short-circuit check cascade ($T_{\text{check}}$) [s]
     ExpectedCostLimit: NotationSymbol  # upper bound a constrained reinforcement learning objective places on expected constraint cost ($\delta$) [varies]
-    ExpectedDecisionRisk: NotationSymbol  # expected loss of an escalation decision under the estimated damage probability ($\mathcal{R}$) [USD]
     ExpectedHistoryActionReturn: NotationSymbol  # expected remaining return under a policy after taking a given action at a given interaction history and then following the policy ($Q$) [dimensionless]
     ExpectedIrreversibleLoss: NotationSymbol  # expected consequence of the bad actions in an execution plan that cannot be recovered ($L_A$) [varies]
     ExpectedNormalMaximum: NotationSymbol  # expected maximum of as many independent standard normal draws as there are candidates in the pool ($m_{N}$) [dimensionless]
     ExpectedQueryDistribution: NotationSymbol  # reference distribution of queries expected from legitimate use of an API, against which an account's query distribution is compared ($p_{\text{expected}}$)
     ExpectedRemainingReturn: NotationSymbol  # expected remaining return under a policy from a given interaction history at a decision step ($V$) [dimensionless]
     ExpectedReturnObjective: NotationSymbol  # expected return of a policy as a function of its parameters, the objective reinforcement learning maximizes ($J$) [dimensionless]
-    ExpectedRunCompletionTime: NotationSymbol  # expected elapsed time to complete all useful steps when every failed block is regenerated from its start, as a function of block size ($T$) [s]
     ExpectedTaskCostSum: NotationSymbol  # expected sum over the horizon of the normalized immediate task costs a policy incurs ($J$) [dimensionless]
     ExperienceReplayBuffer: NotationSymbol  # buffer of past transitions, each a state, action, reward and next state, from which an off-policy learner samples minibatches ($\mathcal{D}$)
     ExperimentCount: NotationSymbol  # number of experiments a team conducts over an accounting period ($N_{\text{exp}}$)
@@ -1741,7 +1723,6 @@ class NotationRegistry:
     FirstClientModelParameters: NotationSymbol  # model parameters of the first client, labeled A, in a two-client secure-aggregation illustration ($\theta_A$)
     FirstComparedGroupLabel: NotationSymbol  # first of two group labels compared in a group-fairness condition, one value of the protected group attribute ($a$)
     FirstComparedItem: NotationSymbol  # first of two items in a paired comparison, the one whose preference probability is stated ($i$)
-    FirstDiscardedSingularNumber: NotationSymbol  # largest singular value a rank-r truncation discards, which equals the spectral-norm reconstruction error ($\sigma_{r+1}$) [dimensionless]
     FirstErrorStepIndex: NotationSymbol  # control step at which an imitating policy first takes an action different from the expert's, the variable summed over in the behavioral-cloning compounding-error bound ($k$)
     FirstFloatingPointAddend: NotationSymbol  # first of three floating-point numbers added in either grouping to show that floating-point addition is not associative ($a$) [dimensionless]
     FirstGroupClassificationThreshold: NotationSymbol  # score threshold applied to the first compared group in a group-specific thresholding policy ($\tau_{\text{thr},a}$) [dimensionless]
@@ -1834,7 +1815,6 @@ class NotationRegistry:
     FreshnessObjective: NotationSymbol  # freshness dimension of a service's SLO vector: its indicator, target, window and owner ($S_{\text{freshness}}$)
     FrictionCoefficientFloor: NotationSymbol  # lowest friction coefficient a braking or contact premise assumes the surface provides ($\mu_{\min}$) [dimensionless]
     FrictionPyramidMatrix: NotationSymbol  # matrix of linear inequalities whose feasible set is an inner polyhedral approximation of one contact's friction cone ($\mathbf{F}$)
-    FrobeniusNorm: NotationSymbol  # label marking a matrix norm as the Frobenius norm, the square root of the sum of squared entries ($F$)
     FrozenFeatureEncoder: NotationSymbol  # fixed pretrained feature encoder that maps an input to the embedding stored for replay ($f$)
     FrustumFeature: NotationSymbol  # feature lifted to one depth hypothesis of a camera ray, the cell's feature weighted by that bin's depth probability ($\mathbf{c}_{u, v, k}$)
     FullBatchLoss: NotationSymbol  # training loss averaged over all examples of one effective batch ($\mathcal{L}_B$)
@@ -1930,7 +1910,6 @@ class NotationRegistry:
     GeneratedResponse: NotationSymbol  # response a language model generates for a prompt, as scored by a reward model ($y$)
     GeneratedSampleCount: NotationSymbol  # number of candidates generated for one task when estimating pass@k, from which subsets of k runs are drawn ($n$)
     GeneratedTokenCap: NotationSymbol  # largest number of generated tokens the runtime lets one rollout produce, enforced by hard termination, that normalizes a length penalty ($N_{\text{cap}}$)
-    GenerationStepErrorRate: NotationSymbol  # rate of rare errors per useful generation step in a verification cadence model, assumed constant ($\lambda_{\text{error}}$) [dimensionless]
     GenerativeActionModelDistribution: NotationSymbol  # probability distribution that a learned generative action model with parameters theta defines over action chunks and its latent or noisy intermediates ($p_\theta$)
     GeneratorLatentVector: NotationSymbol  # latent vector sampled from standard Gaussian noise and mapped by a generator to one synthetic record ($\mathbf{z}$)
     GenericRandomVariable: NotationSymbol  # arbitrary real-valued random variable in a general probability inequality ($X$)
@@ -2232,7 +2211,6 @@ class NotationRegistry:
     IntegratorStateRate: NotationSymbol  # time derivative of the integral-action state, the tracking error plus any anti-windup correction ($\dot{\mathbf{z}}$)
     IntegratorUnwindDelay: NotationSymbol  # delay a wound-up integrator adds before the actuator command leaves its saturation rail and net braking begins ($T_{\text{unwind}}$) [s]
     IntegrityProvenance: NotationSymbol  # set of sources whose content may have influenced a record ($\iota$)
-    IntegrityTrustLabel: NotationSymbol  # two-level integrity label, trusted or untrusted, that marks whether a record's dependencies are qualified for a specified use, propagated by join ($\iota$)
     IntentAcknowledgmentEvent: NotationSymbol  # event at which the log durably acknowledges an operation's recoverable intent record, and the records before it, under the declared failure domain ($e_{\text{flush}}$)
     IntentAdministrativeLease: NotationSymbol  # longest the application processor may hold an intent-lease goal without renewing it, the host-silence bound ($T_{\text{admin}}$) [s]
     IntentDemonstrationDataset: NotationSymbol  # demonstration dataset that pairs observations with the operator's mapped setpoints, recorded before the permission path filters them ($\mathcal{D}_{\text{intent}}$)
@@ -2373,15 +2351,8 @@ class NotationRegistry:
     KeyAxisLabel: NotationSymbol  # einsum index label naming the key-position axis of an attention tensor ($j$)
     KeyBufferPosition: NotationSymbol  # position of the key token within a packed attention buffer ($j$)
     KeyComponent: NotationSymbol  # one component of one token's key vector ($k_{jm}$) [dimensionless]
-    KeyLeftSingularMatrix: NotationSymbol  # orthonormal matrix whose columns are the left singular vectors of a key activation matrix ($\mathbf{U}$)
-    KeyLeftSingularVector: NotationSymbol  # one left singular vector of a key activation matrix, a column of its left singular matrix ($\mathbf{u}$)
     KeyProjectionMatrix: NotationSymbol  # learned matrix that projects token representations into keys ($\mathbf{W}_{K}$)
-    KeyRightSingularMatrix: NotationSymbol  # orthonormal matrix whose columns are the right singular vectors of a key activation matrix ($\mathbf{V}$)
-    KeyRightSingularVector: NotationSymbol  # one right singular vector of a key activation matrix, a column of its right singular matrix ($\mathbf{v}$)
-    KeySingularNumber: NotationSymbol  # one singular value of a key activation matrix, indexed in decreasing order ($\sigma$) [dimensionless]
-    KeySingularSpectrumMatrix: NotationSymbol  # rectangular diagonal matrix holding the singular values of a key activation matrix in decreasing order ($\boldsymbol{\Sigma}$)
     KeySourceMatrix: NotationSymbol  # representations attention draws its keys from, before a head-specific key projection ($\mathbf{X}_{K}$)
-    KeySpectrumLength: NotationSymbol  # number of singular values of a key activation matrix, the smaller of its sequence length and head dimension ($q$)
     KeyVector: NotationSymbol  # key vector of one token, one row of the key matrix ($\mathbf{k}$)
     KineticEnergy: NotationSymbol  # kinetic energy a moving body carries, one half its mass times its speed squared (plus rotational terms where stated) ($E_k$) [J]
     KineticEnergyCeiling: NotationSymbol  # largest kinetic energy an operational containment allows the machine under fault ($E_{\max}$) [J]
@@ -3153,9 +3124,7 @@ class NotationRegistry:
     ParentNodeIndex: NotationSymbol  # index of a parent node, one of the inputs to the node being evaluated ($k$)
     ParentReservedFunds: NotationSymbol  # monetary funds the delegating parent node's budget account withholds, including allocations delegated to its children ($R_{P}$) [USD]
     ParentSettledCharges: NotationSymbol  # gross monetary charges settled into the delegating parent node's budget account ($E_{P}$) [USD]
-    ParetoMinimumDemand: NotationSymbol  # smallest demand a Pareto tail model allows, its scale parameter ($x_{\min}$) [varies]
     ParetoTailExponent: NotationSymbol  # tail index of a Pareto model, the exponent at which the probability of exceeding a demand falls with that demand ($\alpha_{\text{tail}}$) [dimensionless]
-    ParetoTaskDemand: NotationSymbol  # unconstrained demand of a task, such as its step count, modeled as a continuous Pareto random variable ($X$) [varies]
     ParticipatingClientCount: NotationSymbol  # number of clients whose updates one federated round aggregates ($N_{\text{clients}}$)
     PartnerBitIndex: NotationSymbol  # bit position whose mask pairs each rank with its partner, rank index XOR two to this power, in one round of recursive halving-doubling ($k$)
     PassAtKEstimate: NotationSymbol  # unbiased estimate of pass@k for one task from a set of generated candidates, one minus the share of size-k subsets that contain no passing candidate ($\widehat{\operatorname{pass@}k}$) [dimensionless]
@@ -3613,13 +3582,11 @@ class NotationRegistry:
     RangeObservation: NotationSymbol  # one range observation a sensor returns at a time step ($z$)
     RangeObservationHistory: NotationSymbol  # sequence of range observations from the first step through the current step ($z_{1:t}$)
     RankComponentIndex: NotationSymbol  # index of one rank-one component in a CP decomposition, from 1 to the factorization rank ($s$)
-    RankConstrainedMatrix: NotationSymbol  # candidate matrix of rank at most a given value that a low-rank approximation minimum ranges over ($\mathbf{A}$)
     RankContribution: NotationSymbol  # data one rank contributes to a collective operation, its input buffer, indexed by rank ($x$) [varies]
     RankCountBinaryExponent: NotationSymbol  # integer exponent for which the rank count equals two raised to it, the condition algorithms such as butterfly AllReduce require ($m$) [dimensionless]
     RankFusionSmoothingConstant: NotationSymbol  # positive constant reciprocal rank fusion adds to each rank before taking the reciprocal, which compresses score differences between adjacent ranks ($k_{\text{rrf}}$) [dimensionless]
     RankIndex: NotationSymbol  # position of one rank, a device or worker, within a collective communication group, counted from zero ($i$)
     RankReductionResult: NotationSymbol  # result a reducing collective leaves on one rank, indexed by rank ($y$) [varies]
-    RankingFunction: NotationSymbol  # nonnegative integer measure of remaining admissible steps that every admitted step decreases by at least one, bounding how many steps can be admitted ($V$)
     RatedActuatorTorque: NotationSymbol  # rated torque of the actuator under test, the reference the stall counter-torque is scaled from ($\tau_{\text{rated}}$) [N*m]
     RatedCurrentEquilibriumTemperature: NotationSymbol  # winding temperature at thermal equilibrium under continuous rated current, the heat-soaked starting point of a burst ($T_{\text{eq}}$) [degC]
     RatedFatigueLife: NotationSymbol  # cumulative load-cycle count at which ten percent of a population of identical components is expected to have failed ($L_{10}$)
@@ -3654,7 +3621,6 @@ class NotationRegistry:
     RealityGapVector: NotationSymbol  # vector of the discrepancies between a simulator and the physical machine, one component per channel: dynamics, sensing, appearance and timing ($\boldsymbol{\Delta}_{\text{sim2real}}$) [varies]
     RealizedActuatorEffort: NotationSymbol  # force or torque an actuator actually realizes, the commanded effort clipped to its envelope ($u_{\text{act}}$) [varies]
     RealizedArrivalCount: NotationSymbol  # one possible value of the number of requests that arrive after the trigger in a batching window, used as a summation variable ($n$)
-    RealizedDamageOutcome: NotationSymbol  # realized value, zero or one, of the damaging-outcome indicator ($y$) [dimensionless]
     RealizedDampingPower: NotationSymbol  # conservative lower bound on the damping power the actuators actually realize, credited to the energy tank ($P_d$) [W]
     RealizedDeviceComputeRate: NotationSymbol  # floating-point operation rate one device actually achieves on its local work during a training step ($R$) [FLOP/s]
     RealizedFalseAlarmProbability: NotationSymbol  # realized probability that an untruncated sequential test selects the degradation when the baseline holds ($\alpha_{*}$) [dimensionless]
@@ -3850,7 +3816,6 @@ class NotationRegistry:
     RetainedDigestCount: NotationSymbol  # number of previous workspace digests a semantic watchdog retains for recurrence checks ($m$)
     RetainedGradientElementCount: NotationSymbol  # number of largest-magnitude gradient elements top-k sparsification keeps and transmits ($K_{\text{top}}$)
     RetainedProductiveTime: NotationSymbol  # equivalent training time represented by the progress a spot job retains ($T_{\text{productive}}$) [s]
-    RetainedSpectralEnergyFraction: NotationSymbol  # fraction of a matrix's total squared Frobenius norm, its activation energy, that a rank-r truncated approximation preserves ($\eta_r$) [dimensionless]
     RetainingCallCount: NotationSymbol  # number of later model calls in a trajectory that retain one staged observation in context ($H_{\text{rem}}$)
     RetiringChunkJointVelocity: NotationSymbol  # reference velocity of one joint along the retiring trajectory chunk at a seam ($\dot{q}_A$) [rad/s]
     RetiringChunkReferenceState: NotationSymbol  # reference plant state along the retiring trajectory chunk at a seam, as a function of time ($\mathbf{x}_A$)
@@ -4207,7 +4172,6 @@ class NotationRegistry:
     SmallChange: NotationSymbol  # small change, increment or error in the quantity it prefixes ($\delta$)
     SmallPerturbation: NotationSymbol  # small change or error in the quantity it prefixes, treated to first order ($\delta$)
     SmallestJacobianSingularNumber: NotationSymbol  # smallest singular value of the manipulator Jacobian, the tool speed a unit joint rate produces in the weakest direction ($\sigma_{\min}$) [m/rad]
-    SmallestKeySingularNumber: NotationSymbol  # smallest singular value of a key activation matrix, the last in decreasing order ($\sigma_{\min(S, d_{\text{head}})}$) [dimensionless]
     SmoothedClassifier: NotationSymbol  # smoothed classifier of randomized smoothing, which returns the class the base classifier predicts most often when Gaussian noise is added to the input ($g$)
     SmoothedRunnerUpProbability: NotationSymbol  # probability that the base classifier predicts the second most likely class when randomized-smoothing noise is added to the input ($p_{B}$) [dimensionless]
     SmoothedTargetAction: NotationSymbol  # next action the target actor proposes after clipped Gaussian noise is added and the result is clipped to the action range ($\tilde{\mathbf{a}}'$)
@@ -4260,7 +4224,6 @@ class NotationRegistry:
     SpectrallyNormalizedWeightMatrix: NotationSymbol  # weight matrix divided by its spectral norm, so its own spectral norm is one ($\overline{\mathbf{W}}$)
     SpeculativeDecodingSpeedup: NotationSymbol  # decoding speedup speculative decoding gives one isolated generation stream, verified tokens per round over target-step equivalents per round ($S_{\text{spec}}$) [dimensionless]
     SpeculativeDraftLength: NotationSymbol  # number of tokens a draft model proposes for the target model to verify in one speculative-decoding round ($K$)
-    SpeculativeDraftTokenCount: NotationSymbol  # number of tokens a draft proposes autoregressively for the target to verify in one speculative-sampling iteration ($k$)
     SpeedAtDetection: NotationSymbol  # speed of the machine at the moment the hazard is detected ($v$) [m/s]
     SpeedBound: NotationSymbol  # largest speed the machine, a tracked object or an approaching body is credited with in a budget ($v_{\max}$) [m/s]
     SpendingWindowDuration: NotationSymbol  # duration of the trailing window over which spending is measured or new liabilities are limited ($T_{\text{win}}$) [s]
@@ -4289,7 +4252,6 @@ class NotationRegistry:
     StageCost: NotationSymbol  # per-step stage cost in optimal control or model predictive control ($\ell$)
     StageEpisodeCount: NotationSymbol  # number of trajectories one stage of a scheduled collection session produces ($N_{\text{episodes}}$)
     StageReachProbability: NotationSymbol  # probability that a task reaches one stage of a sequential policy, a cascade tier or a loop turn, the product of the rejection probabilities of the stages before it ($r$) [dimensionless]
-    StagedDefinitionCount: NotationSymbol  # number of tool definitions one model call stages in its request ($n_{\text{def}}$)
     StagingExhaustionTime: NotationSymbol  # time until an initially empty staging store is fully reserved while records arrive faster than stalled verifiers drain them ($T_{\text{exhaust}}$) [s]
     StagingStoreCapacity: NotationSymbol  # total bytes of the staging store that holds collected records awaiting assessment ($M_{\text{stage}}$) [bytes]
     StaleSupportRate: NotationSymbol  # share of decisions requiring current evidence that relied on superseded support ($\epsilon_{\text{stale}}$) [dimensionless]
@@ -4346,13 +4308,9 @@ class NotationRegistry:
     SteadyStateTemperatureRise: NotationSymbol  # steady-state temperature rise a single thermal node approaches under constant heat input, heat input times thermal resistance ($\Delta T_{\max}$) [K]
     SteadyStateTrackingError: NotationSymbol  # tracking error vector at rest once transients decay, the offset a constant disturbance leaves under PD control ($\mathbf{e}_{\text{ss}}$)
     SteeringTransferTime: NotationSymbol  # finite time within which some input must steer the state from the initial state to the target state, in the definition of controllability ($T$) [s]
-    StepFailureHazard: NotationSymbol  # negative natural logarithm of the per-step success probability, the per-step failure hazard ($a$) [dimensionless]
-    StepGenerationCost: NotationSymbol  # cost of generating one useful step, assumed the same for every step ($C_{\text{gen}}$) [varies]
-    StepGenerationTime: NotationSymbol  # time to generate one step in a complete-block verification model ($T_{\text{step}}$) [s]
     StepIoTime: NotationSymbol  # time the input pipeline needs to read, decompress, decode and stage the data for one training step ($T_{\text{IO}}$) [s]
     StepResponsePhaseLag: NotationSymbol  # phase by which a physical actuator's step response lags the simulated response at a test frequency, positive for lag ($\Delta \phi$) [deg]
     StepSettlingTime: NotationSymbol  # time a step response takes to enter and stay within its settling band ($t_{\text{settle}}$) [s]
-    StepSuccessProbability: NotationSymbol  # probability that one generation step succeeds, independently of the others ($p$) [dimensionless]
     StepTestVoltage: NotationSymbol  # small voltage step applied across a held motor winding to measure its electrical time constant ($V_{\text{step}}$) [V]
     StepTimePenalty: NotationSymbol  # constant reward penalty charged on every control step of an episode, which rewards finishing sooner ($c_{\text{time}}$) [dimensionless]
     StepTokenLogit: NotationSymbol  # unnormalized logit the model assigns to one vocabulary token at one decoding step, before any constraint mask ($z_{t,v}$) [dimensionless]
@@ -4489,7 +4447,6 @@ class NotationRegistry:
     TangentSeedVector: NotationSymbol  # tangent vector seeded on a function's inputs for one forward-mode pass ($\dot{\mathbf{x}}$)
     TangentialContactShear: NotationSymbol  # friction component of a contact force, tangential to the contact plane ($\mathbf{f}_{k, \parallel}$) [N]
     TangentialSpeed: NotationSymbol  # speed at which a feature at a given range sweeps across a rotating sensor's view, angular rate times range ($v_{\text{tangential}}$) [m/s]
-    TargetAcceptanceDifference: NotationSymbol  # difference in task acceptance probability between two system versions that a release comparison is planned to detect ($\Delta$) [dimensionless]
     TargetActionReturnEstimate: NotationSymbol  # target estimate of the action value, held fixed during one value-fitting update to form the Bellman target ($\hat{Q}$) [dimensionless]
     TargetActorParameters: NotationSymbol  # parameters of the target actor network, a slowly Polyak-averaged copy of the actor parameters ($\theta'$)
     TargetBatchSize: NotationSymbol  # batch size a traffic-adaptive batcher sizes its window to fill at the current arrival rate ($B_{\text{target}}$)
@@ -4866,12 +4823,7 @@ class NotationRegistry:
     TrueOutcomeLevel: NotationSymbol  # one value of a binary true outcome, zero or one, on which a fairness condition is evaluated ($v$)
     TrueReferentScore: NotationSymbol  # normalized score a detector assigns to the ground-truth referent of one calibration scene ($c_{y_j}$) [dimensionless]
     TruncatedDistanceSample: NotationSymbol  # projective distance sample at a voxel clamped to plus or minus the truncation band, in meters ($d_{\mu}$) [m]
-    TruncatedKeyApproximation: NotationSymbol  # rank-r truncated singular value decomposition approximation of a key activation matrix, the optimal approximation of that rank in spectral and Frobenius norm ($\hat{\mathbf{K}}_r$)
-    TruncatedKeyLeftSingularMatrix: NotationSymbol  # matrix of the first r left singular vectors of a key activation matrix ($\mathbf{U}_r$)
-    TruncatedKeyRightSingularMatrix: NotationSymbol  # matrix of the first r right singular vectors of a key activation matrix ($\mathbf{V}_r$)
-    TruncatedKeySpectrumMatrix: NotationSymbol  # diagonal matrix of the r largest singular values of a key activation matrix ($\boldsymbol{\Sigma}_r$)
     TruncationBandVolume: NotationSymbol  # volume of the shell around observed surfaces within the truncation band ($V_{\text{band}}$) [m^3]
-    TruncationRank: NotationSymbol  # number of leading singular components a truncated singular value decomposition keeps ($r$)
     TruthInstrumentSet: NotationSymbol  # set of independent truth instruments (sensors and digitizers) that observe the plant separately from the system under test ($\mathcal{I}_{\text{truth}}$)
     TsdfAccumulatedDistance: NotationSymbol  # running weighted average of the truncated signed distance at a voxel after t frames ($D$) [dimensionless]
     TsdfAccumulatedWeight: NotationSymbol  # accumulated observation weight at a voxel after t frames ($W$) [dimensionless]
@@ -4945,7 +4897,6 @@ class NotationRegistry:
     UnobservableForceOffset: NotationSymbol  # arbitrary offset trajectory that, subtracted from the contact force and added to the sensor bias, leaves the force sensor's reading unchanged ($\Delta$) [N]
     UnobservedUnknownSpace: NotationSymbol  # part of the spatial memory map whose cells are unobserved or whose evidence has expired, which supplies no clearance evidence ($\mathcal{M}_{\text{unknown}}$)
     UnprojectionJacobian: NotationSymbol  # Jacobian of a camera-frame point with respect to its pixel coordinates and depth, which carries measurement covariance into Cartesian covariance ($\mathbf{J}_{\text{unproj}}$)
-    UnrecoverableDamageCost: NotationSymbol  # cost of the unrecoverable damage a modeled external failure causes when an action executes automatically ($C_{\text{blast}}$) [USD]
     UnreservedStopDelay: NotationSymbol  # delay between stop dispatch and physical stop onset that the planned schedule did not reserve, such as an uncharged communication or actuator delay ($\delta$) [s]
     UnshardedLocalExecutionTime: NotationSymbol  # time one device needs to run a replica's whole unsharded local workload, its data movement, computation and host dispatch together, the reference the Fleet Law divides across devices ($T_{\text{compute}}$) [s]
     UnsquashedLatentAction: NotationSymbol  # unbounded latent action sampled from a squashed-Gaussian policy before the tanh squashing that bounds it ($\mathbf{u}$)
@@ -4967,7 +4918,6 @@ class NotationRegistry:
     UsefulAcceleratorHourCost: NotationSymbol  # price of one accelerator-hour of useful work at the ideal rate, the capacity price divided by ML productivity goodput ($C_{\text{useful}}$) [USD/h]
     UsefulComputeFraction: NotationSymbol  # share of the distributed step time spent on useful local arithmetic ($f_{\text{compute}}$) [dimensionless]
     UsefulModelFlops: NotationSymbol  # floating-point operations the model's work actually requires, excluding recomputation and padding ($O_{\text{useful}}$) [FLOP]
-    UsefulStepCount: NotationSymbol  # number of useful generation steps a task needs, excluding regenerated work ($N$)
     UsefulTrainingTime: NotationSymbol  # wall-clock time a training job spends on committed, productive steps that contribute to the final model ($T_{\text{useful}}$) [s]
     UserConnectionSet: NotationSymbol  # set of users recorded as connected to one user in the social or interaction graph ($\mathcal{N}$)
     UserSpaceSetupTime: NotationSymbol  # time to set up the user-space runtime of one sandbox instance, such as language runtimes and libraries ($T_{\text{user}}$) [s]
@@ -4987,10 +4937,7 @@ class NotationRegistry:
     VectorElementCount: NotationSymbol  # number of elements in each operand vector of an element-wise vector operation ($N_{\text{vec}}$)
     Velocity: NotationSymbol  # linear velocity of a point or body ($\mathbf{v}$) [m/s]
     VelocitySaturationExponent: NotationSymbol  # technology-dependent exponent of the alpha-power law, by which drain current grows with gate overdrive above threshold ($\alpha$) [dimensionless]
-    VerificationCheckCost: NotationSymbol  # cost of running one verification check on generated work ($C_{\text{ver}}$) [varies]
-    VerificationCheckCount: NotationSymbol  # number of verification checks over a task ($K$)
     VerificationPoolCapacity: NotationSymbol  # number of trajectories per second a verification pool can finish when every trajectory needs its full set of trials ($\mu_{\text{verify}}$) [trajectories/s]
-    VerificationScheduleCost: NotationSymbol  # expected total cost of a task's generation, verification checks and error recovery as a function of the check interval ($C$) [varies]
     VerificationTrialCount: NotationSymbol  # number of verification trials an all-pass rule requires of one candidate, counting the first ($n_{\text{trial}}$)
     VerificationTrialIndex: NotationSymbol  # number of verification trials already run on a candidate, the index of a sum over trials ($j$)
     VerificationTrialTime: NotationSymbol  # mean time one verification trial occupies a worker slot, including environment provisioning, execution and cleanup ($T_{\text{trial}}$) [s]
