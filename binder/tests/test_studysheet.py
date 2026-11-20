@@ -112,3 +112,24 @@ def test_live_volumes_match_the_slides_release():
     wf = (REPO_ROOT / ".github/workflows/slides-publish-live.yml").read_text()
     slides_live = re.search(r'LIVE_VOLUMES:\s*"([^"]*)"', wf).group(1).split()
     assert tuple(slides_live) == build.LIVE_VOLUMES
+
+
+# The Study Sheets page (added 2026-11-20): one per volume, in the HTML render list and the sidebar.
+
+@pytest.mark.parametrize("vol", build.VOLUMES)
+def test_study_sheets_page_is_in_the_volume_site(vol):
+    page = f"{vol}/backmatter/studysheets.qmd"
+    assert (REPO_ROOT / "books" / page).exists()
+    assert "{#studysheet-list}" in (REPO_ROOT / "books" / page).read_text()
+    config = (REPO_ROOT / f"books/config/_quarto-html-{vol}.yml").read_text()
+    assert config.count(page) == 2, f"{page} must be in both render: and the sidebar"
+
+
+@pytest.mark.parametrize("vol", build.VOLUMES)
+def test_volume_list_covers_every_sheet_in_book_order(vol):
+    sheets = build.book_order(vol)
+    parts = build.book_parts(vol)
+    assert [t.parent.name for t in sheets] == [t.parent.name for t in build.book_order(vol)]
+    assert all(build.chapter_title(t) and "{" not in build.chapter_title(t) for t in sheets)
+    assert set(parts) >= {t.parent.name for t in sheets}, "every sheet's chapter is in the sidebar"
+    assert build.volume_url(vol).endswith(f"MLSysBook-StudySheets-Vol{vol[3:]}.pdf")

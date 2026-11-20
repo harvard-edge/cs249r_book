@@ -148,13 +148,55 @@ def book_order(vol: str) -> list[Path]:
     return order
 
 
+def chapter_title(tex: Path) -> str:
+    """The chapter's title as the book shows it: front-matter `title:` or its first `# ` heading."""
+    qmd = (tex.parent / f"{tex.parent.name}.qmd").read_text()
+    found = (re.search(r'^title:\s*"?([^"\n]+)"?\s*$', qmd, flags=re.M)
+             or re.search(r"^# (.+)$", qmd, flags=re.M))
+    return re.sub(r"\s*\{[^}]*\}", "", found.group(1)).strip() if found else tex.parent.name
+
+
+def book_parts(vol: str) -> dict[str, str]:
+    """Chapter folder -> the sidebar section it is listed under in _quarto-html-volN.yml ("" if none)."""
+    import yaml
+    config = yaml.safe_load((BOOKS / "config" / f"_quarto-html-{vol}.yml").read_text())
+    sidebars = (config.get("website") or {}).get("sidebar") or []
+    out: dict[str, str] = {}
+
+    def walk(items, part):
+        for item in items or []:
+            if isinstance(item, dict) and "contents" in item:
+                walk(item["contents"], item.get("section", part))
+            else:
+                href = item.get("href", "") if isinstance(item, dict) else str(item)
+                m = re.match(rf"^{vol}/(\d+_[^/]+)/\1\.qmd$", str(href))
+                if m:
+                    out[m.group(1)] = part
+    for sb in sidebars if isinstance(sidebars, list) else [sidebars]:
+        walk(sb.get("contents"), "")
+    return out
+
+
+def volume_url(vol: str) -> str:
+    return f"{RELEASES}/{LIVE_TAG if vol in LIVE_VOLUMES else DEV_TAG}/MLSysBook-StudySheets-Vol{vol[3:]}.pdf"
+
+
 def write_manifest(path: Path) -> None:
-    """{volN: {chapter_folder: {"url": ...}}} for every sheet; read by inject_slides.lua and lectures.py."""
+    """Per volume: chapter folder -> {"url"} (the line under each chapter title), and "_volume": the
+    combined PDF plus every sheet in book order with its title and part (the Study Sheets page)."""
     import json
-    manifest = {vol: {t.parent.name: {"url": sheet_url(t)} for t in sheets(vol)} for vol in VOLUMES}
+    manifest = {}
+    for vol in VOLUMES:
+        order, parts = book_order(vol), book_parts(vol)
+        entry = {t.parent.name: {"url": sheet_url(t)} for t in order}
+        entry["_volume"] = {"url": volume_url(vol), "count": len(order), "pages": 2 * len(order),
+                            "sheets": [{"chapter": t.parent.name, "title": chapter_title(t),
+                                        "part": parts.get(t.parent.name, ""), "url": sheet_url(t)}
+                                       for t in order]}
+        manifest[vol] = entry
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(manifest, indent=2) + "\n")
-    print(f"build.py: {sum(len(v) for v in manifest.values())} study sheets -> {path}")
+    print(f"build.py: {sum(e['_volume']['count'] for e in manifest.values())} study sheets -> {path}")
 
 
 def stage(dest: Path, vols: list[str]) -> None:
