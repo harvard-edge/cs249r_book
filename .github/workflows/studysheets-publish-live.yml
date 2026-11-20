@@ -1,0 +1,170 @@
+name: '📝 Study Sheets · 🚀 Publish (Live)'
+
+# =============================================================================
+# Chapter Study Sheets — Live Release
+# =============================================================================
+#
+# Builds the study sheets of the live volumes and publishes them to the
+# `studysheets-latest` release, which the live book (the line under each
+# chapter title) and the slides site (each chapter row) link to.
+#
+# Flow:
+#   1. GUARD   — infra-publish-guard.yml: latest studysheets-validate-dev run on
+#                dev must be green
+#   2. BUILD   — build.py for each live volume, tests, stage release files
+#   3. RELEASE — create or update studysheets-latest; drop stale files; verify
+#
+# Live volumes come from books/shared/studysheet/build.py (LIVE_VOLUMES), the
+# same list that points the book's links at this release, so the links and
+# the files cannot disagree. Volumes III and IV are staging-only (2026-10-23).
+#
+# Order matters on a first release: publish this before the book, so the
+# book's new "Study sheet (PDF)" links never point at a missing file.
+#
+# Triggers:
+#   - workflow_dispatch: manual, type PUBLISH to confirm
+#   - workflow_call: publish-all-live.yml
+#
+# Deploys to: GitHub Release `studysheets-latest`
+# Secrets:    GITHUB_TOKEN
+#
+# Related:
+#   - studysheets-validate-dev.yml — build and checks
+#   - studysheets-preview-dev.yml  — all volumes to studysheets-dev
+#
+# =============================================================================
+
+on:
+  workflow_dispatch:
+    inputs:
+      description:
+        description: 'What are you publishing? [Study sheet updates]'
+        required: false
+        default: 'Study sheet updates'
+      confirm:
+        description: 'Type "PUBLISH" to confirm (safety check)'
+        required: true
+        default: ''
+  workflow_call:
+    inputs:
+      description:
+        type: string
+        required: false
+        default: 'Study sheet updates'
+      confirm:
+        type: string
+        required: true
+
+permissions:
+  contents: write
+  packages: read
+  actions: read
+
+jobs:
+  guard:
+    name: '🛡️ Validate-Dev Green Gate'
+    if: inputs.confirm == 'PUBLISH'
+    uses: ./.github/workflows/infra-publish-guard.yml
+    with:
+      validate_workflow: studysheets-validate-dev.yml
+
+  build:
+    name: '📝 Build Live Volumes'
+    needs: [guard]
+    if: inputs.confirm == 'PUBLISH'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    container:
+      image: ghcr.io/${{ github.repository }}/quarto-linux:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v6
+
+      - name: 📝 Build the live volumes
+        run: |
+          LIVE=$(python3 books/shared/studysheet/build.py --live-volumes)
+          echo "Live volumes: $LIVE"
+          for vol in $LIVE; do
+            python3 books/shared/studysheet/build.py "$vol"
+          done
+          python3 -m pytest -q binder/tests/test_studysheet.py
+          python3 books/shared/studysheet/build.py --stage books/_build/studysheets/release $LIVE
+          ls -la books/_build/studysheets/release
+
+      - name: 📦 Upload release files
+        uses: actions/upload-artifact@v7
+        with:
+          name: studysheets-live
+          path: books/_build/studysheets/release/
+
+  release:
+    name: '🏷️ Publish studysheets-latest'
+    needs: [build]
+    if: inputs.confirm == 'PUBLISH'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: 📥 Download release files
+        uses: actions/download-artifact@v8
+        with:
+          name: studysheets-live
+          path: release/
+
+      - name: 🏷️ Create or update the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          DESCRIPTION: ${{ inputs.description }}
+        run: |
+          set -euo pipefail
+          TAG=studysheets-latest
+          VOLS=$(ls release/MLSysBook-StudySheets-Vol*.pdf | sed -E 's/.*Vol([0-9]+)\.pdf/\1/' | paste -sd' ' -)
+          {
+            echo "## Chapter Study Sheets"
+            echo ""
+            echo "One double-sided sheet per chapter of the Machine Learning Systems textbook: the front is what to learn, the back is practice, with the answers upside down at the foot. Every number on a sheet is computed from the book's simulator, MLSysim."
+            echo ""
+            echo "### Whole volumes"
+            for v in $VOLS; do echo "- **MLSysBook-StudySheets-Vol$v.pdf**: every chapter of Volume $v, in book order"; done
+            echo ""
+            echo "Each chapter's sheet is also attached on its own (volN_<chapter>_studysheet.pdf) and linked under the chapter title in the online book."
+            echo ""
+            echo "_${DESCRIPTION}_ · built from ${GITHUB_SHA:0:8}"
+          } > notes.md
+          if gh release view "$TAG" --repo "$REPO" > /dev/null 2>&1; then
+            gh release edit "$TAG" --repo "$REPO" --notes-file notes.md --title "Study Sheets (Latest)"
+          else
+            gh release create "$TAG" --repo "$REPO" --latest=false --target "$GITHUB_SHA" \
+              --title "Study Sheets (Latest)" --notes-file notes.md
+          fi
+          gh release upload "$TAG" --repo "$REPO" --clobber release/*.pdf
+          for name in $(gh release view "$TAG" --repo "$REPO" --json assets --jq '.assets[].name'); do
+            [ -f "release/$name" ] || gh release delete-asset "$TAG" "$name" --repo "$REPO" --yes
+          done
+
+      - name: ✅ Verify the release matches the build
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh release view studysheets-latest --repo ${{ github.repository }} \
+            --json assets --jq '.assets[].name' | sort > published.txt
+          (cd release && ls *.pdf) | sort > built.txt
+          if ! diff -u built.txt published.txt; then
+            echo "❌ studysheets-latest does not match the build"
+            exit 1
+          fi
+          echo "✅ studysheets-latest carries all $(wc -l < built.txt) files"
+          {
+            echo "## 📝 Study sheets published"
+            echo ""
+            echo "$(wc -l < built.txt) files on [studysheets-latest](${{ github.server_url }}/${{ github.repository }}/releases/tag/studysheets-latest)"
+          } >> "$GITHUB_STEP_SUMMARY"
