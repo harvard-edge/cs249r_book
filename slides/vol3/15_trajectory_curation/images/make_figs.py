@@ -440,6 +440,52 @@ def recipe_bars():
     ax.set_ylim(-0.6, 1.65)
     ax.axis('off')
     sp.save(fig, HERE / 'recipe_bars.svg')
+def credit_steps():
+    """3-step credit-based flow control diagram matching Explore: Collection Pipeline."""
+    W, H = (900, 340)
+    for step in (1, 2, 3):
+        b = ''
+        b += card(12, 18, 178, 86, 'Credit pool', '8 MB ceiling / run', PURPLE_L, PURPLE, ts=21, ss=18)
+        b += card(226, 18, 182, 86, 'Rollout worker', 'runs &amp; captures', BLUE_L, BLUE, ts=21, ss=18)
+        b += card(444, 18, 182, 86, 'Staging store', '32 GB bounded', AMBER_L, AMBER, ts=21, ss=18)
+        b += card(662, 18, 226, 86, 'Verifier &amp; sink', 'commit or discard', GREEN_L, GREEN, ts=21, ss=18)
+        b += arrow(190, 61, 222, 61, 'p', PURPLE, sw=3)
+        b += arrow(408, 61, 440, 61, 'b', BLUE, sw=3)
+        b += arrow(626, 61, 658, 61, 'a', AMBER, sw=3)
+        b += text(206, 48, '1', 18, PURPLE, weight='bold')
+        # Path A: rollout finishes -> credit pool
+        op_ab = 0.35 if step == 3 else 1.0
+        col_a = RED if step >= 2 else GRAY
+        mk_a = 'r' if step >= 2 else 'g'
+        pa = f'<path d="M317,104 L317,156 L136,156 L136,108" fill="none" stroke="{col_a}" stroke-width="2.6" stroke-dasharray="7 5" marker-end="url(#a{mk_a})"/>'
+        pa += box(160, 138, 224, 34, RED_L if step >= 2 else 'white', col_a, rx=6, sw=2)
+        pa += text(272, 161, 'A: rollout finishes', 19, RED if step >= 2 else INK, weight='bold' if step >= 2 else 'normal')
+        if step >= 2:
+            pa += text(518, 161, 'Unsafe: bytes stay in staging', 18.5, RED, anchor='start', weight='bold')
+        b += g(pa, op_ab)
+        # Path B: staging write -> credit pool
+        col_b = RED if step >= 2 else GRAY
+        mk_b = 'r' if step >= 2 else 'g'
+        pb = f'<path d="M490,104 L490,214 L101,214 L101,108" fill="none" stroke="{col_b}" stroke-width="2.6" stroke-dasharray="7 5" marker-end="url(#a{mk_b})"/>'
+        pb += box(185, 196, 260, 34, RED_L if step >= 2 else 'white', col_b, rx=6, sw=2)
+        pb += text(315, 219, 'B: written to staging', 19, RED if step >= 2 else INK, weight='bold' if step >= 2 else 'normal')
+        if step >= 2:
+            pb += text(518, 219, 'Unsafe: stall fills 32 GB', 18.5, RED, anchor='start', weight='bold')
+        b += g(pb, op_ab)
+        # Path C: durable disposition -> credit pool
+        col_c = GREEN if step == 3 else GRAY
+        mk_c = 'n' if step == 3 else 'g'
+        sw_c = 4.0 if step == 3 else 2.6
+        dash_c = '' if step == 3 else ' stroke-dasharray="7 5"'
+        pc = f'<path d="M815,104 L815,274 L66,274 L66,108" fill="none" stroke="{col_c}" stroke-width="{sw_c}"{dash_c} marker-end="url(#a{mk_c})"/>'
+        pc += box(220, 256, 370, 36, GREEN_L if step == 3 else 'white', col_c, rx=6, sw=2.6 if step == 3 else 2)
+        lbl_c = 'C: durable commit or discard (safe)' if step == 3 else 'C: durable commit or discard'
+        pc += text(405, 280, lbl_c, 19.5, GREEN if step == 3 else INK, weight='bold' if step == 3 else 'normal')
+        b += pc
+        if step == 3:
+            b += text(450, 326, 'Verifier stall drains credits: dispatch halts before 32 GB fills.', 20, PURPLE, weight='bold')
+        svg(f'credit_step{step}.svg', W, H, b)
+
 if __name__ == '__main__':
     recall_thumb()
     hook()
@@ -455,6 +501,7 @@ if __name__ == '__main__':
     denominators()
     plateau()
     staging()
+    credit_steps()
     lineage()
     dispositions()
     synthesis()
