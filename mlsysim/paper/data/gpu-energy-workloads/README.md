@@ -1,24 +1,42 @@
 # GPU board energy on more workloads and a third GPU
 
-This is a second declared test of MLSys·im's two device-power assumptions:
-rated TDP, and `Engine.solve`'s energy-proportional rule,
-TDP × (0.30 + 0.70 × utilization). It uses the runner, protocol, trial counts,
-engine settings and analysis of `../gpu-energy/`, whose README documents them.
-It adds Llama-2-7B and Llama-2-13B, which use multi-head attention (one key-value
-head per query head, where Llama-3.1-8B uses grouped-query attention), and
-Mixtral-8x7B, a mixture-of-experts model that runs in bf16, its native format.
-It adds the H200 as a third GPU and measures Llama-3.1-8B and ResNet-50 training
-again on new boards.
+This is a second declared test of MLSys·im's two device-power assumptions: rated
+TDP, and `Engine.solve`'s energy-proportional rule, TDP × (0.30 + 0.70 ×
+utilization). It uses the runner, protocol, trial counts, engine settings and
+analysis of `../gpu-energy/`, whose README documents them. It adds Llama-2-7B
+and Llama-2-13B, which use multi-head attention (one key-value head per query
+head, where Llama-3.1-8B uses grouped-query attention), and Mixtral-8x7B, a
+mixture-of-experts model that runs in bf16, its native format. It adds the H200
+as a third GPU and measures Llama-3.1-8B and ResNet-50 training again on new
+boards.
 
-Three things differ from `../gpu-energy/` apart from the new models and GPU. The
-seed is 2198 (it was 2193), so the random prompt tokens differ. Every
-configuration is held out, where the first plan marked six H100 configurations
-as calibration rows. The configuration ids name the model, so
-`h100-llama-b1-p128` there is `h100-llama31-8b-b1-p128` here. The efficiencies
-are the `engine/empirical.py` anchors that `../gpu-energy/` used: 0.5 for every
-language model (the Llama-3-8B decode anchor), and 0.13 and 0.26 for ResNet-50
-training on the H100 and the A100. The H200 has no anchor, so it uses the H100's
-0.13, since the registry gives both the same 989 TFLOP/s dense FP16 peak.
+Apart from the new models and GPU, these runs differ from `../gpu-energy/` in
+six ways:
+
+- The seed is 2198 (it was 2193), so the random prompt tokens differ. The seed
+  has nothing to do with the number of the pull request that added
+  `../gpu-energy/`.
+- Every configuration is held out, where the first plan marked six H100
+  configurations as calibration rows.
+- The configuration ids name the model, so `h100-llama-b1-p128` there is
+  `h100-llama31-8b-b1-p128` here.
+- A run measures its configurations in plan order. Here that goes through both
+  prompt lengths at each batch size (batch 1 with 128 tokens, batch 1 with
+  2,048, batch 8 with 128, and so on). `../gpu-energy/` went through the batch
+  sizes at each prompt length.
+- The container image was built again. Its base image had moved on, from
+  Python 3.11.12 and glibc 2.36 to Python 3.11.18 and glibc 2.41, and 29
+  unpinned packages (web and serialization libraries such as aiohttp, protobuf
+  and pydantic) have other versions. vLLM, PyTorch, torchvision, Transformers,
+  nvidia-ml-py, CUDA 12.4 and cuDNN are the same.
+- Six of the 20 used runs report NVIDIA driver 620.70.06. Every run of
+  `../gpu-energy/` reports 610.57.04.
+
+The efficiencies are the `engine/empirical.py` anchors that `../gpu-energy/`
+used: 0.5 for every language model (the Llama-3-8B decode anchor), and 0.13 and
+0.26 for ResNet-50 training on the H100 and the A100. The H200 has no anchor, so
+it uses the H100's 0.13, since the registry gives both the same 989 TFLOP/s
+dense FP16 peak.
 
 | File | Role |
 | --- | --- |
@@ -92,8 +110,10 @@ The plan declared four questions. The answers:
 4. **Mixtral-8x7B** (H200 only). The pattern depends on the batch size:
    - At batch 1, the modeled decode step is 1.70–1.71 of the measured one.
      `decode_step` reads all resident weights for a mixture-of-experts model
-     (its docstring calls this conservative). A shorter measured step is
-     consistent with the engine reading only the experts each token selects.
+     (its docstring calls this conservative). Reading all 93.4 GB of weights
+     in the measured step of 11.6 ms would take 8.0 TB/s, more than the H200's
+     4.8 TB/s, so the engine reads less than all of them, as it would if it
+     reads only the experts each token selects.
      The time and power errors compound, and TDP over the modeled time gives
      2.42–2.48 of the measured decode energy.
    - At batch 8 and 16, the modeled step is 0.70–0.96 of the measured one,
@@ -130,7 +150,8 @@ again on new boards, with the new seed. The ratios below compare the two
 
 For Llama-3.1-8B decode, the H100's energy relative to the A100's is 5–9% lower
 than in `../gpu-energy/` in all six configurations. Three comparisons change
-sides. There the H100 used 3.7–7.8% more energy than the A100, and here:
+sides. In `../gpu-energy/` the H100 used 3.7–7.8% more energy than the A100,
+and here:
 
 - batch 1 with 128-token prompts: the A100 was lower on all four board
   pairings there, and the H100 is lower on all four here;
@@ -146,9 +167,15 @@ pairings in each, where it was lower on none.
 Within each test, the two H100 boards differ by 0.1–3.9% in Llama-3.1-8B
 decode energy, but both new boards are 4.5–10% below both earlier ones. The two
 tests also differ in seed, and one new H100 Llama-3.1-8B run used the newer
-driver. So these data cannot say whether the boards or something else caused
-the change, and two boards per GPU do not settle the H100 and A100 decode
-ranking.
+driver, so these two tests alone cannot say what caused the change.
+`../gpu-energy-boards/` and `../gpu-energy-seeds/` measured more boards to find
+out. On the same board, the seed changes decode energy by less than 1% on
+average. The two H100 boards of `../gpu-energy/` used the most decode energy of
+all 16 H100 runs in the four tests, in every configuration, and those runs also
+differ from the later ones in date, container image and configuration order.
+Over the eight H100 and eight A100 boards of the first three tests, no
+Llama-3.1-8B decode configuration has the H100 or the A100 lower on every
+pairing.
 
 These results cover two boards per model and GPU, one engine (vLLM
 0.6.4.post1), language models of 7B to 47B parameters on one GPU, Mixtral on
@@ -176,10 +203,11 @@ The plan, the runner and the protocol did not change. The launcher,
   single-use containers, and each call writes to a fresh folder.
 
 After the matrix launch, the A100 runs were launched again, and the four H200
-runs were measured again with the fixed launcher. The second A100 launch ran
-before the single-use fix. Its six runs have six different Modal task ids, six
-different boards, and commands that match their folders, so none of them is a
-copy. That launch gave two runs on SXM4 boards for every model.
+runs whose folders held copies were measured again with the fixed launcher. The
+second A100 launch ran before the single-use fix. Its six runs have six
+different Modal task ids, six different boards, and commands that match their
+folders, so none of them is a copy. That launch gave two runs on SXM4 boards for
+every model.
 
 After the last run, these launcher changes followed. None of them changes a
 measurement.
