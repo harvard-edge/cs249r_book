@@ -251,6 +251,8 @@ def cadence():
             ax2.barh(y, tau, color=c, height=0.6, alpha=a(s3))
             ax2.barh(y, V['onset'], left=tau, color='white', edgecolor=P['red'], hatch='///', height=0.6, alpha=a(s3))
             ax2.text(tau + V['onset'] + 8, y, '+22 ms stop onset', va='center', fontsize=10.5, color=P['red_d'], alpha=a(s3))
+        ax2.axvline(V['tau_u'], color=P['amber'], ls=':', lw=1.4, alpha=a(s3))
+        ax2.text(448, 1.0, '82 ms < 336 ms\ninference', va='center', ha='center', fontsize=10.2, fontweight='bold', color=P['red_d'], alpha=a(s3), bbox=dict(boxstyle='round,pad=0.2', fc='#FEE2E2', ec=P['red'], lw=0.9, alpha=a(s3)))
         ax2.set_yticks([2, 1, 0])
         ax2.set_yticklabels(['model', 'lease,\nuntracked', 'lease,\ntracked'], fontsize=10.5)
         ax2.set_ylim(-0.5, 2.9)

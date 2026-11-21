@@ -155,28 +155,36 @@ def epochs():
 def lever():
     e0, drift, swing, same = ((lambda q, u: q.to(u).magnitude)(q, 'mm') for q in (Q_(0.1, 'mm'), Q_(0.2, 'mm'), Q_(0.75, 'mm'), Q_(0.3069444444, 'mm')))
     r_tol = 1.0
-    fig, ax = plt.subplots(figsize=(5.8, 2.2))
-    rows = [('Stale edge\n+ current wrist', [e0, drift, swing], 'e_total'), ('Same-epoch\nchain', [e0, drift, same - e0 - drift], 'e_same')]
+    rows = [('Stale edge\n+ current wrist', [e0, drift, swing], '1.05'), ('Same-epoch\nchain', [e0, drift, same - e0 - drift], '0.31')]
     cols = [C['neutral'], C['memory'], C['compute']]
-    for i, (lab, parts, key) in enumerate(rows):
-        yy = 1 - i
-        left = 0
-        for j, p in enumerate(parts):
-            ax.barh(yy, p, left=left, color=cols[j], height=0.55)
-            left += p
-        ax.text(left + 0.02, yy, f"{ {'Stale edge\n+ current wrist': '1.05', 'Same-epoch\nchain': '0.31'}[lab]} mm", va='center', fontsize=13, fontweight='bold', color=C['danger'] if left > r_tol else C['data'])
-        ax.text(-0.02, yy, lab, ha='right', va='center', fontsize=12, color=C['text'], fontweight='bold')
-    key = [(0.0, 'initial 0.10', cols[0]), (0.3, 'drift 0.20', cols[1]), (0.58, 'lever arm 0.75', cols[2])]
-    for x, s, c in key:
-        ax.text(x, 1.45, s, fontsize=11.5, color=c, fontweight='bold', ha='left')
-    ax.axvline(r_tol, color=C['danger'], ls='--', lw=1.5)
-    ax.text(r_tol + 0.02, -0.5, '1 mm slot\ntolerance', color=C['danger'], fontsize=11, ha='left', va='center', fontweight='bold')
-    ax.set_xlim(0, 1.35)
-    ax.set_ylim(-0.75, 1.7)
-    ax.set_yticks([])
-    ax.spines['left'].set_visible(False)
-    ax.set_xlabel('Finger error after one 16.7 ms frame (mm)')
-    sp.save(fig, out('lever.svg'))
+    for step in (1, 2, 3):
+        fig, ax = plt.subplots(figsize=(5.8, 2.25))
+        if step == 1:
+            ax.text(0.48, 0.55, 'Stale edge + current wrist = ? mm\n(initial 0.10 + drift 0.20 + lever ?)', ha='center', va='center', fontsize=12.5, fontweight='bold', color=C['neutral'], bbox=dict(boxstyle='round,pad=0.35', fc='#F8FAFC', ec=C['neutral'], ls='--', lw=1.4))
+            ax.text(-0.02, 1, 'Stale edge\n+ current wrist', ha='right', va='center', fontsize=12, color=C['text'], fontweight='bold')
+            ax.text(-0.02, 0, 'Same-epoch\nchain', ha='right', va='center', fontsize=12, color=C['text'], fontweight='bold', alpha=0.0)
+        else:
+            for i, (lab, parts, val_txt) in enumerate(rows):
+                yy = 1 - i
+                show = i == 0 or step >= 3
+                al = 1.0 if show else 0.0
+                left = 0
+                for j, p in enumerate(parts):
+                    ax.barh(yy, p, left=left, color=cols[j], height=0.55, alpha=al)
+                    left += p
+                ax.text(left + 0.02, yy, f'{val_txt} mm', va='center', fontsize=13, fontweight='bold', color=C['danger'] if left > r_tol else C['data'], alpha=al)
+                ax.text(-0.02, yy, lab, ha='right', va='center', fontsize=12, color=C['text'], fontweight='bold', alpha=al)
+            key = [(0.0, 'initial 0.10', cols[0]), (0.3, 'drift 0.20', cols[1]), (0.58, 'lever arm 0.75', cols[2])]
+            for x, s, c in key:
+                ax.text(x, 1.45, s, fontsize=11.5, color=c, fontweight='bold', ha='left')
+        ax.axvline(r_tol, color=C['danger'], ls='--', lw=1.6)
+        ax.text(r_tol + 0.02, -0.5, '1 mm slot\ntolerance', color=C['danger'], fontsize=11.5, ha='left', va='center', fontweight='bold')
+        ax.set_xlim(0, 1.35)
+        ax.set_ylim(-0.75, 1.7)
+        ax.set_yticks([])
+        ax.spines['left'].set_visible(False)
+        ax.set_xlabel('Finger error after one 16.7 ms frame (mm)')
+        sp.save(fig, out(f'lever_step{step}.svg'))
 
 def umbmark():
     bound, aisle = (50.0, 30.0)
@@ -284,41 +292,45 @@ def snapshot():
     sp.hbars(out('snapshot.svg'), rows, 'kB', log=True, size=(5.8, 1.8), vlines=[(1.05 * 1000, '1.05 MB SRAM', 'danger')], xlabel='ESDF snapshot of the stopping corridor (kB, log)')
 
 def ray_grid():
-    b = []
     x0, y0, cs = (130, 60, 56)
     ncol, nrow = (12, 4)
     ray_row = 2
-    for r in range(nrow):
-        for c in range(ncol):
-            x, y = (x0 + c * cs, y0 + r * cs)
-            fill = 'white'
-            if r == ray_row and c < 7:
-                fill = '#DCFCE7'
-            if r == ray_row and c == 7:
-                fill = '#334155'
-            if r == ray_row and c > 7:
-                fill = 'url(#hatch)'
-            if r == 0 and c in (9, 10):
-                fill = '#FEE2E2'
-            b.append(f'<rect x="{x}" y="{y}" width="{cs}" height="{cs}" fill="{fill}" stroke="#CBD5E1" stroke-width="2"/>')
     yr = y0 + ray_row * cs + cs / 2
-    b.append(f'<circle cx="75" cy="{yr}" r="24" fill="{PETROL}"/>')
-    b.append(t(75, yr + 62, 'sensor', 27, PETROL, weight='bold'))
-    b.append(f'<line x1="99" y1="{yr}" x2="{x0 + 7 * cs + 8}" y2="{yr}" stroke="{PETROL}" stroke-width="4" marker-end="url(#arr)"/>')
-    b.append(f'<rect x="{x0 + 3 * cs + 12}" y="{y0 + ray_row * cs + 12}" width="{cs - 24}" height="{cs - 24}" fill="none" stroke="{RED}" stroke-width="3" stroke-dasharray="6,4"/>')
-    b.append(t(x0 + 3.5 * cs, y0 + ray_row * cs - 12, 'phantom retired', 26, RED, weight='bold'))
-    b.append(t(x0 + 3.5 * cs, y0 + 4 * cs + 34, 'free, epoch t1', 27, GREEN, weight='bold'))
-    b.append(t(x0 + 7.5 * cs, y0 + 4 * cs + 34, 'return', 27, SLATE, weight='bold'))
-    b.append(t(x0 + 10.2 * cs, y0 + 4 * cs + 34, 'behind: still t0', 27, SLATE, weight='bold'))
-    b.append(t(x0 + 9.8 * cs, y0 - 14, 'occupied, t0', 26, '#991B1B', weight='bold'))
-    lx, ly = (40, 385)
-    leg = [('#FEE2E2', 'occupied'), ('#DCFCE7', 'free'), ('url(#hatch)', 'unknown'), ('#E2E8F0', 'expired')]
-    for i, (f, lab) in enumerate(leg):
-        xx = lx + i * 215
-        b.append(f'<rect x="{xx}" y="{ly}" width="40" height="40" fill="{f}" stroke="#64748B" stroke-width="2"/>')
-        b.append(t(xx + 52, ly + 31, lab, 28, SLATE, 'start'))
-    b.append(t(450, 475, 'Unknown and expired cells count as obstacles.', 28, SLATE, weight='bold'))
-    svg('ray_grid.svg', '\n'.join(b), w=900, h=495)
+    for step in (1, 2, 3, 4):
+        b = []
+        for r in range(nrow):
+            for c in range(ncol):
+                x, y = (x0 + c * cs, y0 + r * cs)
+                fill = 'white'
+                if r == 0 and c in (9, 10):
+                    fill = '#FEE2E2'
+                if step >= 2 and r == ray_row and c < 7:
+                    fill = '#DCFCE7'
+                if step >= 3 and r == ray_row and c == 7:
+                    fill = '#334155'
+                if step >= 3 and r == ray_row and c > 7:
+                    fill = 'url(#hatch)'
+                b.append(f'<rect x="{x}" y="{y}" width="{cs}" height="{cs}" fill="{fill}" stroke="#CBD5E1" stroke-width="2"/>')
+        b.append(f'<circle cx="75" cy="{yr}" r="24" fill="{PETROL}"/>')
+        b.append(t(75, yr + 62, 'sensor', 27, PETROL, weight='bold'))
+        b.append(f'<line x1="99" y1="{yr}" x2="{x0 + 7 * cs + 8}" y2="{yr}" stroke="{PETROL}" stroke-width="4" marker-end="url(#arr)"/>')
+        b.append(t(x0 + 9.8 * cs, y0 - 14, 'occupied, t0', 26, '#991B1B', weight='bold'))
+        if step >= 2:
+            b.append(f'<rect x="{x0 + 3 * cs + 12}" y="{y0 + ray_row * cs + 12}" width="{cs - 24}" height="{cs - 24}" fill="none" stroke="{RED}" stroke-width="3" stroke-dasharray="6,4"/>')
+            b.append(t(x0 + 3.5 * cs, y0 + ray_row * cs - 12, 'phantom retired', 26, RED, weight='bold'))
+            b.append(t(x0 + 3.5 * cs, y0 + 4 * cs + 34, 'free, epoch t1', 27, GREEN, weight='bold'))
+        if step >= 3:
+            b.append(t(x0 + 7.5 * cs, y0 + 4 * cs + 34, 'return', 27, SLATE, weight='bold'))
+            b.append(t(x0 + 10.2 * cs, y0 + 4 * cs + 34, 'behind: still t0', 27, SLATE, weight='bold'))
+        if step >= 4:
+            lx, ly = (40, 385)
+            leg = [('#FEE2E2', 'occupied'), ('#DCFCE7', 'free'), ('url(#hatch)', 'unknown'), ('#E2E8F0', 'expired')]
+            for i, (f, lab) in enumerate(leg):
+                xx = lx + i * 215
+                b.append(f'<rect x="{xx}" y="{ly}" width="40" height="40" fill="{f}" stroke="#64748B" stroke-width="2"/>')
+                b.append(t(xx + 52, ly + 31, lab, 28, SLATE, 'start'))
+            b.append(t(450, 475, 'Unknown and expired cells count as obstacles.', 28, SLATE, weight='bold'))
+        svg(f'ray_grid_step{step}.svg', '\n'.join(b), w=900, h=495)
 
 def rack_top():
     s = 250
