@@ -107,19 +107,55 @@ def reach_steps():
 
 def admit_steps():
     rows = [('authentic', 'protected, bound to holder'), ('op in rights', 'read, not write'), ('target in objects', 'repo/, not ~/.aws'), ('condition holds', 'this task only'), ('time < expiry', 'before 300 s')]
-    for step in range(1, len(rows) + 2):
+    for step in range(1, 6):
         g = SVG(900, 340)
         for i, (cond, gloss) in enumerate(rows):
             y = 8 + i * 56
-            on = i < step
+            on = i < step + 1
             col = AME if on else GRAY
             g.rect(60, y, 340, 46, fill=AME_L if on else 'white', stroke=col, sw=2)
             g.text(80, y + 31, cond, T, col, 'bold', 'start', mono=True)
             g.text(440, y + 31, gloss, T, INK if on else GRAY, anchor='start')
-        if step > len(rows):
+        if step >= 5:
             g.rect(60, 290, 780, 44, fill='white', stroke=C['data'], sw=2.5)
             g.text(450, 320, 'default reach is empty', T, C['data'], 'bold')
         g.save(f'admit_step{step}')
+
+def overlay_steps():
+    for step in (1, 2, 3):
+        g = SVG(900, 340)
+        g.rect(24, 14, 412, 180, fill='#FAF5FF', stroke=AME, sw=2.5)
+        g.text(230, 46, 'Task A upper (private rw)', TB, AME, 'bold')
+        g.rect(464, 14, 412, 180, fill='#EFF6FF', stroke=C['memory'], sw=2.5)
+        g.text(670, 46, 'Task B upper (private rw)', TB, C['memory'], 'bold')
+        g.rect(24, 228, 852, 98, fill='#F1F5F9', stroke=C['neutral'], sw=2.5)
+        g.text(450, 258, 'Shared read-only lower (2.4 GB base image)', T, INK, 'bold')
+        g.rect(120, 272, 260, 42, fill='white', stroke=C['neutral'], sw=2, rx=6)
+        g.text(250, 300, 'pool.py (v1)', 22, INK, 'bold', mono=True)
+        g.rect(520, 272, 260, 42, fill='white', stroke=C['neutral'], sw=2, rx=6)
+        g.text(650, 300, 'data.csv', 22, INK, 'bold', mono=True)
+        if step == 1:
+            g.text(230, 108, 'empty: reads fall through', 22, C['neutral'])
+            g.text(230, 144, 'sees: pool.py (v1), data.csv', 21, INK)
+            g.text(670, 108, 'empty: reads fall through', 22, C['neutral'])
+            g.text(670, 144, 'sees: pool.py (v1), data.csv', 21, INK)
+            g.line(230, 194, 230, 224, AME, sw=3, arrow='aa')
+            g.line(670, 194, 670, 224, C['memory'], sw=3, arrow='ag')
+        if step >= 2:
+            g.rect(44, 66, 372, 46, fill=AME_L, stroke=AME, sw=2, rx=6)
+            g.text(230, 96, 'pool.py (v2, copied up)', 21, AME, 'bold', mono=True)
+            g.line(200, 270, 200, 196, AME, sw=3, arrow='aa')
+            g.text(670, 106, 'still reads lower directly', 22, C['memory'])
+            g.text(670, 144, 'sees: pool.py (v1), data.csv', 21, INK, 'bold')
+            g.line(670, 194, 670, 224, C['memory'], sw=3, arrow='ag')
+        if step == 2:
+            g.text(230, 152, 'sees: pool.py (v2), data.csv', 21, AME, 'bold')
+        if step >= 3:
+            g.rect(44, 122, 372, 46, fill='#FEE2E2', stroke=C['danger'], sw=2, rx=6)
+            g.text(230, 152, 'whiteout: data.csv hidden', 21, C['danger'], 'bold')
+            g.text(230, 186, 'Task A view: pool.py (v2) only', 19, C['danger'], 'bold')
+            g.text(670, 184, 'lower & Task B untouched', 20, C['data'], 'bold')
+        g.save(f'overlay_step{step}')
 
 def attenuate_steps():
     for step in (1, 2, 3):
@@ -362,6 +398,7 @@ if __name__ == '__main__':
     attenuate_steps()
     revoke_steps()
     envelopes_steps()
+    overlay_steps()
     egress_steps()
     reset_steps()
     syscall_plots()

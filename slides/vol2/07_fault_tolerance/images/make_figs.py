@@ -311,26 +311,58 @@ ax.set_axisbelow(True)
 sp.save(fig, out / 'dcp_trace.svg')
 
 def budget(path, k):
-    fig, ax = plt.subplots(figsize=(5.6, 1.25))
-    parts = [('detect', 't_detect_s', 'c3'), ('restart', 't_restart_s', 'c1'), ('load', 't_load_s', 'ok'), ('warm up', 't_warmup_s', 'c2')]
-    x = 0
-    for lab, key, ck in parts:
-        w = {'detect': 60.0, 'restart': 180.0, 'load': 24.5, 'warm up': 120.0}[lab]
-        ax.barh(0, w, left=x, color=V[ck], height=0.6, edgecolor='white', lw=1.5)
-        hi = lab == 'load'
-        txt(ax, x + w / 2, 0.8 if hi else 0.42, lab, V[ck], ha='center', va='bottom', fontsize=11.5)
-        txt(ax, x + w / 2, -0.95 if hi else -0.55, f"{ {'detect': '60', 'restart': '180', 'load': '24.5', 'warm up': '120'}[lab]} s", V[ck], ha='center', va='center', fontsize=11)
+    """3-step Checkpoint Recovery Timeline matching Explore fig-checkpoint-recovery-timeline
+    and Napkin Math 7.3 (detect 60s + restart 180s + load 24.5s + warmup 120s = 6.4 min + rework)."""
+    fig, ax = plt.subplots(figsize=(5.8, 1.85))
+    # Top timeline track (y=1.15): progress sawtooth matching Explore
+    # 0 -> 140: progress climbs to durable checkpoint (140, 1.85)
+    ax.plot([0, 140], [0.85, 1.55], color=V['c1'], lw=2.6)
+    ax.plot([140, 140], [0.82, 1.72], color=V['ok'], lw=2.2, ls='--')
+    ax.plot([140], [1.55], 'o', ms=8, color=V['ok'], zorder=5)
+    txt(ax, 140, 1.78, 'durable ckpt', V['ok'], ha='center', va='bottom', fontsize=10.5)
+    # 140 -> 240: unsaved progress climbs, then crashes at x=240
+    ax.plot([140, 240], [1.55, 1.98], color=V['c2'], lw=2.4)
+    ax.plot([240, 240], [1.98, 1.55], color=V['bad'], lw=2.0, ls=':')
+    ax.plot([240], [1.98], 'X', ms=10, color=V['bad'], zorder=6)
+    txt(ax, 240, 2.13, 'fault', V['bad'], ha='center', va='bottom', fontsize=10.5)
+    # Step 2: flatline during 6.4 min recovery (x=240 -> 585)
+    if k >= 2:
+        ax.plot([240, 585], [1.55, 1.55], color=V['bad'], lw=2.4, ls='--')
+        txt(ax, 428, 1.65, 'progress flat (6.4 min)', V['bad'], ha='center', va='bottom', fontsize=10)
+    # Step 3: rework climbs back to pre-fault level (585 -> 685) then resumes new work (685 -> 760)
+    if k >= 3:
+        ax.plot([585, 685], [1.55, 1.98], color=V['bad'], lw=2.6)
+        ax.plot([685, 755], [1.98, 2.28], color=V['ok'], lw=2.6)
+        txt(ax, 720, 2.30, 'resumed', V['ok'], ha='center', va='bottom', fontsize=10.5)
+    # Bottom phase bar track (y=0.0)
+    parts = [('detect', 60.0, 'c3'), ('restart', 180.0, 'c1'), ('load', 24.5, 'ok'), ('warm up', 120.0, 'c2')]
+    scale = 345.0 / 384.5  # maps 384.5 s cleanly onto x=240..585
+    # Show T_ckpt / unsaved bars on left (x=0..240)
+    ax.barh(0, 140, left=0, color=V['c1_l'], edgecolor=V['c1'], height=0.52, lw=1.2)
+    txt(ax, 70, 0, '$T_{\\text{ckpt}}$', V['c1'], ha='center', va='center', fontsize=10.5)
+    ax.barh(0, 100, left=140, color=V['c2_l'], edgecolor=V['c2'], height=0.52, lw=1.2)
+    txt(ax, 190, 0, 'unsaved', '#b45309', ha='center', va='center', fontsize=10.5)
+    # Step 2: recovery segments
+    x = 240.0
+    a2 = 1.0 if k >= 2 else 0.0
+    for lab, sec, ck in parts:
+        w = sec * scale
+        ax.barh(0, w, left=x, color=V[ck], height=0.52, edgecolor='white', lw=1.2, alpha=a2)
+        if lab == 'load':
+            txt(ax, x + w / 2, 0.50, 'load 24.5s', V[ck], k >= 2, ha='center', va='bottom', fontsize=10)
+        else:
+            txt(ax, x + w / 2, -0.45, f'{lab}\n{sec:g} s', V[ck], k >= 2, ha='center', va='top', fontsize=10, linespacing=0.95)
         x += w
-    txt(ax, x + 8, 0, '= 6.4 min', C['text'], va='center', fontsize=13)
-    a = 1.0 if k >= 2 else 0.0
-    ax.barh(0, 200, left=x + 160, height=0.6, fc=C['danger_l'], ec=C['danger'], ls='--', lw=1.5, alpha=a)
-    txt(ax, x + 260, 0.05, '+ rework', C['danger'], k >= 2, ha='center', va='center', fontsize=12)
-    txt(ax, x + 260, -0.55, 'half an interval', C['danger'], k >= 2, ha='center', va='center', fontsize=10.5, fontweight='normal')
-    ax.set_xlim(0, 760)
-    ax.set_ylim(-1.2, 1.25)
+    # Step 3: rework bar
+    a3 = 1.0 if k >= 3 else 0.0
+    ax.barh(0, 100, left=585, height=0.52, fc=C['danger_l'], ec=C['danger'], ls='--', lw=1.5, alpha=a3)
+    txt(ax, 635, 0, 'rework', C['danger'], k >= 3, ha='center', va='center', fontsize=10.5)
+    txt(ax, 635, -0.45, '$\\tau/2$\nreplayed', C['danger'], k >= 3, ha='center', va='top', fontsize=10, linespacing=0.95)
+    ax.set_xlim(-5, 765)
+    ax.set_ylim(-1.12, 2.62)
     ax.axis('off')
     sp.save(fig, path)
-for k in (1, 2):
+for k in (1, 2, 3):
     budget(out / f'budget_step{k}.svg', k)
 
 def fencing(path, k):
@@ -435,36 +467,41 @@ def elastic(path, k):
     save_fixed(fig, path)
 for k in (1, 2, 3):
     elastic(out / f'elastic_step{k}.svg', k)
-fig, (a1, a2) = plt.subplots(1, 2, figsize=(5.6, 1.8), gridspec_kw={'width_ratios': [1.15, 1]})
-_down = [315360.0, 3153.6, 31.536]
-rows = [('1 replica', _down[0], '3.65 days'), ('2 replicas', _down[1], '52.6 min'), ('3 replicas', _down[2], '31.5 s')]
-for i, (lab, v, s) in enumerate(rows):
-    y = 2 - i
-    a1.barh(y, v, color=C['memory'], height=0.6)
-    txt(a1, -0.03, y, lab, C['text'], ha='right', va='center', fontsize=11, transform=a1.get_yaxis_transform())
-    txt(a1, v * 1.4, y, s, C['memory'], va='center', fontsize=11)
-a1.set_xscale('log')
-a1.set_xlim(3, 300000000.0)
-a1.set_ylim(-0.6, 2.6)
-a1.set_yticks([])
-a1.set_xticks([10, 1000.0, 100000.0, 10000000.0])
-a1.set_xticklabels(['10 s', '17 min', '28 h', '116 d'], fontsize=10)
-a1.minorticks_off()
-a1.spines['left'].set_visible(False)
-a1.set_xlabel('Downtime per year, 99% each', fontsize=11)
-for i, (lab, v, ck) in enumerate([('image retry', 0, 'data'), ('LLM chat', 43.0, 'danger')]):
-    y = 1 - i
-    a2.barh(y, max(v, 0.4), color=C[ck], height=0.55)
-    txt(a2, -0.03, y, lab, C['text'], ha='right', va='center', fontsize=11, transform=a2.get_yaxis_transform())
-txt(a2, 1.5, 1, '0 GB lost', C['data'], va='center', fontsize=11)
-txt(a2, 42, 0, '43 GB', 'white', va='center', ha='right', fontsize=12)
-a2.set_xlim(0, 46)
-a2.set_ylim(-0.6, 1.6)
-a2.set_yticks([])
-a2.spines['left'].set_visible(False)
-a2.set_xlabel('State to rebuild on failover', fontsize=11)
-fig.subplots_adjust(wspace=0.75)
-sp.save(fig, out / 'serving_state.svg')
+for k in (1, 2):
+    fig, (a1, a2) = plt.subplots(1, 2, figsize=(4.9, 1.95), gridspec_kw={'width_ratios': [1.2, 1]})
+    _down = [315360.0, 3153.6, 31.536]
+    rows = [('1 replica', _down[0], '3.65 d'), ('2 replicas', _down[1], '52.6 min'), ('3 replicas', _down[2], '31.5 s')]
+    for i, (lab, v, s) in enumerate(rows):
+        y = 2 - i
+        a1.barh(y, v, color=C['memory'], height=0.6)
+        txt(a1, -0.04, y, lab, C['text'], ha='right', va='center', fontsize=12, transform=a1.get_yaxis_transform())
+        txt(a1, v * 1.4, y, s, C['memory'], va='center', fontsize=12)
+    a1.set_xscale('log')
+    a1.set_xlim(3, 300000000.0)
+    a1.set_ylim(-0.6, 2.6)
+    a1.set_yticks([])
+    a1.set_xticks([10, 1000.0, 100000.0, 10000000.0])
+    a1.set_xticklabels(['10 s', '17 m', '28 h', '116 d'], fontsize=11)
+    a1.minorticks_off()
+    a1.spines['left'].set_visible(False)
+    a1.set_xlabel('Downtime/yr (99% each)', fontsize=11.5)
+    a2_show = k >= 2
+    a2_al = 1.0 if a2_show else 0.0
+    for i, (lab, v, ck) in enumerate([('image', 0, 'data'), ('LLM chat', 43.0, 'danger')]):
+        y = 1 - i
+        a2.barh(y, max(v, 0.4), color=C[ck], height=0.55, alpha=a2_al)
+        txt(a2, -0.04, y, lab, C['text'], a2_show, ha='right', va='center', fontsize=12, transform=a2.get_yaxis_transform())
+    txt(a2, 2.0, 1, '0 GB', C['data'], a2_show, va='center', fontsize=12)
+    txt(a2, 41, 0, '43 GB', 'white', a2_show, va='center', ha='right', fontsize=12)
+    a2.set_xlim(0, 46)
+    a2.set_ylim(-0.6, 1.6)
+    a2.set_yticks([])
+    a2.tick_params(axis='x', labelsize=11, colors=C['text'] if a2_show else 'white')
+    a2.spines['left'].set_visible(False)
+    a2.spines['bottom'].set_color(C['text'] if a2_show else 'white')
+    a2.set_xlabel('Failover rebuild state (GB)', fontsize=11.5, color=C['text'] if a2_show else 'white')
+    fig.subplots_adjust(wspace=0.72)
+    sp.save(fig, out / f'serving_state_step{k}.svg')
 
 def degrade(path, k):
     fig, ax = plt.subplots(figsize=(3.6, 1.95))

@@ -232,30 +232,35 @@ def watch_resp():
 watch_resp()
 
 def retry_tree():
-    s = Svg(600, 400)
     xs = [50, 190, 330, 480]
     layers = ['agent loop', 'gateway', 'client library']
-    s.rect(30, 185, 40, 40, P['fault'][1], rx=4)
     ys1 = [95, 205, 315]
-    for y in ys1:
-        s.raw(f'<line x1="70" y1="205" x2="{xs[1]}" y2="{y}" stroke="#a78bfa" stroke-width="2"/>')
-        s.raw(f'<circle cx="{xs[1]}" cy="{y}" r="13" fill="#7c3aed"/>')
-    ys2 = []
-    for y in ys1:
-        for d in (-30, 0, 30):
-            y2 = y + d
-            ys2.append(y2)
-            s.raw(f'<line x1="{xs[1]}" y1="{y}" x2="{xs[2]}" y2="{y2}" stroke="#c4b5fd" stroke-width="1.6"/>')
-            s.raw(f'<circle cx="{xs[2]}" cy="{y2}" r="9" fill="#7c3aed"/>')
-    for y in ys2:
-        for d in (-9, 0, 9):
-            s.raw(f'<line x1="{xs[2]}" y1="{y}" x2="{xs[3]}" y2="{y + d}" stroke="#ddd6fe" stroke-width="1.2"/>')
-            s.raw(f'<circle cx="{xs[3]}" cy="{y + d}" r="4.5" fill="#7c3aed"/>')
-    for x, n in zip(xs, [1, 3, 9, 27]):
-        s.text(x, 385, str(n), 26, '#0f172a', bold=True)
-    for x, lab in zip(xs[1:], layers):
-        s.text(x, 40, lab, 22, '#6d28d9', bold=True)
-    s.save('retry_tree.svg')
+    ys2 = [y + d for y in ys1 for d in (-30, 0, 30)]
+    for k in (1, 2, 3):
+        s = Svg(600, 400)
+        s.rect(30, 185, 40, 40, P['fault'][1], rx=4)
+        s.text(xs[0], 385, '1', 26, '#0f172a', bold=True)
+        for y in ys1:
+            s.raw(f'<line x1="70" y1="205" x2="{xs[1]}" y2="{y}" stroke="#a78bfa" stroke-width="2"/>')
+            s.raw(f'<circle cx="{xs[1]}" cy="{y}" r="13" fill="#7c3aed"/>')
+        s.text(xs[1], 40, layers[0], 22, '#6d28d9', bold=True)
+        s.text(xs[1], 385, '3', 26, '#0f172a', bold=True)
+        if k >= 2:
+            for y in ys1:
+                for d in (-30, 0, 30):
+                    y2 = y + d
+                    s.raw(f'<line x1="{xs[1]}" y1="{y}" x2="{xs[2]}" y2="{y2}" stroke="#c4b5fd" stroke-width="1.6"/>')
+                    s.raw(f'<circle cx="{xs[2]}" cy="{y2}" r="9" fill="#7c3aed"/>')
+            s.text(xs[2], 40, layers[1], 22, '#6d28d9', bold=True)
+            s.text(xs[2], 385, '9', 26, '#0f172a', bold=True)
+        if k >= 3:
+            for y in ys2:
+                for d in (-9, 0, 9):
+                    s.raw(f'<line x1="{xs[2]}" y1="{y}" x2="{xs[3]}" y2="{y + d}" stroke="#fca5a5" stroke-width="1.4"/>')
+                    s.raw(f'<circle cx="{xs[3]}" cy="{y + d}" r="4.5" fill="#dc2626"/>')
+            s.text(xs[3], 40, layers[2], 22, '#b91c1c', bold=True)
+            s.text(xs[3], 385, '27', 28, '#dc2626', bold=True)
+        s.save(f'retry_tree_step{k}.svg')
 retry_tree()
 
 def incident():

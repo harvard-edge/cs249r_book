@@ -291,22 +291,24 @@ def meantest(path):
 meantest(out / 'meantest.svg')
 sp.hbars(out / 'psi_country.svg', [('Other', 0.04702293319, 'danger', '0.047 (72%)'), ('USA', 0.0118353431, 'memory', '0.012'), ('France', 0.003646431136, 'memory', '0.004'), ('UK', 0.002107210313, 'memory', '0.002'), ('Germany', 0.0006899287149, 'memory', '0.001')], '', log=False, size=(3.3, 2.2), xlabel='PSI contribution (total 0.065)')
 
-def grid(path):
+def grid(path, k):
     b = []
     x0, y0, w, h = (120, 10, 375, 155)
-    cells = [(0, 0, 'Probe deeper', 'error up, inputs flat:', 'concept drift or a fault', V['red_l'], V['red']), (1, 0, 'Isolate slices', 'error and drift together:', 'test the update', V['amber_l'], V['amber']), (0, 1, 'Keep serving', 'nothing moved', '', V['frame_l'], V['frame']), (1, 1, 'Monitor', 'inputs moved, error flat:', 'find the source', V['blue_l'], V['blue'])]
-    for cx, cy, t, s1, s2, f, s in cells:
+    cells = [(0, 0, 'Probe deeper', 'error up, inputs flat:', 'concept drift or a fault', V['red_l'], V['red'], 2), (1, 0, 'Isolate slices', 'error and drift together:', 'test the update', V['amber_l'], V['amber'], 1), (0, 1, 'Keep serving', 'nothing moved', '', V['frame_l'], V['frame'], 1), (1, 1, 'Monitor', 'inputs moved, error flat:', 'find the source', V['blue_l'], V['blue'], 1)]
+    for cx, cy, t, s1, s2, f, s, min_k in cells:
+        op = 1.0 if k >= min_k else 0.0
         x, y = (x0 + cx * (w + 10), y0 + cy * (h + 10))
-        b.append(rect(x, y, w, h, f, s, 2.5, 8))
-        b.append(text(x + w / 2, y + 50, t, s if s != V['frame'] else V['gray'], 27, 700))
-        b.append(text(x + w / 2, y + 92, s1, V['ink'], 22))
-        b.append(text(x + w / 2, y + 122, s2, V['ink'], 22))
+        b.append(rect(x, y, w, h, f, s, 2.5, 8, op=op))
+        b.append(text(x + w / 2, y + 50, t, s if s != V['frame'] else V['gray'], 27, 700, op=op))
+        b.append(text(x + w / 2, y + 92, s1, V['ink'], 22, op=op))
+        b.append(text(x + w / 2, y + 122, s2, V['ink'], 22, op=op))
     b.append(arrow(x0, 352, x0 + 2 * w + 10, 352, 'gray', 3))
     b.append(text(x0 + w + 5, 385, 'Input drift statistic (PSI, KS)', V['ink'], 22, 700))
     b.append(arrow(95, y0 + 2 * h + 10, 95, y0, 'gray', 3))
     b.append(f'''<text x="70" y="{y0 + h + 5}" font-size="22" font-weight="700" fill="{V['ink']}" text-anchor="middle" transform="rotate(-90 70 {y0 + h + 5})">Measured error</text>''')
     svg(path, b, 900, 395)
-grid(out / 'drift_grid.svg')
+for k in (1, 2):
+    grid(out / f'drift_grid_step{k}.svg', k)
 
 def calib(path):
     rows = [('CIFAR-100, LeNet 5', 'ece_lenet', 'ece_lenet_ts'), ('CIFAR-100, ResNet 110', 'ece_r110', 'ece_r110_ts'), ('ImageNet, ResNet 152', 'ece_r152', 'ece_r152_ts')]
@@ -332,7 +334,7 @@ calib(out / 'calib.svg')
 def riskcov(path, k):
     cov = np.linspace(0.3, 1.0, 200)
     risk = np.array([0.0120729, 0.01207818135, 0.01208377777, 0.01208970412, 0.01209597578, 0.01210260866, 0.01210961922, 0.01211702446, 0.01212484197, 0.01213308992, 0.01214178704, 0.01215095271, 0.0121606069, 0.01217077023, 0.01218146395, 0.01219270998, 0.01220453091, 0.01221695001, 0.01222999126, 0.01224367934, 0.01225803966, 0.0122730984, 0.01228888245, 0.01230541951, 0.01232273804, 0.0123408673, 0.01235983739, 0.01237967921, 0.01240042452, 0.01242210594, 0.01244475696, 0.01246841196, 0.01249310622, 0.01251887597, 0.01254575836, 0.01257379147, 0.0126030144, 0.0126334672, 0.01266519093, 0.01269822767, 0.01273262056, 0.01276841376, 0.01280565251, 0.01284438316, 0.01288465313, 0.01292651098, 0.01297000642, 0.01301519031, 0.01306211466, 0.01311083272, 0.01316139891, 0.01321386891, 0.01326829964, 0.01332474926, 0.01338327725, 0.01344394439, 0.01350681277, 0.01357194582, 0.01363940834, 0.01370926651, 0.01378158792, 0.01385644156, 0.01393389786, 0.01401402874, 0.01409690755, 0.01418260919, 0.01427121005, 0.01436278807, 0.01445742274, 0.01455519515, 0.01465618797, 0.01476048552, 0.01486817374, 0.01497934025, 0.01509407435, 0.01521246706, 0.01533461111, 0.01546060101, 0.01559053301, 0.01572450519, 0.01586261742, 0.01600497144, 0.01615167082, 0.01630282105, 0.01645852949, 0.01661890547, 0.01678406025, 0.01695410707, 0.01712916118, 0.01730933985, 0.0174947624, 0.01768555022, 0.01788182678, 0.0180837177, 0.01829135072, 0.01850485576, 0.01872436492, 0.01895001253, 0.01918193516, 0.01942027163, 0.01966516306, 0.0199167529, 0.02017518693, 0.02044061328, 0.02071318251, 0.02099304757, 0.02128036385, 0.02157528923, 0.02187798406, 0.02218861125, 0.02250733621, 0.02283432697, 0.02316975412, 0.02351379091, 0.02386661322, 0.02422839963, 0.02459933143, 0.02497959262, 0.02536936998, 0.0257688531, 0.02617823435, 0.02659770897, 0.02702747507, 0.02746773366, 0.02791868869, 0.02838054705, 0.02885351863, 0.02933781634, 0.02983365611, 0.03034125698, 0.03086084107, 0.03139263362, 0.03193686306, 0.03249376099, 0.03306356224, 0.03364650489, 0.03424283028, 0.03485278309, 0.03547661131, 0.03611456632, 0.0367669029, 0.03743387925, 0.03811575703, 0.0388128014, 0.03952528104, 0.0402534682, 0.04099763868, 0.04175807192, 0.04253505102, 0.04332886273, 0.04413979753, 0.04496814965, 0.04581421707, 0.0466783016, 0.04756070888, 0.04846174843, 0.04938173367, 0.05032098195, 0.05127981461, 0.05225855696, 0.0532575384, 0.05427709234, 0.05531755633, 0.05637927205, 0.05746258534, 0.05856784626, 0.05969540911, 0.06084563243, 0.0620188791, 0.06321551633, 0.0644359157, 0.06568045321, 0.06694950929, 0.06824346887, 0.06956272138, 0.07090766079, 0.07227868569, 0.07367619924, 0.07510060931, 0.07655232841, 0.07803177383, 0.07953936757, 0.08107553647, 0.0826407122, 0.08423533127, 0.08585983514, 0.08751467019, 0.0892002878, 0.09091714434, 0.09266570128, 0.09444642514, 0.0962597876, 0.09810626549, 0.09998634086, 0.101900501, 0.1038492385, 0.1058330511, 0.1078524423, 0.1099079206, 0.112])
-    fig, ax = plt.subplots(figsize=(3.5, 2.35))
+    fig, ax = plt.subplots(figsize=(3.7, 2.45))
     ax.plot(cov * 100, risk * 100, color=C['memory'], lw=3)
     ax.set_xlim(30, 102)
     ax.set_ylim(0, 12.8)
@@ -344,10 +346,16 @@ def riskcov(path, k):
     if k >= 2:
         x, y = (90.0, 6.5)
         ax.plot([x], [y], 'o', ms=11, color=C['danger'], zorder=5)
-        ax.annotate('90% answered,\n6.5% error', (x, y), xytext=(-14, 4), textcoords='offset points', ha='right', fontsize=11.5, fontweight='bold', color=C['danger'])
+        ax.annotate('90% answered,\n6.5% error', (x, y), xytext=(-10, 4), textcoords='offset points', ha='right', fontsize=11, fontweight='bold', color=C['danger'])
+        ax.axvspan(90, 100, color=C['danger_l'], alpha=0.55, zorder=0)
+        ax.text(95, 1.3, '10%\nrouted', ha='center', va='bottom', fontsize=10, fontweight='bold', color=C['danger'])
+    if k >= 3:
+        from matplotlib.patches import FancyBboxPatch
+        ax.add_patch(FancyBboxPatch((32.5, 2.75), 37.0, 3.25, boxstyle='round,pad=0.2,rounding_size=0.6', fc=C['danger_l'], ec=C['danger'], lw=1.6, zorder=4))
+        ax.text(51.0, 4.38, '1,000 req/s routed\nCap < 1,000/s:\nqueue & SLO fail', ha='center', va='center', fontsize=9.8, fontweight='bold', color=C['danger'], zorder=5)
     ax.text(32, 12.3, 'illustrative', fontsize=10.5, color=C['neutral'], va='top')
     sp.save(fig, path)
-for k in (1, 2):
+for k in (1, 2, 3):
     riskcov(out / f'riskcov_step{k}.svg', k)
 
 def conformal(path):
@@ -472,7 +480,25 @@ def robustbench(path, k):
 for k in (1, 2, 3):
     robustbench(out / f'robustbench_step{k}.svg', k)
 sp.hbars(out / 'certified.svg', [('Certified radius', 1.545116153, 'data', '1.5'), ('8/255 box corner', 1.738843164, 'danger', '1.74')], '', log=False, size=(3.4, 1.25), xlabel='Euclidean length')
-sp.hbars(out / 'badnets.svg', [('Honest model, clean signs', 90.0, 'neutral', '90.0% correct'), ('Backdoored, clean signs', 89.3, 'memory', '89.3% correct'), ('Backdoored, sticker on stop', 90.3, 'danger', '90.3% speed limit')], '', log=False, size=(5.4, 1.6), xlabel='Percent (BadNets, Table 4)')
+def badnets(path, k):
+    rows = [('Honest, clean signs', 90.0, 'neutral', '90.0% correct'), ('Backdoored, clean signs', 89.3, 'memory', '89.3% correct'), ('Backdoored, sticker on stop', 90.3, 'danger', '90.3% speed limit')]
+    fig, ax = plt.subplots(figsize=(4.6, 1.85))
+    for i, (lab, v, ck, txt) in enumerate(rows):
+        y = 2 - i
+        shown = i < 2 or k >= 2
+        ax.barh(y, v, color=C[ck], height=0.62, alpha=1.0 if shown else 0.0)
+        ax.text(-2, y, lab, ha='right', va='center', fontsize=11.5, fontweight='bold', color=C['text'])
+        ax.text(3, y, txt, va='center', fontsize=11.5, fontweight='bold', color='white', alpha=1.0 if shown else 0.0)
+        if i == 2 and k < 2:
+            ax.text(3, y, '???', va='center', fontsize=13.5, fontweight='bold', color=C['danger'])
+    ax.set_xlim(0, 102)
+    ax.set_ylim(-0.5, 2.5)
+    ax.set_yticks([])
+    ax.spines['left'].set_visible(False)
+    ax.set_xlabel('Percent (BadNets, Table 4)')
+    sp.save(fig, path)
+for k in (1, 2):
+    badnets(out / f'badnets_step{k}.svg', k)
 
 def layers(path, k):
     stages = [('Ingress', 'source identity,', 'least privilege', 'trusted source', 'turns bad', V['blue'], V['blue_l']), ('Sanitize', 'outliers, clusters,', 'spectral filters', 'clean-label poison', 'is not an outlier', V['violet'], V['violet_l']), ('Robust training', 'Huber loss,', 'robust aggregation', 'bounds a residual,', 'not an update', V['amber'], V['amber_l']), ('Release checks', 'triggers, canaries,', 'target slices', 'a trigger nobody', 'tested', V['green'], V['green_l'])]

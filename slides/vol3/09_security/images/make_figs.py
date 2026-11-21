@@ -512,10 +512,35 @@ def thumbs():
         s.arrow(bx, by, x, y, col, sw=3)
     s.add(f'<circle cx="{bx:.1f}" cy="{by:.1f}" r="6" fill="{INK}"/>')
     s.save('thumb_dojo')
+def deputy():
+    """Confused deputy: ambient authority aimed by untrusted input."""
+    for k in (1, 2):
+        s = Svg(440, 380)
+        if k == 1:
+            s.box(65, 14, 310, 68, 'struct', 'Task request', 'benign goal', fs=22, sfs=20)
+            s.arrow(220, 82, 220, 126, 'gray')
+        else:
+            s.box(65, 14, 310, 68, 'fault', 'Untrusted README', 'aims the deputy', fs=22, sfs=20)
+            s.arrow(220, 82, 220, 126, 'red')
+        s.box(40, 130, 360, 84, 'sys', 'Runtime (deputy)', 'holds search + fixture access', fs=22, sfs=20)
+        if k == 1:
+            s.arrow(130, 214, 115, 258, 'green')
+            s.arrow(310, 214, 325, 258, 'amber')
+            s.box(20, 262, 190, 66, 'memory', 'Private fixture', 'local test only', fs=20, sfs=19)
+            s.box(230, 262, 190, 66, 'tool', 'Registry', 'allowed endpoint', fs=20, sfs=19)
+            s.text(220, 362, 'Both grants are legitimate', 21, ROLE['sys'][2], weight='bold')
+        else:
+            s.arrow(220, 214, 220, 256, 'red', sw=3.5)
+            s.box(30, 260, 380, 66, 'fault', 'Fixture sent to registry', 'allowed tool, leaked data', fs=21, sfs=20)
+            s.rect(20, 336, 400, 38, 'sys', rx=6)
+            s.text(220, 362, 'Fix: check data & recipient', 21, ROLE['sys'][2], weight='bold')
+        s.save(f'deputy_step{k}')
+
 if __name__ == '__main__':
     echo()
     seq()
     exposure_plot()
+    deputy()
     checks()
     approval()
     reader()

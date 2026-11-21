@@ -219,21 +219,23 @@ def context_memory(step):
     ax.grid(color=C['grid'], lw=0.6)
     save(fig, out / f'context_memory_step{step}.svg', dict(left=0.14, right=0.86, bottom=0.21, top=0.96))
 
-def kv_per_token():
-    rows = [('GPT-2 XL (1.5B)', 307.2, 'neutral', '307 KB: 25 own heads', None), ('Llama 2 7B', 524.288, 'danger', '524 KB: 32 own heads', None), ('Llama 3.1 8B', 131.072, 'memory', '131 KB: 8 shared', None), ('Llama 2 70B', 327.68, 'memory', '328 KB: 8 shared', 2621.44), ('PaLM 540B', 120.832, 'memory', f'121 KB: {1} shared', None)]
+def kv_per_token(step):
+    rows = [('GPT-2 XL (1.5B)', 307.2, 'neutral', '307 KB: 25 own heads', None), ('Llama 2 7B', 524.288, 'danger', '524 KB: 32 own heads', None), ('Llama 3.1 8B', 131.072, 'memory', '131 KB: 8 shared (GQA)', None), ('Llama 2 70B', 327.68, 'memory', '328 KB (GQA)', 2621.44), ('PaLM 540B', 120.832, 'memory', '121 KB: 1 shared (MQA)', None)]
     fig, ax = plt.subplots(figsize=(5.8, 2.45))
     n = len(rows)
     for i, (label, v, ck, txt, ghost) in enumerate(rows):
         y = n - 1 - i
+        shown = i < 2 or step >= 2
+        a = 1.0 if shown else 0.0
         if ghost:
-            ax.barh(y, ghost - 30, left=30, color='white', edgecolor=C['danger'], ls='--', lw=1.4, height=0.62)
-            ax.text(ghost * 1.1, y, '2.6 MB\nunshared', va='center', fontsize=10.5, color=C['danger'], fontweight='bold', linespacing=1.0)
-        ax.barh(y, v - 30, left=30, color=C[ck], height=0.62)
-        ax.text(27, y, label, ha='right', va='center', fontsize=12, fontweight='bold', color=C['text'])
+            ax.barh(y, ghost - 30, left=30, color='white', edgecolor=C['danger'], ls='--', lw=1.4, height=0.62, alpha=a)
+            ax.text(ghost * 1.1, y, '2.6 MB\nunshared', va='center', fontsize=10.5, color=C['danger'], fontweight='bold', linespacing=1.0, alpha=a)
+        ax.barh(y, v - 30, left=30, color=C[ck], height=0.62, alpha=a)
+        ax.text(27, y, label, ha='right', va='center', fontsize=12, fontweight='bold', color=C['text'] if shown else 'white')
         if ghost:
-            ax.text(36, y, txt, va='center', fontsize=11, fontweight='bold', color='white')
+            ax.text(36, y, txt, va='center', fontsize=10.5, fontweight='bold', color='white', alpha=a)
         else:
-            ax.text(v * 1.1, y, txt, va='center', fontsize=11, fontweight='bold', color=C[ck])
+            ax.text(v * 1.1, y, txt, va='center', fontsize=11, fontweight='bold', color=C[ck], alpha=a)
     ax.set_xscale('log')
     ax.set_xlim(30, 9000)
     ax.set_ylim(-0.6, n - 0.4)
@@ -245,7 +247,7 @@ def kv_per_token():
     ax.set_xlabel('KV cache per token, FP16 (log scale)')
     ax.grid(axis='x', color=C['grid'], lw=0.6)
     ax.set_axisbelow(True)
-    save(fig, out / 'kv_per_token.svg', dict(left=0.27, right=0.98, bottom=0.2, top=0.98))
+    save(fig, out / f'kv_per_token_step{step}.svg', dict(left=0.27, right=0.98, bottom=0.2, top=0.98))
 
 def recsys_rate():
     hbm, pcie = (251652644.2, 4807692.308)
@@ -390,7 +392,8 @@ quadratic()
 decode_ridge()
 for k in (1, 2, 3):
     context_memory(k)
-kv_per_token()
+for k in (1, 2):
+    kv_per_token(k)
 recsys_rate()
 capacity()
 for k in (1, 2, 3):

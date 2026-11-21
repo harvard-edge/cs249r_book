@@ -279,7 +279,7 @@ def depth_width():
     ad.text(30, md[-1] * 0.2, 'saved\nactivations', color=K['compute'], fontsize=10.5, fontweight='bold', ha='right', va='bottom')
     sp.save(fig, out / 'depth_width.svg')
 
-def mnist_roofline():
+def mnist_roofline(step):
     tf = lambda q: q.to('Tflop/s').magnitude
     ai = np.logspace(-1.8, 3, 400)
     fig, ax = plt.subplots(figsize=(5.5, 2.3))
@@ -290,7 +290,10 @@ def mnist_roofline():
         bw = {'host': 0.05, 'accelerator': 3.35}[key]
         ax.plot(ai, np.minimum(peak, bw * ai), color=col, lw=2.5, ls=ls)
         ax.text(900, peak * 1.4, name, color=col, fontsize=11, fontweight='bold', ha='right', va='bottom')
-        for lab, x, y in (('batch 1', i1, tf({'host': Q_(24733638440.0, 'flop / s'), 'accelerator': Q_(1657153775000.0, 'flop / s')}[key])), ('batch 32', i32, tf({'host': Q_(594966073300.0, 'flop / s'), 'accelerator': Q_(39862726910000.0, 'flop / s')}[key]))):
+        pts = [('batch 1', i1, tf({'host': Q_(24733638440.0, 'flop / s'), 'accelerator': Q_(1657153775000.0, 'flop / s')}[key]))]
+        if step >= 2:
+            pts.append(('batch 32', i32, tf({'host': Q_(594966073300.0, 'flop / s'), 'accelerator': Q_(39862726910000.0, 'flop / s')}[key])))
+        for lab, x, y in pts:
             ax.plot(x, y, 'o', color=K['danger'], ms=8, zorder=4)
             rate_lbl = f'{y * 1000:,.0f} GFLOP/s' if y < 1 else f'{y:.1f} TFLOP/s' if y < 10 else f'{y:,.0f} TFLOP/s'
             up = key == 'accelerator'
@@ -306,7 +309,127 @@ def mnist_roofline():
     ax.set_ylabel('FP32 rate (TFLOP/s)')
     ax.grid(color=K['grid'], lw=0.5)
     ax.set_axisbelow(True)
-    sp.save(fig, out / 'mnist_roofline.svg')
+    sp.save(fig, out / f'mnist_roofline_step{step}.svg')
+
+def gd_steps():
+    # Matches vol1:fig-gradient-descent-steps: L(w) = (w - 2)^2, w0 = -1.2, 6 updates
+    w_min = 2.0
+    w0 = -1.2
+    ws = np.linspace(-1.8, 5.8, 300)
+    ls = (ws - w_min) ** 2
+    configs = [('η = 0.30 (smooth descent)', 0.3, K['data']), ('η = 0.97 (overshoots every step)', 0.97, K['danger'])]
+    traces = []
+    for title, lr, col in configs:
+        pts = [(w0, (w0 - w_min) ** 2)]
+        w = w0
+        for _ in range(6):
+            g = 2.0 * (w - w_min)
+            w = w - lr * g
+            pts.append((w, (w - w_min) ** 2))
+        traces.append((title, lr, col, pts))
+    step_counts = {1: 1, 2: 3, 3: 6}
+    for step, n_upd in step_counts.items():
+        fig, axes = plt.subplots(1, 2, figsize=(6.0, 2.35), sharey=True)
+        for ax, (title, lr, col, pts) in zip(axes, traces):
+            ax.plot(ws, ls, color='#BBBBBB', lw=2.2, zorder=1)
+            ax.axvline(w_min, color=K['neutral'], lw=1.0, ls=':', zorder=1)
+            xs = [p[0] for p in pts[:n_upd + 1]]
+            ys = [p[1] for p in pts[:n_upd + 1]]
+            for j in range(len(xs) - 1):
+                ax.annotate('', xy=(xs[j + 1], ys[j + 1]), xytext=(xs[j], ys[j]),
+                            arrowprops=dict(arrowstyle='-|>,head_width=0.22,head_length=0.35', color=col, lw=1.8), zorder=3)
+            ax.scatter(xs[:-1], ys[:-1], s=32, color='white', edgecolors=col, lw=1.6, zorder=4)
+            ax.scatter([xs[-1]], [ys[-1]], s=65, color=col, zorder=5)
+            ax.text(w_min + 0.18, 0.45, 'min (w=2)', ha='left', va='bottom', fontsize=9.5, color=K['neutral'])
+            ax.text(0.50, 0.96, f'After {n_upd} {"step" if n_upd == 1 else "steps"}: w = {xs[-1]:.2f}, L = {ys[-1]:.3f}' if ys[-1] < 0.01 else f'After {n_upd} {"step" if n_upd == 1 else "steps"}: w = {xs[-1]:.2f}, L = {ys[-1]:.2f}',
+                    transform=ax.transAxes, ha='center', va='top', fontsize=10.5, fontweight='bold', color=col,
+                    bbox=dict(facecolor='white', alpha=0.95, edgecolor=col, lw=0.9, pad=2.5))
+            ax.set_title(title, fontsize=11.5, fontweight='bold', color=col)
+            ax.set_xlim(-1.8, 5.8)
+            ax.set_ylim(-0.4, 14.4)
+            ax.set_yticks([0, 2.5, 5.0, 7.5, 10.0])
+            ax.set_xlabel('Weight w')
+            ax.grid(axis='y', color=K['grid'], lw=0.5)
+            ax.set_axisbelow(True)
+        axes[0].set_ylabel('Loss L(w) = (w − 2)²')
+        fig.subplots_adjust(wspace=0.12)
+        sp.save(fig, out / f'gd_steps_step{step}.svg')
+
+def step_memory_sawtooth():
+    # Matches vol1:fig-training-step-memory (784-128-64-10, FP32, Adam, decimal KB)
+    dims = [784, 128, 64, 10]
+    layer_params = [dims[k] * dims[k + 1] + dims[k + 1] for k in range(3)]
+    param_kb = sum(layer_params) * 4 / 1000.0
+    adam_kb = 2 * param_kb
+    events = ['load', 'F1', 'F2', 'F3', 'B3', 'B2', 'B1', 'upd']
+
+    def history(batch):
+        live = [0]
+        grads = []
+        out_h = []
+        def rec():
+            act = sum(batch * dims[k] * 4 for k in live) / 1000.0
+            grd = sum(layer_params[k] * 4 for k in grads) / 1000.0
+            out_h.append((param_kb, adam_kb, grd, act))
+        rec()
+        for l in (1, 2, 3):
+            live.append(l)
+            rec()
+        for l in (2, 1, 0):
+            live.pop()
+            grads.append(l)
+            rec()
+        live = []
+        rec()
+        return out_h
+
+    h32, h1024 = history(32), history(1024)
+    x = np.arange(len(events))
+    tot32 = [sum(t) for t in h32]
+    tot1024 = [sum(t) for t in h1024]
+    pk32_i, pk32_v = int(np.argmax(tot32)), max(tot32)
+    pk1024_i, pk1024_v = int(np.argmax(tot1024)), max(tot1024)
+
+    for step in (1, 2, 3):
+        fig, axes = plt.subplots(1, 2, figsize=(6.1, 2.35), sharey=True)
+        for p_idx, (ax, title, hist, pk_i, pk_v) in enumerate((
+                (axes[0], 'Batch 32', h32, pk32_i, pk32_v),
+                (axes[1], 'Batch 1,024', h1024, pk1024_i, pk1024_v))):
+            show = p_idx == 0 or step >= 2
+            ax.set_title(title, fontsize=12, fontweight='bold', color=K['text'])
+            if show:
+                w_arr = np.array([t[0] for t in hist])
+                ad_arr = np.array([t[1] for t in hist])
+                gr_arr = np.array([t[2] for t in hist])
+                ac_arr = np.array([t[3] for t in hist])
+                ax.bar(x, w_arr, width=0.72, color=K['memory'], label='Weights')
+                ax.bar(x, ad_arr, bottom=w_arr, width=0.72, color=K['network'], label='Adam')
+                ax.bar(x, gr_arr, bottom=w_arr + ad_arr, width=0.72, color=K['danger'], label='Gradients')
+                ax.bar(x, ac_arr, bottom=w_arr + ad_arr + gr_arr, width=0.72, color=K['data'], label='Activations')
+                if step >= 3:
+                    lbl = f'Peak at {events[pk_i]}:\n{pk_v:,.0f} KB'
+                    if p_idx == 0:
+                        ax.annotate(lbl, xy=(pk_i, pk_v), xytext=(pk_i - 1.9, pk_v + 950),
+                                    ha='center', va='bottom', fontsize=10.5, fontweight='bold', color=K['danger'],
+                                    arrowprops=dict(arrowstyle='-|>', color=K['danger'], lw=1.4))
+                    else:
+                        ax.annotate(lbl, xy=(pk_i, pk_v), xytext=(pk_i + 2.0, pk_v + 420),
+                                    ha='center', va='bottom', fontsize=10.5, fontweight='bold', color=K['data'],
+                                    arrowprops=dict(arrowstyle='-|>', color=K['data'], lw=1.4))
+            ax.set_xticks(x)
+            ax.set_xticklabels(events, fontsize=10)
+            ax.set_ylim(0, 7100)
+            ax.set_yticks([0, 1500, 3000, 4500, 6000])
+            ax.set_yticklabels(['0', '1.5 MB', '3.0 MB', '4.5 MB', '6.0 MB'])
+            ax.grid(axis='y', color=K['grid'], lw=0.5)
+            ax.set_axisbelow(True)
+        axes[0].set_ylabel('Live memory (shared scale)')
+        # Inline vector legend across top of panel 0 with generous spacing
+        for x0, nm, col in ((0.01, 'Weights', K['memory']), (0.29, 'Adam', K['network']), (0.52, 'Grads', K['danger']), (0.77, 'Acts', K['data'])):
+            axes[0].add_patch(plt.Rectangle((x0, 0.895), 0.032, 0.045, transform=axes[0].transAxes, facecolor=col, edgecolor='none', clip_on=False))
+            axes[0].text(x0 + 0.042, 0.918, nm, transform=axes[0].transAxes, fontsize=9.5, fontweight='bold', color=col, va='center')
+        fig.subplots_adjust(wspace=0.08)
+        sp.save(fig, out / f'step_memory_sawtooth_step{step}.svg')
 
 def model_bytes():
     by = lambda q: q.to('byte').magnitude
@@ -337,7 +460,10 @@ def model_bytes():
     sp.save(fig, out / 'model_bytes.svg')
 param_growth()
 depth_width()
-mnist_roofline()
+for k in (1, 2):
+    mnist_roofline(k)
+gd_steps()
+step_memory_sawtooth()
 model_bytes()
 
 def mnist_digit():

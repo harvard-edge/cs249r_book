@@ -333,7 +333,7 @@ def lease(step):
     ax.barh(yP, infer, left=renew, color=BLUE, height=0.45)
     for x in (first, last):
         ax.plot([x], [yA], marker='v', ms=9, color=GREEN_D)
-    ax.text(last, yA + 0.32, 'last admission', fontsize=FS_S, color=GREEN_D, ha='center')
+    ax.text(last - 3, yA + 0.32, 'last admission', fontsize=FS_S, color=GREEN_D, ha='right')
     ax.add_patch(Rectangle((first, yL - 0.22), lease_ms, 0.44, fc='none', ec=GREEN, ls='--', lw=1.2))
     if step == 1:
         ax.barh(yD, stall, left=0, color=SLATE, height=0.45)
@@ -341,6 +341,7 @@ def lease(step):
     if step >= 2:
         ax.add_patch(Rectangle((stall, yP - 0.22), x_end - stall, 0.44, fc=RED_L, ec=RED, hatch='///', lw=1))
         ax.text(stall + 25, yP + 0.33, 'stalled', fontsize=FS_S, color=RED_D, ha='center', fontweight='bold')
+        ax.text(122, yA - 0.04, 'seq=10 unchanged\nlease: 60 to 0 ms', fontsize=FS_S - 1, color=SLATE, ha='center', va='center', bbox=dict(fc='#F1F5F9', ec=SLATE, lw=0.8, pad=2.0))
         ax.barh(yL, lease_ms, left=last, color=GREEN, height=0.44)
         ax.text(last + lease_ms / 2, yL, 'lease 60 ms', color='white', fontsize=FS, fontweight='bold', ha='center', va='center')
         ax.barh(yD, expiry, left=0, color=SLATE, height=0.45)

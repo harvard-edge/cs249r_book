@@ -291,41 +291,46 @@ def handshake():
     x0, x1, tmax = (150, 880, 34.0)
     X = lambda ms: x0 + (x1 - x0) * ms / tmax
     lanes = {'Console': 66, 'MCU': 166, 'Drives': 266}
-    b = []
-    for name, y in lanes.items():
-        b.append(text(x0 - 12, y + 34, name, 23, TXT, anchor='end', weight='bold'))
-        b.append(line(x0, y + 52, x1, y + 52, LGRAY, 1.5))
     t = 0.0
     starts = {}
     for k, d in {'Request': 0.01, 'Acknowledge': 0.005, 'Commit': 0.001, 'Confirm': 0.015}.items():
         starts[k] = (t, t + d * 1000.0)
         t += d * 1000.0
     r0, r1 = starts['Request']
-    b.append(box(X(r0), 72, X(r1) - X(r0), 40, BLUE_F, BLUE, rx=3))
-    b.append(text((X(r0) + X(r1)) / 2, 100, 'Request 10', 22, '#1D4ED8', weight='bold'))
-    b.append(arrow(X(r1) - 4, 114, X(r1) + 6, 172, BLUE, marker='ahb'))
     a0, a1 = starts['Acknowledge']
-    b.append(box(X(a0), 174, X(a1) - X(a0), 40, GREEN_F, GREEN, rx=3))
-    b.append(text((X(a0) + X(a1)) / 2, 240, 'Ack 5', 22, '#047857', weight='bold'))
     c0, c1 = starts['Commit']
-    b.append(box(X(c0), 168, X(c1) - X(c0) + 2, 52, RED_F, RED, rx=2))
-    b.append(line(X(c0), 44, X(c0), 326, RED, 2.5, dash='6,4'))
-    b.append(text(X(c0), 36, 'Commit on one 1 ms tick changes the owner', 22, RED, weight='bold'))
     f0, f1 = starts['Confirm']
-    b.append(box(X(f0) + 2, 174, X(f1) - X(f0) - 2, 40, GREEN_F, GREEN, rx=3))
-    b.append(text((X(f0) + X(f1)) / 2, 202, 'Confirm 15', 22, '#047857', weight='bold'))
-    b.append(arrow(X(f1) - 6, 172, X(f1) + 4, 114, GREEN, marker='ahg'))
-    b.append(text(X(f1) - 8, 100, 'if lost, alarm only', 22, RED, anchor='end', italic=True))
-    b.append(box(X(0), 274, X(c0) - X(0), 40, BLUE_F, NAVY, rx=3))
-    b.append(text((X(0) + X(c0)) / 2, 302, 'policy setpoints', 22, NAVY))
-    b.append(box(X(c1), 274, X(tmax) - X(c1), 40, GREEN_F, GREEN, rx=3))
-    b.append(text((X(c1) + X(tmax)) / 2, 302, 'enforcer blend', 22, '#047857'))
     ay = 344
-    b.append(line(x0, ay, x1, ay, SLATE, 2))
-    for ms, lab in [(0, '0'), (10.0, '10'), (15.0, '15'), (31.0, '31 ms')]:
-        b.append(line(X(ms), ay, X(ms), ay + 8, SLATE, 2))
-        b.append(text(X(ms), ay + 32, lab, 22, SLATE))
-    svg('handshake', 900, 385, b)
+    for step in (1, 2, 3):
+        b = []
+        for name, y in lanes.items():
+            b.append(text(x0 - 12, y + 34, name, 23, TXT, anchor='end', weight='bold'))
+            b.append(line(x0, y + 52, x1, y + 52, LGRAY, 1.5))
+        b.append(box(X(r0), 72, X(r1) - X(r0), 40, BLUE_F, BLUE, rx=3))
+        b.append(text((X(r0) + X(r1)) / 2, 100, 'Request 10', 22, '#1D4ED8', weight='bold'))
+        b.append(arrow(X(r1) - 4, 114, X(r1) + 6, 172, BLUE, marker='ahb'))
+        b.append(box(X(a0), 174, X(a1) - X(a0), 40, GREEN_F, GREEN, rx=3))
+        b.append(text((X(a0) + X(a1)) / 2, 240, 'Ack 5', 22, '#047857', weight='bold'))
+        b.append(box(X(0), 274, X(c0) - X(0), 40, BLUE_F, NAVY, rx=3))
+        b.append(text((X(0) + X(c0)) / 2, 302, 'policy setpoints', 22, NAVY))
+        if step == 1:
+            b.append(text(X(c0) + 12, 36, 'next 1 ms tick: atomic owner switch', 22, SLATE, anchor='start', italic=True))
+        if step >= 2:
+            b.append(box(X(c0), 168, X(c1) - X(c0) + 2, 52, RED_F, RED, rx=2))
+            b.append(line(X(c0), 44, X(c0), 326, RED, 2.5, dash='6,4'))
+            b.append(text(X(c0), 36, 'Commit on one 1 ms tick changes the owner', 22, RED, weight='bold'))
+            b.append(box(X(c1), 274, X(tmax) - X(c1), 40, GREEN_F, GREEN, rx=3))
+            b.append(text((X(c1) + X(tmax)) / 2, 302, 'enforcer blend', 22, '#047857'))
+        if step >= 3:
+            b.append(box(X(f0) + 2, 174, X(f1) - X(f0) - 2, 40, GREEN_F, GREEN, rx=3))
+            b.append(text((X(f0) + X(f1)) / 2, 202, 'Confirm 15', 22, '#047857', weight='bold'))
+            b.append(arrow(X(f1) - 6, 172, X(f1) + 4, 114, GREEN, marker='ahg'))
+            b.append(text(X(f1) - 8, 100, 'if lost, alarm only', 22, RED, anchor='end', italic=True))
+        b.append(line(x0, ay, x1, ay, SLATE, 2))
+        for ms, lab in [(0, '0'), (10.0, '10'), (15.0, '15'), (31.0, '31 ms')]:
+            b.append(line(X(ms), ay, X(ms), ay + 8, SLATE, 2))
+            b.append(text(X(ms), ay + 32, lab, 22, SLATE))
+        svg(f'handshake_step{step}', 900, 385, b)
 
 def quintic():
     W = 0.52734375

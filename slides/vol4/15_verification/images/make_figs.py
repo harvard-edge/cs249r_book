@@ -135,34 +135,41 @@ def f1trace():
     lease_ms, cmd_ms = (0.06 * 1000.0, (0.06 + 0.001) * 1000.0)
     frame_ms = (0.06 + 0.001 + 0.001) * 1000.0
     late_ms = 0.112 * 1000.0
-    for step in (1, 2):
+    for step in (1, 2, 3):
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(5.8, 2.75), gridspec_kw=dict(height_ratios=[1.25, 1], hspace=0.55))
         chans = [('lease', 0, lease_ms, TEAL), ('stop cmd', cmd_ms, 200, GREEN), ('drive frame', frame_ms, 200, GREEN), ('decel. onset', on * 1000.0, 200, GREEN)]
         for i, (lab, t1, t2, col) in enumerate(chans):
             y = 3 - i
             if lab == 'lease':
                 ax1.plot([0, lease_ms, lease_ms, 130], [y + 0.35, y + 0.35, y, y], color=col, lw=2.5)
+            elif lab == 'decel. onset' and step == 1:
+                ax1.plot([0, 130], [y, y], color=GRAY, lw=1.6, ls=':')
+                ax1.text(on * 1000.0 + 3, y + 0.32, 'measured onset <= 82 ms?', ha='left', va='center', fontsize=10.5, color=SLATE, fontweight='bold', bbox=dict(fc='white', ec='none', pad=0.8))
             else:
                 ax1.plot([0, t1, t1, 130], [y, y, y + 0.35, y + 0.35], color=col, lw=2.5)
             ax1.text(-3, y + 0.15, lab, ha='right', va='center', fontsize=11, color=TEXT)
         ax1.axvspan(frame_ms, on * 1000.0, color=GREEN_L, alpha=0.8, lw=0)
         ax1.axvline(on * 1000.0, color=GREEN, lw=1.2, ls=':')
         ax1.text(on * 1000.0 + 2, 4.0, '82 ms bound', ha='left', va='bottom', color=GREEN, fontsize=11, fontweight='bold')
-        if step >= 2:
+        if step >= 3:
             ax1.plot([0, late_ms, late_ms, 130], [-0.05, -0.05, 0.3, 0.3], color=RED, lw=2.5, ls='--')
             ax1.annotate('', xy=(on * 1000.0, -0.5), xytext=(late_ms, -0.5), arrowprops=dict(arrowstyle='<->', color=RED, lw=1.6))
-            ax1.text(late_ms + 2, -0.5, '-30 ms', ha='left', va='center', color=RED, fontsize=11, fontweight='bold')
+            ax1.text(late_ms + 2, -0.5, '-30 ms (FAIL)', ha='left', va='center', color=RED, fontsize=11, fontweight='bold')
         ax1.set_xlim(0, 130)
         ax1.set_ylim(-0.85, 4.5)
         ax1.set_yticks([])
         ax1.spines['left'].set_visible(False)
         ax1.set_xlabel('Time after the last valid renewal (ms)', fontsize=11)
         t = np.linspace(0, 1.2, 600)
-        ax2.plot(t * 1000.0, speed_profile(on, t), color=GREEN, lw=2.5)
-        ax2.text(1195, 1.28, 'on time: 711.9 mm, rest at 1,013 ms', fontsize=11, color=GREEN, fontweight='bold', ha='right', va='center')
+        if step == 1:
+            ax2.plot([0, 82], [1.3, 1.3], color=SLATE, lw=2.4)
+            ax2.text(620, 0.72, 'precommitted oracle: onset <= 82 ms AND travel <= 751.9 mm', fontsize=10.5, color=SLATE, fontweight='bold', ha='center', va='center', bbox=dict(boxstyle='round,pad=0.3', fc='#F8FAFC', ec=SLATE_L, lw=1.2))
         if step >= 2:
+            ax2.plot(t * 1000.0, speed_profile(on, t), color=GREEN, lw=2.5)
+            ax2.text(1195, 1.28, 'on time: 711.9 mm, rest at 1,013 ms (PASS)', fontsize=10.5, color=GREEN, fontweight='bold', ha='right', va='center')
+        if step >= 3:
             ax2.plot(t * 1000.0, speed_profile(0.112, t), color=RED, lw=2.5, ls='--')
-            ax2.text(1195, 1.0, 'late: 750.9 mm, margin +1 mm', fontsize=11, color=RED, fontweight='bold', ha='right', va='center')
+            ax2.text(1195, 0.96, 'late: 750.9 mm (+1 mm, FAIL)', fontsize=10.5, color=RED, fontweight='bold', ha='right', va='center')
         ax2.set_xlim(0, 1200)
         ax2.set_ylim(0, 1.45)
         ax2.set_ylabel('m/s', fontsize=11)

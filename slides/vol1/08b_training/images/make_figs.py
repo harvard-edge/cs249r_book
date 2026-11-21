@@ -304,16 +304,19 @@ def kit_body(name):
         keep.append(line)
     return '<g transform="translate(-320,0)">\n' + '\n'.join(keep) + '\n</g>'
 
+import html
+
 def text(x, y, s, color, size=20, weight=700, anchor='start'):
-    return f'<text x="{x}" y="{y}" {FONT} font-size="{size}" font-weight="{weight}" fill="{color}" text-anchor="{anchor}" dominant-baseline="central">{s}</text>'
-for k in (1, 2, 3):
-    body = kit_body('machine_hl_hbm' if k != 2 else 'machine_hl_sram')
+    return f'<text x="{x}" y="{y}" {FONT} font-size="{size}" font-weight="{weight}" fill="{color}" text-anchor="{anchor}" dominant-baseline="central">{html.escape(str(s), quote=False)}</text>'
+
+for k in (1, 2, 3, 4):
+    body = kit_body('machine_hl_sram' if k in (2, 4) else 'machine_hl_hbm')
     extra = []
-    blue, red, gray = (C['memory'], '#A51C30', '#888888')
+    blue, red, green, gray = (C['memory'], '#A51C30', C['data'], '#888888')
     extra.append(text(575, 368, 'HBM', blue, 27))
     extra.append(text(575, 402, '80 GB, 3.35 TB/s', blue, 25, 400))
     if k >= 2:
-        side = blue if k == 2 else gray
+        side = blue if k == 2 else (green if k == 4 else gray)
         extra.append(text(575, 50, 'On-chip SRAM', side, 27))
         extra.append(text(575, 84, '30 to 50 MB,', side, 25, 400))
         extra.append(text(575, 116, '15 to 20 TB/s', side, 25, 400))
@@ -333,6 +336,28 @@ for k in (1, 2, 3):
         extra.append(text(575, 234, '1 write S,  2 read S,', red, 25, 400))
         extra.append(text(575, 268, '3 write P,  4 read P', red, 25, 400))
         extra.append(text(10, 485, 'Scores only: d_head / 2 = 64 / 2 = 32 FLOP per byte; ridge 295', red, 23))
+    if k == 4:
+        # Step 4: FlashAttention tiled SRAM path (matches vol1:fig-training-attention-storage)
+        extra.append(f'<rect x="78" y="108" width="134" height="212" rx="10" fill="{C["data_l"]}" stroke="{green}" stroke-width="3"/>')
+        extra.append(text(145, 146, 'Tiles in', green, 23, 700, 'middle'))
+        extra.append(text(145, 178, 'SRAM:', green, 23, 700, 'middle'))
+        extra.append(text(145, 214, 'S, P stay', green, 22, 400, 'middle'))
+        extra.append(text(145, 246, 'on-chip', green, 22, 400, 'middle'))
+        extra.append(text(145, 286, 'm, l, O', green, 23, 700, 'middle'))
+        # 2 green crossing arrows + 2 dimmed crossed-out S/P labels to keep visual continuity >= step 3
+        for j, (xa, down, lbl) in enumerate([(295, False, 'Q,K,V'), (385, False, 'tiles'), (475, True, 'O, m, l')]):
+            y1, y2 = (318, 380) if down else (380, 318)
+            head = y2 - 10 if down else y2 + 10
+            extra.append(f'<line x1="{xa}" y1="{y1}" x2="{xa}" y2="{head}" stroke="{green}" stroke-width="5"/>')
+            tip = f'{xa - 11},{head} {xa + 11},{head} {xa},{y2 + 6}' if down else f'{xa - 11},{head} {xa + 11},{head} {xa},{y2 - 6}'
+            extra.append(f'<polygon points="{tip}" fill="{green}"/>')
+            extra.append(f'<circle cx="{xa}" cy="347" r="15" fill="white" stroke="{green}" stroke-width="2.5"/>')
+            extra.append(text(xa, 348, str(j + 1), green, 20, 700, 'middle'))
+        extra.append(f'<rect x="565" y="182" width="322" height="128" rx="8" fill="{C["data_l"]}" stroke="{green}" stroke-width="2.5"/>')
+        extra.append(text(580, 208, 'FlashAttention (tiled):', green, 24))
+        extra.append(text(580, 242, '1-2 stream Q, K, V tiles', green, 23, 400))
+        extra.append(text(580, 276, '3 write O + (m, l) only', green, 23, 400))
+        extra.append(text(10, 485, 'Tiled SRAM: S and P never cross HBM; online softmax stays on-chip', green, 23))
     svg = '<svg xmlns="http://www.w3.org/2000/svg" width="900" height="500" viewBox="0 0 900 500">\n<rect width="900" height="500" fill="white"/>\n' + body + '\n' + '\n'.join(extra) + '\n</svg>\n'
     (out / f'attention_io_step{k}.svg').write_text(svg)
 for k in (1, 2):
@@ -439,4 +464,214 @@ for k in (1, 2):
     sp.save(fig, out / f'sqrt_ckpt_step{k}.svg')
 krows = [('No recompute', 19.6, 'neutral', '19.6 ms'), ('Full recompute', 27.2, 'danger', '27.2 ms (+39%)'), ('Selective recompute', 20.9, 'data', '20.9 ms (+7%)')]
 sp.hbars(out / 'selective_recompute.svg', krows, 'ms', log=False, size=(5.8, 1.9), xlabel='One layer of a 22B GPT, forward + backward, A100 (ms)')
+
+# --- Pass 2 vector \mlsyssteps replacements for Explore animations + §8.7 sharding ---
+def _box(x, y, w, h, fc, ec, sw=2.4, rx=8, dash=''):
+    d = f' stroke-dasharray="{dash}"' if dash else ''
+    return f'<rect x="{x:.1f}" y="{y:.1f}" width="{w:.1f}" height="{h:.1f}" rx="{rx}" fill="{fc}" stroke="{ec}" stroke-width="{sw}"{d}/>'
+
+def _arr(x1, y1, x2, y2, col='#555555', sw=3.2):
+    ang = np.arctan2(y2 - y1, x2 - x1)
+    hl, hw = 13.0, 7.5
+    bx, by = x2 - hl * np.cos(ang), y2 - hl * np.sin(ang)
+    px, py = -np.sin(ang) * hw, np.cos(ang) * hw
+    return (f'<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{bx:.1f}" y2="{by:.1f}" stroke="{col}" stroke-width="{sw}"/>'
+            f'<polygon points="{x2:.1f},{y2:.1f} {bx+px:.1f},{by+py:.1f} {bx-px:.1f},{by-py:.1f}" fill="{col}"/>')
+
+def mixed_precision_steps():
+    """3-step vector loop matching vol1:fig-mixed-precision (§8.6.3)."""
+    W, H = 920, 360
+    for step in (1, 2, 3):
+        s = []
+        # Step 1: FP32 master -> Cast FP16 -> Forward FP16
+        s.append(_box(24, 24, 240, 108, C['memory_l'], C['memory'], 2.8))
+        s.append(text(144, 56, 'FP32 Master Weights', C['memory'], 22, 700, 'middle'))
+        s.append(text(144, 86, '4 B/param + Adam', C['text'], 20, 400, 'middle'))
+        s.append(text(144, 110, 'm, v (8 B, FP32)', C['text'], 20, 400, 'middle'))
+
+        s.append(_arr(268, 78, 336, 78, C['memory']))
+        s.append(_box(340, 24, 232, 108, C['data_l'], C['data'], 2.6))
+        s.append(text(456, 56, '1. Cast to FP16', C['data'], 22, 700, 'middle'))
+        s.append(text(456, 92, 'working weights (2 B)', C['text'], 20, 400, 'middle'))
+
+        s.append(_arr(576, 78, 644, 78, C['data']))
+        s.append(_box(648, 24, 248, 108, C['data_l'], C['data'], 2.6))
+        s.append(text(772, 56, '2. Forward (FP16)', C['data'], 22, 700, 'middle'))
+        s.append(text(772, 92, 'Tensor Cores; acts 2 B', C['text'], 20, 400, 'middle'))
+
+        # Step 2: Loss scale -> Backward -> Copy & Unscale
+        if step >= 2:
+            s.append(_arr(772, 136, 772, 174, C['compute']))
+            s.append(_box(648, 178, 248, 96, C['compute_l'], C['compute'], 2.6))
+            s.append(text(772, 208, '3. Scale Loss × S', C['compute'], 22, 700, 'middle'))
+            s.append(text(772, 242, 'shift small grads up', C['text'], 20, 400, 'middle'))
+
+            s.append(_arr(644, 226, 576, 226, C['compute']))
+            s.append(_box(340, 178, 232, 96, C['compute_l'], C['compute'], 2.6))
+            s.append(text(456, 208, '4. Backward (FP16)', C['compute'], 22, 700, 'middle'))
+            s.append(text(456, 242, 'scaled grads (2 B)', C['text'], 20, 400, 'middle'))
+
+            s.append(_arr(336, 226, 268, 226, C['compute']))
+            s.append(_box(24, 178, 240, 96, C['network_l'], C['network'], 2.6))
+            s.append(text(144, 208, '5. Copy & Unscale ÷ S', C['network'], 21, 700, 'middle'))
+            s.append(text(144, 242, 'FP32 grads; skip if Inf', C['text'], 20, 400, 'middle'))
+
+        # Step 3: Return arrow (Stage 6: Update FP32 Master) + summary banner
+        if step >= 3:
+            s.append(_arr(144, 174, 144, 136, C['memory'], 3.6))
+            s.append(text(162, 155, '6. Update', C['memory'], 20, 700, 'start'))
+            s.append(_box(24, 294, 872, 52, C['memory_l'], C['memory'], 2.2))
+            s.append(text(460, 320, 'Static state stays 16 B/param; BF16 drops stages 3 & 5 (keeps master).', C['memory'], 21, 700, 'middle'))
+
+        (out / f'mixed_precision_step{step}.svg').write_text(
+            f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" viewBox="0 0 {W} {H}">\n'
+            f'<rect width="{W}" height="{H}" fill="white"/>\n' + '\n'.join(s) + '\n</svg>\n'
+        )
+
+mixed_precision_steps()
+
+def grad_accum_steps():
+    """3-step vector diagram matching vol1:fig-grad-accumulation (§8.6.5)."""
+    W, H = 900, 315
+    for step in (1, 2, 3):
+        s = []
+        # Micro-batch 1 (always shown)
+        s.append(_box(22, 18, 208, 108, C['data_l'], C['data'], 2.4))
+        s.append(text(126, 46, 'Micro-batch 1 (b)', C['data'], 21, 700, 'middle'))
+        s.append(text(126, 76, 'fwd: alloc A1', C['text'], 20, 400, 'middle'))
+        s.append(text(126, 104, 'bwd: free A1, +g1', C['compute'], 20, 700, 'middle'))
+        s.append(_arr(126, 130, 126, 174, C['compute']))
+
+        # Persistent gradient accumulator bar
+        s.append(_box(22, 178, 650, 56, C['compute_l'], C['compute'], 2.6))
+        g_txt = 'Accumulated gradient buffer (persistent):  g = g1' if step == 1 else 'Accumulated gradient buffer (persistent):  g = g1 + g2 + g3'
+        s.append(text(347, 206, g_txt, C['compute'], 21, 700, 'middle'))
+
+        # Step 2: Micro-batches 2 and 3 reuse the same activation slot
+        if step >= 2:
+            for idx, (x0, a_lbl, g_lbl) in enumerate([(244, 'A2', 'g2'), (466, 'A3', 'g3')], 2):
+                s.append(_box(x0, 18, 208, 108, C['data_l'], C['data'], 2.4))
+                s.append(text(x0 + 104, 46, f'Micro-batch {idx} (b)', C['data'], 21, 700, 'middle'))
+                s.append(text(x0 + 104, 76, f'reuses slot: {a_lbl}', C['text'], 20, 400, 'middle'))
+                s.append(text(x0 + 104, 104, f'bwd: free {a_lbl}, +{g_lbl}', C['compute'], 20, 700, 'middle'))
+                s.append(_arr(x0 + 104, 130, x0 + 104, 174, C['compute']))
+            s.append(_box(722, 18, 160, 108, C['data_l'], C['data'], 2.4))
+            s.append(text(802, 46, 'Peak live', C['data'], 21, 700, 'middle'))
+            s.append(text(802, 76, '1 micro-batch', C['text'], 20, 700, 'middle'))
+            s.append(text(802, 104, '(b, not K·b)', C['data'], 20, 400, 'middle'))
+
+        # Step 3: One optimizer step after K micro-batches
+        if step >= 3:
+            s.append(_arr(676, 206, 718, 206, C['memory'], 3.5))
+            s.append(_box(722, 140, 160, 132, C['memory_l'], C['memory'], 2.8))
+            s.append(text(802, 172, '1 Update', C['memory'], 22, 700, 'middle'))
+            s.append(text(802, 206, 'g ÷ K', C['compute'], 22, 700, 'middle'))
+            s.append(text(802, 240, 'θ0 → θ1', C['text'], 21, 700, 'middle'))
+            s.append(_box(22, 254, 650, 46, C['memory_l'], C['memory'], 2.0))
+            s.append(text(347, 277, 'Same gradient as batch B = K·b; weights fixed until step K.', C['memory'], 21, 700, 'middle'))
+
+        (out / f'grad_accum_step{step}.svg').write_text(
+            f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" viewBox="0 0 {W} {H}">\n'
+            f'<rect width="{W}" height="{H}" fill="white"/>\n' + '\n'.join(s) + '\n</svg>\n'
+        )
+
+grad_accum_steps()
+
+def act_ckpt_steps():
+    """3-step vector diagram matching vol1:fig-activation-checkpointing (§8.6.5).
+    5 positions a0..a4: checkpoints saved at a0 & a3 (green), interior a1, a2, a4 dropped -> recomputed (orange)."""
+    W, H = 900, 355
+    xs = [190, 345, 500, 655, 810]
+    for step in (1, 2, 3):
+        s = []
+        # Top row: Forward pass
+        s.append(text(20, 74, 'Forward', C['text'], 23, 700, 'start'))
+        s.append(text(20, 102, 'pass', C['neutral'], 21, 400, 'start'))
+        for i in range(4):
+            s.append(_arr(xs[i] + 36, 84, xs[i + 1] - 36, 84, '#777777', 2.6))
+        for i, x in enumerate(xs):
+            kept = i in (0, 3)
+            fc = C['data_l'] if kept else '#F5F5F5'
+            ec = C['data'] if kept else '#999999'
+            dash = '' if kept else '6,4'
+            s.append(_box(x - 34, 52, 68, 64, fc, ec, 2.8 if kept else 2.0, 10, dash))
+            s.append(text(x, 84, f'a{i}', ec, 23, 700, 'middle'))
+            tag = 'saved' if kept else 'dropped'
+            s.append(text(x, 28, tag, ec, 20, 700 if kept else 400, 'middle'))
+
+        # Step 2: Backward replays from a3 to recompute a4
+        if step >= 2:
+            s.append(text(20, 210, 'Backward', C['text'], 23, 700, 'start'))
+            s.append(text(20, 238, 'pass', C['neutral'], 21, 400, 'start'))
+            # Checkpoint a3 carried down
+            s.append(_box(xs[3] - 34, 188, 68, 64, C['data_l'], C['data'], 2.8, 10))
+            s.append(text(xs[3], 220, 'a3', C['data'], 23, 700, 'middle'))
+            s.append(_arr(xs[3], 120, xs[3], 184, C['data'], 2.6))
+            # Replay a3 -> a4 (orange recomputed)
+            s.append(_arr(xs[3] + 36, 220, xs[4] - 36, 220, C['compute'], 2.8))
+            s.append(_box(xs[4] - 34, 188, 68, 64, C['compute_l'], C['compute'], 2.8, 10))
+            s.append(text(xs[4], 220, 'a4', C['compute'], 23, 700, 'middle'))
+            s.append(text(xs[4], 274, 'recomputed', C['compute'], 20, 700, 'middle'))
+            s.append(text((xs[3] + xs[4]) / 2, 166, 'replay →', C['compute'], 20, 700, 'middle'))
+
+        # Step 3: Backward replays from a0 to recompute a1, a2, then banner
+        if step >= 3:
+            s.append(_box(xs[0] - 34, 188, 68, 64, C['data_l'], C['data'], 2.8, 10))
+            s.append(text(xs[0], 220, 'a0', C['data'], 23, 700, 'middle'))
+            s.append(_arr(xs[0], 120, xs[0], 184, C['data'], 2.6))
+            for i in (1, 2):
+                s.append(_arr(xs[i - 1] + 36, 220, xs[i] - 36, 220, C['compute'], 2.8))
+                s.append(_box(xs[i] - 34, 188, 68, 64, C['compute_l'], C['compute'], 2.8, 10))
+                s.append(text(xs[i], 220, f'a{i}', C['compute'], 23, 700, 'middle'))
+            s.append(text((xs[1] + xs[2]) / 2, 274, 'recomputed, then freed', C['compute'], 20, 700, 'middle'))
+            s.append(text((xs[0] + xs[1]) / 2, 166, 'replay →', C['compute'], 20, 700, 'middle'))
+            s.append(_box(24, 296, 852, 48, C['compute_l'], C['compute'], 2.2))
+            s.append(text(450, 320, 'Only 1 segment + saved checkpoints live at once; pays ~1 extra forward.', C['compute'], 21, 700, 'middle'))
+
+        (out / f'act_ckpt_step{step}.svg').write_text(
+            f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" viewBox="0 0 {W} {H}">\n'
+            f'<rect width="{W}" height="{H}" fill="white"/>\n' + '\n'.join(s) + '\n</svg>\n'
+        )
+
+act_ckpt_steps()
+
+def zero_shard_steps():
+    """3-step bar chart for §8.7 single-node scaling (Llama 3 8B on 8x H100, mixed Adam)."""
+    # Exact verified values (GB per GPU across 8 GPUs):
+    # DDP (ZeRO-0): 16 W + 16 G + 96 opt = 128 GB
+    # ZeRO-1:       16 W + 16 G + 12 opt = 44 GB
+    # ZeRO-2:       16 W +  2 G + 12 opt = 30 GB
+    # ZeRO-3/FSDP:   2 W +  2 G + 12 opt = 16 GB
+    zrows = [
+        ('DDP (ZeRO-0)', [(16, 'W', 'memory'), (16, 'G', 'network'), (96, 'opt. state 96', 'compute')], '128 GB (no fit)', 1),
+        ('ZeRO-1', [(16, 'W', 'memory'), (16, 'G', 'network'), (12, '', 'compute')], '44 GB (opt/8)', 2),
+        ('ZeRO-2', [(16, 'W', 'memory'), (2, '', 'network'), (12, '', 'compute')], '30 GB (+grad/8)', 2),
+        ('ZeRO-3 / FSDP', [(2, '', 'memory'), (2, '', 'network'), (12, '', 'compute')], '16 GB (all/8, fits)', 3),
+    ]
+    for k in (1, 2, 3):
+        fig, ax = plt.subplots(figsize=(5.4, 2.65))
+        for i, (name, segs, tot_txt, req) in enumerate(zrows):
+            y = 3 - i
+            shown = k >= req
+            a = 1.0 if shown else 0.0
+            x = 0
+            for w, txt, ck in segs:
+                ax.barh(y, w, left=x, color=C[ck], height=0.6, edgecolor='white', alpha=a)
+                if txt and w >= 14:
+                    label(ax, x + w / 2, y, txt, 'white', shown, ha='center', va='center', fontsize=10.5)
+                x += w
+            ax.text(-2, y, name, ha='right', va='center', fontsize=12, fontweight='bold', color=C['text'] if shown else 'white')
+            tcol = C['danger'] if x > CAP else C['data']
+            bb = dict(facecolor='white', edgecolor='none', pad=1.2) if shown else None
+            label(ax, x + 2.5, y, tot_txt, tcol, shown, va='center', fontsize=11.5, bbox=bb)
+        ax.axvline(CAP, color=C['memory'], lw=2, ls='--', zorder=0)
+        ax.text(CAP + 2, 3.45, 'H100: 85.9 GB', color=C['memory'], fontsize=11, fontweight='bold', va='bottom')
+        ax.set_xlim(0, 185)
+        ax.set_ylim(-0.6, 3.85)
+        ax.set_yticks([])
+        ax.spines['left'].set_visible(False)
+        ax.set_xlabel('Static state per GPU on 8× H100, Llama 3 8B (GB)', fontsize=11)
+        sp.save(fig, out / f'zero_shard_step{k}.svg')
+
+zero_shard_steps()
 print('figures written')

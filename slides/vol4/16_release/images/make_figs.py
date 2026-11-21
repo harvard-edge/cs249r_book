@@ -46,7 +46,7 @@ def save_slot(fig, name):
     """Save at exactly the figure size, so the slide places it at scale 1."""
     fig.savefig(HERE / f'{name}.svg', format='svg', facecolor='white')
     plt.close(fig)
-DEFS = f'<defs>\n<marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="{SLATE}"/></marker>\n<marker id="ahg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="{GREEN}"/></marker>\n<marker id="ahr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="{RED}"/></marker>\n</defs>'
+DEFS = f'<defs>\n<marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="{SLATE}"/></marker>\n<marker id="ahg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="{GREEN}"/></marker>\n<marker id="aha" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="{AMBER}"/></marker>\n<marker id="ahr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="{RED}"/></marker>\n</defs>'
 
 def svg(name, w, h, body):
     (HERE / f'{name}.svg').write_text(f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}" width="{w}" height="{h}" font-family="{FONT}">\n{DEFS}\n<rect width="{w}" height="{h}" fill="white"/>\n' + '\n'.join(body) + '\n</svg>\n')
@@ -330,12 +330,15 @@ def manifest(k):
         b.append(arrow(568, 185, 592, 185, SLATE, 2.4))
         b.append(box(596, 116, 132, 138, 'white', SLATE, sw=2.2))
         b += lines(662, 146, ['Gate:', 'authenticate,', 'then check', 'standing'], 18, gap=26)
-        b.append(arrow(728, 160, 750, 112, GREEN, 2.2, marker='ahg'))
-        b.append(arrow(728, 210, 750, 258, RED, 2.2, marker='ahr'))
-        b.append(box(752, 50, 144, 90, GREEN_F, GREEN, sw=2.2))
-        b += lines(824, 78, ['UNCOND or', 'COND:', 'permit on'], 18, GREEN, weight='bold', gap=22)
-        b.append(box(752, 230, 144, 90, RED_F, RED, sw=2.2))
-        b += lines(824, 258, ['REFUSE:', 'permit off;', 'stop or hold'], 18, RED, weight='bold', gap=22)
+        b.append(arrow(728, 148, 750, 61, GREEN, 2.2, marker='ahg'))
+        b.append(arrow(728, 185, 750, 185, AMBER, 2.2, marker='aha'))
+        b.append(arrow(728, 222, 750, 309, RED, 2.2, marker='ahr'))
+        b.append(box(752, 20, 144, 82, GREEN_F, GREEN, sw=2.2))
+        b += lines(824, 46, ['UNCOND:', 'permit on', 'full envelope'], 17, GREEN, weight='bold', gap=21)
+        b.append(box(752, 144, 144, 82, AMBER_F, AMBER, sw=2.2))
+        b += lines(824, 170, ['COND:', 'restricted', 'signed scope'], 17, '#92400E', weight='bold', gap=21)
+        b.append(box(752, 268, 144, 82, RED_F, RED, sw=2.2))
+        b += lines(824, 294, ['REFUSE:', 'permit off;', 'stop or hold'], 17, RED, weight='bold', gap=21)
     svg(f'manifest_step{k}', W, H, b)
 REOPEN_COLS = ['Task', 'Stop', 'Contact', 'Timing', 'Age', 'Indep.']
 REOPEN_ROWS = [('Retrained policy, same backbone', [1, 0, 1, 0, 0, 0]), ('Larger backbone, same enforcer binary', [1, 0, 0, 1, 1, 1]), ('Driver or thread-priority change', [0, 0, 0, 1, 1, 1]), ('OS reflash that resets calibration', [0, 1, 1, 0, 0, 0]), ('Worn brake lining, no software change', [0, 1, 0, 0, 0, 0])]

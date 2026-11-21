@@ -1469,11 +1469,110 @@ def rule_numbers(deck, vol, out):
                     f"Lecture{'s' if len(major_decks) > 1 else ''} {', '.join(major_decks)}: \"{sent[:110]}\"")
 
 
+# ----------------------------------------------------------------------------
+# Added 2026-11-20 (Pass 0 slides audit): guard against stale calcs.py /
+# retired Literature.* credits, missing dividerstack opt-in, broken chapter
+# §X.Y(.Z) citations, and vanishing elements inside \mlsyssteps SVG builds.
+# ----------------------------------------------------------------------------
+
+DEAD_REF_RE = re.compile(
+    r"\b(?:images/)?(?:calcs|deckvals)\.py\b|numbers\.tex|\\val\{|\bLiterature\.[A-Z][A-Za-z0-9_]*")
+EXT_SEC_CONTEXT = ("NTSB", "HAR-19", "Goyal", "Dubey", "arXiv", "ISO", "IEC", "NIST")
+WAVE_STEP_ALLOW = {"wave4_step"}
+
+
+def rule_dead_refs(deck, vol, out):
+    for lno, line in enumerate(deck.raw.splitlines(), 1):
+        m = DEAD_REF_RE.search(line)
+        if m:
+            out("dead-refs", "error", None, lno,
+                f"stale reference '{m.group(0)}' (retired in numbers.md / Three-Tier Architecture)")
+
+
+def rule_dividerstack(deck, vol, out):
+    start = deck.src.find("\\mlsyssetup{")
+    if start == -1:
+        return
+    end = match_brace(deck.src, start + len("\\mlsyssetup"))
+    setup = deck.src[start:end]
+    if "dividerstack" not in setup:
+        lno = deck.src.count("\n", 0, start) + 1
+        out("dividerstack", "error", None, lno,
+            "\\mlsyssetup omits dividerstack (section dividers fall back to illegible thumbnail stack)")
+
+
+def _book_chapter_sections(vol, vol_name, ch_num):
+    cache = getattr(vol, "_chapter_secs", None)
+    if cache is None:
+        cache = {}
+        cfg = ROOT.parent / "books" / "config" / f"_quarto-pdf-{vol_name}.yml"
+        if cfg.exists():
+            qmds = re.findall(r"(\d+_[^/\s'\"]+/[^\s'\"]+\.qmd)", cfg.read_text(encoding="utf-8", errors="ignore"))
+            for idx, rel in enumerate(qmds, 1):
+                p = ROOT.parent / "books" / vol_name / rel
+                if not p.exists():
+                    continue
+                h2 = h3 = 0
+                secs = set()
+                for line in p.read_text(encoding="utf-8", errors="ignore").splitlines():
+                    if line.startswith("## ") and "unnumbered" not in line:
+                        h2 += 1
+                        h3 = 0
+                        secs.add(f"{idx}.{h2}")
+                    elif line.startswith("### ") and "unnumbered" not in line:
+                        h3 += 1
+                        secs.add(f"{idx}.{h2}.{h3}")
+                cache[idx] = secs
+        vol._chapter_secs = cache
+    return cache.get(ch_num)
+
+
+def rule_section_refs(deck, vol, out):
+    m = re.match(r"^(\d+)b?_", deck.path.name)
+    if not m or int(m.group(1)) == 0:
+        return
+    cn = int(m.group(1))
+    secs = _book_chapter_sections(vol, deck.volume, cn)
+    if not secs:
+        return
+    pat = re.compile(rf"(?:\\S|§)\s*({cn}\.\d+(?:\.\d+)?)")
+    for lno, line in enumerate(deck.src.splitlines(), 1):
+        for sm in pat.finditer(line):
+            before = line[max(0, sm.start() - 90):sm.start()]
+            if any(ext in before for ext in EXT_SEC_CONTEXT):
+                continue
+            ref = sm.group(1)
+            if ref not in secs:
+                out("section-refs", "error", None, lno,
+                    f"book section §{ref} does not exist in current chapter {cn} .qmd")
+
+
+def rule_step_continuity(deck, vol, out):
+    elem_re = re.compile(r"<(?:rect|path|circle|ellipse|polygon|line|text)\b")
+    for m in re.finditer(r"\\mlsyssteps(?:\[[^\]]*\])?\{([^}]+)\}\{(\d+)\}", deck.src):
+        pref, cnt = m.group(1), int(m.group(2))
+        if "\\mlsyskit" in pref or pref in WAVE_STEP_ALLOW:
+            continue
+        counts = []
+        for k in range(1, cnt + 1):
+            sp = deck.path / "images" / f"{pref}{k}.svg"
+            if sp.exists():
+                counts.append((k, len(elem_re.findall(sp.read_text(encoding="utf-8", errors="ignore")))))
+        for i in range(1, len(counts)):
+            if counts[i][1] < counts[i - 1][1] - 3 and counts[i][1] < 0.85 * counts[i - 1][1]:
+                lno = deck.src.count("\n", 0, m.start()) + 1
+                out("step-continuity", "warning", None, lno,
+                    f"step build '{pref}' drops visual primitives mid-build: {counts}")
+                break
+
+
 RULES = {
     "cover": rule_cover, "callbacks": rule_callbacks, "next-lecture": rule_next,
     "unused-images": rule_unused, "style": rule_style, "notes": rule_notes,
     "activity": rule_activity, "title-vs-tag": rule_title_tag, "concepts": rule_concepts,
     "numbers-basis": rule_numbers,
+    "dead-refs": rule_dead_refs, "dividerstack": rule_dividerstack,
+    "section-refs": rule_section_refs, "step-continuity": rule_step_continuity,
 }
 
 

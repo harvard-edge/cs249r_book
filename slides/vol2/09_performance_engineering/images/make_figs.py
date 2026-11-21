@@ -186,27 +186,30 @@ ax.grid(axis='x', color=C['grid'], lw=0.6)
 ax.set_axisbelow(True)
 sp.save(fig, out / 'runtime_terms.svg')
 sizes = [int(128.0) * 2 ** k for k in range(8)]
-fig, ax = plt.subplots(figsize=(5.6, 2.15))
-for i, n in enumerate(sizes):
-    t = {128: SimpleNamespace(checkpoint_share=0.004242989861, failure_side=0.004582658009, input_wait_share=0.07692307692, interruption_checkpoint_interval=Q_(20.87615423, 'min'), interruption_interval=Q_(22.23539875, 'h'), interval=Q_(76.98973539, 'min'), mtbf=Q_(302.4193548, 'h'), preemption_cost=Q_(20.16333333, 'min'), preemption_share=0.01400231481, recovery_share=0.0003396681481, recovery_time=Q_(6.163333333, 'min'), rework_share=0.002121494931, runtime_goodput=0.9039797148, runtime_loss=0.0960202852, startup_share=0.0005122354497, startup_time=Q_(5.163333333, 'min'), write_share=0.002121494931, write_time=Q_(9.8, 's')), 256: SimpleNamespace(checkpoint_share=0.006000493807, failure_side=0.006679830103, input_wait_share=0.07692307692, interruption_checkpoint_interval=Q_(20.14857819, 'min'), interruption_interval=Q_(20.71251036, 'h'), interval=Q_(54.43996397, 'min'), mtbf=Q_(151.2096774, 'h'), preemption_cost=Q_(20.16333333, 'min'), preemption_share=0.01400231481, recovery_share=0.0006793362963, recovery_time=Q_(6.163333333, 'min'), rework_share=0.003000246903, runtime_goodput=0.9018825427, runtime_loss=0.09811745729, startup_share=0.0005122354497, startup_time=Q_(5.163333333, 'min'), write_share=0.003000246903, write_time=Q_(9.8, 's')), 512: SimpleNamespace(checkpoint_share=0.008485979723, failure_side=0.009844652315, input_wait_share=0.07692307692, interruption_checkpoint_interval=Q_(18.89592837, 'min'), interruption_interval=Q_(18.21714841, 'h'), interval=Q_(38.49486769, 'min'), mtbf=Q_(75.60483871, 'h'), preemption_cost=Q_(20.16333333, 'min'), preemption_share=0.01400231481, recovery_share=0.001358672593, recovery_time=Q_(6.163333333, 'min'), rework_share=0.004242989861, runtime_goodput=0.8987177205, runtime_loss=0.1012822795, startup_share=0.0005122354497, startup_time=Q_(5.163333333, 'min'), write_share=0.004242989861, write_time=Q_(9.8, 's')), 1024: SimpleNamespace(checkpoint_share=0.01200098761, failure_side=0.0147183328, input_wait_share=0.07692307692, interruption_checkpoint_interval=Q_(16.96253341, 'min'), interruption_interval=Q_(14.67997651, 'h'), interval=Q_(27.21998199, 'min'), mtbf=Q_(37.80241935, 'h'), preemption_cost=Q_(20.16333333, 'min'), preemption_share=0.01400231481, recovery_share=0.002717345185, recovery_time=Q_(6.163333333, 'min'), rework_share=0.006000493807, runtime_goodput=0.89384404, runtime_loss=0.10615596, startup_share=0.0005122354497, startup_time=Q_(5.163333333, 'min'), write_share=0.006000493807, write_time=Q_(9.8, 's')), 2048: SimpleNamespace(checkpoint_share=0.01697195945, failure_side=0.02240664982, input_wait_share=0.07692307692, interruption_checkpoint_interval=Q_(14.39606131, 'min'), interruption_interval=Q_(10.57380516, 'h'), interval=Q_(19.24743385, 'min'), mtbf=Q_(18.90120968, 'h'), preemption_cost=Q_(20.16333333, 'min'), preemption_share=0.01400231481, recovery_share=0.00543469037, recovery_time=Q_(6.163333333, 'min'), rework_share=0.008485979723, runtime_goodput=0.886155723, runtime_loss=0.113844277, startup_share=0.0005122354497, startup_time=Q_(5.163333333, 'min'), write_share=0.008485979723, write_time=Q_(9.8, 's')), 4096: SimpleNamespace(checkpoint_share=0.02400197523, failure_side=0.03487135597, input_wait_share=0.07692307692, interruption_checkpoint_interval=Q_(11.52819917, 'min'), interruption_interval=Q_(6.780580418, 'h'), interval=Q_(13.60999099, 'min'), mtbf=Q_(9.450604839, 'h'), preemption_cost=Q_(20.16333333, 'min'), preemption_share=0.01400231481, recovery_share=0.01086938074, recovery_time=Q_(6.163333333, 'min'), rework_share=0.01200098761, runtime_goodput=0.8736910168, runtime_loss=0.1263089832, startup_share=0.0005122354497, startup_time=Q_(5.163333333, 'min'), write_share=0.01200098761, write_time=Q_(9.8, 's')), 8192: SimpleNamespace(checkpoint_share=0.03394391889, failure_side=0.05568268037, input_wait_share=0.07692307692, interruption_checkpoint_interval=Q_(8.796626572, 'min'), interruption_interval=Q_(3.947991788, 'h'), interval=Q_(9.623716923, 'min'), mtbf=Q_(4.725302419, 'h'), preemption_cost=Q_(20.16333333, 'min'), preemption_share=0.01400231481, recovery_share=0.02173876148, recovery_time=Q_(6.163333333, 'min'), rework_share=0.01697195945, runtime_goodput=0.8528796924, runtime_loss=0.1471203076, startup_share=0.0005122354497, startup_time=Q_(5.163333333, 'min'), write_share=0.01697195945, write_time=Q_(9.8, 's')), 16384: SimpleNamespace(checkpoint_share=0.04800395045, failure_side=0.09148147342, input_wait_share=0.07692307692, interruption_checkpoint_interval=Q_(6.492903094, 'min'), interruption_interval=Q_(2.150907683, 'h'), interval=Q_(6.804995497, 'min'), mtbf=Q_(2.36265121, 'h'), preemption_cost=Q_(20.16333333, 'min'), preemption_share=0.01400231481, recovery_share=0.04347752296, recovery_time=Q_(6.163333333, 'min'), rework_share=0.02400197523, runtime_goodput=0.8170808994, runtime_loss=0.1829191006, startup_share=0.0005122354497, startup_time=Q_(5.163333333, 'min'), write_share=0.02400197523, write_time=Q_(9.8, 's'))}[n]
-    parts = [(t.input_wait_share, '#D9C3A5'), (t.preemption_share, COL['S_l']), (t.startup_share, C['neutral_l']), (t.checkpoint_share, '#A0715A'), (t.recovery_share, COL['R'])]
-    b = 0
-    for v, col in parts:
-        ax.bar(i, v * 100, 0.66, bottom=b, color=col, edgecolor='white', lw=0.6)
-        b += v * 100
-    ax.text(i, b + 0.4, f'{b:.0f}%', ha='center', va='bottom', fontsize=11.5, fontweight='bold', color=C['text'])
-ax.bar(8.0, 10.0, 0.4, color='white', edgecolor=C['text'], lw=1.6, ls='--')
-ax.text(8.0, 10.0 + 0.4, 'Llama 3\n≤ 10%', ha='center', va='bottom', fontsize=10.5, fontweight='bold', color=C['text'], linespacing=0.95)
-cross = math.log2(12928 / sizes[0])
-ax.axvline(cross, color=C['danger'], lw=1.4, ls=':')
-ax.annotate('checkpoints + recovery\npass input waits', xy=(cross, 17.5), xytext=(3.0, 19.6), ha='center', va='top', arrowprops=dict(arrowstyle='-|>', color=C['danger'], lw=1.2), fontsize=10.5, color=C['danger'], fontweight='bold', linespacing=0.95)
-ax.text(-0.4, 23.8, 'brown: checkpoints, recovery\ntan: input waits; violet: preemption', ha='left', va='top', fontsize=10.5, color=C['neutral'], linespacing=1.0)
-ax.set_xticks(list(range(8)) + [8.0], ['128', '256', '512', '1K', '2K', '4K', '8K', '16K', '16K\nmeasured'], fontsize=10.5)
-ax.set_xlim(-0.5, 8.4)
-ax.set_ylim(0, 24)
-ax.set_ylabel('Runtime loss\n(% of held time)')
-ax.set_xlabel('GPUs in the job (derived model; same inputs at every size)', fontsize=11)
-sp.save(fig, out / 'runtime_scaling.svg')
+for k_rt in (1, 2):
+    fig, ax = plt.subplots(figsize=(5.6, 2.15))
+    for i, n in enumerate(sizes):
+        t = {128: SimpleNamespace(checkpoint_share=0.004242989861, failure_side=0.004582658009, input_wait_share=0.07692307692, interruption_checkpoint_interval=Q_(20.87615423, 'min'), interruption_interval=Q_(22.23539875, 'h'), interval=Q_(76.98973539, 'min'), mtbf=Q_(302.4193548, 'h'), preemption_cost=Q_(20.16333333, 'min'), preemption_share=0.01400231481, recovery_share=0.0003396681481, recovery_time=Q_(6.163333333, 'min'), rework_share=0.002121494931, runtime_goodput=0.9039797148, runtime_loss=0.0960202852, startup_share=0.0005122354497, startup_time=Q_(5.163333333, 'min'), write_share=0.002121494931, write_time=Q_(9.8, 's')), 256: SimpleNamespace(checkpoint_share=0.006000493807, failure_side=0.006679830103, input_wait_share=0.07692307692, interruption_checkpoint_interval=Q_(20.14857819, 'min'), interruption_interval=Q_(20.71251036, 'h'), interval=Q_(54.43996397, 'min'), mtbf=Q_(151.2096774, 'h'), preemption_cost=Q_(20.16333333, 'min'), preemption_share=0.01400231481, recovery_share=0.0006793362963, recovery_time=Q_(6.163333333, 'min'), rework_share=0.003000246903, runtime_goodput=0.9018825427, runtime_loss=0.09811745729, startup_share=0.0005122354497, startup_time=Q_(5.163333333, 'min'), write_share=0.003000246903, write_time=Q_(9.8, 's')), 512: SimpleNamespace(checkpoint_share=0.008485979723, failure_side=0.009844652315, input_wait_share=0.07692307692, interruption_checkpoint_interval=Q_(18.89592837, 'min'), interruption_interval=Q_(18.21714841, 'h'), interval=Q_(38.49486769, 'min'), mtbf=Q_(75.60483871, 'h'), preemption_cost=Q_(20.16333333, 'min'), preemption_share=0.01400231481, recovery_share=0.001358672593, recovery_time=Q_(6.163333333, 'min'), rework_share=0.004242989861, runtime_goodput=0.8987177205, runtime_loss=0.1012822795, startup_share=0.0005122354497, startup_time=Q_(5.163333333, 'min'), write_share=0.004242989861, write_time=Q_(9.8, 's')), 1024: SimpleNamespace(checkpoint_share=0.01200098761, failure_side=0.0147183328, input_wait_share=0.07692307692, interruption_checkpoint_interval=Q_(16.96253341, 'min'), interruption_interval=Q_(14.67997651, 'h'), interval=Q_(27.21998199, 'min'), mtbf=Q_(37.80241935, 'h'), preemption_cost=Q_(20.16333333, 'min'), preemption_share=0.01400231481, recovery_share=0.002717345185, recovery_time=Q_(6.163333333, 'min'), rework_share=0.006000493807, runtime_goodput=0.89384404, runtime_loss=0.10615596, startup_share=0.0005122354497, startup_time=Q_(5.163333333, 'min'), write_share=0.006000493807, write_time=Q_(9.8, 's')), 2048: SimpleNamespace(checkpoint_share=0.01697195945, failure_side=0.02240664982, input_wait_share=0.07692307692, interruption_checkpoint_interval=Q_(14.39606131, 'min'), interruption_interval=Q_(10.57380516, 'h'), interval=Q_(19.24743385, 'min'), mtbf=Q_(18.90120968, 'h'), preemption_cost=Q_(20.16333333, 'min'), preemption_share=0.01400231481, recovery_share=0.00543469037, recovery_time=Q_(6.163333333, 'min'), rework_share=0.008485979723, runtime_goodput=0.886155723, runtime_loss=0.113844277, startup_share=0.0005122354497, startup_time=Q_(5.163333333, 'min'), write_share=0.008485979723, write_time=Q_(9.8, 's')), 4096: SimpleNamespace(checkpoint_share=0.02400197523, failure_side=0.03487135597, input_wait_share=0.07692307692, interruption_checkpoint_interval=Q_(11.52819917, 'min'), interruption_interval=Q_(6.780580418, 'h'), interval=Q_(13.60999099, 'min'), mtbf=Q_(9.450604839, 'h'), preemption_cost=Q_(20.16333333, 'min'), preemption_share=0.01400231481, recovery_share=0.01086938074, recovery_time=Q_(6.163333333, 'min'), rework_share=0.01200098761, runtime_goodput=0.8736910168, runtime_loss=0.1263089832, startup_share=0.0005122354497, startup_time=Q_(5.163333333, 'min'), write_share=0.01200098761, write_time=Q_(9.8, 's')), 8192: SimpleNamespace(checkpoint_share=0.03394391889, failure_side=0.05568268037, input_wait_share=0.07692307692, interruption_checkpoint_interval=Q_(8.796626572, 'min'), interruption_interval=Q_(3.947991788, 'h'), interval=Q_(9.623716923, 'min'), mtbf=Q_(4.725302419, 'h'), preemption_cost=Q_(20.16333333, 'min'), preemption_share=0.01400231481, recovery_share=0.02173876148, recovery_time=Q_(6.163333333, 'min'), rework_share=0.01697195945, runtime_goodput=0.8528796924, runtime_loss=0.1471203076, startup_share=0.0005122354497, startup_time=Q_(5.163333333, 'min'), write_share=0.01697195945, write_time=Q_(9.8, 's')), 16384: SimpleNamespace(checkpoint_share=0.04800395045, failure_side=0.09148147342, input_wait_share=0.07692307692, interruption_checkpoint_interval=Q_(6.492903094, 'min'), interruption_interval=Q_(2.150907683, 'h'), interval=Q_(6.804995497, 'min'), mtbf=Q_(2.36265121, 'h'), preemption_cost=Q_(20.16333333, 'min'), preemption_share=0.01400231481, recovery_share=0.04347752296, recovery_time=Q_(6.163333333, 'min'), rework_share=0.02400197523, runtime_goodput=0.8170808994, runtime_loss=0.1829191006, startup_share=0.0005122354497, startup_time=Q_(5.163333333, 'min'), write_share=0.02400197523, write_time=Q_(9.8, 's'))}[n]
+        parts = [(t.input_wait_share, '#D9C3A5'), (t.preemption_share, COL['S_l']), (t.startup_share, C['neutral_l']), (t.checkpoint_share, '#A0715A'), (t.recovery_share, COL['R'])]
+        b = 0
+        for v, col in parts:
+            ax.bar(i, v * 100, 0.66, bottom=b, color=col, edgecolor='white', lw=0.6)
+            b += v * 100
+        ax.text(i, b + 0.4, f'{b:.0f}%', ha='center', va='bottom', fontsize=11.5, fontweight='bold', color=C['text'])
+    a2 = 1.0 if k_rt >= 2 else 0.0
+    ax.bar(8.0, 10.0, 0.4, color='white', edgecolor=C['text'], lw=1.6, ls='--', alpha=a2)
+    text(ax, 8.0, 10.0 + 0.4, 'Llama 3\n≤ 10%', C['text'], k_rt >= 2, ha='center', va='bottom', fontsize=10.5, fontweight='bold', linespacing=0.95)
+    cross = math.log2(12928 / sizes[0])
+    ax.axvline(cross, color=C['danger'], lw=1.4, ls=':', alpha=a2)
+    if k_rt >= 2:
+        ax.annotate('checkpoints + recovery\npass input waits', xy=(cross, 17.5), xytext=(3.0, 19.6), ha='center', va='top', arrowprops=dict(arrowstyle='-|>', color=C['danger'], lw=1.2), fontsize=10.5, color=C['danger'], fontweight='bold', linespacing=0.95)
+    ax.text(-0.4, 23.8, 'brown: checkpoints, recovery\ntan: input waits; violet: preemption', ha='left', va='top', fontsize=10.5, color=C['neutral'], linespacing=1.0)
+    ax.set_xticks(list(range(8)) + [8.0], ['128', '256', '512', '1K', '2K', '4K', '8K', '16K', '16K\nmeasured' if k_rt >= 2 else ''], fontsize=10.5)
+    ax.set_xlim(-0.5, 8.4)
+    ax.set_ylim(0, 24)
+    ax.set_ylabel('Runtime loss\n(% of held time)')
+    ax.set_xlabel('GPUs in the job (derived model; same inputs at every size)', fontsize=11)
+    sp.save(fig, out / f'runtime_scaling_step{k_rt}.svg')
 sp.hbars(out / 'mfu_published.svg', [(lab, _NUMS[key], col, f'{_VALS[key]}%') for lab, key, col in [('GPT-3, 2020', 'mfu_gpt3', 'compute'), ('MT-NLG, 2021', 'mfu_mtnlg', 'compute'), ('Gopher, 2021', 'mfu_gopher', 'compute'), ('PaLM, 2022', 'mfu_palm', 'compute'), ('Llama 3, 8K GPUs', 'llama_p8_pct', 'memory'), ('Llama 3, 16K GPUs', 'llama_p_pct', 'memory')]], '%', log=False, size=(4.3, 2.4), xlabel='MFU (% of peak)')
 
 def node_fleet(path, step):
@@ -334,31 +337,101 @@ def levers(path, step):
     sp.save(fig, path)
 for k in (1, 2):
     levers(out / f'levers_step{k}.svg', k)
-fig, ax = plt.subplots(figsize=(5.8, 2.5))
-P = np.linspace(0.3, 0.75, 200)
-R0, P0, P1 = (0.9, 0.48, 0.65)
-base = R0 * P0
-ax.fill_between(P, base / P, 1.05, where=base / P < 1.05, color=C['data_l'], alpha=0.7)
-for c in (0.3, 0.35, 0.5, 0.55):
-    ax.plot(P, c / P, color=C['grid'], lw=1.0)
-ax.plot(P, base / P, color=C['text'], lw=2.4)
-ax.text(0.745, 0.9, 'bold curve:\nR × P = 0.43', fontsize=12, ha='right', va='center', color=C['text'], fontweight='bold', linespacing=0.95)
-ax.plot([P0], [R0], 'o', ms=11, color=C['danger'], zorder=5)
-ax.text(P0 - 0.012, R0 - 0.02, 'running job', ha='right', va='top', fontsize=11.5, fontweight='bold', color=C['danger'])
-ax.annotate('', xy=(P1, R0), xytext=(P0 + 0.01, R0), arrowprops=dict(arrowstyle='-|>', color=COL['P'], lw=2.2))
-ax.text((P0 + P1) / 2 + 0.005, R0 - 0.025, 'P to 0.65: +35%', ha='center', va='top', fontsize=11.5, fontweight='bold', color=COL['P'])
-ax.annotate('', xy=(P1, base / P1), xytext=(P1, R0 - 0.01), arrowprops=dict(arrowstyle='-|>', color=COL['R'], lw=1.8, ls='--'))
-ax.plot([P1], [base / P1], 'o', ms=9, mfc='white', mec=COL['R'], mew=2, zorder=5)
-ax.text(P1 + 0.01, 0.73, 'break-even:\nR may fall 26%', ha='left', va='center', fontsize=11, fontweight='bold', color=COL['R'], linespacing=0.95)
-ax.axhline(1.0, color=C['neutral'], lw=1, ls=':')
-ax.annotate('', xy=(P0, 1.0), xytext=(P0, R0 + 0.005), arrowprops=dict(arrowstyle='-|>', color=C['neutral'], lw=1.6))
-ax.text(P0 - 0.045, 0.955, 'R headroom:\n+11% at most', ha='right', va='center', fontsize=11, color=C['neutral'], fontweight='bold', linespacing=0.95)
-ax.text(0.745, 1.02, 'shaded: the trade raises R × P', fontsize=11, color=C['data'], fontweight='bold', ha='right', va='center')
-ax.set_xlim(0.3, 0.75)
-ax.set_ylim(0.55, 1.05)
-ax.set_xlabel('Program goodput P')
-ax.set_ylabel('Runtime goodput R')
-sp.save(fig, out / 'isogoodput.svg')
+for k_iso in (1, 2):
+    fig, ax = plt.subplots(figsize=(5.8, 2.5))
+    P = np.linspace(0.3, 0.75, 200)
+    R0, P0, P1 = (0.9, 0.48, 0.65)
+    base = R0 * P0
+    ax.fill_between(P, base / P, 1.05, where=base / P < 1.05, color=C['data_l'], alpha=0.7)
+    for c in (0.3, 0.35, 0.5, 0.55):
+        ax.plot(P, c / P, color=C['grid'], lw=1.0)
+    ax.plot(P, base / P, color=C['text'], lw=2.4)
+    ax.text(0.745, 0.9, 'bold curve:\nR × P = 0.43', fontsize=12, ha='right', va='center', color=C['text'], fontweight='bold', linespacing=0.95)
+    ax.plot([P0], [R0], 'o', ms=11, color=C['danger'], zorder=5)
+    ax.text(P0 - 0.012, R0 - 0.02, 'running job', ha='right', va='top', fontsize=11.5, fontweight='bold', color=C['danger'])
+    ax.axhline(1.0, color=C['neutral'], lw=1, ls=':')
+    ax.annotate('', xy=(P0, 1.0), xytext=(P0, R0 + 0.005), arrowprops=dict(arrowstyle='-|>', color=C['neutral'], lw=1.6))
+    ax.text(P0 - 0.045, 0.955, 'R headroom:\n+11% at most', ha='right', va='center', fontsize=11, color=C['neutral'], fontweight='bold', linespacing=0.95)
+    ax.text(0.745, 1.02, 'shaded: the trade raises R × P', fontsize=11, color=C['data'], fontweight='bold', ha='right', va='center')
+    if k_iso >= 2:
+        ax.annotate('', xy=(P1, R0), xytext=(P0 + 0.01, R0), arrowprops=dict(arrowstyle='-|>', color=COL['P'], lw=2.2))
+        ax.text((P0 + P1) / 2 + 0.005, R0 - 0.025, 'P to 0.65: +35%', ha='center', va='top', fontsize=11.5, fontweight='bold', color=COL['P'])
+        ax.annotate('', xy=(P1, base / P1), xytext=(P1, R0 - 0.01), arrowprops=dict(arrowstyle='-|>', color=COL['R'], lw=1.8, ls='--'))
+        ax.plot([P1], [base / P1], 'o', ms=9, mfc='white', mec=COL['R'], mew=2, zorder=5)
+        ax.text(P1 + 0.01, 0.73, 'break-even:\nR may fall 26%', ha='left', va='center', fontsize=11, fontweight='bold', color=COL['R'], linespacing=0.95)
+    ax.set_xlim(0.3, 0.75)
+    ax.set_ylim(0.55, 1.05)
+    ax.set_xlabel('Program goodput P')
+    ax.set_ylabel('Runtime goodput R')
+    sp.save(fig, out / f'isogoodput_step{k_iso}.svg')
+
+# 4-step Explore visuals: fig-fusion-before-after & fig-performance-engineering-flashattention-tiling
+def kernel_fusion_flash():
+    w, h = 940, 348
+    for k in (1, 2, 3, 4):
+        items = []
+        # Panel 1 (Step 1): Unfused kernels
+        items.append('<rect x="14" y="12" width="442" height="142" rx="8" fill="#f8fafc" stroke="#dc2626" stroke-width="2"/>')
+        items.append('<text x="26" y="38" font-size="20" font-weight="bold" fill="#b91c1c">1. Unfused: 4 HBM transfers</text>')
+        boxes1 = [(24, 64, 'Lin', '#EAF1F8', '#1F407A', '#14294E'),
+                  (104, 82, 'HBM I1', '#fee2e2', '#dc2626', '#b91c1c'),
+                  (202, 62, 'Act', '#EAF1F8', '#1F407A', '#14294E'),
+                  (280, 82, 'HBM I2', '#fee2e2', '#dc2626', '#b91c1c'),
+                  (378, 66, 'Norm', '#EAF1F8', '#1F407A', '#14294E')]
+        for idx, (bx, bw, lab, fc, ec, tc) in enumerate(boxes1):
+            dash = ' stroke-dasharray="5,3"' if 'HBM' in lab else ''
+            items.append(f'<rect x="{bx}" y="54" width="{bw}" height="52" rx="6" fill="{fc}" stroke="{ec}" stroke-width="2"{dash}/>')
+            items.append(f'<text x="{bx + bw / 2}" y="87" font-size="19" font-weight="bold" fill="{tc}" text-anchor="middle">{lab}</text>')
+            if idx < len(boxes1) - 1:
+                nx = boxes1[idx + 1][0]
+                items.append(f'<line x1="{bx + bw}" y1="80" x2="{nx - 4}" y2="80" stroke="#64748b" stroke-width="2.6" marker-end="url(#arrG)"/>')
+        items.append('<text x="235" y="136" font-size="19" fill="#475569" text-anchor="middle">Intermediates I1, I2 cross HBM twice each</text>')
+        # Panel 2 (Step 2): Fused kernel
+        if k >= 2:
+            items.append('<rect x="484" y="12" width="442" height="142" rx="8" fill="#f8fafc" stroke="#16a34a" stroke-width="2"/>')
+            items.append('<text x="496" y="38" font-size="20" font-weight="bold" fill="#15803d">2. Fused kernel: 0 HBM intermediates</text>')
+            items.append('<rect x="502" y="50" width="406" height="60" rx="7" fill="#dcfce7" stroke="#16a34a" stroke-width="2.2"/>')
+            fboxes = [(518, 96, 'Linear'), (654, 86, 'Act'), (780, 112, 'Norm')]
+            for idx, (bx, bw, lab) in enumerate(fboxes):
+                items.append(f'<rect x="{bx}" y="58" width="{bw}" height="44" rx="5" fill="#EAF1F8" stroke="#1F407A" stroke-width="1.8"/>')
+                items.append(f'<text x="{bx + bw / 2}" y="87" font-size="19" font-weight="bold" fill="#14294E" text-anchor="middle">{lab}</text>')
+                if idx < len(fboxes) - 1:
+                    nx = fboxes[idx + 1][0]
+                    items.append(f'<line x1="{bx + bw}" y1="80" x2="{nx - 4}" y2="80" stroke="#15803d" stroke-width="3" marker-end="url(#arrOk)"/>')
+            items.append('<text x="705" y="136" font-size="19" font-weight="bold" fill="#15803d" text-anchor="middle">I1, I2 stay in registers / SRAM (1 load, 1 store)</text>')
+        # Panel 3 (Step 3): FlashAttention SRAM tiling
+        if k >= 3:
+            items.append('<rect x="14" y="170" width="598" height="166" rx="8" fill="#f8fafc" stroke="#1F407A" stroke-width="2"/>')
+            items.append('<text x="26" y="196" font-size="20" font-weight="bold" fill="#1F407A">3. FlashAttention: stream K/V blocks into SRAM</text>')
+            items.append('<rect x="26" y="210" width="234" height="78" rx="6" fill="#EAF1F8" stroke="#1F407A" stroke-width="1.8"/>')
+            items.append('<text x="143" y="238" font-size="19" font-weight="bold" fill="#14294E" text-anchor="middle">Block 1: s=1, v=2</text>')
+            items.append('<text x="143" y="268" font-size="19" fill="#334155" text-anchor="middle">m=1, l=1.00, a=2.00</text>')
+            items.append('<line x1="260" y1="249" x2="294" y2="249" stroke="#d97706" stroke-width="3.2" marker-end="url(#arrA)"/>')
+            items.append('<rect x="300" y="210" width="298" height="78" rx="6" fill="#fef3c7" stroke="#d97706" stroke-width="2"/>')
+            items.append('<text x="449" y="238" font-size="19" font-weight="bold" fill="#b45309" text-anchor="middle">Block 2: s=3, v=6 (α=0.135)</text>')
+            items.append('<text x="449" y="268" font-size="19" fill="#78350f" text-anchor="middle">m=3, l=1.135, a=6.271</text>')
+            items.append('<text x="313" y="318" font-size="19" fill="#475569" text-anchor="middle">Online softmax rescales prior (l, a) by exp(1 - 3) = 0.135</text>')
+        # Panel 4 (Step 4): Final output without N x N HBM matrix
+        if k >= 4:
+            items.append('<rect x="628" y="170" width="298" height="166" rx="8" fill="#f8fafc" stroke="#16a34a" stroke-width="2"/>')
+            items.append('<text x="642" y="196" font-size="20" font-weight="bold" fill="#15803d">4. Final exact output</text>')
+            items.append('<rect x="642" y="210" width="270" height="78" rx="6" fill="#dcfce7" stroke="#16a34a" stroke-width="2"/>')
+            items.append('<text x="777" y="238" font-size="20" font-weight="bold" fill="#15803d" text-anchor="middle">O = a / l = 5.523</text>')
+            items.append('<text x="777" y="268" font-size="19" fill="#166534" text-anchor="middle">Single write back to HBM</text>')
+            items.append('<text x="777" y="318" font-size="19" font-weight="bold" fill="#b91c1c" text-anchor="middle">No N x N matrix in HBM</text>')
+        svg = (
+            f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}" width="{w}" height="{h}" font-family="Helvetica, Arial, sans-serif">\n'
+            '<defs>'
+            '<marker id="arrG" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#64748b"/></marker>'
+            '<marker id="arrOk" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#15803d"/></marker>'
+            '<marker id="arrA" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#d97706"/></marker>'
+            '</defs>\n'
+            f'<rect width="{w}" height="{h}" fill="white"/>\n'
+            + '\n'.join(items) + '\n</svg>\n'
+        )
+        (out / f'kernel_fusion_flash_step{k}.svg').write_text(svg)
+
+kernel_fusion_flash()
 fig, ax = plt.subplots(figsize=(5.6, 2.0))
 pts = [(1.0, 1.0, '8,192 GPUs, MFU 43%'), (1 / 1.906976744, 0.43 / 0.41, '16,384 GPUs, MFU 41%')]
 ax.plot([p[0] for p in pts], [p[1] for p in pts], color=C['neutral'], lw=1.4, ls='--')

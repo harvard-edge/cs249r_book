@@ -220,7 +220,7 @@ sp.save(fig, out / 'fstore.svg')
 click_hours = [1.5, 4.0, 7.5, 10.0, 13.0, 14.5, 16.0, 18.5, 20.0, 22.5]
 assert len(click_hours) == 10
 assert sum((h < 12 for h in click_hours)) == 4
-for k in (1, 2):
+for k in (1, 2, 3):
     fig, ax = plt.subplots(figsize=(5.9, 2.5))
     ax.plot([0, 24], [1, 1], color=C['neutral'], lw=1.5)
     for h in click_hours:
@@ -228,15 +228,16 @@ for k in (1, 2):
         ax.plot([h], [1], 'o', ms=12, color=V['c1'] if early else C['neutral_l'], mec=V['c1'] if early else C['neutral'], mew=1.5, zorder=5)
     ax.axvline(12, color=C['danger'], lw=2.2)
     ax.text(12, 1.95, 'prediction at noon', ha='center', fontsize=12, color=C['danger'], fontweight='bold', zorder=10, bbox=dict(facecolor='white', edgecolor='none', pad=1))
-    a = 1.0 if k >= 2 else 0.0
-    ax.annotate('', xy=(0, 0.45), xytext=(12, 0.45), arrowprops=dict(arrowstyle='<->', color=V['c1'], lw=2, alpha=a))
-    ax.text(6, 0.18, 'point-in-time join: 4 clicks', ha='center', fontsize=12, color=V['c1'], fontweight='bold', alpha=a, bbox=dict(facecolor='white', edgecolor='none', pad=1, alpha=a), zorder=10)
-    ax.annotate('', xy=(0, -0.35), xytext=(24, -0.35), arrowprops=dict(arrowstyle='<->', color=C['danger'], lw=2, alpha=a))
-    ax.text(12, -0.62, 'naive join to the midnight table: 10 clicks (2.5×)', ha='center', fontsize=12, color=C['danger'], fontweight='bold', alpha=a, bbox=dict(facecolor='white', edgecolor='none', pad=1, alpha=a), zorder=10)
+    a2 = 1.0 if k >= 2 else 0.0
+    a3 = 1.0 if k >= 3 else 0.0
+    ax.annotate('', xy=(0, 0.45), xytext=(12, 0.45), arrowprops=dict(arrowstyle='<->', color=V['c1'], lw=2, alpha=a2))
+    ax.text(6, 0.14, 'point-in-time join: 4 clicks (valid)', ha='center', fontsize=11.5, color=V['c1'], fontweight='bold', alpha=a2, bbox=dict(facecolor='white', edgecolor='none', pad=1, alpha=a2), zorder=10)
+    ax.annotate('', xy=(0, -0.35), xytext=(24, -0.35), arrowprops=dict(arrowstyle='<->', color=C['danger'], lw=2, alpha=a3))
+    ax.text(12, -0.66, 'naive join to midnight table: 10 clicks (2.5× future leakage)', ha='center', fontsize=11.5, color=C['danger'], fontweight='bold', alpha=a3, bbox=dict(facecolor='white', edgecolor='none', pad=1, alpha=a3), zorder=10)
     if k == 1:
         ax.text(18, 0.45, 'total_clicks_today = ???', ha='center', fontsize=12.5, fontweight='bold', color=C['danger'])
     ax.set_xlim(-0.5, 24.5)
-    ax.set_ylim(-0.9, 2.3)
+    ax.set_ylim(-0.95, 2.3)
     ax.set_yticks([])
     ax.spines['left'].set_visible(False)
     ax.set_xticks([0, 6, 12, 18, 24])
@@ -288,6 +289,38 @@ for k in (1, 2):
     ax.tick_params(axis='y', labelsize=13)
     ax.set_ylabel('Users exposed until rollback (%)', fontsize=13)
     sp.save(fig, out / f'exposure_step{k}.svg')
+for k in (1, 2, 3):
+    fig, ax = plt.subplots(figsize=(7.6, 3.05))
+    ax.set_xlim(0, 12.6)
+    ax.set_ylim(0, 4.9)
+    hide_axis(ax)
+    box(ax, 0.08, 3.45, 2.05, 1.15, '1. Shadow\n(0% users)', V['c1_l'], V['c1'], fs=10.8)
+    box(ax, 2.55, 4.05, 2.35, 0.62, 'Prod v1 (100%)', V['ok_l'], V['ok'], fs=10.2)
+    box(ax, 2.55, 3.25, 2.35, 0.62, 'Cand v2 (copy)', V['c3_l'], V['c3'], fs=10.2)
+    arrow(ax, (2.15, 4.20), (2.53, 4.35), V['ok'])
+    ax.annotate('', xy=(2.53, 3.56), xytext=(2.15, 3.85), arrowprops=dict(arrowstyle='-|>', ls='--', color=V['c3'], lw=1.6))
+    box(ax, 5.35, 4.05, 2.40, 0.62, 'Users served', V['frame_l'], V['frame'], fs=10.2, tc=C['text'])
+    box(ax, 5.35, 3.15, 3.40, 0.78, 'Compare outputs\nand latency', V['c3_l'], V['c3'], fs=10.0)
+    arrow(ax, (4.92, 4.36), (5.33, 4.36), V['ok'])
+    arrow(ax, (4.92, 3.56), (5.33, 3.56), V['c3'])
+    ax.text(9.05, 3.92, 'extra compute,\n0 user harm', ha='left', va='center', fontsize=10.8, fontweight='bold', color=V['c1'])
+    if k >= 2:
+        box(ax, 0.08, 1.65, 2.05, 1.15, '2. Canary\n(5% users)', V['c2_l'], V['c2'], fs=10.8)
+        box(ax, 2.55, 2.25, 2.35, 0.60, 'Prod v1 (95%)', V['ok_l'], V['ok'], fs=10.2)
+        box(ax, 2.55, 1.47, 2.35, 0.60, 'Cand v2 (5%)', V['c2_l'], V['c2'], fs=10.2)
+        arrow(ax, (2.15, 2.42), (2.53, 2.55), V['ok'])
+        arrow(ax, (2.15, 2.02), (2.53, 1.77), V['c2'])
+        box(ax, 5.35, 1.47, 3.40, 1.38, 'Live outcomes +\nguardrails (20× less)', V['c2_l'], V['c2'], fs=10.2)
+        arrow(ax, (4.92, 2.55), (5.33, 2.45), V['ok'])
+        arrow(ax, (4.92, 1.77), (5.33, 1.87), V['c2'])
+        ax.text(9.05, 2.16, 'real feedback,\nbounded blast', ha='left', va='center', fontsize=10.8, fontweight='bold', color=V['c2'])
+    if k >= 3:
+        box(ax, 0.08, 0.15, 3.05, 0.96, '3. Evidence Gate\n(fixed thresholds)', V['c3_l'], V['c3'], fs=10.5)
+        box(ax, 3.60, 0.15, 4.35, 0.96, 'Promote: 1% $\\rightarrow$ 5%\n$\\rightarrow$ 25% $\\rightarrow$ 100%', V['ok_l'], V['ok'], fs=10.5)
+        box(ax, 8.45, 0.15, 4.05, 0.96, 'Breach: instant rollback\nto validated v1', V['bad_l'], V['bad'], fs=10.5)
+        arrow(ax, (3.15, 0.63), (3.58, 0.63), V['ok'])
+        arrow(ax, (7.97, 0.63), (8.43, 0.63), V['bad'])
+    sp.save(fig, out / f'shadow_step{k}.svg')
 stages = [(1.0, 2), (5.0, 0.5), (25.0, 0.5), (50.0, 1)]
 for k in (1, 2):
     fig, ax = plt.subplots(figsize=(5.4, 3.0))
@@ -357,41 +390,55 @@ ax.tick_params(labelsize=12)
 ax.set_xlabel('Independent checks, M', fontsize=13)
 ax.set_ylabel('P(any false alert)', fontsize=13)
 sp.save(fig, out / 'alerts.svg')
-fig, ax = plt.subplots(figsize=(5.9, 2.9))
-ax.set_xlim(0, 10)
-ax.set_xlim(0, 10.5)
-ax.set_ylim(0, 4.4)
-hide_axis(ax)
-levels = [('Infrastructure', 'platform team', V['c1_l'], V['c1']), ('Model', 'model owner', V['c1_l'], V['c1']), ('Portfolio', 'domain team', V['c3_l'], V['c3']), ('Business', 'incident lead', V['bad_l'], V['bad'])]
-for i, (lab, own, fc, ec) in enumerate(levels):
-    y0, y1 = (i * 1.0 + 0.1, i * 1.0 + 1.0)
-    w0, w1 = (7.0 - 1.3 * i, 7.0 - 1.3 * (i + 1))
-    cx = 3.7
-    ax.add_patch(Polygon([(cx - w0 / 2, y0), (cx + w0 / 2, y0), (cx + w1 / 2 + 0.01, y1), (cx - w1 / 2 - 0.01, y1)], closed=True, facecolor=fc, edgecolor=ec, lw=1.6))
-    ax.text(cx, (y0 + y1) / 2, lab, ha='center', va='center', fontsize=12.5, fontweight='bold', color=ec)
-    ax.text(7.9, (y0 + y1) / 2, own, ha='left', va='center', fontsize=12.5, fontweight='bold', color=ec)
-ax.text(7.9, 4.25, 'first owner paged', ha='left', fontsize=11, color=C['neutral'])
-ax.annotate('', xy=(7.6, 3.8), xytext=(7.6, 0.2), arrowprops=dict(arrowstyle='<->', color=C['neutral'], lw=1.3))
-sp.save(fig, out / 'pyramid.svg')
-fig, ax = plt.subplots(figsize=(5.9, 2.6))
-rows = [('Availability', 0.4, 'serving'), ('Latency', 0.6, 'serving'), ('Freshness', 1.3, 'data'), ('Model quality', 0.5, 'model')]
-for i, (lab, v, own) in enumerate(rows):
-    y = 3 - i
-    bad = v > 1
-    ax.barh(y, v, color=C['danger'] if bad else C['memory_l'], edgecolor=C['danger'] if bad else C['memory'], height=0.6, lw=1.5)
-    ax.text(v - 0.03 if bad else v + 0.03, y, f'{v:.2f}', va='center', fontsize=12.5, fontweight='bold', ha='right' if bad else 'left', color='white' if bad else C['memory'], bbox=None if bad else dict(facecolor='white', edgecolor='none', pad=0.5), zorder=5)
-    ax.text(-0.03, y, f'{lab}\n({own} owner)', ha='right', va='center', fontsize=11.5, fontweight='bold')
-ax.axvline(1.0, color=C['text'], lw=2)
-ax.text(1.02, 3.55, 'budget spent: B = 1', ha='left', fontsize=11.5, fontweight='bold')
-ax.axvline(0.7, color=C['neutral'], lw=1.5, ls='--')
-ax.text(0.7 - 0.02, 3.55, 'mean 0.70', ha='right', fontsize=11.5, color=C['neutral'], fontweight='bold')
-ax.text(1.36, 1.0, 'max: stop\npromotion', va='center', fontsize=12, color=C['danger'], fontweight='bold')
-ax.set_xlim(0, 1.75)
-ax.set_ylim(-0.5, 3.8)
-ax.set_yticks([])
-ax.spines['left'].set_visible(False)
-ax.set_xlabel('Budget consumed B = observed / allowed violations (illustrative)')
-sp.save(fig, out / 'slo_vector.svg')
+for k in (1, 2, 3):
+    fig, ax = plt.subplots(figsize=(7.2, 2.95))
+    ax.set_xlim(0, 14.5)
+    ax.set_ylim(0, 4.5)
+    hide_axis(ax)
+    levels = [('Infrastructure', 'platform team', V['c1_l'], V['c1']), ('Model', 'model owner', V['c1_l'], V['c1']), ('Portfolio', 'domain team', V['c3_l'], V['c3']), ('Business', 'incident lead', V['bad_l'], V['bad'])]
+    for i, (lab, own, fc, ec) in enumerate(levels):
+        y0, y1 = (i * 1.0 + 0.1, i * 1.0 + 1.0)
+        w0, w1 = (6.4 - 1.2 * i, 6.4 - 1.2 * (i + 1))
+        cx = 3.3
+        if k == 2 and i == 1:
+            fc, ec = (V['bad_l'], V['bad'])
+        if k == 3 and i == 0:
+            fc, ec = (V['ok_l'], V['ok'])
+        ax.add_patch(Polygon([(cx - w0 / 2, y0), (cx + w0 / 2, y0), (cx + w1 / 2 + 0.01, y1), (cx - w1 / 2 - 0.01, y1)], closed=True, facecolor=fc, edgecolor=ec, lw=1.8 if (k == 2 and i == 1) or (k == 3 and i == 0) else 1.5))
+        ax.text(cx, (y0 + y1) / 2, lab, ha='center', va='center', fontsize=12.5, fontweight='bold', color=ec)
+        ax.text(7.15, (y0 + y1) / 2, own, ha='left', va='center', fontsize=12.0, fontweight='bold', color=ec)
+    ax.text(7.15, 4.30, 'first owner paged', ha='left', fontsize=11.5, color=C['neutral'])
+    ax.annotate('', xy=(6.85, 3.8), xytext=(6.85, 0.2), arrowprops=dict(arrowstyle='<->', color=C['neutral'], lw=1.4))
+    if k >= 2:
+        box(ax, 10.25, 2.25, 4.10, 0.90, '60 / 100 models fire\nat once (alert storm)', V['bad_l'], V['bad'], fs=11.2)
+    if k >= 3:
+        box(ax, 10.25, 0.55, 4.10, 0.96, 'correlate $\\rightarrow$ 1 shared\npipeline incident', V['ok_l'], V['ok'], fs=11.2)
+        arrow(ax, (12.30, 2.22), (12.30, 1.54), V['ok'], lw=2.0)
+    sp.save(fig, out / f'pyramid_step{k}.svg')
+for k in (1, 2):
+    fig, ax = plt.subplots(figsize=(5.9, 2.6))
+    rows = [('Availability', 0.4, 'serving'), ('Latency', 0.6, 'serving'), ('Freshness', 1.3, 'data'), ('Model quality', 0.5, 'model')]
+    for i, (lab, v, own) in enumerate(rows):
+        y = 3 - i
+        bad = v > 1
+        ax.text(-0.03, y, f'{lab}\n({own} owner)', ha='right', va='center', fontsize=11.5, fontweight='bold')
+        if bad and k == 1:
+            ax.text(0.18, y, '??? (not checked by HTTP 200)', va='center', ha='left', fontsize=11.5, fontweight='bold', color=C['danger'])
+            continue
+        ax.barh(y, v, color=C['danger'] if bad else C['memory_l'], edgecolor=C['danger'] if bad else C['memory'], height=0.6, lw=1.5)
+        ax.text(v - 0.03 if bad else v + 0.03, y, f'{v:.2f}', va='center', fontsize=12.5, fontweight='bold', ha='right' if bad else 'left', color='white' if bad else C['memory'], bbox=None if bad else dict(facecolor='white', edgecolor='none', pad=0.5), zorder=5)
+    ax.axvline(1.0, color=C['text'], lw=2)
+    ax.text(1.02, 3.55, 'budget spent: B = 1', ha='left', fontsize=11.5, fontweight='bold')
+    if k >= 2:
+        ax.axvline(0.7, color=C['neutral'], lw=1.5, ls='--')
+        ax.text(0.7 - 0.02, 3.55, 'mean 0.70', ha='right', fontsize=11.5, color=C['neutral'], fontweight='bold')
+        ax.text(1.36, 1.0, 'max: stop\npromotion', va='center', fontsize=12, color=C['danger'], fontweight='bold')
+    ax.set_xlim(0, 1.75)
+    ax.set_ylim(-0.5, 3.8)
+    ax.set_yticks([])
+    ax.spines['left'].set_visible(False)
+    ax.set_xlabel('Budget consumed B = observed / allowed violations (illustrative)')
+    sp.save(fig, out / f'slo_vector_step{k}.svg')
 fig, ax = plt.subplots(figsize=(5.4, 3.0))
 ax.add_patch(Rectangle((15.83333333, 0.6), 21.33333333 - 15.83333333, 0.8, facecolor=C['danger_l'], edgecolor=C['danger'], lw=1.5))
 ax.text((15.83333333 + 21.33333333) / 2, 1.0, 'facebook.com unreachable\nabout 5.5 h', ha='center', va='center', fontsize=13, fontweight='bold', color=C['danger'])

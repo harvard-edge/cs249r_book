@@ -276,6 +276,38 @@ def terms():
         ax.text(W - 0.05, 0.05, 'schematic, not to scale', ha='right', va='bottom', fontsize=11.2, color=V['mute'])
         out(fig, f'terms_step{step}', tight=False)
 
+def tinytl():
+    W, H = (6.2, 2.50)
+    for step in (1, 2, 3):
+        fig, ax = canvas(W, H)
+        ax.text(0.04, 2.12, '1. Full\nfine-tune', ha='left', va='center', fontsize=12.5, fontweight='bold', color=V['bad_t'])
+        for i in range(3):
+            x = 1.08 + i * 1.06
+            box(ax, x, 1.98, 0.84, 0.44, V['c1_l'], V['c1'], f'Conv {i + 1}\ntrain W', fs=11.0, bold=True)
+            if i < 2:
+                arrow(ax, x + 0.85, 2.20, x + 1.05, 2.20, V['c1'], lw=1.4)
+            box(ax, x + 0.04, 1.66, 0.76, 0.28, V['bad_l'], V['bad'], 'save $A$', fs=11.0, color=V['bad_t'], bold=True)
+        box(ax, 4.18, 1.72, 1.96, 0.68, V['bad_l'], V['bad'], '200 MB activations\n(360 MB: killed)', fs=11.5, color=V['bad_t'], bold=True)
+        if step >= 2:
+            ax.text(0.04, 1.24, '2. Freeze W,\nbias-only', ha='left', va='center', fontsize=12.5, fontweight='bold', color=V['mute'])
+            for i in range(3):
+                x = 1.08 + i * 1.06
+                box(ax, x, 1.02, 0.84, 0.44, V['fr_l'], V['fr'], f'Conv {i + 1}\nfrozen', fs=11.0, color=V['mute'])
+                if i < 2:
+                    arrow(ax, x + 0.85, 1.24, x + 1.05, 1.24, V['mute'], lw=1.4)
+            box(ax, 4.18, 0.94, 1.96, 0.60, V['c2_l'], V['c2'], 'no conv $A$ for $dW$\nbut lower accuracy', fs=11.5, color=V['c2_t'], bold=True)
+        if step >= 3:
+            ax.text(0.04, 0.40, '3. TinyTL\n+ lite-res', ha='left', va='center', fontsize=12.5, fontweight='bold', color=V['ok_t'])
+            for i in range(3):
+                x = 1.08 + i * 1.06
+                box(ax, x, 0.42, 0.84, 0.36, V['fr_l'], V['fr'], f'Conv {i + 1}*', fs=11.2, color=V['mute'])
+                box(ax, x + 0.02, 0.06, 0.80, 0.30, V['ok_l'], V['ok'], 'lite-res', fs=11.2, color=V['ok_t'], bold=True)
+                if i < 2:
+                    arrow(ax, x + 0.85, 0.60, x + 1.05, 0.60, V['mute'], lw=1.3)
+                    arrow(ax, x + 0.83, 0.21, x + 1.07, 0.21, V['ok'], lw=1.3)
+            box(ax, 4.18, 0.08, 1.96, 0.68, V['ok_l'], V['ok'], 'recovers accuracy\nup to 6.5× less RAM', fs=11.5, color=V['ok_t'], bold=True)
+        out(fig, f'tinytl_step{step}', tight=False)
+
 def personalize():
     fig, ax = plt.subplots(figsize=(3.9, 2.0))
     rows = [('10 full copies', 400.0, C['neutral'], '400 MB'), ('Base + 10 adapters', 42.0, C['memory'], '42 MB')]
@@ -307,26 +339,37 @@ def battery():
 
 def tiny_energy():
     from mlsysim import load_series
-    keep = {'Syntiant Core 2\n(KWS, low-energy)': 'Syntiant Core 2, keyword spotting', 'STM32N6 NPU\n(KWS, low-power)': 'STM32N6 NPU, keyword spotting', 'STM32N6 NPU\n(IC, high-perf)': 'STM32N6 NPU, image classification', 'Google Coral\nEdge TPU': 'Google Coral Edge TPU', 'Jetson AGX Orin\n(ResNet-50)': 'Jetson AGX Orin, ResNet-50'}
-    rows = [(keep[d['name'].replace('\\n', '\n')], d['energy_uj']) for d in load_series(HERE / 'data' / 'edge_inference_benchmarks.csv').entries if d['name'].replace('\\n', '\n') in keep]
+    keep = {
+        'Syntiant Core 2\n(KWS, low-energy)': 'Syntiant Core 2, KWS (low-energy)',
+        'Syntiant Core 2\n(KWS, high-perf)': 'Syntiant Core 2, KWS (high-perf)',
+        'Syntiant Core 2\n(VWW)': 'Syntiant Core 2, visual wake words',
+        'Syntiant Core 2\n(IC)': 'Syntiant Core 2, image classification',
+        'STM32N6 NPU\n(KWS, low-power)': 'STM32N6 NPU, KWS (low-power)',
+        'STM32N6 NPU\n(VWW, high-perf)': 'STM32N6 NPU, VWW (high-perf)',
+    }
+    rows = [
+        (keep[d['name'].replace('\\n', '\n')], d['energy_uj'])
+        for d in load_series(HERE / 'data' / 'edge_inference_benchmarks.csv').entries
+        if d.get('source_status') == 'source_matched' and d['name'].replace('\\n', '\n') in keep
+    ]
     rows.sort(key=lambda r: r[1])
-    fig, ax = plt.subplots(figsize=(5.9, 2.5))
+    fig, ax = plt.subplots(figsize=(5.9, 2.8))
     t_lo, t_hi = ((lambda q, u: q.to(u).magnitude)(q, 'microjoule') for q in (Q_(2.0, 'J'), Q_(3.0, 'J')))
     ax.axvspan(t_lo, t_hi, color=C['danger_l'], zorder=0)
-    ax.text(t_lo * 1.2, 2.0, 'one second\nof training\nat 2 to 3 W', ha='center', va='center', fontsize=13.2, color=C['danger'], fontweight='bold')
+    ax.text((t_lo * t_hi) ** 0.5, (len(rows) - 1) / 2.0, 'one second\nof phone\ntraining\n(2 to 3 W)', ha='center', va='center', fontsize=12.5, color=C['danger'], fontweight='bold')
     for i, (lab, e) in enumerate(rows):
         y = len(rows) - 1 - i
         ax.scatter(e, y, s=70, color=C['compute'], zorder=3)
         txt = f'{e:,.0f} µJ' if e < 1000 else f'{e / 1000:,.1f} mJ'
-        ax.text(e * 1.5, y, txt, va='center', fontsize=13.2, color=C['compute'], fontweight='bold')
-        ax.text(12, y, lab, ha='right', va='center', fontsize=13.2, color=TXT)
+        ax.text(e * 1.5, y, txt, va='center', fontsize=12.5, color=C['compute'], fontweight='bold')
+        ax.text(12, y, lab, ha='right', va='center', fontsize=12.5, color=TXT)
     ax.set_xscale('log')
-    ax.set_xlim(15, 12000000.0)
+    ax.set_xlim(15, 14000000.0)
     ax.set_ylim(-0.6, len(rows) - 0.4)
     ax.set_yticks([])
     ax.set_xticks([100.0, 10000.0, 1000000.0])
-    ax.set_xticklabels(['100 µJ', '10 mJ', '1 J'], fontsize=13.2)
-    ax.set_xlabel('Energy per inference (log scale)', fontsize=13.2)
+    ax.set_xticklabels(['100 µJ', '10 mJ', '1 J'], fontsize=12.5)
+    ax.set_xlabel('Energy per MCU inference vs. one phone training second (log scale)', fontsize=12.5)
     out(fig, 'tiny_energy')
 
 def round_timeline():
@@ -453,23 +496,27 @@ def secagg():
 
 def secagg_drop():
     W, H = (6.4, 2.6)
-    fig, ax = canvas(W, H)
     names = ['A', 'B', 'C', 'D', 'E']
     xs = [0.6 + i * 0.75 for i in range(5)]
-    for x, n in zip(xs, names):
-        dropped = n == 'C'
-        ax.add_patch(plt.Circle((x, 0.95), 0.24, fc=V['bad_l'] if dropped else V['c1_l'], ec=V['bad'] if dropped else V['c1'], lw=1.6))
-        ax.text(x, 0.95, n, ha='center', va='center', fontsize=14.6, fontweight='bold', color=V['bad_t'] if dropped else V['c1'])
-        if dropped:
-            ax.plot([x - 0.2, x + 0.2], [0.75, 1.15], color=V['bad'], lw=2)
-            ax.text(x, 0.6, 'drops after\nagreeing masks', ha='center', va='top', fontsize=11.8, color=V['bad_t'])
+    for step in (1, 2):
+        fig, ax = canvas(W, H)
+        for x, n in zip(xs, names):
+            dropped = n == 'C'
+            ax.add_patch(plt.Circle((x, 0.95), 0.24, fc=V['bad_l'] if dropped else V['c1_l'], ec=V['bad'] if dropped else V['c1'], lw=1.6))
+            ax.text(x, 0.95, n, ha='center', va='center', fontsize=14.6, fontweight='bold', color=V['bad_t'] if dropped else V['c1'])
+            if dropped:
+                ax.plot([x - 0.2, x + 0.2], [0.75, 1.15], color=V['bad'], lw=2)
+                ax.text(x, 0.6, 'drops after\nagreeing masks', ha='center', va='top', fontsize=11.8, color=V['bad_t'])
+            else:
+                arrow(ax, x, 1.21, x, 1.62, V['c2'], lw=1.8)
+        box(ax, 0.3, 1.65, 3.6, 0.55, V['c3_l'], V['c3'], "sum still holds C's masks with A, B, D, E", fs=12.9)
+        if step == 1:
+            box(ax, 4.15, 1.65, 2.15, 0.55, V['bad_l'], V['bad'], "masks do not cancel;\nsum unreadable", fs=12.0, color=V['bad_t'])
         else:
-            arrow(ax, x, 1.21, x, 1.62, V['c2'], lw=1.8)
-    box(ax, 0.3, 1.65, 3.6, 0.55, V['c3_l'], V['c3'], "sum still holds C's masks with A, B, D, E", fs=12.9)
-    box(ax, 4.15, 1.65, 2.15, 0.55, V['ok_l'], V['ok'], "survivors send shares\nof C's mask seeds", fs=12.3)
-    box(ax, 4.15, 0.55, 2.15, 0.7, V['bad_l'], V['bad'], 'fewer than t survivors:\nround is abandoned', fs=12.3)
-    ax.text(5.22, 2.42, "server rebuilds and\nsubtracts C's masks", ha='center', va='center', fontsize=12.3, color=V['ok_t'])
-    out(fig, 'secagg_drop', tight=False)
+            box(ax, 4.15, 1.65, 2.15, 0.55, V['ok_l'], V['ok'], "survivors send shares\nof C's mask seeds", fs=12.3)
+            box(ax, 4.15, 0.55, 2.15, 0.7, V['bad_l'], V['bad'], 'fewer than t survivors:\nround is abandoned', fs=12.3)
+            ax.text(5.22, 2.42, "server rebuilds and\nsubtracts C's masks", ha='center', va='center', fontsize=12.3, color=V['ok_t'])
+        out(fig, f'secagg_drop_step{step}', tight=False)
 
 def sessions():
     rows = [('Completed and accepted', 1116401.0, C['data'], '75'), ('Completed, rejected as late', 327478.0, C['compute'], '22'), ('Interrupted (left idle)', 29771.0, C['danger'], '2')]
@@ -613,6 +660,7 @@ if __name__ == '__main__':
     memladder()
     npu_tops()
     terms()
+    tinytl()
     personalize()
     battery()
     tiny_energy()

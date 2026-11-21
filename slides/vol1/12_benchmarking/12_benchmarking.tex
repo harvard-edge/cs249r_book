@@ -121,19 +121,21 @@
 
 \begin{frame}[t]{Estimate: how many requests hit a slow shard?}
   \mlsysactivity{Estimate}{2 min}
+  \vspace{-0.1cm}
   \begin{columns}[T]
-    \begin{column}{0.40\textwidth}
+    \begin{column}{0.41\textwidth}
       \begin{mlsyscard}{mlsysaccent}
-        \small Each of 100 shards is slow 1\% of the time, independently. A request waits for all 100.\\[0.1cm]
-        What fraction of requests waits on a slow one?
-      \end{mlsyscard}\vspace{0.15cm}
-      \uncover<2->{\small $P = 1 - 0.99^{100}$\\[0.05cm] $\phantom{P} = 1 - 0.366 = 63\%$}
+        \footnotesize Each of 100 shards is slow 1\% of the time, independently. A request waits for all 100. What fraction waits on a slow one?
+      \end{mlsyscard}\vspace{0.12cm}
+      \uncover<2->{\small $P = 1 - 0.99^{100} = 1 - 0.366 = \mathbf{63\%}$}\\[0.14cm]
+      \begin{minipage}[c]{0.46\linewidth}\mlsysphoto[width=\linewidth,height=1.25cm,keepaspectratio]{datacenter-server-racks.jpg}\end{minipage}\hfill
+      \begin{minipage}[c]{0.51\linewidth}\raggedright\scriptsize\textcolor{midgray}{Fan-out across leaf server racks multiplies single-shard tails.}\end{minipage}
     \end{column}
-    \begin{column}{0.58\textwidth}
-      \centering\mlsyssteps[width=\textwidth,height=4.95cm,keepaspectratio]{fanout_step}{2}
+    \begin{column}{0.57\textwidth}
+      \centering\mlsyssteps[width=\textwidth,height=4.75cm,keepaspectratio]{fanout_step}{2}
     \end{column}
   \end{columns}
-  \mlsyscredit{Benchmarking, footnote 20 (Dean and Barroso, ``The Tail at Scale,'' CACM 2013); curve $1 - 0.99^n$ computed.}
+  \mlsyscredit{Benchmarking, footnote 20 (Dean and Barroso, ``The Tail at Scale,'' CACM 2013); curve $1 - 0.99^n$ computed. Photo: Carl Lender (CC BY 2.0), Wikimedia Commons.}
   \note{[2.5 min] A worked estimate that explains the previous slide's 140 ms. A shard is one leaf server holding part of the data, so one request touches many shards. ENGAGE: one minute with a neighbor. Each shard is fast 99 percent of the time. Step 2: work it slowly on the board. The chance one shard is fast is 0.99. The chance all 100 are fast is 0.99 multiplied by itself 100 times, about 0.366. The chance at least one is slow is the rest: 1 minus 0.366, about 63 percent. Point to the curve: at 10 shards it is already 9.6 percent, the chapter's self-check answer. Students who answered 1 percent assumed the request is as slow as a typical shard; it is as slow as its slowest one. So a leaf's p99 becomes something close to the whole request's median, which is what the measured table showed: 40 ms median against one leaf's 1 ms. WARN: the formula assumes shards are slow independently; correlated slowdowns, such as a shared network switch, behave differently. LINK: Lecture 13 uses the complement, 36.6 percent of requests meeting the target, to motivate hedged requests. FLEX: [CORE].}
 \end{frame}
 
@@ -177,48 +179,44 @@
 
 \begin{frame}{A closed-loop client erases the stall it should measure}
   \centering
-  \mlsyssteps[width=0.92\textwidth,height=5.0cm,keepaspectratio]{loop_step}{2}
-  \note{[2 min] The client that sends requests is part of the measurement. Step 1: a closed-loop client sends one request, waits for the reply, then sends the next. The server stalls for 500 ms, for example in garbage collection. The client waits too, sends nothing, and records one slow request. Step 2: an open-loop client sends on its own schedule, the way independent users do; MLPerf's Server scenario uses random (Poisson) arrivals. Every request that arrives during the stall waits behind it, and the log shows 14 slow requests. The closed-loop client hid the tail it was built to find; this error is called coordinated omission. ENGAGE: which client does a load-testing script that loops ``send, wait, send'' implement? Expected: closed loop. LINK: Lecture 13 measures queues under load. FLEX: [CORE].}
+  \mlsyssteps[width=0.92\textwidth,height=5.15cm,keepaspectratio]{loop_step}{3}
+  \mlsyscredit{Benchmarking, \S12.2.4 (interactive Explore figure: Coordinated Omission).}
+  \note{[2 min] The client that sends requests is part of the measurement. Step 1: a closed-loop client sends one request, waits for the reply, then sends the next. The server stalls for 500 ms, for example in garbage collection. The client waits too, sends nothing, and records one slow request. Step 2: an open-loop client sends on its own schedule, the way independent users do; MLPerf's Server scenario uses random (Poisson) arrivals. Every request that arrives during the stall waits behind it, and the log shows 14 slow requests. Step 3: the closed-loop client hid 13 of 14 tail requests, an error called coordinated omission. ENGAGE: which client does a load-testing script that loops ``send, wait, send'' implement? Expected: closed loop. LINK: Lecture 13 measures queues under load. FLEX: [CORE].}
 \end{frame}
 
-\begin{frame}[fragile]{A host timer measures the launch and misses the kernel}
+\begin{frame}[fragile,t]{A host timer measures the launch and misses the kernel}
+  \vspace{-0.22cm}
   \begin{columns}[T]
-    \begin{column}{0.62\textwidth}
-      {\footnotesize\textbf{timer\_demo.py}, after its imports}
-\vspace{-0.25cm}
-\begin{semiverbatim}\fontsize{8.7}{10.4}\selectfont
-x = torch.randn(8192, 8192, device="mps")
-for _ in range(5): y = x @ x          # warm-up
-torch.mps.synchronize()
-
+    \begin{column}{0.61\textwidth}
+      {\scriptsize\textbf{timer\_demo.py} (8,192$\times$8,192 matmul on MPS after 5 warm-up runs)}
+\vspace{-0.3cm}
+\begin{semiverbatim}\fontsize{7.8}{8.9}\selectfont
 t0 = time.perf_counter(); y = x @ x
-t1 = time.perf_counter()              # no barrier
+t1 = time.perf_counter()            # no barrier
 print(f"host timer:       \{1e3*(t1-t0):.3f\} ms")
 torch.mps.synchronize()
-
 t0 = time.perf_counter(); y = x @ x
-torch.mps.synchronize()               # barrier
+torch.mps.synchronize()             # barrier
 t1 = time.perf_counter()
 print(f"with synchronize: \{1e3*(t1-t0):.3f\} ms")
 \end{semiverbatim}
     \end{column}
     \begin{column}{0.37\textwidth}
-      \begin{uncoverenv}<2->
-      {\footnotesize\textbf{Printed}}
-\vspace{-0.25cm}
-\begin{semiverbatim}\fontsize{9}{11}\selectfont
+      {\scriptsize\textbf{Printed (Apple M5 Max GPU)}}
+\vspace{-0.3cm}
+\begin{semiverbatim}\fontsize{8.0}{9.4}\selectfont
 host timer:       0.175 ms
 with synchronize: 76.525 ms
 \end{semiverbatim}
-      \vspace{-0.1cm}
-      \small The multiply ran \textbf{437$\times$} longer than the host timer reported.
-      \end{uncoverenv}\\[0.2cm]
-      \begin{mlsyscard}{RedLine}\footnotesize\textbf{Barrier rule:} synchronize before the clock stops, or time with device events.\\[0.05cm]
-      \textbf{Warm-up rule:} discard cold iterations.\end{mlsyscard}
+      \vspace{-0.2cm}
+      \begin{mlsyscard}{RedLine}\scriptsize\textbf{Barrier:} sync before stop, or use device events.\\
+      \textbf{Warm-up:} discard cold iterations.\end{mlsyscard}
     \end{column}
-  \end{columns}
-  \mlsyscredit{Run here: python3 images/timer\_demo.py (torch 2.13.0, MPS backend on an Apple M5 Max GPU). Rules: Benchmarking, Systems Perspective 12.4, rules 1 and 5; \S12.2.4.}
-  \note{[2 min] Real code and its real output. The script times one 8,192 by 8,192 matrix multiply on a laptop GPU through PyTorch's Metal backend (MPS); on an NVIDIA GPU the calls are torch.cuda.synchronize() and torch.cuda.Event, and the behavior is the same. Step 1: read the code. The warm-up loop runs the multiply five times so allocation and kernel selection are paid before timing. The first timed block stops the clock right after the multiply is called. ENGAGE: predict the first print against the second. Step 2: 0.175 ms against 76.525 ms, 437 times apart. A GPU launch returns to Python as soon as the work is queued, so the first timer measured the enqueue and missed the kernel. The barrier waits for the GPU to finish before the clock stops. The two cards are the chapter's micro-benchmarking rules 5 and 1. WARN: a result that looks impossibly fast usually timed the launch. Students who time PyTorch with time.time() and no synchronize make exactly this error. FLEX: [CORE]; if time allows, rerun the script live (it takes a few seconds).}
+  \end{columns}\vspace{-0.12cm}
+  \centering
+  \mlsyssteps[width=0.96\textwidth,height=2.82cm,keepaspectratio]{async_step}{3}
+  \mlsyscredit{Run here: python3 images/timer\_demo.py (torch 2.13.0, MPS, Apple M5 Max). Benchmarking, \S12.2.4 (interactive Explore figure: Asynchronous Accelerator Timing) and Systems Perspective 12.4.}
+  \note{[2 min] Real code, its real output, and the three timing intervals underneath. The script warms up five times, then times one 8,192 by 8,192 matrix multiply twice on a laptop GPU through PyTorch MPS (NVIDIA GPUs use torch.cuda.synchronize() and torch.cuda.Event). Step 1: the green call timer measures only command enqueue, 0.175 ms, because GPU launches return immediately to Python. Step 2: the kernel runs asynchronously on the accelerator stream; orange device events measure pure kernel execution without launch or host-sync overhead. Step 3: calling synchronize() blocks the host until the stream drains, giving 76.525 ms end to end, 437 times longer. ENGAGE: why do both warm-up and a barrier matter? Expected: warm-up pays cold allocation/JIT; the barrier prevents timing the enqueue alone. FLEX: [CORE].}
 \end{frame}
 
 % =============================================================================
@@ -269,7 +267,7 @@ with synchronize: 76.525 ms
   \vspace{-0.2cm}
   {\small On this CPU: \textcolor{RedLine}{\textbf{convolutions 92.0\%}}, \textcolor{BlueLine}{\textbf{batch norm 4.8\%}}, everything else 3.2\%.}\\[0.15cm]
   \uncover<2->{\begin{mlsyscard}{mlsysaccent}\footnotesize\textbf{On an H100} tensor cores run the convolutions near the ceiling, so batch norm, elementwise layers, and host JPEG decoding take the 8.0$\times$ gap (Napkin Math 12.1).\end{mlsyscard}}
-  \mlsyscredit{Run here: python3 images/profile\_step.py (torch 2.13.0, torchvision 0.28.0; CPU of an Apple M5 Max; 3 warm-up steps). Shares: calcs.py.}
+  \mlsyscredit{Run here: python3 images/profile\_step.py (torch 2.13.0, torchvision 0.28.0; CPU of an Apple M5 Max; 3 warm-up steps). Shares (derived).}
   \note{[2 min] Real tool output. The previous slide located a gap; a profiler says where the time went. This deck's images folder holds the script, which builds ResNet-50, runs three warm-up training steps, and profiles one more on the laptop's CPU. The table is what torch.profiler printed, sorted by each operator's own time; the slide shows its first three columns. Step 1: read the top rows. Forward and backward convolutions take 92.0 percent of the step, batch normalization 4.8 percent, everything else 3.2 percent. On a CPU, ResNet-50 training is convolution time. Step 2: the chapter's diagnosis for the H100. Its tensor cores run the convolutions close to the roofline, so the same profile on that GPU shows a much larger share for batch normalization, elementwise additions and activations, and idle gaps while the host decodes JPEGs. ENGAGE (before step 2): which rows would grow on the H100? One minute with a neighbor. Expected: the batch-norm and add rows. WARN: a profile describes one machine; attributing the H100's gap needs a run on an H100, where adding ProfilerActivity.CUDA records each GPU kernel. LINK: Lecture 5 read the same table for a small network. FLEX: [OPTIONAL]; cutting it loses the operator-level profile.}
 \end{frame}
 
@@ -359,7 +357,7 @@ with synchronize: 76.525 ms
       \begin{minipage}[c]{0.81\linewidth}\raggedright\scriptsize An 8-GPU HGX board (B200 generation shown). An Eos node holds eight H100s on a board of this kind; the 64-GPU run joins eight nodes by a network.\end{minipage}
     \end{column}
   \end{columns}
-  \mlsyscredit{MLPerf Training v4.0 closed, NVIDIA eos and eos\_n8 (ngc24.04\_mxnet), ResNet-50; published scores (middle three runs $\times$ 1.0042); derived: calcs.py. Photo: Pokiiri, CC BY-SA 4.0, Wikimedia Commons.}
+  \mlsyscredit{MLPerf Training v4.0 closed, NVIDIA eos and eos\_n8 (ngc24.04\_mxnet), ResNet-50; published scores (middle three runs $\times$ 1.0042); derived. Photo: Pokiiri, CC BY-SA 4.0, Wikimedia Commons.}
   \note{[3.5 min] Strong scaling: the same job, the same global batch of 3,200 images and the same 35 epochs, on eight times the accelerators. ENGAGE: predict, then vote. Step 2: B. The published score falls from 13.33 to 2.52 minutes, 5.3 times faster against an ideal 8. Work the efficiency on the board: the ideal time is 13.33 over 8, 1.67 minutes, which was answer A. The measured time is 2.52, so efficiency is 1.67 over 2.52, or 13.33 over 8 times 2.52, about 66 percent. Per GPU, throughput falls from about 7,040 to about 4,660 images per second (35 epochs of 1,281,167 images over each run's time), the range on the roofline slide. Each GPU now processes 50 images per step instead of 400, so fixed costs per step, such as synchronizing gradients across the network, take a larger share; the photo shows one node's board, and the 64-GPU run crosses a network between eight of them. WARN: C assumes scaling barely helps; the chapter's Napkin Math 12.3 uses an illustrative 75 percent, and these runs show 66. ENGAGE: when would you still buy the 64-GPU system? Expected: when time matters more than cost. Part 2 uses these same submissions to measure noise. FLEX: [OPTIONAL]; cutting it loses the scaling-efficiency predict.}
 \end{frame}
 
@@ -488,7 +486,7 @@ min_duration (ms): 600000
       {\scriptsize STM32 Nucleo-64 board; the entries ran on Nucleo-144 boards}
     \end{column}
   \end{columns}
-  \mlsyscredit{MLCommons, MLPerf Tiny v1.2, closed, visual wake words (MobileNetV1 0.25$\times$ reference, accuracy 84.8 to 85.2\%), summary.csv; ratios: calcs.py. Photo: Ordercrazy, CC0, Wikimedia Commons.}
+  \mlsyscredit{MLCommons, MLPerf Tiny v1.2, closed, visual wake words (MobileNetV1 0.25$\times$ reference, accuracy 84.8 to 85.2\%), summary.csv; ratios (derived). Photo: Ordercrazy, CC0, Wikimedia Commons.}
   \note{[2.5 min] Published microcontroller results for visual wake words: is there a person in the image? The reference network is a small MobileNetV1. Step 1: one chip, two operating points. The Syntiant NDP9120 at 30.7 MHz and 0.9 V uses 72 microjoules per inference; at 98.7 MHz and 1.1 V it runs 3.1 times faster and uses 97 microjoules, 1.35 times the energy. Raising the clock needs a higher voltage, and dynamic power grows with voltage squared (Lecture 11). Step 2: three general-purpose STM32 boards on the same task use 1,355 to 3,895 microjoules (the photo shows a smaller board of the same Nucleo family; the entries are NUCLEO-L4R5ZI, -H7A3ZI-Q, and -U575ZI-Q), up to 54 times the Syntiant's low point. ENGAGE: the vendor of the first chip wants to quote one energy number. Which? Expected: the 72 microjoules, the most favorable point; a fair report names the clock. WARN: a fast operating point is not the efficient one. FLEX: [OPTIONAL] if short; keep the Syntiant pair.}
 \end{frame}
 
@@ -512,7 +510,7 @@ min_duration (ms): 600000
   \end{columns}\vspace{0.1cm}
   \centering
   \uncover<4->{\safeimg[width=0.98\textwidth,height=1.75cm,keepaspectratio]{duty.pdf}}
-  \mlsyscredit{Benchmarking, \S12.7.2 (DS-CNN keyword spotting on an ESP32-S3-class board); arithmetic: calcs.py. Photo: VectorVoyager, CC BY-SA 4.0, Wikimedia Commons.}
+  \mlsyscredit{Benchmarking, \S12.7.2 (DS-CNN keyword spotting on an ESP32-S3-class board); arithmetic (derived). Photo: VectorVoyager, CC BY-SA 4.0, Wikimedia Commons.}
   \note{[3 min] Keyword spotting, the chapter's power case. The photo shows the class of board the chapter assumes. ENGAGE: one minute with a neighbor. Step 2: the formula. The duty cycle d is the fraction of time spent on inference, 8.3 ms out of each second, about 0.8 percent; average power weights active and idle power by their time shares. Ask for estimates before showing step 3. Step 3: 3.3 mW active plus 49.6 mW idle, about 52.9 mW. Step 4: 94 percent of the battery drain is waiting. Active energy would match idle only if inference filled about 11 percent of the time (50 / 450). Follow-up: a new model halves inference energy. Battery gain? About 1.67 of 52.9 mW, about 3 percent. WARN: students optimize the part that is measured, energy per inference; here the idle floor decides. A power benchmark for a duty-cycled device must state the duty cycle. Contrast: continuous video analytics has d near 1, and active energy dominates. FLEX: [CORE].}
 \end{frame}
 
@@ -554,15 +552,15 @@ min_duration (ms): 600000
 \end{frame}
 
 \begin{frame}[fragile]{Read and explore}
+  \vspace{-0.12cm}
   \footnotesize
   \begin{itemize}\setlength{\itemsep}{0.0cm}
     \item \textbf{Read:} Benchmarking, \S12.1 to \S12.3, \S12.4.4, \S12.5, \S12.6.4 to \S12.6.5, \S12.7, \S12.10; Napkin Math 12.1 to 12.4.
-    \item \textbf{Practice:} time one model on your laptop twice: once with a host timer and no warm-up; once with warm-up, a synchronize barrier, 30 runs, and p50 and p99.
-    \item Reddi et al., ``MLPerf Inference Benchmark,'' ISCA 2020.
-    \item Dean and Barroso, ``The Tail at Scale,'' CACM 2013.
-    \item Tschand et al., ``MLPerf Power,'' HPCA 2025.
-    \item Mattson et al., ``MLPerf Training Benchmark,'' MLSys 2020.
-    \item MLCommons results and rules: mlcommons.org/benchmarks. Every submission's logs, for example in github.com/mlcommons/inference\_results\_v5.0:
+    \item \textbf{Explore:} \textit{Coordinated Omission} and \textit{Asynchronous Accelerator Timing} (\S12.2.4) on mlsysbook.ai/vol1/.
+    \item \textbf{Practice:} time one model twice (no warm-up/barrier vs.\ warm-up, synchronize, 30 runs, p50 and p99).
+    \item Reddi et al., ``MLPerf Inference Benchmark,'' ISCA 2020; Mattson et al., ``MLPerf Training,'' MLSys 2020.
+    \item Dean and Barroso, ``The Tail at Scale,'' CACM 2013; Tschand et al., ``MLPerf Power,'' HPCA 2025.
+    \item MLCommons logs (e.g.\ github.com/mlcommons/inference\_results\_v5.0):
   \end{itemize}
 \vspace{-0.3cm}
 \begin{semiverbatim}\scriptsize

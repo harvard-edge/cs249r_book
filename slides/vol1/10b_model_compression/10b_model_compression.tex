@@ -145,10 +145,8 @@
         \textbf{Name} & \textbf{Bits} & \textbf{Size} & \uncover<2->{\textbf{Bits/wt}} \\[-0.05cm]
         \midrule
         Q2\_K & 2 & 2.83 GB & \uncover<2->{\textcolor{RedLine}{3.35}} \\
-        Q3\_K\_M & 3 & 3.30 GB & \uncover<2->{3.91} \\
         Q4\_0 & 4 & 3.83 GB & \uncover<2->{\textbf{4.54}} \\
         Q4\_K\_M & 4 & 4.08 GB & \uncover<2->{4.84} \\
-        Q6\_K & 6 & 5.53 GB & \uncover<2->{6.56} \\
         Q8\_0 & 8 & 7.16 GB & \uncover<2->{8.50} \\
         \bottomrule
       \end{tabular}\\[0.2cm]
@@ -170,7 +168,7 @@ typedef struct \{
       \end{uncoverenv}
     \end{column}
   \end{columns}
-  \mlsyscredit{Table: huggingface.co/TheBloke/Llama-2-7B-GGUF, Provided files (commit b4e04e1); Bits/wt: Hub byte sizes over 6.74 B weights (calcs.py). Code: github.com/ggml-org/llama.cpp v0.7.0 (MIT).}
+  \mlsyscredit{Table: huggingface.co/TheBloke/Llama-2-7B-GGUF, Provided files (commit b4e04e1); Bits/wt: Hub byte sizes over 6.74 B weights. Code: github.com/ggml-org/llama.cpp v0.7.0 (MIT).}
   \note{[2.5 min] A real artifact: the model card of a public repository of Llama 2 7B files in GGUF, the format the llama.cpp runtime loads. Step 1: three of the card's columns: the file's name, its nominal bits, and its size. ENGAGE: Q4\_0 holds 6.74 billion weights in 3.83 GB; how many bits per weight? Thirty seconds. Step 2: 4.54 bits (derived: bytes times 8 over the weight count). Every file is above its nominal bits. Q2\_K stores 3.35 bits per weight, Q8\_0 8.50. Step 3: why. llama.cpp's source stores weights in blocks of 32; each block keeps one 16-bit scale, d, beside 16 bytes of packed 4-bit codes. That is 18 bytes for 32 weights, 4.5 bits per weight. The scale is the price of reaching a real range with 16 levels, the subject of the next segment. The card's notes give Q2\_K's blocks 2.5625 bits per weight; the rest of its 3.35 is tensors and metadata the name does not describe. WARN: students compute INT4 bytes as parameters over two. That omits the scales, 12.5 percent more at Q4\_0; when memory is the constraint, use the file size. LINK: the closing slide's 7B model. FLEX: [OPTIONAL]; cutting it loses the real file's overhead bits.}
 \end{frame}
 
@@ -184,10 +182,19 @@ typedef struct \{
 
 \begin{frame}{Fewer bits save bytes, energy, and sometimes capacity}
   \mlsysactivity{Vote}{1 min}
-  \centering
-  \mlsyssteps[width=0.95\textwidth,height=4.6cm,keepaspectratio]{energy_step}{2}\\[0.1cm]
-  \uncover<3->{\small Capacity shrinks too. A keyword spotter drops from 800 KB to 200 KB, inside 512 KB of SRAM.}
-  \mlsyscredit{Horowitz 2014 (45 nm), via Model Compression, table 8 and \S10.3.2. Keyword spotter (DS-CNN): Lighthouse 10.2.}
+  \begin{columns}[c]
+    \begin{column}{0.67\textwidth}
+      \centering\mlsyssteps[width=\textwidth,height=4.7cm,keepaspectratio]{energy_step}{2}
+    \end{column}
+    \begin{column}{0.30\textwidth}
+      \uncover<3->{%
+        {\centering\mlsysphoto[width=\textwidth,height=2.2cm,keepaspectratio]{arduino-nano.jpg}\par}\vspace{0.12cm}
+        \raggedright\footnotesize
+        \textbf{Capacity gate (MCU):}\\[0.06cm]
+        Keyword spotter drops \textbf{800 KB $\rightarrow$ 200 KB} (INT8), fitting inside \textbf{512 KB} SRAM.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Horowitz 2014 (45 nm), via Model Compression, table 8 and \S10.3.2. Spotter: Lighthouse 10.2. Photo: MegaMegaAndOmega (CC BY-SA 4.0).}
   \note{[2.5 min] [CORE] Step 1: energy per operation in a 45 nm reference process. An FP32 add costs 0.90 pJ, an INT8 add 0.03 pJ, 30 times less; a multiply 18.5 times less; a full multiply-accumulate 15.3 times. ENGAGE before step 2: hands up, which costs more, the INT8 multiply-accumulate or reading its 32-bit operand from DRAM (the phone's or server's main memory)? Step 2: the DRAM read, 640 pJ, about 2,100 times the multiply-accumulate. So the larger saving from fewer bits is usually the bytes not moved, since INT8 moves a quarter of FP32's bits. Step 3: sometimes bytes decide feasibility. The keyword spotter (a tiny always-on model that listens for a wake word) has 800 KB of FP32 weights against 512 KB of SRAM, the small fast memory on a microcontroller; INT8 makes it 200 KB, which fits, with activations still to check. WARN: 45 nm figures; modern ratios differ, the ordering does not. Land the segment: an integer format keeps evenly spaced levels and a scale to reach any range; every bit removed is a byte not moved and a cheaper operation, if the hardware has the path. LINK: Lecture 11 owns the energy ladder.}
 \end{frame}
 
@@ -301,11 +308,12 @@ tensor([[-1.0039,  1.0039],
 
 \begin{frame}{A zero-point buys back half the levels for one-sided data}
   \centering
-  \includegraphics[width=0.86\textwidth,height=2.55cm,keepaspectratio]{calranges}\\[0.05cm]
-  \uncover<2->{\small ReLU6 output, $[0, 6]$: symmetric step $6/127 = 0.047$; asymmetric $6/255 = 0.024$.}\\[0.1cm]
-  \uncover<3->{\includegraphics[width=0.80\textwidth,height=2.45cm,keepaspectratio]{zeropoint}}
-  \mlsyscredit{Redrawn after Model Compression, \S10.3.3 (figure 22); $z = -64$ and steps derived. Bars: Krishnamoorthi 2018, Table 3 (post-training INT8, per-channel weights, activations alike).}
-  \note{[2 min] [OPTIONAL] Step 1, the book's figure redrawn. Left: symmetric, $[-1, 1]$ onto $-127$ to 127, zero-point 0. Right: asymmetric, $[-0.5, 1.5]$ onto $-128$ to 127; the step is 2/255, so real zero lands at code $-64$ (derived). Step 2: after ReLU6 (MobileNet's activation, which clips outputs to 0 to 6) every value is non-negative. A symmetric grid spends half its levels on negative values that never occur, so its step is 6/127 = 0.047; an asymmetric grid spends all 255 steps on $[0, 6]$, a step of 0.024, half as large (derived). Step 3, measured: these bars compare weight grids; the activations are quantized the same way in both. With per-channel INT8 post-training weights, MobileNet-v1 reaches 59.1 percent on a symmetric grid and 70.3 on an asymmetric one, against 70.9 in float. Even weights need not be centered; here a symmetric grid costs 11 points. A nonzero zero-point has a cost. Every output needs a correction term, z times the sum of the weights. ENGAGE: why do many runtimes still default to symmetric weights and asymmetric activations? Expected: symmetric weights avoid the correction term, and quantization-aware training closes the symmetric gap (Krishnamoorthi 2018, \S3.2.3); activations after ReLU are one-sided. WARN: these bars show where symmetric weights fail; do not cite them for the default. FLEX: [OPTIONAL].}
+  \only<1|handout:0>{\includegraphics[width=0.94\textwidth,height=2.85cm,keepaspectratio]{calranges_step1}}%
+  \only<2-|handout:1>{\includegraphics[width=0.94\textwidth,height=2.85cm,keepaspectratio]{calranges_step2}}\\[0.04cm]
+  \uncover<2->{\small ReLU6 output, $[0, 6]$: symmetric step $6/127 = 0.047$; asymmetric $6/255 = 0.024$.}\\[0.06cm]
+  \uncover<3->{\includegraphics[width=0.80\textwidth,height=2.20cm,keepaspectratio]{zeropoint}}
+  \mlsyscredit{Model Compression, \S10.3.3 (interactive Explore figure: Symmetric vs.\ Asymmetric Ranges). Bars: Krishnamoorthi 2018, Table 3.}
+  \note{[2 min] [OPTIONAL] Step 1: symmetric maps $[-1, 1]$ onto $-127$ to 127 ($z = 0$); asymmetric maps $[-0.5, 1.5]$ onto $-128$ to 127 ($z = -64$). Step 2: test $x = 1.2$. On the symmetric grid it clips to 1.0 (code 127, error 0.20); on the asymmetric grid it lands inside at code 89 and reconstructs cleanly to 1.20. For one-sided ReLU6 outputs in $[0, 6]$, an asymmetric grid spends all 255 steps on non-negative values (step 0.024 vs.\ 0.047). Step 3, measured: with per-channel INT8 post-training weights, MobileNet-v1 reaches 59.1 percent symmetric vs.\ 70.3 asymmetric (70.9 float). ENGAGE: why do many runtimes default to symmetric weights and asymmetric activations? Expected: symmetric weights skip the zero-point correction term, and QAT closes the weight gap, whereas post-ReLU activations are one-sided. FLEX: [OPTIONAL].}
 \end{frame}
 
 \begin{frame}{Integer layers add in 32 bits and rescale once per output}
@@ -316,6 +324,9 @@ tensor([[-1.0039,  1.0039],
     \node[blk=RedLine, right=of m] (a) {INT32\\accumulate};
     \node[blk=GreenLine, right=of a] (r) {$\times M$, round\\back to INT8};
     \draw[arr] (q) -- (m); \draw[arr] (m) -- (a); \draw[arr] (a) -- (r);
+    \draw<2|handout:0>[BlueLine, line width=2.4pt, rounded corners=3pt] ([xshift=-2pt,yshift=-2pt]q.south west) rectangle ([xshift=2pt,yshift=2pt]q.north east);
+    \draw<3|handout:0>[RedLine, line width=2.4pt, rounded corners=3pt] ([xshift=-2pt,yshift=-2pt]m.south west) rectangle ([xshift=2pt,yshift=2pt]a.north east);
+    \draw<4-|handout:1>[GreenLine, line width=2.4pt, rounded corners=3pt] ([xshift=-2pt,yshift=-2pt]r.south west) rectangle ([xshift=2pt,yshift=2pt]r.north east);
   \end{tikzpicture}\\[0.25cm]
   \footnotesize
   \renewcommand{\arraystretch}{1.12}
@@ -329,7 +340,7 @@ tensor([[-1.0039,  1.0039],
     \bottomrule
   \end{tabular}\\[0.2cm]
   \uncover<4->{\small $4{,}170 \times s_w s_x = 0.388$ \ (exact: 0.375). \quad $M = s_w s_x / s_y = 0.0118$, \ $y_q = 49$.}
-  \mlsyscredit{Pipeline after Model Compression, \S10.3.3 (figure 24, requantization scale $M$). Worked numbers derived; output scale $s_y = 1/127$.}
+  \mlsyscredit{Model Compression, \S10.3.3 (interactive Explore figure: Integer Layer Pipeline; requantization scale $M$). Worked numbers derived; $s_y = 1/127$.}
   \note{[3 min] [CORE] One output of one INT8 layer, by hand. Step 1: quantize both inputs, multiply in pairs, add in a 32-bit integer register, then multiply once by a combined scale $M$. Each tensor's scale is its largest magnitude over 127. Step 2: the codes. 0.5 / (0.75/127) = 84.7, so 85; $-0.25$ gives $-42$; 0.75 gives 127. For $x$: 63.5 rounds to 64, then 127 and 32. Step 3: integer products 5,440, $-5{,}334$, and 4,064, summed in INT32: 4,170. ENGAGE: why not add in 8 bits? Expected: one product already needs 15 to 16 bits, and a layer adds thousands of them. A 32-bit register holds about 133,000 worst-case products of $127 \times 127$ (derived: $2^{31} / 127^2$). Step 4: reading the sum back as a real number multiplies by both scales, 0.388, against the exact 0.375; each rounding added a little. For the next layer, multiply by $M = s_w s_x / s_y$ = 0.0118 and round: 49. WARN: the scales apply once per output, which is why integer layers are cheap. Land the segment: two numbers per range define the mapping; inside the range the error is at most half a step; integer layers add in 32 bits and rescale once.}
 \end{frame}
 
@@ -340,34 +351,25 @@ tensor([[-1.0039,  1.0039],
 \mlsysdivider{Which range should one scale cover?}{Model Compression, \S10.3.3 (calibration, granularity)}
 \section{Range}
 
-\begin{frame}{Clipping the tail gives the bulk 2.3$\times$ finer steps}
+\begin{frame}{Clipping the tail cuts ResNet-50 error by 34\%}
   \mlsysactivity{Estimate}{1.5 min}
   \centering
-  \includegraphics[width=0.86\textwidth,height=4.3cm,keepaspectratio]{calhist_step1}\\[0.05cm]
-  \only<1|handout:0>{\normalsize UINT8 over $[0, 2.5]$, or clipped at 1.1: step size of each? What happens above 1.1?}%
-  \only<2-|handout:1>{\small $2.5/255 = 0.0098$ against $1.1/255 = 0.0043$; values above 1.1 saturate at code 255.}
-  \mlsyscredit{Redrawn after Model Compression, \S10.3.3 (figure 21, after Wu et al. 2020; illustrative). Step sizes derived (images/calcs.py).}
-  \note{[1.5 min] [CORE] Activations of one ResNet-50 layer, as the chapter draws them (illustrative): most values below about 1.1, a sparse tail past 2. Calibration means running a small set of unlabeled inputs through the model and recording each tensor's values to choose its range. ENGAGE: one minute, compute both step sizes. Step 2: covering everything to 2.5 gives a step of 0.0098; clipping at 1.1 gives 0.0043, about 2.3 times finer for the bulk (derived). The price is that every value above 1.1 is stored as the top code, 255. WARN: clipping is a bet that the tail does not matter; the chapter says task validation must check rare cases. LINK: the next slide shows the measured version of this histogram and three rules for choosing the clip. FLEX: [CORE].}
+  \mlsyssteps[width=0.92\textwidth,height=4.45cm,keepaspectratio]{calhist_step}{3}\\[0.06cm]
+  \only<1|handout:0>{\small UINT8 max ($\beta = 2.09$, $s = 0.0082$) spends bins on a sparse tail. What if we clip it?}%
+  \only<2|handout:0>{\small KL-entropy ($\beta = 1.39$, $s = 0.0055$) clips 0.0003\% of values and cuts total RMSE by \textbf{34\%}.}%
+  \only<3-|handout:1>{\small Over-clipping ($\beta = 0.50$) clips 3.5\% of activations and raises RMSE \textbf{24.6$\times$}.}
+  \mlsyscredit{Wu et al.\ 2020 (arXiv 2004.09602); Model Compression, \S10.3.3 (interactive Explore figure: Activation Clipping Trade-off). RMSE derived from profile.}
+  \note{[1.5 min] [CORE] Real ResNet-50 layer1.0.conv2 post-ReLU activations (32.9 million values from Wu et al.\ 2020, log count). Calibration runs a small unlabeled set through the model to pick each tensor's clipping range. Step 1: covering the max (2.09) gives step $s = 0.0082$ and total RMSE 0.00241; ENGAGE: what happens if we lower $\beta$? Step 2: KL-entropy ($\beta = 1.39$) and 99.99\% percentile ($\beta = 1.12$) clip under 0.005\% of values, shrink the step to 0.0055 or 0.0044, and cut total RMSE by 34 percent to 0.00158. Step 3: push too far ($\beta = 0.50$) and clipping 3.5 percent of values drives RMSE to 0.0390, 24.6 times worse. Next slide plots this U-shaped trade-off beside five networks.}
 \end{frame}
 
 \begin{frame}{Measured: no calibration rule is best for every network}
   \begin{columns}[c]
-    \begin{column}{0.55\textwidth}
+    \begin{column}{0.52\textwidth}
       \centering
-      \begin{tikzpicture}
-        \node[anchor=south west, inner sep=0] (img) at (0,0)
-          {\includegraphics[width=\linewidth]{wu2020-fig2}};
-        \begin{scope}[x={(img.south east)}, y={(img.north west)}]
-          \fill[white] (0.498,0.715) rectangle (0.581,0.805);
-          \fill[white] (0.590,0.715) rectangle (0.680,0.805);
-          \node[font=\footnotesize\bfseries, text=BlueLine, fill=white, inner sep=1pt, anchor=west] at (0.497,0.88) {99.99\%};
-          \node[font=\footnotesize\bfseries, text=GreenLine, fill=white, inner sep=1pt, anchor=west] at (0.592,0.76) {entropy};
-          \node[font=\footnotesize\bfseries, text=RedLine, fill=white, inner sep=1pt, anchor=west] at (0.816,0.76) {max};
-        \end{scope}
-      \end{tikzpicture}\\[0.05cm]
-      {\footnotesize ResNet-50 activations, log count, three ranges}
+      \safeimg[width=\linewidth,height=4.7cm,keepaspectratio]{clip_rmse.pdf}\\[0.04cm]
+      {\footnotesize ResNet-50 layer1.0.conv2: rounding vs.\ clipping RMSE}
     \end{column}
-    \begin{column}{0.43\textwidth}
+    \begin{column}{0.46\textwidth}
       \centering\footnotesize
       \setlength{\tabcolsep}{3pt}
       \renewcommand{\arraystretch}{1.15}
@@ -385,33 +387,38 @@ tensor([[-1.0039,  1.0039],
       {\footnotesize Top-1 (BERT: F1); bold: best of the three}
     \end{column}
   \end{columns}
-  \mlsyscredit{Wu, Judd, Zhang, Isaev, Micikevicius 2020 (arXiv 2004.09602): Figure 2 as published; Table 5 excerpt (weights per-channel max; activations calibrated as listed).}
-  \note{[2 min] Measured, from the paper the chapter's histogram follows (Wu et al. 2020). Left, their Figure 2: the activations entering one ResNet-50 convolution, counts on a log scale, with the range each of three rules chooses. Max keeps the largest value seen and spends levels on a tail of a few single values. Percentile at 99.99 clips the top 0.01 percent of values; entropy picks the range whose rounded histogram stays closest to the original, by KL divergence. Both clip near the end of the bulk. Right, their Table 5: INT8 post-training accuracy, weights per channel, activations calibrated each way. ENGAGE: which rule would you make the default? Expected: none wins everywhere. Max collapses Inception v4 to 0.12 and EfficientNet-B0 to 22.3; entropy collapses BERT to 37.40, where 99.99 percent nearly holds. The paper concludes that no single calibration is best for all networks, so calibrate per model and validate on the task. WARN: this ResNet-50 is v1.5 at 76.16, a third checkpoint; compare within this table only. The paper's full table adds 99.9, 99.999, and 99.9999 percent; 99.999 is BERT's best, 90.20. FLEX: [OPTIONAL]; cutting it loses the measured calibration comparison.}
+  \mlsyscredit{Wu, Judd, Zhang, Isaev, Micikevicius 2020 (arXiv 2004.09602): RMSE curve derived from ResNet-50 profile; Table 5 excerpt (weights per-channel max).}
+  \note{[2 min] [OPTIONAL] Left: the exact U-shaped trade-off from the last slide's histogram. Shrinking $\beta$ lowers rounding error linearly (blue dashed) until tail clipping error (orange dotted) explodes; KL-entropy (1.39) sits right at the minimum. Right: Wu et al.\ Table 5 across five real networks (per-channel weights, activations calibrated each way). ENGAGE: which rule would you make the default? Expected: none wins everywhere. Max collapses Inception v4 to 0.12 and EfficientNet-B0 to 22.3; entropy collapses BERT to 37.40, where 99.99 percent nearly holds (99.999 reaches 90.20). Calibrate per model and validate on the task. WARN: this ResNet-50 is v1.5 at 76.16; compare within this table only.}
+\end{frame}
+
+\begin{frame}{Why MobileNetV2 collapsed: channel ranges differ 200$\times$}
+  \centering
+  \begin{tikzpicture}
+    \node[anchor=south west, inner sep=0] (img) at (0,0)
+      {\includegraphics[width=11.4cm]{nagel2019-fig2}};
+    \begin{scope}[x={(img.south east)}, y={(img.north west)}]
+      \only<2-|handout:1>{%
+        \draw[RedLine, line width=1.6pt, rounded corners=2pt] (0.465,0.17) rectangle (0.522,0.93);
+        \draw[RedLine, line width=1.6pt, rounded corners=2pt] (0.791,0.17) rectangle (0.869,0.93);
+        \draw[BlueLine, line width=1.6pt, rounded corners=2pt] (0.358,0.42) rectangle (0.392,0.50);
+        \draw[BlueLine, line width=1.6pt, rounded corners=2pt] (0.661,0.42) rectangle (0.695,0.50);
+        \node[font=\footnotesize\bfseries, text=RedLine, fill=white, inner sep=1.5pt, align=center]
+          at (0.655,0.80) {wide channels\\set the scale};
+        \node[font=\footnotesize\bfseries, text=BlueLine, fill=white, inner sep=1.5pt, anchor=north]
+          at (0.53,0.33) {narrow: a few codes, or one};}
+    \end{scope}
+  \end{tikzpicture}\\[0.08cm]
+  {\footnotesize Nagel et al.: $[-128, 128]$ and $(-0.5, 0.5)$ channels; one 8-bit scale rounds the narrow one to zero.}
+  \mlsyscredit{Nagel, van Baalen, Blankevoort, Welling 2019 (arXiv 1906.04721), Figure 2 as published: per-output-channel weights of MobileNetV2's first depthwise layer.}
+  \note{[1.5 min] [CORE] The answer to the hook. Step 1, measured: Nagel et al.'s Figure 2, the weights of MobileNetV2's first depthwise layer (Lecture 6), one box per output channel. Most of the 32 channels sit near zero while a few span tens of units. Step 2: one scale per tensor must cover the widest channels (red), so its step is huge and a narrow channel's weights (blue) collapse onto one or two codes. The paper's example: $[-128, 128]$ alongside $(-0.5, 0.5)$ forces a step near 1, rounding the entire narrow channel to zero.}
 \end{frame}
 
 \begin{frame}{One scale per channel restores MobileNetV2 from 0.1 to 69.8\%}
   \centering
-  \only<1-2|handout:0>{%
-    \begin{tikzpicture}
-      \node[anchor=south west, inner sep=0] (img) at (0,0)
-        {\includegraphics[width=11.4cm]{nagel2019-fig2}};
-      \begin{scope}[x={(img.south east)}, y={(img.north west)}]
-        \only<2>{%
-          \draw[RedLine, line width=1.6pt, rounded corners=2pt] (0.465,0.17) rectangle (0.522,0.93);
-          \draw[RedLine, line width=1.6pt, rounded corners=2pt] (0.791,0.17) rectangle (0.869,0.93);
-          \draw[BlueLine, line width=1.6pt, rounded corners=2pt] (0.358,0.42) rectangle (0.392,0.50);
-          \draw[BlueLine, line width=1.6pt, rounded corners=2pt] (0.661,0.42) rectangle (0.695,0.50);
-          \node[font=\footnotesize\bfseries, text=RedLine, fill=white, inner sep=1.5pt, align=center]
-            at (0.655,0.80) {wide channels\\set the scale};
-          \node[font=\footnotesize\bfseries, text=BlueLine, fill=white, inner sep=1.5pt, anchor=north]
-            at (0.53,0.33) {narrow: a few codes, or one};}
-      \end{scope}
-    \end{tikzpicture}}%
-  \only<3-|handout:1>{\mlsyssteps[width=0.94\textwidth,height=4.6cm,keepaspectratio]{perchannel_step}{2}}\\[0.05cm]
-  \only<1-2|handout:0>{\footnotesize Paper's example: channels in $[-128, 128]$ and $(-0.5, 0.5)$; at 8 bits the second rounds to all zeros.}%
-  \only<3-|handout:1>{\small No retraining needed; quantization-aware training adds 1.3 points.}
-  \mlsyscredit{Nagel, van Baalen, Blankevoort, Welling 2019 (arXiv 1906.04721), Figure 2 as published: per-output-channel weights of MobileNetV2's first depthwise layer. Bars: Krishnamoorthi 2018, Tables 3 and 4.}
-  \note{[3.5 min] [CORE] The answer to the hook. Step 1, measured: Nagel et al.'s Figure 2, the weights of MobileNetV2's first depthwise layer (it filters each channel separately, Lecture 6), one box per output channel: minimum, quartiles, median, and maximum. Most of the 32 channels sit close to zero; a few span tens of units. Step 2: one scale per tensor must cover the widest channels (red), so its step is large and a narrow channel's weights (blue) land on one or two codes. The paper's own example: a channel in $[-128, 128]$ and one in $(-0.5, 0.5)$; with one 8-bit scale the step is about 1, so every weight in the second becomes 0. Step 3: give each channel its own scale. Measured: MobileNetV2 goes from 0.1 percent per-tensor to 69.8 per-channel with no retraining, and 71.1 with quantization-aware training (next segment), against 71.9 in float. ResNet-50 stays at 75.0 to 75.2. WARN: per-channel scales cost metadata and a rescale per channel; they are the default for weights, while activations usually keep one scale per tensor. Large language models go one step finer: one scale per group of weights, 128 in AWQ (Lin et al. 2024) and 32 in the GGUF block from the formats segment. The hook's answer: D. FLEX: [CORE].}
+  \mlsyssteps[width=0.94\textwidth,height=4.7cm,keepaspectratio]{perchannel_step}{2}\\[0.1cm]
+  {\small No retraining needed; quantization-aware training adds 1.3 points.}
+  \mlsyscredit{Krishnamoorthi 2018, Tables 3 and 4 (per-tensor vs.\ per-channel INT8 PTQ and QAT).}
+  \note{[2 min] [CORE] The fix: give each output channel its own scale. Step 1, measured: MobileNetV2 jumps from 0.1 percent per-tensor to 69.8 percent per-channel with no retraining, against 71.9 in float. ResNet-50 stays at 75.0 to 75.2. Step 2: quantization-aware training (next segment) recovers another 1.3 points to 71.1 percent. WARN: per-channel scales cost metadata and a rescale per channel; they are the default for weights, while activations usually keep one scale per tensor. Large language models go finer still: one scale per group of 128 weights in AWQ or 32 in GGUF. The hook's answer was D.}
 \end{frame}
 
 \begin{frame}{Large language models grow outliers that break one scale per tensor}
@@ -425,12 +432,20 @@ tensor([[-1.0039,  1.0039],
 \begin{frame}{Outlier features appear abruptly near 6.7 billion parameters}
   \begin{columns}[c]
     \begin{column}{0.56\textwidth}
-      \centering\includegraphics[width=\textwidth,height=6.2cm,keepaspectratio]{dettmers2022-fig3a}
+      \centering
+      \begin{tikzpicture}
+        \node[anchor=south west, inner sep=0] (img) at (0,0)
+          {\includegraphics[width=\textwidth,height=5.8cm,keepaspectratio]{dettmers2022-fig3a}};
+        \begin{scope}[x={(img.south east)}, y={(img.north west)}]
+          \node[font=\footnotesize\bfseries, text=BlueLine, fill=white, inner sep=1pt, anchor=west] at (0.68,0.88) {\% layers};
+          \node[font=\footnotesize\bfseries, text=OrangeLine, fill=white, inner sep=1pt, anchor=west] at (0.68,0.62) {\% tokens};
+        \end{scope}
+      \end{tikzpicture}
     \end{column}
     \begin{column}{0.42\textwidth}
       \small
       \textcolor{BlueLine}{\textbf{Blue:}} share of layers with an outlier feature\\[0.1cm]
-      \textcolor{OrangeLine}{\textbf{Orange:}} share of tokens affected\\[0.4cm]
+      \textcolor{OrangeLine}{\textbf{Orange:}} share of tokens affected\\[0.35cm]
       \uncover<2->{\normalsize From 6.7B: every layer, about 75\% of tokens.\\[0.25cm]
       \small Values up to 20$\times$ the other features, in about 6 hidden dimensions.}
     \end{column}
@@ -441,22 +456,24 @@ tensor([[-1.0039,  1.0039],
 
 \begin{frame}{Diagnose: why does the INT8 model fail at night?}
   \mlsysactivity{Diagnose}{2.5 min}
+  \vspace{-0.15cm}
   \begin{columns}[T]
-    \begin{column}{0.48\textwidth}
+    \begin{column}{0.46\textwidth}
       \begin{mlsyscard}{mlsysaccent}
-        \textbf{Symptom (illustrative)}\\[0.1cm]
-        \small Static INT8 ranges calibrated on 500 daytime images.\\[0.1cm]
-        Night images: INT8 loses 6 points; FP32 loses 1.\\[0.1cm]
-        Name two causes and two fixes.
+        {\footnotesize\textbf{Symptom (illustrative):} static INT8 calibrated on 500 daytime frames. Night frames: INT8 loses 6 pts; FP32 loses 1. Name two causes and two fixes.}
       \end{mlsyscard}
+      \centering
+      \safeimg[width=0.68\textwidth,height=1.15cm,keepaspectratio]{camera_trap_badger.jpg}\\[-0.02cm]
+      {\scriptsize\textcolor{midgray}{Nighttime IR camera-trap frame (domain shift)}}
     \end{column}
-    \begin{column}{0.48\textwidth}
-      \uncover<2->{\small
-        \textbf{Cause:} ranges fixed on data that missed deployment; night values clip or use few levels.\\[0.15cm]
-        \textbf{Fixes:} recalibrate with night images; compute ranges at run time; per-channel scales or quantization-aware training if still short.}
+    \begin{column}{0.50\textwidth}
+      \uncover<2->{\small\raggedright
+        \textbf{Cause:} ranges frozen on daytime RGB miss nighttime IR statistics; activations clip or collapse onto few codes.\\[0.18cm]
+        \textbf{Fixes:} recalibrate on day + night frames; dynamic per-input ranges; per-channel scales or QAT if still short.\\[0.18cm]
+        \footnotesize\textcolor{midgray}{Real anchor: miscalibrated ranges collapse Inception v4 to 0.12\% (Wu et al.\ Table 5) and break wildlife IR traps (Lecture 12).}}
     \end{column}
   \end{columns}
-  \mlsyscredit{Scenario illustrative. Model Compression, \S10.3.3 (static and dynamic ranges) and Checkpoint 10.2.}
+  \mlsyscredit{Scenario illustrative; Model Compression, \S10.3.3 and Checkpoint 10.2. Anchor: Wu et al.\ 2020. Photo: Dodro (CC BY 4.0), Wikimedia Commons.}
   \note{[2.5 min] [CORE] ENGAGE: two minutes in pairs; ask for causes before fixes. The numbers are an invented scenario; say so. Step 2: the INT8 model has its activation ranges frozen from 500 daytime images (static quantization). Night images have darker inputs and different activation statistics. Some values fall outside the fixed range and clip, others sit in a small corner of it and get few levels. FP32 has no fixed range, so it degrades less. Fixes, in order of cost: recalibrate on a set that represents deployment, night included; dynamic quantization, which computes ranges per input at run time, costs a reduction pass over each activation tensor before the integer arithmetic; per-channel scales or quantization-aware training if post-training still misses. WARN: students answer ``use more bits''. That treats the symptom; the cause is the calibration data. Land the segment: the scale is set by the widest values it must cover, so clip rare outliers, give each channel its own scale, and treat the calibration set as part of the model.}
 \end{frame}
 
@@ -553,7 +570,7 @@ tensor([[-1.0039,  1.0039],
   \vspace{0.1cm}
   \uncover<2->{\small\textcolor{BlueLine}{\textbf{Generate, memory bound:}} Q4\_0 \textbf{2.30$\times$} F16, from a file 3.53$\times$ smaller\\[0.05cm]
   \textcolor{OrangeLine}{\textbf{Prompt, compute bound:}} Q4\_0 \textbf{0.88$\times$} F16, slower}
-  \mlsyscredit{github.com/ggml-org/llama.cpp, discussion 4167 (M2 Ultra post, @ggerganov), llama-bench output (t/s column) redrawn (every row: 6.74 B weights, Metal, ngl 99). Ratios: images/calcs.py.}
+  \mlsyscredit{github.com/ggml-org/llama.cpp, discussion 4167 (M2 Ultra post, @ggerganov), llama-bench output (t/s column) redrawn (every row: 6.74 B weights, Metal, ngl 99). Ratios derived.}
   \note{[2.5 min] [CORE] Measured by a tool students can run on a laptop: llama-bench, from llama.cpp's public results thread. Every row is the same 6.74-billion-weight model on the GPU. tg 128 generates 128 tokens one at a time, batch one, like decoding on the phone; pp 512 processes a 512-token prompt in one pass. ENGAGE: from the roofline slide, which test should gain from Q4\_0, and by at most how much? Step 2: generation runs 2.30 times faster with Q4\_0 (Q8\_0: 1.62) from a file 3.53 times smaller, the memory-bound case, short of the byte ratio. The prompt runs 0.88 times as fast because it is compute bound, so the 4-bit weights only add unpacking work. The thread's other chips agree, with generation 2.63 to 2.86 times on M1 Pro, M3 Max, and M4 Max, prompt 0.88 to 0.98 (derived). WARN: why short of 3.53? At F16 the M2 Ultra streams about 553 GB/s of weights; at Q4\_0 about 360 GB/s (derived: tokens per second times file size), so unpacking costs time on every byte. LINK: the next slide shows unpacking that costs more than it saves. FLEX: [CORE].}
 \end{frame}
 
@@ -636,7 +653,7 @@ tensor([[-1.0039,  1.0039],
       \uncover<3->{\small Part 1's 7B model takes 3.5 GB of 4-bit codes and 3.9~GB with block scales, so it fits in 8 GB.}
     \end{column}
   \end{columns}
-  \mlsyscredit{Krishnamoorthi 2018, Tables 3, 4, 7. 7B sizes derived (images/calcs.py): 7 billion $\times$ 0.5 B; at Q4\_0's 4.5 bits per weight, 3.9 GB.}
+  \mlsyscredit{Krishnamoorthi 2018, Tables 3, 4, 7. 7B sizes derived: 7 billion $\times$ 0.5 B; at Q4\_0's 4.5 bits per weight, 3.9 GB.}
   \note{[1.5 min] [CORE] Return to the hook. Step 1: per-tensor INT8 took MobileNetV2 from 71.9 to 0.1 percent because one scale served channels with very different ranges. One scale per channel gave 69.8 percent with no retraining; quantization-aware training gave 71.1. Step 2: the same INT8 model ran in 63 ms on the Pixel 2's CPU against 105 ms in FP32, and in 15.5 ms on the DSP, which cannot run FP32 at all. Precision enabled the speed, and the integer processor supplied most of it. Step 3: Part 1's 7-billion-parameter model, 14 GB in FP16, takes 3.5 GB of 4-bit codes, or 3.9 GB once the block scales from the GGUF slide are counted (derived), fits the phone's 8 GB, and moves a quarter of the weight bytes per token when unpacking stays in the kernel. ENGAGE: which segment's idea fixed each problem? Expected: range granularity for MobileNetV2's accuracy, the integer processor for its speed, fused weight-only INT4 for the 7B model.}
 \end{frame}
 
@@ -661,16 +678,17 @@ tensor([[-1.0039,  1.0039],
 \end{frame}
 
 \begin{frame}{Read and explore}
+  \vspace{-0.1cm}
   \footnotesize
-  \begin{itemize}\setlength{\itemsep}{0cm}
+  \begin{itemize}\setlength{\itemsep}{0.04cm}
     \item \textbf{Read:} Model Compression, \S10.3, \S10.4.1, \S10.5.4, \S10.6.2 (mlsysbook.ai).
-    \item Krishnamoorthi, ``Quantizing Deep Convolutional Networks for Efficient Inference: A Whitepaper,'' 2018.
-    \item Jacob et al., ``Quantization and Training of Neural Networks for Integer-Arithmetic-Only Inference,'' CVPR 2018.
-    \item Nagel et al., ``Data-Free Quantization Through Weight Equalization and Bias Correction,'' ICCV 2019.
-    \item Nagel et al., ``A White Paper on Neural Network Quantization,'' 2021.
+    \item \textbf{Explore:} \textit{Symmetric vs.\ Asymmetric Ranges}, \textit{Integer Layer Pipeline}, \textit{Activation Clipping Trade-off} (\S10.3.3) on mlsysbook.ai/vol1/.
+    \item Krishnamoorthi, ``Quantizing Deep Convolutional Networks for Efficient Inference,'' 2018.
+    \item Jacob et al., ``Quantization and Training for Integer-Arithmetic-Only Inference,'' CVPR 2018.
+    \item Nagel et al., ICCV 2019 (equalization) and ``White Paper on Neural Network Quantization,'' 2021.
     \item Dettmers et al., ``LLM.int8(): 8-bit Matrix Multiplication for Transformers at Scale,'' NeurIPS 2022.
     \item Frantar et al., ``GPTQ: Accurate Post-Training Quantization for Generative Pre-trained Transformers,'' ICLR 2023.
-    \item Lin et al., ``AWQ: Activation-aware Weight Quantization for On-Device LLM Compression,'' MLSys 2024.
+    \item Lin et al., ``AWQ: Activation-aware Weight Quantization for LLM Compression,'' MLSys 2024.
   \end{itemize}
   \note{[0.5 min] [OPTIONAL] The chapter first: work Napkin Math 10.1 to 10.4 by hand and redo 10.4 for INT8 weights. Krishnamoorthi is the source of today's MobileNetV2 and Pixel 2 numbers; Jacob et al. is the scale-and-zero-point scheme mobile runtimes use; Nagel et al. 2019 is the source of the per-channel range finding, and Nagel et al. 2021 is a clear walk through the whole pipeline; Dettmers et al., Frantar et al., and Lin et al. are the three language-model papers. FLEX: add the TinyTorch quantization module if your course assigns it.}
 \end{frame}

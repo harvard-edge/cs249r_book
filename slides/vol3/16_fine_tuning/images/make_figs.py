@@ -247,7 +247,7 @@ def occupancy():
 occupancy()
 
 def blockmask(step):
-    s = Svg(640, 360)
+    s = Svg(640, 396)
     n, s1 = (8, 5)
     cell = 32
 
@@ -281,8 +281,11 @@ def blockmask(step):
     s.text(166, 351, '−∞', 22, INK, anchor='start')
     s.rect(240, 334, 20, 20, '#fca5a5')
     s.text(266, 351, 'cross-example', 22, INK, anchor='start')
+    if step >= 3:
+        s.rect(20, 362, 600, 30, '#dcfce7', '#16a34a', rx=6, sw=1.8)
+        s.text(320, 383, 'Row softmax isolates ex. 2: max |Δ| = 0', 21, '#15803d', bold=True)
     s.save(f'blockmask_step{step}.svg')
-for k in (1, 2):
+for k in (1, 2, 3):
     blockmask(k)
 
 def offcorpus():

@@ -90,10 +90,10 @@ for k in (1, 2, 3):
     ax2.set_xlabel('Latency (ms)' if k >= 3 else '')
     sp.save(fig, out / f'tail_step{k}.svg')
 stall = (300, 800)
-for k in (1, 2):
-    fig, ax = plt.subplots(figsize=(5.6, 2.0))
+for k in (1, 2, 3):
+    fig, ax = plt.subplots(figsize=(5.6, 2.25))
     ax.add_patch(Rectangle((stall[0], 0.1), stall[1] - stall[0], 2.0, color=C['neutral_l'], zorder=0))
-    ax.text((stall[0] + stall[1]) / 2, 2.25, 'server stalls 500 ms', ha='center', fontsize=11, color=C['neutral'], fontweight='bold')
+    ax.text((stall[0] + stall[1]) / 2, 2.24, 'server stalls 500 ms', ha='center', fontsize=11, color=C['neutral'], fontweight='bold')
     y = 1.6
     t = 0
     while t < 1000:
@@ -118,14 +118,67 @@ for k in (1, 2):
             ax.add_patch(Rectangle((a_, y - 0.18), 20, 0.36, color=C['memory'], alpha=alpha))
     ax.text(-15, y, 'Open loop', ha='right', va='center', fontsize=12, fontweight='bold', color=C['text'], alpha=alpha)
     ax.text(1010, y, f'{slow} slow requests', va='center', fontsize=11, fontweight='bold', color=C['danger'], alpha=alpha)
+    if k >= 3:
+        ax.text(500, -0.34, f'Coordinated omission: closed loop hides {slow - 1} of {slow} slow requests', ha='center', va='center', fontsize=11, fontweight='bold', color=C['danger'], bbox=dict(facecolor=C['danger_l'], edgecolor=C['danger'], boxstyle='round,pad=0.25', lw=1.2))
     ax.set_xlim(0, 1000)
-    ax.set_ylim(0.0, 2.6)
+    ax.set_ylim(-0.62, 2.55)
     ax.set_yticks([])
     ax.spines['left'].set_visible(False)
     ax.set_xticks([0, 250, 500, 750, 1000])
     ax.set_xlabel('Time (ms)')
-    tag(ax, 'Mechanism only (Benchmarking, §12.2.4)', (0.0, -0.42))
+    tag(ax, 'Mechanism only (Benchmarking, §12.2.4)', (0.0, -0.36))
     sp.save(fig, out / f'loop_step{k}.svg')
+
+# 3-step Asynchronous Accelerator Timing (matching vol1:fig-benchmark-async-timing, §12.2.4)
+import html as _html
+def async_timing_svg(step):
+    FONT = 'font-family="Helvetica, Arial, sans-serif"'
+    def tx(x, y, s, sz=22, wt='400', fill=C['text'], anchor='middle'):
+        return f'<text x="{x}" y="{y}" {FONT} font-size="{sz}" font-weight="{wt}" fill="{fill}" text-anchor="{anchor}" dominant-baseline="central">{_html.escape(str(s), quote=False)}</text>'
+    def bx(x, y, w, h, fc, ec, lw=2.0, rx=5):
+        return f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="{rx}" fill="{fc}" stroke="{ec}" stroke-width="{lw}"/>'
+    def brk(x1, x2, y, col, label, above=True, sz=22):
+        s = []
+        s.append(f'<line x1="{x1}" y1="{y}" x2="{x2}" y2="{y}" stroke="{col}" stroke-width="2.6"/>')
+        s.append(f'<line x1="{x1}" y1="{y-6}" x2="{x1}" y2="{y+6}" stroke="{col}" stroke-width="2.6"/>')
+        s.append(f'<line x1="{x2}" y1="{y-6}" x2="{x2}" y2="{y+6}" stroke="{col}" stroke-width="2.6"/>')
+        ly = y - 16 if above else y + 18
+        if label:
+            s.append(tx((x1 + x2) / 2, ly, label, sz, '700', col))
+        return '\n'.join(s)
+
+    parts = ['<svg xmlns="http://www.w3.org/2000/svg" width="880" height="218" viewBox="0 0 880 218">', '<rect width="880" height="218" fill="white"/>']
+    # Two swimlanes
+    parts.append(tx(10, 96, 'Host CPU', 23, '700', C['text'], 'start'))
+    parts.append('<line x1="146" y1="96" x2="866" y2="96" stroke="#D0D7DE" stroke-width="2"/>')
+    parts.append(tx(10, 158, 'Accelerator', 23, '700', C['text'], 'start'))
+    parts.append('<line x1="146" y1="158" x2="866" y2="158" stroke="#D0D7DE" stroke-width="2"/>')
+
+    # Enqueue block on host + green call timer (Step 1)
+    parts.append(bx(156, 78, 92, 36, C['data_l'], C['data'], 2.2, 5))
+    parts.append(tx(202, 96, 'launch', 22, '700', C['data']))
+    parts.append(brk(156, 248, 62, C['data'], '', above=True))
+    parts.append(tx(260, 62, 'Call timer: 0.175 ms (enqueue only)', 22, '700', C['data'], 'start'))
+
+    # Step 2: Accelerator kernel execution + orange device events
+    if step >= 2:
+        parts.append('<line x1="248" y1="114" x2="274" y2="140" stroke="#7A869A" stroke-width="2" stroke-dasharray="5,3"/>')
+        parts.append(bx(274, 140, 424, 36, C['compute_l'], C['compute'], 2.4, 5))
+        parts.append(tx(486, 158, '8,192 × 8,192 GEMM on GPU', 22, '700', C['compute']))
+        parts.append(brk(274, 698, 186, C['compute'], 'Device events: pure kernel time (no launch or sync)', above=False, sz=21.5))
+
+    # Step 3: Synchronize barrier + blue end-to-end host timer cleanly above call timer
+    if step >= 3:
+        parts.append('<line x1="698" y1="140" x2="722" y2="114" stroke="#006395" stroke-width="2.2" stroke-dasharray="5,3"/>')
+        parts.append(bx(706, 78, 154, 36, C['memory_l'], C['memory'], 2.2, 5))
+        parts.append(tx(783, 96, 'synchronize()', 21.5, '700', C['memory']))
+        parts.append(brk(156, 860, 32, C['memory'], 'Synchronized host timer: 76.525 ms (437× longer)', above=True, sz=22))
+
+    parts.append('</svg>')
+    (out / f'async_step{step}.svg').write_text('\n'.join(parts))
+
+for k in (1, 2, 3):
+    async_timing_svg(k)
 tiers = [('ML layers', 'one GEMM\nkernel', 'Micro'), ('ML model', 'ResNet-50\nforward pass', 'Macro'), ('AI task', '+ decode,\npostprocess', 'Application'), ('End to end', '+ network,\nqueue, storage', 'End to end')]
 for k in (1, 2, 3, 4):
     fig, ax = plt.subplots(figsize=(5.8, 2.5))

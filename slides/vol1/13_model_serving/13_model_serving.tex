@@ -95,7 +95,7 @@
     \textbf{Failure} & The run finishes late & \leavevmode\uncover<2->{A user waits past the deadline} \\
     \bottomrule
   \end{tabular}
-  \mlsyscredit{Model Serving, \S13.1 and \S13.4; ResNet-50 on one H100 (table 8, modeled). The 67.5\% bound is this lecture's fleet estimate.}
+  \mlsyscredit{Model Serving, \S13.1 and \S13.5; ResNet-50 on one H100 (table 8, modeled). The 67.5\% bound is this lecture's fleet estimate.}
   \note{[1.5 min] [CORE] The chapter's first idea: serving inverts training's priorities. Step 1, the training column: Lectures 8 and 8b judged a run by its total throughput, so they chose the largest batch that fit and tried to keep the accelerator busy all the time; a slow step only delays the end of the run. Step 2, the serving column, row by row. The objective is each request's tail latency; the average rate comes second. The deadline sets the batch. At batch 1 the same H100 serves 283 images per second against 7,040 at batch 32. The machine must keep idle capacity. The queueing segment will show that a 50 ms p99 target allows at most 67.5 percent utilization. A failure is one user waiting; in training it is a late run. ENGAGE: which training habit would hurt a service most? Expected: running the accelerator near 100 percent busy, because waiting time explodes near full load. LINK: Lecture 12's Offline and Server scenarios measure these two columns.}
 \end{frame}
 
@@ -103,7 +103,7 @@
   \centering
   \safeimg[width=0.92\textwidth,height=3.6cm,keepaspectratio]{static_dynamic.pdf}\\[0.3cm]
   {\small Static: photos labeled overnight. Dynamic: moderation within 100 ms.}
-  \mlsyscredit{Model Serving, \S13.1.1: batch 1 at 3.5 ms (modeled); 89,500 images/s for a compiled INT8 engine at large batch (MLPerf, as cited).}
+  \mlsyscredit{Model Serving, \S13.2.1: batch 1 at 3.5 ms (modeled); 89,500 images/s for a compiled INT8 engine at large batch (MLPerf, as cited).}
   \note{[1.5 min] [OPTIONAL] Two ways to serve the same ResNet-50. Static inference precomputes: a photo application classifies all 10,000 images in a user's library overnight and stores the labels, so browsing is only a lookup. Dynamic inference answers on demand: a content-moderation service must score each uploaded image within a 100 ms deadline. One at a time at 3.5 ms, the library takes 35 s of H100 time; at the 89,500 images per second MLPerf measured for a compiled INT8 engine at large batch, 0.11 s, 316 times less (the chapter rounds to about 320). ENGAGE: why not precompute everything? (Expected: the inputs must be known in advance; new uploads, new users, and new models break it, and stored answers go stale.) Production systems mix the two: precompute the frequent queries, serve the rest live. LINK: Lecture 12's Offline and Server scenarios are these two regimes. Today is about the dynamic one, where the deadline makes every request expensive. FLEX: cutting it loses the static-against-dynamic contrast.}
 \end{frame}
 
@@ -120,7 +120,7 @@
 % SECTION: BUDGET
 % =============================================================================
 \mlsysnote{[0.5 min] [CORE] First, one request on an idle server: where does its time go?}
-\mlsysdivider{Where does one request's time go?}{Model Serving, \S13.1 and \S13.3}
+\mlsysdivider{Where does one request's time go?}{Model Serving, \S13.1 and \S13.4}
 \section{Budget}
 
 \begin{frame}{The model is 41 percent of one request's time}
@@ -154,33 +154,26 @@
 
 \begin{frame}{Overlapping host and GPU work raises GPU use to 78 percent}
   \centering
-  \mlsyssteps[width=0.95\textwidth,height=5.8cm,keepaspectratio]{pipeline_step}{2}
-  \note{[1.5 min] Step 1: serial service. Each request runs its full 8.6 ms before the next begins, so the GPU is busy 3.5 ms of every 8.6 ms, 41 percent. Step 2: pipelining. While the GPU runs request one, the host already decodes request two. A request now finishes every 4.5 ms, the length of the slower stage, so the GPU is busy 3.5 of every 4.5 ms, 78 percent. ENGAGE: why not 100 percent? Because the host stage is the slower one; a second preprocessing worker removes that cap. LINK: this is the double buffering of Lecture 7 (prepare the next input while the current one runs), applied to the request path. WARN: pipelining raises throughput and leaves the latency of one request unchanged; that request still takes 8.6 ms. FLEX: [OPTIONAL]; cutting it loses pipelining; the batching segment's fixed-cost argument assumes this duty-cycle idea.}
+  \mlsyssteps[width=0.95\textwidth,height=5.7cm,keepaspectratio]{pipeline_step}{3}
+  \mlsyscredit{Model Serving, \S13.4 (interactive Explore figure: Serving Pipeline Timing).}
+  \note{[1.5 min] Step 1: serial service. Each request runs its full 8.6 ms before the next begins, so the GPU is busy 3.5 ms of every 8.6 ms, 41 percent. Step 2: pipelining begins. While the GPU runs request 1, the host CPU already decodes request 2 in parallel. Step 3: steady-state pipelining. A request now finishes every 4.5 ms, the length of the slower host stage, so the GPU is busy 3.5 of every 4.5 ms, 78 percent. ENGAGE: why not 100 percent? Because the host stage is the slower one; a second preprocessing worker removes that cap. LINK: this is the double buffering of Lecture 7 (prepare the next input while the current one runs), applied to the request path. WARN: pipelining raises throughput and leaves the latency of one request unchanged; that request still takes 8.6 ms. FLEX: [OPTIONAL]; cutting it loses pipelining; the batching segment's fixed-cost argument assumes this duty-cycle idea.}
 \end{frame}
 
 \begin{frame}{Predict: what does a 10$\times$ faster model buy the user?}
   \mlsysactivity{Predict}{2 min}
   \centering
-  \only<1-2|handout:0>{\mlsyssteps[width=\textwidth,height=3.6cm,keepaspectratio]{budget_step}{2}\\[0.3cm]}%
-  \only<3-|handout:1>{\begin{columns}[c]
-    \begin{column}{0.62\textwidth}
-      \centering\includegraphics[width=\textwidth,height=4.1cm,keepaspectratio]{aitax_fig6.png}
-    \end{column}
-    \begin{column}{0.36\textwidth}
-      \small\textbf{Measured:} one video frame of a face-recognition service, mean 351 ms.\\[0.15cm]
-      AI stages: 59\%.\\ Waiting in brokers: over a third.
-    \end{column}
-  \end{columns}\vspace{0.2cm}}
-  \uncover<2->{\normalsize Book model: 8.6 $\rightarrow$ 5.5 ms, only \textbf{\textcolor{mlsysaccent}{1.6$\times$}} faster.}
-  \mlsyscredit{Model Serving, table 3 and Systems Perspective 13.2. Pie: Richins et al., ``AI Tax,'' arXiv 2007.10571, Fig.~6, reproduced from the paper.}
-  \note{[2.5 min] Step 1: the model becomes 10 times faster, 3.5 ms to 0.35 ms. ENGAGE: students write the new end-to-end time before the reveal. Step 2: 5.5 ms, a 1.6 times speedup. Students who wrote 0.86 ms scaled the whole request; the 5 ms of preprocessing and copying did not change. This is Amdahl's law (Lectures 1 and 11) applied to one request. The part you do not speed up sets the ceiling. Step 3: the paper's own figure from a measured service. A face-recognition pipeline in an edge datacenter, instrumented frame by frame: ingestion 18.8 ms, face detection 74.8 ms, waiting in the message brokers (queues that pass frames between stages) 126.1 ms, identification 131.5 ms, 351 ms in all. The two AI stages are 59 percent; over a third is waiting between stages. WARN: hardware progress makes this worse, because each accelerator generation shrinks the model slice while the host stages stay. FLEX: [CORE].}
+  \mlsyssteps[width=0.92\textwidth,height=2.80cm,keepaspectratio]{budget_step}{2}\\[0.06cm]
+  \uncover<2->{\small Book model: 8.6 $\rightarrow$ 5.5 ms, only \textbf{\textcolor{mlsysaccent}{1.6$\times$}} faster.}\\[0.08cm]
+  \uncover<3->{\safeimg[width=0.92\textwidth,height=2.15cm,keepaspectratio]{aitax_bar.pdf}}
+  \mlsyscredit{Model Serving, table 3 and Systems Perspective 13.2. Measured bar: Richins et al., ``AI Tax,'' arXiv 2007.10571, Fig.~6 (exact printed means, 351.2 ms total; AI 59\%, brokers 36\%).}
+  \note{[2.5 min] Step 1: the model becomes 10 times faster, 3.5 ms to 0.35 ms. ENGAGE: students write the new end-to-end time before the reveal. Step 2: 5.5 ms, a 1.6 times speedup. Students who wrote 0.86 ms scaled the whole request; the 5 ms of preprocessing and copying did not change. This is Amdahl's law (Lectures 1 and 11) applied to one request. The part you do not speed up sets the ceiling. Step 3: a measured edge-datacenter face-recognition service, instrumented frame by frame: ingestion 18.8 ms, face detection 74.8 ms, waiting in message brokers (queues that pass frames between stages) 126.1 ms, identification 131.5 ms, 351.2 ms in all. The two AI stages are 59 percent; over a third (36 percent) is waiting between stages. WARN: hardware progress makes this worse, because each accelerator generation shrinks the model slice while the host stages stay. FLEX: [CORE].}
 \end{frame}
 
 % =============================================================================
 % SECTION: QUEUES
 % =============================================================================
 \mlsysnote{[0.5 min] [CORE] Land the first segment aloud: the deadline is shared by every stage, so a faster model buys far less than its own speedup. Now let many requests arrive at once.}
-\mlsysdivider{How much idle capacity must a service keep?}{Model Serving, \S13.4}
+\mlsysdivider{How much idle capacity must a service keep?}{Model Serving, \S13.5}
 \section{Queues}
 
 \begin{frame}{Requests in the server equal arrival rate times time inside}
@@ -209,7 +202,7 @@
       \uncover<4->{\small 32 can run at once; the rest wait.\\ The other 18 need buffers in host memory.}
     \end{column}
   \end{columns}
-  \mlsyscredit{Little 1961; Model Serving, \S13.4.1 and Napkin Math 13.2.}
+  \mlsyscredit{Little 1961; Model Serving, \S13.5.1 and Napkin Math 13.2.}
   \note{[2.5 min] Step 1: Little's law. It holds for any stable system, whatever the arrival pattern or scheduling order. Step 2: the terms. N is the average number of requests inside the server, queued or running; lambda (the Greek letter) is arrivals per second; W is the average time each spends inside. Step 3: the picture. Step 4: a service at 1,000 requests per second (QPS, queries per second) with 50 ms mean time inside holds 50 requests on average. The GPU runs at most 32 at once and that is fine, because the other 18 wait in host memory, so the server needs buffers and worker threads for 50. ENGAGE: a service holds 50 requests at 10 ms each; what rate does it sustain? Expected: 5,000 per second. WARN: Little's law gives the average; it says nothing about whether the slowest request meets its deadline. That is the next slide. FLEX: [OPTIONAL]; fold the 50-request example into the capacity estimate if short.}
 \end{frame}
 
@@ -253,10 +246,18 @@
 \end{frame}
 
 \begin{frame}{Measured: a 15 ms p99 bound costs 9 to 18 percent of throughput}
-  \centering
-  \mlsyssteps[width=0.90\textwidth,height=5.0cm,keepaspectratio]{mlperf_server_step}{2}\\[0.2cm]
-  \uncover<2->{\small Same eight GPUs, same model. Server: random arrivals, p99 under 15 ms.}
-  \mlsyscredit{MLPerf Inference v5.0, closed, datacenter, ResNet-50: A = Cisco UCS C885A M8 (5.0-0010); B = QuantaGrid D74H-7U (5.0-0065). Server bound from the v5.0 inference rules.}
+  \begin{columns}[c]
+    \begin{column}{0.70\textwidth}
+      \centering\mlsyssteps[width=\textwidth,height=4.8cm,keepaspectratio]{mlperf_server_step}{2}
+    \end{column}
+    \begin{column}{0.28\textwidth}
+      \centering\mlsysphoto[width=\textwidth,height=2.6cm,keepaspectratio]{datacenter-server-racks.jpg}\\[0.08cm]
+      {\footnotesize Datacenter server racks: two 8$\times$ H100 hosts running MLPerf Server}
+    \end{column}
+  \end{columns}
+  \vspace{0.15cm}
+  \centering\uncover<2->{\small Same eight GPUs, same model. Server: random arrivals, p99 under 15 ms.}
+  \mlsyscredit{MLPerf Inference v5.0, closed, datacenter, ResNet-50: A = Cisco UCS C885A M8 (5.0-0010); B = QuantaGrid D74H-7U (5.0-0065). Photo: Carl Lender (CC BY 2.0), Wikimedia Commons.}
   \note{[1.5 min] LINK: Lecture 12 showed these bars to argue that the scenario is part of a benchmark claim. Now the knee explains them. Step 1: two eight-H100 systems running ResNet-50 in Offline mode, every input available at once: about 716,000 and 713,000 images per second. Step 2: the Server scenario on the same machines, with Poisson arrivals and the rule that 99 percent of queries finish within 15 ms. System A keeps 91 percent of its Offline rate, system B 82 percent. The gap is the headroom the tail bound requires, because the servers must stay below the knee. ENGAGE: why do two systems with identical GPUs differ by 9 points? Expected: software (batching policy, scheduling) decides how close to the knee each can run. FLEX: [OPTIONAL].}
 \end{frame}
 
@@ -264,19 +265,19 @@
   \mlsysactivity{Vote}{2 min}
   \begin{columns}[c]
     \begin{column}{0.52\textwidth}
-      \centering\mlsyssteps[width=\textwidth,height=5.4cm,keepaspectratio]{vote_fast_step}{2}
+      \centering\mlsyssteps[width=\textwidth,height=5.2cm,keepaspectratio]{vote_fast_step}{2}
     \end{column}
     \begin{column}{0.46\textwidth}
-      {\small Service time 3.5 $\rightarrow$ 1.8 ms; traffic unchanged. Mean time in system improves by:}\\[0.3cm]
+      {\small Service time 3.5 $\rightarrow$ 1.8 ms; traffic unchanged. Mean time in system improves by:}\\[0.18cm]
       \large
-      \choice{A}{under 2$\times$}\\[0.12cm]
-      \choice{B}{exactly 2$\times$}\\[0.12cm]
-      \answer{C}{about 6$\times$}\\[0.12cm]
-      \choice{D}{not at all}\\[0.2cm]
+      \choice{A}{under 2$\times$}\\[0.10cm]
+      \choice{B}{exactly 2$\times$}\\[0.10cm]
+      \answer{C}{about 6$\times$}\\[0.10cm]
+      \choice{D}{not at all}\\[0.15cm]
       \uncover<2->{\small 17.6 $\rightarrow$ 3.0 ms; the queue drains too.}
     \end{column}
   \end{columns}
-  \mlsyscredit{Model Serving, \S13.11, first fallacy (M/M/1 model).}
+  \mlsyscredit{Model Serving, \S13.12, first fallacy (M/M/1 model).}
   \note{[2.5 min] Peer instruction: vote, one minute with a neighbor, vote again. Step 2: C. At 80 percent busy with 3.5 ms service, the mean time inside is 17.6 ms, of which 14.1 ms is waiting. The faster model serves the same traffic at 41 percent busy, so the mean falls to 3.0 ms and the wait to 1.2 ms. The request gets faster twice: once in service and again in the queue that lower utilization drains. A is the fixed-fraction Amdahl reasoning from the predict slide, which ignores load. D confuses a long queue with a fixed cost. WARN: this does not contradict Amdahl's law. Amdahl holds the other stages fixed; under load, the queueing delay itself depends on the service time. Land the segment aloud: waiting grows as 1 over (1 minus utilization), so a tail target fixes the highest safe utilization, and that utilization sizes the fleet. FLEX: [OPTIONAL]; cutting it loses the 2x-model vote.}
 \end{frame}
 
@@ -295,7 +296,7 @@
       \end{mlsyscard}}
     \end{column}
   \end{columns}
-  \mlsyscredit{Model Serving, \S13.4.4 and \S13.4.5 (independent servers assumed); Dean and Barroso, ``The Tail at Scale,'' CACM 2013, Table 1.}
+  \mlsyscredit{Model Serving, \S13.5.4 and \S13.5.5 (independent servers assumed); Dean and Barroso, ``The Tail at Scale,'' CACM 2013, Table 1.}
   \note{[2.5 min] [CORE] Many requests are served by more than one model. A search query asks 100 index shards, a recommendation asks an ensemble. The user waits for the slowest. Step 1: each server finishes on time 99 percent of the time; with 10 servers, 0.99 to the 10th, 90.4 percent of requests are on time. ENGAGE: one minute; predict the share for 100 servers. Step 2: 0.99 to the 100th, 36.6 percent. Nearly two thirds of requests wait for a slow server, so each server's own tail must be far tighter than the user's target. Students who answer 99 percent apply one server's tail to the whole request. Step 3: one fix. Hedging resends a request that is still running at the historical 95th-percentile time and keeps whichever answer arrives first; with a stable distribution it duplicates about 5 percent of requests. WARN: duplicates cost accelerator time, because a launched GPU kernel cannot be cheaply canceled, and under overload they deepen the queue they were meant to bypass. The measured line under the curve is Dean and Barroso's table from Lecture 12, in one line: at Google, one leaf server's 99th percentile was 10 ms, while a request that waits for all leaves saw 140 ms, 14 times longer, so the effect is real at scale. FLEX: [CORE].}
 \end{frame}
 
@@ -303,7 +304,7 @@
 % SECTION: BATCHING
 % =============================================================================
 \mlsysnote{[0.5 min] [CORE] The other way to stay below the knee is to raise each GPU's service rate. The largest lever is to run several requests at once.}
-\mlsysdivider{What does a batch buy, and who pays for it?}{Model Serving, \S13.5}
+\mlsysdivider{What does a batch buy, and who pays for it?}{Model Serving, \S13.6}
 \section{Batching}
 
 \begin{frame}[fragile]{A load generator's report shows every request running alone}
@@ -333,7 +334,8 @@ Request concurrency: 1
       \small
       \uncover<2->{\textcolor{BlueLine}{\textbf{Client:}} 708 \textmu s per request\\[0.2cm]}
       \uncover<3->{\textcolor{OrangeLine}{\textbf{Server:}} 382 \textmu s; the model runs 257 (36\% of 708). 326 \textmu s are outside the server.\\[0.2cm]}
-      \uncover<4->{\textcolor{RedLine}{\textbf{Executions = inferences:}} with one request outstanding, every request ran as a batch of one.}
+      \uncover<4->{\textcolor{RedLine}{\textbf{Executions = inferences:}} with one request outstanding, every request ran as a batch of one.\\[0.18cm]
+      {\footnotesize\textcolor{midgray}{Serialization (JSON vs.\ gRPC) and OS jitter live inside that 326 \textmu s outside-server slice.}}}
     \end{column}
   \end{columns}
   \mlsyscredit{Triton perf\_analyzer docs, quick\_start.md, github.com/triton-inference-server/perf\_analyzer (main @ 93ba37f). Lines quoted exactly; long lines wrapped.}
@@ -359,7 +361,7 @@ Request concurrency: 1
   \centering
   \mlsyssteps[width=0.95\textwidth,height=4.9cm,keepaspectratio]{batch_curve_step}{2}\\[0.1cm]
   \uncover<2->{\small One at a time: 0.414 ms. Eight at a time: 0.770 ms.}
-  \mlsyscredit{Left: Model Serving, \S13.5.4 (modeled). Right: MLPerf Inference v5.0, edge, 3$\times$ L4 (5.0-0047); rates per GPU derived from p90 and p99 latencies and Offline/3.}
+  \mlsyscredit{Left: Model Serving, \S13.6.4 (modeled). Right: MLPerf Inference v5.0, edge, 3$\times$ L4 (5.0-0047); rates per GPU derived from p90 and p99 latencies and Offline/3.}
   \note{[2.5 min] Step 1: the chapter's model of one H100, time per batch = 3.50 ms + 0.033 ms per image (more precisely 3.495 + 0.0329). Throughput climbs almost in proportion to batch size while the fixed cost dominates, then flattens: batch 128 takes 7.7 ms and gives 16,600 images per second. The latency sets the largest useful batch. Step 2: measured data from a smaller GPU, an NVIDIA L4, in MLPerf. One image at a time: 0.414 ms, about 2,415 per second. Eight images per query: 0.770 ms, about 10,390 per second. Every input at once: 12,855 per second per GPU. Eight at a time costs 1.9 times the latency for 4.3 times the throughput. WARN: these rates are derived; the chapter does not report them. MLPerf reports SingleStream as a 90th-percentile latency and MultiStream as a 99th, and the submission ran three L4s; we assume the latency runs used one. FLEX: [OPTIONAL]; keep the right panel if short.}
 \end{frame}
 
@@ -367,7 +369,7 @@ Request concurrency: 1
   \centering
   \mlsyssteps[width=0.98\textwidth,height=5.0cm,keepaspectratio]{window_step}{3}\\[0.05cm]
   {\small Mean wait = window / 2. A 20 ms window spends 10 ms of a 50 ms budget.}
-  \mlsyscredit{Model Serving, \S13.5.4, equations 8, 9, and 12; window arrivals illustrative, counts Poisson.}
+  \mlsyscredit{Model Serving, \S13.6.4, equations 8, 9, and 12; window arrivals illustrative, counts Poisson.}
   \note{[2.5 min] One time axis, one change per step. Step 1: a 10 ms window. Requests land at random; the batch leaves at the end of the window. The first arrival waits almost 10 ms, the last almost none, so on average a request waits half the window. A 20 ms window adds 10 ms on average, 20 percent of a 50 ms budget. Step 2: how many requests a 10 ms window collects. At 50 QPS the mean is 0.5 and 61 percent of windows are empty; at 200 QPS the count swings widely around 2; at 1,000 QPS it clusters near 10. Low traffic gives small, ragged batches; at 50 QPS a 10 ms window is rarely worth having. At 500 QPS with a 10 ms window, the batch a request sees averages 6 and reaches 12 at the 99th percentile. Step 3: a size cap ends the window early when enough requests arrive, the second trigger of the next slides. WARN: the tail of the batch distribution must fit the deadline, and its mean says little about the tail. FLEX: [CORE].}
 \end{frame}
 
@@ -432,7 +434,7 @@ Request concurrency: 1
       \uncover<2->{\small Mean wait to fill: 15 $\rightarrow$ 31 ms.\\Capacity at 16 is already 8$\times$ the load.}
     \end{column}
   \end{columns}
-  \mlsyscredit{Model Serving, \S13.11, fallacy on larger serving batches; \S13.5.2, equation 6.}
+  \mlsyscredit{Model Serving, \S13.12, fallacy on larger serving batches; \S13.6.2, equation 6.}
   \note{[2 min] Vote, discuss, vote again. Step 2: B. At 500 requests per second, a batch that waits for 16 requests waits on average (16 minus 1) / (2 times 500) seconds, 15 ms; at 32, 31 ms. The capacity gain is real, 3,980 to 7,040 images per second, but the service already has 3,980 against 500 offered, so the extra capacity buys nothing while every request waits twice as long. C names a real limit, but not the one that binds here. Land the segment aloud: a batch shares fixed costs and raises throughput almost for free in compute time, but every request pays the wait for the batch to form; the deadline sets the largest useful batch. FLEX: [CORE].}
 \end{frame}
 
@@ -440,7 +442,7 @@ Request concurrency: 1
 % SECTION: COLD START
 % =============================================================================
 \mlsysnote{[0.5 min] [CORE] Everything so far assumed a replica that is already running. Traffic spikes need new ones.}
-\mlsysdivider{How long before a new replica can help?}{Model Serving, \S13.8.1 to \S13.8.4, \S13.11}
+\mlsysdivider{How long before a new replica can help?}{Model Serving, \S13.9.1 to \S13.9.4, \S13.12}
 \section{Cold Start}
 
 \begin{frame}{A new replica needs seconds to minutes before it serves}
@@ -508,7 +510,7 @@ Request concurrency: 1
   \end{columns}
   \vspace{0.2cm}
   {\centering\normalsize 10 GB $\div$ 32 GB/s (PCIe Gen4 $\times$16) = 312.5 ms, before any warmup.\par}
-  \mlsyscredit{Model Serving, \S13.8.4. Photo: Smial, FAL (Free Art License), Wikimedia Commons.}
+  \mlsyscredit{Model Serving, \S13.9.4. Photo: Smial, FAL (Free Art License), Wikimedia Commons.}
   \note{[1 min] The photo shows the 16-lane PCIe connector at the edge of a graphics card. A server that hosts more models than its GPU memory holds must swap them in from host memory. Moving 10 GB across PCIe Gen4 at its theoretical 32 GB/s takes at least 312.5 ms, more than six times a 50 ms deadline, and about 90 forward passes of ResNet-50. ENGAGE: so where must a model that serves interactive traffic live? Expected: resident in GPU memory, or on a warm replica; on-demand swapping is for rarely used models only. FLEX: [OPTIONAL].}
 \end{frame}
 
@@ -532,7 +534,7 @@ Request concurrency: 1
       Report rejections and fallback quality with latency.}
     \end{column}
   \end{columns}
-  \mlsyscredit{Model Serving, Example 13.3, \S13.4.4, \S13.10.1.}
+  \mlsyscredit{Model Serving, Example 13.3, \S13.5.4, \S13.11.1.}
   \note{[2.5 min] The scenario is the chapter's Black Friday example: a recommender sized for normal traffic receives ten times more. Utilization pins at 100 percent and the queue grows for as long as the surge lasts; in the chapter's scenario latency reaches 10 s and clients time out. ENGAGE: two minutes in pairs, then take three answers. Step 2: the four levers. Admission control rejects excess requests at once (HTTP 503) instead of admitting work that will miss its deadline anyway. Graceful degradation serves a cheaper answer, such as a smaller model that is already resident and warm, or shorter generations. Warm pools and precompiled engines shrink the 35 s to about 1.5 s. Predictive scaling adds replicas before a known peak. WARN: shedding load can make a dashboard look healthy because rejected requests vanish from the latency statistics; report the rejection rate and fallback quality beside latency. Land the segment aloud: a replica is useless until it has loaded, compiled, and warmed, and that delay arrives exactly when the spike needs capacity, so it belongs in the plan. FLEX: [CORE].}
 \end{frame}
 
@@ -564,7 +566,7 @@ Request concurrency: 1
       {\footnotesize Service time, the utilization the tail allows, peak rate plus headroom.}}
     \end{column}
   \end{columns}
-  \mlsyscredit{Model Serving, Example 13.1, Napkin Math 13.3, \S13.10.2 (a plan, to be load-tested). Cost: derived, \$4 per H100-hour at 5,000 requests/s. Photo: four H100 PCIe cards, Geekerwan, CC BY 3.0, Wikimedia Commons.}
+  \mlsyscredit{Model Serving, Example 13.1, Napkin Math 13.3, \S13.11.2 (a plan, to be load-tested). Cost: derived, \$4 per H100-hour at 5,000 requests/s. Photo: four H100 PCIe cards, Geekerwan, CC BY 3.0, Wikimedia Commons.}
   \note{[3 min] [CORE] Back to the hook's bars. The photo shows four H100 cards; the batch-1 plan needs nine times that many. Step 1: retrieval. Students write three quantities, closed notes, 90 seconds. Step 2: the answers, and the hook as a fleet. Service time comes from batching and the runtime; the safe utilization comes from the p99 target; the peak rate plus headroom comes from the traffic. At 5,000 requests per second with a 50 ms p99 budget, batch-1 service needs 36 H100s. Applying the same utilization factor to the batched rate of 7,040 images per second gives 3. WARN: the chapter says this comparison is a plan that still needs proof, because batching changes the waiting distribution, so the batched plan must be load-tested with formation delay included. Step 3: the same plans in dollars. 36 H100s at \$4 an hour serving 5,000 requests per second cost \$8.00 per million requests; 3 batched H100s cost \$0.67 (derived). The hook's 7.5 times became 12 times at fleet scale, because the batch-1 fleet also needs headroom for its longer queue. A tighter deadline is bought with accelerators. FLEX: [CORE].}
 \end{frame}
 
@@ -589,8 +591,9 @@ Request concurrency: 1
 
 \begin{frame}{Read and explore}
   \small
-  \begin{itemize}\setlength{\itemsep}{0.12cm}
-    \item \textbf{Read:} Model Serving, \S13.1, \S13.3 to \S13.6, \S13.8.1 to \S13.8.4, \S13.10.1 to \S13.10.2, \S13.11; Napkin Math 13.2 to 13.4 and Example 13.4 by hand.
+  \begin{itemize}\setlength{\itemsep}{0.08cm}
+    \item \textbf{Read:} Model Serving, \S13.1, \S13.4 to \S13.7, \S13.9.1 to \S13.9.4, \S13.11.1 to \S13.11.2, \S13.12; Napkin Math 13.2 to 13.4 and Example 13.4 by hand.
+    \item \textbf{Explore:} \emph{Serving Pipeline Timing} (\S13.4) on mlsysbook.ai/vol1/.
     \item Harchol-Balter, \emph{Performance Modeling and Design of Computer Systems: Queueing Theory in Action}, 2013.
     \item Crankshaw et al., ``Clipper: A Low-Latency Online Prediction Serving System,'' NSDI 2017.
     \item Dean and Barroso, ``The Tail at Scale,'' CACM 2013.

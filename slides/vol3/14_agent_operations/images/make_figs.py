@@ -127,10 +127,10 @@ def hook_timeline(k):
 for k in range(1, 5):
     hook_timeline(k)
 
-def gantt(name, rows, xmax, notes=(), size=(5.4, 3.4), crit=(), ghost=(), qmark=None, gap=None, fs=15):
+def gantt(name, rows, xmax, notes=(), size=(5.4, 3.4), crit=(), ghost=(), qmark=None, gap=None, late=(), fs=15):
     """rows: list of (label, start, end, color_key). crit: labels outlined in
     violet (the critical path). ghost: (label, start, end) drawn faint.
-    gap: (start, end) hatched as unattributed time."""
+    gap: (start, end) hatched as unattributed time. late: labels drawn red dashed."""
     fig, ax = plt.subplots(figsize=size)
     n = len(rows)
     for i, (label, s0, e0, ck) in enumerate(rows):
@@ -139,8 +139,12 @@ def gantt(name, rows, xmax, notes=(), size=(5.4, 3.4), crit=(), ghost=(), qmark=
             if gl == label:
                 ax.barh(y, ge - gs, left=gs, height=0.6, color='white', edgecolor=C['neutral'], hatch='///', linewidth=1.2, zorder=1)
         if e0 is not None:
-            ax.barh(y, e0 - s0, left=s0, height=0.6, color=C[ck], zorder=2, edgecolor=VIO if label in crit else 'none', linewidth=3.0 if label in crit else 0)
-        ax.text(-0.15, y, label, ha='right', va='center', fontsize=fs, color=C['text'], fontweight='bold')
+            if label in late:
+                ax.barh(y, e0 - s0, left=s0, height=0.6, color=C['danger_l'], edgecolor=C['danger'], linestyle='--', linewidth=2.4, zorder=2)
+            else:
+                ax.barh(y, e0 - s0, left=s0, height=0.6, color=C[ck], zorder=2, edgecolor=VIO if label in crit else 'none', linewidth=3.0 if label in crit else 0)
+        if label not in late or e0 is not None:
+            ax.text(-0.15, y, label, ha='right', va='center', fontsize=fs, color=C['danger'] if label in late else C['text'], fontweight='bold')
     if gap:
         ax.axvspan(gap[0], gap[1], color=C['danger_l'], zorder=0)
     if qmark:
@@ -169,8 +173,12 @@ run = run_spans()
 S = run['spans']
 LBL = [('root span', 'invoke_agent repair_agent', 'neutral'), ('retrieve', 'retrieve supporting_context', 'data'), ('model: propose', 'chat propose_checks', 'memory'), ('run_tests', 'execute_tool run_tests', 'compute'), ('run_lint', 'execute_tool run_lint', 'compute'), ('model: report', 'chat synthesize_report', 'memory')]
 rows = [(lbl, S[k][0], S[k][1], ck) for lbl, k, ck in LBL]
-gantt('run_step1.svg', rows, 12.6)
-gantt('run_step2.svg', rows, 12.6, crit=('retrieve', 'model: propose', 'run_tests', 'model: report'), gap=(S['execute_tool run_tests'][1], S['chat synthesize_report'][0]), notes=[(S['execute_tool run_lint'][1] + 0.3, 1, 'off the path', C['neutral'], 'left'), (9.9, 2, f"{run['gap']:.1f} s gap", C['danger'], 'left')])
+t_end = S['chat synthesize_report'][1]
+rows_base = rows + [('late callback', None, None, 'danger')]
+rows_late = rows + [('late callback', t_end, t_end + 0.85, 'danger')]
+gantt('run_step1.svg', rows_base, 13.0, size=(5.4, 3.55), late=('late callback',), fs=16.5)
+gantt('run_step2.svg', rows_base, 13.0, size=(5.4, 3.55), crit=('retrieve', 'model: propose', 'run_tests', 'model: report'), gap=(S['execute_tool run_tests'][1], S['chat synthesize_report'][0]), late=('late callback',), notes=[(S['execute_tool run_lint'][1] + 0.3, 2, 'off the path', C['neutral'], 'left'), (9.9, 3, f"{run['gap']:.1f} s gap", C['danger'], 'left')], fs=16.5)
+gantt('run_step3.svg', rows_late, 13.0, size=(5.4, 3.55), crit=('retrieve', 'model: propose', 'run_tests', 'model: report'), gap=(S['execute_tool run_tests'][1], S['chat synthesize_report'][0]), late=('late callback',), notes=[(S['execute_tool run_lint'][1] + 0.3, 2, 'off the path', C['neutral'], 'left'), (9.9, 3, f"{run['gap']:.1f} s gap", C['danger'], 'left'), (t_end - 0.25, 0, 'attaches after root close', C['danger'], 'right')], fs=16.5)
 iv = {'retrieve': (0.0, 0.2), 'propose': (0.2, 3.2), 'tests': (3.2, 9.2), 'lint': (3.2, 5.2), 'synthesize': (9.7, 11.7)}
 t_ret, t_pro = (iv['retrieve'][1], iv['propose'][1])
 t_chk = t_pro
@@ -255,18 +263,21 @@ def tail_pipe(k):
     s.arrow([(90, 150), (90, 50), (236, 50)], P['ok'][1])
     s.box(240, 140, 240, 100, 'Staging buffer', ('held until the', 'verdict window ends'), 'store', tsize=20, ssize=18)
     s.arrow([(170, 190), (236, 190)], GRY)
-    sh = k >= 2
+    sh2 = k >= 2
+    sh3 = k >= 3
     cls = [('Failed or violation: keep', 'fault'), ('Pending: keep, flag', 'tool'), ('Slow or costly: keep', 'think'), ('Ordinary: 2% control', 'gray')]
     for i, (t_, role) in enumerate(cls):
         y = 104 + i * 56
-        s.box(604, y, 286, 46, t_, (), role, show=sh, tsize=19)
-        s.arrow([(480, 190), (540, 190), (540, y + 23), (600, y + 23)], P[role][1], show=sh)
-    s.text(747, 98, 'evict from the bottom first', 18, '#475569', show=sh, italic=True)
-    s.arrow([(360, 240), (360, 290), (200, 290), (200, 94)], RED, dash=True, show=sh)
-    s.text(372, 284, 'buffer expired: the record', 18, P['fault'][2], anchor='start', show=sh)
-    s.text(372, 308, 'flags the missing detail', 18, P['fault'][2], anchor='start', show=sh)
+        use_role = 'fault' if (i == 3 and sh3) else role
+        label = 'Ordinary: evict first under load' if (i == 3 and sh3) else t_
+        s.box(604, y, 286, 46, label, (), use_role, show=sh2, tsize=18.5 if (i == 3 and sh3) else 19)
+        s.arrow([(480, 190), (558, 190), (558, y + 23), (600, y + 23)], P[use_role][1], show=sh2)
+    s.text(747, 94, 'evict bottom first under load' if sh3 else 'evict from the bottom first', 17.5, P['fault'][2] if sh3 else '#475569', bold=sh3, show=sh2, italic=not sh3)
+    s.arrow([(355, 240), (355, 290), (200, 290), (200, 94)], RED, dash=True, show=sh3)
+    s.text(368, 284, 'expired: record', 18, P['fault'][2], anchor='start', bold=True, show=sh3)
+    s.text(368, 308, 'flags missing body', 18, P['fault'][2], anchor='start', show=sh3)
     s.save(f'tail_step{k}.svg')
-for k in (1, 2):
+for k in (1, 2, 3):
     tail_pipe(k)
 sp.hbars(str(out / 'retention.svg'), [('Keep all', 336.0, 'neutral', '336 GB'), ('Head 5%', 16.8, 'memory', '16.8 GB: 20 of 400 failures/h'), ('Tail', 23.184, 'data', '23.2 GB: all 400 failures/h')], 'GB', log=False, xlabel='Retained trace bodies per day (GB, decimal)', size=(5.8, 2.0))
 

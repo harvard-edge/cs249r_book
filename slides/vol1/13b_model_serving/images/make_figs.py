@@ -93,8 +93,8 @@ for k in (1, 2, 3, 4):
     ax.spines['left'].set_visible(False)
     ax.set_xlabel('Milliseconds, one chat request (Llama 2 70B, median, no batching)')
     sp.save(fig, out / f'ttft_step{k}.svg')
-PHASE_PRE = [('GPT-2 XL,\n512 tokens', 3.882709808, '3.9'), ('Llama 3 8B,\n1,000 tokens', 41.93186047, '41.9')]
-PHASE_DEC = [('GPT-2 XL', 0.8955223881, 'memory', '0.9 ms'), ('Llama 3 8B,\nINT4', 1.567649681, 'memory', '1.2 floor, 1.57'), ('GPT-2 XL,\neager', 8.64, 'neutral', '8.6 ms')]
+PHASE_PRE = [('GPT-2 XL,\n512 tokens', 3.882709808, '3.9'), ('Llama 3 8B,\n1,000 tokens', 41.2692, '41.3')]
+PHASE_DEC = [('GPT-2 XL', 0.8955223881, 'memory', '0.9 ms'), ('Llama 3 8B,\nINT4', 1.2476, 'memory', '1.2 floor, 1.25'), ('GPT-2 XL,\neager', 8.64, 'neutral', '8.6 ms')]
 FS = 9
 for k in (1, 2, 3, 4):
     fig = plt.figure(figsize=cm(10.4, 5.0))
@@ -128,10 +128,10 @@ for k in (1, 2, 3, 4):
         a_.set_ylim(-0.5, 2.5 if a_ is bx else 1.5)
         a_.tick_params(axis='x', labelsize=8, pad=1)
     a4 = 1.0 if k >= 4 else 0.0
-    tp = 1.567649681
+    tp = 1.2476
     cx.barh(0, tp, color=C['memory'], height=0.8, alpha=a4)
     cx.barh(0, 20 - tp, left=tp, color=C['data_l'], edgecolor=C['data'], hatch='//', height=0.8, lw=0, alpha=a4)
-    cx.text(10.8, 0, '18.4 ms: room to share this read (derived)', ha='center', va='center', fontsize=FS - 0.5, fontweight='bold', color=C['data'], alpha=a4, bbox=dict(facecolor='white', edgecolor='none', pad=1, alpha=a4))
+    cx.text(10.6, 0, '18.8 ms: room to share this read (derived)', ha='center', va='center', fontsize=FS - 0.5, fontweight='bold', color=C['data'], alpha=a4, bbox=dict(facecolor='white', edgecolor='none', pad=1, alpha=a4))
     cx.text(-0.3, 0, 'Llama 3 8B,\n20 ms TPOT', ha='right', va='center', fontsize=FS - 0.5, fontweight='bold', alpha=a4)
     cx.set_xlim(0, 20)
     cx.set_ylim(-0.6, 0.6)
@@ -285,7 +285,7 @@ for k in range(1, 8):
             summary(ax, 'done at step 100; 350 of 400 slot-steps used (87.5%)', C['data'])
     save_slot(fig, out / f'cb_step{k}.svg')
 DEC = 2.771058455
-PRE = 41.93186047
+PRE = 41.2692
 for k in (1, 2, 3):
     fig, (ax, bx) = plt.subplots(1, 2, figsize=cm(9.9, 4.4), sharey=True, gridspec_kw={'wspace': 0.1})
     fig.subplots_adjust(left=0.2, right=0.99, top=0.88, bottom=0.12)
@@ -294,14 +294,14 @@ for k in (1, 2, 3):
         tall = i == 4
         a = 1.0 if not tall or k >= 2 else 0.0
         ax.bar(i, v, color=C['compute'] if tall else C['memory'], width=0.75, alpha=a)
-    ax.text(4, DEC + PRE + 1.5, '44.7 ms', ha='center', fontsize=9, fontweight='bold', color=C['compute'], alpha=1.0 if k >= 2 else 0.0)
+    ax.text(4, DEC + PRE + 1.5, '44.0 ms', ha='center', fontsize=9, fontweight='bold', color=C['compute'], alpha=1.0 if k >= 2 else 0.0)
     ax.set_title('Whole prompt in one step', fontsize=8.5, loc='left', fontweight='bold', pad=3)
     right = [DEC] * 2 + [DEC + PRE / 4] * 4 + [DEC] * 3
     a3 = 1.0 if k >= 3 else 0.0
     for i, v in enumerate(right):
         chunk = 2 <= i <= 5
         bx.bar(i, v, color=C['compute'] if chunk else C['memory'], width=0.75, alpha=a3)
-    bx.text(4.0, 27, f'{4} chunks of 250:\n13.3 ms each', ha='center', fontsize=8.5, fontweight='bold', color=C['compute'], alpha=a3)
+    bx.text(4.0, 27, f'{4} chunks of 250:\n13.1 ms each', ha='center', fontsize=8.5, fontweight='bold', color=C['compute'], alpha=a3)
     bx.set_title('Four chunks', fontsize=8.5, loc='left', fontweight='bold', alpha=a3, pad=3)
     for a_, show in ((ax, True), (bx, k >= 3)):
         a_.axhline(20, color=C['danger'], lw=1.8, ls='--', alpha=1.0 if show else 0.0)
@@ -341,36 +341,44 @@ ax.tick_params(labelsize=8, pad=1)
 ax.set_xlabel('Context length (tokens)', fontsize=8.5, labelpad=1)
 ax.set_ylabel('KV cache (GB, FP16)', fontsize=8.5, labelpad=1)
 ax.set_title('Llama 3 8B, 16-bit weights, one H100', fontsize=9, fontweight='bold', loc='left', pad=3)
-save_slot(fig, out / 'kv_budget_8b.svg')
+save_slot(fig, out / 'kv_budget_step1.svg')
+
 ctx = np.linspace(0, 32768, 200)
-fig, ax = plt.subplots(figsize=cm(8.7, 4.6))
-fig.subplots_adjust(left=0.13, right=0.98, top=0.88, bottom=0.21)
 B70 = 50.59934592
-ax.axhspan(B70, 125, color=C['danger_l'], alpha=0.6, lw=0)
-ax.axhline(B70, color=C['danger'], lw=2, ls='--')
-ax.text(32000, B70 + 2.5, 'budget: 50.6 GB', ha='right', va='bottom', fontsize=8.5, color=C['danger'], fontweight='bold')
-for b, ck in ((1, 'memory'), (4, 'data'), (16, 'compute'), (32, 'network')):
-    kv = b * ctx * 327680 / 1000000000.0
-    ax.plot(ctx, kv, color=C[ck], lw=2.5)
-    if b > 4:
-        xe = 102000000000.0 / (b * 327680)
-        lx, ly = (xe * 0.96, 102)
-    else:
-        lx = 24000 if b == 4 else 32000
-        ly = b * lx * 327680 / 1000000000.0 + 3
-    ax.text(lx, ly, f'batch {b}', ha='right', fontsize=8.5, color=C[ck], fontweight='bold')
 x32 = 4825.529663
-ax.plot([x32], [B70], 'o', ms=7, color=C['network'], mec='white', mew=1.5, zorder=5)
-ax.annotate('32 chats full near\n4,800 tokens', (x32, B70), xytext=(19500, 72), fontsize=8.5, color=C['network'], fontweight='bold', arrowprops=dict(arrowstyle='-', color=C['network']))
-ax.set_xlim(0, 32768)
-ax.set_ylim(0, 120)
-ax.set_xticks([0, 8192, 16384, 24576, 32768])
-ax.set_xticklabels(['0', '8K', '16K', '24K', '32K'])
-ax.tick_params(labelsize=8, pad=1)
-ax.set_xlabel('Context length (tokens)', fontsize=8.5, labelpad=1)
-ax.set_ylabel('KV cache (GB, FP16)', fontsize=8.5, labelpad=1)
-ax.set_title('Larger model: 70B class, 4-bit weights, one H100', fontsize=9, fontweight='bold', loc='left', pad=3)
-save_slot(fig, out / 'kv_budget.svg')
+x16 = B70 * 1e9 / (16 * 327680)
+for k in (2, 3):
+    fig, ax = plt.subplots(figsize=cm(8.7, 4.6))
+    fig.subplots_adjust(left=0.13, right=0.955, top=0.88, bottom=0.21)
+    ax.axhspan(B70, 125, color=C['danger_l'], alpha=0.6, lw=0)
+    ax.axhline(B70, color=C['danger'], lw=2, ls='--')
+    ax.text(32200, B70 + 2.5, 'budget: 50.6 GB', ha='right', va='bottom', fontsize=8.5, color=C['danger'], fontweight='bold')
+    for b, ck in ((1, 'memory'), (4, 'data'), (16, 'compute'), (32, 'network')):
+        kv = b * ctx * 327680 / 1000000000.0
+        ax.plot(ctx, kv, color=C[ck], lw=2.5)
+        if b > 4:
+            xe = 102000000000.0 / (b * 327680)
+            lx, ly = (xe * 0.96, 102)
+        else:
+            lx = 32200
+            ly = (b * lx * 327680 / 1000000000.0 + 2) if b == 1 else (b * lx * 327680 / 1000000000.0 - 17.0)
+        ax.text(lx, ly, f'batch {b}', ha='right', fontsize=8.5, color=C[ck], fontweight='bold')
+    ax.plot([x32], [B70], 'o', ms=7, color=C['network'], mec='white', mew=1.5, zorder=5)
+    ax.annotate('32 chats full near\n4,800 tokens', (x32, B70), xytext=(17500, 76), fontsize=8.5, color=C['network'], fontweight='bold', arrowprops=dict(arrowstyle='-', color=C['network']))
+    if k >= 3:
+        ax.plot([x16], [B70], 'o', ms=7, color=C['compute'], mec='white', mew=1.5, zorder=6)
+        ax.annotate('16 chats: 9.7K\n(evict 16: 2× ctx)', (x16, B70), xytext=(11000, 29), fontsize=8.3, color=C['compute'], fontweight='bold',
+                    bbox=dict(facecolor='white', edgecolor='none', pad=1.2, alpha=0.88),
+                    arrowprops=dict(arrowstyle='->', color=C['compute'], lw=1.4))
+    ax.set_xlim(0, 32768)
+    ax.set_ylim(0, 120)
+    ax.set_xticks([0, 8192, 16384, 24576, 32768])
+    ax.set_xticklabels(['0', '8K', '16K', '24K', '32K'])
+    ax.tick_params(labelsize=8, pad=1)
+    ax.set_xlabel('Context length (tokens)', fontsize=8.5, labelpad=1)
+    ax.set_ylabel('KV cache (GB, FP16)', fontsize=8.5, labelpad=1)
+    ax.set_title('Larger model: 70B class, 4-bit weights, one H100', fontsize=9, fontweight='bold', loc='left', pad=3)
+    save_slot(fig, out / f'kv_budget_step{k}.svg')
 for k in (1, 2, 3):
     fig, ax = plt.subplots(figsize=(5.9, 1.9))
     y0, h = (0.0, 0.8)
@@ -496,21 +504,25 @@ for k in (1, 2):
     ax.set_ylim(0, 3.4)
     hide_axis(ax)
     save_slot(fig, out / f'share_step{k}.svg')
-fig, ax = plt.subplots(figsize=cm(9.3, 3.4))
-fig.subplots_adjust(left=0.24, right=0.97, top=0.97, bottom=0.3)
 DS = [('Both phases', 1.6, 'neutral'), ('Prefill only', 5.6, 'compute'), ('Decode only', 10.0, 'memory')]
-for i, (lab, v, ck) in enumerate(DS):
-    y = 2 - i
-    ax.barh(y, v, color=C[ck], height=0.62)
-    ax.text(v + 0.15, y, f'{v:g}', va='center', fontsize=9.5, fontweight='bold', color=C[ck])
-    ax.text(-0.2, y, lab, ha='right', va='center', fontsize=9, fontweight='bold')
-ax.set_xlim(0, 11.5)
-ax.set_yticks([])
-ax.set_ylim(-0.5, 2.5)
-ax.spines['left'].set_visible(False)
-ax.tick_params(axis='x', labelsize=8, pad=1)
-ax.set_xlabel('Requests/s per A100 meeting both deadlines\n(13B model, measured)', fontsize=8.5, labelpad=1)
-save_slot(fig, out / 'distserve_bars.svg')
+for k in (1, 2):
+    fig, ax = plt.subplots(figsize=cm(9.3, 3.4))
+    fig.subplots_adjust(left=0.24, right=0.97, top=0.97, bottom=0.3)
+    for i, (lab, v, ck) in enumerate(DS):
+        if k == 1 and i > 0:
+            continue
+        y = 2 - i
+        ax.barh(y, v, color=C[ck], height=0.62)
+        extra = '' if i == 0 else f'  ({v / 1.6:.1f}×)'
+        ax.text(v + 0.15, y, f'{v:g}{extra}', va='center', fontsize=9.5, fontweight='bold', color=C[ck])
+        ax.text(-0.2, y, lab, ha='right', va='center', fontsize=9, fontweight='bold')
+    ax.set_xlim(0, 12.8)
+    ax.set_yticks([])
+    ax.set_ylim(-0.5, 2.5)
+    ax.spines['left'].set_visible(False)
+    ax.tick_params(axis='x', labelsize=8, pad=1)
+    ax.set_xlabel('Requests/s per A100 meeting both deadlines\n(13B model, measured)', fontsize=8.5, labelpad=1)
+    save_slot(fig, out / f'distserve_bars_step{k}.svg')
 fig, ax = plt.subplots(figsize=(4.4, 2.3))
 for i, (lab, ck) in enumerate((('prefill', 'compute'), ('prefill', 'compute'))):
     ax.add_patch(Rectangle((0.1, 1.3 - i * 1.0), 1.2, 0.7, facecolor=C[ck + '_l'], edgecolor=C[ck], lw=1.8))
@@ -525,7 +537,22 @@ ax.set_xlim(0, 4.0)
 ax.set_ylim(-0.3, 2.1)
 hide_axis(ax)
 sp.save(fig, out / 'distserve_pool.svg')
-sp.hbars(out / 'split_link.svg', [('Cache traffic at 10 req/s', 11.3, 'network', '11.3 GB/s'), ('NVLink, A100', 600.0, 'memory', '600 GB/s')], '', log=False, size=(5.0, 1.5), xlabel='GB/s (OPT-66B, 512-token prompts; DistServe)')
+for k in (1, 2):
+    fig, ax = plt.subplots(figsize=(5.0, 1.55))
+    sl_rows = [('Cache traffic\nat 10 req/s', 11.3, 'network', '11.3 GB/s (1.9% of NVLink)'), ('NVLink, A100', 600.0, 'memory', '600 GB/s')]
+    for i, (lab, v, ck, txt) in enumerate(sl_rows):
+        if k == 1 and i > 0:
+            continue
+        y = 1 - i
+        ax.barh(y, v, color=C[ck], height=0.58)
+        ax.text(v + 12, y, txt, va='center', fontsize=11, fontweight='bold', color=C[ck])
+        ax.text(-12, y, lab, ha='right', va='center', fontsize=11, fontweight='bold')
+    ax.set_xlim(0, 760)
+    ax.set_ylim(-0.5, 1.5)
+    ax.set_yticks([])
+    ax.spines['left'].set_visible(False)
+    ax.set_xlabel('GB/s (OPT-66B, 512-token prompts; DistServe)', fontsize=10.5)
+    sp.save(fig, out / f'split_link_step{k}.svg')
 from datetime import date
 rows = ({'model': 'Legacy GPT-3.5', 'date': '2022-11-30', 'usd_per_mtok_input': 20.0, 'source_key': 'openai2023chatgptwhisper', 'check': 'matches Epoch AI lowest-price series (GPT-3.5, 2022-11-30, $20); the cited post prices gpt-3.5-turbo at one tenth of existing GPT-3.5 models'}, {'model': 'GPT-3.5 Turbo', 'date': '2023-03-01', 'usd_per_mtok_input': 2.0, 'source_key': 'openai2023chatgptwhisper', 'check': 'matches Epoch AI lowest-price series ($2); openai.com refuses automated fetches'}, {'model': 'GPT-4 (Original)', 'date': '2023-03-14', 'usd_per_mtok_input': 30.0, 'source_key': 'openai2023gpt4web', 'check': '8K-context prompt price; checked 2026-10-13 against OpenAI API pricing (developers.openai.com/api/docs/pricing): gpt-4-0613 $30.00 input'}, {'model': 'Claude 3 Opus', 'date': '2024-03-04', 'usd_per_mtok_input': 15.0, 'source_key': 'anthropic2024claude3family', 'check': 'fetched 2026-10-13: $15 input per million tokens, post dated 2024-03-04'}, {'model': 'Claude 3 Haiku', 'date': '2024-03-04', 'usd_per_mtok_input': 0.25, 'source_key': 'anthropic2024claude3family', 'check': 'fetched 2026-10-13: $0.25 input per million tokens, post dated 2024-03-04'}, {'model': 'GPT-4o', 'date': '2024-05-13', 'usd_per_mtok_input': 5.0, 'source_key': 'openaiCommunity2024gpt4oApi', 'check': 'fetched 2026-10-13: $5 per million input tokens, post dated 2024-05-13'}, {'model': 'GPT-4o-mini', 'date': '2024-07-18', 'usd_per_mtok_input': 0.15, 'source_key': 'openai2024gpt4oMini', 'check': 'checked 2026-10-13 against OpenAI API pricing (developers.openai.com/api/docs/pricing): gpt-4o-mini $0.15 input'}, {'model': 'Gemini 1.5 Flash', 'date': '2024-08-12', 'usd_per_mtok_input': 0.075, 'source_key': 'google2024gemini15flashPricing', 'check': 'fetched 2026-10-13: $0.075 input for prompts up to 128K, effective 2024-08-12'}, {'model': 'DeepSeek-V3', 'date': '2025-02-08', 'usd_per_mtok_input': 0.27, 'source_key': 'deepseek2024v3', 'check': 'fetched 2026-10-13: $0.27 per million input tokens (cache miss) from Feb 8 2025, post dated 2024-12-26'})
 OFFSET = {'Legacy GPT-3.5': (4, -11, 'left'), 'GPT-3.5 Turbo': (5, -10, 'left'), 'GPT-4 (Original)': (5, 2, 'left'), 'Claude 3 Opus': (5, 3, 'left'), 'Claude 3 Haiku': (-5, -2, 'right'), 'GPT-4o': (5, 2, 'left'), 'GPT-4o-mini': (5, -3, 'left'), 'Gemini 1.5 Flash': (-5, 3, 'right'), 'DeepSeek-V3': (-5, 5, 'right')}

@@ -24,6 +24,7 @@
   layer=reliability,
   logo={../../assets/img/logo-mlsysbook.png},
   instlogo={../../assets/img/logo-harvard.png},
+  dividerstack,
 }
 \usepackage[T1]{fontenc}
 \usepackage[scaled=0.9]{helvet}
@@ -177,7 +178,7 @@ $\Tstep(N) = \dfrac{\Tcomp}{N} + \underbrace{\Tcomm(N)}_{\text{placement}} + \un
 \begin{frame}{Two jobs holding half a pool each make zero progress}
   \centering
   \mlsyssteps[width=0.96\textwidth,height=5.7cm,keepaspectratio]{gang_step}{3}
-  \mlsyscredit{Fleet Orchestration, \S8.4.3 and figure 4; War Story 8.1 (Sigler 2021, OpenAI).}
+  \mlsyscredit{Fleet Orchestration, \S8.4.3 and figure 4 (interactive Explore figure: Gang Scheduling Deadlock); War Story 8.1 (Sigler 2021, OpenAI).}
   \note{[3 min] NARRATE: An 8-GPU pool, two jobs that each need all 8. Synchronous training needs every rank in every collective, so 4 of 8 GPUs complete zero steps. Step 1: placed one GPU at a time, J1 gets 4 and waits for the rest. Step 2: J2 gets the other 4 and also waits. Each holds what the other needs. This is a hold-and-wait deadlock, and all 8 GPUs burn power at zero progress. Step 3: gang scheduling grants J1 all 8 at once; J2 holds nothing until J1 ends. At the chapter's \$2 per GPU-hour, a deadlock that strands a 10,000-GPU cluster wastes \$20,000 an hour. OpenAI used exactly this two-job example when it scaled Kubernetes to 7,500 nodes, and added group admission. ENGAGE: Does giving J1 higher priority fix it? (Expected: no; priority orders requests, it does not stop partial holds.) WARN: Atomicity must cover every resource the group needs, including its NVLink domain and network share, or the deadlock moves one layer down. FLEX: [CORE]}
 \end{frame}
 
@@ -245,21 +246,24 @@ $\Tstep(N) = \dfrac{\Tcomp}{N} + \underbrace{\Tcomm(N)}_{\text{placement}} + \un
   \begin{columns}[c]
     \begin{column}{0.50\textwidth}
       \centering
-      \safeimg[width=\textwidth,height=5.6cm,keepaspectratio]{frag_grid.pdf}
+      \mlsyssteps[width=\textwidth,height=4.8cm,keepaspectratio]{frag_grid_step}{2}
     \end{column}
     \begin{column}{0.47\textwidth}
-      \small
-      With 6-GPU jobs, each 8-GPU node runs one, so \textbf{75\%} is usable.\\[0.25cm]
-      {\footnotesize The request sets the shape:}\\[0.05cm]
+      \footnotesize
+      With 6-GPU jobs, each 8-GPU node runs one, so \textbf{75\%} is usable.\\[0.05cm]
+      The request sets the shape:\\[0.04cm]
       \begin{mlsyscard}{mlsysaccent}
         {\ttfamily\scriptsize sbatch -{}-gpus=16 ...}\\
-        {\footnotesize any 16 GPUs start sooner but may scatter}\\[0.08cm]
+        {\scriptsize any 16 GPUs start sooner but may scatter}\\[0.04cm]
         {\ttfamily\scriptsize sbatch -{}-nodes=2 -{}-gpus-per-node=8}\\
-        {\footnotesize two whole nodes keep NVLink inside each}
+        {\scriptsize two whole nodes keep NVLink inside each}
       \end{mlsyscard}
+      \vspace{0.04cm}
+      \centering\safeimg[width=0.68\textwidth,height=1.20cm,keepaspectratio]{cscs-alps-hall.jpg}\\[-0.02cm]
+      {\scriptsize\textcolor{midgray}{Multi-node GPU hall (CSCS Alps).}}
     \end{column}
   \end{columns}
-  \mlsyscredit{Fleet Orchestration, \S8.4.2 and figure 3 (19 of 64 free; slot layout illustrative); request shapes, \S8.5.1.}
+  \mlsyscredit{Fleet Orchestration, \S8.4.2 and figure 3 (19 of 64 free; layout illustrative); \S8.5.1. Photo: Marco Abram, CSCS, CC BY-SA 3.0, Wikimedia Commons.}
   \note{[2 min] NARRATE: Eight nodes of eight GPUs. Fifteen running jobs leave 19 slots free, 30 percent of the cluster, but every node keeps at least one busy slot, so a job that needs 8 GPUs on one node cannot start. This is fragmentation. Free capacity sits in pieces no pending job can use. Even a uniform workload strands capacity: 6-GPU jobs fit one per node and leave 2 idle on each, 75 percent usable. The request decides the shape. In Slurm, asking for 16 GPUs anywhere starts sooner on partly used nodes but may scatter the group; asking for two full nodes keeps each half on NVLink. Real requests also need CPU cores, host memory, and network on the same node; the job fits only if every dimension fits. ENGAGE: Name two ways to make the 8-GPU job runnable. (Expected: drain one node with a reservation, as in backfill; or migrate small jobs to consolidate, paying their checkpoint and restart.) WARN: Overcommitting whole GPUs because their average activity is 70 percent does not create capacity; a reserved device is occupied while idle. FLEX: [OPTIONAL]}
 \end{frame}
 
@@ -296,18 +300,18 @@ $\Tstep(N) = \dfrac{\Tcomp}{N} + \underbrace{\Tcomm(N)}_{\text{placement}} + \un
 \end{frame}
 
 \begin{frame}{Each research scheduler matches one signal to one goal}
-  \small
-  \renewcommand{\arraystretch}{1.3}
-  \begin{tabular}{@{}P{1.9cm}P{4.0cm}P{3.4cm}P{4.1cm}@{}}\toprule
-    \textbf{Scheduler} & \textbf{Signal} & \textbf{Goal} & \textbf{What it needs}\\\midrule
-    Tiresias & GPU-hours used so far & mean completion time & accounting records only\\
+  \footnotesize
+  \renewcommand{\arraystretch}{1.22}
+  \begin{tabular}{@{}P{1.9cm}P{4.1cm}P{3.4cm}P{3.9cm}@{}}\toprule
+    \textbf{Scheduler} & \textbf{Signal} & \textbf{Goal} & \textbf{Requires}\\\midrule
+    Tiresias & GPU-hours used so far & mean completion time & accounting logs only\\
     Gandiva & iteration boundaries & utilization & profiling, time slicing\\
-    Themis & finish time vs.\ fair share & worst-case fairness & finish-time estimates\\
-    \textcolor{mlsysaccent}{\textbf{Pollux}} & goodput (throughput $\times$ progress) & cluster goodput & a batch-resizing training loop\\\bottomrule
-  \end{tabular}\\[0.3cm]
-  \begin{mlsyscard}{mlsysaccent}\small
-    Measured: Pollux cut mean job completion time \textbf{37 to 50\%} against the schedulers it was compared with, on its testbed and trace.
-  \end{mlsyscard}
+    \uncover<2->{Themis} & \uncover<2->{finish time vs.\ fair share} & \uncover<2->{worst-case fairness} & \uncover<2->{finish-time estimates}\\
+    \uncover<2->{\textcolor{mlsysaccent}{\textbf{Pollux}}} & \uncover<2->{goodput (rate $\times$ progress)} & \uncover<2->{cluster goodput} & \uncover<2->{batch-resizing loop}\\\bottomrule
+  \end{tabular}\\[0.18cm]
+  \uncover<2->{\begin{mlsyscard}{mlsysaccent}\small
+    Measured: Pollux cut mean job completion time \textbf{37 to 50\%} against baseline schedulers on its testbed and trace.
+  \end{mlsyscard}}
   \mlsyscredit{Fleet Orchestration, \S8.9 and table 5; Qiao et al., OSDI 2021, as cited in \S8.9.4.}
   \note{[2 min] NARRATE: Four research schedulers, each one signal for one objective. Tiresias needs no runtime estimate. It lowers the priority of jobs as they consume GPU-hours, so short jobs finish first when durations are heavy-tailed. Gandiva switches jobs at iteration boundaries, where little state must move, to pack and migrate. Themis measures finish time against what a fair share would give, and auctions GPUs to the application furthest behind, which needs finish-time estimates from every application. Pollux adds GPUs only while the larger batch still makes progress per example. Past the critical batch size (Lecture 6), more GPUs raise examples per second and lower progress. ENGAGE: Your platform sees only accounting records. Which can you deploy? (Expected: Tiresias.) WARN: A published gain belongs to its testbed and trace; each added signal is also a new way to be wrong, so test against queue delay, starvation, and recovery cost on your own fleet. Land the segment aloud. Filter to feasible allocations, share them, measure fairness in delay, and choose a signal that matches the goal. FLEX: [CORE]}
 \end{frame}
@@ -354,7 +358,7 @@ $\Tstep(N) = \dfrac{\Tcomp}{N} + \underbrace{\Tcomm(N)}_{\text{placement}} + \un
     \end{column}
     \begin{column}{0.73\textwidth}
       \centering
-      \mlsyssteps[width=\textwidth,height=5.0cm,keepaspectratio]{place_step}{2}\\
+      \mlsyssteps[width=\textwidth,height=4.8cm,keepaspectratio]{place_step}{2}\\
       {\footnotesize Topology-aware placement gives the most frequent exchange the fastest link.}
     \end{column}
   \end{columns}
@@ -408,19 +412,19 @@ $\Tstep(N) = \dfrac{\Tcomp}{N} + \underbrace{\Tcomm(N)}_{\text{placement}} + \un
   \mlsysactivity{Vote}{2 min}
   \begin{columns}[T]
     \begin{column}{0.40\textwidth}
-      {\normalsize\choice{A}{True}\qquad\answerat{2}{B}{False}}\\[0.15cm]
+      {\normalsize\choice{A}{True}\qquad\answerat{2}{B}{False}}\\[0.12cm]
       \begin{mlsyscard}{mlsysaccent}\small
         $\text{cost}_{\text{eff}} = \text{price}_{\text{spot}} \times \dfrac{\text{billed time}}{\text{retained progress}}$
       \end{mlsyscard}
     \end{column}
     \begin{column}{0.56\textwidth}
-      \small Spot: discounted GPUs a cloud provider can take back with 30 s to 2 min notice.\\[0.2cm]
-      \uncover<2->{\footnotesize 65\% discount, 45 min billed overhead per 2 h of progress: $0.35 \times 2.75 / 2 = 0.48$ of the on-demand price, \textbf{52\%} saved. 70B model, 512 GPUs, 14 days: \textbf{53.0\%} cheaper, \textbf{34.2\%} longer.}
+      \small Spot: discounted GPUs reclaimed on 30 s to 2 min notice.\\[0.14cm]
+      \uncover<2->{\footnotesize 65\% discount, 45 min overhead per 2 h progress: $0.35 \times 2.75 / 2 = 0.48\times$ (\textbf{52\%} saved). 70B on 512 GPUs: \textbf{53.0\%} cheaper, \textbf{34.2\%} longer.}
     \end{column}
   \end{columns}
-  \vspace{0.05cm}
+  \vspace{0.04cm}
   \centering
-  \mlsyssteps[width=0.85\textwidth,height=2.3cm,keepaspectratio]{spot_step}{2}
+  \mlsyssteps[width=0.88\textwidth,height=2.55cm,keepaspectratio]{spot_step}{2}
   \mlsyscredit{Fleet Orchestration, \S8.13 (fallacy), equation 3, \S8.8.2, and Systems Perspective 8.4 (scenario rates \$2 and \$0.70 per GPU-hour).}
   \note{[2.5 min] NARRATE: Cloud providers rent spare GPUs cheaply and take them back with little notice, up to 2 minutes on AWS, up to 30 seconds for GCP preemptible machines. ENGAGE: Vote. Step 2: false as stated. The effective cost is the spot price times billed time over retained progress. The chapter's fallacy case takes a 65 percent discount, 15 minutes to checkpoint to slow storage and 30 to restart, after each 2 hours of progress: 0.35 times 2.75 / 2 is 0.48 of the on-demand price, 52 percent saved, and replay of unsaved work would cut it further. The bars are the chapter's 14-day run of a 70B model on 512 GPUs: \$344,064 on demand against \$161,567 on spot, 53.0 percent cheaper but 34.2 percent longer, and only because checkpointing already existed. Without it, one interruption restarts from scratch. WARN: Checkpointing handles isolated losses; a whole zone's pool can be reclaimed at once, so diversify zones and instance types and keep an on-demand fallback. The checkpoint interval for spot follows Lecture 7's Young-Daly reasoning, with the interruption rate in place of hardware failure. FLEX: [CORE]}
 \end{frame}
@@ -452,10 +456,18 @@ $\Tstep(N) = \dfrac{\Tcomp}{N} + \underbrace{\Tcomm(N)}_{\text{placement}} + \un
 \end{frame}
 
 \begin{frame}{Lending idle serving GPUs lifts the fleet from 75\% to 88\%}
-  \centering
-  \safeimg[width=0.90\textwidth,height=4.6cm,keepaspectratio]{diurnal.pdf}\\[0.1cm]
+  \begin{columns}[c]
+    \begin{column}{0.73\textwidth}
+      \centering\safeimg[width=\textwidth,height=4.5cm,keepaspectratio]{diurnal.pdf}
+    \end{column}
+    \begin{column}{0.25\textwidth}
+      \centering\mlsysphoto[width=\textwidth,height=2.5cm,keepaspectratio]{datacenter-server-racks.jpg}\\[0.04cm]
+      {\scriptsize\textcolor{midgray}{Shared serving and training racks.}\par}
+    \end{column}
+  \end{columns}
+  \vspace{0.08cm}\centering
   {\small 1,024 GPUs: 768 active with a static split, 901 when lending on the forecast (\$2.3M a year).}
-  \mlsyscredit{Fleet Orchestration, Napkin Math 8.5 and figure 15 (curve shape illustrative; averages and peak from the notebook).}
+  \mlsyscredit{Fleet Orchestration, Napkin Math 8.5 and figure 15 (curve shape illustrative; averages and peak from notebook). Photo: Carl Lender, CC BY 2.0, Wikimedia Commons.}
   \note{[1.5 min] NARRATE: A static split reserves 400 GPUs for serving, the forecast peak of 283 plus a 117-GPU surge buffer. Serving averages 150, so 768 of 1,024 GPUs are active, 75 percent. Lending everything above demand plus buffer to training adds 133 GPUs on average, 901 active, 88 percent, about \$2.3 million a year at \$2 per GPU-hour. ENGAGE: Why not lend the buffer too and reclaim on each spike? (Expected: moving a GPU takes minutes of checkpoint, launch, load, and warmup; a burst exhausts the buffer in seconds.) WARN: The shift runs on a forecast; ready headroom covers what the forecast misses. Autoscaling of replicas is Lecture 10's. FLEX: [OPTIONAL]}
 \end{frame}
 
@@ -467,20 +479,16 @@ $\Tstep(N) = \dfrac{\Tcomp}{N} + \underbrace{\Tcomm(N)}_{\text{placement}} + \un
       {\footnotesize Hoarding: 500 reserved GPUs idle for 3 weeks cost \textbf{\$504,000}.}
     \end{column}
     \begin{column}{0.41\textwidth}
-      {\footnotesize\textbf{Kueue ClusterQueue} (Kubernetes)}\\[0.05cm]
+      {\footnotesize\textbf{Kueue ClusterQueue} (abridged)}\\[0.05cm]
       \begin{mlsyscard}{mlsysaccent}
         {\ttfamily\scriptsize kind: ClusterQueue\\
         spec:\\
         \ \ cohort: research\\
         \ \ resourceGroups:\\
-        \ \ - coveredResources:\\
-        \ \ \ \ - nvidia.com/gpu\\
-        \ \ \ \ flavors:\\
+        \ \ - flavors: \textcolor{midgray}{\# nvidia.com/gpu}\\
         \ \ \ \ - name: a100\\
-        \ \ \ \ \ \ resources:\\
-        \ \ \ \ \ \ - name: nvidia.com/gpu\\
-        \ \ \ \ \ \ \ \ \textcolor{mlsysaccent}{\textbf{nominalQuota: 500}}\\
-        \ \ \ \ \ \ \ \ \textcolor{mlsysaccent}{\textbf{borrowingLimit: 200}}\\}
+        \ \ \ \ \ \ \textcolor{mlsysaccent}{\textbf{nominalQuota: 500}}\\
+        \ \ \ \ \ \ \textcolor{mlsysaccent}{\textbf{borrowingLimit: 200}}\\}
       \end{mlsyscard}
     \end{column}
   \end{columns}
@@ -566,12 +574,12 @@ $\Tstep(N) = \dfrac{\Tcomp}{N} + \underbrace{\Tcomm(N)}_{\text{placement}} + \un
 
 \begin{frame}{Takeaways}
   \normalsize
-  \begin{itemize}\setlength{\itemsep}{0.12cm}
-    \item A rigid gang gets every accelerator at once or holds none; reservation and enforced backfill keep it from starving the fleet or idling it.
-    \item Fairness is computed over allocations a job can run and measured in waiting time; mixed job sizes make waits climb fast with load.
-    \item Placement sets the communication term; the most frequent exchange gets the fastest tier, and elasticity trades a resize cost for an earlier start.
-    \item Every preemption, spot loss, and reclaim pays lost work plus restart; discounts and borrowing pay only after those costs.
-    \item Allocated, active, and productive capacity differ; idle GPUs beside a full queue usually mean an outdated policy.
+  \begin{itemize}\setlength{\itemsep}{0.18cm}
+    \item Admit rigid gangs all at once; pair reservations with enforced backfill.
+    \item Filter to feasible allocations first, then share fairly and track slowdown.
+    \item Map frequent collectives to fast links; price elastic resizes by completion time.
+    \item Spot discounts and borrowed quota pay only after lost work and restart.
+    \item Separate allocated, active, and productive GPUs; idle pools usually mean stale policy.
   \end{itemize}
   \note{[1.5 min] NARRATE: One line per segment. Ask students which slide taught each line. If short on time, read the first and the last. FLEX: [CORE]}
 \end{frame}
@@ -595,11 +603,11 @@ $\Tstep(N) = \dfrac{\Tcomp}{N} + \underbrace{\Tcomm(N)}_{\text{placement}} + \un
 \end{frame}
 
 \begin{frame}{Read and explore}
-  \small
-  \begin{itemize}\setlength{\itemsep}{0.02cm}
-    \item \textbf{Read:} Fleet Orchestration, \S8.4, \S8.6 to \S8.8.1, \S8.12; self-checks for \S8.4, \S8.8, \S8.12; Napkin Math 8.1 to 8.5 by hand.
-    \item Ghodsi et al., ``Dominant Resource Fairness,'' NSDI 2011.
-    \item Burns et al., ``Borg, Omega, and Kubernetes,'' CACM 2016.
+  \footnotesize
+  \begin{itemize}\setlength{\itemsep}{0.06cm}
+    \item \textbf{Read:} Fleet Orchestration, \S8.4, \S8.6 to \S8.8.1, \S8.12; self-checks; Napkin Math 8.1 to 8.5 by hand.
+    \item \textbf{Explore:} \emph{Gang Scheduling Deadlock} (\S8.4.3) on mlsysbook.ai/vol2/.
+    \item Ghodsi et al., ``Dominant Resource Fairness,'' NSDI 2011; Burns et al., ``Borg, Omega, and Kubernetes,'' CACM 2016.
     \item Hu et al., ``Characterization of LLM Development in the Datacenter,'' NSDI 2024 (AcmeTrace).
     \item Qiao et al., ``Pollux,'' OSDI 2021: allocation coupled to batch size.
     \item Sigler, ``Scaling Kubernetes to 7,500 Nodes,'' OpenAI, 2021.

@@ -381,11 +381,200 @@ def gpipe(p=4, m=4):
             g[st][st + i] = f'F{i + 1}'
             g[st][m + p - 1 + (p - 1 - st) + i] = f'B{m - i}'
     return g
-for k in (1, 2):
-    s = SVG(900, 345)
+for k in (1, 2, 3):
+    s = SVG(900, 392)
     pipe_grid(s, 30, naive(), 'One batch through 4 stages: each GPU idles 6 of 8 slots', 1.0)
     pipe_grid(s, 210, gpipe(), 'Four microbatches (GPipe): each GPU idles 6 of 14 slots, 43%', 1.0 if k >= 2 else 0.0, cw=55)
+    if k >= 3:
+        s.rect(68, 206, 222, 38, 'none', V['bad'], sw=3.2, dash='6,4', rx=5)
+        s.text(460, 372, 'GPipe catch: GPU 0 holds all m = 4 microbatches live before B4', 21, V['bad'], anchor='middle')
     s.save(out / f'pipe_step{k}.svg')
+
+# Explore figure vol2:fig-fsdp-parameter-lifetime (4-step)
+for k in (1, 2, 3, 4):
+    s = SVG(940, 340)
+    cols = ['Init', 'Fwd AG', 'Fwd', 'Release', 'Bwd AG+G', 'RS+Step']
+    rows_f = [
+        ('Param shard (1/N)', V['c1_l'], V['c1']),
+        ('Opt shard (1/N)', '#f1f5f9', V['gray']),
+        ('Gathered params', V['c2_l'], V['c2']),
+        ('Saved activations', V['ok_l'], V['ok']),
+        ('Full layer grad', V['bad_l'], V['bad']),
+        ('Grad shard (1/N)', V['c3_l'], V['c3']),
+    ]
+    x0, y0, cw, rh = 200, 44, 118, 38
+    for ci, cl in enumerate(cols):
+        s.text(x0 + ci * cw + cw / 2, 22, cl, 20, V['text'])
+    for ri, (rl, fc, ec) in enumerate(rows_f):
+        y = y0 + ri * (rh + 6)
+        s.text(x0 - 12, y + rh / 2, rl, 19, V['text'], anchor='end')
+        for ci in range(6):
+            x = x0 + ci * cw + 4
+            s.rect(x, y, cw - 8, rh, '#f8fafc', '#e2e8f0', sw=1.2, rx=4)
+    # Step 1: persistent param & opt shards
+    for ci in range(6):
+        x = x0 + ci * cw + 4
+        s.rect(x, y0, cw - 8, rh, V['c1_l'], V['c1'], sw=2, rx=4)
+        s.text(x + (cw - 8) / 2, y0 + rh / 2, '1/N', 20, V['c1'])
+        s.rect(x, y0 + 44, cw - 8, rh, '#e2e8f0', V['gray'], sw=2, rx=4)
+        s.text(x + (cw - 8) / 2, y0 + 44 + rh / 2, '1/N', 20, V['gray'])
+    # Step 2: Forward AllGather + Compute activations
+    if k >= 2:
+        for ci, txt in ((1, 'AllGather'), (2, 'Full W')):
+            x = x0 + ci * cw + 4
+            s.rect(x, y0 + 88, cw - 8, rh, V['c2_l'], V['c2'], sw=2.2, rx=4)
+            s.text(x + (cw - 8) / 2, y0 + 88 + rh / 2, txt, 19, '#b45309')
+        x = x0 + 2 * cw + 4
+        s.rect(x, y0 + 132, cw - 8, rh, V['ok_l'], V['ok'], sw=2.2, rx=4)
+        s.text(x + (cw - 8) / 2, y0 + 132 + rh / 2, 'saved', 19, V['ok'])
+    # Step 3: Release gathered params while activations stay live
+    if k >= 3:
+        x = x0 + 3 * cw + 4
+        s.rect(x, y0 + 88, cw - 8, rh, 'white', V['c2'], sw=2, dash='6,4', rx=4)
+        s.text(x + (cw - 8) / 2, y0 + 88 + rh / 2, 'freed', 19, '#b45309')
+        s.rect(x, y0 + 132, cw - 8, rh, V['ok_l'], V['ok'], sw=2.2, rx=4)
+        s.text(x + (cw - 8) / 2, y0 + 132 + rh / 2, 'live', 19, V['ok'])
+    # Step 4: Backward 2nd AllGather + Full grad + ReduceScatter shard
+    if k >= 4:
+        x4 = x0 + 4 * cw + 4
+        s.rect(x4, y0 + 88, cw - 8, rh, V['c2_l'], V['c2'], sw=2.4, rx=4)
+        s.text(x4 + (cw - 8) / 2, y0 + 88 + rh / 2, '2nd AG', 19, '#b45309')
+        s.rect(x4, y0 + 132, cw - 8, rh, 'white', V['ok'], sw=2, dash='6,4', rx=4)
+        s.text(x4 + (cw - 8) / 2, y0 + 132 + rh / 2, 'freed', 19, V['ok'])
+        s.rect(x4, y0 + 176, cw - 8, rh, V['bad_l'], V['bad'], sw=2.2, rx=4)
+        s.text(x4 + (cw - 8) / 2, y0 + 176 + rh / 2, 'full G', 19, V['bad'])
+        x5 = x0 + 5 * cw + 4
+        s.rect(x5, y0 + 220, cw - 8, rh, V['c3_l'], V['c3'], sw=2.2, rx=4)
+        s.text(x5 + (cw - 8) / 2, y0 + 220 + rh / 2, 'RS 1/N', 19, V['c3'])
+    cap = {
+        1: 'Persistent per GPU: only 1/N of parameters and optimizer state.',
+        2: 'Forward: AllGather assembles full layer weights; compute saves activations.',
+        3: 'Release: gathered weights are freed immediately; activations stay live.',
+        4: 'Backward: 2nd AllGather + ReduceScatter -> 3L collectives/step, ~3x param bytes.',
+    }[k]
+    s.text(470, 322, cap, 20, V['text'])
+    s.save(out / f'fsdp_life_step{k}.svg')
+
+# Explore figure vol2:fig-pipeline-1f1b (3-step, p=4, m=8)
+def build_1f1b(p=4, m=8):
+    # Exact 1F1B schedule on 22 slots (warmup, steady 1F1B, cooldown)
+    # Using classic PipeDream-Flush / Megatron 1F1B slot positions (1F1B unit F=1, B=1)
+    # Warmup forwards per stage s: p - s (4, 3, 2, 1)
+    # Wait: with unit F=1 and B=1, total slots = 2*(m+p-1) = 22.
+    # For each microbatch i (1..m): F_i on stage s is at slot t_F(s, i), B_i on stage s is at slot t_B(s, i).
+    # Standard unit-time 1F1B for p=4, m=8:
+    # Stage 3: F1@3, B1@4, F2@5, B2@6, F3@7, B3@8, F4@9, B4@10, F5@11, B5@12, F6@13, B6@14, F7@15, B7@16, F8@17, B8@18
+    # Stage 2: F1@2, F2@3, B1@5, F3@6, B2@7, F4@8, B3@9, F5@10, B4@11, F6@12, B5@13, F7@14, B6@15, F8@16, B7@17, B8@19
+    # Stage 1: F1@1, F2@2, F3@3, B1@6, F4@7, B2@8, F5@9, B3@10, F6@11, B4@12, F7@13, B5@14, F8@15, B6@16, B7@18, B8@20
+    # Stage 0: F1@0, F2@1, F3@2, F4@3, B1@7, F5@8, B2@9, F6@10, B3@11, F7@12, B4@13, F8@14, B5@15, B6@17, B7@19, B8@21
+    # Verify dependencies: F_i(s) < F_i(s+1), F_i(p-1) < B_i(p-1), B_i(s+1) < B_i(s)!
+    # Let's check: F5: s0@8 -> s1@9 -> s2@10 -> s3@11 -> B5: s3@12 -> s2@13 -> s1@14 -> s0@15! ALL VALID & COLLISION-FREE!
+    sched = {
+        0: [(0,'F1','w'),(1,'F2','w'),(2,'F3','w'),(3,'F4','w'),(7,'B1','s'),(8,'F5','s'),(9,'B2','s'),(10,'F6','s'),(11,'B3','s'),(12,'F7','s'),(13,'B4','s'),(14,'F8','s'),(15,'B5','c'),(17,'B6','c'),(19,'B7','c'),(21,'B8','c')],
+        1: [(1,'F1','w'),(2,'F2','w'),(3,'F3','w'),(6,'B1','s'),(7,'F4','s'),(8,'B2','s'),(9,'F5','s'),(10,'B3','s'),(11,'F6','s'),(12,'B4','s'),(13,'F7','s'),(14,'B5','s'),(15,'F8','s'),(16,'B6','c'),(18,'B7','c'),(20,'B8','c')],
+        2: [(2,'F1','w'),(3,'F2','w'),(5,'B1','s'),(6,'F3','s'),(7,'B2','s'),(8,'F4','s'),(9,'B3','s'),(10,'F5','s'),(11,'B4','s'),(12,'F6','s'),(13,'B5','s'),(14,'F7','s'),(15,'B6','s'),(16,'F8','s'),(17,'B7','c'),(19,'B8','c')],
+        3: [(3,'F1','w'),(4,'B1','s'),(5,'F2','s'),(6,'B2','s'),(7,'F3','s'),(8,'B3','s'),(9,'F4','s'),(10,'B4','s'),(11,'F5','s'),(12,'B5','s'),(13,'F6','s'),(14,'B6','s'),(15,'F7','s'),(16,'B7','s'),(17,'F8','s'),(18,'B8','c')],
+    }
+    return sched
+
+_sched_1f1b = build_1f1b()
+for k in (1, 2, 3):
+    s = SVG(940, 340)
+    cw, rh, x0, y0 = 34, 44, 92, 62
+    s.text(460, 24, '1F1B schedule (p = 4 stages, m = 8 microbatches)', 22, V['text'])
+    # Phase labels at top
+    s.text(x0 + 2 * cw, 48, 'Warm-up', 19, V['c1'])
+    if k >= 2:
+        s.text(x0 + 10.5 * cw, 48, 'Steady 1F1B (free each act. on B)', 19, V['ok'])
+    if k >= 3:
+        s.text(x0 + 19.2 * cw, 48, 'Cooldown', 19, '#b45309')
+    peaks = [4, 3, 2, 1]
+    s.text(892, 48, 'Peak', 19, V['ok'])
+    for st in range(4):
+        y = y0 + st * (rh + 12)
+        s.text(x0 - 12, y + rh / 2, f'GPU {st}', 20, V['gray'], anchor='end')
+        placed = {}
+        for slot, lbl, ph in _sched_1f1b[st]:
+            if (ph == 'w') or (ph == 's' and k >= 2) or (ph == 'c' and k >= 3):
+                placed[slot] = lbl
+        max_slot = 4 if k == 1 else 18 if k == 2 else 22
+        for t in range(max_slot):
+            x = x0 + t * cw
+            if t in placed:
+                lbl = placed[t]
+                fwd = lbl[0] == 'F'
+                s.rect(x, y, cw - 3, rh, V['c1_l'] if fwd else V['c2_l'], V['c1'] if fwd else V['c2'], 1.8, 4)
+                s.text(x + (cw - 3) / 2, y + rh / 2, lbl, 18, V['c1'] if fwd else '#b45309')
+            else:
+                s.rect(x, y, cw - 3, rh, V['bad_l'], 'none', 0, 4)
+        if k >= 2:
+            s.text(892, y + rh / 2, f'{peaks[st]}', 22, V['ok'])
+    cap = {
+        1: 'Step 1 (Warm-up): stage s runs p - s forwards (4, 3, 2, 1) to fill the pipe.',
+        2: 'Step 2 (Steady 1F1B): each B frees one activation -> peak live = [4, 3, 2, 1] vs GPipe 8.',
+        3: 'Step 3 (Cooldown): same 3/11 (27.3%) bubble as GPipe, half the activation memory.',
+    }[k]
+    s.text(470, 316, cap, 20, V['text'])
+    s.save(out / f'pipe_1f1b_step{k}.svg')
+
+# Explore figures vol2:fig-ulysses-ownership-transpose & vol2:fig-moe-all-to-all-routing + DLRM (3-step)
+for k in (1, 2, 3):
+    s = SVG(940, 335)
+    # Panel 1: Context (DeepSpeed Ulysses + Ring Attention)
+    s.rect(12, 14, 296, 308, '#f8fafc', V['c1'], sw=2.2, rx=8)
+    s.text(160, 40, '1. Context (Ulysses)', 22, V['c1'])
+    s.rect(30, 62, 260, 48, V['c1_l'], V['c1'], sw=1.8, rx=5)
+    s.text(160, 86, 'Token-sharded [S/c, h]', 19, V['c1'])
+    s.line(160, 110, 160, 144, V['c2'], 3.5, arrow=True)
+    s.text(230, 128, 'AllToAll', 19, '#b45309')
+    s.rect(30, 148, 260, 56, V['c2_l'], V['c2'], sw=1.8, rx=5)
+    s.text(160, 168, 'Head-sharded [S, h/c]', 19, '#b45309')
+    s.text(160, 191, 'local attn (0 msgs)', 19, V['gray'], weight='normal')
+    s.line(160, 204, 160, 236, V['c2'], 3.5, arrow=True)
+    s.text(160, 254, 'Inverse AllToAll back', 19, V['c1'])
+    s.text(160, 286, 'Ring Attn: >=1,100 tok NVL', 18, V['gray'], weight='normal')
+    s.text(160, 308, '>=9,900 tok on NDR', 18, V['gray'], weight='normal')
+    # Panel 2: MoE Expert Routing
+    op2 = 1.0 if k >= 2 else 0.0
+    s.rect(322, 14, 296, 308, '#f8fafc', V['c2'], sw=2.2, rx=8, op=op2)
+    s.text(470, 40, '2. Experts (MoE)', 22, '#b45309', op=op2)
+    for ri in range(4):
+        rx = 340 + ri * 66
+        s.rect(rx, 64, 58, 38, V['c1_l'], V['c1'], sw=1.6, rx=4, op=op2)
+        s.text(rx + 29, 83, f'R{ri}', 19, V['c1'], op=op2)
+    s.line(369, 102, 498, 144, V['c2'], 3, arrow=True, op=op2)
+    s.line(435, 102, 369, 144, V['c2'], 2.2, arrow=True, op=op2)
+    s.line(501, 102, 567, 144, V['c2'], 2.2, arrow=True, op=op2)
+    s.rect(380, 113, 180, 26, '#f8fafc', 'none', sw=0, rx=4, op=op2)
+    s.text(470, 126, 'Dispatch AllToAll', 19, '#b45309', op=op2)
+    for ei in range(4):
+        ex = 340 + ei * 66
+        fc = V['bad_l'] if ei == 2 else V['c2_l']
+        ec = V['bad'] if ei == 2 else V['c2']
+        s.rect(ex, 148, 58, 44, fc, ec, sw=2, rx=4, op=op2)
+        s.text(ex + 29, 170, f'E{ei}', 19, V['bad'] if ei == 2 else '#b45309', op=op2)
+    s.line(498, 192, 369, 232, V['c2'], 3, arrow=True, op=op2)
+    s.rect(380, 205, 180, 26, '#f8fafc', 'none', sw=0, rx=4, op=op2)
+    s.text(470, 218, 'Combine AllToAll', 19, '#b45309', op=op2)
+    s.text(470, 254, '2 AllToAlls per MoE layer', 19, V['text'], op=op2)
+    s.text(470, 286, 'Hot expert (E2) overflows', 18, V['bad'], op=op2)
+    s.text(470, 308, 'its capacity buffer', 18, V['bad'], op=op2)
+    # Panel 3: DLRM Embeddings
+    op3 = 1.0 if k >= 3 else 0.0
+    s.rect(632, 14, 296, 308, '#f8fafc', V['ok'], sw=2.2, rx=8, op=op3)
+    s.text(780, 40, '3. Embeddings (DLRM)', 22, V['ok'], op=op3)
+    s.rect(650, 64, 260, 52, V['ok_l'], V['ok'], sw=1.8, rx=5, op=op3)
+    s.text(780, 81, '10 TB+ table sharded', 19, V['ok'], op=op3)
+    s.text(780, 104, 'by row: hash(id) mod N', 18, V['gray'], weight='normal', op=op3)
+    s.line(780, 116, 780, 152, V['ok'], 3.5, arrow=True, op=op3)
+    s.text(846, 134, 'AllToAll', 19, V['ok'], op=op3)
+    s.rect(650, 156, 260, 56, V['c1_l'], V['c1'], sw=1.8, rx=5, op=op3)
+    s.text(780, 175, 'Exchange only touched', 19, V['c1'], op=op3)
+    s.text(780, 198, 'rows per batch', 19, V['c1'], op=op3)
+    s.text(780, 254, 'Sparse lookup traffic', 19, V['text'], op=op3)
+    s.text(780, 286, 'Hot IDs skew receive port', 18, V['bad'], op=op3)
+    s.text(780, 308, '(all ranks query same ID)', 18, V['gray'], weight='normal', op=op3)
+    s.save(out / f'axes_extra_step{k}.svg')
 m = np.arange(1, 257)
 for k in (1, 2):
     fig, ax = plt.subplots(figsize=(5.4, 3.4))
@@ -543,18 +732,24 @@ s.save(out / 'grid3d.svg')
 print('figures written to', out)
 _pol, _ref = (1120.0, 140.0)
 _rew, _valg = (26.0, 208.0)
-fig, ax = plt.subplots(figsize=(5.8, 1.1))
-for y, parts, tot in ((1, [(_pol, C['memory'], 'policy'), (_ref, C['neutral'], 'ref.'), (_rew, C['data'], ''), (_valg, C['compute'], 'value')], 'PPO 1,494 GB'), (0, [(_pol, C['memory'], 'policy'), (_ref, C['neutral'], 'ref.')], 'DPO 1,260 GB')):
-    left = 0
-    for w, col, lab in parts:
-        ax.barh(y, w, 0.62, left=left, color=col, edgecolor='white', lw=1)
-        if lab:
-            ax.text(left + w / 2, y, lab, ha='center', va='center', fontsize=11.5, fontweight='bold', color='white')
-        left += w
-    ax.text(left + 15, y, tot, va='center', fontsize=12.5, fontweight='bold', color=C['text'])
-_x = _pol + _ref + _rew / 2
-ax.annotate('reward', (_x, 1.31), xytext=(_x - 25, 1.62), ha='right', va='center', fontsize=11, fontweight='bold', color=C['data'], arrowprops=dict(arrowstyle='-', color=C['data'], lw=1.2))
-ax.set_xlim(0, (_pol + _ref + _rew + _valg) * 1.32)
-ax.set_ylim(-0.4, 1.8)
-ax.axis('off')
-sp.save(fig, out / 'rlhf_state.svg')
+for k in (1, 2):
+    fig, ax = plt.subplots(figsize=(5.8, 1.15))
+    rows_rl = (
+        (1, [(_pol, C['memory'], 'policy'), (_ref, C['neutral'], 'ref.'), (_rew, C['data'], ''), (_valg, C['compute'], 'value')], 'PPO 1,494 GB', True),
+        (0, [(_pol, C['memory'], 'policy'), (_ref, C['neutral'], 'ref.')], 'DPO 1,260 GB (-15.7%)', k >= 2),
+    )
+    for y, parts, tot, show in rows_rl:
+        a = 1.0 if show else 0.0
+        left = 0
+        for w, col, lab in parts:
+            ax.barh(y, w, 0.62, left=left, color=col, edgecolor='white', lw=1, alpha=a)
+            if lab:
+                ax.text(left + w / 2, y, lab, ha='center', va='center', fontsize=11.5, fontweight='bold', color='white', alpha=a)
+            left += w
+        ax.text(left + 15, y, tot, va='center', fontsize=12, fontweight='bold', color=C['text'], alpha=a)
+    _x = _pol + _ref + _rew / 2
+    ax.annotate('reward', (_x, 1.31), xytext=(_x - 25, 1.62), ha='right', va='center', fontsize=11, fontweight='bold', color=C['data'], arrowprops=dict(arrowstyle='-', color=C['data'], lw=1.2))
+    ax.set_xlim(0, (_pol + _ref + _rew + _valg) * 1.46)
+    ax.set_ylim(-0.4, 1.8)
+    ax.axis('off')
+    sp.save(fig, out / f'rlhf_state_step{k}.svg')

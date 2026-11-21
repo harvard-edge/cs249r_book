@@ -83,26 +83,29 @@ for k in (1, 2):
     ax.set_ylim(-0.6, 1.6)
     ax.axis('off')
     sp.save(fig, out / f'flops_per_token_step{k}.svg')
-fig, ax = plt.subplots(figsize=(5.8, 2.6))
 PALM_TABLE3 = [('GPT-3 175B, V100', 'mfu_gpt3'), ('Gopher 280B, 4,096 TPU v3', 'mfu_gopher'), ('Megatron-Turing NLG 530B, 2,240 A100', 'mfu_mtnlg'), ('PaLM 540B, 6,144 TPU v4', 'mfu_palm')]
-rows = [(name, _NUMS[key], 'compute', f'{_VALS[key]}%') for name, key in PALM_TABLE3]
-rows.append(('GPT-2 XL, this lecture', 50.0, 'neutral', '50% (assumed)'))
-n = len(rows)
-for i, (name, v, ck, text) in enumerate(rows):
-    y = n - 1 - i
-    ax.barh(y, v, color=C[ck], height=0.62)
-    ax.text(-1, y, name, ha='right', va='center', fontsize=11, fontweight='bold', color=C['text'])
-    ax.text(v + 1.5, y, text, va='center', fontsize=12, fontweight='bold', color=C[ck])
-ax.axvline(100, color=C['neutral'], lw=1.5, ls='--')
-ax.text(99, n - 0.45, 'peak', ha='right', va='bottom', fontsize=11, color=C['neutral'])
-ax.set_xlim(0, 100)
-ax.set_ylim(-0.6, n - 0.1)
-ax.set_yticks([])
-ax.spines['left'].set_visible(False)
-ax.set_xlabel('Model FLOPs utilization (percent of peak)')
-ax.grid(axis='x', color=C['grid'], lw=0.6)
-ax.set_axisbelow(True)
-sp.save(fig, out / 'mfu_published.svg')
+mfu_rows = [(name, _NUMS[key], 'compute', f'{_VALS[key]}%') for name, key in PALM_TABLE3]
+mfu_rows.append(('GPT-2 XL, this lecture', 50.0, 'neutral', '50% (assumed)'))
+for k in (1, 2):
+    fig, ax = plt.subplots(figsize=(5.8, 2.6))
+    n = len(mfu_rows)
+    for i, (name, v, ck, text) in enumerate(mfu_rows):
+        y = n - 1 - i
+        shown = i < 4 or k >= 2
+        a = 1.0 if shown else 0.0
+        ax.barh(y, v, color=C[ck], height=0.62, alpha=a)
+        ax.text(-1, y, name, ha='right', va='center', fontsize=11, fontweight='bold', color=C['text'] if shown else 'white')
+        ax.text(v + 1.5, y, text, va='center', fontsize=12, fontweight='bold', color=C[ck], alpha=a)
+    ax.axvline(100, color=C['neutral'], lw=1.5, ls='--')
+    ax.text(99, n - 0.45, 'peak', ha='right', va='bottom', fontsize=11, color=C['neutral'])
+    ax.set_xlim(0, 100)
+    ax.set_ylim(-0.6, n - 0.1)
+    ax.set_yticks([])
+    ax.spines['left'].set_visible(False)
+    ax.set_xlabel('Model FLOPs utilization (percent of peak)')
+    ax.grid(axis='x', color=C['grid'], lw=0.6)
+    ax.set_axisbelow(True)
+    sp.save(fig, out / f'mfu_published_step{k}.svg')
 segs = [(1.9, 'weights', 'memory'), (1.9, 'gradients', 'network'), (3.8, 'Adam m, v', 'compute'), (3.4, 'activations', 'data')]
 for k in range(1, 5):
     fig, ax = plt.subplots(figsize=(5.8, 1.9))
@@ -119,25 +122,32 @@ for k in range(1, 5):
     ax.set_ylim(-1.15, 0.95)
     ax.axis('off')
     sp.save(fig, out / f'train_state_step{k}.svg')
-fig, ax = plt.subplots(figsize=(5.8, 2.0))
 W_B, MASTER_B, MOM_B, TOT_B = (round(_NUMS[k]) for k in ('mp_w_b', 'mp_master_b', 'mp_moments_b', 'mp_total_b'))
-rows = [('Inference', [(W_B, 'W', 'memory')]), ('Training', [(W_B, 'W', 'memory'), (W_B, 'G', 'network'), (MASTER_B, 'master', 'neutral'), (MOM_B, 'Adam m, v (FP32)', 'compute')])]
-for i, (name, parts) in enumerate(rows):
-    y = 1 - i
-    x = 0
-    for w, text, ck in parts:
-        ax.barh(y, w, left=x, color=C[ck], height=0.6, edgecolor='white')
-        ax.text(x + w / 2, y, text, ha='center', va='center', color='white', fontsize=12, fontweight='bold')
-        x += w
-    ax.text(-0.2, y, name, ha='right', va='center', fontsize=13, fontweight='bold', color=C['text'])
-    ax.text(x + 0.3, y, f'{x} B', va='center', fontsize=14, fontweight='bold', color=C['danger'] if x == TOT_B else C['text'])
-ax.set_xlim(0, 18.8)
-ax.set_ylim(-0.6, 1.6)
-ax.set_yticks([])
-ax.set_xticks([0, W_B, W_B + W_B, MASTER_B + MASTER_B, TOT_B])
-ax.spines['left'].set_visible(False)
-ax.set_xlabel('Bytes per parameter before activations (W, G: FP16 weights, gradients; master: FP32)', fontsize=11)
-sp.save(fig, out / 'static_bytes.svg')
+static_rows = [
+    ('Inference (FP16)', [(W_B, 'W', 'memory')], '2 B  (3 GB)'),
+    ('FP32 Adam', [(4, 'W  4B', 'memory'), (4, 'G  4B', 'network'), (8, 'Adam m, v (FP32)  8B', 'compute')], '16 B  (24 GB)'),
+    ('Mixed Adam', [(W_B, 'W', 'memory'), (W_B, 'G', 'network'), (MASTER_B, 'master', 'neutral'), (MOM_B, 'Adam m, v (FP32)  8B', 'compute')], '16 B  (24 GB)'),
+]
+for k in (1, 2, 3):
+    fig, ax = plt.subplots(figsize=(5.8, 2.35))
+    for i, (name, parts, tot_txt) in enumerate(static_rows):
+        y = 2 - i
+        shown = i < k
+        a = 1.0 if shown else 0.0
+        x = 0
+        for w, text, ck in parts:
+            ax.barh(y, w, left=x, color=C[ck], height=0.6, edgecolor='white', alpha=a)
+            label(ax, x + w / 2, y, text, 'white', shown, ha='center', va='center', fontsize=11)
+            x += w
+        ax.text(-0.25, y, name, ha='right', va='center', fontsize=12, fontweight='bold', color=C['text'] if shown else 'white')
+        label(ax, x + 0.3, y, tot_txt, C['danger'] if x == TOT_B else C['text'], shown, va='center', fontsize=12)
+    ax.set_xlim(0, 21.8)
+    ax.set_ylim(-0.55, 2.55)
+    ax.set_yticks([])
+    ax.set_xticks([0, 2, 4, 8, 16])
+    ax.spines['left'].set_visible(False)
+    ax.set_xlabel('Bytes per parameter before activations (GPT-2 XL: 1.5B params)', fontsize=11)
+    sp.save(fig, out / f'static_compare_step{k}.svg')
 STATIC = 24.0
 SCORES = 201.326592
 PERTOK = 85.5638016
@@ -161,30 +171,39 @@ for k in range(1, 4):
     ax.spines['left'].set_visible(False)
     ax.set_xlabel('GB for one batch-32 step of GPT-2 XL (FP16 activations)')
     sp.save(fig, out / f'gpt2_b32_step{k}.svg')
-fig, ax = plt.subplots(figsize=(5.8, 2.3))
 L_W = 16.06
 L_REST = 112.0
 L_LORA = 0.109051904
 L_ACT = 36.5
-rows = [('Full fine-tune', [(L_W, 'W', 'memory'), (L_REST, 'grads, master, Adam  112', 'compute'), (L_ACT, 'act.', 'data')], 'about 165 GB'), ('LoRA adapters', [(L_W, 'W', 'memory'), (L_LORA, '', 'compute'), (L_ACT, 'act. 36.5', 'data')], 'about 53 GB')]
-for i, (name, parts, total) in enumerate(rows):
-    y = 1 - i
-    x = 0
-    for w, text, ck in parts:
-        ax.barh(y, w, left=x, color=C[ck], height=0.6, edgecolor='white')
-        if text:
-            ax.text(x + w / 2, y, text, ha='center', va='center', color='white', fontsize=11, fontweight='bold')
-        x += w
-    ax.text(-2, y, name, ha='right', va='center', fontsize=13, fontweight='bold', color=C['text'])
-    ax.text(max(x, CAP) + 3, y, total, va='center', fontsize=13, fontweight='bold', color=C['danger'] if x > CAP else C['data'])
-ax.axvline(CAP, color=C['memory'], lw=2, ls='--', zorder=0)
-ax.text(CAP + 2, 1.42, 'H100: 85.9 GB (80 GiB)', color=C['memory'], fontsize=11, fontweight='bold', va='bottom')
-ax.set_xlim(0, 215)
-ax.set_ylim(-0.55, 1.75)
-ax.set_yticks([])
-ax.spines['left'].set_visible(False)
-ax.set_xlabel('GB on one accelerator, Llama 3 8B (W: 16 GB of 16-bit weights)')
-sp.save(fig, out / 'llama_finetune.svg')
+ft_rows = [
+    ('Full fine-tune', [(L_W, 'W', 'memory'), (L_REST, 'grads, master, Adam  112', 'compute'), (L_ACT, 'act.', 'data')], '165 GB (no fit)'),
+    ('LoRA adapters', [(L_W, 'W', 'memory'), (L_LORA, '', 'compute'), (L_ACT, 'act. 36.5', 'data')], '53 GB (fits)'),
+]
+for k in (1, 2, 3):
+    fig, ax = plt.subplots(figsize=(5.8, 2.25))
+    for i, (name, parts, total) in enumerate(ft_rows):
+        y = 1 - i
+        shown = (i == 0 and k >= 2) or (i == 1 and k >= 3)
+        a = 1.0 if shown else 0.0
+        x = 0
+        for w, text, ck in parts:
+            ax.barh(y, w, left=x, color=C[ck], height=0.62, edgecolor='white', alpha=a)
+            if text:
+                label(ax, x + w / 2, y, text, 'white', shown, ha='center', va='center', fontsize=12.5)
+            x += w
+        ax.text(-2, y, name, ha='right', va='center', fontsize=13, fontweight='bold', color=C['text'] if shown else 'white')
+        label(ax, max(x, CAP) + 3, y, total, C['danger'] if x > CAP else C['data'], shown, va='center', fontsize=13)
+    ax.axvline(CAP, color=C['memory'], lw=2, ls='--', zorder=0)
+    ax.text(CAP + 2, 1.42, 'H100: 85.9 GB (80 GiB)', color=C['memory'], fontsize=12.5, fontweight='bold', va='bottom')
+    if k == 1:
+        ax.text(42, 0.5, 'Compute full fine-tune\nvs. LoRA totals', ha='center', va='center', fontsize=12.5, fontweight='bold', color=C['neutral'])
+    ax.set_xlim(0, 228)
+    ax.set_ylim(-0.55, 1.78)
+    ax.set_yticks([])
+    ax.spines['left'].set_visible(False)
+    ax.set_xlabel('GB on one accelerator, Llama 3 8B (W: 16 GB; LoRA state 0.11 GB)', fontsize=12)
+    ax.tick_params(axis='x', labelsize=12)
+    sp.save(fig, out / f'llama_finetune_step{k}.svg')
 for k in (1, 2):
     fig, ax = plt.subplots(figsize=(5.4, 3.0))
     gpus = ['A100', 'H100']
@@ -267,9 +286,118 @@ ax.spines['left'].set_visible(False)
 ax.set_xlabel('Percent of the step (busy) or of peak (MFU)', fontsize=11)
 sp.save(fig, out / 'busy_mfu.svg')
 
-def trace_crop():
-    from PIL import Image
-    src = Image.open(out / 'fig-tf-bottleneck-trace.png').convert('RGB')
-    src.crop((285, 208, 668, 398)).save(out / 'trace_crop.png')
-trace_crop()
+import html
+SVG_FONT = 'font-family="Helvetica, Arial, sans-serif"'
+
+def _svg_wrap(path, body, w=900, h=365):
+    (out / path).write_text(
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}">\n'
+        f'<rect width="{w}" height="{h}" fill="white"/>\n{body}\n</svg>\n'
+    )
+
+def _stxt(x, y, s, size=21, bold=False, color='#1A1A2E', anchor='middle'):
+    b = ' font-weight="bold"' if bold else ''
+    return f'<text x="{x:.1f}" y="{y:.1f}" {SVG_FONT} font-size="{size}"{b} fill="{color}" text-anchor="{anchor}" dominant-baseline="central">{html.escape(str(s), quote=False)}</text>'
+
+def _srect(x, y, w, h, fill, stroke, sw=2.0, rx=5, dash=''):
+    d = f' stroke-dasharray="{dash}"' if dash else ''
+    return f'<rect x="{x:.1f}" y="{y:.1f}" width="{w:.1f}" height="{h:.1f}" rx="{rx}" fill="{fill}" stroke="{stroke}" stroke-width="{sw}"{d}/>'
+
+def gil_trace():
+    """Crisp vector profiler timeline drawn accurately to scale: 250 ms Host Python GIL + 12 ms GPU burst (4.6% busy)."""
+    W, H = 790, 305
+    ox, scale = 162.0, 588.0 / 524.0  # 0..524 ms across 588 px
+    s = []
+    s.append(_stxt(ox + 294, 22, 'Profiler timeline drawn to scale (two training steps = 524 ms)', 22, True, C['text']))
+    # Row labels
+    s.append(_stxt(148, 102, 'GPU steps', 22, True, C['compute'], 'end'))
+    s.append(_stxt(148, 184, 'Host Python', 22, True, C['memory'], 'end'))
+    s.append(_stxt(148, 210, '(GIL thread)', 21, False, C['neutral'], 'end'))
+    # GPU idle gaps and 12 ms bursts
+    for t0, t1 in [(0, 250), (262, 512)]:
+        s.append(_srect(ox + t0 * scale, 72, (t1 - t0) * scale, 60, '#F6F6F6', '#B5B5B5', 1.8, 4, '6,4'))
+        s.append(_stxt(ox + (t0 + t1) / 2 * scale, 102, 'GPU idle (250 ms)', 21, True, '#777777'))
+    for t0, t1 in [(250, 262), (512, 524)]:
+        s.append(_srect(ox + t0 * scale, 72, (t1 - t0) * scale, 60, C['compute'], C['compute'], 1.5, 2))
+    # Annotate thin 12 ms GPU burst clearly above
+    s.append(_stxt(ox + 256 * scale, 54, '12 ms', 21, True, C['compute']))
+    s.append(_stxt(ox + 518 * scale, 54, '12 ms', 21, True, C['compute']))
+    # Host Python 250 ms busy blocks
+    for idx, (t0, t1) in enumerate([(0, 250), (262, 512)], 1):
+        s.append(_srect(ox + t0 * scale, 164, (t1 - t0) * scale, 60, C['memory_l'], C['memory'], 2.2, 4))
+        s.append(_stxt(ox + (t0 + t1) / 2 * scale, 194, f'Batch {idx} prep (250 ms)', 21, True, C['memory']))
+    # Time axis
+    ay = 252
+    s.append(f'<line x1="{ox}" y1="{ay}" x2="{ox + 524 * scale:.1f}" y2="{ay}" stroke="#444444" stroke-width="2"/>')
+    for ms in (0, 125, 250, 375, 500):
+        x = ox + ms * scale
+        s.append(f'<line x1="{x:.1f}" y1="{ay}" x2="{x:.1f}" y2="{ay + 8}" stroke="#444444" stroke-width="2"/>')
+        s.append(_stxt(x, ay + 24, f'{ms} ms', 21, False, C['neutral']))
+    _svg_wrap('gil_trace.svg', '\n'.join(s), W, H)
+
+gil_trace()
+
+def prefetch_overlap():
+    """3-step Gantt timeline matching vol1:fig-fetching-optimized (§8.6.2).
+    Serial: Open1(0-7.5) Read1(7.5-20) Train1(20-35) Open2(35-42.5) Read2(42.5-55) Train2(55-70) Open3(70-77.5) Read3(77.5-90) Train3(90-105).
+    Prefetched: CPU Open1(0-7.5) Read1(7.5-20) Read2(20-30) Open2(30-37.5) Read3(37.5-50); GPU Train1(20-35) Train2(35-50) Train3(50-65)."""
+    W, H = 900, 375
+    ox, scale = 128.0, 740.0 / 108.0  # 0..108 min across 740 px
+    for step in (1, 2, 3):
+        s = []
+        # Step 1: Unoptimized serial timeline (always present)
+        s.append(_stxt(ox, 20, 'Serial input (no prefetch): 105 min total, GPU busy 43%', 21, True, C['danger'], 'start'))
+        s.append(_stxt(116, 56, 'CPU I/O', 20, True, C['memory'], 'end'))
+        s.append(_stxt(116, 102, 'GPU', 20, True, C['compute'], 'end'))
+        serial_cpu = [(0, 7.5, 'O1', 'neutral'), (7.5, 20, 'R1', 'memory'),
+                      (35, 42.5, 'O2', 'neutral'), (42.5, 55, 'R2', 'memory'),
+                      (70, 77.5, 'O3', 'neutral'), (77.5, 90, 'R3', 'memory')]
+        serial_gpu = [(20, 35, 'T1'), (55, 70, 'T2'), (90, 105, 'T3')]
+        serial_idle = [(0, 20), (35, 55), (70, 90)]
+        for t0, t1, lab, ck in serial_cpu:
+            fc = C['memory_l'] if ck == 'memory' else '#ECEFF1'
+            ec = C['memory'] if ck == 'memory' else '#666666'
+            s.append(_srect(ox + t0 * scale, 38, (t1 - t0) * scale, 36, fc, ec, 1.8, 4))
+            s.append(_stxt(ox + (t0 + t1) / 2 * scale, 56, lab, 20, True, ec))
+        for t0, t1 in serial_idle:
+            s.append(_srect(ox + t0 * scale, 84, (t1 - t0) * scale, 36, '#F7F7F7', '#BBBBBB', 1.6, 4, '5,3'))
+            s.append(_stxt(ox + (t0 + t1) / 2 * scale, 102, 'idle', 20, False, '#888888'))
+        for t0, t1, lab in serial_gpu:
+            s.append(_srect(ox + t0 * scale, 84, (t1 - t0) * scale, 36, C['compute_l'], C['compute'], 2.0, 4))
+            s.append(_stxt(ox + (t0 + t1) / 2 * scale, 102, lab, 20, True, C['compute']))
+        # Time ticks (top & shared scale)
+        for m in (0, 20, 35, 50, 65, 90, 105):
+            x = ox + m * scale
+            s.append(f'<line x1="{x:.1f}" y1="124" x2="{x:.1f}" y2="132" stroke="#999999" stroke-width="1.4"/>')
+            s.append(_stxt(x, 144, str(m), 20, False, C['neutral']))
+
+        # Step 2: Overlapped prefetch timeline
+        if step >= 2:
+            s.append(_stxt(ox, 178, 'Prefetched (overlapped): 65 min total, GPU continuous 20 → 65 min', 21, True, C['data'], 'start'))
+            s.append(_stxt(116, 214, 'CPU I/O', 20, True, C['memory'], 'end'))
+            s.append(_stxt(116, 260, 'GPU', 20, True, C['data'], 'end'))
+            ov_cpu = [(0, 7.5, 'O1', 'neutral'), (7.5, 20, 'R1', 'memory'),
+                      (20, 30, 'R2', 'memory'), (30, 37.5, 'O2', 'neutral'), (37.5, 50, 'R3', 'memory')]
+            for t0, t1, lab, ck in ov_cpu:
+                fc = C['memory_l'] if ck == 'memory' else '#ECEFF1'
+                ec = C['memory'] if ck == 'memory' else '#666666'
+                s.append(_srect(ox + t0 * scale, 196, (t1 - t0) * scale, 36, fc, ec, 1.8, 4))
+                s.append(_stxt(ox + (t0 + t1) / 2 * scale, 214, lab, 20, True, ec))
+            s.append(_srect(ox, 242, 20 * scale, 36, '#F7F7F7', '#BBBBBB', 1.6, 4, '5,3'))
+            s.append(_stxt(ox + 10 * scale, 260, 'warmup', 20, False, '#888888'))
+            for t0, t1, lab in [(20, 35, 'T1'), (35, 50, 'T2'), (50, 65, 'T3')]:
+                s.append(_srect(ox + t0 * scale, 242, (t1 - t0) * scale, 36, C['data_l'], C['data'], 2.2, 4))
+                s.append(_stxt(ox + (t0 + t1) / 2 * scale, 260, lab, 20, True, C['data']))
+            # Saved time bracket 65..105
+            s.append(_srect(ox + 65 * scale, 242, 40 * scale, 36, C['data_l'], C['data'], 1.8, 4, '6,4'))
+            s.append(_stxt(ox + 85 * scale, 260, '40 min saved (1.6×)', 20, True, C['data']))
+
+        # Step 3: Takeaway banner
+        if step >= 3:
+            s.append(_srect(24, 302, 852, 56, C['data_l'], C['data'], 2.2, 8))
+            s.append(_stxt(450, 330, 'Overlap hides CPU I/O only while host prefetch rate ≥ GPU batch rate.', 21, True, C['data']))
+
+        _svg_wrap(f'prefetch_overlap_step{step}.svg', '\n'.join(s), W, H)
+
+prefetch_overlap()
 print('figures written')

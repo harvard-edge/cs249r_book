@@ -458,43 +458,72 @@ def forks():
         b.append(text(max(bar, 8) + 20, y + 62, f"{ {'every boundary': '117', 'turns 10 and 20': '9'}[label]}×", 32, col, 'start', 'bold'))
     svg(HERE / 'forks.svg', W, H, '\n'.join(b))
 
-def loop_limits():
-    """Three limits on the rollout loop: barrier, staleness, verifier pool."""
-    W, H = (900, 330)
-    b = []
-    heads = ['Group barrier', 'Staleness', 'Verifier pool']
-    for i, h in enumerate(heads):
-        x = 8 + i * 300
-        b.append(box(x, 6, 284, 318, 'white', PURPLE, rx=10))
-        b.append(text(x + 142, 40, h, 25, PURPLE, weight='bold'))
-    lat = [0.2, 2.1, 4.2, 16.8]
-    top = max(lat)
-    for k, v in enumerate(sorted(lat)):
-        y = 70 + k * 44
-        b.append(box(26, y, 248, 30, GRAY_L, GRAY, rx=3, dash=True))
-        b.append(box(26, y, max(248 * v / top, 4), 30, AMBER if v == top else BLUE, AMBER if v == top else BLUE, rx=3))
-    b.append(text(150, 272, 'the step waits for the slowest', 20))
-    b.append(text(150, 304, '65% of slot time idle', 22, RED, weight='bold'))
-    for k in range(4):
-        x = 330 + k * 64
-        b.append(box(x, 70, 54, 40, PURPLE_L, PURPLE, rx=4))
-        b.append(text(x + 27, 97, f'v{k + 1}', 21, PURPLE, weight='bold'))
-    b.append(box(330, 134, 246, 34, AMBER_L, AMBER, rx=4))
-    b.append(text(453, 158, 'one long rollout', 20))
-    b.append(box(330, 180, 54, 34, BLUE_L, BLUE, rx=4))
-    b.append(text(357, 204, 'short', 18))
-    b.append(text(458, 262, 'long rollouts go stale', 21))
-    b.append(text(458, 296, 'lag = versions passed', 22, RED, weight='bold'))
-    b.append(text(758, 86, '32 trials/s arrive', 21))
-    slots = 10
-    busy = round(slots * 80.0 / 100)
-    for k in range(slots):
-        x = 630 + k % 5 * 52
-        y = 110 + k // 5 * 52
-        b.append(box(x, y, 42, 42, BLUE if k < busy else GRAY_L, BLUE if k < busy else GRAY, rx=4))
-    b.append(text(758, 252, '768 busy of 960 slots', 21))
-    b.append(text(758, 296, '80% target', 22, RED, weight='bold'))
-    svg(HERE / 'loop_limits.svg', W, H, '\n'.join(b))
+def freshness_steps():
+    """3-step build: barrier + verifier cards, plus asynchronous freshness pipeline (Explore)."""
+    W, H = (900, 354)
+    for step in (1, 2, 3):
+        b = []
+        # Top compact cards: Group barrier & Verifier pool
+        b.append(box(10, 6, 430, 88, 'white', PURPLE, rx=8))
+        b.append(text(24, 32, 'Group barrier', 21, PURPLE, 'start', 'bold'))
+        b.append(text(426, 32, '65% idle', 21, RED, 'end', 'bold'))
+        lat = [0.2, 2.1, 4.2, 16.8]
+        for k, v in enumerate(lat):
+            y = 44 + k * 11
+            b.append(box(24, y, 250, 8, GRAY_L, GRAY, rx=2))
+            b.append(box(24, y, max(250 * v / 16.8, 6), 8, AMBER if v == 16.8 else BLUE, AMBER if v == 16.8 else BLUE, rx=2))
+        b.append(text(290, 74, 'waits for slowest', 19, INK, 'start'))
+
+        b.append(box(460, 6, 430, 88, 'white', PURPLE, rx=8))
+        b.append(text(474, 32, 'Verifier pool (Little\'s law)', 21, PURPLE, 'start', 'bold'))
+        b.append(text(876, 32, '80% target', 21, RED, 'end', 'bold'))
+        for k in range(10):
+            x = 474 + k * 24
+            b.append(box(x, 48, 18, 28, BLUE if k < 8 else GRAY_L, BLUE if k < 8 else GRAY, rx=3))
+        b.append(text(722, 68, '768 / 960 slots', 20, INK, 'start', 'bold'))
+
+        # Main panel: Asynchronous freshness pipeline
+        b.append(box(10, 106, 880, 240, 'white', PURPLE, rx=10))
+        b.append(text(26, 134, 'Asynchronous freshness pipeline', 22, PURPLE, 'start', 'bold'))
+        b.append(text(874, 134, 'max staleness lag = 2 versions', 20, INK, 'end', 'bold'))
+
+        vx = [150, 330, 510, 690]
+        for k, x in enumerate(vx):
+            b.append(f'<line x1="{x}" y1="150" x2="{x}" y2="294" stroke="{GRAY}" stroke-width="1.6" stroke-dasharray="5,5"/>')
+            b.append(box(x - 24, 146, 48, 30, PURPLE_L, PURPLE, rx=4))
+            b.append(text(x, 168, f'v{k + 1}', 20, PURPLE, weight='bold'))
+
+        # Rollout A (lag 1, accepted)
+        b.append(box(150, 186, 180, 30, BLUE_L, BLUE, rx=4))
+        b.append(text(240, 207, 'short rollout A', 19, INK, weight='bold'))
+        b.append(box(340, 186, 155, 30, GREEN_L, GREEN, rx=4))
+        b.append(text(417, 207, 'accept (lag 1)', 19, GREEN, weight='bold'))
+
+        # Rollout B (lag 2, accepted)
+        b.append(box(150, 224, 360, 30, BLUE_L, BLUE, rx=4))
+        b.append(text(330, 245, 'medium rollout B', 19, INK, weight='bold'))
+        b.append(box(520, 224, 155, 30, GREEN_L, GREEN, rx=4))
+        b.append(text(597, 245, 'accept (lag 2)', 19, GREEN, weight='bold'))
+
+        # Step 2+: long/hard rollout C crosses bound
+        if step >= 2:
+            c_fill = RED_L if step >= 3 else AMBER_L
+            c_col = RED if step >= 3 else AMBER
+            b.append(box(150, 262, 540, 30, c_fill, c_col, rx=4, dash=(step == 2)))
+            b.append(text(420, 283, 'long / hard rollout C (started v1, ends v4)', 19, c_col, weight='bold'))
+            if step == 2:
+                b.append(box(700, 262, 174, 30, AMBER_L, AMBER, rx=4))
+                b.append(text(787, 283, 'lag 3 &gt; bound 2', 19, AMBER, weight='bold'))
+            else:
+                b.append(box(700, 262, 174, 30, RED_L, RED, rx=4))
+                b.append(text(787, 283, 'drop: stale', 19, RED, weight='bold'))
+
+        # Step 3: survivorship bias + takeaway banner
+        if step >= 3:
+            b.append(box(26, 302, 848, 34, PURPLE_L, PURPLE, rx=6))
+            b.append(text(450, 326, 'Dropping stale rollouts drops hard tasks; shorten rollout age instead', 20, PURPLE, weight='bold'))
+
+        svg(HERE / f'freshness_step{step}.svg', W, H, '\n'.join(b))
 if __name__ == '__main__':
     metr_tasks()
     metr_prompts()
@@ -515,5 +544,5 @@ if __name__ == '__main__':
     yue()
     thumbs()
     forks()
-    loop_limits()
+    freshness_steps()
     print('figures written')
