@@ -368,6 +368,47 @@ def gap_vector(k):
     fig.text(0.01, 0.0, 'dashed: simulator    solid: hardware    illustrative values', fontsize=12, color=C['neutral'])
     fig.tight_layout(h_pad=0.6, w_pad=1.0)
     sp.save(fig, out / f'gap_vector_step{k}.svg')
+
+def denoise(k):
+    """3-step diffusion denoising around a block obstacle + proposal boundary."""
+    fig, ax = plt.subplots(figsize=(4.2, 3.0))
+    ax.set_xlim(-1.90, 1.90)
+    ax.set_ylim(-0.40, 3.12)
+    ax.axis('off')
+    ax.plot([0], [0.05], 'o', ms=11, color=C['memory'], zorder=5)
+    ax.text(0, -0.25, 'robot', ha='center', va='center', fontsize=13.5, fontweight='bold', color=C['memory'])
+    ax.add_patch(plt.Rectangle((-0.44, 0.94), 0.88, 0.56, fc='#CBD5E1', ec=C['text'], lw=1.6, zorder=4))
+    ax.text(0, 1.22, 'block', ha='center', va='center', fontsize=13.5, fontweight='bold', color=C['text'], zorder=5)
+    ax.plot([0], [2.62], '*', ms=15, color=C['data'], zorder=5)
+    ax.text(0.24, 2.62, 'goal', ha='left', va='center', fontsize=13.5, fontweight='bold', color=C['data'])
+    ys = np.linspace(0.08, 2.55, 60)
+    if k == 1:
+        rng = np.random.default_rng(7)
+        for _ in range(7):
+            xs = rng.normal(0, 0.45, size=len(ys)) * np.sin(np.pi * ys / 2.55)
+            ax.plot(xs, ys, color=C['neutral'], lw=1.3, ls=':', alpha=0.75)
+        pts_x = rng.normal(0, 0.55, 18)
+        pts_y = rng.uniform(0.35, 2.35, 18)
+        ax.scatter(pts_x, pts_y, s=22, color=C['neutral'], alpha=0.8, zorder=3)
+        ax.text(0, 2.96, 'Step 1: noisy action-chunk samples', ha='center', va='center', fontsize=13.5, fontweight='bold', color=C['text'])
+    else:
+        for sign, col, lw in ((-1, C['memory'], 2.8), (1, C['neutral'], 1.6)):
+            xs = sign * 0.92 * np.sin(np.pi * (ys - 0.08) / 2.47)
+            ax.plot(xs, ys, color=col, lw=lw, ls='-' if sign < 0 else '--', zorder=3)
+        ax.plot([0, 0], [0.15, 0.92], color=C['danger'], lw=1.8, ls=':', alpha=0.8)
+        ax.text(0, 0.56, 'mean hits', ha='center', va='center', fontsize=13.5, color=C['danger'], fontweight='bold', bbox=dict(fc='white', ec='none', pad=1))
+        ax.text(-0.98, 1.22, 'committed\nmode', ha='right', va='center', fontsize=13.5, color=C['memory'], fontweight='bold')
+        ax.text(0.98, 1.22, 'alt\nmode', ha='left', va='center', fontsize=13.5, color=C['neutral'])
+        if k == 2:
+            ax.text(0, 2.96, 'Step 2: commits to one valid route', ha='center', va='center', fontsize=13.5, fontweight='bold', color=C['memory'])
+        else:
+            ax.axhline(1.98, color=C['danger'], lw=2.0, ls='--', zorder=6)
+            ax.text(-1.86, 2.08, 'proposal boundary', ha='left', va='bottom', fontsize=13.5, color=C['danger'], fontweight='bold')
+            ax.text(1.05, 2.28, 'Permission:\ncheck limits', ha='center', va='center', fontsize=13.5, color=C['data'], fontweight='bold', bbox=dict(boxstyle='round,pad=0.2', fc='#DCFCE7', ec=C['data'], lw=1.2), zorder=7)
+            ax.text(0, 2.96, 'Step 3: boundary still checks limits', ha='center', va='center', fontsize=13.5, fontweight='bold', color=C['data'])
+    fig.subplots_adjust(left=0.01, right=0.99, top=0.97, bottom=0.02)
+    sp.save(fig, out / f'denoise_step{k}.svg')
+
 if __name__ == '__main__':
     for k in (1, 2):
         dactyl_hook(k)
@@ -377,6 +418,7 @@ if __name__ == '__main__':
     dotrows(out / 'dactyl_memory.svg', memory, {'LSTM policy': 13.0, 'FF policy, LSTM value': 3.5, 'FF policy, FF value': 3.0}, (2.9, 1.9), highlight=('LSTM policy',), names={'LSTM policy': 'LSTM', 'FF policy, LSTM value': 'FF, LSTM V', 'FF policy, FF value': 'FF, FF V'})
     for k in (1, 2, 3):
         mode_avg(k)
+        denoise(k)
         decoder(k)
         spring(k)
         odd(k)

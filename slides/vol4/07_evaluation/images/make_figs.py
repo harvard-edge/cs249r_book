@@ -108,16 +108,22 @@ def aisle(step):
     fig, ax = plt.subplots(figsize=(5.8, 2.5))
     d = np.linspace(0, aisle_m, 300)
     ax.axhline(clear_cm, color=C['danger'], lw=2, ls='--')
-    ax.text(29.6, clear_cm + 0.6, 'rack: 15 cm side clearance', ha='right', color=C['danger'], fontsize=12, fontweight='bold')
+    ax.text(29.6, clear_cm + 0.6, 'rack: 15 cm side clearance', ha='right', color=C['danger'], fontsize=11.5, fontweight='bold')
     ax.plot(d, np.zeros_like(d), color=C['memory'], lw=3)
-    ax.text(29.6, 1.6, 'replay: reset each step, MSE 3.05×10⁻⁴ rad²', ha='right', color=C['memory'], fontsize=12, fontweight='bold')
-    a = 1.0 if step >= 2 else 0.0
-    dd = d[d <= d_hit]
-    ax.plot(dd, dd * math.tan(rad) * 100, color=C['compute'], lw=3, alpha=a)
-    ax.plot([d_hit], [clear_cm], 'o', ms=10, color=C['danger'], alpha=a)
-    ax.text(d_hit + 0.6, 11.2, 'closed loop: 5.7 s, 8.6 m', color=C['compute'], fontsize=12, fontweight='bold', alpha=a)
+    ax.text(29.6, 1.5, 'replay: reset each step, MSE 3.05×10⁻⁴ rad²', ha='right', color=C['memory'], fontsize=11.5, fontweight='bold')
+    if step == 1:
+        ax.text(13.5, 7.8, 'closed-loop path under 1° bias = ?', ha='center', va='center', fontsize=11.5, fontweight='bold', color=C['neutral'], bbox=dict(boxstyle='round,pad=0.3', fc='#F8FAFC', ec=C['neutral'], ls='--', lw=1.2))
+    if step >= 2:
+        dd = d[d <= d_hit]
+        ax.plot(dd, dd * math.tan(rad) * 100, color=C['compute'], lw=3)
+        if step == 2:
+            ax.text(d_hit + 0.6, 9.2, 'closed loop: lateral drift grows as v·sin(1°)·t', color=C['compute'], fontsize=11.5, fontweight='bold')
+    if step >= 3:
+        ax.axhspan(clear_cm, 19.5, color=C['danger_l'], alpha=0.55, zorder=0)
+        ax.plot([d_hit], [clear_cm], 'o', ms=10, color=C['danger'], zorder=5)
+        ax.text(d_hit + 0.7, 10.6, 'hits rack at 8.6 m (5.7 s)\nreplay MSE stays identical', color=C['danger'], fontsize=11.2, fontweight='bold', va='center', bbox=dict(fc='white', ec='none', pad=1.0))
     ax.set_xlim(0, aisle_m)
-    ax.set_ylim(-1, 19)
+    ax.set_ylim(-1, 19.5)
     ax.set_xlabel('Distance along the 30 m aisle (m)')
     ax.set_ylabel('Lateral offset (cm)')
     ax.grid(color=C['grid'], lw=0.5)
@@ -283,9 +289,10 @@ def record(step):
 def main():
     for s in (1, 2):
         coverage(s)
-        aisle(s)
         inversion(s)
         record(s)
+    for s in (1, 2, 3):
+        aisle(s)
     for s in (1, 2, 3, 4):
         regimes(s)
     mandlekar()
