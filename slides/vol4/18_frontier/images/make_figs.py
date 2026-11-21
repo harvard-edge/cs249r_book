@@ -250,28 +250,35 @@ def film_terms(step):
     sp.save(fig, out(f'film_terms_step{step}.svg'))
 
 def indist():
-    fig, ax = plt.subplots(figsize=(5.8, 2.4))
     t = np.linspace(0, 10, 400)
     base = 0.5 + 0.08 * np.sin(1.3 * t)
     td = 6.0
-    ax.axvspan(0, td, color='#FEF3C7', alpha=0.7, lw=0)
-    ax.plot(t, base + 1.0, color=PROPOSE, lw=2.5)
     haz = np.where(t < td, base, base - 0.25 * (1 - np.exp(-(t - td) / 0.8)))
-    ax.plot(t, haz, color=RED, lw=2.5)
-    ax.plot(t[t < td], base[t < td] + 1.0, color=PROPOSE, lw=2.5)
-    ax.text(0.15, 1.75, 'dry floor: sensor history', color=PROPOSE, fontsize=12, fontweight='bold')
-    ax.text(0.15, 0.13, 'film: the same history', color=RED, fontsize=12, fontweight='bold')
-    ax.axvline(td, color=TEXT, lw=1.8, ls='--')
-    ax.text(td + 0.1, 1.95, 'deadline: last moment a\nstop still ends in time', fontsize=11, color=TEXT, va='top')
-    ax.text(td / 2, 1.15, 'identical until the deadline', fontsize=12, color=AMBER, ha='center', fontweight='bold')
-    ax.text(8.2, 0.05, 'differs too late', fontsize=11, color=RED, ha='center')
-    ax.set_xlim(0, 10)
-    ax.set_ylim(-0.05, 2.0)
-    ax.set_xticks([])
-    ax.set_yticks([])
-    ax.spines['left'].set_visible(False)
-    ax.set_xlabel('Time as the base approaches the film', fontsize=11)
-    sp.save(fig, out('indist.svg'))
+    for step in (1, 2, 3):
+        fig, ax = plt.subplots(figsize=(5.8, 2.4))
+        ax.axvspan(0, td, color='#FEF3C7', alpha=0.7, lw=0)
+        if step < 3:
+            ax.plot(t[t < td], base[t < td] + 1.0, color=PROPOSE, lw=2.5)
+            ax.plot(t[t < td], haz[t < td], color=RED, lw=2.5)
+        else:
+            ax.plot(t, base + 1.0, color=PROPOSE, lw=2.5)
+            ax.plot(t, haz, color=RED, lw=2.5)
+        ax.text(0.15, 1.75, 'dry floor: sensor history', color=PROPOSE, fontsize=12, fontweight='bold')
+        ax.text(0.15, 0.13, 'film: the same history', color=RED, fontsize=12, fontweight='bold')
+        ax.text(td / 2, 1.15, 'identical sensor histories' if step == 1 else 'identical until the deadline', fontsize=12, color=AMBER, ha='center', fontweight='bold')
+        if step >= 2:
+            ax.axvline(td, color=TEXT, lw=1.8, ls='--')
+            ax.text(td + 0.15, 1.95, 'deadline: last moment a\nstop still ends in time', fontsize=11, color=TEXT, va='top')
+        if step >= 3:
+            ax.text(8.1, 0.05, 'differs too late', fontsize=11, color=RED, ha='center', fontweight='bold')
+            ax.text(8.1, 0.96, 'no classifier beats\nidentical inputs', fontsize=10.5, color=RED, ha='center', va='center', fontweight='bold', bbox=dict(boxstyle='round,pad=0.25', fc='#FEE2E2', ec=RED, lw=1.2))
+        ax.set_xlim(0, 10)
+        ax.set_ylim(-0.05, 2.0)
+        ax.set_xticks([])
+        ax.set_yticks([])
+        ax.spines['left'].set_visible(False)
+        ax.set_xlabel('Time as the base approaches the film', fontsize=11)
+        sp.save(fig, out(f'indist_step{step}.svg'))
 
 def overreserve():
     t_stop, t_eq, spare_ms = (931.25, 465.625, 100.775)

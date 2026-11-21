@@ -385,23 +385,30 @@ def retention():
     day_h = 16.0
     window_s = 30.0
     day_s = 57600.0
-    fig, ax = plt.subplots(figsize=(5.4, 2.7))
-    fig.subplots_adjust(left=0.27, right=0.97, bottom=0.3, top=0.97)
-    ax.barh(1, day_h, color=P['red_l'], ec=P['red'], height=0.6)
-    ax.text(day_h / 2, 1, 'every frame, all day', ha='center', va='center', fontsize=15, color=P['red_d'], fontweight='bold')
     rng = np.random.default_rng(17)
     starts = np.sort(rng.uniform(0, day_s - window_s, 20))
-    for s0 in starts:
-        ax.barh(0, window_s / 3600 * 6, left=s0 / 3600, color=P['green'], height=0.6)
-    ax.text(-0.4, 1, 'Continuous', ha='right', va='center', fontsize=15, fontweight='bold')
-    ax.text(-0.4, 0, 'Triggered', ha='right', va='center', fontsize=15, fontweight='bold')
-    ax.set_xlim(0, day_h)
-    ax.set_xticks([0, 4, 8, 12, 16])
-    ax.set_ylim(-0.5, 1.5)
-    ax.set_yticks([])
-    ax.tick_params(labelsize=14)
-    ax.set_xlabel('Hour of a 16 h day (marks 6x wide)', fontsize=14)
-    save(fig, 'retention')
+    for step in (1, 2, 3):
+        fig, ax = plt.subplots(figsize=(5.4, 2.75))
+        fig.subplots_adjust(left=0.27, right=0.97, bottom=0.26, top=0.96)
+        ax.barh(1, day_h, color=P['red_l'], ec=P['red'], height=0.56)
+        ax.text(day_h / 2, 1, 'every frame, all day (960 min)', ha='center', va='center', fontsize=14, color=P['red_d'], fontweight='bold')
+        if step == 1:
+            ax.barh(0, day_h, color='#F8FAFC', ec='#94A3B8', ls='--', lw=1.4, height=0.56)
+            ax.text(day_h / 2, 0, '20 triggered events: how much kept?', ha='center', va='center', fontsize=13.5, color=P['slate'], fontweight='bold')
+        if step >= 2:
+            for s0 in starts:
+                ax.barh(0, window_s / 3600 * 6, left=s0 / 3600, color=P['green'], height=0.56)
+        if step >= 3:
+            ax.text(day_h / 2, -0.62, '1.0% kept (96x cut); auto-purged on expiry', ha='center', va='center', fontsize=13.5, color='#047857', fontweight='bold', bbox=dict(boxstyle='round,pad=0.25', fc='#DCFCE7', ec=P['green'], lw=1.3))
+        ax.text(-0.4, 1, 'Continuous', ha='right', va='center', fontsize=15, fontweight='bold')
+        ax.text(-0.4, 0, 'Triggered', ha='right', va='center', fontsize=15, fontweight='bold')
+        ax.set_xlim(0, day_h)
+        ax.set_xticks([0, 4, 8, 12, 16])
+        ax.set_ylim(-0.96, 1.46)
+        ax.set_yticks([])
+        ax.tick_params(labelsize=14)
+        ax.set_xlabel('Hour of a 16 h day (marks 6x wide)', fontsize=14)
+        save(fig, f'retention_step{step}')
 
 def labor():
     fig, ax = plt.subplots(figsize=(5.4, 3.4))
