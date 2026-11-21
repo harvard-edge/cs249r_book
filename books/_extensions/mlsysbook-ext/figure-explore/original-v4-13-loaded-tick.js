@@ -1,6 +1,6 @@
 (() => {
  'use strict';
- const NAME="original-v4-13-loaded-tick", CFG={"question": "Does fitting within a period establish the timing premise?", "intro": "Compare how FIFO memory backlogs stretch the 135 µs unloaded permission tick toward the 250 µs declared WCET and 400 µs deadline inside a 1,000 µs period.", "scope": "Canonical loaded-tick FIFO memory-service model inside a 1,000 µs (1 ms) period: isolated sub-costs (40 µs sense allowance + 70 µs constraint evaluation + 25 µs drive-frame write = 135 µs unloaded tick), declared WCET 250 µs, blocking and interference reserve B + I = 90 µs, and full-response deadline 400 µs (leaving 310 µs before B + I). Rows compare 21, 82, and 114 queued memory transactions across 16 interleaved channels against 5 queued transactions on 1 channel.", "purpose": "Accumulate queued wait before the read and unchanged later computation, then compare the correct threshold.", "steps": [["Unloaded execution", "On Row 1 (unloaded), summing the isolated sub-costs—40.0 µs sense allowance + 70.0 µs constraint evaluation + 25.0 µs drive-frame write—completes the permission tick in 135.0 µs (135 µs), well below the 250 µs declared WCET, 400 µs deadline, and 1,000 µs period."], ["Loaded snapshot is queued", "On Row 2 (21 FIFO backlogs across 16 interleaved channels), t = 0.000 µs begins with the sensor snapshot stalled behind queued tile, camera, and telemetry traffic; the permission core cannot start constraint evaluation yet."], ["Drain the queue", "By t = 39.467 µs on Row 2, the 21 queued FIFO transactions finish draining across the 16 interleaved memory channels while the snapshot read itself has not yet started."], ["Read and retain the snapshot", "At t = 39.488 µs on Row 2, the 0.020 µs snapshot transfer across the 16 interleaved channels completes (39.467 + 0.020 = 39.488 µs within the 40 µs sense allowance), delivering the snapshot to the permission core."], ["Evaluate constraints and finish the frame", "Adding the unchanged 95.0 µs of constraint evaluation (70 µs) and drive-frame write (25 µs) completes Row 2 at 134.488 µs, satisfying both the 250 µs declared WCET and the 400 µs deadline (134.488 + 90 = 224.488 µs)."], ["Declared WCET", "On Row 3 (82 FIFO backlogs across 16 channels), 154.111 µs of queue wait + 0.020 µs snapshot read + 95.0 µs compute reaches 249.131 µs—the largest backlog count inside the 250 µs declared WCET (and 249.131 + 90 = 339.131 µs ≤ 400 µs deadline)."], ["Deadline allocation", "On Row 4 (114 FIFO backlogs across 16 channels), 214.252 µs of queue wait + 0.020 µs read + 95.0 µs compute reaches 309.272 µs, which already violates the 250 µs declared WCET and leaves only the 90 µs B + I reserve before the 400 µs deadline (399.272 µs)."], ["One-channel mapping", "On Row 5 (1 channel, no 16-channel interleaving), just 5 queued backlogs take 141.915 µs of wait + 0.321 µs read + 95.0 µs compute = 237.236 µs; all 5 rows finish well inside the 1,000 µs period, proving that fitting a 1,000 µs period never certifies the timing premise."]], "guard": "Period pass is not timing-premise pass. Keep FIFO queueing assumptions, sense read, WCET, full response deadline and channel mapping distinct.", "key": "vol4:fig-13-loaded-tick"}, NS='http://www.w3.org/2000/svg';
+ const NAME="original-v4-13-loaded-tick", CFG={"question": "Does fitting within a period establish the timing premise?", "intro": "Compare how FIFO memory backlogs stretch the 135 µs unloaded permission tick toward the 250 µs declared WCET and 400 µs deadline inside a 1,000 µs period.", "scope": "Canonical loaded-tick FIFO memory-service model inside a 1,000 µs (1 ms) period: isolated sub-costs (40 µs sense allowance + 70 µs constraint evaluation + 25 µs drive-frame write = 135 µs unloaded tick), declared WCET 250 µs, blocking and interference reserve B + I = 90 µs, and full-response deadline 400 µs (leaving 310 µs before B + I). Rows compare 21, 61, and 93 queued memory backlogs across 16 interleaved channels against 4 queued backlogs on 1 channel, stacking FIFO wait and DRAM snapshot read on top of the unloaded 135 µs tick.", "purpose": "Accumulate queued wait before the read and unchanged later computation, then compare the correct threshold.", "steps": [["Unloaded execution", "On Row 1 (unloaded), summing the isolated sub-costs—40.0 µs sense allowance + 70.0 µs constraint evaluation + 25.0 µs drive-frame write—completes the permission tick in 135.0 µs (135 µs), well below the 250 µs declared WCET, 400 µs deadline, and 1,000 µs period."], ["Loaded snapshot is queued", "On Row 2 (21 FIFO backlogs across 16 interleaved channels), t = 0.000 µs begins with the sensor snapshot stalled behind queued tile, camera, and telemetry traffic; the permission core cannot start constraint evaluation yet."], ["Drain the queue", "By t = 39.467 µs on Row 2, the 21 queued FIFO backlogs finish draining across the 16 interleaved memory channels while the snapshot read itself has not yet started."], ["Read and retain the snapshot", "Adding the 40.0 µs sense allowance and 0.020 µs DRAM snapshot transfer (40.020 µs total; the DRAM wait plus transfer is 39.467 + 0.020 = 39.488 µs within the 40 µs sense allowance) completes sensing at t = 79.488 µs on Row 2, delivering the snapshot to the permission core."], ["Evaluate constraints and finish the frame", "Adding the unchanged 95.0 µs of constraint evaluation (70 µs) and drive-frame write (25 µs) completes Row 2 at 174.488 µs, satisfying both the 250 µs declared WCET and the 400 µs deadline (174.488 + 90 = 264.488 µs)."], ["Declared WCET", "On Row 3 (61 FIFO backlogs across 16 channels), 114.644 µs of queue wait + 40.020 µs sense and snapshot read + 95.0 µs compute reaches 249.664 µs—the largest backlog count inside the 250 µs declared WCET (and 249.664 + 90 = 339.664 µs ≤ 400 µs deadline)."], ["Deadline allocation", "On Row 4 (93 FIFO backlogs across 16 channels), 174.784 µs of queue wait + 40.020 µs sense and read + 95.0 µs compute reaches 309.804 µs, which already violates the 250 µs declared WCET and leaves only the 90 µs B + I reserve before the 400 µs deadline (399.804 µs)."], ["One-channel mapping", "On Row 5 (1 channel, no 16-channel interleaving), just 4 queued backlogs take 113.532 µs of wait + 40.321 µs sense and read + 95.0 µs compute = 248.853 µs; all 5 rows finish well inside the 1,000 µs period, proving that fitting a 1,000 µs period never certifies the timing premise."]], "guard": "Period pass is not timing-premise pass. Keep FIFO queueing assumptions, sense read, WCET, full response deadline and channel mapping distinct.", "key": "vol4:fig-13-loaded-tick"}, NS='http://www.w3.org/2000/svg';
  const el=(tag,attrs={},text)=>{const n=document.createElementNS(NS,tag);Object.entries(attrs).forEach(([k,v])=>n.setAttribute(k,v));if(text!==undefined)n.textContent=text;return n;};
  window.MLSysFigureLessons=window.MLSysFigureLessons||{};
  window.MLSysFigureLessons[NAME]=async(root,context)=>{
@@ -31,25 +31,25 @@
     {
       "label": "sense allowance",
       "wait": 39.46744117647059,
-      "read": 0.02007843137254902,
+      "read": 40.02007843137255,
       "compute": 95.0
     },
     {
       "label": "declared WCET",
-      "wait": 154.1109607843137,
-      "read": 0.02007843137254902,
+      "wait": 114.64351960784314,
+      "read": 40.02007843137255,
       "compute": 95.0
     },
     {
       "label": "deadline allocation",
-      "wait": 214.25182352941175,
-      "read": 0.02007843137254902,
+      "wait": 174.78438235294118,
+      "read": 40.02007843137255,
       "compute": 95.0
     },
     {
       "label": "one channel",
-      "wait": 141.9146568627451,
-      "read": 0.3212549019607843,
+      "wait": 113.53172549019608,
+      "read": 40.32125490196078,
       "compute": 95.0
     }
   ],

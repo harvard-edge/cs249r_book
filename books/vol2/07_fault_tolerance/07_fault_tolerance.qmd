@@ -355,6 +355,7 @@ The raw memory bit-error rates in that HBM soft-error budget justify ECC, but th
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Scenarios
 from mlsysim.fmt import MarkdownStr, check, fmt, fmt_count, fmt_rate, fmt_time
+from mlsysim.physics import calc_mtbf_node
 
 class FailureCascadeExample:
     # ┌── 1. LOAD (Constants) ──────────────────────
@@ -365,6 +366,8 @@ class FailureCascadeExample:
     psu_mttf = scn.component_mttf["power"].to(hour).magnitude
     nic_mttf = scn.component_mttf["network"].to(hour).magnitude
     gpus_per_node = scn.devices_per_node
+    nics_per_node = Systems.Nodes.DGX_H100.nics_per_node
+    nodes_10k = Systems.Clusters.Training_10K.count
     series_psus = scn.per_node["power"]  # 0: 4+2 redundant supplies
     psus_per_node = Systems.Nodes.DGX_H100.psus_per_node
     psu_redundancy = Systems.Nodes.DGX_H100.psu_redundancy
@@ -384,11 +387,21 @@ class FailureCascadeExample:
     per_day = 24 * l_system_disp
     per_week = 24 * 7 * l_system_disp
     weekly_failures = round(per_week)
+    rail_node_mtbf = calc_mtbf_node(
+        Systems.Reliability.Gpu.mttf_hours,
+        gpus_per_node,
+        Systems.Reliability.Nic.mttf_hours,
+        nics_per_node,
+        Systems.Reliability.Psu.mttf_hours,
+        series_psus,
+    )
+    rail_mtbf_h = (rail_node_mtbf / nodes_10k).to(hour).magnitude
 
     # ┌── 3. GUARD (Invariants) ────────────────────
     check(0 < l_gpu < 1, "per-GPU failure rate must be a small positive value")
     check(l_power == 0, "DGX H100 PSUs are 4+2 redundant: no single-PSU term in the series sum")
     check(2.0 < mtbf_h < 5.0, "10k-GPU cluster MTBF should be a few hours")
+    check(0 < rail_mtbf_h < mtbf_h, "rail-optimized 8-NIC DGX H100 model must yield a shorter MTBF than the shared-path model")
     check(per_week > per_day > 1, "weekly failures must exceed daily, both above one")
     check(9 < fleet_gpus / ref_gpus < 11, "prose says 'roughly ten times' the reference cluster")
 
@@ -400,6 +413,7 @@ class FailureCascadeExample:
     psu_mttf_hours_str = fmt_time(psu_mttf, "hour", precision=0, commas=True, style="word")
     nic_mttf_hours_str = fmt_time(nic_mttf, "hour", precision=0, commas=True, style="word")
     gpus_per_node_str = fmt(gpus_per_node, precision=0)
+    nics_per_node_str = fmt(nics_per_node, precision=0)
     psus_per_node_str = fmt(psus_per_node, precision=0)
     psus_required_str = fmt(psus_required, precision=0)
     psu_redundancy_str = fmt(psu_redundancy, precision=0)
@@ -428,6 +442,7 @@ class FailureCascadeExample:
     mtbf_eq_math = fmt_display_math(rf" \SystemMtbf = \frac{{1}}{{{l_system_disp:.4f}}} = {mtbf_h:.2f} \text{{ hours}} ")
     mtbf_hours_str = fmt_time(mtbf_h, "hour", precision=1, commas=False, style="word")
     mtbf_hours_2dp_str = fmt_time(mtbf_h, "hour", precision=2, commas=False, style="word")
+    rail_mtbf_hours_2dp_str = fmt_time(rail_mtbf_h, "hour", precision=2, commas=False, style="word")
     failures_per_day_str = fmt_rate(per_day, "failures/day", precision=1, commas=False)
     weekly_failures_str = fmt_count(weekly_failures, precision=0, label="failure")
 ```
@@ -438,7 +453,7 @@ Consider a training cluster designed for large language model development, rough
 - Individual GPU MTTF: `{python} FailureCascadeExample.gpu_mttf_hours_str`
 - Each GPU connected to host via PCIe (MTTF: `{python} FailureCascadeExample.pcie_mttf_hours_str`)
 - Each node contains `{python} FailureCascadeExample.gpus_per_node_str` GPUs fed by `{python} FailureCascadeExample.psus_per_node_str` power supply units (MTTF: `{python} FailureCascadeExample.psu_mttf_hours_str` each) in `{python} FailureCascadeExample.psus_required_str`+`{python} FailureCascadeExample.psu_redundancy_str` redundancy, so the node keeps full performance with any `{python} FailureCascadeExample.psu_redundancy_str` of them failed
-- Network infrastructure per node (NIC, cables): MTTF `{python} FailureCascadeExample.nic_mttf_hours_str`
+- Shared node-level network path (NIC and cables): MTTF `{python} FailureCascadeExample.nic_mttf_hours_str`
 
 Each GPU operates within a failure domain that includes the GPU itself, its PCIe connection, and a proportional share of the node's shared power and network infrastructure. Dividing a node-wide subsystem rate by the `{python} FailureCascadeExample.gpus_per_node_str` GPUs in the node prorates one shared failure source across those GPUs, so that multiplying the per-GPU total by all `{python} FailureCascadeExample.fleet_gpus_str` GPUs in the final step counts each node's shared hardware once per node rather than eight times. Power enters the sum only through supplies whose single failure stops the node, counted as $\SeriesPsuCount$ in the power equation. With the node's supplies in redundant sets, no single unit qualifies, so the power term below is zero in this first-order calculation. The approximation omits the residual risk that additional independent failures exhaust redundancy before repair. A fault upstream of the chassis, such as the loss of the circuits feeding it, can also take down the whole node. That risk belongs to the correlated failures treated later in this chapter. The four subsystem rates follow from their MTTF values:
 
@@ -460,10 +475,10 @@ Multiplying that total by the cluster size gives the system failure rate, whose 
 
 `{python} FailureCascadeExample.mtbf_eq_math`
 
-Under the model, the cluster experiences a failure every `{python} FailureCascadeExample.mtbf_hours_str` on average. The expected failure cadence is `{python} FailureCascadeExample.failures_per_day_str`; a training run lasting one week has an expected count of `{python} FailureCascadeExample.weekly_failures_str`. Actual incident times vary, but the expected loss is large enough that recovery must be part of normal execution planning.
+Under the model, the cluster experiences a failure every `{python} FailureCascadeExample.mtbf_hours_str` on average. The expected failure cadence is `{python} FailureCascadeExample.failures_per_day_str`; a training run lasting one week has an expected count of `{python} FailureCascadeExample.weekly_failures_str`. Because this cascade models one shared node-level network path alongside per-GPU PCIe links, substituting a rail-optimized DGX H100 node with `{python} FailureCascadeExample.nics_per_node_str` dedicated NICs (one per GPU) and no separate PCIe term yields a slightly shorter cluster MTBF of `{python} FailureCascadeExample.rail_mtbf_hours_2dp_str`. Actual incident times vary, but the expected loss is large enough that recovery must be part of normal execution planning.
 
 ::: {.column-margin .margin-pointer}
-↪ The step-by-step composition of per-component failure rates into a fleet-wide system MTBF, reusable for any node design or cluster size, is developed in @sec-appdx-reliability-foundations-mtbf-cascade.
+↪ The general step-by-step composition of per-component failure rates into a fleet-wide system MTBF, worked for that eight-NIC DGX H100 node design across cluster sizes, is developed in @sec-appdx-reliability-foundations-mtbf-cascade.
 :::
 
 Against that full-system cascade at one scale, the cluster MTBF scaling\index{Cluster!MTBF scaling} in @tbl-cluster-mtbf-scaling isolates the GPU-only baseline across cluster sizes. The full-system calculation is lower once PCIe and network failure domains are included. The same 10,000-GPU cluster therefore carries three MTBF values in this chapter. Each later calculation names the one it uses: the GPU-only `{python} FleetReliabilityRates.hours_between_str` of this table, the full-system `{python} FailureCascadeExample.mtbf_hours_str` of the four-subsystem cascade, and the two-to-three-hour cadence that somewhat larger production runs report in the next paragraphs. The full-system MTBF is the default input; a calculation that uses the GPU-only value says so, usually because it compares cluster sizes on the common basis of @tbl-cluster-mtbf-scaling, and its failure count is then a lower bound.
@@ -1328,7 +1343,7 @@ Google's reactive hot-spare protocol shows how those pieces combine in three sta
 Verify your understanding of Byzantine failures and SDC:
 
 - [ ] **SDC danger**: explain why silent data corruption is more dangerous for ML training than a simple node crash.
-- [ ] **Hot spare vs. restart**: compare a hot spare redundancy strategy with traditional checkpoint-restart in terms of recovery latency.
+- [ ] **Selective vs. full redundancy**: compare selective check-and-verify with a reactive hot spare against dual or triple modular redundancy in terms of standing resource overhead and corruption coverage.
 - [ ] **Sanity checker**: identify the metric used as a "sanity checker" to identify potential hardware faults: GPU temperature or gradient norm.
 - [ ] **Byzantine scope**: assess the True or False claim that Byzantine failures only occur when a malicious actor intentionally sabotages the training cluster.
 
@@ -1468,7 +1483,7 @@ When a top-of-rack switch dies two weeks into the training run of a 175-billion-
 
 1.  **Significance**: It minimizes lost work after a system failure by trading checkpoint I/O against rework. Writing too often wastes accelerator time on storage traffic; writing too rarely risks replaying many completed steps after a failure. The Young-Daly interval\index{Young-Daly formula!square-root trade-off} developed in this section chooses the cadence that balances write cost against expected lost work.
 2.  **Distinction**: A resumable checkpoint captures a consistent execution state, including optimizer state, random-number generator state, data position, and learning rate schedules. It can use full or incremental storage; bitwise replay additionally requires compatible deterministic execution.
-3.  **Common pitfall**: A frequent misconception is that checkpointing is "just writing to disk." For large models it is a storage-system stress test, because the simultaneous write from thousands of GPUs can trigger a checkpoint storm (definition \ref{dfn-data-storage-checkpoint-storm}) that saturates the shared network and storage bandwidth $(\Bandwidth)$.
+3.  **Common pitfall**: A frequent misconception is that checkpointing is "just writing to disk." For large models it is a storage-system stress test, because the simultaneous write from thousands of GPUs can trigger a checkpoint storm (defined in @sec-storage-checkpointing) that saturates the shared network and storage bandwidth $(\Bandwidth)$.
 
 :::
 
@@ -2339,7 +2354,7 @@ class RecoveryBudget:
     waste_gpu_hours_10k = r_10k.gpu_hours_per_day
 
     # ┌── 3. GUARD ─────────────────────────────────────────
-    check(abs(t_total.to(minute).magnitude - 6.6) < 1.0, f"Expected ~6.6 min total recovery time, got {t_total.to(minute).magnitude:.1f}")
+    check(abs(t_total.to(minute).magnitude - 6.4) < 0.1, f"Expected ~6.4 min total recovery time, got {t_total.to(minute).magnitude:.1f}")
     check(t_total < 30 * minute, "Recovery time should be under 30 min")
     check(
         abs((t_detect + t_restart + t_load + t_warmup - t_total).to(second).magnitude) < 1e-9,
@@ -2570,7 +2585,7 @@ class StragglerTax:
 - Effective cluster speed: 1 step $\div$ `{python} StragglerTax.straggler_step_str` s = `{python} StragglerTax.effective_speed_str` steps/sec (`{python} StragglerTax.throughput_loss_str` percent throughput loss from `{python} StragglerTax.straggler_frac_str` of the hardware)
 - Hourly idle compute waste: `{python} StragglerTax.n_gpus_str` GPUs $\times$ `{python} StragglerTax.throughput_loss_str`% $\times$ `{python} StragglerTax.gpu_cost_str` = `{python} StragglerTax.wasted_cost_str`
 
-**Systems insight**: Replacement is worthwhile only when the expected time saved exceeds recovery and replay costs. Suppose the slowdown is expected to persist for the next $\SlowdownPersistenceUpdateCount$ useful updates, whose step times are $\DegradedStepTime$ on the degraded allocation and $\HealthyStepTime$ after replacement. The simplified break-even condition is then $\SlowdownPersistenceUpdateCount(\DegradedStepTime-\HealthyStepTime) > \JobRestartTime+ \LostWorkReplayTime$. The right side includes waiting for capacity and restoring state. A short-lived slowdown may clear before replacement pays off; false-positive detection and uncertain persistence also affect the decision. MTBF describes failure recurrence, not how long this slowdown will last.
+**Systems insight**: Replacement is worthwhile only when the expected time saved exceeds recovery and replay costs. Suppose the slowdown is expected to persist for the next $\SlowdownPersistenceUpdateCount$ useful updates, whose step times are $\DegradedStepTime$ on the degraded allocation and $\HealthyStepTime$ after replacement. Once the straggler is detected (so $\FailureDetectionTime$ is already sunk), the simplified break-even condition is $\SlowdownPersistenceUpdateCount(\DegradedStepTime - \HealthyStepTime) > \JobRestartTime + \CheckpointLoadTime + \RecoveryWarmupTime + \LostWorkReplayTime$, combining the post-detection recovery terms of @eq-recovery-time with $\LostWorkReplayTime$, the time to replay uncheckpointed steps. If the job writes a graceful checkpoint before draining the slow rank, $\CheckpointWriteTime$ replaces $\LostWorkReplayTime$. A short-lived slowdown may clear before replacement pays off; false-positive detection and uncertain persistence also affect the decision. MTBF describes failure recurrence, not how long this slowdown will last.
 
 ::::
 
@@ -2870,12 +2885,12 @@ Whether worker loss comes from a hardware fault or a spot preemption, training f
 
 Ray Train, built on Ray's actor model, provides a checkpoint-oriented recovery path that restarts a worker group after a failure or preemption and resumes from the latest available checkpoint. The training function remains responsible for saving and loading sufficient state [@rayTrainFaultToleranceDocs]. Horovod Elastic similarly builds on Horovod's data-parallel training system [@sergeev2018horovod] with an elastic state API for worker additions and removals [@horovodElasticDocs]. The API resets ranks and reconstructs communication while leaving convergence-sensitive choices such as learning-rate or batch-size policy to the training script. Across these four frameworks, restarting the worker group is largely automated, while state resharding remains manual, deployment-dependent, or tied to a checkpoint reload (@tbl-elastic-training-comparison).
 
-| **Framework**       | **Failure detection** | **Automatic recovery** | **State resharding** | **Cluster integration** |
-|:--------------------|:---------------------:|:----------------------:|:--------------------:|:-----------------------:|
-| **PyTorch Elastic** |   Rendezvous timeout  |          Yes           |        Manual        |        Kubernetes       |
-| **DeepSpeed**       |        External       |    Checkpoint-based    | Deployment-dependent |   External schedulers   |
-| **Ray Train**       |   Actor supervision   | Checkpoint retry path  |  Checkpoint reload   |       Ray Cluster       |
-| **Horovod Elastic** |    Driver heartbeat   |          Yes           |        Manual        |    Slurm, Kubernetes    |
+| **Framework**       | **Failure detection** | **Automatic recovery** | **State resharding** |    **Cluster integration**    |
+|:--------------------|:---------------------:|:----------------------:|:--------------------:|:-----------------------------:|
+| **PyTorch Elastic** |   Rendezvous timeout  |          Yes           |        Manual        | Slurm, Kubernetes, standalone |
+| **DeepSpeed**       |        External       |    Checkpoint-based    | Deployment-dependent |      External schedulers      |
+| **Ray Train**       |   Actor supervision   | Checkpoint retry path  |  Checkpoint reload   |          Ray Cluster          |
+| **Horovod Elastic** |    Driver heartbeat   |          Yes           |        Manual        |       Slurm, Kubernetes       |
 
 : **Elastic Recovery Framework Comparison**: Frameworks differ in how they detect worker failures and how much of the recovery sequence (group reconstruction, state redistribution, batch size adjustment) they automate. {#tbl-elastic-training-comparison}
 
@@ -3131,7 +3146,7 @@ class KvCacheLiveState:
 
 In the first of those regimes, multi-turn LLM serving, the KV cache[^fn-kv-cache-resilience] can be substantial (gigabytes for long contexts across attention layers). Losing it requires recomputing attention state from the retained token history, which can take seconds to minutes; previously delivered text need not be generated again. During an in-flight response, recovery must also know which output tokens the client has already received so a retry does not silently duplicate or replace part of the response.
 
-[^fn-kv-cache-resilience]: [offset=-34mm] **KV cache**\index{KV cache!serving fault tolerance}: Stores key and value projections for all previous tokens across all attention layers, with a per-token size derived in @sec-inference-scale-kv-cache-wall. For a Llama-family 70B model at its `{python} KvCacheLiveState.context_k_str` context in BF16, the KV cache is about `{python} KvCacheLiveState.kv_gqa_str` per conversation. Reconstruction can exceed serving latency service level agreements (SLAs) even when a replacement replica is already available.
+[^fn-kv-cache-resilience]: [offset=-34mm] **KV cache**\index{KV cache!serving fault tolerance}: Stores key and value projections for all previous tokens across all attention layers, with a per-token size derived in @sec-inference-scale-kv-cache-wall. For a Llama-family 70B model at its `{python} KvCacheLiveState.context_k_str` context in BF16, the KV cache is about `{python} KvCacheLiveState.kv_gqa_str` per conversation. Reconstruction can exceed serving latency SLOs even when a replacement replica is already available.
 
 ::: {.column-margin}
 ![](images/svg/fault_tolerance_kv_live_state_ladder.svg){width="100%" fig-alt="Two rows. An image retry shows only a thin baseline mark labeled no state lost. An LLM conversation shows a full-width blue bar labeled 43 GB."}

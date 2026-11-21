@@ -10,22 +10,6 @@ format:
 
 Every fleet is built from single machines, and this book assumes that the reader already reasons fluently about one of them. This appendix restates that single-machine foundation in reference form so that a reader who meets the prerequisites only loosely can work every calculation in the book without another text. It collects the Data, Algorithm, and Machine (D·A·M) diagnostic framework and the iron law it rests on, arithmetic intensity and the roofline bound, the accelerator memory hierarchy, the kernel-level levers that shorten a single device's step, the byte accounting of mixed-precision training, and the arithmetic of transformer training and inference. The chapters build the fleet-scale Compute, Communication, and Coordination (C$^3$) framework on this base.
 
-::: {.content-visible when-format="pdf"}
-\newpage
-:::
-
-::: {.callout-learning-objectives}
-
-- Classify single-machine bottlenecks by dominant Data, Algorithm, or Machine axis while recognizing mixed causes
-- Map optimization techniques to their D·A·M intersection zone to understand which axes they span
-- Apply the iron law equation to quantitatively diagnose performance problems
-- Distinguish between memory-bound and compute-bound workloads using arithmetic intensity and the roofline bound
-- Calculate the per-parameter memory of mixed-precision training and the FLOPs of transformer training and decoding
-- Select appropriate profiling tools and optimization strategies for each Data, Algorithm, or Machine axis
-- Evaluate system health using D·A·M scorecard metrics (I/O overhead, active parameters, MFU)
-
-:::
-
 ## How to Use This Appendix {.unnumbered}
 
 This appendix is a reference for single-node performance and for the single-machine quantities that fleet-scale arguments take as given. Start from the symptom or the missing quantity:
@@ -202,7 +186,7 @@ Each optimization shortens only one term of the iron law, so adding peak FLOP/s 
 # │ Goal: Supply registry values for the prerequisite recap: H100 memory tiers,
 # │       Archetype A training-state bytes, and GPT-3 transformer arithmetic.
 # │ Show: 80 GB HBM at 3.35 TB/s; 50 MB L2; 64 GB/s PCIe; 16 and 14 bytes/param;
-# │       2.8 TB state; 2.45 TB checkpoint; 33-device floor; 12 N_L d^2;
+# │       2.8 TB state; 2.45 TB checkpoint; 35-device floor; 12 N_L d^2;
 # │       6PD vs. registry training FLOPs; 4.72 MB KV cache per token.
 # │ How: byte widths summed per parameter; params × bytes; 6 × P × D.
 # │
@@ -218,6 +202,7 @@ class SingleMachineRecap:
     h = Hardware.Cloud.H100
     m = Scenarios.DenseLLMPretrainingReference.workload  # Archetype A running instance (GPT-3, 175B dense)
     hbm_cap = h.memory.capacity
+    hbm_budget = h.memory.labeled_capacity  # 80 GB decimal nameplate budget
     hbm_bw = h.memory.bandwidth
     l2_cap = h.memory.l2_cache
     pcie_bw = h.interconnect.bandwidth  # per direction
@@ -239,7 +224,7 @@ class SingleMachineRecap:
     train_state_q = (params * state_bpp).to(TB)
     ckpt_q = (params * ckpt_bpp).to(TB)
     weights_q = (params * BYTES_FP16).to(GB)
-    min_devices = math.ceil((train_state_q / hbm_cap).to("").magnitude)
+    min_devices = math.ceil((train_state_q / hbm_budget).to("").magnitude)
     hbm_pcie_ratio = (hbm_bw / pcie_bw).to("").magnitude
     layer_params = 12 * layers * hidden**2
     layer_params_ratio = layer_params / params
@@ -252,12 +237,12 @@ class SingleMachineRecap:
     check(state_bpp_sum.to(byte).magnitude == state_bpp.to(byte).magnitude, "Table rows must sum to the registry training-state bytes/param")
     check(ckpt_bpp_sum.to(byte).magnitude == ckpt_bpp.to(byte).magnitude, "Checkpoint rows must sum to the registry checkpoint bytes/param")
     check(abs(train_state_q.magnitude - 2.8) < 0.01, "Archetype A state should be 2.8 TB")
+    check(min_devices == 35, "2.8 TB divided by the 80 GB H100 nameplate must give 35 devices")
     check(abs(layer_params_ratio - 1) < 0.02, "12 N_L d^2 should match GPT-3 within 2 percent")
     check(abs((train_flops_q / registry_flops_q).to("").magnitude - 1) < 0.01, "6PD should match registry training FLOPs")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     hbm_cap_str = fmt_memory_capacity(hbm_cap, precision=0)
-    hbm_cap_decimal_str = fmt_memory(hbm_cap.to(GB), unit=GB, precision=1)
     hbm_bw_str = fmt_bandwidth(hbm_bw, unit=TB / second, precision=2)
     l2_str = fmt_memory_capacity(l2_cap, precision=0)
     pcie_bw_str = fmt_bandwidth(pcie_bw, unit=GB / second, precision=0)
@@ -333,7 +318,7 @@ Whether a large model fits in an 80 GB H100 memory bank or must be partitioned a
 
 : **Mixed-Precision Adam Memory per Parameter**: Persistent training state before activations, framework metadata, and communication buffers. The checkpoint omits gradients because a resumed run recomputes them in its first step. {#tbl-appdx-dam-training-state}
 
-For Archetype A, the `{python} SingleMachineRecap.params_b_str`-parameter dense model the chapters use as their running instance, the training state is `{python} SingleMachineRecap.train_state_str` and a resumable checkpoint is `{python} SingleMachineRecap.ckpt_str`. A single H100 offers `{python} SingleMachineRecap.hbm_cap_str` of HBM (a binary nameplate, about `{python} SingleMachineRecap.hbm_cap_decimal_str` in decimal units), so the persistent state alone requires at least `{python} SingleMachineRecap.min_devices_str` devices before a single activation is stored. That floor is why the model state must be partitioned across devices, which @sec-distributed-training-systems develops. Serving the same model needs only the 16-bit weights, `{python} SingleMachineRecap.weights_str`, plus the key-value cache.
+For Archetype A, the `{python} SingleMachineRecap.params_b_str`-parameter dense model the chapters use as their running instance, the training state is `{python} SingleMachineRecap.train_state_str` and a resumable checkpoint is `{python} SingleMachineRecap.ckpt_str`. A single H100 offers `{python} SingleMachineRecap.hbm_cap_str` of HBM, so budgeting against that published nameplate capacity requires at least `{python} SingleMachineRecap.min_devices_str` devices for the persistent state alone before a single activation is stored. That floor is why the model state must be partitioned across devices, which @sec-distributed-training-systems develops. Serving the same model needs only the 16-bit weights, `{python} SingleMachineRecap.weights_str`, plus the key-value cache.
 
 Activations are the other large consumer of training memory. The intermediate tensors that the backward pass needs grow with batch size, sequence length, hidden width, and depth, and for long sequences they can exceed the parameter state. **Activation checkpointing**\index{Activation checkpointing!appendix refresher} stores only selected activations and recomputes the rest during the backward pass, trading additional compute for memory.
 
@@ -406,13 +391,3 @@ This progression exposes cases where higher single-node MFU comes at the expense
 ## Summary {#sec-appdx-dam-taxonomy-summary}
 
 The D·A·M taxonomy provides the diagnostic baseline for every ML systems analysis. Isolating the bottleneck to Data, Algorithm, or Machine ensures that optimization efforts target the binding constraint. Alongside that diagnostic lens, the memory hierarchy, the byte accounting of mixed-precision training, and the transformer counting rules supply the quantities that fleet-scale arguments take as given. This single-node discipline is the prerequisite for the fleet-scale engineering addressed throughout this book.
-
-::: {.callout-takeaways title="Single-machine diagnostic heuristics"}
-
-* **Identify the dominant axis**: Decide whether Data, Algorithm, or Machine is the binding constraint before proposing any optimization.
-* **Profile arithmetic intensity**: Arithmetic intensity, read against the roofline's ridge point, quantitatively distinguishes between Data-bound and Machine-bound regimes.
-* **Use the iron law**: The iron law transforms vague symptoms into specific term-based bottlenecks.
-* **Count bytes and FLOPs per parameter**: Mixed-precision Adam training holds `{python} SingleMachineRecap.state_bpp_str` bytes per parameter (`{python} SingleMachineRecap.ckpt_bpp_str` in a checkpoint), and dense transformer training costs about $6\Parameters \DatasetSize$ FLOPs. These two rules size most memory and compute budgets in the chapters.
-* **Grade with the scorecard**: The Data-Algorithm-Machine scorecard standardizes "good" performance before moving to fleet scale.
-
-:::

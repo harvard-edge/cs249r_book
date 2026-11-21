@@ -3,7 +3,7 @@ number-offset: [4]
 quiz: collective_communication_quizzes.json
 concepts: collective_communication_concepts.yml
 engine: jupyter
-notation-local: [\AllReduceMinimumBandwidthTime, \AllToAllExchangeTime, \BackwardPassTime, \BlockQuantizationScale, \ButterflyAllReduceTime, \CodecOverheadTime, \CollectiveCallStartupLatency, \CompressedGradientUpdate, \CompressedGradientUpdateElement, \CutCrossingDataVolume, \DestinationRankIndex, \DoubleTreeAllReduceTime, \ErrorFeedbackResidual, \ErrorFeedbackResidualElement, \ExpertIndex, \ExpertSelectionProbability, \ExpertTokenCount, \FirstRingTraceElement, \FourthRingTraceElement, \GradientElementCount, \InjectionBandwidth, \LayerAllReduceTime, \LayerBackwardTime, \LayerExposedCommunicationTime, \LocalTokenCount, \MaxReceivedTokenCount, \OverlappedBackwardCommunicationTime, \OversubscriptionRatio, \ParameterServerCount, \PartnerBitIndex, \QuantizedGradient, \RandomRetainedElementCount, \RankContribution, \RankReductionResult, \ReceiveBandwidth, \ReconstructedGradient, \RingAllReduceBandwidthTime, \RingAllReduceStartupTime, \RingStepIndex, \SecondRingTraceElement, \SequentialBackwardCommunicationTime, \SplitMessageCount, \ThirdRingTraceElement, \TokenDispatchTime, \TopMagnitudeIndicator, \TorusFirstAxisChipCount, \TorusSecondAxisChipCount, \TorusThirdAxisChipCount, \TrainingStepCount, \TreeLikeAllReduceTime]
+notation-local: [\AllReduceMinimumBandwidthTime, \AllToAllExchangeTime, \BackwardPassTime, \BlockQuantizationScale, \ButterflyAllReduceTime, \CodecOverheadTime, \CollectiveCallStartupLatency, \CompressedGradientUpdate, \CompressedGradientUpdateElement, \CutCrossingDataVolume, \DestinationRankIndex, \DoubleTreeAllReduceTime, \ErrorFeedbackResidual, \ErrorFeedbackResidualElement, \ExpertIndex, \ExpertTokenCount, \FirstRingTraceElement, \FourthRingTraceElement, \GradientElementCount, \InjectionBandwidth, \LayerAllReduceTime, \LayerBackwardTime, \LayerExposedCommunicationTime, \LocalTokenCount, \MaxReceivedTokenCount, \OverlappedBackwardCommunicationTime, \OversubscriptionRatio, \ParameterServerCount, \PartnerBitIndex, \QuantizedGradient, \RandomRetainedElementCount, \RankContribution, \RankReductionResult, \ReceiveBandwidth, \ReconstructedGradient, \RingAllReduceBandwidthTime, \RingAllReduceStartupTime, \RingStepIndex, \SecondRingTraceElement, \SequentialBackwardCommunicationTime, \SplitMessageCount, \ThirdRingTraceElement, \TokenDispatchTime, \TopMagnitudeIndicator, \TorusFirstAxisChipCount, \TorusSecondAxisChipCount, \TorusThirdAxisChipCount, \TrainingStepCount, \TreeLikeAllReduceTime]
 ---
 
 # Collective Communication {#sec-collective-communication}
@@ -864,13 +864,13 @@ Trading resident memory for on-demand assembly multiplies the collective call co
 
 Total byte volume changes far less than that call count. Because each AllGather and ReduceScatter over a large group moves nearly $\CollectiveTensorSize$ bytes per rank across all layers combined, where $\CollectiveTensorSize$ is the model-sized payload without optimizer state, the $2\LayerCount$-call schedule sends roughly the AllReduce's $2\CollectiveTensorSize$ per rank and the resharded $3\LayerCount$-call schedule sends about $3\CollectiveTensorSize$ ($1.5\times$) when parameters and gradients travel at the same width. Different parameter and reduction datatypes shift that ratio.
 
-The higher call count carries its own price, because every call pays a startup cost. An effective startup cost $\CollectiveCallStartupLatency$ contributes approximately $2\LayerCount\CollectiveCallStartupLatency$ per step before overlap, or $3\LayerCount\CollectiveCallStartupLatency$ with resharding. FSDP is therefore more sensitive to $\CollectiveCallStartupLatency$ than a single whole-gradient reduction even though its bytes barely change. The counts describe one grouping policy, since FSDP units need not coincide with layers and data parallelism can also split its reduction into several calls to enable overlap. FSDP implementations mitigate the startup cost through prefetching\index{Prefetching} and communication-stream pipelining (issuing collectives on a stream separate from computation), but the relevant $\CollectiveCallStartupLatency$ must come from a matched collective benchmark rather than a wire-latency specification.
+The higher call count carries its own price, because every call pays a startup cost. Denoting the effective per-call startup cost across a collective's schedule rounds by $\CollectiveCallStartupLatency$ (decomposed round by round in @sec-communication-collective-operations-collective-operations-network-performance-modeling-0d8e), this overhead contributes approximately $2\LayerCount\CollectiveCallStartupLatency$ per step before overlap, or $3\LayerCount\CollectiveCallStartupLatency$ with resharding. FSDP is therefore more sensitive to $\CollectiveCallStartupLatency$ than a single whole-gradient reduction even though its bytes barely change. The counts describe one grouping policy, since FSDP units need not coincide with layers and data parallelism can also split its reduction into several calls to enable overlap. FSDP implementations mitigate the startup cost through prefetching\index{Prefetching} and communication-stream pipelining (issuing collectives on a stream separate from computation), but the relevant $\CollectiveCallStartupLatency$ must come from a matched collective benchmark rather than a wire-latency specification, following the calibration discipline in @sec-communication-nccl-reality.
 
 ::: {.column-margin .margin-pointer}
 ↪ The ZeRO stages and the reshard-after-forward FSDP schedule, with the memory each saves and the communication each adds, are developed in @sec-distributed-training-systems-systems-memoryefficient-data-parallelism-zero-fsdp-0e69.
 :::
 
-Selecting the right collective algorithm at each invocation requires distinguishing transfer cost from dependency exposure. An FSDP AllGather sits on the critical path\index{FSDP!AllGather latency sensitivity}, because a layer cannot compute until its full parameters arrive. Its transfer can nevertheless be bandwidth-bound when the parameter tensor is large. Prefetching can hide part of that gather, while a ReduceScatter can overlap with the remaining backward computation. Neither dependency alone selects Ring or Tree; message size, group size, topology, and the available overlap window jointly determine the useful schedule.
+Selecting the right collective algorithm at each invocation requires distinguishing transfer cost from dependency exposure. An FSDP AllGather sits on the critical path\index{FSDP!AllGather latency sensitivity}, because a layer cannot compute until its full parameters arrive. Its transfer can nevertheless be bandwidth-bound when the parameter tensor is large. Prefetching can hide part of that gather, while a ReduceScatter can overlap with the remaining backward computation under the overlap limits developed in @sec-communication-overlap. Neither dependency alone selects Ring or Tree, whose size-dependent trade-offs are derived in @sec-communication-collective-operations-collective-operations-allreduce-algorithms-7545; message size, group size, topology, and the available overlap window jointly determine the useful schedule.
 
 The primitives specify what must be communicated, and sharding shows how often a training step invokes them. Choosing a schedule for each invocation first requires a price for every round of an exchange.
 
@@ -958,13 +958,13 @@ Where that crossover falls depends on the physical link, and across the typical 
 # │       second set of hand-typed numbers that drifted from the rows.
 # │ Show: Effective collective-launch alpha ranges, registry bandwidths, and
 # │       the computed latency/bandwidth crossover size per interconnect.
-# │ How: Alpha ranges are EFFECTIVE collective-launch values (software stack
-# │      included) — pedagogical assumptions consistent with the chapter's
-# │      wire-vs-effective discussion; the registry holds wire latencies
-# │      (Tech.Interconnect, Fabrics) and two effective anchors
-# │      (SwitchFabric.AlphaNdr/AlphaRoce). Editor ruling 2026-09-28: AlphaNdr
-# │      is the canonical NDR alpha, so the NDR crossover uses it. The
-# │      per-fabric ranges are the registered teaching set
+# │ How: Alpha ranges are EFFECTIVE single-hop adjacent-rank collective-launch
+# │      values (RDMA NIC + single leaf/rail hop + software stack) — distinct
+# │      from Tech.Interconnect wire latencies (0.5–1 us) and Fabrics.*.latency
+# │      multi-hop end-to-end cluster transit (IB NDR 5 us, HDR 7 us, RoCE 10 us).
+# │      Editor ruling 2026-09-28 / Wave 1 V2-APP-F4: SwitchFabric.AlphaNdr
+# │      (1.5 us) is the canonical single-hop NDR anchor, so the NDR crossover
+# │      uses it. The per-fabric ranges are the registered teaching set
 # │      (SwitchFabric.EffectiveAlpha<Link>Low/High, ruling P8, 2026-10-15).
 # │
 # └─────────────────────────────────────────────────────────────────────────────
@@ -1036,7 +1036,7 @@ class InterconnectAlphaBeta:
 | **PCIe Gen5 (GPU$\leftrightarrow$CPU)** |  `{python} InterconnectAlphaBeta.pcie_alpha_range_str`  |      `{python} InterconnectAlphaBeta.pcie_bw_str`      |   `{python} InterconnectAlphaBeta.pcie_nstar_str`    |
 | **Ethernet 100 Gbps (RoCE)**            |  `{python} InterconnectAlphaBeta.roce_alpha_range_str`  |      `{python} InterconnectAlphaBeta.roce_bw_str`      |   `{python} InterconnectAlphaBeta.roce_nstar_str`    |
 
-: **Interconnect Performance Parameters**: Effective per-message launch latency ($\MessageStartupLatency$, including the software stack), per-direction link bandwidth ($\LinkBandwidth$, the one-way deliverable rate that enters $\PointToPointTransferTime(\PointToPointMessageSize) = \MessageStartupLatency+ \PointToPointMessageSize/\LinkBandwidth$; NVLink's datasheet `{python} InterconnectAlphaBeta.nvlink_bidir_str` is the bidirectional total, so its $\LinkBandwidth$ is the `{python} InterconnectAlphaBeta.nvlink_bw_str` one-way rate), and the computed crossover size $\LatencyBandwidthCrossoverSize = \MessageStartupLatency\cdot \LinkBandwidth$ at each row's $\MessageStartupLatency$ midpoint (for InfiniBand NDR, at the representative `{python} InterconnectAlphaBeta.ndr_alpha_anchor_us_str` used throughout this chapter), where communication transitions from latency-bound to bandwidth-bound. {#tbl-interconnect-parameters}
+: **Interconnect Performance Parameters**: Effective single-hop adjacent-rank launch latency ($\MessageStartupLatency$, including the NIC, a single switch hop, and the communication software stack; distinct from multi-hop end-to-end leaf-spine-leaf cluster transit), per-direction link bandwidth ($\LinkBandwidth$, the one-way deliverable rate that enters $\PointToPointTransferTime(\PointToPointMessageSize) = \MessageStartupLatency+ \PointToPointMessageSize/\LinkBandwidth$; NVLink's datasheet `{python} InterconnectAlphaBeta.nvlink_bidir_str` is the bidirectional total, so its $\LinkBandwidth$ is the `{python} InterconnectAlphaBeta.nvlink_bw_str` one-way rate), and the computed crossover size $\LatencyBandwidthCrossoverSize = \MessageStartupLatency\cdot \LinkBandwidth$ at each row's $\MessageStartupLatency$ midpoint (for InfiniBand NDR, at the representative `{python} InterconnectAlphaBeta.ndr_alpha_anchor_us_str` used throughout this chapter), where communication transitions from latency-bound to bandwidth-bound. {#tbl-interconnect-parameters}
 
 The NVLink and NDR rows show the roughly ninefold per-direction cliff of @sec-compute-bandwidth-hierarchy, which @sec-network-fabrics-introduction traces across a decade of interconnect generations. Even on the lower-crossover inter-node fabric, a bucket far above $\LatencyBandwidthCrossoverSize$ can still travel in chunks below it because a ring divides the bucket among its $\DeviceCount$ ranks. Pricing one bucket at two group sizes shows when that happens and what it costs.
 
@@ -2039,7 +2039,8 @@ class RingVsTree:
     _beta_gbs = int(beta.to(GB / second).magnitude)
     ring_lat_sub_math = fmt_math(rf"2 \times {N - 1} \times {_alpha_us}\ \MicroUnitPrefix\text{{s}}")
     tree_lat_sub_math = fmt_math(rf"2 \times {log2N} \times {_alpha_us}\ \MicroUnitPrefix\text{{s}}")
-    ring_bw_sub_math = fmt_math(rf"2 \times \frac{{{_m_mb}\text{{ MB}}}}{{{_beta_gbs}\text{{ GB/s}}}}")
+    # The (N-1)/N factor is written out, so the printed operands give the printed 196.9 us.
+    ring_bw_sub_math = fmt_math(rf"2 \times \frac{{{N - 1}}}{{{N}}} \times \frac{{{_m_mb}\text{{ MB}}}}{{{_beta_gbs}\text{{ GB/s}}}}")
     tree_bw_sub_math = fmt_math(rf"{2 * log2N} \times \frac{{{_m_mb}\text{{ MB}}}}{{{_beta_gbs}\text{{ GB/s}}}}")
     # Penalty ratios and the crossover substitution for the notebook's insight line.
     lat_ratio_mult_str = fmt_multiple((ring_lat / tree_lat).to_base_units().magnitude, precision=1, commas=False)
@@ -2060,7 +2061,7 @@ class RingVsTree:
 
 **Bandwidth** (note the difference):
 
-3.  **Ring Bandwidth**\index{Ring AllReduce!bandwidth}: $2\frac{\DeviceCount-1}{\DeviceCount}\frac{\CollectivePayloadSize}{\LinkBandwidth} \approx$ `{python} RingVsTree.ring_bw_sub_math` = `{python} RingVsTree.ring_bw_us_str` (optimal: each rank sends about $2\CollectivePayloadSize$ in total, the lower bound).
+3.  **Ring Bandwidth**\index{Ring AllReduce!bandwidth}: $2\frac{\DeviceCount-1}{\DeviceCount}\frac{\CollectivePayloadSize}{\LinkBandwidth} =$ `{python} RingVsTree.ring_bw_sub_math` $\approx$ `{python} RingVsTree.ring_bw_us_str` (optimal: each rank sends about $2\CollectivePayloadSize$ in total, the lower bound).
 4.  **Tree Bandwidth**\index{Tree AllReduce!bandwidth}: $2\log_2 \DeviceCount\cdot \frac{\CollectivePayloadSize}{\LinkBandwidth} =$ `{python} RingVsTree.tree_bw_sub_math` = `{python} RingVsTree.tree_bw_us_str` (each level sends full message).
 
 Summing the latency and bandwidth terms gives each algorithm's total time (@tbl-collective-communication-ring-vs-tree-1mb-64gpu).
@@ -3040,11 +3041,10 @@ class MoeAllToAll:
     remote_gpus = _d.remote_peers
     data_per_transfer = _d.pair_bytes
     total_sent = _d.sent_bytes
-    # Bandwidth term rounded to whole microseconds: the worked trace presents it
-    # as the clean "≈ 5 μs" approximation the callout math line displays, so the
-    # downstream per-transfer and serialized totals stay on visible
-    # arithmetic (1.5 + 5 = 6.5; 7 × 6.5 = 45.5).
-    bw_time = round((data_per_transfer / beta).to(microsecond).magnitude) * microsecond
+    # Keep exact unrounded arithmetic through serialized and parallel bounds so
+    # T_serialized - T_parallel = (remote_gpus - 1) * alpha = 6 * 1.5 us = 9.0 us
+    # holds exactly (47.2 - 38.2 = 9.0 us) with matching visible precision.
+    bw_time = (data_per_transfer / beta).to(microsecond)
     per_transfer = alpha + bw_time
     serialized = remote_gpus * per_transfer
     # Concurrent peer streams share the GPU's aggregate NIC injection bandwidth.
@@ -3056,8 +3056,12 @@ class MoeAllToAll:
     check(abs(kb_per_token.to(KB).magnitude - 4.096) < 1e-9, f"KB/token = {kb_per_token.to(KB).magnitude}")
     check(tokens_per_expert == 64, f"tokens/expert = {tokens_per_expert}")
     check(abs(data_per_transfer.to(KB).magnitude - 262.144) < 1e-9, f"data/transfer = {data_per_transfer.to(KB).magnitude} KB")
-    check(abs(per_transfer.to(microsecond).magnitude - 6.5) < 1e-9, f"T/transfer = {per_transfer.to(microsecond).magnitude} μs")
+    check(abs(per_transfer.to(microsecond).magnitude - 6.74288) < 1e-6, f"T/transfer = {per_transfer.to(microsecond).magnitude} μs")
     check(abs(parallel.to(microsecond).magnitude - 38.20016) < 1e-9, f"Parallel injection lower bound = {parallel.to(microsecond).magnitude} μs")
+    check(
+        abs((serialized - parallel).to(microsecond).magnitude - (remote_gpus - 1) * alpha.to(microsecond).magnitude) < 1e-9,
+        "Serialized - parallel must equal (remote_gpus - 1) * alpha",
+    )
     # ┌── 4. OUTPUT ────────────────────────────────────────
     alpha_us_str = fmt_time(alpha, microsecond, precision=1, commas=False)
     beta_gb_per_s_str = fmt_bandwidth(beta, unit=GB / second, precision=0, commas=False)
@@ -3067,8 +3071,8 @@ class MoeAllToAll:
     tokens_per_expert_str = fmt_count(tokens_per_expert, label="token", commas=False)
     data_per_transfer_kb_str = fmt_memory(data_per_transfer, unit=KB, precision=3, commas=False)
     total_sent_mb_str = fmt_memory(total_sent, unit=MB, precision=2, commas=False)
-    bw_time_approx_us_str = fmt_time(bw_time, microsecond, precision=0, commas=False)
-    per_transfer_us_str = fmt_time(per_transfer, unit=microsecond, precision=1, commas=False)
+    bw_time_us_str = fmt_time(bw_time, microsecond, precision=2, commas=False)
+    per_transfer_us_str = fmt_time(per_transfer, unit=microsecond, precision=2, commas=False)
     serialized_us_str = fmt_time(serialized, unit=microsecond, precision=1, commas=False)
     parallel_us_str = fmt_time(parallel, unit=microsecond, precision=1, commas=False)
     total_tokens_str = fmt_count(total_tokens, label="token", commas=False)
@@ -3093,11 +3097,11 @@ Each GPU holds `{python} MoeAllToAll.tokens_per_gpu_str` that need to reach `{py
 
 **Latency Analysis** (InfiniBand NDR, $\MessageStartupLatency=$ `{python} MoeAllToAll.alpha_us_str`, $\LinkBandwidth=$ `{python} MoeAllToAll.beta_gb_per_s_str`):
 
-Each of the `{python} MoeAllToAll.remote_gpus_str` transfers is a `{python} MoeAllToAll.data_per_transfer_kb_str` message. From the $\MessageStartupLatency$-$\LinkBandwidth$ model: $\TransferTimeForPayload$ = `{python} MoeAllToAll.alpha_us_str` + `{python} MoeAllToAll.bw_time_approx_us_str` = `{python} MoeAllToAll.per_transfer_us_str` per transfer.
+Each of the `{python} MoeAllToAll.remote_gpus_str` transfers is a `{python} MoeAllToAll.data_per_transfer_kb_str` message. From the $\MessageStartupLatency$-$\LinkBandwidth$ model: $\TransferTimeForPayload \approx$ `{python} MoeAllToAll.alpha_us_str` + `{python} MoeAllToAll.bw_time_us_str` = `{python} MoeAllToAll.per_transfer_us_str` per transfer.
 
-If serialized: `{python} MoeAllToAll.remote_gpus_str` $\times$ `{python} MoeAllToAll.per_transfer_us_str` = `{python} MoeAllToAll.serialized_us_str`. If all `{python} MoeAllToAll.remote_gpus_str` transfers are issued concurrently, they still share the GPU's `{python} MoeAllToAll.beta_gb_per_s_str` injection port. The aggregate injection lower bound is therefore $\MessageStartupLatency+ \text{total bytes sent}/\LinkBandwidth=$ `{python} MoeAllToAll.parallel_us_str`, before contention and additional collective overhead. Full duplex permits simultaneous sending and receiving; it does not provide one full-bandwidth outgoing port per peer.
+If serialized: `{python} MoeAllToAll.remote_gpus_str` $\times$ `{python} MoeAllToAll.per_transfer_us_str` $\approx$ `{python} MoeAllToAll.serialized_us_str`. If all `{python} MoeAllToAll.remote_gpus_str` transfers are issued concurrently, they still share the GPU's `{python} MoeAllToAll.beta_gb_per_s_str` injection port. The aggregate injection lower bound is therefore $\MessageStartupLatency+ \text{total bytes sent}/\LinkBandwidth \approx$ `{python} MoeAllToAll.parallel_us_str`, before contention and additional collective overhead. Full duplex permits simultaneous sending and receiving; it does not provide one full-bandwidth outgoing port per peer.
 
-**Systems insight**: The injection result is only a lower bound. If the topology's usable bisection bandwidth is $\BisectionBandwidth$ and $\CutCrossingDataVolume$ bytes must cross its minimum cut, the exchange also obeys $\AllToAllExchangeTime\geq \CutCrossingDataVolume/\BisectionBandwidth$. Oversubscription reduces $\BisectionBandwidth$, fine-grained peer messages add startup cost, and expert skew raises the maximum receive volume above the uniform estimate. The forward pass runs the AllToAll twice per layer, once for token dispatch and once for result collection; training also communicates gradients during backward.
+**Systems insight**: The injection result is only a lower bound. If the topology's usable per-direction bisection bandwidth is $\BisectionBandwidth$ and $\CutCrossingDataVolume$ bytes must cross its minimum cut in one direction (from one half of the partition to the other), the exchange also obeys $\AllToAllExchangeTime\geq \CutCrossingDataVolume/\BisectionBandwidth$. Oversubscription reduces $\BisectionBandwidth$, fine-grained peer messages add startup cost, and expert skew raises the maximum receive volume above the uniform estimate. The forward pass runs the AllToAll twice per layer, once for token dispatch and once for result collection; training also communicates gradients during backward.
 
 :::
 
@@ -3105,13 +3109,13 @@ If serialized: `{python} MoeAllToAll.remote_gpus_str` $\times$ `{python} MoeAllT
 
 The worked trace in notebook \ref{nbk-collective-communication-alltoall-moe-token-routing} assumes uniform token routing, in which every expert receives an identical share of tokens. In production MoE models, routing decisions are dynamic and data-dependent. The exchange keeps its two-phase shape, but its buffer sizes, its slowest receiver, and its load on the fabric all become functions of the routing distribution. The hierarchy just developed for AllReduce reappears as one of the schedules that can contain them.
 
-Each MoE layer performs two exchanges. In an MoE transformer layer with $\ExpertCount$ experts distributed across $\DeviceCount$ ranks ($\ExpertCount/\DeviceCount$ experts per rank), each rank holds a local batch of $\LocalTokenCount$ tokens. A gating router computes top-$\RoutedExpertCount$ routing probabilities over all $\ExpertCount$ experts for each token, inducing two collective communication phases separated by expert computation. During token dispatch\index{AllToAll!dispatch phase}, each rank partitions its $\LocalTokenCount$ local token activation vectors ($\LayerInputVector\in \mathbb{R}^{\HiddenDimension}$, where $\HiddenDimension$ is the model's hidden dimension) according to the destination ranks hosting the selected experts. The rank then executes an AllToAll collective (or variable-size `AllToAllv`\index{AllToAll!variable-size AllToAllv}) to route tokens across the fabric according to the routing matrix\index{AllToAll!routing matrix}. After each rank computes forward passes through its assigned local expert feed-forward networks (FFNs), the token combine\index{AllToAll!combine phase} phase executes a second AllToAll collective to route output vectors back to their originating ranks. Each rank then computes the weighted combination of expert outputs:
-$$\LayerOutputVector_i = \sum_{j \in \text{top-}\RoutedExpertCount} {\RouterGateProbability}_{i,j} \cdot \text{Expert}_j(\LayerInputVector_i)$$
+Each MoE layer performs two exchanges. In an MoE transformer layer with $\ExpertCount$ experts distributed across $\DeviceCount$ ranks ($\ExpertCount/\DeviceCount$ experts per rank), each rank holds a local batch of $\LocalTokenCount$ tokens whose activations ($\LayerInputVector\in \mathbb{R}^{\HiddenDimension}$, where $\HiddenDimension$ is the model's hidden dimension) a gating router assigns to top-$\RoutedExpertCount$ experts. During token dispatch\index{AllToAll!dispatch phase}, each rank partitions its $\LocalTokenCount$ activation vectors by destination rank and executes an AllToAll collective (or variable-size `AllToAllv`\index{AllToAll!variable-size AllToAllv}) according to the routing matrix\index{AllToAll!routing matrix}. After each rank runs its local expert feed-forward networks (FFNs), the token combine\index{AllToAll!combine phase} phase executes a second AllToAll to return the processed vectors to their originating ranks for gate-weighted recombination.
 
-Because routing is data-dependent, so are the required buffer sizes, even when the input tensor shape is fixed. One simplified model treats assignments of different tokens independently: the count for expert $\ExpertIndex$ is then $\ExpertTokenCount\sim \text{Binomial}(\DeviceCount \LocalTokenCount, \ExpertSelectionProbability)$, where $\ExpertSelectionProbability$ is the fixed probability that a token selects expert $\ExpertIndex$. Correlated tokens or changing router probabilities require a different count model. To avoid reallocating buffers for every routing decision, a capacity-limited implementation can reserve space using an expert capacity factor\index{Capacity factor!expert routing} $\ExpertCapacityFactor\ge 1.0$, a multiplier on each expert's average share of token assignments [@lepikhin2021gshard; @fedus2022switch]:
-$$\text{Capacity}_{\ExpertIndex}= \left\lceil \frac{\DeviceCount\times \LocalTokenCount\times \RoutedExpertCount}{\ExpertCount} \times \ExpertCapacityFactor\right\rceil$$
+Because routing is data-dependent, the number of tokens $\ExpertTokenCount$ routed to each expert $\ExpertIndex$ varies from batch to batch even when the input tensor shape is fixed. Fixed-buffer implementations avoid reallocating communication buffers on every step by sizing each expert's buffer with a capacity factor\index{Capacity factor!expert routing} $\ExpertCapacityFactor \ge 1.0$ above the uniform per-expert share [@lepikhin2021gshard; @fedus2022switch], which inflates a padded AllToAll payload by roughly $\ExpertCapacityFactor$ whenever unused slots are transmitted alongside active tokens. A dropless variable-size `AllToAllv` avoids transmitting those unused padding slots, though it still requires buffer memory for the realized counts $\ExpertTokenCount$ and remains exposed to routing skew.
 
-The capacity factor exposes a trade-off between reserved space and retained expert assignments. At uniform expected capacity ($\ExpertCapacityFactor= 1.0$), some experts can still overflow while others have unused slots. A dropping implementation bypasses excess assignments through the residual connection\index{Token dropping!capacity factor}, changing the computation and potentially harming training quality. Increasing headroom ($\ExpertCapacityFactor> 1.0$, for example $1.25$–$1.5$) can reduce overflow. If the implementation transmits every reserved slot, its padded payload grows by approximately a factor of $\ExpertCapacityFactor$ relative to the uniform capacity-one budget; kernels that skip unused slots need not perform the corresponding dummy computation. A dropless implementation retains every assignment and can use variable-size `AllToAllv` to avoid sending unused slots. It still needs enough memory for the realized counts and remains exposed to routing skew.
+::: {.column-margin .margin-pointer}
+↪ Expert parallelism, including gate-weighted FFN recombination, capacity-factor sizing, and token-dropping trade-offs, is developed in @sec-distributed-training-systems-systems-expert-parallelism-mixture-experts-bc45.
+:::
 
 Because token routing is determined by input semantics, some experts inevitably receive disproportionate token volumes. An expert that receives several times the average load raises its host GPU's receive traffic by the same excess. The host's total receive volume depends on the combined load of all experts assigned to it, which is the rank-level quantity in the bound that follows.
 
@@ -3119,7 +3123,7 @@ Routing skew can create stragglers\index{Straggler!expert skew} in both communic
 $$\TokenDispatchTime\ge \frac{\MaxReceivedTokenCount\times \HiddenDimension\times \ElementStorageSize}{\ReceiveBandwidth}$$
 where $\MaxReceivedTokenCount= \max_{\RankIndex} \sum_{\ExpertIndex\in \text{rank } \RankIndex} \ExpertTokenCount$ counts the largest remotely received token batch at any rank $\RankIndex$, restricting $\ExpertTokenCount$ in this sum to assignments arriving from other ranks. Here $\ElementStorageSize$ is the bytes per activation element, and $\ReceiveBandwidth$ is that rank's receive bandwidth.
 
-Bisection capacity provides a separate limit. Ring AllReduce exchanges data with logical ring neighbors, whereas AllToAll permits every rank on one side of the bisection to send to every rank on the other\index{AllToAll!bipartite exchange}. Under uniform destination assignment, a fraction $(\DeviceCount-1)/\DeviceCount\approx 1$ of tokens leaves its source rank; the fraction crossing nodes or a particular fabric cut depends on placement. In the simplified symmetric fabric model, each rank has injection bandwidth $\InjectionBandwidth$, the rate its port can send into the fabric, and an oversubscription ratio $\OversubscriptionRatio:1$ gives a switch tier $\OversubscriptionRatio$ times more downlink than uplink capacity. Usable bisection bandwidth $\BisectionBandwidth = (\DeviceCount\cdot \InjectionBandwidth) / (2\OversubscriptionRatio)$ then bounds the time needed to carry traffic across that cut:
+Bisection capacity provides a separate limit. Ring AllReduce exchanges data with logical ring neighbors, whereas AllToAll permits every rank on one side of the bisection to send to every rank on the other\index{AllToAll!bipartite exchange}. Under uniform destination assignment, a fraction $(\DeviceCount-1)/\DeviceCount\approx 1$ of tokens leaves its source rank; the fraction crossing nodes or a particular fabric cut depends on placement. In the simplified symmetric fabric model, each rank has per-direction injection bandwidth $\InjectionBandwidth$, the rate its port can send into the fabric, and an oversubscription ratio $\OversubscriptionRatio:1$ gives a switch tier $\OversubscriptionRatio$ times more downlink than uplink capacity. Usable one-way bisection bandwidth $\BisectionBandwidth = (\DeviceCount\cdot \InjectionBandwidth) / (2\OversubscriptionRatio)$ then bounds the time needed to carry $\CutCrossingDataVolume$ bytes across that cut in one direction (from one half of the partition to the other):
 $$\TokenDispatchTime\ge \frac{\CutCrossingDataVolume}{\BisectionBandwidth}$$
 Dispatch cannot finish faster than the larger of those reception and bisection bounds, and notebook \ref{nbk-collective-communication-moe-skew-receive-bound} shows how routing skew alone raises the reception floor even when bisection capacity is ample.
 
@@ -3561,7 +3565,7 @@ The same model on a faster network, where communication takes only `{python} Com
 Verify your understanding of when and how to apply gradient compression:
 
 - [ ] **Error feedback**: explain why uncorrected 1-bit SGD can fail to converge and why 1-bit Adam introduces warmup and residual correction, comparing how each method handles information loss.
-- [ ] **Compression payoff**: determine whether applying 4$\times$ gradient compression improves total step time when the backward pass takes 800 ms and AllReduce takes either 200 ms or 2,000 ms.
+- [ ] **Compression payoff**: under the serial step model with negligible encoding overhead, determine whether 4$\times$ gradient compression that requires 20 percent more steps to reach target quality improves total training time when compute takes 800 ms per step and AllReduce takes either 200 ms or 2,000 ms.
 - [ ] **Error accumulator**: derive the steady-state behavior of the error accumulator $\ErrorFeedbackResidualElement_t$ when the true gradient is constant at $\LossGradient= 0.3$ and the compression threshold is 0.5.
 - [ ] **Top-k vs. quantization**: choose between Top-k sparsification and quantization for a workload, accounting for compression ratio and sparse-index encoding overhead.
 

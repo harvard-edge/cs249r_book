@@ -52,12 +52,15 @@ CreditParityAccuracyCost = _st.ConstraintAccuracyCostScenario(
     baseline_accuracy=85.0,  # scenario assumption
     constrained_accuracy=81.0,  # scenario assumption
     context={  # scenario assumption: the policy's stated rates, percent
+        "group_a_share": 60,
+        "group_b_share": 40,
         "group_a_default": 20,
         "group_b_default": 40,
-        "default_threshold": 30,
+        "default_threshold": 50,
         "group_a_approval": 80,
         "group_b_approval_unconstrained": 60,
-        "default_threshold_parity": 50,
+        "default_threshold_parity": 85,
+        "flipped_slice_default": 75,
     },
 )
 

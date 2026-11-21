@@ -23,13 +23,13 @@ This appendix is designed as a symptom-first reference for fleet-scale diagnosis
 
 Where the single-machine D·A·M framework (@sec-appdx-dam-taxonomy) diagnoses bottlenecks within one node (data starvation, algorithmic overhead, or hardware saturation), a distributed job can stall even when every individual node is healthy. The **C$^3$ taxonomy**\index{C³ taxonomy!appendix refresher} is the diagnostic framework for fleet-scale ML systems engineering. It isolates the dominant cluster-level axis across Compute (whether the accelerators are doing useful math), Communication (whether the network is moving data fast enough), and Coordination (whether the system is spending too much time on synchronization, failure recovery, and scheduling), along with the intersections between them. Rather than replacing D·A·M, C$^3$ extends each single-machine axis to the new failure modes that appear when a workload spans a fleet (@tbl-c3-dam-mapping).
 
-| **D·A·M axis** | **Single-machine concern**          | **C$^3$ extension**  | **What changes at fleet scale**                                                                                               |
-|:---------------|:------------------------------------|:---------------------|:------------------------------------------------------------------------------------------------------------------------------|
-| **Data**       | Host disk $\to$ GPU memory pipeline | Communication        | Data movement crosses network fabrics; AllReduce, AllGather, and pipeline transfers dominate                                  |
-| **Algorithm**  | Operator choice, autograd graph     | Compute/Coordination | Workload must be partitioned ($\DeviceCount$-way sharding); communication-to-compute ratio determines scaling                 |
-| **Machine**    | SM occupancy, HBM bandwidth         | Coordination         | Single-device faults become cluster-wide stragglers; failure recovery, scheduling, and power density constrain $\DeviceCount$ |
+| **D·A·M axis** | **Single-machine concern**          | **C$^3$ extension**        | **What changes at fleet scale**                                                                                                                                                            |
+|:---------------|:------------------------------------|:---------------------------|:-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Data**       | Host disk $\to$ GPU memory pipeline | Communication/Coordination | Data movement crosses network fabrics (AllReduce, AllGather, pipeline transfers), while distributed samplers and checkpoints require cluster-wide coordination                             |
+| **Algorithm**  | Operator choice, autograd graph     | Compute/Coordination       | Workload must be partitioned ($\DeviceCount$-way sharding); communication-to-compute ratio determines scaling                                                                              |
+| **Machine**    | SM occupancy, HBM bandwidth         | Compute/Coordination       | Per-device silicon throughput and HBM set the compute ceiling, while single-device faults become cluster-wide stragglers; recovery, scheduling, and power density constrain $\DeviceCount$ |
 
-: **Mapping D·A·M to C$^3$**: How single-machine diagnostic concerns generalize to fleet-scale challenges. {#tbl-c3-dam-mapping tbl-colwidths="[15,28,22,35]"}
+: **Mapping D·A·M to C$^3$**: How single-machine diagnostic concerns project many-to-many onto fleet-scale challenges (@sec-vol2-introduction-projection). {#tbl-c3-dam-mapping tbl-colwidths="[14,25,23,38]"}
 
 The most important row in @tbl-c3-dam-mapping is the last one. On a single machine, the overhead term ($\Latency$) in the iron law is typically small, consisting of kernel launch latency, Python dispatch, and synchronization barriers. At fleet scale, coordination becomes an axis in its own right: checkpoint writes, failure detection and recovery, pipeline bubble overhead, scheduler preemptions, and maintenance windows collectively consume a significant fraction of wall time. Coordination is the axis that single-machine diagnosis lacks, and much of this book is devoted to it.
 
@@ -110,7 +110,7 @@ The governing failure mode is that one slow participant paces the whole collecti
 
 ### Fleet-scale ML systems engineering {#sec-appdx-c3-taxonomy-triple-intersection}
 
-Partitioning a 405-billion-parameter model across 16,384 GPUs requires fitting shard states into high-bandwidth memory (HBM) ($\FleetComputeTaxonomyAxis$), matching tensor and pipeline traffic to intra-node NVLink and inter-node InfiniBand bandwidths ($\FleetCommunicationTaxonomyAxis$), and keeping pipeline bubbles and checkpoint stalls from consuming wall-clock time ($\FleetCoordinationTaxonomyAxis$). At the center ($\FleetComputeTaxonomyAxis\cap \FleetCommunicationTaxonomyAxis\cap \FleetCoordinationTaxonomyAxis$), all three constraints converge simultaneously. This is the discipline of **fleet-scale ML systems engineering**\index{Fleet-scale ML systems engineering!definition}. Systems engineers at this center do not optimize a single accelerator or a single network switch; they manage the trade-offs of the distributed machine as an integrated whole. The central engineering challenges encompass three coupled design problems:
+Partitioning a 405-billion-parameter model across 16,384 GPUs requires fitting shard states into high-bandwidth memory (HBM) ($\FleetComputeTaxonomyAxis$), matching tensor and pipeline traffic to intra-node NVLink and inter-node InfiniBand bandwidths ($\FleetCommunicationTaxonomyAxis$), and keeping pipeline bubbles and checkpoint stalls from consuming wall-clock time ($\FleetCoordinationTaxonomyAxis$). At the center ($\FleetComputeTaxonomyAxis\cap \FleetCommunicationTaxonomyAxis\cap \FleetCoordinationTaxonomyAxis$), all three constraints converge simultaneously. This is the discipline of **fleet-scale ML systems engineering**\index{Fleet-scale ML systems engineering!appendix refresher}. Systems engineers at this center do not optimize a single accelerator or a single network switch; they manage the trade-offs of the distributed machine as an integrated whole. The central engineering challenges encompass three coupled design problems:
 
 -  **4D parallelism co-design**: Balancing data parallelism (DP), tensor parallelism (TP), pipeline parallelism (PP), and expert parallelism (EP) so that memory consumption fits within accelerator HBM ($\FleetComputeTaxonomyAxis$), high-frequency communications map to intra-node NVLink and low-frequency communications map to inter-node fabrics ($\FleetCommunicationTaxonomyAxis$), and pipeline bubbles and barrier dependencies are minimized ($\FleetCoordinationTaxonomyAxis$).
 -  **Memory sharding vs. communication volume**: Frameworks like PyTorch FSDP2 and DeepSpeed ZeRO-3 eliminate memory redundancy ($\FleetComputeTaxonomyAxis$) by partitioning model states across workers, but pay for it with repeated AllGather communication ($\FleetCommunicationTaxonomyAxis$) and state coordination metadata ($\FleetCoordinationTaxonomyAxis$).
@@ -302,7 +302,7 @@ If communication were eliminated entirely, throughput would increase by `{python
 
 #### Symptom {.unnumbered}
 
-Even when both per-device compute and collective transfers are healthy, a `{python} C3CaseStudies.case3_n_gpus_str`-GPU training run shows `{python} C3CaseStudies.case3_mfu_pct_str` compute-phase model FLOPs utilization per device, measured only while kernels execute, and communication accounts for only `{python} C3CaseStudies.case3_comm_pct_str` of step time. Both figures look healthy. Yet only `{python} C3CaseStudies.case3_retained_pct_str` of wall time is left after the run's coordination overheads. That share is not a goodput factor, because it mixes losses that belong to different factors. Pipeline bubbles lie inside retained steps and are a program goodput loss, while checkpoints, recovery, maintenance, and preemption fall outside the steps (@sec-performance-engineering-goodput-boundaries). The remaining `{python} C3CaseStudies.case3_coord_pct_str` of wall time is consumed by checkpoint writes, failure recovery restarts, pipeline bubble idle time, scheduler preemptions (`{python} C3CaseStudies.case3_oh_scheduler_pct_str` of wall time), and maintenance windows.
+Even when both per-device compute and collective transfers are healthy, a shared-fleet `{python} C3CaseStudies.case3_n_gpus_str`-GPU training run shows `{python} C3CaseStudies.case3_mfu_pct_str` compute-phase model FLOPs utilization per device, measured only while kernels execute, and communication accounts for only `{python} C3CaseStudies.case3_comm_pct_str` of step time. Both figures look healthy. Yet only `{python} C3CaseStudies.case3_retained_pct_str` of wall time is left after the run's coordination overheads. That share is not a goodput factor, because it mixes losses that belong to different factors. Pipeline bubbles lie inside retained steps and are a program goodput loss, while checkpoints, recovery, maintenance, and preemption fall outside the steps (@sec-performance-engineering-goodput-boundaries). The remaining `{python} C3CaseStudies.case3_coord_pct_str` of wall time adds shared-fleet scheduler preemptions (`{python} C3CaseStudies.case3_oh_scheduler_pct_str` of wall time) on top of the four dedicated-cluster overhead categories in @tbl-fleet-overhead: checkpoint writes, failure recovery restarts, pipeline bubble idle time, and maintenance windows.
 
 #### Diagnosis {.unnumbered}
 
@@ -411,11 +411,11 @@ Once the decision tree isolates the anomalous hardware or OS counter, pairing th
 
 The fleet diagnostic scorecard in @tbl-c3-dam-scorecard carries each single-node Data, Algorithm, and Machine (D·A·M) concern to the fleet telemetry that exposes it, the C$^3$ axes it affects, and a target benchmark. Each row links a single-node resource category to the cluster-level telemetry signal and target benchmark that govern distributed execution.
 
-| **D·A·M axis**             | **Fleet telemetry signal**                                                   | **C$^3$ axis**                 | **Target efficiency benchmark**                                                                                         |
-|:---------------------------|:-----------------------------------------------------------------------------|:-------------------------------|:------------------------------------------------------------------------------------------------------------------------|
-| **Data ($\text{D}$)**      | Network fabric RX/TX saturation, storage write I/O wait times                | **Communication/Coordination** | I/O wait time $< 2\%$ of step time; NCCL ring bandwidth $> 85\%$ of fabric peak                                         |
-| **Algorithm ($\text{A}$)** | Pipeline bubble idle fraction, partitioning imbalance across stages          | **Compute/Coordination**       | Pipeline bubble fraction $< 20\%$ under the balanced-stage model                                                        |
-| **Machine ($\text{M}$)**   | Model FLOPs utilization (MFU), PCIe AER errors, thermal and power throttling | **Compute**                    | MFU $>$ `{python} C3Scorecard.mfu_high_str`; thermal throttle events $= 0$; PCIe link width held at maximum (Gen 5 x16) |
+| **D·A·M axis**             | **Fleet telemetry signal**                                                                       | **C$^3$ axis**                 | **Target efficiency benchmark**                                                                                                                             |
+|:---------------------------|:-------------------------------------------------------------------------------------------------|:-------------------------------|:------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Data ($\text{D}$)**      | Network fabric RX/TX saturation, storage write I/O wait times                                    | **Communication/Coordination** | I/O wait time $< 2\%$ of step time; NCCL ring bandwidth $> 85\%$ of fabric peak                                                                             |
+| **Algorithm ($\text{A}$)** | Pipeline bubble idle fraction, partitioning imbalance across stages                              | **Compute/Coordination**       | Pipeline bubble fraction $< 20\%$ under the balanced-stage model                                                                                            |
+| **Machine ($\text{M}$)**   | Model FLOPs utilization (MFU), PCIe AER errors, thermal and power throttling, node health alerts | **Compute/Coordination**       | MFU $>$ `{python} C3Scorecard.mfu_high_str`; thermal throttle events $= 0$; PCIe link width held at maximum (Gen 5 x16); faulty nodes drained automatically |
 
 : **Fleet Diagnostic Scorecard**: Each single-node D·A·M concern maps to the fleet telemetry that exposes it and to the C$^3$ axes it affects. {#tbl-c3-dam-scorecard}
 
@@ -436,7 +436,7 @@ The gap between scaling-law predictions and observed training outcomes is, in la
 #| label: appendix-c3-effective-flops
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: ### The effective FLOP/s concept — 100K-GPU callout
-from mlsysim.fmt import MarkdownStr, fmt, fmt_flop_rate
+from mlsysim.fmt import MarkdownStr, check, fmt, fmt_flop_rate
 
 class C3EffectiveFlops:
     fleet = Systems.Clusters.Mega_100K
@@ -444,12 +444,12 @@ class C3EffectiveFlops:
     peak_flops = n_gpus_eff * fleet.node.accelerator.compute.peak_flops
     compute_phase_efficiency = Literature.Training.MfuHigh
     scaling_efficiency = ReferenceStats.TrainingScaleProfiles.Eff8192Gpu
-    operational_goodput = 1.0 - (
-        Ops.TrainingRunOverheads.Checkpoint
-        + Ops.TrainingRunOverheads.FailureRecovery
-        + Ops.TrainingRunOverheads.Maintenance
-        + Ops.TrainingRunOverheads.SchedulerPreemption
-    )
+    # Shared-fleet runtime goodput deducts scheduler preemption in addition to the
+    # dedicated-cluster out-of-step overheads (checkpoint, failure recovery, maintenance).
+    dedicated_goodput = 1.0 - (Ops.TrainingRunOverheads.Checkpoint + Ops.TrainingRunOverheads.FailureRecovery + Ops.TrainingRunOverheads.Maintenance)
+    operational_goodput = dedicated_goodput - Ops.TrainingRunOverheads.SchedulerPreemption
+    check(abs(dedicated_goodput - 0.82) < 1e-9, "Dedicated-cluster runtime goodput must equal 82 percent")
+    check(abs(operational_goodput - 0.65) < 1e-9, "Shared-fleet runtime goodput must equal 65 percent")
     effective_flops = peak_flops * compute_phase_efficiency * scaling_efficiency * operational_goodput
     c3_tax = (peak_flops / effective_flops).to("").magnitude
     eff_fraction = (effective_flops / peak_flops).to("").magnitude
@@ -462,6 +462,8 @@ class C3EffectiveFlops:
     compute_efficiency_pct_str = fmt_percent(compute_phase_efficiency, precision=0, commas=False, style='prose')
     scaling_pct_str = fmt_percent(scaling_efficiency, precision=0, commas=False, style='prose')
     operational_goodput_pct_str = fmt_percent(operational_goodput, precision=0, commas=False, style='prose')
+    dedicated_goodput_pct_str = fmt_percent(dedicated_goodput, precision=0, commas=False, style='prose')
+    scheduler_preemption_pct_str = fmt_percent(Ops.TrainingRunOverheads.SchedulerPreemption, precision=0, commas=False, style='prose')
     n_gpus_str = fmt(n_gpus_eff, precision=0)
     scaling_ref_gpus_str = fmt(Systems.Clusters.Frontier_8K.total_accelerators, precision=0)
 
@@ -482,11 +484,11 @@ MFU, the single-device baseline, measures useful model arithmetic against peak t
 
 ::: {#psp-appendix-c3-tax-100000-gpu-cluster .callout-perspective title="Compound C³ loss on a 100,000-GPU cluster"}
 
-Consider a `{python} C3EffectiveFlops.n_gpus_str`-GPU H100 cluster with `{python} C3EffectiveFlops.peak_pflop_per_s_str` of peak aggregate throughput. After the three disjoint C$^3$ efficiency factors:
+Consider a shared-fleet `{python} C3EffectiveFlops.n_gpus_str`-GPU H100 cluster with `{python} C3EffectiveFlops.peak_pflop_per_s_str` of peak aggregate throughput. After the three disjoint C$^3$ efficiency factors:
 
 `{python} C3EffectiveFlops.effective_eq_math`
 
-The fleet delivers `{python} C3EffectiveFlops.eff_fraction_pct_str` of its peak capacity as useful training work. The **compound C$^3$ loss**\index{C³ taxonomy!compound loss}, the ratio of peak to effective compute, is `{python} C3EffectiveFlops.c3_tax_mult_str`, so achieving a given effective compute budget requires `{python} C3EffectiveFlops.c3_tax_mult_str` the raw hardware. The compute phase retains a `{python} C3EffectiveFlops.compute_efficiency_pct_str` efficiency factor, and the distributed step retains a `{python} C3EffectiveFlops.scaling_pct_str` scaling factor (using the modeled `{python} C3EffectiveFlops.scaling_ref_gpus_str`-GPU tier as an illustrative proxy that includes pipeline losses). Runtime goodput retains a `{python} C3EffectiveFlops.operational_goodput_pct_str` factor after checkpoints, failures, scheduler preemptions, and maintenance.
+The fleet delivers `{python} C3EffectiveFlops.eff_fraction_pct_str` of its peak capacity as useful training work. The **compound C$^3$ loss**\index{C³ taxonomy!compound loss}, the ratio of peak to effective compute, is `{python} C3EffectiveFlops.c3_tax_mult_str`, so achieving a given effective compute budget requires `{python} C3EffectiveFlops.c3_tax_mult_str` the raw hardware. The compute phase retains a `{python} C3EffectiveFlops.compute_efficiency_pct_str` efficiency factor, and the distributed step retains a `{python} C3EffectiveFlops.scaling_pct_str` scaling factor (using the modeled `{python} C3EffectiveFlops.scaling_ref_gpus_str`-GPU tier as an illustrative proxy that includes pipeline losses). Shared-fleet runtime goodput retains a `{python} C3EffectiveFlops.operational_goodput_pct_str` factor after deducting checkpoints, failures, maintenance, and `{python} C3EffectiveFlops.scheduler_preemption_pct_str` scheduler preemptions (@tbl-fleet-overhead); a dedicated cluster without preemption retains `{python} C3EffectiveFlops.dedicated_goodput_pct_str` runtime goodput (@sec-appdx-fleet-foundations-weak-scaling-fleet).
 
 These losses reflect the physics of fleet-scale computation rather than a failure of engineering. The C$^3$ taxonomy quantifies where the losses occur so that optimization effort targets the dominant term.
 

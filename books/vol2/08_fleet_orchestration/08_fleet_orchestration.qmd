@@ -742,7 +742,7 @@ Where bin packing and device sharing govern how requests fit onto individual nod
 ↩ Ring and tree AllReduce schedules, each of which completes only after every rank's contribution has been reduced, are established in @sec-communication-collective-operations-collective-operations-allreduce-algorithms-7545.
 :::
 
-The partial-allocation pattern is a hold-and-wait deadlock\index{Deadlock!hold-and-wait},[^fn-deadlock-scheduling-cycle] and its price is the whole allocation for as long as the cycle persists. At the scale of the chapter's reference workload, two `{python} ClusterEconomicsContext.gang_job_gpus_str`-GPU gangs that have each acquired `{python} ClusterEconomicsContext.gang_held_gpus_str` GPUs from a pool too small to complete either one burn about `{python} ClusterEconomicsContext.gang_idle_burn_str` per hour apiece. The limiting case is two jobs that each request the entire cluster, the example OpenAI used to motivate group admission (example \ref{exmp-fleet-orchestration-openai-gang-scheduling}). On the `{python} ClusterEconomicsContext.cluster_size_str`-GPU cluster, a deadlock that strands every device wastes `{python} ClusterEconomicsContext.cluster_hourly_cost_str` per hour at the chapter's rate while producing no progress for either job. Measured against the stake computed at the start of the chapter, raising utilization from `{python} ClusterEconomicsContext.util_low_pct_str` to `{python} ClusterEconomicsContext.util_high_pct_str` recovers about `{python} ClusterEconomicsContext.daily_gain_str` per day in equivalent capacity value. About `{python} ClusterEconomicsContext.deadlock_hours_str` hours of such a deadlock therefore erase a full day of that gain. Gang scheduling does not create the gain, but it protects it. For a rigid job $\RigidGangJob$ requiring $\DeviceCount$ GPUs, the scheduler must grant all $\DeviceCount$ GPUs atomically or leave the job queued without a partial allocation. This all-or-nothing rule removes hold-and-wait for the resources covered by that allocation; it does not prevent later deadlocks in application code or auxiliary resources.
+The partial-allocation pattern is a hold-and-wait deadlock\index{Deadlock!hold-and-wait},[^fn-deadlock-scheduling-cycle] and its price is the whole allocation for as long as the cycle persists. At the scale of the chapter's reference workload, two `{python} ClusterEconomicsContext.gang_job_gpus_str`-GPU gangs that have each acquired `{python} ClusterEconomicsContext.gang_held_gpus_str` GPUs from a pool too small to complete either one burn about `{python} ClusterEconomicsContext.gang_idle_burn_str` per hour apiece. The limiting case is two jobs that each request the entire cluster, a scenario @sec-fleet-orchestration-kubernetes revisits when showing how Kubernetes enforces all-or-nothing gang scheduling. On the `{python} ClusterEconomicsContext.cluster_size_str`-GPU cluster, a deadlock that strands every device wastes `{python} ClusterEconomicsContext.cluster_hourly_cost_str` per hour at the chapter's rate while producing no progress for either job. Measured against the stake computed at the start of the chapter, raising utilization from `{python} ClusterEconomicsContext.util_low_pct_str` to `{python} ClusterEconomicsContext.util_high_pct_str` recovers about `{python} ClusterEconomicsContext.daily_gain_str` per day in equivalent capacity value. About `{python} ClusterEconomicsContext.deadlock_hours_str` hours of such a deadlock therefore erase a full day of that gain. Gang scheduling does not create the gain, but it protects it. For a rigid job $\RigidGangJob$ requiring $\DeviceCount$ GPUs, the scheduler must grant all $\DeviceCount$ GPUs atomically or leave the job queued without a partial allocation. This all-or-nothing rule removes hold-and-wait for the resources covered by that allocation; it does not prevent later deadlocks in application code or auxiliary resources.
 
 [^fn-deadlock-scheduling-cycle]: **Hold-and-wait**\index{Deadlock!Coffman conditions}: One of the four Coffman conditions (mutual exclusion, hold-and-wait, no preemption, and circular wait), all of which must hold for deadlock to occur [@coffman1971]. Gang scheduling removes hold-and-wait through atomic allocation, which is why it prevents this deadlock by construction; the price is reduced packing flexibility.
 
@@ -824,7 +824,7 @@ Slurm's architecture consists of a central controller daemon (`slurmctld`) that 
 
 | **Partition** | **GPUs/node**  | **Interconnect** |  **Typical use**   |
 |:--------------|:--------------:|:----------------:|:------------------:|
-| **dgx-a100**  | 8$\times$ A100 | NVLink + IB NDR  | Large LLM training |
+| **dgx-h100**  | 8$\times$ H100 | NVLink + IB NDR  | Large LLM training |
 | **a100-pcie** | 4$\times$ A100 |  PCIe + IB HDR   |  Medium training   |
 | **inference** | 2$\times$ A10G |     Ethernet     |   Model serving    |
 | **debug**     | 1$\times$ V100 |     Ethernet     |    Development     |
@@ -851,7 +851,7 @@ Several Slurm features expose ML structure to the batch system. A hyperparameter
 
 Heterogeneous jobs\index{Slurm!heterogeneous jobs} carry the heterogeneous gang of @sec-fleet-orchestration-heterogeneous-gang into a batch allocation. One job can contain components with distinct resource requests, admitted together. The 64-GPU fine-tuning run of the 175B model, for example, could request 8 GPU nodes for training and 2 CPU-only nodes for on-the-fly tokenization as a single allocation. It could then launch training on the GPU component and data workers on the CPU component (`srun --het-group=0` and `--het-group=1`). This separation helps only if the data workers and transfer path sustain the training stage's consumption rate; a heterogeneous allocation exposes that choice but does not itself balance the pipeline.
 
-At the boundaries of each allocation, prolog and epilog scripts\index{Slurm!prolog and epilog scripts} turn job transitions into health checks. A prolog tests reported topology, ECC counters, and link status on each allocated node and drains a failing node before launch. An epilog removes the job's orphan processes and shared-memory segments. Draining a failing node this way applies the quarantine practice of @sec-fleet-orchestration-topology-discovery at job boundaries, keeping sensitive work off a node whose health evidence shows degradation. Passing the prolog reduces exposure to known faults but does not establish the bandwidth the job will receive.
+At the boundaries of each allocation, prolog and epilog scripts\index{Slurm!prolog and epilog scripts} turn job transitions into health checks. A prolog tests reported topology, ECC counters, and link status on each allocated node and drains a failing node before launch. An epilog removes the job's orphan processes and shared-memory segments. Draining a failing node at job boundaries previews the quarantine practice developed later in @sec-fleet-orchestration-topology-discovery, keeping sensitive work off a node whose health evidence shows degradation. Passing the prolog reduces exposure to known faults but does not establish the bandwidth the job will receive.
 
 Slurm's strengths for ML training include explicit batch allocations, configurable fair-share policies, and integration with MPI-based distributed training frameworks. A mixed training-serving fleet also needs a service lifecycle that maintains ready replicas as demand and failures change. Inside a batch scheduler, adding or removing an inference replica means submitting or canceling a job, a far heavier operation than a controller adjusting a replica count, and a failed replica stays down until something resubmits it. Operators must integrate replica health, replacement, and demand-driven scaling with the batch scheduler, or assign those responsibilities to a service orchestration platform.
 
@@ -925,7 +925,7 @@ class OpenAiK8sScale:
 
 When a PodGroup cannot find enough free capacity on its own, priority classes\index{Kubernetes!priority classes} control scheduling precedence and preemption\index{Kubernetes!preemption} eligibility. A fleet might give inference higher priority than training to help protect serving service-level objectives (SLOs), but priority cannot replace ready capacity during a demand spike. With `preemptionPolicy: PreemptLowerPriority`, a pending pod can displace lower-priority pods when their removal makes placement feasible. With `preemptionPolicy: Never`, it retains queue precedence without initiating preemption and remains subject to higher-priority preemption. Termination, cleanup, and replacement startup take time. Training applications also need a checkpoint-aware shutdown path that fits the allowed grace period; assigning priorities does not create that path. The policy must balance serving readiness against repeated interruption of training.
 
-Kueue\index{Kueue!Kubernetes job queueing}[^fn-kueue-k8s-scheduler] makes admission a separate control decision. It manages when workloads may consume quota, while a compatible scheduler binds their pods to nodes. The admission policy and placement policy must agree on resource types, group requirements, and topology. Separating these responsibilities lets each layer run its own policy, at the price of keeping the two consistent. Kueue represents each team or project as a queue with a configured quota (a ClusterQueue\index{Kueue!ClusterQueue borrowing}) and groups queues into cohorts whose members may lend one another unused quota, under the borrowing and reclaim contract of @sec-fleet-orchestration-burst-capacity.
+Kueue\index{Kueue!Kubernetes job queueing}[^fn-kueue-k8s-scheduler] makes admission a separate control decision. It manages when workloads may consume quota, while a compatible scheduler binds their pods to nodes. The admission policy and placement policy must agree on resource types, group requirements, and topology. Separating these responsibilities lets each layer run its own policy, at the price of keeping the two consistent. Kueue represents each team or project as a queue with a configured quota (a ClusterQueue\index{Kueue!ClusterQueue borrowing}) and groups queues into cohorts whose members may lend one another unused quota, following the borrowing and reclaim contract developed later in @sec-fleet-orchestration-burst-capacity.
 
 [^fn-kueue-k8s-scheduler]: **Kueue**\index{Kueue!Kubernetes scheduling}: Kueue separates workload admission from pod placement. Its all-or-nothing mechanisms include waiting for admitted pods to become ready and requeuing workloads that exceed the configured timeout. Aggregate quota admission alone does not prove that a gang fits the physical topology; the guarantee depends on the configured readiness, topology, and placement mechanisms.
 
@@ -973,7 +973,7 @@ class ReferenceCheckpoint:
     corpus_tb_str = fmt_memory(corpus_bytes, unit=TB, precision=0, commas=False)
 ```
 
-Checkpoint bandwidth is the third constraint, because storage integration must account for the checkpoint storm of definition \ref{dfn-data-storage-checkpoint-storm}, in which many workers write large amounts of state together. Kubernetes PersistentVolumeClaims (PVCs) request capacity on a configured storage system but do not reserve checkpoint throughput. A `{python} ReferenceCheckpoint.job_gpus_str`-GPU training job writing the `{python} ReferenceCheckpoint.ckpt_tb_str` resumable checkpoint of the 175B model needs a measured write budget shared with other workloads. Backend bandwidth controls, client throttling, or staggered writes can limit interference; the platform must verify which controls the storage implementation enforces.
+Checkpoint bandwidth is the third constraint, because storage integration must account for the checkpoint storm of @sec-storage-checkpointing, in which many workers write large amounts of state together. Kubernetes PersistentVolumeClaims (PVCs) request capacity on a configured storage system but do not reserve checkpoint throughput. A `{python} ReferenceCheckpoint.job_gpus_str`-GPU training job writing the `{python} ReferenceCheckpoint.ckpt_tb_str` resumable checkpoint of the 175B model needs a measured write budget shared with other workloads. Backend bandwidth controls, client throttling, or staggered writes can limit interference; the platform must verify which controls the storage implementation enforces.
 
 Visibility into progress is the fourth. The **observability stack**\index{Observability stack!definition} for training clusters combines general-purpose cluster monitoring (commonly Prometheus and Grafana) with accelerator telemetry such as the Data Center GPU Manager (DCGM) exporter, which reports utilization, memory bandwidth, temperature, and ECC errors. These observations locate symptoms. Correlating them with step progress, input waits, and communication traces is what distinguishes useful computation from stalls and identifies which dependency limits a training job.
 
@@ -1198,9 +1198,9 @@ class TopologyPlacement:
 
 Applied to a whole job, the same locality reasoning ranks four placement strategies on a `{python} TopologyPlacement.n_gpus_str`-GPU, 0.5 GB gradient synchronization (@fig-topology-placement). The latencies in this comparison are illustrative rather than derived from topology names alone. They are constructed above the payload's ring-AllReduce bandwidth bound to show the order in which placement removes delay, and the resulting speedup ratio compares whole collectives rather than matching the link-bandwidth ratio of the earlier two-rack paths.
 
-Random placement spans multiple racks and spine switches at an assumed `{python} TopologyPlacement.random_placement_latency_ms_str`, and each successive strategy removes one source of delay that the previous one leaves. Confining the group to a single rack eliminates spine hops and reduces latency to `{python} TopologyPlacement.rack_aware_latency_ms_str`. Rail-optimized alignment maps ranks so that every member of each collective group sits at the same local GPU index and therefore on the same network rail (developed in @sec-fleet-orchestration-rail-optimized). Traffic that previously hopped between rails through the spine now stays within one rail's switches, which cuts latency to `{python} TopologyPlacement.rail_optimized_latency_ms_str`. Topology-optimal placement additionally avoids leaf ports that other jobs are using and reaches `{python} TopologyPlacement.optimal_latency_ms_str`, a `{python} TopologyPlacement.speedup_mult_str` reduction across the four bars (each of which also carries its algorithm throughput).
+Random placement spans multiple racks and spine switches at an assumed `{python} TopologyPlacement.random_placement_latency_ms_str`, and each successive strategy removes one source of delay that the previous one leaves. Confining the group to a single rack eliminates cross-rack spine hops and reduces latency to `{python} TopologyPlacement.rack_aware_latency_ms_str`. Rail-optimized alignment maps ranks so that every member of each collective group sits at the same local GPU index and therefore on the same network rail (developed in @sec-fleet-orchestration-rail-optimized). Traffic that previously hopped between rails through the spine now stays within one rail's switches, which cuts latency to `{python} TopologyPlacement.rail_optimized_latency_ms_str`. Topology-optimal placement additionally avoids leaf ports that other jobs are using and reaches `{python} TopologyPlacement.optimal_latency_ms_str`, a `{python} TopologyPlacement.speedup_mult_str` reduction across the four bars (each of which also carries its algorithm throughput).
 
-::: {#fig-topology-placement fig-env="figure" fig-pos="htb" fig-cap="**Topology Placement Impact**: Assumed AllReduce latency across four placement strategies (Random, Rack-Aware, Rail-Optimized, and Topology-Optimal) for a 0.5 GB gradient sync on 64 GPUs. The assumed latency falls from 120 ms to 25 ms, a 4.8$\times$ ratio. Labels report payload divided by completion time (algorithm throughput), not physical link bandwidth. The dashed ghost above each bar names the source of delay that strategy removes." fig-alt="Bar chart of AllReduce latency for four placement strategies: random at 120 ms, rack-aware at 85 ms, and rail-optimized at 40 ms in gray, and topology-optimal at 25 ms in light green. Each bar carries its latency and algorithm throughput inside its top. Above each bar after the first, a dashed hatched ghost reaches up to the previous bar's height and names the delay that strategy removes: spine hops, cross-rail hops, and contended leaf ports, joined by dotted steps into a staircase. A dashed line carries the 120 ms level across the chart, and a green double arrow between it and the top of the topology-optimal bar is labeled 4.8 times lower."}
+::: {#fig-topology-placement fig-env="figure" fig-pos="htb" fig-cap="**Topology Placement Impact**: Assumed AllReduce latency across four placement strategies (Random, Rack-Aware, Rail-Optimized, and Topology-Optimal) for a 0.5 GB gradient sync on 64 GPUs. The assumed latency falls from 120 ms to 25 ms, a 4.8$\times$ ratio. Labels report payload divided by completion time (algorithm throughput), not physical link bandwidth. The dashed ghost above each bar names the source of delay that strategy removes." fig-alt="Bar chart of AllReduce latency for four placement strategies: random at 120 ms, rack-aware at 85 ms, and rail-optimized at 40 ms in gray, and topology-optimal at 25 ms in light green. Each bar carries its latency and algorithm throughput inside its top. Above each bar after the first, a dashed hatched ghost reaches up to the previous bar's height and names the delay that strategy removes: cross-rack spine hops, cross-rail hops, and contended leaf ports, joined by dotted steps into a staircase. A dashed line carries the 120 ms level across the chart, and a green double arrow between it and the top of the topology-optimal bar is labeled 4.8 times lower."}
 
 ```{python}
 #| echo: false
@@ -1263,7 +1263,7 @@ for bar, time, bw in zip(bars, times, bandwidths):
 
 # Staircase: each strategy keeps the previous bar's height as a dashed ghost, and
 # the ghost names the source of delay that strategy removes (prose order).
-removed = ['spine hops', 'cross-rail hops', 'contended\nleaf ports']
+removed = ['cross-rack\nspine hops', 'cross-rail hops', 'contended\nleaf ports']
 for i in range(1, len(times)):
     xb = x[i] - 0.28
     # rc_context keeps the light hatch local to these ghosts (no rcParams leak).
@@ -1371,7 +1371,37 @@ When a spine switch fails or an optical link degrades and begins retransmitting,
 
 Cluster topology is an operating state, not a fixed schematic. Hardware failures, maintenance windows, and thermal throttling change the paths and effective capacity available to the scheduler. A spine switch failure in a redundant Clos network can leave connectivity intact while removing capacity. The effect on our 175B parameter model's data-parallel AllReduce depends on rerouting, concurrent traffic, and how much bandwidth the job was using. If the failure increases exposed communication time, the scheduler must compare continuing at reduced throughput with the cost of moving to a healthier allocation. A degraded link can also pass binary up/down probes while cutting delivered bandwidth, so the scheduler needs performance evidence such as retransmission counts and collective bandwidth, the link-level telemetry of @sec-network-fabrics-link-telemetry, as well as reachability.
 
-A checkpoint-and-restart migration spends time saving state, releasing the old allocation, obtaining a new one, and restoring execution. Its value depends on measured transition cost and remaining work. If migration takes 10 minutes and removes a sustained 20 percent throughput loss, each later minute of training recovers a fifth of a minute of progress, so the move pays back in less than an hour of subsequent training. That comparison assumes a healthy destination is available and the gain persists. A practical policy also accounts for queue delay and requires evidence that placement causes the slowdown, such as rising collective time on the affected path, before it moves the job.
+```{python}
+#| echo: false
+#| label: defrag-migration-payback
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ DEFRAGMENTATION MIGRATION PAYBACK
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: The checkpoint-and-restart migration paragraph below.
+# │ Goal: Payback of a migration that removes a sustained throughput loss.
+# │ Show: 10 min cost, 20 percent loss removed, 50 min of later training to repay.
+# │ How: payback = cost / loss share. (Added 2026-11-20; worked in prose before.)
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt_percent, fmt_time
+from mlsysim.core.units import minute
+
+class MigrationPayback:
+    """Training time a migration needs to repay its transition cost."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    cost = 10 * minute  # scenario assumption: checkpoint, reallocate, restore
+    loss_removed = 0.20  # scenario assumption: sustained throughput loss the move removes
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    payback = (cost / loss_removed).to(minute)
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(payback < 60 * minute, "Prose says the move pays back in less than an hour.")
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    cost_str = fmt_time(cost, minute, precision=0, commas=False, style="word")
+    loss_pct_str = fmt_percent(loss_removed, precision=0, commas=False, style="prose")
+    payback_str = fmt_time(payback, minute, precision=0, commas=False, style="word")
+```
+
+A checkpoint-and-restart migration spends time saving state, releasing the old allocation, obtaining a new one, and restoring execution. Its value depends on measured transition cost and remaining work. If migration takes `{python} MigrationPayback.cost_str` and removes a sustained `{python} MigrationPayback.loss_pct_str` throughput loss, each later minute of training recovers that share of a minute of progress, so the move pays back after `{python} MigrationPayback.payback_str` of subsequent training. That comparison assumes a healthy destination is available and the gain persists. A practical policy also accounts for queue delay and requires evidence that placement causes the slowdown, such as rising collective time on the affected path, before it moves the job.
 
 ::: {#exmp-fleet-orchestration-health-checks .callout-example title="Performance-aware health checks (2021)"}
 
@@ -1558,12 +1588,13 @@ class ElasticNodeRange:
 # │          paragraph that introduces it.
 # │
 # │ Goal: Model eta_scaling for the 175B reference job from 64 to 4,096 GPUs.
-# │ Show: 89 -> 69 percent; the pipeline bubble dominates the losses at scale,
+# │ Show: 89 -> 70 percent; the pipeline bubble dominates the losses at scale,
 # │       while throughput still rises at every step.
 # │ How:  DistributedModel sweep; Scenarios.Gpt3SelfContainedReplicaDgxH100: TP = node size; PP = smallest power of two
 # │       that fits mixed-precision Adam state in HBM; fixed global batch from
 # │       Brown et al. (2020). Each sweep point is an unregistered in-memory
-# │       copy of the Training_1K fleet (HDR InfiniBand at every size).
+# │       copy of the Training_1K_NDR fleet (NDR InfiniBand at every size, as the
+# │       stored scaling-efficiency tiers; moved from HDR 2026-11-20).
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Literature, ReferenceStats, Scenarios, Systems
 from mlsysim.solvers import DistributedModel
@@ -1571,9 +1602,9 @@ from mlsysim.fmt import check, fmt, fmt_count, fmt_multiple, fmt_percent
 
 class ElasticScalingCurve:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    scenario = Scenarios.DenseLLMPretrainingReference  # GPT-3 175B on DGX H100 + HDR IB
+    scenario = Scenarios.DenseLLMPretrainingReference  # GPT-3 175B on DGX H100
     model = scenario.workload
-    fleet = scenario.system
+    fleet = Systems.Clusters.Training_1K_NDR  # 1,024 GPUs on NDR InfiniBand, the fabric of the stored tiers
     min_sys = Systems.Clusters.Research_256  # policy minimum (matches ElasticNodeRange)
     local_eff = float(ReferenceStats.TrainingScaleProfiles.LocalComputeEfficiency)
     batch_tokens = float(Literature.TrainingRuns.Gpt3BatchTokens)  # Brown et al. (2020), Table 2.1
@@ -1653,7 +1684,7 @@ Each action must respect the framework contract. The most consequential of the t
 
 ### Elastic scaling policies {#sec-fleet-orchestration-elastic-policies}
 
-Adding resources to a running job does not always accelerate time-to-convergence. Communication and synchronization overhead limit throughput gains, requiring the scheduler to enforce elastic scaling policies based on empirical efficiency curves rather than resource availability alone. With fixed global work per step, a job's scaling efficiency\index{Scaling efficiency!operating regimes} $\ScalingEfficiency(\ScalingCurveWorkerCount)$ at $\ScalingCurveWorkerCount$ workers (definition \ref{dfn-distributed-training-scaling-efficiency}) typically passes through three regimes. In the near-linear regime, per-worker computation dwarfs every fixed per-step cost. In the sublinear regime, pipeline fill and drain and the unhidden part of gradient synchronization become a visible share of each step. In the saturation regime, those fixed costs rival the shrinking computation itself. Assigning available GPUs to a saturated job can yield less useful progress than serving queued work. The lower allocation bound answers a different question. Below its **minimum viable scale**\index{Minimum viable scale!definition}, a job may lack the memory or complete parallel groups needed to execute at all. A policy can impose a higher minimum to meet a deadline, even when a smaller allocation remains computationally efficient.
+Adding resources to a running job does not always accelerate time-to-convergence. Communication and synchronization overhead limit throughput gains, requiring the scheduler to enforce elastic scaling policies based on empirical efficiency curves rather than resource availability alone. With fixed global work per step, a job's scaling efficiency\index{Scaling efficiency!operating regimes} $\ScalingEfficiency(\ScalingCurveWorkerCount)$ at $\ScalingCurveWorkerCount$ workers (defined in @sec-distributed-training-scaling-math) typically passes through three regimes. In the near-linear regime, per-worker computation dwarfs every fixed per-step cost. In the sublinear regime, pipeline fill and drain and the unhidden part of gradient synchronization become a visible share of each step. In the saturation regime, those fixed costs rival the shrinking computation itself. Assigning available GPUs to a saturated job can yield less useful progress than serving queued work. The lower allocation bound answers a different question. Below its **minimum viable scale**\index{Minimum viable scale!definition}, a job may lack the memory or complete parallel groups needed to execute at all. A policy can impose a higher minimum to meet a deadline, even when a smaller allocation remains computationally efficient.
 
 ::: {.column-margin}
 ![](images/svg/vol2_fleet_orchestration_margin_002.svg){width="100%" fig-alt="Schematic throughput curve against worker count beside a dashed ideal linear diagonal from the origin. The curve follows the diagonal at first, falls away from it, and flattens, with the regions labeled linear, sublinear, and saturated along the horizontal axis."}
@@ -2734,7 +2765,7 @@ class GpuSharingRoi:
 
 ::: {#nbk-fleet-orchestration-gpu-sharing-roi .callout-notebook title="GPU sharing ROI"}
 
-Consider a fleet serving `{python} GpuSharingRoi.gs_n_small_str` distinct `{python} GpuSharingRoi.gs_small_model_b_str` models (`{python} GpuSharingRoi.gs_small_footprint_gb_str` footprint each) and `{python} GpuSharingRoi.gs_n_large_str` distinct `{python} GpuSharingRoi.gs_large_model_b_str` models (`{python} GpuSharingRoi.gs_large_footprint_gb_str` footprint each). Assume load testing has established that each proposed co-resident pair meets its throughput and tail-latency objectives with the required headroom and isolation. The memory-utilization percentages use the same conservative admission budgets. The example computes the resulting capacity reduction under the load-testing assumption; memory fit alone would not establish it.
+Consider a fleet serving `{python} GpuSharingRoi.gs_n_small_str` distinct `{python} GpuSharingRoi.gs_small_model_b_str` models (`{python} GpuSharingRoi.gs_small_footprint_gb_str` runtime footprint each) and `{python} GpuSharingRoi.gs_n_large_str` distinct `{python} GpuSharingRoi.gs_large_model_b_str` models (`{python} GpuSharingRoi.gs_large_footprint_gb_str` of FP16 weights each, plus KV cache and runtime buffers). Assume load testing has established that each proposed co-resident pair meets its throughput and tail-latency objectives with the required headroom and isolation. The memory-utilization percentages use the same conservative admission budgets. The example computes the resulting capacity reduction under the load-testing assumption; memory fit alone would not establish it.
 
 **Strategy A (exclusive access, one model per GPU)**: The `{python} GpuSharingRoi.gs_small_model_b_str` models require `{python} GpuSharingRoi.gs_n_small_str` A100 GPUs (`{python} GpuSharingRoi.gs_a100_mem_gb_str` each), achieving only `{python} GpuSharingRoi.gs_excl_util_str` memory utilization (`{python} GpuSharingRoi.gs_n_small_str` $\times$ `{python} GpuSharingRoi.gs_small_footprint_gb_str` used out of `{python} GpuSharingRoi.gs_excl_total_mem_gb_str` total). The `{python} GpuSharingRoi.gs_large_model_b_str` models require `{python} GpuSharingRoi.gs_excl_large_str` (`{python} GpuSharingRoi.gs_n_large_str` models $\times$ `{python} GpuSharingRoi.gs_gpus_per_large_str` each for tensor parallelism). Total fleet: `{python} GpuSharingRoi.gs_excl_total_str`.
 
@@ -2986,7 +3017,7 @@ Multi-tenancy and quotas turn organizational priorities into rules for resource 
 
 Assigning fixed GPU quotas at the namespace or project level (for example, 500 GPUs to Team A, 300 to Team B, and 200 to Team C) gives each team a clear entitlement, but leads to systematic underutilization whenever workloads fluctuate. If Team A's 500-GPU allocation sits 50 percent idle during a quiet period while Team B's queue overflows with urgent work, rigid quotas leave 250 GPUs wasted that Team B is forbidden to use. Allocating smaller static quotas to each team creates the opposite failure: teams are blocked from running legitimate work during peak periods even when the cluster has spare capacity overall.
 
-Hierarchical quotas, which Slurm expresses through its account hierarchy and fair-share accounting (@eq-fleet-orchestration-fair-share) and Kueue through ClusterQueues grouped into borrowing cohorts, separate a team's guaranteed share from its maximum permitted allocation. In @eq-fleet-orchestration-quota, $\TeamQuotaCap$ denotes a team's maximum burst cap rather than its guarantee, $\DepartmentQuotaLimit$ is the department's total capacity limit, and $\SiblingTeamAllocation$ is each sibling team's current active allocation. Assuming those allocations remain within the department limit, the smaller of the team's burst cap and the department's currently unallocated capacity sets the team's admission ceiling before any reclamation:
+Hierarchical quotas, which Slurm expresses through its account hierarchy and fair-share accounting (@eq-fleet-orchestration-fair-share) and Kueue through ClusterQueues grouped into borrowing cohorts, separate a team's guaranteed share from its maximum permitted allocation. In @eq-fleet-orchestration-quota, $\TeamQuotaCap$ denotes a team's maximum burst cap rather than its guarantee, $\DepartmentQuotaLimit$ is the department's total capacity limit, and $\SiblingTeamAllocation$ is each sibling team's current active allocation. Assuming those allocations remain within the department limit, the smaller of the team's burst cap and the department capacity not currently held by sibling teams sets the team's admission ceiling before any reclamation:
 
 $$ \EffectiveAdmissionCeiling= \min\left(\TeamQuotaCap,\ \DepartmentQuotaLimit- \sum_{\text{other teams}} \SiblingTeamAllocation\right) $$ {#eq-fleet-orchestration-quota}
 
@@ -3342,6 +3373,7 @@ class DebugValueCalc:
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     debug_improvement = _fix.improvement
     debug_productive_gain = _fix.productive_gain
+    debug_productive_annual = debug_productive_gain * _gpu_rate * HOURS_PER_YEAR
     debug_recovered = _fix.raw_gpu_equivalent
     debug_annual = _fix.annual_value
     a100_80_nodes = a100_80_count // a100_gpus_per_node
@@ -3358,6 +3390,9 @@ class DebugValueCalc:
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(abs(debug_improvement - 0.24) < 0.01, f"Expected 24 pp utilization improvement, got {debug_improvement}")
     check(abs(debug_productive_gain - 245.76) < 0.01, f"Expected ~246 productive GPUs, got {debug_productive_gain}")
+    check(
+        abs(debug_productive_annual / MILLION - 4.31) < 0.01, f"Expected ~$4.31M active-GPU-equivalent value, got {debug_productive_annual / MILLION}"
+    )
     check(abs(debug_recovered - 409.6) < 0.01, f"Expected ~410 recovered GPUs, got {debug_recovered}")
     check(large_job_total_gpus == 1200, "Large-job demand should match scenario")
     check(medium_job_total_gpus == 256, "Medium-job demand should match scenario")
@@ -3366,6 +3401,7 @@ class DebugValueCalc:
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     debug_productive_gain_str = fmt_int(debug_productive_gain, commas=False)
+    debug_productive_annual_usd_str = fmt_usd(debug_productive_annual, scale="M", precision=1, commas=False)
     debug_recovered_str = fmt_int(debug_recovered, commas=False)
     debug_annual_usd_str = fmt_usd(debug_annual, scale="M", precision=0, commas=False)
     debug_gpu_hour_rate_str = fmt_usd(_gpu_rate, precision=0, commas=False, per="GPU-hour")
@@ -3383,8 +3419,8 @@ class DebugValueCalc:
     v100_nodes_str = fmt_count(v100_nodes, commas=False, label="node")
     a100_gpus_per_node_str = fmt_count(a100_gpus_per_node, commas=False, label="GPU")
     v100_gpus_per_node_str = fmt_count(v100_gpus_per_node, commas=False, label="GPU")
-    nvlink_a100_gb_per_s_str = fmt_bandwidth(Hardware.Cloud.A100.nvlink.bandwidth, unit=GB / second, precision=0)
-    pcie_v100_gb_per_s_str = fmt_bandwidth(Hardware.Cloud.V100.interconnect.bandwidth, unit=GB / second, precision=1)
+    nvlink_a100_gb_per_s_str = fmt_bandwidth(Hardware.Cloud.A100.nvlink.bandwidth_per_direction, unit=GB / second, precision=0)
+    pcie_v100_gb_per_s_str = fmt_bandwidth(Hardware.Cloud.V100.interconnect.bandwidth_per_direction, unit=GB / second, precision=1)
     pending_jobs_str = fmt(pending_jobs, precision=0, commas=False)
     large_job_peak_memory_str = fmt_memory(large_job_peak_memory, unit=GB, precision=0, commas=False)
     a100_80_alloc_before_str = fmt_percent(a100_80_alloc_before, precision=0, commas=False, style='symbol')
@@ -3405,7 +3441,7 @@ class DebugValueCalc:
 
 When a cluster adds a new generation of high-memory GPUs alongside older pools, job templates written for the newest hardware can leave the older pools sitting idle while dozens of jobs queue behind the newest partition. Diagnosing this **policy-infrastructure mismatch** requires comparing scheduler state with physical capability and inspecting job requests against each hardware pool. A full queue and idle accelerators can coexist when the scheduler is honoring constraints that the top-level dashboard has aggregated away. Consider a heterogeneous cluster accumulated across three procurement cycles (@tbl-fleet-orchestration-debug-inventory).
 
-| **GPU type**   |                  **Count**                  |                     **Memory**                     |                       **Interconnect**                       |                                               **Nodes**                                               |
+| **GPU type**   |                  **Count**                  |                     **Memory**                     |               **Interconnect (per direction)**               |                                               **Nodes**                                               |
 |:---------------|:-------------------------------------------:|:--------------------------------------------------:|:------------------------------------------------------------:|:-----------------------------------------------------------------------------------------------------:|
 | **A100-80 GB** | `{python} DebugValueCalc.a100_80_count_str` | `{python} DebugValueCalc.a100_80_memory_str` HBM2e | NVLink (`{python} DebugValueCalc.nvlink_a100_gb_per_s_str`)  | `{python} DebugValueCalc.a100_80_nodes_str` $\times$ `{python} DebugValueCalc.a100_gpus_per_node_str` |
 | **A100-40 GB** | `{python} DebugValueCalc.a100_40_count_str` | `{python} DebugValueCalc.a100_40_memory_str` HBM2e | NVLink (`{python} DebugValueCalc.nvlink_a100_gb_per_s_str`)  | `{python} DebugValueCalc.a100_40_nodes_str` $\times$ `{python} DebugValueCalc.a100_gpus_per_node_str` |
@@ -3421,7 +3457,7 @@ Across those three pools, only `{python} DebugValueCalc.a100_80_count_str` carry
 
 **Diagnosis**: Over-specification (users copying A100-80 GB templates for `{python} DebugValueCalc.large_job_peak_memory_str` memory jobs), pool fragmentation, and legacy V100 avoidance leave A100-40 GB and V100 nodes idle while large jobs wait for A100-80 GB allocations. The scheduler correctly enforced policies written for a homogeneous fleet that no longer matched the heterogeneous infrastructure.
 
-**Systems lesson**: Surface-level diagnosis often mistakes policy-infrastructure mismatches for scheduling algorithm bugs. Updating scheduler policies to support automatic capability matching, dynamic memory profiling, and backfilling raises cluster utilization to `{python} DebugValueCalc.debug_util_after_pct_prose_str`, recovering `{python} DebugValueCalc.debug_annual_usd_str` in annual compute capacity. @Tbl-fleet-orchestration-debug-results breaks that gain out pool by pool, using the allocated and active tiers of @sec-fleet-orchestration-resource-accounting.
+**Systems lesson**: Surface-level diagnosis often mistakes policy-infrastructure mismatches for scheduling algorithm bugs. Updating scheduler policies to support automatic capability matching, dynamic memory profiling, and backfilling raises cluster utilization to `{python} DebugValueCalc.debug_util_after_pct_prose_str`, avoiding roughly `{python} DebugValueCalc.debug_annual_usd_str` per year in replacement GPU purchases at the old utilization. @Tbl-fleet-orchestration-debug-results breaks that gain out pool by pool, using the allocated and active tiers of @sec-fleet-orchestration-resource-accounting.
 
 :::
 
@@ -3436,7 +3472,7 @@ Comparing the before-and-after measurements across pools (@tbl-fleet-orchestrati
 
 : **Utilization Recovery Results**: Before the fix, A100-80 GB GPUs were almost fully allocated but less than fully active, while strict job templates stranded the other pools. Pool rows report allocated utilization, and for the A100-80 GB pool also the active share of its allocated GPUs; the A100-80 GB change is in that active share, the others in allocation. The cluster-wide row is the fleet's separately observed average utilization, so the pool rows are diagnostic signals that locate the loss rather than terms that add up to the total. {#tbl-fleet-orchestration-debug-results}
 
-For this capacity valuation, assume that each active GPU-hour delivers the same retained useful work before and after the policy change, including across hardware pools. Under that simplifying assumption, the observed utilization gain is equivalent to approximately `{python} DebugValueCalc.debug_productive_gain_str` fully active GPUs of productive work (@tbl-fleet-orchestration-debug-results). A heterogeneous production fleet must validate that conversion against workload progress and measured throughput in each pool. As at the start of the chapter, procurement planning compares the gain with the hardware it replaces, here `{python} DebugValueCalc.debug_recovered_str` additional raw GPUs, because new devices under the old policies would also run at only `{python} DebugValueCalc.debug_util_before_pct_str` utilization. At `{python} DebugValueCalc.debug_gpu_hour_rate_str`, that avoided purchase represents approximately `{python} DebugValueCalc.debug_annual_usd_str` in annual recovered value, achieved through policy changes requiring zero additional hardware investment.
+For this capacity valuation, assume that each active GPU-hour delivers the same retained useful work before and after the policy change, including across hardware pools. Under that simplifying assumption, the observed utilization gain is equivalent to approximately `{python} DebugValueCalc.debug_productive_gain_str` fully active GPUs of productive work (@tbl-fleet-orchestration-debug-results), or `{python} DebugValueCalc.debug_productive_annual_usd_str` annually on the active-GPU-equivalent basis priced in @sec-fleet-orchestration-introduction. A heterogeneous production fleet must validate that conversion against workload progress and measured throughput in each pool. Procurement planning instead prices the raw hardware the gain replaces, here `{python} DebugValueCalc.debug_recovered_str` additional raw GPUs, because new devices under the old policies would also run at only `{python} DebugValueCalc.debug_util_before_pct_str` utilization. At `{python} DebugValueCalc.debug_gpu_hour_rate_str`, that avoided purchase represents approximately `{python} DebugValueCalc.debug_annual_usd_str` per year in replacement value, achieved through policy changes requiring zero additional hardware investment.
 
 ### Common utilization anti-patterns {#sec-fleet-orchestration-anti-patterns}
 
@@ -3526,7 +3562,42 @@ Gang scheduling prevents partial-allocation deadlock for a rigid synchronous gro
 
 **Pitfall**: *Setting static quotas based on peak demand.*
 
-Organizations commonly set team quotas to handle worst-case demand, reasoning that teams need guaranteed access during crunch periods. If Team A's peak demand is 500 GPUs and Team B's is 300 GPUs, the cluster needs 800 GPUs with static quotas. In practice, peaks rarely coincide. A 600-GPU cluster can accommodate either peak when the other team's simultaneous demand leaves enough capacity, but it cannot guarantee both peaks concurrently. Hierarchical fair-share with borrowing uses that statistical opportunity only when the declared guarantees fit physical capacity and borrowed work can yield within the reclamation contract. In this example, sizing static quotas to the sum of the peaks provisions 800 GPUs where a 600-GPU shared cluster with borrowing covers either peak. The extra 200, a quarter of the larger cluster, are guarantees that sit unused whenever the peaks do not coincide.
+```{python}
+#| echo: false
+#| label: static-quota-peaks
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ STATIC QUOTAS SIZED TO SUMMED PEAKS
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Pitfall "Setting static quotas based on peak demand" below.
+# │ Goal: Capacity for summed peaks against a shared cluster that covers either.
+# │ Show: 500 + 300 = 800 GPUs; a 600-GPU shared cluster; 200 idle, a quarter.
+# │ How: sums and shares. (Added 2026-11-20; worked in prose before.)
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt_count, fmt_percent
+
+class QuotaPeaks:
+    """Static quotas for two teams' peaks against one shared cluster."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    peak_a = 500  # scenario assumption: Team A's peak GPUs
+    peak_b = 300  # scenario assumption: Team B's peak GPUs
+    shared = 600  # scenario assumption: shared cluster that covers either peak
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    static = peak_a + peak_b
+    idle = static - shared
+    idle_share = idle / static
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(shared >= max(peak_a, peak_b) and shared < static, "The shared cluster covers either peak but not both.")
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    peak_a_str = fmt_count(peak_a, commas=False, label="GPU")
+    peak_b_str = fmt_count(peak_b, commas=False, label="GPU")
+    static_str = fmt_count(static, commas=False, label="GPU")
+    shared_num_str = fmt_count(shared, commas=False)
+    idle_num_str = fmt_count(idle, commas=False)
+    idle_share_pct_str = fmt_percent(idle_share, precision=0, commas=False, style="prose")
+```
+
+Organizations commonly set team quotas to handle worst-case demand, reasoning that teams need guaranteed access during crunch periods. If Team A's peak demand is `{python} QuotaPeaks.peak_a_str` and Team B's is `{python} QuotaPeaks.peak_b_str`, the cluster needs `{python} QuotaPeaks.static_str` with static quotas. In practice, peaks rarely coincide. A `{python} QuotaPeaks.shared_num_str`-GPU cluster can accommodate either peak when the other team's simultaneous demand leaves enough capacity, but it cannot guarantee both peaks concurrently. Hierarchical fair-share with borrowing uses that statistical opportunity only when the declared guarantees fit physical capacity and borrowed work can yield within the reclamation contract. In this example, sizing static quotas to the sum of the peaks provisions `{python} QuotaPeaks.static_str` where a `{python} QuotaPeaks.shared_num_str`-GPU shared cluster with borrowing covers either peak. The extra `{python} QuotaPeaks.idle_num_str`, `{python} QuotaPeaks.idle_share_pct_str` of the larger cluster, are guarantees that sit unused whenever the peaks do not coincide.
 
 :::
 

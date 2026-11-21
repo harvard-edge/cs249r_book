@@ -914,6 +914,18 @@ NVIDIA_DLE_RESNET50_A100_TRAINING = Provenance(
     ),
 )
 
+MLPERF_TRAINING_RESNET50_QUALITY_TARGET = Provenance(
+    id="prov:mlperf-training-resnet50-quality-target",
+    kind=ProvenanceKind.INDUSTRY_REPORT,
+    ref=(
+        "MLCommons, MLPerf Training Rules, benchmark table: Vision / Image classification / "
+        "ResNet-50 v1.5, quality target 75.90% classification (top-1 on ImageNet validation)"
+    ),
+    url="https://github.com/mlcommons/training_policies/blob/master/training_rules.adoc",
+    verified="2026-11-20",
+    notes="The accuracy a training submission must reach before its time is counted.",
+)
+
 MLPERF_TRAINING_V31_RESNET50_H100 = Provenance(
     id="prov:mlperf-training-v31-resnet50-h100",
     kind=ProvenanceKind.INDUSTRY_REPORT,
@@ -1359,9 +1371,12 @@ EFFECTIVE_COLLECTIVE_ALPHA_RANGES = _est(
     "Effective per-message collective-launch latency (alpha) ranges by interconnect: NVLink 4.0, "
     "PCIe Gen5, InfiniBand NDR and HDR, 100G RoCE",
     notes=(
-        "Teaching assumption, not a vendor figure: alpha here is the EFFECTIVE launch latency of one "
-        "collective message, communication-library software stack included, so it sits above the wire "
-        "latencies in Tech.Interconnect and Fabrics. Ranges: NVLink 1-2 us, PCIe Gen5 2-5 us, IB NDR "
+        "Teaching assumption, not a vendor figure: alpha here is the effective SINGLE-HOP "
+        "adjacent-rank collective-launch latency (RDMA NIC + single switch hop + communication "
+        "library software stack), so it sits above single-hop board/link wire latencies in "
+        "Tech.Interconnect (NVLink 0.5 us, PCIe Gen5 1 us), whereas Fabrics.*.latency (IB NDR "
+        "5 us, IB HDR 7 us, RoCE 10 us) models multi-hop end-to-end cluster fabric transit across "
+        "leaf-spine-leaf switches, optics, and FEC. Ranges: NVLink 1-2 us, PCIe Gen5 2-5 us, IB NDR "
         "1-3 us, IB HDR 2-5 us, RoCE 100G 5-10 us. They bracket the single-value anchors AlphaNdr "
         "(1.5 us) and AlphaRoce (5 us) from prov:fabric-latency-assumptions. Consolidated 2026-10-15 "
         "from three identical hand-typed copies in book cells into this one source."
@@ -2185,16 +2200,17 @@ MIDSCALE_TRAINING_CARBON_SCENARIO = _est(
 SCALING_EFFICIENCY_REFERENCE_JOB_MODELED = Provenance(
     id="prov:scaling-efficiency-reference-job-modeled",
     kind=ProvenanceKind.DERIVED,
-    ref="MLSysIM DistributedModel sweep of Scenarios.DenseLLMPretrainingReference",
+    ref="MLSysIM DistributedModel sweep of Scenarios.DenseLLMPretrainingReference on Systems.Clusters.Training_1K_NDR",
     notes=(
-        "GPT-3 175B on DGX H100 + HDR InfiniBand; TP8 x PP8 (64-GPU replica); fixed global batch "
+        "GPT-3 175B on DGX H100 + NDR InfiniBand (moved from HDR 2026-11-20 so the tiers match the 8,192-GPU "
+        "Frontier_8K step the chapters model); TP8 x PP8 (64-GPU replica); fixed global batch "
         "1,536 sequences (Brown et al. 2020 Table 2.1), one sequence per micro-batch, overlap_comm=True, "
-        "efficiency=LocalComputeEfficiency 0.45, fp16. Raw 0.8738 (256), 0.8293 (1,024), 0.5619 (8,192), "
+        "efficiency=LocalComputeEfficiency 0.45, fp16. Raw 0.8738 (256), 0.8318 (1,024), 0.5733 (8,192), "
         "rounded to 2 dp. Same sweep as vol2 fig-fleet-orchestration-scaling-efficiency-curve. Published "
         "strong-scaling retention is higher with larger batch and interleaved pipelines: MegaScale Table 2 "
         "is 0.90 from 256 to 1,024 and 0.93 from 3,072 to 12,288 GPUs."
     ),
-    verified="2026-09-29",
+    verified="2026-11-20",
 )
 
 # --- Accelerator life cycle (2026-10-13) ---

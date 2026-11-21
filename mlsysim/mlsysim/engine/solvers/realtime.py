@@ -561,20 +561,24 @@ class SharedDramReadModel(ForwardModel):
         Notes
         -----
         Equation: wait = (tile_bytes + camera_bytes + telemetry_bytes)/bandwidth +
-        ``bank_switches*bank_switch_time``; own = snapshot_bytes/bandwidth; n =
-        floor((read_allowance-own)/wait).
+        ``bank_switches*bank_switch_time``; own = snapshot_bytes/bandwidth;
+        unloaded = sense + compute_after_sense; headroom_wcet = wcet - unloaded;
+        headroom_dead = execution_ceiling - unloaded; n = floor((room-own)/wait);
+        end(n) = unloaded + own + ``n*wait``.
 
-        Assumptions: All declared backlog transfers queue before the snapshot; FIFO
-        prevents new arrivals from overtaking it. Priority bypass waits for one
-        transaction only.
+        Assumptions: The isolated tick sub-costs (``sense`` + ``compute_after_sense``)
+        remain unchanged; moving the snapshot read onto shared DRAM adds ``own + n*wait``
+        on top of the unloaded tick. All declared backlog transfers queue before the
+        snapshot; FIFO prevents new arrivals from overtaking it. Priority bypass waits
+        for one transaction only.
 
         Excludes: Refresh, arbitration inefficiency, row-hit-first starvation, cache
         behavior, and an AXI service-time guarantee.
 
         References
         ----------
-        Derivation: sum serialized byte-transfer and row-switch times, then solve own +
-        ``n*wait`` <= read_allowance for the largest integer n.
+        Derivation: sum serialized byte-transfer and row-switch times, then solve
+        ``unloaded + own + n*wait <= bound`` for the largest integer n.
 
         Examples
         --------
@@ -595,26 +599,28 @@ class SharedDramReadModel(ForwardModel):
             bandwidth=bandwidth, bank_switches=bank_switches, bank_switch_time=bank_switch_time,
             compute_time=compute_after_sense)
         wait, own = r["queue_fifo"].to(_US), r["own_read"].to(_US)
+        sense_us = sense.to(_US)
         compute = compute_after_sense.to(_US)
-        ceil_wcet = (wcet - compute).to(_US)
-        ceil_dead = (execution_ceiling - compute).to(_US)
+        unloaded = (sense_us + compute).to(_US)
+        ceil_wcet = (wcet - unloaded).to(_US)
+        ceil_dead = (execution_ceiling - unloaded).to(_US)
 
         def count(room):
             return int(math.floor(((room - own) / wait).to("").magnitude))
 
         def end(n):
-            return (own + n * wait + compute).to(_US)
+            return (unloaded + own + n * wait).to(_US)
 
-        n_sense, n_wcet, n_dead = count(sense), count(ceil_wcet), count(ceil_dead)
+        n_sense, n_wcet, n_dead = count(sense_us), count(ceil_wcet), count(ceil_dead)
         return SharedDramReadResult(
             queued_transactions=r["queued_transactions"], tile_transactions=r["tile_transactions"],
             backlog_bytes=tile_bytes + camera_bytes + telemetry_bytes,
             backlog_wait=wait, snapshot_read=own, loaded_read=(wait + own).to(_US),
-            sense_left=(sense - wait - own).to(_US),
+            sense_left=(sense_us - wait - own).to(_US),
             bypass_read=(r["queue_priority_bypass"] + own).to(_US),
             read_ceiling_wcet=ceil_wcet, read_ceiling_deadline=ceil_dead,
             backlogs_sense=n_sense, backlogs_wcet=n_wcet, backlogs_deadline=n_dead,
-            unloaded_end=(sense + compute).to(_US),
+            unloaded_end=unloaded,
             end_sense=end(n_sense), end_wcet=end(n_wcet), end_deadline=end(n_dead),
         )
 
@@ -750,7 +756,7 @@ class CommandAuthenticationModel(ForwardModel):
     carries the machine v x tau_fresh. Verified serially, n forged signed
     packets queued ahead of a valid veto finish it at (n + 1) t_verify; the
     fewest that push it past the deadline is n = floor(T_latest / t_verify),
-    sustained at n / ((n + 1) t_verify) packets per second (added 2026-10-20).
+    with sustained verifier saturation at ceil(1 / t_verify) packets per second (added 2026-10-20).
     """
 
     requires = ("clock", "verify_cycles", "speed", "spare", "deadline")
@@ -797,8 +803,9 @@ class CommandAuthenticationModel(ForwardModel):
         -----
         Equation: t_sig = verify_cycles/clock; t_mac =
         ``mac_blocks*mac_block_cycles/clock``; travel = ``speed*time``; n =
-        floor(deadline/t_sig) forged commands delay the following veto until
-        ``(n+1)*t_sig``.
+        floor(deadline/t_sig) forged commands queued ahead of the veto delay it
+        until ``(n+1)*t_sig``; sustaining a non-draining backlog requires an
+        injection rate at or above the serial service rate ``ceil(1/t_sig)``.
 
         Assumptions: Cycle counts are supplied, verification is serial, and each forged
         signed packet consumes a full verification before rejection.
@@ -833,7 +840,7 @@ class CommandAuthenticationModel(ForwardModel):
             spare_after_freshness=(spare - fresh).to(_MM),
             deadline=deadline.to(_MS), deadline_after_admission=deadline_after_admission.to(_MS),
             forged_to_miss=n, veto_verified_at=admit,
-            forged_rate=math.ceil((n / admit).to(1 / ureg.second).magnitude),
+            forged_rate=math.ceil((1 / t_sig).to(1 / ureg.second).magnitude),
             forged_mac_to_miss=math.floor((deadline / t_mac).to("").magnitude),
             forged_to_miss_after_admission=math.floor((deadline_after_admission / t_sig).to("").magnitude),
         )

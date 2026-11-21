@@ -1130,7 +1130,7 @@ class AlexNetEvolutionTable:
 
 : **AI Performance Evolution Across Paradigms**: Representative systems illustrate the growth in computational scale across eras. GPT-4 training details are estimated reference anchors rather than official disclosures. {#tbl-ai-evolution-performance tbl-colwidths="[16,15,16,23,30]"}
 
-Digit recognition, ImageNet classification, and Massive Multitask Language Understanding (MMLU) measure different capabilities under separate metrics, so @tbl-ai-evolution-performance does not compare methods on one task. It shows instead that each new capability threshold demanded orders of magnitude more hardware, from single-node CPU routines to multi-megawatt accelerator clusters. Testing Sutton's lesson, whether general methods powered by raw computation surpass hand-engineered representations, requires holding the task fixed and comparing competing approaches within one domain.
+Digit recognition, ImageNet classification, and Massive Multitask Language Understanding (MMLU) measure different capabilities under separate metrics, so @tbl-ai-evolution-performance does not compare methods on one task. Its later rows reflect newer model families: transformers are attention-based networks developed in @sec-network-architectures, vision transformer (ViT) models such as ViT-H/14 apply that design to images, and foundation models are large models trained on broad data and then adapted to many tasks. The table shows instead that each new capability threshold demanded orders of magnitude more hardware, from single-node CPU routines to multi-megawatt accelerator clusters. Testing Sutton's lesson, whether general methods powered by raw computation surpass hand-engineered representations, requires holding the task fixed and comparing competing approaches within one domain.
 
 Game playing provides that fixed-domain test while separating the roles of search and learning. In chess, IBM's Deep Blue\index{Deep Blue}[^fn-deepblue-compute-scale] defeated world champion Garry Kasparov in 1997 by combining custom chess hardware, large-scale search, and chess-specific evaluation knowledge. In Go, DeepMind's AlphaGo\index{AlphaGo} learned from expert games and self-play, using neural networks to guide tree search, but still used some engineered input features [@silver2016]. AlphaGo Zero[^fn-alphago-compute-scale] provides the clearer example of Sutton's lesson: it learned through self-play without human game records or those hand-engineered features [@silver2017]. The advance depended on methods that could turn computation into improved play, not merely on a faster machine.
 
@@ -1539,7 +1539,7 @@ Even when every component executes without error, a shift on the data axis can s
 
 In this example, the miss rate triples, from `{python} PedestrianRecallDrift.misses_before_str` in `{python} PedestrianRecallDrift.frames_per_window_str` pedestrian frames to `{python} PedestrianRecallDrift.misses_after_str` in `{python} PedestrianRecallDrift.frames_per_window_str`. That is a substantial change in detection quality, but it does not imply a tripling of vehicle-level safety risk, because other parts of the vehicle's system also shape how a missed detection affects a driving decision. Correct execution and predictive quality are separate properties, and an ML system must be engineered and monitored for both.
 
-When execution fails, crashes, unhandled exceptions, and failed health checks often make the defect directly observable, though conventional software can also produce silent numerical errors or logic bugs. Machine learning adds another route to **silent degradation**\index{Silent degradation!definition}: learned behavior loses predictive quality as the operating population changes, even while the runtime executes instructions without error, memory allocations succeed, and inference servers return predictions well within latency service level agreements (SLAs).
+When execution fails, crashes, unhandled exceptions, and failed health checks often make the defect directly observable, though conventional software can also produce silent numerical errors or logic bugs. Machine learning adds another route to **silent degradation**\index{Silent degradation!definition}: learned behavior loses predictive quality as the operating population changes, even while the runtime executes instructions without error, memory allocations succeed, and inference servers return predictions well within their latency budgets.
 
 ::: {.column-margin}
 ![](images/svg/vol1_introduction_margin_003.svg){width="100%" fig-alt="Two lines over time: a flat gray line labeled Health and a line labeled Recall falling from 95% to 85%, with the widening gap shaded."}
@@ -1829,14 +1829,20 @@ class GPT3Training:
     eta_opt = run_opt.efficiency
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    seconds_base = run_base.training_time.to(second)
+    seconds_per_day = round((1 * day).to(second).magnitude)
     days_base = run_base.training_time.to(day)
     days_opt = run_opt.training_time.to(day)
     days_saved = days_base - days_opt
     _ops_mag = f"{ops_quantity.to(flop).magnitude:.2e}"
     ops_exp_value = int(_ops_mag.split("e+")[1])
+    _sec_mag = f"{seconds_base.to(second).magnitude:.2e}"
+    sec_exp_value = int(_sec_mag.split("e+")[1])
     peak_rate_value = peak_flops_rate.to(TFLOPs / second).magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(seconds_per_day == 86_400, f"Expected 86,400 s/day, got {seconds_per_day}")
+    check(2.0e6 < seconds_base.to(second).magnitude < 2.5e6, f"Expected ~2.18e6 s, got {seconds_base}")
     check(days_base > 20 * day, f"Text implies >20 days, got {days_base.to(day).magnitude:.1f}")
     check(days_saved > 5 * day, f"Text claims significant savings, got {days_saved.to(day).magnitude:.1f}")
     check(days_opt < days_base, "Optimization failed to reduce time")
@@ -1846,19 +1852,22 @@ class GPT3Training:
     num_accelerators_str = fmt_count(num_accelerators, commas=True, label="accelerator")
     eta_base_pct_str = fmt_percent(eta_base, precision=0, commas=False, style='prose')
     eta_opt_pct_str = fmt_percent(eta_opt, precision=0, commas=False, style='prose')
+    seconds_per_day_str = fmt_int(seconds_per_day, commas=True)
     days_initial_str = fmt_time(round(days_base.to(day).magnitude), day, precision=0, commas=False, style="word")
     days_optimized_str = fmt_time(round(days_opt.to(day).magnitude), day, precision=0, commas=False, style="word")
     days_saved_str = fmt_time(round(days_saved.to(day).magnitude), day, precision=0, commas=False, style="word")
 
     # LaTeX math components
     _ops_coeff = _ops_mag.split("e+")[0]
+    _sec_coeff = _sec_mag.split("e+")[0]
     peak_tflop_per_s_per_accelerator_str = fmt_flop_rate(peak_flops_rate, unit=TFLOPs / second, precision=0, commas=False)
 
     # Equation assembly (inline refs use GPT3Training.* form)
     time_formula_math = fmt_math(r"\TrainingTime \approx \frac{\Operations}{\AcceleratorCount \cdot \PeakRate \cdot \EfficiencyHw}")
     time_value_math = fmt_math(
-        rf"\approx \frac{{{_ops_coeff} \times 10^{{{ops_exp_value}}}}}{{{num_accelerators} \times {peak_rate_value:.0f} \times 10^{{12}} \times {eta_base}}}"
+        rf"\approx \frac{{{_ops_coeff} \times 10^{{{ops_exp_value}}}\ \text{{FLOPs}}}}{{{num_accelerators} \times {peak_rate_value:.0f} \times 10^{{12}}\ \text{{FLOP/s}} \times {eta_base}}}"
     )
+    time_seconds_math = fmt_math(rf"\approx {_sec_coeff} \times 10^{{{sec_exp_value}}}\ \text{{s}}")
     time_days_math = fmt_math(rf"\approx {fmt_int(days_base.to(day).magnitude, commas=False)}\ \text{{days}}")
     ops_math = fmt_math(rf"\approx {_ops_coeff} \times 10^{{{ops_exp_value}}}\ \text{{FLOPs}}")
 ```
@@ -1869,7 +1878,7 @@ class GPT3Training:
 
 **Given**:
 
-*   **Operations $(\Operations)$**: `{python} GPT3Training.ops_math` (the product of the Data factor, `{python} GPT3Scale.gpt3_training_tokens_billion_str` tokens, and the Algorithm factor, $6\Parameters$ FLOPs/token for `{python} GPT3Scale.gpt3_params_billion_str` parameters)
+*   **Operations $(\Operations)$**: `{python} GPT3Training.ops_math` (the reported training work, closely matched by the product of the Data factor, `{python} GPT3Scale.gpt3_training_tokens_billion_str` tokens, and the Algorithm factor, $6\Parameters$ FLOPs/token for `{python} GPT3Scale.gpt3_params_billion_str` parameters)
 *   **Peak Rate $(\PeakRate)$**: `{python} GPT3Training.peak_tflop_per_s_per_accelerator_str`
 *   **Efficiency $(\EfficiencyHw)$**: ≈ `{python} GPT3Training.eta_base_pct_str` (an end-to-end factor that absorbs communication and memory stalls, not the compute-only utilization of @eq-intro-iron-law; an assumed planning value for large-scale distributed training, where those delays keep realized throughput well below peak)
 *   **Accelerator Count $(\AcceleratorCount)$**: `{python} GPT3Training.num_accelerators_str`
@@ -1880,7 +1889,8 @@ Assume that the training workload reuses data sufficiently to make arithmetic do
 
 - `{python} GPT3Training.time_formula_math`
 `{python} GPT3Training.time_value_math`
-`{python} GPT3Training.time_days_math`
+`{python} GPT3Training.time_seconds_math`
+`{python} GPT3Training.time_days_math` (at `{python} GPT3Training.seconds_per_day_str` s/day)
 
 **Result**:
 `{python} GPT3Training.days_initial_str`.
@@ -2084,7 +2094,7 @@ class TrainingScaleTransition:
     compute_growth_order_str = fmt(compute_growth_order, precision=0, commas=False)
 ```
 
-AlexNet's 2012 run (@sec-introduction-deep-learning-era-infrastructure-bottleneck-2f02) used two consumer GPUs for about six days on the `{python} ImageNetStats.images_m_str` labeled images of the ImageNet challenge training split[^fn-imagenet-dataset-scale] [@deng2009], a budget a university laboratory could afford. Modern foundation models, large models trained on broad data and then adapted to many tasks, demand training compute roughly `{python} TrainingScaleTransition.compute_growth_order_str` orders of magnitude larger.
+AlexNet's 2012 run (@sec-introduction-deep-learning-era-infrastructure-bottleneck-2f02) used two consumer GPUs for about six days on the `{python} ImageNetStats.images_m_str` labeled images of the ImageNet challenge training split[^fn-imagenet-dataset-scale] [@deng2009], a budget a university laboratory could afford. Modern foundation models demand training compute roughly `{python} TrainingScaleTransition.compute_growth_order_str` orders of magnitude larger.
 
 [^fn-imagenet-dataset-scale]: **ImageNet**\index{ImageNet!scale}: The full image collection grew from 3.2 million images reported in the initial paper to about 14.2 million across thousands of labeled categories [@deng2009; @russakovsky2015]. The 2012 challenge used a subset of this collection; AlexNet's training split contained about `{python} ImageNetStats.images_m_str` labeled images. Distinguishing the full collection from a benchmark split matters when comparing dataset sizes and training costs.
 
@@ -2159,7 +2169,7 @@ class EfficiencyGainsMetrics:
 
 Algorithmic efficiency has the clearest measured history. @hernandez2020measuring held accuracy fixed at the AlexNet level and asked how much training computation successive architectures needed to reach it. Because they counted operations rather than seconds, hardware speed does not enter the measurement. Between AlexNet in 2012 and EfficientNet-B0 in 2019, the required compute fell by `{python} EfficiencyGainsMetrics.algo_efficiency_max_mult_str`, and a least-squares exponential fit across the six efficiency-frontier architectures halves required compute roughly every `{python} EfficiencyGainsMetrics.algo_halving_months_str` (@fig-algo-efficiency). Four widely adopted comparison architectures (VGG-11, ResNet-18, DenseNet-121, and MobileNetV2) sit below that frontier because they traded training efficiency at AlexNet accuracy for higher peak capacity or simpler building blocks. Comparing this algorithmic reduction with hardware progress would require a matching measure of useful throughput or energy efficiency; Moore's law describes transistor integration,[^fn-moores-law-baseline] which alone does not determine either quantity.
 
-::: {#fig-algo-efficiency fig-env="figure" fig-pos="htb" fig-cap="**Algorithmic Efficiency Trajectory**: Each point shows how much less training compute an ImageNet architecture needed than AlexNet to reach AlexNet-level accuracy, isolating algorithmic progress from hardware speed. Solid red circles mark the six efficiency-frontier models from @hernandez2020measuring, and open gray diamonds mark four widely taught comparison architectures (VGG-11, ResNet-18, DenseNet-121, and MobileNetV2) that sit off the AlexNet-level efficiency frontier. The dashed line is a least-squares exponential fit to the six frontier models, matching the roughly `{python} EfficiencyGainsMetrics.algo_halving_months_str` doubling rate reported by @hernandez2020measuring." fig-alt="Scatter plot of training efficiency factors relative to AlexNet from 2012 to 2020. Six solid red circles trace efficiency-frontier architectures from AlexNet at 1x to EfficientNet-B0 at about 44x, four open gray diamonds mark off-frontier comparison models including VGG-11 below 1x, and a dashed exponential trend line fit to the six frontier models doubles roughly every 16 months."}
+::: {#fig-algo-efficiency fig-env="figure" fig-pos="htb" fig-cap="**Algorithmic Efficiency Trajectory**: Each point shows how much less training compute an ImageNet architecture needed than AlexNet to reach AlexNet-level accuracy, isolating algorithmic progress from hardware speed. Solid red circles mark the six efficiency-frontier models from @hernandez2020measuring, and open gray diamonds mark four widely taught comparison architectures (VGG-11, ResNet-18, DenseNet-121, and MobileNetV2) that sit off the AlexNet-level efficiency frontier. The dashed line is a least-squares exponential fit to the six frontier models, matching the doubling time of roughly `{python} EfficiencyGainsMetrics.algo_halving_months_str` reported by @hernandez2020measuring." fig-alt="Scatter plot of training efficiency factors relative to AlexNet from 2012 to 2020. Six solid red circles trace efficiency-frontier architectures from AlexNet at 1x to EfficientNet-B0 at about 44x, four open gray diamonds mark off-frontier comparison models including VGG-11 below 1x, and a dashed exponential trend line fit to the six frontier models doubles roughly every 16 months."}
 
 ```{python}
 #| echo: false
@@ -2319,7 +2329,7 @@ class TrainingComputeGrowthFigure:
     doubling_months_str = fmt_int(doubling_months, commas=False)  # caption says "every N months"; whole months
 ```
 
-::: {#fig-ai-training-compute-growth fig-env="figure" fig-pos="htb" fig-cap="**The Era of Scale**: Each point plots a published or Epoch AI estimated training-compute budget (FLOPs) for one of 17 curated landmark models against its integer publication year on a logarithmic scale. Blue circles mark deep-learning-era runs and red squares mark large-scale-era runs following the taxonomy of @sevilla2022 (which places AlphaGoZero and subsequent foundation-scale runs in the large-scale era). The dashed line is a least-squares fit to this 17-landmark subset and doubles every `{python} TrainingComputeGrowthFigure.doubling_months_str` months. From AlexNet (2012) to GPT-4-class training scale (2023), compute requirements increased by roughly `{python} TrainingComputeGrowthFigure.compute_growth_order_str` orders of magnitude (about `{python} TrainingComputeGrowthFigure.compute_growth_m_str` times). This curated landmark trajectory complements broader multi-hundred-model trend studies [@amodei2018aicompute; @sevilla2022] and motivates the specialized infrastructure studied across this series. Data from Epoch AI's Notable AI Models database [@epochai2026notable]." fig-alt="Scatter plot of training-compute estimates on a logarithmic vertical axis from 2012 to 2025 across 17 landmark models. Blue circles mark deep-learning-era runs, red squares mark large-scale-era runs starting with AlphaGoZero and T5-11B through Grok-3, and a dashed least-squares fit line doubles roughly every 5 months."}
+::: {#fig-ai-training-compute-growth fig-env="figure" fig-pos="htb" fig-cap="**The Era of Scale**: Each point plots a published or Epoch AI estimated training-compute budget (FLOPs) for one of 17 curated landmark models against its integer publication year on a logarithmic scale. Blue circles mark deep-learning-era runs and red squares mark large-scale-era runs following the taxonomy of @sevilla2022 (which places AlphaGoZero and subsequent foundation-scale runs in the large-scale era). The dashed line is a least-squares fit to this 17-landmark subset and doubles every `{python} TrainingComputeGrowthFigure.doubling_months_str` months. From AlexNet (2012) to GPT-4-class training scale (2023), compute requirements increased by roughly `{python} TrainingComputeGrowthFigure.compute_growth_order_str` orders of magnitude (about `{python} TrainingComputeGrowthFigure.compute_growth_m_str` times). This curated landmark trajectory complements broader multi-hundred-model trend studies [@amodei2018aicompute; @sevilla2022] and motivates the specialized infrastructure studied throughout this book. Data from Epoch AI's Notable AI Models database [@epochai2026notable]." fig-alt="Scatter plot of training-compute estimates on a logarithmic vertical axis from 2012 to 2025 across 17 landmark models. Blue circles mark deep-learning-era runs, red squares mark large-scale-era runs starting with AlphaGoZero and T5-11B through Grok-3, and a dashed least-squares fit line doubles roughly every 5 months."}
 
 ```{python}
 #| echo: false
@@ -2893,17 +2903,13 @@ The same stages apply across ML systems, but a megawatt-scale data center and a 
 # │ Context: "Deployment context shapes the lifecycle" subsection
 # │
 # │ Goal: Quantify the multi-order-of-magnitude span of the ML Systems landscape.
-# │ Show: Cloud-to-TinyML memory and compute span.
-# │ How: Reference mlsysim deployment tiers and representative hardware twins.
+# │ Show: Single-node cloud-to-TinyML memory/compute span and pod-scale power span.
+# │ How: Reference mlsysim deployment tiers, hardware twins, and cloud pod specs.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Platforms, Hardware
+from mlsysim import Platforms, Hardware, Systems
 from mlsysim.fmt import check, fmt_math
 import math
-
-def _oom(value):
-    """Order of magnitude (base-10 exponent) of a positive scalar."""
-    return round(math.log10(value))
 
 # ┌── LEGO ───────────────────────────────────────────────
 class DeploymentSystems:
@@ -2912,48 +2918,25 @@ class DeploymentSystems:
     """
 
     # ┌── 1. LOAD (Deployment paradigms) ─────────────────────────────────────
-    # Tiers provide RAM; hardware twins provide representative compute scale.
-    # Cloud and Tiny set the span; Edge and Mobile anchor the interior tiers.
+    # Per-node/per-accelerator endpoints: cloud tier RAM and H100 peak compute
+    # vs. TinyML microcontroller SRAM and ESP32-S3 peak compute.
+    # Full-pod endpoint: TPU v4 pod power vs. TinyML milliwatt power budget.
     t_cloud = Platforms.Cloud
-    t_edge = Platforms.Edge
-    t_mobile = Platforms.Mobile
     t_tiny = Platforms.Tiny
-
     h_cloud = Hardware.Cloud.H100
-    h_edge = Hardware.Edge.JetsonAGXOrin
-    h_mobile = Hardware.Mobile.Pixel8
     h_tiny = Hardware.Tiny.ESP32_S3
+    pod_cloud = Systems.Pods.TPUv4_4096
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     mem_scaling = (t_cloud.ram / t_tiny.ram).to("count").magnitude
     compute_scaling = (h_cloud.compute.peak_flops / h_tiny.compute.peak_flops).to("count").magnitude
-
-    # Per-tier order-of-magnitude anchors so the span the Observation cites is
-    # visible in the table itself: bytes for memory; base ops/s for compute
-    # (the registry normalizes both FLOP/s and INT TOPS twins to a flop/s base).
-    cloud_mem_oom = _oom(t_cloud.ram.to("byte").magnitude)
-    edge_mem_oom = _oom(t_edge.ram.to("byte").magnitude)
-    mobile_mem_oom = _oom(t_mobile.ram.to("byte").magnitude)
-    tiny_mem_oom = _oom(t_tiny.ram.to("byte").magnitude)
-
-    cloud_ops_oom = _oom(h_cloud.compute.peak_flops.to_base_units().magnitude)
-    edge_ops_oom = _oom(h_edge.compute.peak_flops.to_base_units().magnitude)
-    mobile_ops_oom = _oom(h_mobile.compute.peak_flops.to_base_units().magnitude)
-    tiny_ops_oom = _oom(h_tiny.compute.peak_flops.to_base_units().magnitude)
+    pod_power_scaling = (pod_cloud.power / t_tiny.power_threshold).to("count").magnitude
+    pod_power_oom = round(math.log10(pod_power_scaling))
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(mem_scaling > 1e5, "Cloud memory should be >100,000x TinyML memory.")
-    check(compute_scaling > 1e6, "Cloud compute should be >1,000,000x TinyML compute.")
-    # Lock the table endpoints to the span the Observation states, so the two
-    # can never silently diverge.
-    check(
-        cloud_mem_oom - tiny_mem_oom == round(math.log10(mem_scaling)),
-        "Memory column endpoints must expose the same span the Observation cites.",
-    )
-    check(
-        cloud_ops_oom - tiny_ops_oom == round(math.log10(compute_scaling)),
-        "Compute column endpoints must expose the same span the Observation cites.",
-    )
+    check(mem_scaling > 1e5, "Single-node cloud memory should be >100,000x TinyML memory.")
+    check(compute_scaling > 1e6, "Single-accelerator cloud compute should be >1,000,000x TinyML compute.")
+    check(pod_power_oom == 9, f"Pod-to-TinyML power span should be ~9 orders of magnitude, got {pod_power_oom}.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     mem_span_math = fmt_math(f"10^{{{round(math.log10(mem_scaling))}}}")
@@ -2996,7 +2979,7 @@ class EdgeLatencyDistance:
     distance_per_ms_str = fmt_qty(distance_per_delay, unit=cm, precision=0)
 ```
 
-From cloud to TinyML, the endpoints differ by roughly `{python} DeploymentSystems.mem_span_math` in memory and `{python} DeploymentSystems.compute_span_math` in compute. Because a cloud model cannot fit directly on a microcontroller, moving down that scale requires compression, a smaller architecture, or a narrower task. At the upper end, cloud ML systems\index{Cloud ML} offer large computing budgets alongside capacity limits, operational complexity, and substantial infrastructure bills. At the lower end, TinyML systems\index{TinyML} on microcontrollers make memory and energy feasibility an immediate concern, as a sensor may need to detect anomalies on a single battery for years. Between these poles, placement determines where work and resource demands fall. Edge ML systems\index{Edge ML!latency and bandwidth}, such as a gateway in a factory or a camera that analyzes its own video, move computation toward data sources to reduce latency[^fn-latency-edge-constraint] and network traffic. Mobile ML systems\index{Mobile ML!resource constraints} share memory, thermal headroom, and battery power with foreground applications. Hybrid systems split work across tiers to balance latency, privacy, bandwidth, and update control.
+Between a single cloud accelerator node and a TinyML microcontroller, memory differs by roughly `{python} DeploymentSystems.mem_span_math` and compute by roughly `{python} DeploymentSystems.compute_span_math`; at full data-center pod scale, power and memory span roughly nine orders of magnitude (from megawatts and terabytes down to milliwatts and kilobytes). Because a cloud model cannot fit directly on a microcontroller, moving down that scale requires compression, a smaller architecture, or a narrower task. At the upper end, cloud ML systems\index{Cloud ML} offer large computing budgets alongside capacity limits, operational complexity, and substantial infrastructure bills. At the lower end, TinyML systems\index{TinyML} on microcontrollers make memory and energy feasibility an immediate concern, as a sensor may need to detect anomalies on a single battery for years. Between these poles, placement determines where work and resource demands fall. Edge ML systems\index{Edge ML!latency and bandwidth}, such as a gateway in a factory or a camera that analyzes its own video, move computation toward data sources to reduce latency[^fn-latency-edge-constraint] and network traffic. Mobile ML systems\index{Mobile ML!resource constraints} share memory, thermal headroom, and battery power with foreground applications. Hybrid systems split work across tiers to balance latency, privacy, bandwidth, and update control.
 
 ::: {.column-margin .margin-pointer}
 ↪ The light barrier, power wall, and memory wall that shape these operating envelopes are developed in @sec-ml-systems-deployment-spectrum-71be.

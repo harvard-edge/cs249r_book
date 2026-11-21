@@ -3586,7 +3586,7 @@ class SparseFlashFitScenario(BaseScenario):
 
 
 class SpeedupCompositionScenario(BaseScenario):
-    """Independent paper speedups multiplied together, against the ``measured`` speedup.
+    """Independent paper speedups multiplied together, against the ``realized`` speedup.
 
     Notes
     -----
@@ -3605,7 +3605,7 @@ class SpeedupCompositionScenario(BaseScenario):
     Execute the registered worked inputs; this is a modeled calculation.
 
     >>> from mlsysim import Scenarios
-    >>> case = Scenarios.PrunedInt8PaperVsMeasured
+    >>> case = Scenarios.PrunedInt8PaperVsRealized
     >>> value = case.paper
     >>> round(value, 3)
     8.0"""
@@ -3613,7 +3613,7 @@ class SpeedupCompositionScenario(BaseScenario):
     # Retain the public class identity used by Pydantic schemas and pickle.
     __module__ = "mlsysim.engine.scenario_types"
     factors: Dict[str, float]
-    measured: float
+    realized: float  # a supplied realized speedup; named for what it is (was `measured`, 2026-11-20)
 
     @property
     def paper(self) -> float:
@@ -3631,11 +3631,11 @@ class SpeedupCompositionScenario(BaseScenario):
 
     @property
     def realized_share(self) -> float:
-        """Dimensionless observed speedup divided by the product of component factors.
+        """Dimensionless realized speedup divided by the product of component factors.
 
         Equation:
-            return self.measured / self.paper"""
-        return self.measured / self.paper
+            return self.realized / self.paper"""
+        return self.realized / self.paper
 
 
 class WorkLatencyGapScenario(BaseScenario):

@@ -1671,7 +1671,7 @@ Beyond model forward-pass execution, every request pays fixed overheads to the h
 # │
 # │ Goal: Quantify the share of the reference forward pass consumed by the
 # │       named microsecond-scale overheads.
-# │ Show: Serialization + dispatch + data copy range as a percentage of budget.
+# │ Show: Serialization + dispatch + data copy range as a share of the forward pass.
 # │ How: Sum lower/upper bounds and divide by the reference forward-pass time.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
@@ -1729,7 +1729,7 @@ class ServingTaxMicrosecondsCalc:
 
 Most of those host-side overheads fall into a gap that Barroso, Patterson, and colleagues identified in how computer systems handle latency across time scales\index{Killer microseconds!latency gap} [@barroso2017]. Nanosecond-scale stalls (such as cache misses) are hidden by the processor, which keeps executing other instructions, while millisecond-scale delays (such as disk I/O or network RPCs) are hidden by operating system thread context switching. Operations in the microsecond range (1–100 $\MicroUnitPrefix\text{s}$) fall into the gap between these two mechanisms. They are too long to spin-wait on a CPU core without wasting compute cycles and power, yet too short for the operating system to context-switch to another thread without paying scheduling overheads that exceed the wait time itself.
 
-Serving infrastructure operates directly in this killer microseconds regime. Using the representative ranges in @tbl-serving-tax, serialization at 50–500 $\MicroUnitPrefix\text{s}$, dispatch at 10–50 $\MicroUnitPrefix\text{s}$, and data copy at 100–500 $\MicroUnitPrefix\text{s}$ are each individually small. For the `{python} ServingTaxMicrosecondsCalc.inference_ms_str` reference forward pass, however, these named microsecond-scale overheads collectively add about `{python} ServingTaxMicrosecondsCalc.micro_tax_min_pct_str` to `{python} ServingTaxMicrosecondsCalc.micro_tax_max_pct_str` of the latency budget before network and queuing delays are counted. No single overhead justifies optimization in isolation, yet together they determine whether the system meets its SLO.
+Serving infrastructure operates directly in this killer microseconds regime. Using the representative ranges in @tbl-serving-tax, serialization at 50–500 $\MicroUnitPrefix\text{s}$, dispatch at 10–50 $\MicroUnitPrefix\text{s}$, and data copy at 100–500 $\MicroUnitPrefix\text{s}$ are each individually small. For the `{python} ServingTaxMicrosecondsCalc.inference_ms_str` reference forward pass, however, these named microsecond-scale overheads collectively add about `{python} ServingTaxMicrosecondsCalc.micro_tax_min_pct_str` to `{python} ServingTaxMicrosecondsCalc.micro_tax_max_pct_str` of that forward-pass duration before network and queuing delays are counted. No single overhead justifies optimization in isolation, yet together they determine whether the system meets its SLO.
 
 Reducing this compound overhead requires changing the architecture across the software-hardware interface. When microsecond delays accumulate across serialization, kernel dispatch, and memory copies, isolated optimizations to individual functions yield negligible improvements. Instead, high-performance serving runtimes remove the boundaries themselves. They use zero-copy memory buffers between networking and execution runtimes, maintain persistent CUDA streams to bypass driver dispatch latencies, and migrate preprocessing kernels directly onto the accelerator to avoid intermediate host-device transfers. Eliminating those fixed boundary costs leaves the portion of preprocessing and execution that scales with the dimensions of the input payload itself.
 
@@ -1932,13 +1932,13 @@ response = {
         for label, prob in zip(labels, top5_probs)
     ],
     "model_version": "resnet50-v2.1",  # Client-side version tracking
-    "inference_time_ms": 5.2,  # Observability for latency monitoring
+    "inference_time_ms": 3.5,  # Observability for latency monitoring
 }
 ```
 
 :::
 
-In @lst-resnet-postprocessing, total postprocessing time is approximately `{python} LatencyTableCalc.l_post_ms_str`, negligible compared with preprocessing and inference. The GPU handles the normalization and top-5 reduction, so the subsequent `.tolist()` call transfers only tens of bytes across PCIe. However, `.tolist()` forces a synchronous device-to-host copy, blocking the host thread until the GPU stream finishes. In high-throughput pipelined servers, such synchronization barriers must be scheduled carefully to avoid stalling the CPU thread while it feeds subsequent requests.
+Moving softmax and top-5 selection onto the GPU in @lst-resnet-postprocessing, rather than running them on the host CPU as drawn in @fig-model-serving-request-timeline, keeps total postprocessing near `{python} LatencyTableCalc.l_post_ms_str` (still negligible compared with preprocessing and inference) while shrinking the PCIe return payload. Because the GPU handles the normalization and top-5 reduction, the subsequent `.tolist()` calls transfer only tens of bytes across PCIe. However, each `.tolist()` call forces a synchronous device-to-host copy, blocking the host thread until the GPU stream finishes. In high-throughput pipelined servers, such synchronization barriers must be scheduled carefully to avoid stalling the CPU thread while it feeds subsequent requests.
 
 #### Output formatting {#sec-model-serving-output-formatting-753f}
 
@@ -2496,7 +2496,7 @@ class CapacityPlanningCalc:
     check(cp_util_after_fail_value / 100 < cp_rho_safe_value, "N+1 claim: after one failure utilization must stay below the safe threshold.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    cp_mu_required_req_per_s_str = fmt_rate(cp_mu_required_value, 'req/s', precision=1, commas=False)
+    cp_mu_required_req_per_s_str = fmt_rate(cp_mu_required_value, 'req/s', precision=1, commas=True)
     cp_gpus_raw_str = fmt(cp_gpus_raw_value, precision=1, commas=False)
     cp_gpus_ceil_str = fmt_count(cp_gpus_ceil_value, precision=0, commas=False)
     cp_final_raw_str = fmt(cp_final_raw_value, precision=1, commas=False)
@@ -2506,23 +2506,23 @@ class CapacityPlanningCalc:
     cp_n_plus_2_min_gpus_str = fmt_count(cp_n_plus_2_min_value, precision=0, commas=False, label="GPU")
     cp_n_plus_2_headroom_gpus_str = fmt_count(cp_n_plus_2_headroom_value, precision=0, commas=False, label="GPU")
     cp_peak_qps_str = fmt_rate(cp_peak_qps_value, 'QPS', precision=0)
-    cp_single_gpu_rate_req_per_s_str = fmt_rate(round(cp_single_gpu_rate_value.magnitude) * (count / second), 'req/s', precision=0)
+    cp_single_gpu_rate_req_per_s_str = fmt_rate(cp_single_gpu_rate_value, 'req/s', precision=1, commas=False)
     _cp_mu_required_req_per_s_math_fragment = cp_mu_required_req_per_s_str.replace(" req/s", r"\,\mathrm{req}/\mathrm{s}")
     _cp_peak_qps_math_fragment = cp_peak_qps_str.replace(" QPS", r"\,\mathrm{QPS}")
-    cp_service_ms_str = fmt_time(cp_service_ms_value, 'millisecond', precision=1, commas=False)
+    cp_service_ms_str = fmt_time(cp_service_ms_value, 'millisecond', precision=2, commas=False)
     cp_p99_target_ms_str = fmt_time(cp_p99_target_ms_value, 'millisecond', precision=0, commas=False)
     _cp_service_ms_math_fragment = cp_service_ms_str.replace(" ms", r"\,\mathrm{ms}")
     _cp_p99_target_ms_math_fragment = cp_p99_target_ms_str.replace(" ms", r"\,\mathrm{ms}")
-    cp_rho_safe_str = fmt(cp_rho_safe_value, precision=2, commas=False)
-    cp_rho_safe_pct_str = fmt_percent(round(cp_rho_safe_value, 2), precision=0, commas=False, style='prose')
+    cp_rho_safe_str = fmt(cp_rho_safe_value, precision=3, commas=False)
+    cp_rho_safe_pct_str = fmt_percent(round(cp_rho_safe_value, 3), precision=1, commas=False, style='prose')
     mm1_p99_factor_str = fmt_ratio(mm1_p99_factor_value, precision=1, commas=False)
     cp_rho_safe_math = fmt_math(
         f"\\ServingUtilization \\leq "
         f"1 - ({mm1_p99_factor_str} \\times {_cp_service_ms_math_fragment})/"
-        f"{_cp_p99_target_ms_math_fragment} = {cp_rho_safe_str}"
+        f"{_cp_p99_target_ms_math_fragment} \\approx {cp_rho_safe_str}"
     )
     cp_mu_required_math = fmt_math(
-        f"\\RequiredServiceRate = " f"{_cp_peak_qps_math_fragment} / {cp_rho_safe_str} = " f"{_cp_mu_required_req_per_s_math_fragment}"
+        f"\\RequiredServiceRate = " f"{_cp_peak_qps_math_fragment} / {cp_rho_safe_str} \\approx " f"{_cp_mu_required_req_per_s_math_fragment}"
     )
     cp_headroom_pct_str = fmt_percent(cp_headroom_pct_value / 100, precision=0, commas=False, style='prose')
     cp_headroom_factor_str = fmt_ratio(cp_headroom_factor_value, precision=1, commas=False)
@@ -2545,7 +2545,7 @@ Consider designing a ResNet-50 serving system with these requirements:
 The worker model covers waiting for the GPU and the GPU forward pass only. This scenario gives the worker a p99 subbudget of `{python} CapacityPlanningCalc.cp_p99_target_ms_str`. All stages outside the worker (network transit, serialization, preprocessing, transfer, and postprocessing) get a separate combined upper bound of 18 ms. The end-to-end deadline is therefore the worker's `{python} CapacityPlanningCalc.cp_p99_target_ms_str` plus those 18 ms.
 
 **Step 1**: Find safe utilization.
-From @eq-p99-latency, $\TailRequestLatency\approx$ `{python} CapacityPlanningCalc.mm1_p99_factor_str` $\times$ service time / $(1 - \ServingUtilization)$. Setting $\TailRequestLatency\leq$ `{python} CapacityPlanningCalc.cp_p99_target_ms_str` with `{python} CapacityPlanningCalc.cp_service_ms_str` service time gives `{python} CapacityPlanningCalc.cp_rho_safe_math` (`{python} CapacityPlanningCalc.cp_rho_safe_pct_str` maximum utilization). This is an M/M/1 p99 estimate under the stated arrival and service assumptions; a load test must validate the tail.
+From @eq-p99-latency, $\TailRequestLatency\approx$ `{python} CapacityPlanningCalc.mm1_p99_factor_str` $\times$ service time / $(1 - \ServingUtilization)$. Setting $\TailRequestLatency\leq$ `{python} CapacityPlanningCalc.cp_p99_target_ms_str` with `{python} CapacityPlanningCalc.cp_service_ms_str` service time gives `{python} CapacityPlanningCalc.cp_rho_safe_math` (`{python} CapacityPlanningCalc.cp_rho_safe_pct_str` maximum utilization); the remaining steps retain unrounded intermediate values from the reference profile while displaying rounded operands. This is an M/M/1 p99 estimate under the stated arrival and service assumptions; a load test must validate the tail.
 
 **Step 2**: Calculate required service rate.
 `{python} CapacityPlanningCalc.cp_mu_required_math`
@@ -2553,7 +2553,7 @@ From @eq-p99-latency, $\TailRequestLatency\approx$ `{python} CapacityPlanningCal
 **Step 3**: Determine GPU count.
 In this M/M/1 model, the single-GPU rate is `{python} CapacityPlanningCalc.cp_single_gpu_rate_req_per_s_str`.
 
-GPUs needed = `{python} CapacityPlanningCalc.cp_mu_required_req_per_s_str` / `{python} CapacityPlanningCalc.cp_single_gpu_rate_req_per_s_str` = `{python} CapacityPlanningCalc.cp_gpus_raw_str` → `{python} CapacityPlanningCalc.cp_gpus_ceil_str` GPUs
+GPUs needed = `{python} CapacityPlanningCalc.cp_mu_required_req_per_s_str` / `{python} CapacityPlanningCalc.cp_single_gpu_rate_req_per_s_str` ≈ `{python} CapacityPlanningCalc.cp_gpus_raw_str` → `{python} CapacityPlanningCalc.cp_gpus_ceil_str` GPUs
 
 This single-GPU rate is the batch-1 service rate. Each request holds the GPU for the full service time, which keeps the M/M/1 model closed-form. Dynamic batching (@sec-model-serving-throughput-optimization-18d1) amortizes fixed overhead across requests and raises the per-GPU rate several-fold, so a batched deployment may need fewer GPUs after its own latency distribution is validated. @Sec-model-serving-capacity-planning-96a3 compares the two regimes.
 
@@ -2561,7 +2561,7 @@ This single-GPU rate is the batch-1 service rate. Each request holds the GPU for
 This scenario adds `{python} CapacityPlanningCalc.cp_headroom_pct_str` headroom for traffic spikes and variance: final count = `{python} CapacityPlanningCalc.cp_gpus_ceil_str` $\times$ `{python} CapacityPlanningCalc.cp_headroom_factor_str` = `{python} CapacityPlanningCalc.cp_final_raw_str`, rounded up to `{python} CapacityPlanningCalc.cp_final_ceil_str`.
 
 **Step 5**: Verify fault tolerance.
-The `{python} CapacityPlanningCalc.cp_headroom_pct_str` headroom addresses traffic variance, but production systems also need fault tolerance. With `{python} CapacityPlanningCalc.cp_final_ceil_str` GPUs, losing one leaves `{python} CapacityPlanningCalc.cp_gpus_after_fail_str` GPUs handling `{python} CapacityPlanningCalc.cp_peak_qps_str`. The postfailure utilization is `{python} CapacityPlanningCalc.cp_peak_qps_str` / (`{python} CapacityPlanningCalc.cp_single_gpu_rate_req_per_s_str` $\times$ `{python} CapacityPlanningCalc.cp_gpus_after_fail_str`) = `{python} CapacityPlanningCalc.cp_util_after_fail_pct_math`.
+The `{python} CapacityPlanningCalc.cp_headroom_pct_str` headroom addresses traffic variance, but production systems also need fault tolerance. With `{python} CapacityPlanningCalc.cp_final_ceil_str` GPUs, losing one leaves `{python} CapacityPlanningCalc.cp_gpus_after_fail_str` GPUs handling `{python} CapacityPlanningCalc.cp_peak_qps_str`. The postfailure utilization is `{python} CapacityPlanningCalc.cp_peak_qps_str` / (`{python} CapacityPlanningCalc.cp_single_gpu_rate_req_per_s_str` $\times$ `{python} CapacityPlanningCalc.cp_gpus_after_fail_str`) ≈ `{python} CapacityPlanningCalc.cp_util_after_fail_pct_math`.
 
 This remains well below the `{python} CapacityPlanningCalc.cp_rho_safe_pct_str` safe utilization threshold, confirming N+1 redundancy, enough capacity to lose any one GPU and still meet the target. For stricter fault tolerance requirements, N+2 redundancy (tolerating two simultaneous failures) would require `{python} CapacityPlanningCalc.cp_n_plus_2_min_gpus_str` under the same safe-utilization threshold, or about `{python} CapacityPlanningCalc.cp_n_plus_2_headroom_gpus_str` if the `{python} CapacityPlanningCalc.cp_headroom_pct_str` headroom must remain after two simultaneous failures.
 
@@ -3114,7 +3114,7 @@ class BatchingTax:
     wait_time_b1_ms_str = fmt_time(round(w_form_b1), 'millisecond', precision=0, commas=False)
     wait_time_b32_ms_str = fmt_time(round(w_form_b32), 'millisecond', precision=0, commas=False)
     lat_b1_ms_str = fmt_time(round(lat_b1, 1), 'millisecond', precision=1, commas=False)
-    b1_rate_rps_str = fmt_rate(round(b1_rate, -1), 'requests/s', precision=0, commas=False)
+    b1_rate_rps_str = fmt_rate(round(b1_rate), 'requests/s', precision=0, commas=False)  # same 283 the cost example prints
     lat_b32_ms_str = fmt_time(round(lat_b32), 'millisecond', precision=0, commas=False)
     penalty_ratio_mult_str = fmt_multiple(round(penalty_ratio), precision=0, commas=False)
     lambda_qps_str = fmt_rate(lambda_qps, 'QPS', precision=0)
@@ -3491,50 +3491,64 @@ The heuristic returns only a formation timer. Its inputs omit the time the oldes
 # │          @sec-model-serving-adaptive-batching-windows-c404
 # │
 # │ Goal: Tabulate the throughput-latency Pareto frontier across batching windows.
-# │ How: each (window, max-batch) config runs saturated on the affine service
-# │      model; avg = W/2 + service, p99 envelope = W + service.
+# │ How: pipelined calendar-window model on the affine service profile: each
+# │      window W carries the largest batch B*(W) that finishes within W
+# │      (T_svc(B) <= W), so throughput = B / W, avg = W/2 + T_svc(B), and
+# │      formation-plus-service envelope = W + T_svc(B).
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_time, fmt_rate, fmt_percent, fmt_multiple, check
+from mlsysim.fmt import fmt, fmt_time, fmt_rate, fmt_multiple, check
 from mlsysim.core.units import ms
 
 class ParetoBatching:
-    """Batching Pareto frontier: five window/max-batch configurations on the reference profile."""
+    """Batching Pareto frontier: five pipelined calendar-window configs on the reference profile."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    # Each configuration runs saturated: batches fill to the cap. Average latency is half the
-    # window plus service; the p99 column is the conservative envelope, full window plus service.
-    window_ms = [2, 5, 10, 20, 50]
-    max_batch = [8, 16, 32, 64, 128]
+    # Under pipelined calendar-window batching, a single worker launches one batch every W ms
+    # while the next window accumulates. Stability requires T_svc(B) <= W, so the largest
+    # sustainable batch cap for window W is floor((W - T_fixed) / T_per_image).
+    window_ms = [4, 6, 10, 15, 20]
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    max_batch = []
+    service_ms = []
     avg_ms = []
     p99_ms = []
     throughput_value = []
-    for _w, _b in zip(window_ms, max_batch):
+    for _w in window_ms:
+        _b = int(((_w * ms - _FIXED) / _PER_IMAGE).to("").magnitude)
         _svc = _SERVICE.service_time(_b).to(ms).magnitude
+        max_batch.append(_b)
+        service_ms.append(_svc)
         avg_ms.append(_w / 2 + _svc)
         p99_ms.append(_w + _svc)
-        throughput_value.append(_b / (_svc / 1000))  # images per second
-    throughput_gain_value = throughput_value[-1] / throughput_value[0] - 1
+        throughput_value.append(_b / (_w / 1000))  # exact calendar-window rate B / W (img/s)
+    throughput_ratio_value = throughput_value[-1] / throughput_value[0]
     p99_ratio_value = p99_ms[-1] / p99_ms[0]
+    late_gain_value = throughput_value[-1] - throughput_value[2]
+    marginal_slopes = []
+    for _i in range(1, len(window_ms)):
+        marginal_slopes.append((throughput_value[_i] - throughput_value[_i - 1]) / (p99_ms[_i] - p99_ms[_i - 1]))
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(all(s <= w for s, w in zip(service_ms, window_ms)), "Each batch must finish within its window for pipelined stability.")
     check(throughput_value == sorted(throughput_value), "Throughput must rise across the frontier.")
-    check(p99_ms == sorted(p99_ms), "p99 latency must rise across the frontier.")
+    check(p99_ms == sorted(p99_ms), "Formation-plus-service envelope must rise across the frontier.")
     check(len(set(throughput_value)) == len(throughput_value), "Every configuration must be nondominated.")
+    check(marginal_slopes == sorted(marginal_slopes, reverse=True), "Marginal throughput per ms of envelope must diminish past the knee.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     window_ms_str = [fmt_time(w * ms, 'millisecond', precision=0, commas=False) for w in window_ms]
     max_batch_str = [fmt(b, precision=0, commas=False) for b in max_batch]
     avg_ms_str = [fmt_time(round(a, 1) * ms, 'millisecond', precision=None, commas=False) for a in avg_ms]
     p99_ms_str = [fmt_time(round(p, 1) * ms, 'millisecond', precision=None, commas=False) for p in p99_ms]
-    throughput_str = [fmt_rate(round(t, -2), 'img/s', precision=0, commas=True) for t in throughput_value]
-    throughput_gain_str = fmt_percent(round(throughput_gain_value, 1), precision=0, commas=True, style='prose', max_ratio=10)
+    throughput_str = [fmt_rate(round(t, -1), 'img/s', precision=0, commas=True) for t in throughput_value]
+    throughput_ratio_mult_str = fmt_multiple(round(throughput_ratio_value, 1), precision=None, commas=False)
     p99_ratio_mult_str = fmt_multiple(round(p99_ratio_value, 1), precision=None, commas=False)
+    late_gain_str = fmt_rate(round(late_gain_value, -1), 'img/s', precision=0, commas=True)
 ```
 
-Whether the window is fixed or adaptive, the nondominated batching configurations form a Pareto frontier\index{Pareto frontier!throughput-latency} where improving throughput requires accepting higher latency. Across five window and batch-cap configurations on the reference profile, from a `{python} ParetoBatching.window_ms_str[0]` window capped at batch `{python} ParetoBatching.max_batch_str[0]` to a `{python} ParetoBatching.window_ms_str[4]` window capped at batch `{python} ParetoBatching.max_batch_str[4]`, modeled throughput rises from `{python} ParetoBatching.throughput_str[0]` to `{python} ParetoBatching.throughput_str[4]`, a gain of `{python} ParetoBatching.throughput_gain_str`. The modeled p99 envelope rises from `{python} ParetoBatching.p99_ms_str[0]` to `{python} ParetoBatching.p99_ms_str[4]`, `{python} ParetoBatching.p99_ratio_mult_str` its initial value. Average latency over the same range grows from `{python} ParetoBatching.avg_ms_str[0]` to `{python} ParetoBatching.avg_ms_str[4]`.
+Whether the window is fixed or adaptive, the nondominated batching configurations form a Pareto frontier\index{Pareto frontier!throughput-latency} where improving throughput requires accepting higher latency. Under a pipelined calendar-window model in which each window carries the largest batch the worker can finish within that window ($\BatchServiceTime(\BatchSize) \leq \BatchingWindow$), sweeping five configurations on the reference profile from a `{python} ParetoBatching.window_ms_str[0]` window capped at batch `{python} ParetoBatching.max_batch_str[0]` to a `{python} ParetoBatching.window_ms_str[4]` window capped at batch `{python} ParetoBatching.max_batch_str[4]` raises modeled throughput from `{python} ParetoBatching.throughput_str[0]` to `{python} ParetoBatching.throughput_str[4]`, `{python} ParetoBatching.throughput_ratio_mult_str` the initial rate. Over the same range, the modeled formation-plus-service envelope rises from `{python} ParetoBatching.p99_ms_str[0]` to `{python} ParetoBatching.p99_ms_str[4]`, `{python} ParetoBatching.p99_ratio_mult_str` its initial value, while average latency grows from `{python} ParetoBatching.avg_ms_str[0]` to `{python} ParetoBatching.avg_ms_str[4]`. Most of that throughput gain arrives before the knee, as widening the window from `{python} ParetoBatching.window_ms_str[0]` to `{python} ParetoBatching.window_ms_str[2]` already reaches `{python} ParetoBatching.throughput_str[2]` while doubling the window again to `{python} ParetoBatching.window_ms_str[4]` adds only `{python} ParetoBatching.late_gain_str`.
 
 #### Practical configuration guidelines {#sec-model-serving-practical-configuration-guidelines-9791}
 
@@ -4701,7 +4715,7 @@ Each property strains a different tool from the preceding sections. Sequential g
 
 [^fn-autoregressive-decoding-serving]: **Autoregressive**\index{Autoregressive model!autoregressive, serial bottleneck}: From Greek *auto-* (self) and Latin *regressus* (a going back), since the output "regresses" on itself; George Udny Yule introduced autoregressive models in 1927 for analyzing sunspot cycles. In language modeling, each output token conditions on all previously generated tokens, creating a serial dependency that prevents the parallelism exploited during training. Decode is often weight-bandwidth-bound at small batches; larger batches amortize the weight stream and can shift the bottleneck toward compute or KV-cache traffic [@pope2023efficiently].
 
-The chapter's second service carries the section. GPT-2 XL, the bandwidth-bound lighthouse, anchors the metrics, the decode floor, speculative decoding, and the energy per generated token, because its weight stream sets each of them. Llama 3 8B, introduced with the running cases, carries the cache budget, paging, and prefix reuse, because its longer contexts make memory capacity rather than bandwidth the first constraint to run out.
+The chapter's second service carries the section. GPT-2 XL, the bandwidth-bound lighthouse, anchors the metrics, the decode floor, and speculative decoding, because its weight stream sets each of them. Llama 3 8B, introduced with the running cases, carries the cache budget, paging, and prefix reuse, because its longer contexts make memory capacity rather than bandwidth the first constraint to run out. A larger production chat service then closes the section with the energy per generated token.
 
 ### Performance metrics: TTFT and TPOT {#sec-model-serving-performance-metrics-ttft-tpot-b009}
 
@@ -5397,9 +5411,9 @@ class ChatMeasuredAnchor:
 
 ::: {#nbk-carbon-chat .callout-notebook title="The energy cost of a chat"}
 
-**Problem**: How much energy does an H100-backed chat service spend per generated token and for a response with `{python} CarbonCostCalc.cc_response_tokens_str`?
+**Problem**: How much energy does an H100-backed production chat service spend per generated token and for a response with `{python} CarbonCostCalc.cc_response_tokens_str`?
 
-As LLMs scale, joules per token becomes a first-class operational metric alongside latency. Assuming the H100 draws its `{python} CarbonCostH100Tdp.h100_tdp_w_str` thermal design power (TDP), this scenario estimate follows from throughput and power [@choquette2023]:
+As LLMs scale, joules per token becomes a first-class operational metric alongside latency. Consider a larger production chat model whose per-H100 decode throughput is far lower than the smaller GPT-2 XL lighthouse in @sec-model-serving-decode-floor-7d3a. Assuming the H100 draws its `{python} CarbonCostH100Tdp.h100_tdp_w_str` thermal design power (TDP), this scenario estimate follows from throughput and power [@choquette2023]:
 
 1.  **Throughput**: `{python} CarbonCostCalc.cc_concurrent_str` concurrent requests $\times$ `{python} CarbonCostCalc.cc_tokens_req_tokens_per_s_str` per request ≈ `{python} CarbonCostCalc.cc_total_tokens_per_s_str`.
 2.  **Power**: `{python} CarbonCostH100Tdp.h100_tdp_w_str` (GPU) + `{python} CarbonCostCalc.cc_host_overhead_w_str` (Host/Overhead) = `{python} CarbonCostCalc.cc_total_power_w_str`.
@@ -6051,7 +6065,7 @@ class FallacyLatencyCalc:
 
 Engineers who optimize model inference expect proportional improvement in user-perceived latency\index{Latency!inference vs. user-perceived}, but serving systems introduce latency sources absent from offline benchmarks. Under load, queuing delay dominates: @eq-mm1-wait shows that at `{python} FallacyLatencyCalc.fl_utilization_high_pct_str` utilization with `{python} FallacyLatencyCalc.fl_service_slow_ms_str` service time, average wait time is `{python} FallacyLatencyCalc.fl_wait_slow_ms_str` before inference even begins. Reducing inference from `{python} FallacyLatencyCalc.fl_service_slow_ms_str` to `{python} FallacyLatencyCalc.fl_service_fast_ms_str` changes service time but also shifts utilization from `{python} FallacyLatencyCalc.fl_utilization_high_pct_str` to `{python} FallacyLatencyCalc.fl_utilization_new_pct_str`, reducing queuing wait from `{python} FallacyLatencyCalc.fl_wait_slow_ms_str` to `{python} FallacyLatencyCalc.fl_wait_fast_ms_str`, a `{python} FallacyLatencyCalc.fl_queuing_improvement_mult_str` queuing improvement that dwarfs the `{python} FallacyLatencyCalc.fl_inference_gain_ms_str` inference gain.
 
-This nonlinear interaction between inference speed and queuing behavior produces an apparent paradox. The system-level speedup (`{python} FallacyLatencyCalc.fl_total_slow_ms_str` → `{python} FallacyLatencyCalc.fl_total_fast_ms_str`, or `{python} FallacyLatencyCalc.fl_system_speedup_mult_str`) far exceeds the model-level speedup (`{python} FallacyLatencyCalc.fl_service_slow_ms_str` → `{python} FallacyLatencyCalc.fl_service_fast_ms_str`, or `{python} FallacyLatencyCalc.fl_model_speedup_mult_str`). At first glance, this superlinear improvement appears to contradict Amdahl's law, which states that total system speedup is strictly bounded by the enhanced execution fraction. However, the fixed-fraction Amdahl calculation holds other stage costs unchanged; serving is a dynamic queueing system. Average queue waiting time scales nonlinearly with server utilization: $\QueueWaitTime \propto \frac{\ServingUtilization}{1 - \ServingUtilization}$, where $\ServingUtilization = \ArrivalRate \cdot \BatchServiceTime(1)$ for unbatched service. When kernel optimization cuts service time $\BatchServiceTime(1)$, it both accelerates execution and lowers server utilization $\ServingUtilization$. Pulling utilization away from saturation collapses queue waiting times nonlinearly. A kernel optimization therefore shortens the request twice, once in the service time and again in the queue that the lower utilization drains. Conversely, profiling inference latency in isolation without modeling arrival load conceals the primary driver of user-perceived performance.
+This nonlinear interaction between inference speed and queuing behavior produces an apparent paradox. The system-level speedup (`{python} FallacyLatencyCalc.fl_total_slow_ms_str` → `{python} FallacyLatencyCalc.fl_total_fast_ms_str`, or `{python} FallacyLatencyCalc.fl_system_speedup_mult_str`) far exceeds the model-level speedup (`{python} FallacyLatencyCalc.fl_service_slow_ms_str` → `{python} FallacyLatencyCalc.fl_service_fast_ms_str`, or `{python} FallacyLatencyCalc.fl_model_speedup_mult_str`). At first glance, this superlinear improvement appears to contradict Amdahl's law, which states that total system speedup is strictly bounded by the enhanced execution fraction. However, the fixed-fraction Amdahl calculation holds other stage costs unchanged; serving is a dynamic queueing system. In an M/M/1 queue, average queue waiting time equals $\QueueWaitTime = \BatchServiceTime(1) \cdot \frac{\ServingUtilization}{1 - \ServingUtilization}$, where $\ServingUtilization = \ArrivalRate \cdot \BatchServiceTime(1)$ for unbatched service. When kernel optimization cuts service time $\BatchServiceTime(1)$ at a fixed arrival rate $\ArrivalRate$, it shrinks both the leading $\BatchServiceTime(1)$ factor and the utilization term $\frac{\ServingUtilization}{1 - \ServingUtilization}$ together. Pulling utilization away from saturation collapses queue waiting times nonlinearly. A kernel optimization therefore shortens the request twice, once in the service time and again in the queue that the lower utilization drains. Conversely, profiling inference latency in isolation without modeling arrival load conceals the primary driver of user-perceived performance.
 
 :::
 

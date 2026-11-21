@@ -360,6 +360,7 @@ class LogitScalingTruncation:
     tail_base = sampled.base_tail  # probability of drawing any non-top token
     tail_sharp = sampled.sharp_tail
     tail_ratio = sampled.tail_ratio
+    outer_tail = 1.0 - sum_nuc  # probability mass outside the active nucleus
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(sum(probs_tau1) - 1.0) < 1e-12, "Baseline distribution must normalize")
@@ -372,6 +373,8 @@ class LogitScalingTruncation:
     check(abs(p_nuc_v2 - 0.1824) < 0.001, "Unexpected nucleus v2 prob")
     check(abs(p_nuc_v1 + p_nuc_v2 - 1.0) < 1e-12, "Nucleus must normalize")
     check(3 < tail_ratio < 6, "Halving temperature should shrink the non-top tail several-fold")
+    check(abs(outer_tail - sum(probs_tau1[2:])) < 1e-12, "Outer tail must match excluded tokens")
+    check(p_nuc_v2 > tail_sharp, "Nucleus truncation keeps more non-top mass than halving temperature here")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     logits_math = fmt_math(rf"\LogitVector_t = [{', '.join(f'{v:g}' for v in logits)}]")
@@ -387,9 +390,11 @@ class LogitScalingTruncation:
     nucleus_mass_str = fmt(sum_nuc, precision=4, commas=False)
     nucleus_first_str = fmt(p_nuc_v1, precision=4, commas=False)
     nucleus_second_str = fmt(p_nuc_v2, precision=4, commas=False)
+    nucleus_second_pct_str = fmt_percent(p_nuc_v2, precision=1, style="prose")
     tail_base_pct_str = fmt_percent(tail_base, precision=1, style="prose")
     tail_sharp_pct_str = fmt_percent(tail_sharp, precision=1, style="prose")
     tail_ratio_mult_str = fmt_multiple(tail_ratio, precision=1)
+    outer_tail_pct_str = fmt_percent(outer_tail, precision=1, style="prose")
 ```
 
 ::: {#nbk-02-logit-scaling-and-truncation-on .callout-notebook title="Temperature and truncation on the same logits"}
@@ -404,7 +409,7 @@ Halving the temperature to $\SamplingTemperature =$ `{python} LogitScalingTrunca
 
 Returning to unit temperature and applying nucleus truncation with $\NucleusProbabilityMass =$ `{python} LogitScalingTruncation.p_nucleus_str` evaluates cumulative probability mass. The lead token $\VocabularyToken_1$ provides `{python} LogitScalingTruncation.first_prob_str`, which falls short of the threshold. Incorporating $\VocabularyToken_2$ (`{python} LogitScalingTruncation.second_prob_str`) brings cumulative coverage to `{python} LogitScalingTruncation.nucleus_mass_str`, which satisfies the threshold and defines the active nucleus as $\{\VocabularyToken_1, \VocabularyToken_2\}$. Renormalizing across this active set assigns probability `{python} LogitScalingTruncation.nucleus_first_str` to $\VocabularyToken_1$ and `{python} LogitScalingTruncation.nucleus_second_str` to $\VocabularyToken_2$, while strictly zeroing the remaining tail tokens $\{\VocabularyToken_3, \VocabularyToken_4, \VocabularyToken_5\}$.
 
-**Systems insight**: Temperature governs candidate diversity. Halving temperature compresses the non-top probability tail from `{python} LogitScalingTruncation.tail_base_pct_str` to `{python} LogitScalingTruncation.tail_sharp_pct_str`, achieving a `{python} LogitScalingTruncation.tail_ratio_mult_str` reduction, whereas nucleus truncation eliminates the tail entirely. Repeated calls produce diverse outputs only when probability mass occupies this tail, which is the stochastic resource that parallel candidate sampling draws on in @sec-vol3-test-time-compute-breadth-axis. Because neither transformation ensures that the highest-scoring candidate is correct, engineering teams configure decoding parameters based on empirical task pass rates rather than raw model likelihood.
+**Systems insight**: Temperature scaling and nucleus truncation reshape candidate diversity in different ways. Halving temperature compresses all non-top probability mass from `{python} LogitScalingTruncation.tail_base_pct_str` to `{python} LogitScalingTruncation.tail_sharp_pct_str` (a `{python} LogitScalingTruncation.tail_ratio_mult_str` reduction) while leaving every token with positive probability. Nucleus truncation at $\NucleusProbabilityMass =$ `{python} LogitScalingTruncation.p_nucleus_str` instead zeroes only the `{python} LogitScalingTruncation.outer_tail_pct_str` outer tail $\{\VocabularyToken_3, \VocabularyToken_4, \VocabularyToken_5\}$ and places `{python} LogitScalingTruncation.nucleus_second_pct_str` of the renormalized probability mass on the non-top token $\VocabularyToken_2$. Repeated calls produce diverse outputs only when probability mass remains on non-top alternatives, which is the stochastic resource that parallel candidate sampling draws on in @sec-vol3-test-time-compute-breadth-axis. Because neither transformation ensures that the highest-scoring candidate is correct, engineering teams configure decoding parameters based on empirical task pass rates rather than raw model likelihood.
 
 :::
 
@@ -502,7 +507,7 @@ $$\NormalizedStatusEnvelope = \langle \text{status}, \ResponsePayload, \Response
 
 Here, $\ResponsePayload$ is the returned payload, which may be complete, partial, or empty, and $\ResponseMetadata$ holds the call's telemetry: the response `kind`, the raw provider `stop_reason`, reported token `usage`, request identifiers, latency timestamps, and serving settings. Keeping $\ResponsePayload$ paired with $\ResponseMetadata$ prevents downstream code from reading the payload without its status, and records unreported usage as unknown rather than zero.
 
-Because different model APIs report stop reasons, error codes, and transport failures in incompatible ways, the runtime adapter maps provider-specific signals onto the seven normalized statuses in @tbl-vol3-invocation-status. Two of them, `REJECTED` and `CANCELED`, occur only while a response is streaming (@sec-vol3-foundation-model-streaming-cancellation). Each status records what the host runtime verified locally; if two events race, such as a local cancellation crossing an incoming completion frame, the adapter resolves the status deterministically while keeping the raw provider signals in $\ResponseMetadata$.
+Because different model APIs report stop reasons, error codes, and transport failures in incompatible ways, the runtime adapter maps provider-specific signals onto the seven normalized statuses in @tbl-vol3-invocation-status. Among them, `REJECTED` occurs when a stream monitor aborts a malformed reply during reception, whereas `CANCELED` occurs whenever the runtime or an operator cancels an in-flight call before accepted completion (the streaming case is developed in @sec-vol3-foundation-model-streaming-cancellation). Each status records what the host runtime verified locally; if two events race, such as a local cancellation crossing an incoming completion frame, the adapter resolves the status deterministically while keeping the raw provider signals in $\ResponseMetadata$.
 
 | Status flag         | Terminal condition                                                               | Payload integrity                                                              | Admissible host action                                               |
 |:--------------------|:---------------------------------------------------------------------------------|:-------------------------------------------------------------------------------|:---------------------------------------------------------------------|
@@ -565,27 +570,33 @@ Rejection and cancellation are distinct events. When the stream monitor spots a 
 # │      the same floor that CallPrice uses in @sec-vol3-foundation-model-cost.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
-from mlsysim.fmt import check, fmt_count, fmt_time
+from mlsysim.fmt import check, fmt_bandwidth, fmt_count, fmt_memory, fmt_time
 
 class StreamCancel:
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
     scenario = Scenarios.CanceledStreamDecodeSavings  # Llama-3 70B, 8-bit weights, one H100
     k_cap = scenario.output_allowance  # output allowance of the canceled call (as drawn in the figure)
     k_cut = scenario.reject_step  # decode step at which the stream monitor rejects (as drawn)
+    bandwidth = scenario.floors.hardware.memory.bandwidth
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    t_dec = scenario.floors.result.memory_time.to(second)
+    floor = scenario.floors.result
+    weights = floor.weight_bytes
+    t_dec = floor.memory_time.to(second)
     cancel_steps = scenario.skipped_steps
     cancel_s = scenario.decode_time_avoided
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(cancel_steps == 4_000, "The figure labels 4,000 decode steps not run")
     check(cancel_s > 10 * second, "Early cancellation should spare tens of seconds of decode")
+    check(abs((weights / bandwidth - t_dec).to(second).magnitude) < 1e-12, "Decode floor equals weights / bandwidth")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     k_cap_str = fmt_count(k_cap)
     k_cut_str = fmt_count(k_cut)
     cancel_steps_str = fmt_count(cancel_steps)
+    weights_gb_str = fmt_memory(weights, unit=GB, precision=1)
+    bandwidth_str = fmt_bandwidth(bandwidth, unit=TB / second, precision=2)
     t_dec_ms_str = fmt_time(t_dec, unit=ms, precision=3)
     cancel_s_str = fmt_time(cancel_s, unit=second, precision=1)
 ```
@@ -596,7 +607,7 @@ Consider a call with an output allowance of `{python} StreamCancel.k_cap_str` to
 ![](images/svg/streaming_token_cancellation.svg)
 :::
 
-The skipped-step count shown is an upper bound that requires provider cooperation. If the serving engine processes the cancellation promptly, it skips up to $\OutputLimit - \RejectionDecodeStep =$ `{python} StreamCancel.cancel_steps_str` autoregressive decode steps. In the reference unbatched deployment, each plain autoregressive decode step reads the model weights from accelerator memory, so the step takes at least the weight bytes divided by the memory bandwidth; for the reference deployment of @sec-vol3-foundation-model-cost, that floor is `{python} StreamCancel.t_dec_ms_str` per generated token. At that reference floor, skipping all these steps avoids `{python} StreamCancel.cancel_s_str` of estimated decode work. An honored cancellation also frees the request's slot among the requests the serving engine decodes together and releases the call's KV-cache allocations. If the remote service fails to honor the cancellation, the host runtime still quarantines the rejected payload locally, but the remote service may continue generating up to its token allowance.
+The skipped-step count shown is an upper bound that requires provider cooperation. If the serving engine processes the cancellation promptly, it skips up to $\OutputLimit - \RejectionDecodeStep =$ `{python} StreamCancel.cancel_steps_str` autoregressive decode steps. In an unbatched deployment, each plain autoregressive decode step reads the model weights from accelerator memory, so the step takes at least the weight bytes divided by the memory bandwidth; for the reference deployment priced in @sec-vol3-foundation-model-cost (`{python} StreamCancel.weights_gb_str` of 8-bit weights streamed at `{python} StreamCancel.bandwidth_str`), that floor is `{python} StreamCancel.t_dec_ms_str` per generated token. At that reference floor, skipping all `{python} StreamCancel.cancel_steps_str` steps avoids `{python} StreamCancel.cancel_s_str` of estimated decode work. An honored cancellation also frees the request's slot among the requests the serving engine decodes together and releases the call's KV-cache allocations. If the remote service fails to honor the cancellation, the host runtime still quarantines the rejected payload locally, but the remote service may continue generating up to its token allowance.
 
 Nonstreaming calls apply the same status check once the whole response arrives. Streaming moves that check earlier in the call so the runtime can reject bad prefixes and reclaim resources sooner, without relaxing the rule that incomplete prefixes never run. Either way, `COMPLETED` status establishes only that a whole candidate arrived from the service, leaving open whether its contents are valid, permitted, or true.
 
@@ -776,7 +787,11 @@ Adding an explicit `unknown` variant or a structured `error` branch to the schem
 
 Choosing the right schema branch or file path still depends on what the model has learned, because a grammar mask forces valid syntax even when the model has no idea which tool or argument fits the task. Training and runtime masking work at different layers and complement each other. Supervised fine-tuning (further training on curated example responses, developed in @sec-vol3-fine-tuning) and instruction tuning teach models to map prompts onto tool definitions and put high probability on appropriate arguments [@schick2023toolformer]. Runtime logit masking fixes the support of the distribution at each step by setting illegal tokens to zero probability. A model tuned for tool use puts high logits on sensible tokens, while the runtime mask ensures that sampling noise or long-context drift cannot emit broken syntax. Neither replaces the other: training alone gives no hard guarantee against syntax errors, and a grammar mask supplies no domain knowledge about which file path is right.
 
-Grammar constraints also carry their own costs. Compiling complex regular expressions or nested JSON schemas into deterministic automata consumes CPU time and memory. In dynamic environments where agents construct ad hoc schemas per request, compilation latency can offset the latency saved by avoiding syntax retries. Similarly, tracking parse states and computing masks across large vocabularies ($|\TokenVocabulary| \ge 128{,}000$ tokens) adds per-token decoding overhead unless supported by precomputed lookup indices or bitmasks applied on the accelerator. Eliminating syntax retries lowers total cost only when compilation, mask memory, and per-token mask work together cost less than the retries they replace.
+Grammar constraints also carry their own costs. Compiling complex regular expressions or nested JSON schemas into deterministic automata consumes CPU time and memory. In dynamic environments where agents construct ad hoc schemas per request, compilation latency can offset the latency saved by avoiding syntax retries. Similarly, tracking parse states and computing masks across large vocabularies ($|\TokenVocabulary| \ge 128{,}000$ tokens) adds per-token decoding overhead unless supported by precomputed lookup indices or bitmasks applied on the accelerator. Eliminating syntax retries lowers total cost only when compilation, mask memory, and per-token mask work together cost less than the retries they replace. @Sec-vol3-app-b-logit-masking derives the parse-failure break-even rate at which constrained-decoding overhead pays for itself.
+
+::: {.column-margin .margin-pointer}
+↪ Sampler placement, logit transfer payloads, and dense grammar-mask storage requirements inside the decode loop are developed in @sec-vol3-appendix-inference-decode-loop.
+:::
 
 ::: {#chk-02-schema-constrained-decoding .callout-checkpoint title="Evaluating schema-constrained decoding"}
 
@@ -975,7 +990,7 @@ The lowercase symbols are per-token floors. The analytical budget uses the allow
 
 $$\frac{\PerTokenDecodeTime}{\PerTokenPrefillTime} \approx \frac{\PeakRate \, \ElementStorageSize}{2 \, \Bandwidth}$$ {#eq-vol3-fm-floor-ratio}
 
-Consider a concrete reference deployment: a dense model with `{python} CallPrice.params_str` parameters stored in 8-bit precision ($\ElementStorageSize = 1$ byte) on a single accelerator with an 8-bit peak rate of `{python} CallPrice.peak_fp8_str` and a memory bandwidth of `{python} CallPrice.bandwidth_str`. Each token costs `{python} CallPrice.token_flops_str` of arithmetic, and dividing by the peak rate gives a prefill floor of `{python} CallPrice.t_pre_us_str` per prompt token. Each decode step reads `{python} CallPrice.weights_gb_str` of weights, and dividing by the bandwidth gives a decode floor of `{python} CallPrice.t_dec_ms_str` per generated token. Under @eq-vol3-fm-floor-ratio, decoding a single output token therefore takes the same hardware time as ingesting roughly `{python} CallPrice.ratio_str` prompt tokens. This asymmetry is the content of output-bound latency (principle \ref{pri-vol3-memory-bandwidth-decoding})\index{Principle!output-bound latency}, under which each plain, unbatched decode step incurs a full weight read in this model, so output volume can dominate call latency. The ratio reflects weight-dominated, unbatched decode against peak-throughput prefill, not a measured cloud service rate or a commercial billing tier.
+Consider a concrete reference deployment: a dense model with `{python} CallPrice.params_str` parameters stored in 8-bit precision ($\ElementStorageSize = 1$ byte) on a single accelerator with an 8-bit peak rate of `{python} CallPrice.peak_fp8_str` and a memory bandwidth of `{python} CallPrice.bandwidth_str`. Each token costs `{python} CallPrice.token_flops_str` of arithmetic, and dividing by the peak rate gives a prefill floor of `{python} CallPrice.t_pre_us_str` per prompt token. Each decode step reads `{python} CallPrice.weights_gb_str` of weights, and dividing by the bandwidth gives a decode floor of `{python} CallPrice.t_dec_ms_str` per generated token. Under @eq-vol3-fm-floor-ratio, decoding a single output token therefore takes the same hardware time as ingesting roughly `{python} CallPrice.ratio_str` prompt tokens. This asymmetry is the content of output-bound latency (principle \ref{pri-vol3-memory-bandwidth-decoding})\index{Principle!output-bound latency}, under which each plain, unbatched decode step incurs a full weight read in this model, so output volume can dominate call latency. The ratio reflects weight-dominated, unbatched decode against peak-throughput prefill, not a measured cloud service rate or a commercial billing tier. @Sec-vol3-appendix-inference-assumptions tabulates these reference model and accelerator inputs so a reader can substitute different hardware.
 
 ::: {.column-margin .margin-pointer}
 ↪ Both execution floors and their operating boundaries are developed in @sec-vol3-appendix-inference-roofline.
@@ -1275,7 +1290,7 @@ The following six papers provide essential reading on the conceptual and systems
 - @saltzer1984endtoend presents the end-to-end argument in system design, articulating why lower architectural layers cannot reliably guarantee higher-level application correctness. It underpins why an agent runtime cannot treat external service status codes (such as `COMPLETED`) as substitutes for independent outcome validation.
 - @holtzman2020curious analyzes the degeneration of likelihood-maximizing decoding in open-ended text generation and introduces nucleus (top-$\NucleusProbabilityMass$) sampling. It demonstrates that decoding algorithms represent deliberate engineering trade-offs that govern output entropy, coherence, and candidate diversity.
 - @pope2023efficiently develops an analytical roofline model of Transformer serving that separates compute-bound prompt prefill from memory-bandwidth-bound autoregressive decoding. It establishes the quantitative foundation for per-token latency floors, KV cache memory footprints, and batching trade-offs.
-- @willard2023outlines introduces efficient constrained decoding by compiling regular expressions and context-free grammars into finite-state machines indexed over the model's token vocabulary. It demonstrates how to enforce strict structural schemas at runtime with minimal per-token computational overhead.
+- @willard2023outlines introduces efficient constrained decoding by compiling regular expressions into finite-state machines indexed over the model's token vocabulary and combining incremental pushdown parsing with vocabulary-indexed lexical masks for context-free grammars. It demonstrates how to enforce strict structural schemas at runtime with minimal per-token computational overhead.
 - @bommasani2021opportunities surveys the technical capabilities and architectural risks of foundation models. Its analysis of model homogenization clarifies why centralized upstream dependencies require strict isolation boundaries, independent validation, and runtime guardrails across downstream applications.
 
 ## Exercises {#sec-vol3-foundation-model-exercises}

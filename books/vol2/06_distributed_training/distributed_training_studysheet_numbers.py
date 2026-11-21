@@ -122,9 +122,9 @@ def numbers() -> dict:
     one, four = Scenarios.Gpt2DataParallelOneNode, Scenarios.Gpt2DataParallelFourNodes10GbE
     r1, r4 = one.result, four.result
     eth = four.inter_bandwidth.to("GB/s").magnitude                         # 10 Gb/s = 1.25 GB/s
-    ring = 2 * (r4.n_devices - 1) / r4.n_devices
+    ring = 2 * (four.nodes - 1) / four.nodes
     assert abs(ring * r4.gradient_bytes.to(GB).magnitude - r4.inter_bytes.to(GB).magnitude) < 1e-9
-    n.update(gptgrad=f"{r4.gradient_bytes.to(GB).magnitude:.0f}", gptgpus=c(r4.n_devices), gptsmall=c(r1.n_devices),
+    n.update(gptgrad=f"{r4.gradient_bytes.to(GB).magnitude:.0f}", gptgpus=c(r4.n_devices), gptnodes=c(four.nodes), gptsmall=c(r1.n_devices),
              ethgbit=f"{four.inter_bandwidth.to('Gbps').magnitude:.0f}", ethbytes=f"{eth:.2f}",
              gptring=f"{r4.inter_bytes.to(GB).magnitude:.2f}", gptinter=f"{r4.inter_time.to('s').magnitude:.2f}",
              gptcomp=f"{r4.compute_time.to('s').magnitude:.1f}", gptcomm=f"{r4.communication_time.to('s').magnitude:.2f}",

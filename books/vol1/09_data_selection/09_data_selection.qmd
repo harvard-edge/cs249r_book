@@ -515,7 +515,7 @@ A higher ICR indicates that each FLOP of training yields more measured learning 
 As a training run adds more examples from the same source, a growing share of those examples repeat patterns the model has already seen, and the information-compute ratio falls. The **ICR frontier**\index{Information-compute ratio!frontier} is the dataset size at which adding more of that data stops paying. Beyond it, the marginal ICR, the learning returned by the next FLOP spent on more data, drops below what that FLOP could return elsewhere, such as a larger model, a different data source, or an earlier stop. More data from this source then raises cost faster than accuracy, so the run falls further below the accuracy-cost Pareto frontier of the previous section. Despite the shared name, the ICR frontier is one stopping point for one data source, not a curve like the Pareto frontier. The compute-optimal frontier of @sec-data-selection-computeoptimal-frontier-24ba answers a third question, how a fixed compute budget should be split between model size and training data.
 
 To illustrate diminishing returns, let $\DataInformationContent(\DatasetSize)$ be the information content of a dataset of size $\DatasetSize$ and assume $\DataInformationContent(\DatasetSize) \propto \log \DatasetSize$. This is a simplified analytical model rather than a universal law. If compute cost scales linearly with the per-sample operation count $\OperationsPerSample$, then total operations are $\Operations = \OperationsPerSample \cdot \DatasetSize$, and the resulting marginal ICR follows @eq-icr-decay:
-$$\text{ICR}(\DatasetSize) = \frac{\DerivativeOperator\DataInformationContent/d\DatasetSize}{d\Operations/d\DatasetSize} \approx \frac{1/\DatasetSize}{\OperationsPerSample} = \frac{1}{\OperationsPerSample\cdot \DatasetSize}$$ {#eq-icr-decay}
+$$\text{ICR}(\DatasetSize) = \frac{\DerivativeOperator\DataInformationContent/d\DatasetSize}{d\Operations/d\DatasetSize} \propto \frac{1/\DatasetSize}{\OperationsPerSample} = \frac{1}{\OperationsPerSample\cdot \DatasetSize}$$ {#eq-icr-decay}
 
 The derivative ratio in @eq-icr-decay describes the return on an infinitesimal increase in dataset size; for two finite dataset sizes, the ratio is the difference in evaluation gain divided by the difference in training FLOPs. Under this illustrative model, marginal ICR falls as $1/(\OperationsPerSample \cdot \DatasetSize)$, so doubling the dataset halves the learning each additional FLOP yields. Inverted, the compute spent per unit of learning grows linearly with $\DatasetSize$. ICR never reaches zero in this model and the curve has no knee of its own, so the frontier is located by comparing marginal ICR with a threshold, not read off the curve. The threshold is the opportunity cost named in the definition, what the same FLOP would return in its best alternative use. A team estimates that threshold by measuring, over the same FLOP interval, the gain from the best alternative it can actually run, such as a larger model trained on the current data, and stops adding data from this source once the data's marginal gain falls below it.
 
@@ -1586,24 +1586,26 @@ class CoresetPractice:
 ::: {#lst-el2n-coreset lst-cap="**EL2N-Based Coreset Selection**: The `compute_el2n_scores` function trains a proxy model for a few epochs, then measures prediction error via L2 distance from one-hot labels. High scores identify samples the proxy finds difficult, including potentially noisy examples. The `select_coreset` function illustrates ranking by this score; production use also requires coverage, noise, and target-quality validation."}
 
 ```{.python}
-def compute_el2n_scores(model, dataloader, num_epochs=5):
+def compute_el2n_scores(model, train_loader, score_loader, num_epochs=5):
     """Compute EL2N scores.
 
     Returns L2 norm of (prediction - one_hot_label).
     """
-    # Train proxy model for a few epochs to get meaningful predictions
-    train_proxy(model, dataloader, num_epochs)
+    # Train proxy model on shuffled batches for a few epochs
+    train_proxy(model, train_loader, num_epochs)
 
     scores = []
     model.eval()
-    for x, y in dataloader:
-        logits = model(x)
-        probs = softmax(logits, dim=1)
-        # One-hot encode labels
-        one_hot = zeros_like(probs).scatter_(1, y.unsqueeze(1), 1)
-        # EL2N score = L2 distance between probabilities and one-hot target
-        el2n = (probs - one_hot).norm(dim=1)  # High = large prediction error
-        scores.extend(el2n.tolist())
+    # Unshuffled score_loader keeps scores aligned with dataset indices
+    with no_grad():
+        for x, y in score_loader:
+            logits = model(x)
+            probs = softmax(logits, dim=1)
+            # One-hot encode labels
+            one_hot = zeros_like(probs).scatter_(1, y.unsqueeze(1), 1)
+            # EL2N score: L2 distance to one-hot target (high = large error)
+            el2n = (probs - one_hot).norm(dim=1)
+            scores.extend(el2n.tolist())
     return scores
 
 
@@ -1616,7 +1618,9 @@ def select_coreset(scores, dataset, fraction=0.1):
 
 
 # Illustrative 10% subset; validate accuracy and coverage before use
-scores = compute_el2n_scores(proxy_model, full_loader)
+train_loader = DataLoader(full_dataset, batch_size=batch_size, shuffle=True)
+score_loader = DataLoader(full_dataset, batch_size=batch_size, shuffle=False)
+scores = compute_el2n_scores(proxy_model, train_loader, score_loader)
 coreset = select_coreset(scores, full_dataset, fraction=0.1)
 train_full_model(model, coreset)
 ```
@@ -1643,7 +1647,7 @@ Implementing a curriculum requires two components: a difficulty scorer that rank
 $$
 \text{samples}_{\EpochIndex} = \texttt{sort\_by\_difficulty}[:\DatasetSize\cdot \min(1, \EpochIndex/\WarmupEpochCount)]
 $$
-where $\EpochIndex$ is the current epoch, $\DatasetSize$ is the total dataset size, and $\WarmupEpochCount$ is the number of warmup epochs before the full dataset becomes available. Early epochs train on the easiest fraction $\EpochIndex/\WarmupEpochCount$ of the $\DatasetSize$ samples; after warmup, training proceeds on the full dataset. From a systems standpoint, dynamically re-sorting multi-terabyte datasets epoch-by-epoch destroys sequential I/O read-ahead and stalls accelerators on storage latency. Production data loaders implement curricula by pre-sorting data offline into discrete difficulty-tiered shards or buckets. During training, workers stream shards sequentially from storage while maintaining local shuffle buffers within each tier, preserving high sequential storage bandwidth while maintaining batch diversity and gradient stability.
+where $\EpochIndex$ is the current epoch, $\DatasetSize$ is the total dataset size, and $\WarmupEpochCount$ is the number of warmup epochs before the full dataset becomes available. Early epochs train on the easiest fraction $\EpochIndex/\WarmupEpochCount$ of the $\DatasetSize$ samples; after warmup, training proceeds on the full dataset. From a systems standpoint, dynamically re-sorting multi-terabyte datasets epoch-by-epoch destroys sequential I/O read-ahead and stalls accelerators on storage latency. Production data loaders implement curricula by pre-sorting data offline into discrete difficulty-tiered shards or buckets. During training, workers stream shards sequentially from storage while maintaining local shuffle buffers (in-memory reservoirs that randomize samples drawn from those sequential reads, developed in @sec-data-selection-hardware-empathy-random-access-penalty-ef16) within each tier, preserving high sequential storage bandwidth while maintaining batch diversity and gradient stability.
 
 The pacing rule fixes one saving before any benchmark is run. Summed over the warmup, the loader serves $\sum_{\EpochIndex=1}^{\WarmupEpochCount} \DatasetSize \cdot \EpochIndex/\WarmupEpochCount= \DatasetSize (\WarmupEpochCount+1)/2$ samples in place of $\WarmupEpochCount\cdot \DatasetSize$, so the warmup epochs cost roughly half their full-data FLOPs. A curriculum can therefore save compute in two distinct ways, through cheaper warmup epochs and through any reduction in the total epochs needed to reach target quality, and a claimed saving must say which of the two it measured.
 
@@ -2537,7 +2541,7 @@ class ClinicalLabelingEconomics:
 
 A single hospital's chest X-ray archive, smaller than the pool in @sec-data-selection-active-learning-humanintheloop-6932, may hold `{python} ClinicalLabelingEconomics.full_pool_scans_str` scans of which only `{python} ClinicalLabelingEconomics.labeled_scans_str` have been reviewed and labeled[^fn-labeling-economic-cost] by radiologists, a labeling rate of `{python} ClinicalLabelingEconomics.labeling_rate_pct_str`. **Semi-supervised learning**\index{Semi-supervised learning!definition} puts the remaining `{python} ClinicalLabelingEconomics.unlabeled_scans_str` images to work by shifting the trade-off from human annotation to accelerator compute. It uses the small labeled subset to anchor training on the larger unlabeled pool, extracting supervisory signals from unannotated inputs. Models trained this way can approach fully supervised accuracy with far fewer manual labels, provided the unlabeled pool matches the target distribution and the result is validated on labeled data.
 
-[^fn-labeling-economic-cost]: **Illustrative clinical labeling economics**\index{Data labeling!clinical economics}: The review-rate and hourly-rate ranges are scenario assumptions rather than reported measurements. Under those inputs, labeling `{python} ClinicalLabelingEconomics.labeled_scans_str` scans requires `{python} ClinicalLabelingEconomics.labeled_hours_range_str` and costs `{python} ClinicalLabelingEconomics.labeled_cost_range_str`; labeling all `{python} ClinicalLabelingEconomics.full_pool_scans_str` costs `{python} ClinicalLabelingEconomics.full_cost_range_str`. The arithmetic illustrates why semi-supervised learning can be attractive when expert labels are expensive, but actual review time, adjudication, prevalence, and validation requirements must be measured.
+[^fn-labeling-economic-cost]: **Illustrative clinical labeling economics**\index{Data labeling!clinical economics}: Assuming a review rate of `{python} ClinicalLabelingEconomics.review_rate_range_str` scans per hour and a specialist rate of `{python} ClinicalLabelingEconomics.hourly_rate_range_str` (scenario assumptions rather than reported measurements), labeling `{python} ClinicalLabelingEconomics.labeled_scans_str` scans requires `{python} ClinicalLabelingEconomics.labeled_hours_range_str` and costs `{python} ClinicalLabelingEconomics.labeled_cost_range_str`; labeling all `{python} ClinicalLabelingEconomics.full_pool_scans_str` costs `{python} ClinicalLabelingEconomics.full_cost_range_str`. The arithmetic illustrates why semi-supervised learning can be attractive when expert labels are expensive, but actual review time, adjudication, prevalence, and validation requirements must be measured.
 
 Unlabeled data, although it cannot teach the mapping from inputs to outputs, contains structural information about the input distribution $\InputDistribution$ that can constrain the hypothesis space, the set of functions the model could learn. Under the smoothness assumption (nearby inputs share a label) and the cluster assumption (inputs in one dense cluster share a label), a decision boundary that cuts through a dense region assigns different labels to nearby inputs and is less plausible than one in a low-density region. Semi-supervised methods exploit these assumptions, which must be checked against the target task.
 
@@ -2971,9 +2975,9 @@ class ResNetEpochOnH100:
     score_energy = epoch.score_energy()
     host_supply = epoch.host_rate.to(count / second).magnitude  # img/s, the training chapter's host
     host_epoch_time = epoch.host_epoch_time
-    run_saving_energy = epoch.run_saving_energy
-    run_saving_time = epoch.run_saving_time
-    saving_over_score = epoch.saving_over_score_energy
+    run_saving_energy = epoch.net_saving_energy()
+    run_saving_time = epoch.net_saving_time()
+    saving_over_score = epoch.net_saving_over_score_energy()
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     # Must agree with the training chapter: about 10,100 images/s of accelerator demand
@@ -3006,8 +3010,8 @@ class ResNetEpochOnH100:
     pruned_energy_str = fmt_energy(round(pruned_energy.magnitude) * kJ, unit=kJ, precision=0)
     score_time_str = fmt_time(round(score_time.magnitude) * second, 'second', precision=0, style='word')
     score_energy_str = fmt_energy(round(score_energy.magnitude) * kJ, unit=kJ, precision=0)
-    run_saving_energy_str = fmt_energy(round(run_saving_energy.magnitude, 1) * MJ, unit=MJ)
-    run_saving_time_str = fmt_time(round(run_saving_time.magnitude) * hour, 'hour', precision=0, style='word')
+    run_saving_energy_str = fmt_energy(run_saving_energy, unit=MJ, precision=1)
+    run_saving_time_str = fmt_time(run_saving_time, 'hour', precision=1, style='word')
     saving_over_score_mult_str = fmt_multiple(round(saving_over_score), precision=0)
 ```
 
@@ -3125,7 +3129,7 @@ Across those four stages, local NVMe reads and PCIe transfers finish well inside
 
 **Compute**: Each image costs `{python} ResNetEpochOnH100.train_gflop_str` forward and backward, so a full epoch is `{python} ResNetEpochOnH100.epoch_flops_str`. At the `{python} ResNetEpochOnH100.mfu_pct_str` of peak that ResNet-50 sustains in training (@sec-model-training-data-pipeline-8e71), the H100 finishes it in about `{python} ResNetEpochOnH100.epoch_time_str`, which at its `{python} ResNetEpochOnH100.tdp_str` board power is about `{python} ResNetEpochOnH100.epoch_energy_str`. The pruned epoch takes about `{python} ResNetEpochOnH100.pruned_time_str` and `{python} ResNetEpochOnH100.pruned_energy_str`.
 
-**Selection**: An EL2N-style scoring pass is one forward pass over the full pool, a third of an epoch's arithmetic, about `{python} ResNetEpochOnH100.score_time_str` and `{python} ResNetEpochOnH100.score_energy_str`, paid once. Over `{python} ResNetEpochOnH100.epochs_str` epochs the coreset saves about `{python} ResNetEpochOnH100.run_saving_energy_str` and `{python} ResNetEpochOnH100.run_saving_time_str` of accelerator time, `{python} ResNetEpochOnH100.saving_over_score_mult_str` the scoring energy.
+**Selection**: An EL2N-style scoring pass is one forward pass over the full pool, a third of an epoch's arithmetic, about `{python} ResNetEpochOnH100.score_time_str` and `{python} ResNetEpochOnH100.score_energy_str`, paid once. Over `{python} ResNetEpochOnH100.epochs_str` epochs, after paying that scoring pass, the coreset saves about `{python} ResNetEpochOnH100.run_saving_energy_str` and `{python} ResNetEpochOnH100.run_saving_time_str` of accelerator time, `{python} ResNetEpochOnH100.saving_over_score_mult_str` the scoring energy.
 
 **Data path**: To stay compute-bound, the accelerator must receive about `{python} ResNetEpochOnH100.image_rate_str` images per second. Reading the `{python} ResNetEpochOnH100.storage_gb_str` ImageNet archive from local NVMe at `{python} ResNetEpochOnH100.storage_bw_str` takes about `{python} ResNetEpochOnH100.storage_time_str` per epoch, and copying the decoded 8-bit tensors (`{python} ResNetEpochOnH100.pcie_gb_str`) across PCIe at `{python} ResNetEpochOnH100.pcie_bw_str` takes about `{python} ResNetEpochOnH100.pcie_time_str`, both shorter than even the pruned epoch's compute time. The stage that must keep up is the host CPU, which has to decode and augment `{python} ResNetEpochOnH100.image_rate_str` JPEG images every second. The training chapter's host supplies only about `{python} ResNetEpochOnH100.host_supply_str` per accelerator, so an epoch actually takes about `{python} ResNetEpochOnH100.host_epoch_time_str` until decode capacity grows; the seconds above are the compute-bound figures selection can claim once the host keeps up.
 
@@ -3348,7 +3352,7 @@ Conversely, when the selection policy updates dynamically across training iterat
 
 ### Data echoing {#sec-data-selection-data-echoing-amortizing-io-costs-b4e0}
 
-Even with sequential reads, the host CPU often cannot decode and augment samples fast enough. Heavy data transformations, such as 3D rotations, MixUp, JPEG decoding, or on-the-fly generative synthesis, demand substantial host processing per sample. When the host produces batches slower than the accelerator consumes them, the feeding problem of @sec-data-engineering-feeding-problem reappears inside the selection loop and the accelerator idles, starved for input. The resulting collapse in accelerator utilization extends training wall-clock time, neutralizing the efficiency gains achieved by pruning the dataset.
+Even with sequential reads, the host CPU often cannot decode and augment samples fast enough. Heavy data transformations, such as 3D rotations, multi-stage RandAugment, JPEG decoding, or on-the-fly generative synthesis, demand substantial host processing per sample. When the host produces batches slower than the accelerator consumes them, the feeding problem of @sec-data-engineering-feeding-problem reappears inside the selection loop and the accelerator idles, starved for input. The resulting collapse in accelerator utilization extends training wall-clock time, neutralizing the efficiency gains achieved by pruning the dataset.
 
 ::: {.column-margin .margin-pointer}
 ↩ Accelerator bubbles, which open when the data-loading stage cannot keep pace with the accelerator, are established in @sec-model-training-staged-pipeline.
@@ -3499,7 +3503,7 @@ The selection dependencies admit two broad architectures, each at a different po
 
 Hierarchical selection\index{Hierarchical selection!distributed coreset} instead distributes the selection computation itself. Each worker selects candidates from its own shard, and the coordinator merges and reranks them before dispatching the final indices (@fig-distributed-coreset-architecture). Shard-local selection reduces coordinator load but introduces a quality trade-off, because local quotas and score distributions may not preserve the global ranking or rare groups spread unevenly across shards. The merge step therefore needs normalization, coverage constraints, or a second global pass.
 
-::: {#fig-distributed-coreset-architecture fig-env="figure" fig-pos="htb" fig-cap="**Distributed Coreset Selection Architecture**: Parallel shard-local scoring reduces the work assigned to a centralized rank-merging coordinator. Workers send local EL2N scores upward; the coordinator merges them and broadcasts final coreset indices. All boxes are processes on one host; the coordinator is a selection role, and each worker drives one accelerator. The design is beneficial only when this coordination overhead remains below the training time saved by the coreset." fig-alt="Architecture diagram with one wide Coordinator Node above three representative worker boxes labeled Worker 0, Worker 1, and Worker N, separated by ellipses. The coordinator collects shard-local EL2N scores, merges and reranks local selections, and broadcasts final coreset indices. Paired arrows show local scores flowing upward from workers and final coreset indices flowing downward."}
+::: {#fig-distributed-coreset-architecture fig-env="figure" fig-pos="htb" fig-cap="**Distributed Coreset Selection Architecture**: Parallel shard-local scoring reduces the work assigned to a centralized rank-merging coordinator. Workers send local EL2N scores upward; the coordinator merges them and broadcasts final coreset indices. All boxes are processes on one host; the coordinator is a selection role, and each worker drives one accelerator. The design is beneficial only when this coordination overhead remains below the training time saved by the coreset." fig-alt="Architecture diagram with one wide Coordinator Process box above three representative worker boxes labeled Worker 0, Worker 1, and Worker N, with an ellipsis between Worker 1 and Worker N. The coordinator collects shard-local EL2N scores, merges and reranks local selections, and broadcasts final coreset indices. Paired arrows show local scores flowing upward from workers and final coreset indices flowing downward."}
 
 ```{.tikz}
 \scalebox{0.85}{%
@@ -3514,9 +3518,9 @@ Hierarchical selection\index{Hierarchical selection!distributed coreset} instead
    Text/.style={right,fill=none,text=black!70,font=\footnotesize\sffamily,align=left},
 }
 
-% Coordinator node
+% Coordinator process
 \node[Box] (B0) {};
-\node[draw=none,fill=BlueD,text=white,below=0pt of B0.north] (BB0) {\textbf{Coordinator Node}};
+\node[draw=none,fill=BlueD,text=white,below=0pt of B0.north] (BB0) {\textbf{Coordinator Process}};
 \node[draw=none,align=left,anchor=south]at($(B0.south)+(0,2pt)$){%
     \textbullet\ Collects shard-local EL2N scores\\
     \textbullet\ Merges and reranks local selections\\
@@ -3545,7 +3549,6 @@ fill=GreenLine,text=white] (WW2){\textbf{Worker N}};
 \draw[ScoreLine] ([xshift=-1.7mm]W\i.north) -- ([xshift=-1.7mm]W\i.north |- B0.south);
 \draw[IndexLine] ([xshift=1.7mm]W\i.north |- B0.south) -- ([xshift=1.7mm]W\i.north);
 }
-\node at ($(W1)!0.5!(W0)$) {\Large$\cdots$};
 \node at ($(W2)!0.5!(W0)$) {\Large$\cdots$};
 \end{tikzpicture}}
 ```
@@ -3826,7 +3829,7 @@ If candidate scoring is computationally heavy or the unlabeled pool is massive, 
 
 The ROI divides by the active-learning budget rather than by the one-time investment of @eq-data-selection-amortized-roi, because here the money spent on labels and scoring is itself the investment being judged. Within this labels-plus-scoring boundary, break-even occurs when avoided labeling costs equal selection overhead. In this scenario, active learning would break even only if its total scoring spend grew from `{python} BreakevenCalc.cost_active_inference_str` to the full gap between `{python} BreakevenCalc.cost_random_total_str` of random labels and `{python} BreakevenCalc.cost_active_label_str` of active-learning labels. A complete dollar comparison must also deduct any additional retraining, engineering, storage, and delay-related expense relative to the random-labeling baseline.
 
-When an unlabeled candidate pool $\UnlabeledPool$ contains millions of uncurated examples, repeatedly scoring it across multiple rounds scales scoring cost with $|\UnlabeledPool| \times \CandidateScoringCost$. An algorithmic reduction in labeled samples can then be erased if proxy inference costs are not carefully bounded. When one fixed budget funds both scoring and labeling, every dollar spent scoring the pool is a dollar withdrawn from labels, so practical loops narrow $\UnlabeledPool$ with metadata or a cheap heuristic before the active model scores it.
+When an unlabeled candidate pool $\UnlabeledPool$ contains millions of uncurated examples, repeatedly scoring it across multiple rounds multiplies each round's scoring cost of $|\UnlabeledPool| \times \CandidateScoringCost$ (where $\CandidateScoringCost$ is the inference cost per candidate) by the number of rounds. An algorithmic reduction in labeled samples can then be erased if proxy inference costs are not carefully bounded. When one fixed budget funds both scoring and labeling, every dollar spent scoring the pool is a dollar withdrawn from labels, so practical loops narrow $\UnlabeledPool$ with metadata or a cheap heuristic before the active model scores it.
 
 ### Amortization across training runs {#sec-data-selection-amortization-across-training-runs-f6b8}
 
@@ -4494,16 +4497,14 @@ class FpFallacyCalc:
     acc_gain_10x_pp = scaling.accuracy_gain
     curated_sample_count = 100_000 * count
     raw_sample_count = 1_000_000 * count
-    curated_accuracy_pct = 92.0
-    raw_accuracy_pct = 88.0
-    synthetic_gen1_acc_pct = 95.0
-    synthetic_gen5_acc_pct = 78.0
+    curated_accuracy_pct = 92.0  # scenario assumption: illustrative accuracy on the curated 100K set
+    raw_accuracy_pct = 88.0  # scenario assumption: illustrative accuracy on the raw 1M set
+    # Illustrative model collapse (constructed, not measured): generation-1 and generation-5
+    # accuracy for recursive synthetic-only training, after the trend Shumailov et al. (2024) report.
+    synthetic_gen1_acc_pct = 95.0  # scenario assumption
+    synthetic_gen5_acc_pct = 78.0  # scenario assumption
     training_run_cost = 100_000_000 * USD  # scenario assumption: large-scale training run
-    efficiency_gain_pct_value = 10
-    cifar10_coreset_pct_value = 50
-    cifar10_acc_retained_pct = 98
-    imagenet_acc_retained_pct = 95
-    medical_acc_retained_pct = 72
+    efficiency_gain_pct_value = 10  # scenario assumption: efficiency gain from selection
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     curated_cost_ratio_value = (raw_sample_count / curated_sample_count).to("").magnitude
@@ -4712,7 +4713,7 @@ Every row of the opening chapter map (@tbl-data-selection-chapter-spine) has now
 | **Quantity**                       | **Formula**                                                                                                                           | **Where derived**                                                       |
 |:-----------------------------------|:--------------------------------------------------------------------------------------------------------------------------------------|:------------------------------------------------------------------------|
 | **Information-compute ratio**      | $\text{ICR} = \FiniteChange\DataInformationContent/\FiniteChange\Operations$                                                          | @sec-data-selection-informationcompute-ratio-8c0b                       |
-| **Marginal ICR (log-information)** | $\text{ICR}(\DatasetSize) \approx 1/(\OperationsPerSample\cdot \DatasetSize)$                                                         | @eq-icr-decay                                                           |
+| **Marginal ICR (log-information)** | $\text{ICR}(\DatasetSize) \propto 1/(\OperationsPerSample\cdot \DatasetSize)$                                                         | @eq-icr-decay                                                           |
 | **Training compute**               | $\Operations \approx 6\Parameters\DatasetSize$; compute-optimal tokens $\ComputeOptimalTokenCount \propto \sqrt{\Operations}$         | @sec-data-selection-computeoptimal-frontier-24ba                        |
 | **Performance-per-data**           | $\text{PPD}(\LearningCurveSampleCount) = [\text{Accuracy}(\LearningCurveSampleCount) - \text{Accuracy}(0)]/\LearningCurveSampleCount$ | @sec-data-selection-core-metrics-32e9                                   |
 | **Data compression ratio**         | $\text{DCR} = \FullDatasetSize/\SubsetDatasetSize$ at target accuracy                                                                 | @sec-data-selection-core-metrics-32e9                                   |

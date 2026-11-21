@@ -155,7 +155,36 @@ ML benchmarking operates across three interdependent dimensions that map directl
 
 The three dimensions do not receive equal space. System benchmarking carries most of the chapter, because its measurement problems (how a benchmark is built, at what granularity it measures, which standardized suite it follows, and how it measures training, inference, and power) also shape how models and data are evaluated. Model and data evaluation follow once that machinery is in place, and the summary asks whether all three survive live traffic.
 
-Three lighthouse workloads carry the chapter, each chosen because one resource usually limits it and because it arrives with claims from the preceding chapters. ResNet-50\index{ResNet-50!benchmarking lighthouse}, the book's compute-bound lighthouse, carries the measurement and training half. It is the MLPerf Training reference workload, with a published quality target (75.9 percent top-1 on ImageNet) and a published per-accelerator throughput, and its INT8 profile is the one @sec-model-compression modeled and @sec-hardware-acceleration placed on the roofline. MobileNetV2 carries the deployment half. It does far less arithmetic per image than ResNet-50 yet is still compute-bound in its efficient regime. It runs on one edge board in an illustrative scenario assembled from typical parts, a wildlife camera trap whose low-power host CPU and attached INT8 accelerator must classify each frame within its deadline on battery power. The measurements made on that board recur from the harness through the energy budget. Keyword spotting (KWS), the power-bound lighthouse, carries the power section, where the question is the energy a wake-word detector spends listening rather than how fast it answers. @Tbl-benchmarking-lighthouse-footprints lists each workload's operations and bytes, the quantities every later benchmark either confirms or refutes.
+```{python}
+#| echo: false
+#| label: mlperf-resnet50-quality
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MLPERF RESNET-50 QUALITY TARGET
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Every place the chapter names ResNet-50's MLPerf Training quality
+# │          floor, and the FP32 accuracy it is compared with.
+# │ Goal: One source for both, so the chapter's six mentions cannot drift.
+# │ Show: 75.9 percent target; 76.1 percent FP32 top-1.
+# │ How: Literature.Benchmarks (MLPerf Training rules) and the INT8 deployment
+# │      profile scenario. (Added 2026-11-20; these were typed in prose.)
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Literature, Scenarios
+from mlsysim.fmt import check, fmt_percent
+
+class MLPerfQuality:
+    """ResNet-50's MLPerf Training quality target and FP32 reference accuracy."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    target = Literature.Benchmarks.MLPerfResNet50QualityTarget  # fraction, MLPerf Training rules
+    fp32_top1 = Scenarios.ResNet50Int8ProfileH100.float_top1_pct / 100
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(fp32_top1 > target, "A standard FP32 ResNet-50 must clear the MLPerf quality target.")
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    target_str = fmt_percent(target, precision=1, commas=False, style="prose")
+    fp32_top1_str = fmt_percent(fp32_top1, precision=1, commas=False, style="prose")
+```
+
+Three lighthouse workloads carry the chapter, each chosen because one resource usually limits it and because it arrives with claims from the preceding chapters. ResNet-50\index{ResNet-50!benchmarking lighthouse}, the book's compute-bound lighthouse, carries the measurement and training half. It is the MLPerf Training reference workload, with a published quality target (`{python} MLPerfQuality.target_str` top-1 on ImageNet) and a published per-accelerator throughput, and its INT8 profile is the one @sec-model-compression modeled and @sec-hardware-acceleration placed on the roofline. MobileNetV2 carries the deployment half. It does far less arithmetic per image than ResNet-50 yet is still compute-bound in its efficient regime. It runs on one edge board in an illustrative scenario assembled from typical parts, a wildlife camera trap whose low-power host CPU and attached INT8 accelerator must classify each frame within its deadline on battery power. The measurements made on that board recur from the harness through the energy budget. Keyword spotting (KWS), the power-bound lighthouse, carries the power section, where the question is the energy a wake-word detector spends listening rather than how fast it answers. @Tbl-benchmarking-lighthouse-footprints lists each workload's operations and bytes, the quantities every later benchmark either confirms or refutes.
 
 ```{python}
 #| echo: false
@@ -281,7 +310,7 @@ Every benchmark begins as a claim. The claim from the preceding chapters, that R
 
 The input and output specifications fix the data each run must move and define the exact scope of timed execution. The input specification fixes tensor dimensions, batching behavior, numerical representations (such as FP16 or INT8), and ingestion rates. For the ResNet-50 claim, it decides whether timing starts at a JPEG on storage or at a preprocessed tensor already in accelerator memory, a choice that can change the measured time more than the precision change being tested. Conversely, the output specification defines the termination boundary of the computation. Benchmarks frequently introduce measurement bias by timing only accelerator forward passes while ignoring the CPU post-processing required to turn raw tensor outputs into usable decisions. A robust output specification defines whether the system emits raw logits, intermediate embeddings, or final class labels, accounting for any downstream thresholding or reduction kernels that consume host memory bandwidth.
 
-The performance specification defines the operational envelope that governs whether an optimization is viable. Unconstrained throughput numbers are meaningless if statistical accuracy degrades below acceptable thresholds, and high average throughput cannot rescue a system that violates a latency SLO. For the ResNet-50 claim, the performance specification couples a quality floor (MLPerf Training requires 75.9 percent top-1, and an INT8 deployment might permit at most one percentage point of loss against FP32) with hardware execution limits. These are a tail-latency ceiling, sustained throughput matching the arrival rate of images, and a resident memory footprint that leaves room for activations at the chosen batch size. By defining these three boundaries up front, the benchmark ensures that the later stages, from dataset construction to measurement harness configuration, evaluate system optimizations against the true operational constraints of deployment. The same boundary discipline turns edge deployment claims into a testable specification on the chapter's camera-trap board (lighthouse \ref{lhs-benchmarking-mobilenet-deployment-validation}).
+The performance specification defines the operational envelope that governs whether an optimization is viable. Unconstrained throughput numbers are meaningless if statistical accuracy degrades below acceptable thresholds, and high average throughput cannot rescue a system that violates a latency SLO. For the ResNet-50 claim, the performance specification couples a quality floor (MLPerf Training requires `{python} MLPerfQuality.target_str` top-1, and an INT8 deployment might permit at most one percentage point of loss against FP32) with hardware execution limits. These are a tail-latency ceiling, sustained throughput matching the arrival rate of images, and a resident memory footprint that leaves room for activations at the chosen batch size. By defining these three boundaries up front, the benchmark ensures that the later stages, from dataset construction to measurement harness configuration, evaluate system optimizations against the true operational constraints of deployment. The same boundary discipline turns edge deployment claims into a testable specification on the chapter's camera-trap board (lighthouse \ref{lhs-benchmarking-mobilenet-deployment-validation}).
 
 ```{python}
 #| echo: false
@@ -331,7 +360,7 @@ A systematic evaluation isolates the accelerator's latency from preprocessing an
 
 ### Task and dataset {#sec-benchmarking-standardized-datasets-123f}
 
-Fixing ResNet-50's quality floor at 75.9 percent top-1 accuracy means nothing until the evaluation dataset itself is fixed, because a team that tests its INT8 model on a private slice of easy daytime photographs can claim no accuracy loss while a team testing on all 50,000 ImageNet validation images sees a regression. Standardized datasets enforce identical evaluation conditions across competing approaches, preventing teams from cherry-picking private slices that obscure comparative weaknesses. In computer vision, ImageNet\index{ImageNet!standardized dataset} [@imagenet_website; @deng2009], COCO\index{COCO!object detection dataset} [@lin2014microsoft], and CIFAR-10\index{CIFAR-10!classification reference dataset} [@cifar10_website] establish reference tasks across classification and detection. In natural language processing, SQuAD\index{SQuAD!reading comprehension dataset}[^fn-squad-question-answering] [@rajpurkar2016], GLUE\index{GLUE!language understanding benchmark}[^fn-glue-benchmark-saturation] [@wang2018], and WikiText [@wikitext_website; @merity2016pointer] fulfill equivalent roles by standardizing comprehension, classification, and language modeling across diverse textual domains.
+Fixing ResNet-50's quality floor at `{python} MLPerfQuality.target_str` top-1 accuracy means nothing until the evaluation dataset itself is fixed, because a team that tests its INT8 model on a private slice of easy daytime photographs can claim no accuracy loss while a team testing on all 50,000 ImageNet validation images sees a regression. Standardized datasets enforce identical evaluation conditions across competing approaches, preventing teams from cherry-picking private slices that obscure comparative weaknesses. In computer vision, ImageNet\index{ImageNet!standardized dataset} [@imagenet_website; @deng2009], COCO\index{COCO!object detection dataset} [@lin2014microsoft], and CIFAR-10\index{CIFAR-10!classification reference dataset} [@cifar10_website] establish reference tasks across classification and detection. In natural language processing, SQuAD\index{SQuAD!reading comprehension dataset}[^fn-squad-question-answering] [@rajpurkar2016], GLUE\index{GLUE!language understanding benchmark}[^fn-glue-benchmark-saturation] [@wang2018], and WikiText [@wikitext_website; @merity2016pointer] fulfill equivalent roles by standardizing comprehension, classification, and language modeling across diverse textual domains.
 
 [^fn-squad-question-answering]: **SQuAD (Stanford question answering dataset)**\index{SQuAD!saturation}: Introduced in 2016 with more than 100,000 question-answer pairs from Wikipedia [@rajpurkar2016]. AI systems exceeded the SQuAD 1.1 human baseline of 91.2 percent F1 by 2018 [@devlin2019], but the "superhuman" result reflects a benchmarking failure mode. The task's extractive format (answers are text spans within the passage) makes it easier than open-ended question answering, inflating perceived capability relative to production NLP systems.
 
@@ -394,7 +423,7 @@ Fixing the model and its regime settles what runs; the remaining choice is which
 |                | Token throughput             | tokens/s               | LLM inference          |
 |                | Time-to-train                | Hours/days             | Training benchmarks    |
 | **Latency**    | p50 latency                  | Milliseconds           | Median response time   |
-|                | p99 latency                  | Milliseconds           | Tail latency (SLA)     |
+|                | p99 latency                  | Milliseconds           | Tail latency (SLO)     |
 |                | First-token latency          | Milliseconds           | LLM responsiveness     |
 | **Efficiency** | Samples/second/watt          | Samples/s/W            | Energy efficiency      |
 |                | Accuracy/FLOP                | percent/PFLOP          | Algorithmic efficiency |
@@ -573,7 +602,7 @@ Four unstated conditions determine what the claim means:
 1. **Batch size**: Large batches can raise compute utilization but inflate queuing delay; batch 1 minimizes latency but leaves execution units underutilized.
 2. **Precision**: INT8 execution exploits higher-throughput integer pipelines and cuts memory traffic, but requires quantization-range calibration that can compromise numerical fidelity.
 3. **Measurement boundary**: The measurement window must state whether it isolates pure accelerator kernel execution or includes host-to-device transfers, JPEG decoding, and tensor format conversions.
-4. **Accuracy**: The claim must state whether the optimized model retains baseline validation accuracy (such as the 76.1 percent top-1 a standard FP32 ResNet-50 reaches on ImageNet, above MLPerf Training's 75.9 percent target) or trades task quality for raw execution speed.
+4. **Accuracy**: The claim must state whether the optimized model retains baseline validation accuracy (such as the `{python} MLPerfQuality.fp32_top1_str` top-1 a standard FP32 ResNet-50 reaches on ImageNet, above MLPerf Training's `{python} MLPerfQuality.target_str` target) or trades task quality for raw execution speed.
 
 **Example**: "`{python} H100TdpClaim.vendor_claim_ips_str`/second on ResNet-50 at batch size `{python} H100TdpClaim.spec_batch_size_str`, INT8 precision, `{python} H100TdpClaim.spec_top1_pct_str` Top-1 accuracy, including JPEG decoding, on NVIDIA H100 at `{python} H100TdpClaim.h100_tdp_w_str` thermal design power (TDP)."
 
@@ -1473,7 +1502,7 @@ Because ML workloads couple tensor execution units, memory bandwidth, and commun
 | **MLPerf Variant**   | **Target Domain** | **Key Constraints**                              | **Primary Metrics**                             |
 |:---------------------|:------------------|:-------------------------------------------------|:------------------------------------------------|
 | **MLPerf Training**  | Data center       | Multi-node scaling, high bandwidth interconnects | Time-to-quality, throughput (samples/sec)       |
-| **MLPerf Inference** | Server/Edge       | Latency SLAs, throughput requirements            | QPS, latency percentiles, accuracy preservation |
+| **MLPerf Inference** | Server/Edge       | Latency SLOs, throughput requirements            | QPS, latency percentiles, accuracy preservation |
 | **MLPerf Tiny**      | MCU/IoT           | Ultra-low-power inference, limited memory        | Latency, accuracy, energy per inference         |
 | **MLPerf Power**     | Cross-cutting     | Energy budgets, thermal constraints              | Performance/W, energy per query                 |
 
@@ -1796,7 +1825,7 @@ Community standards fix the workload, the divisions, and the arrival pattern. Th
 Training and inference fail in opposite ways on the same accelerator. A training run stalls when synchronizing gradients across accelerators saturates the interconnect; a serving deployment violates its SLO when request bursts build a queue. The two regimes also measure different resources. Training iteratively refines parameters over billions of samples and must hold parameters, gradients, optimizer state, and the activations retained for the backward pass, a footprint that can far exceed the weights alone (@tbl-benchmarking-lighthouse-footprints gives ResNet-50's). Its figure of merit is wall-clock time to a target accuracy. Inference evaluates fixed parameters against arriving queries, discards the backward graph and optimizer state, and is judged by latency percentiles and throughput under bursty load. A training result and an inference result on the same accelerator therefore measure different resources and cannot stand in for each other, which is why MLPerf maintains separate Training and Inference suites [@mattson2020mlperf; @reddi2020]. This chapter measures training on ResNet-50 and serving on MobileNetV2 (@sec-benchmarking-inference-benchmarks-2c1f).
 
 ::: {.column-margin .margin-pointer}
-↩ The training memory budget of weights, gradients, optimizer state, and retained activations is established in @sec-model-training-optimizer-memory-training-loop-4383.
+↩ The training memory budget of weights, gradients, optimizer state, and retained activations is established in @sec-model-training-mathematical-foundations-d894.
 :::
 
 Because training couples per-step computation with gradient communication and multi-gigabyte state, a team that purchases a larger GPU cluster expecting proportional training-speed gains can discover after procurement that interconnect stalls and memory bottlenecks swallow much of the speedup. Training benchmarks\index{ML training benchmark!convergence throughput scalability} exist to catch that gap before capital is committed. @Tbl-training-metrics collects the metrics they report in six groups, from time and throughput through reproducibility. One of those measurements is the outcome, the wall-clock time to reach a verified quality target, and the rest diagnose what paced or interrupted the run.
@@ -2073,7 +2102,7 @@ No single counter captures all four functions of a training benchmark. A complet
 
 #### Time and throughput {#sec-benchmarking-time-throughput-1252}
 
-A training cluster that processes twice as many images per second by doubling the minibatch or dropping precision has not sped up training if the run requires twice as many epochs to converge, or if it never reaches the quality floor at all. That is why the primary metric for evaluating training efficiency is the time required to reach a predefined accuracy threshold\index{Time-to-accuracy!training benchmark primary metric}. Time to accuracy, time to train, and time to quality all name this one measurement. Training time $(\TrainingTime)$ measures how long a model takes to converge to an acceptable performance level, reflecting the overall computational efficiency of the system. Let $\text{Accuracy}_{\text{val}}(\TimeInstant)$ be the model's validation accuracy at training time $\TimeInstant$, and let the target accuracy be the benchmark-specific threshold (for example, 75.9 percent top-1 accuracy for ResNet-50 on ImageNet in MLPerf). @Eq-training-time-benchmark formally defines this metric as the earliest time at which validation accuracy reaches the target (the infimum, $\inf$, of all such times), keeping the benchmark focused on how quickly a system achieves meaningful results:
+A training cluster that processes twice as many images per second by doubling the minibatch or dropping precision has not sped up training if the run requires twice as many epochs to converge, or if it never reaches the quality floor at all. That is why the primary metric for evaluating training efficiency is the time required to reach a predefined accuracy threshold\index{Time-to-accuracy!training benchmark primary metric}. Time to accuracy, time to train, and time to quality all name this one measurement. Training time $(\TrainingTime)$ measures how long a model takes to converge to an acceptable performance level, reflecting the overall computational efficiency of the system. Let $\text{Accuracy}_{\text{val}}(\TimeInstant)$ be the model's validation accuracy at training time $\TimeInstant$, and let the target accuracy be the benchmark-specific threshold (for example, `{python} MLPerfQuality.target_str` top-1 accuracy for ResNet-50 on ImageNet in MLPerf). @Eq-training-time-benchmark formally defines this metric as the earliest time at which validation accuracy reaches the target (the infimum, $\inf$, of all such times), keeping the benchmark focused on how quickly a system achieves meaningful results:
 $$\TrainingTime= \inf \big\{\TimeInstant\geq 0 : \text{Accuracy}_{\text{val}}(\TimeInstant) \geq \text{target accuracy} \big\}$$ {#eq-training-time-benchmark}
 
 A run that never reaches the target has no finite time-to-accuracy, preventing raw training speed from rewarding a system that fails the benchmark's quality criterion.
@@ -2083,7 +2112,7 @@ $$\text{Throughput} = \frac{\ProcessedSampleCount}{\TrainingTime}$$ {#eq-through
 
 [^fn-throughput-etymology-capacity]: **Throughput**\index{Throughput!etymology}: Originating in manufacturing to measure units produced per unit time, the term entered computing in the 1960s batch-processing era. The manufacturing origin carries a systems lesson: throughput and latency are inherently opposed, because batching increases throughput (more units per hour) at the cost of individual item wait time. In ML serving, this manifests as the batch-size trade-off: larger batches improve GPU utilization but increase per-request latency.
 
-Throughput alone cannot certify system capability. A platform may sustain high sample rates using aggressive low-precision formats or enormous minibatches, yet fail to reach target accuracy because of gradient divergence or poor generalization. In MLPerf Training, for instance, a ResNet-50 benchmark on ImageNet is valid only if the model achieves the required 75.9 percent top-1 validation accuracy [@mattson2020mlperf; @mlperf_training_website]. Evaluating throughput strictly as the rate of progress toward convergence ensures that reported gains reflect genuine learning productivity rather than wasted arithmetic cycles.
+Throughput alone cannot certify system capability. A platform may sustain high sample rates using aggressive low-precision formats or enormous minibatches, yet fail to reach target accuracy because of gradient divergence or poor generalization. In MLPerf Training, for instance, a ResNet-50 benchmark on ImageNet is valid only if the model achieves the required `{python} MLPerfQuality.target_str` top-1 validation accuracy [@mattson2020mlperf; @mlperf_training_website]. Evaluating throughput strictly as the rate of progress toward convergence ensures that reported gains reflect genuine learning productivity rather than wasted arithmetic cycles.
 
 #### Scalability and parallelism {#sec-benchmarking-scalability-parallelism-1124}
 
@@ -2187,7 +2216,7 @@ MLPerf reports raw performance, while scaling efficiency can be calculated acros
 ↩ The AllReduce collective that averages gradients across data-parallel workers is established in @sec-model-training-data-parallelism-ad1c.
 :::
 
-Parallelism strategies (data, model, and pipeline parallelism) and the synchronization each requires are developed in @sec-model-training-data-parallelism-ad1c; within one machine of two to eight accelerators, data parallelism\index{Data Parallelism!training strategy} is the common case. A benchmark's job is narrower: to report how much of the added capacity a configuration converts into speedup without degrading convergence. That conversion is **scaling efficiency**\index{Scaling efficiency!strong scaling definition}. While strong scaling evaluates whether adding processors reduces training time on a fixed total workload, **weak scaling**\index{Weak scaling!definition} scales the problem size proportionally with processor count to keep the per-device workload constant. It measures whether the system can train larger models or ingest larger datasets within a fixed time budget without communication bottlenecks dominating.
+Parallelism strategies (data, model, and pipeline parallelism) and the synchronization each requires are developed in @sec-model-training-singlenode-multigpu-training-c87f; within one machine of two to eight accelerators, data parallelism\index{Data Parallelism!training strategy} is the common case. A benchmark's job is narrower: to report how much of the added capacity a configuration converts into speedup without degrading convergence. That conversion is **scaling efficiency**\index{Scaling efficiency!strong scaling definition}. While strong scaling evaluates whether adding processors reduces training time on a fixed total workload, **weak scaling**\index{Weak scaling!definition} scales the problem size proportionally with processor count to keep the per-device workload constant. It measures whether the system can train larger models or ingest larger datasets within a fixed time budget without communication bottlenecks dominating.
 
 #### Resource utilization {#sec-benchmarking-resource-utilization-336b}
 
@@ -2231,7 +2260,7 @@ class Gpt3TrainingEnergyAnchor:
     )
 ```
 
-Training GPT-3\index{GPT-3!training cost} was estimated to consume `{python} Gpt3TrainingEnergyAnchor.gpt3_training_energy_mwh_str` of electricity [@patterson2021carbon]. At that scale, energy efficiency metrics\index{Energy efficiency!training cost accounting} quantify the power usage of training workloads so teams can identify systems that reach target accuracy without wasted energy. Fewer iterations reduce energy only when their total energy cost is lower; a more expensive step can offset the reduced count, so suites such as MLPerf Training measure total energy over the complete run to the same quality target. The same power accounting governs inference, where precision is one potential energy lever; @sec-benchmarking-power-measurement-techniques-bcc2 works through why INT8 quantization cuts per-inference energy by attacking both memory traffic and arithmetic cost.
+Training GPT-3\index{GPT-3!training cost} was estimated to consume `{python} Gpt3TrainingEnergyAnchor.gpt3_training_energy_mwh_str` of electricity [@patterson2021carbon]. At that scale, energy efficiency metrics\index{Energy efficiency!training cost accounting} quantify the power usage of training workloads so teams can identify systems that reach target accuracy without wasted energy. Fewer iterations reduce energy only when their total energy cost is lower; a more expensive step can offset the reduced count, so suites such as MLPerf Training measure total energy over the complete run to the same quality target. The same power accounting governs inference, where lower precision can reduce component energy (@sec-model-compression-precision-energy-cc8e), and @sec-benchmarking-power-measurement-techniques-bcc2 develops the measurement boundaries and integration windows needed to verify whether those savings survive at the device level.
 
 Cost considerations extend beyond electricity usage to include hardware expenses, cloud computing costs, and infrastructure maintenance. Training benchmarks provide insights into the cost-effectiveness of different hardware and software configurations by measuring training time in relation to resource expenditure. Organizations can use these benchmarks to balance performance and budget constraints when selecting training infrastructure.
 
@@ -2461,7 +2490,7 @@ Token throughput\index{Token throughput!generation rate} translates these genera
 
 Latency is only half of the serving envelope. Throughput counts how many inference requests a system completes per second, typically expressed as queries per second\index{Queries per second!inference throughput metric} (QPS) or frames per second (FPS), and it is meaningful only together with the latency at which it was measured. Batching raises throughput by processing several inputs at once while adding wait time to each, so a throughput figure reported without its latency percentile and offered load says nothing about whether a serving deadline is met. A benchmark therefore reports **batch throughput**\index{Batch throughput!definition}, the requests completed per second at a stated batch size, and per-request latency as a pair at the same offered load. Choosing the batch size that balances them is a serving policy (@sec-model-serving-batching-tax); the benchmark's job is to measure both sides of that trade.
 
-Speed alone is insufficient because inference optimizations can change model behavior. Reducing numerical precision can accelerate computation while cutting memory and energy, as the simplified MobileNetV2 energy estimate worked out in the power section shows (@sec-benchmarking-power-measurement-boundaries-982c), but lower-precision calculations can introduce accuracy degradation. Inference benchmarks therefore evaluate how well models perform under different numerical settings, such as FP32, FP16, and INT8.[^fn-int8-quantized-benchmark] Model compression techniques[^fn-model-compression-benchmarking] further improve efficiency, but their impact on model accuracy varies depending on the task and dataset. Benchmarks help determine whether these optimizations are viable for deployment, ensuring that improvements in efficiency do not come at the cost of unacceptable accuracy loss.
+Speed alone is insufficient because inference optimizations can change model behavior. Reducing numerical precision can accelerate computation while cutting memory and energy (@sec-model-compression-precision-energy-cc8e), but lower-precision calculations can introduce accuracy degradation. Inference benchmarks therefore evaluate how well models perform under different numerical settings, such as FP32, FP16, and INT8.[^fn-int8-quantized-benchmark] Model compression techniques[^fn-model-compression-benchmarking] further improve efficiency, but their impact on model accuracy varies depending on the task and dataset. Benchmarks help determine whether these optimizations are viable for deployment, ensuring that improvements in efficiency do not come at the cost of unacceptable accuracy loss.
 
 Beyond speed and accuracy, an inference benchmark must also report several resource terms, and each exists because a system can pass the latency test and still fail to deploy. Memory footprint decides whether the model fits the device's budget at all, since inference rarely spans accelerators the way training can. Cold-start performance\index{Cold start latency!serverless AI impact}, the load time plus first-request latency,[^fn-cold-start-latency] exposes initialization cost to the requesting user. It dominates in serverless AI environments[^fn-serverless-ai-inference] and on devices that evict models to free memory. When provisioning, model transfer, runtime initialization, and the first response lie on the user request path, the benchmark must include them; a warm-instance result answers a different question. Scalability records whether added accelerators or concurrent models raise throughput or collide on memory bandwidth, and energy per inference (joules per inference, or QPS/W in the cloud) sets battery life on mobile devices and operating cost in data centers.
 
@@ -3365,135 +3394,46 @@ The excluded components can more than double the reported energy. Google measure
 
 The gap between the two boundaries means that an accelerator-only figure understates what a deployed service consumes, and two figures measured under different boundaries are not comparable. Utilization also moves the figure, because the narrow measurement came from the most efficiently used machines. Open benchmark suites such as ML.ENERGY measure energy under realistic serving conditions so that their results reflect deployed utilization rather than an idealized run [@chung2025energy].
 
-The measurement boundary determines which components are counted; workload composition determines where their energy is spent. On mobile devices running TensorFlow Mobile, data movement accounts for 57.3 percent of total inference energy [@boroumand2018], exposing why operation counts alone fail to predict power consumption. Under the energy-movement principle (\ref{pri-energy-movement}), total energy depends on how many events of each kind occur and what each one costs, not on arithmetic alone. The worked example in notebook \ref{nbk-benchmarking-why-int8-saves-energy} decomposes MobileNetV2 inference energy to demonstrate how moving from FP32 to INT8 attacks both the memory-movement bottleneck and arithmetic switching costs.
-
 ```{python}
 #| echo: false
-#| label: energy-per-op-constants
+#| label: component-energy-reminder-anchor
 # ┌─────────────────────────────────────────────────────────────────────────────
-# │ ENERGY PER OPERATION AND MEMORY ACCESS CONSTANTS
+# │ COMPONENT ENERGY REMINDER ANCHOR
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: "Why INT8 Saves Energy" callout tables immediately below.
+# │ Context: Component-energy reminder in @sec-benchmarking-power-measurement-boundaries-982c.
 # │
-# │ Goal: Provide per-operation and per-access energy values for the
-# │       precision vs. energy comparison tables.
-# │ Show: pJ per multiply-accumulate at FP32/FP16/INT8, pJ per byte at register/L1/L2.
-# │ How:  Read Horowitz 2014 energy anchors from Hardware.Tech.Op / Hardware.Tech.Memory.
+# │ Goal:    Pin the recalled FP32 and INT8 MAC energies to the same registry
+# │          scenario as @tbl-model-compression-energy-hierarchy.
+# │ Show:    Reference 45 nm FP32 MAC (4.6 pJ) and INT8 MAC (0.3 pJ) energies.
+# │ How:     Read Scenarios.Int8VsFp32OperationEnergy45nm from mlsysim.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_multiple, fmt_energy_per_byte, fmt_energy_per_flop, check
-from mlsysim.core.units import pJ, byte, flop
+from mlsysim import Scenarios
+from mlsysim.core.units import pJ, flop
+from mlsysim.fmt import check, fmt_energy
 
-class EnergyPerOp:
-    """FP32-vs-INT8 multiply and DRAM-vs-register energy ratios for the INT8 energy notebook."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    ENERGY_FLOP_FP32_PJ = Hardware.Tech.Op.FlopFp32.energy
-    ENERGY_FLOP_FP16_PJ = Hardware.Tech.Op.FlopFp16.energy
-    ENERGY_OP_INT8_PJ = Hardware.Tech.Op.OpInt8.energy
-    ENERGY_REG_PJ_PER_BYTE = Hardware.Tech.Movement.Register.energy_per_byte
-    ENERGY_DRAM_PJ_PER_BYTE = Hardware.Tech.Memory.DRAM.energy_per_byte
-
-    # ┌── 2. EXECUTE (The Compute) ───────────────────────────────────────────
-    # Relative costs: per-op energy vs FP32, and DRAM vs register
-    _fp32_e = ENERGY_FLOP_FP32_PJ.to(pJ / flop).magnitude
-    fp16_rel_value = ENERGY_FLOP_FP16_PJ.to(pJ / flop).magnitude / _fp32_e
-    int8_rel_value = ENERGY_OP_INT8_PJ.to(pJ / flop).magnitude / _fp32_e
-    dram_vs_reg_ratio_value = round(ENERGY_DRAM_PJ_PER_BYTE.to(pJ / byte).magnitude / ENERGY_REG_PJ_PER_BYTE.to(pJ / byte).magnitude)
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(round(fp16_rel_value, 1) == 0.3, f"FP16 relative energy should be ~0.3, got {fp16_rel_value:.2f}")
-    check(round(int8_rel_value, 2) == 0.05, f"INT8 relative energy should be ~0.05, got {int8_rel_value:.3f}")
-    check(dram_vs_reg_ratio_value == 1600, f"DRAM vs. register energy ratio should be 1600, got {dram_vs_reg_ratio_value}")
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    fp32_vs_int8_mult_str = fmt_multiple(1.0 / int8_rel_value, precision=1, commas=False)
-    dram_vs_reg_ratio_mult_str = fmt_multiple(dram_vs_reg_ratio_value, precision=0, commas=True)
-```
-
-```{python}
-#| echo: false
-#| label: energy-breakdown-calc
 # ┌── LEGO ───────────────────────────────────────────────
-# │ Context: INT8 energy callout tables — MobileNet load vs compute breakdown
-from mlsysim import Models, Hardware
-from mlsysim.fmt import fmt, check, fmt_energy_per_byte, fmt_flops, fmt_memory, fmt_energy
-
-class EnergyBreakdownCalc:
-    """FP32 vs. INT8 MobileNet inference energy: memory load dominates; INT8 attacks both sources."""
+class ComponentEnergyReminder:
+    """Reference 45 nm FP32 and INT8 MAC energies recalled from the compression chapter."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    m_params = Models.Vision.MobileNetV2.parameters.to(Mparam).magnitude
-    m_ops = Models.Vision.MobileNetV2.inference_flops.to(MFLOPs).magnitude
-    ENERGY_DRAM_PJ_PER_BYTE = Hardware.Tech.Memory.DRAM.energy_per_byte
-    ENERGY_FLOP_FP32_PJ = Hardware.Tech.Op.FlopFp32.energy
-    ENERGY_OP_INT8_PJ = Hardware.Tech.Op.OpInt8.energy
-    _dram_pj = ENERGY_DRAM_PJ_PER_BYTE.to(pJ / byte).magnitude
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    m_fp32 = Models.Vision.MobileNetV2.size_in_bytes(BYTES_FP32)
-    m_int8 = Models.Vision.MobileNetV2.size_in_bytes(BYTES_INT8)
-    e_fp32_load = (m_fp32 * ENERGY_DRAM_PJ_PER_BYTE).to(uJ)
-    e_fp32_compute = (Models.Vision.MobileNetV2.inference_flops * ENERGY_FLOP_FP32_PJ).to(uJ)
-    e_int8_load = (m_int8 * ENERGY_DRAM_PJ_PER_BYTE).to(uJ)
-    e_int8_compute = (Models.Vision.MobileNetV2.inference_flops * ENERGY_OP_INT8_PJ).to(uJ)
-    e_fp32_total = e_fp32_load + e_fp32_compute
-    e_int8_total = e_int8_load + e_int8_compute
-    s_load = (e_fp32_load / e_int8_load).to_base_units().magnitude
-    s_compute = (e_fp32_compute / e_int8_compute).to_base_units().magnitude
-    s_total = (e_fp32_total / e_int8_total).to_base_units().magnitude
-    e_fp32_load_mj = e_fp32_load.to(mJ)
-    e_fp32_compute_mj = e_fp32_compute.to(mJ)
+    _energy = Scenarios.Int8VsFp32OperationEnergy45nm
+    mac_fp32 = _energy.wide_mac * flop
+    mac_int8 = _energy.narrow_mac * flop
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    # Direct scenario lookup (wide_mac = FP32 mul + FP32 add; narrow_mac = INT8 mul + INT32 add).
+
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(round(m_fp32.to(MB).magnitude) == 14, f"MobileNetV2 FP32 size should be about 14 MB, got {m_fp32.to(MB).magnitude:.1f}")
-    check(s_load == 4.0, f"Expected 4x load-energy reduction, got {s_load:.1f}x")
-    check(s_compute > 15, f"Expected INT8 compute to be much cheaper, got {s_compute:.1f}x")
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    dram_energy_pj_per_byte_str = fmt_energy_per_byte(ENERGY_DRAM_PJ_PER_BYTE, precision=0, commas=False)
-    m_ops_mflop_str = fmt_flops(Models.Vision.MobileNetV2.inference_flops, unit=MFLOPs, precision=0, commas=False)
-    m_fp32_mb_str = fmt_memory(m_fp32, unit=MB, commas=False)
-    m_int8_mb_str = fmt_memory(m_int8, unit=MB, precision=1, commas=False)
-    e_fp32_load_str = fmt_energy(round(e_fp32_load.to(uJ).magnitude) * uJ, unit=uJ, precision=0, commas=False)
-    e_fp32_compute_str = fmt_energy(e_fp32_compute, unit=uJ, precision=0, commas=True)
-    e_fp32_total_str = fmt_energy(round(e_fp32_total.to(uJ).magnitude) * uJ, unit=uJ, precision=0, commas=True)
-    e_int8_load_str = fmt_energy(round(e_int8_load.to(uJ).magnitude) * uJ, unit=uJ, precision=0, commas=False)
-    e_int8_compute_str = fmt_energy(e_int8_compute, unit=uJ, precision=0, commas=False)
-    e_int8_total_str = fmt_energy(round(e_int8_total.to(uJ).magnitude) * uJ, unit=uJ, precision=0, commas=True)
-    load_savings_factor_mult_str = fmt_multiple(s_load, precision=0, commas=False)
-    compute_savings_factor_mult_str = fmt_multiple(s_compute, precision=1, commas=False)
-    total_savings_factor_mult_str = fmt_multiple(s_total, precision=1, commas=False)
+    check(abs(mac_fp32.to(pJ).magnitude - 4.6) < 1e-6, f"Expected 4.6 pJ FP32 MAC, got {mac_fp32.to(pJ)}")
+    check(abs(mac_int8.to(pJ).magnitude - 0.3) < 1e-6, f"Expected 0.3 pJ INT8 MAC, got {mac_int8.to(pJ)}")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    mac_fp32_pj_str = fmt_energy(mac_fp32, unit=pJ, precision=1, commas=False)
+    mac_int8_pj_str = fmt_energy(mac_int8, unit=pJ, precision=1, commas=False)
 ```
 
-::: {#nbk-benchmarking-why-int8-saves-energy .callout-notebook title="Why INT8 saves energy"}
-
-```{=latex}
-\begingroup
-\renewcommand{\arraystretch}{1.25}
-```
-**Problem**: Under the stated 45 nm component-energy model, how much does replacing FP32 with INT8 reduce MobileNetV2 weight-read and arithmetic energy?
-
-Moving data costs far more energy than computing on it (principle \ref{pri-energy-movement}, grounded in Horowitz's energy estimates [@horowitz2014]), so quantization\index{Quantization!INT8 energy savings} can save energy on both memory access and compute operations.
-
-Narrower datatypes require less switching and storage energy per operation, and off-chip memory costs far more than either. In the 45 nm component model that @sec-model-compression-precision-energy-cc8e tabulates (@tbl-model-compression-energy-hierarchy), an 8-bit multiplier uses about `{python} EnergyPerOp.fp32_vs_int8_mult_str` less energy than a 32-bit floating-point multiplier. Reading one byte from DRAM, about `{python} EnergyBreakdownCalc.dram_energy_pj_per_byte_str`, costs over `{python} EnergyPerOp.dram_vs_reg_ratio_mult_str` more than a register access [@horowitz2014]. Absolute values and ratios vary with circuit design and process technology.
-
-**Math**: Component energy is the sum of a data-movement term and a compute term (@eq-energy-cost), a load term $\DataVolume \times \EnergyPerByteMoved$ (model bytes times DRAM energy per byte) and a compute term $\Operations\times \EnergyPerOperation$ (operations times energy per operation). The FP32 terms sum as `{python} EnergyBreakdownCalc.e_fp32_load_str` + `{python} EnergyBreakdownCalc.e_fp32_compute_str` = `{python} EnergyBreakdownCalc.e_fp32_total_str`; the INT8 terms sum as `{python} EnergyBreakdownCalc.e_int8_load_str` + `{python} EnergyBreakdownCalc.e_int8_compute_str` = `{python} EnergyBreakdownCalc.e_int8_total_str`. Dividing the totals gives a `{python} EnergyBreakdownCalc.total_savings_factor_mult_str` reduction under this simplified model.
-
-@Tbl-benchmarking-mobilenet-int8-energy combines the two effects in a deliberately simplified MobileNetV2 model. It counts one DRAM read per weight and charges every cataloged FLOP at the listed multiplier energy, while excluding activation traffic, cache behavior, additions as a distinct cost, control overhead, and static power:
-
-| **Component**                                                | **FP32 (`{python} EnergyBreakdownCalc.m_fp32_mb_str`)** | **INT8 (`{python} EnergyBreakdownCalc.m_int8_mb_str`)** |                           **Savings**                            |
-|:-------------------------------------------------------------|:-------------------------------------------------------:|:-------------------------------------------------------:|:----------------------------------------------------------------:|
-| **One weight read from DRAM**                                |      `{python} EnergyBreakdownCalc.e_fp32_load_str`     |      `{python} EnergyBreakdownCalc.e_int8_load_str`     |   `{python} EnergyBreakdownCalc.load_savings_factor_mult_str`    |
-| **Compute (`{python} EnergyBreakdownCalc.m_ops_mflop_str`)** |    `{python} EnergyBreakdownCalc.e_fp32_compute_str`    |    `{python} EnergyBreakdownCalc.e_int8_compute_str`    |  `{python} EnergyBreakdownCalc.compute_savings_factor_mult_str`  |
-| **Total**                                                    |   **`{python} EnergyBreakdownCalc.e_fp32_total_str`**   |   **`{python} EnergyBreakdownCalc.e_int8_total_str`**   | **`{python} EnergyBreakdownCalc.total_savings_factor_mult_str`** |
-
-: **MobileNetV2 INT8 Simplified Energy Estimate**: One weight read plus a multiplier-energy charge for every cataloged FLOP under a 45 nm component-energy model. This is not a whole-device inference measurement. {#tbl-benchmarking-mobilenet-int8-energy tbl-colwidths="[40,20,20,20]"}
-
-```{=latex}
-\endgroup
-```
-
-**Systems insight**: Within this simplified model, the weight read and the arithmetic contribute comparable FP32 energy (`{python} EnergyBreakdownCalc.e_fp32_load_str` and `{python} EnergyBreakdownCalc.e_fp32_compute_str`), and INT8 reduces both, taking the total from `{python} EnergyBreakdownCalc.e_fp32_total_str` to `{python} EnergyBreakdownCalc.e_int8_total_str`. The decomposition explains the physical mechanism behind potential savings, but battery-life or per-inference claims require controlled whole-device power measurements.
-
-:::
+The measurement boundary determines which components are counted; workload composition determines where their energy is spent. On mobile devices running TensorFlow Mobile, data movement accounts for 57.3 percent of total inference energy [@boroumand2018], exposing why operation counts alone fail to predict power consumption. Under the energy-movement principle (\ref{pri-energy-movement}), component energy depends on both arithmetic precision and where operands sit on the energy ladder (@fig-energy-hierarchy in @sec-hardware-acceleration-machine-learning-hardware-specialization-09c5), where off-chip DRAM fetches cost orders of magnitude more than on-chip SRAM reads or logic [@horowitz2014]. Moving from FP32 to INT8 quantization\index{Quantization!INT8 energy savings} attacks both terms at the circuit level, quartering raw off-chip weight bytes and lowering reference 45 nm multiply-accumulate energy from `{python} ComponentEnergyReminder.mac_fp32_pj_str` to `{python} ComponentEnergyReminder.mac_int8_pj_str` (@tbl-model-compression-energy-hierarchy in @sec-model-compression-precision-energy-cc8e). Those analytical component numbers explain why precision and locality can save energy, yet they omit activation traffic, cache behavior, host overhead, and static power, so battery-life or per-inference energy claims still require metered measurements inside an explicit system boundary.
 
 Beyond individual server nodes, large-scale deployments introduce shared infrastructure that complicates boundary definition. In data centers, cooling systems and power delivery account for 20 to 30 percent of total facility electricity consumption [@barroso2019]. This facility-level overhead is captured by power usage effectiveness (PUE)\index{Power usage effectiveness!data center cooling metric}:
 $$\text{PUE} = \frac{\text{Total Facility Energy}}{\text{IT Equipment Energy}}$$
@@ -3552,7 +3492,8 @@ class KwsDutyCycle:
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     kws_mflop_str = fmt_flops(kws.inference_flops, unit=MFLOPs, precision=0, commas=False)
     t_inf_ms_str = fmt_time(t_inf, ms, precision=1, commas=False)
-    duty_pct_str = fmt_percent(round(duty, 3), precision=1, commas=False, style="prose")
+    # Two decimals: 8.3 ms per 1 s window is 0.83%, the share that reproduces the 52.9 mW average.
+    duty_pct_str = fmt_percent(round(duty, 4), precision=2, commas=False, style="prose")
     e_inf_mj_str = fmt_energy(e_inf, unit=mJ, precision=1, commas=False)
     active_power_w_str = fmt_power(active_power, unit=watt, precision=1, commas=False)
     idle_power_mw_str = fmt_power(idle_power, unit=milliwatt, precision=0, commas=False)
@@ -3797,6 +3738,10 @@ class McNemarThreshold:
 ```
 **Systems insight**: A small test set limits what a benchmark can resolve. The test set, viewed as a measurement instrument, must be sized to match the precision of the change it is meant to detect. A single accuracy estimate alone needs about `{python} StatisticalConfidenceTrap.one_prop_n_str` images for ±`{python} StatisticalConfidenceTrap.target_margin_pp_str` precision, and that sample size does not by itself power a comparison between two models.
 
+:::
+
+::: {.column-margin .margin-pointer}
+↪ Worked derivations for rate confidence intervals, required sample sizes, and McNemar's paired test are collected for reference in @sec-appdx-data-foundations-sampling-estimation-5b1e.
 :::
 
 The same paired logic governs timing comparisons. Suppose an engineer measures baseline and candidate mean latency under the same request mix, offered load, and timing boundary. Each experimental trial pairs a complete baseline run with a complete candidate run, following the same warm-up and thermal-state protocol and randomizing their execution order so that slow changes, such as a machine warming up, do not favor whichever implementation runs second. The comparison assumes that separately repeated run pairs are independent, with persistent background load or thermal drift controlled or accounted for. Requests within one run can share queues, caches, and thermal conditions and therefore cannot automatically count as independent trials. The report states the interval method and confidence level and uses the run pairs as the repeated observations. A request-latency p99 describes the slow end of the observed request population. It is neither a confidence interval for mean latency nor a measure of uncertainty in the estimated p99.
@@ -4312,7 +4257,7 @@ Beyond calibration alone, neural network compression (pruning, quantization, kno
 
 Pruning benchmarks must distinguish structured from unstructured sparsity, because they produce qualitatively different results on real hardware, as the storage and execution break-even of @sec-model-compression-sparse-break-even-7e4a shows. Structured pruning yields smaller dense operations that conventional kernels exploit [@li2017pruning]. Unstructured pruning can reach high sparsity but realizes speedups only with specialized sparse computation support, so protocols must specify hardware platform and software implementation [@han2015deep; @gale2019state].
 
-Quantization benchmarks evaluate precision reduction across data types. In the illustrative MobileNetV2 scenario, INT8 reduces raw weight storage by `{python} MobileNetLighthouseSetup.mobilenet_v2_compression_ratio_mult_str` and the assumed latency values yield the speedup in example \ref{exmp-benchmarking-benchmarking-vision-model-edge-deployment}; realized performance depends on the hardware and implementation. The precision-accuracy trade-off [@jacob2018] is worked in lighthouse \ref{lhs-benchmarking-mobilenet-int8-compression} and the energy implications in @sec-benchmarking-power-measurement-boundaries-982c. Mixed-precision\index{Mixed-precision!layer-wise precision assignment} assignment, which keeps sensitive layers at FP16 while computation-heavy layers use INT8 or INT4, multiplies the configurations a benchmark must name. Knowledge distillation\index{Knowledge distillation!benchmark evaluation} (@sec-model-compression-knowledge-distillation-1842) adds a smaller student whose benchmark must verify that it generalizes rather than merely memorizing the teacher's outputs [@hinton2015distilling].
+Quantization benchmarks evaluate precision reduction across data types. In the illustrative MobileNetV2 scenario, INT8 reduces raw weight storage by `{python} MobileNetLighthouseSetup.mobilenet_v2_compression_ratio_mult_str` and the assumed latency values yield the speedup in example \ref{exmp-benchmarking-benchmarking-vision-model-edge-deployment}; realized performance depends on the hardware and implementation. The precision-accuracy trade-off [@jacob2018] is worked in lighthouse \ref{lhs-benchmarking-mobilenet-int8-compression}, and @sec-benchmarking-power-measurement-boundaries-982c sets the measurement boundary required to verify whether component-level energy savings (@sec-model-compression-precision-energy-cc8e) survive on real hardware. Mixed-precision\index{Mixed-precision!layer-wise precision assignment} assignment, which keeps sensitive layers at FP16 while computation-heavy layers use INT8 or INT4, multiplies the configurations a benchmark must name. Knowledge distillation\index{Knowledge distillation!benchmark evaluation} (@sec-model-compression-knowledge-distillation-1842) adds a smaller student whose benchmark must verify that it generalizes rather than merely memorizing the teacher's outputs [@hinton2015distilling].
 
 Acceleration factors vary across hardware platforms because sparse models, reduced-precision models, and efficient architectures need compatible kernels, memory layouts, and accelerator support. Current benchmark suites like MLPerf focus primarily on standardized reference models, while production deployments often use compressed or hardware-specific variants. A compression report must therefore name its representation and execution path before an efficiency-quality comparison can establish whether the variant is deployable.
 
@@ -4528,7 +4473,7 @@ For small corpora, manual audits over stratified random samples provide baseline
 Whereas confident learning flags suspect labels after a model exists, inter-annotator agreement measures consistency across annotators prior to model training. The statistics are the ones data engineering already uses to monitor label quality in production; a data benchmark applies them once, to certify the evaluation set itself. Cohen's kappa\index{Cohen's kappa!inter-annotator agreement} for two raters and Fleiss' kappa for multiple raters quantify agreement above chance expectation [@cohen1960; @fleiss1971measuring]. When agreement metrics fall below established thresholds on tasks with objective ground truth, the failure points to ambiguous labeling taxonomies, rater fatigue, or inconsistent guidelines. While Landis and Koch's qualitative kappa bands provide a historical reference [@landis1977measurement], production pipelines require agreement thresholds calibrated directly to application-specific risk tolerance.
 
 ::: {.column-margin .margin-pointer}
-↩ Cohen's kappa, its chance-agreement correction, and label quality drift are established in @sec-data-engineering-label-quality-drift-1ce7.
+↩ Cohen's kappa, Fleiss' kappa, and the chance-agreement correction are established in @sec-data-engineering-achieving-label-accuracy-consensus-7190.
 :::
 
 The structural form of label noise determines its downstream impact. Random label noise dilutes gradient signals across classes, increasing sample complexity but rarely teaching coherent false representations. In contrast, systematic errors\index{Systematic error!learned ground truth}, such as consistently mislabeling an underrepresented subclass or coupling a label with an environmental artifact, inject structured bias into model weights. If images of wolves photographed against snow are consistently labeled as dogs, the model learns to associate snow with the target class. In the presence of systematic label error, collecting more training data under the same labeling protocol does not correct the bias; it merely reinforces the spurious association with higher parameter certainty.
@@ -5076,50 +5021,6 @@ Standard benchmark runs assume fault-free nodes, warm caches, and uninterrupted 
 
 Benchmarking completes Part III's optimization pipeline by validating whether the efficiency gains from data selection, model compression, and hardware acceleration deliver in practice. The three benchmark lenses examine system execution, model behavior, and data representativeness separately, then test whether their assumptions survive when the complete system runs under deployment conditions. Every row of @tbl-benchmarking-chapter-spine began as a claim and now has a test that can settle it. ResNet-50's INT8 claim became a test with stated conditions, a matched pair of MLPerf Inference Offline runs whose result a team can now obtain rather than assume. Its roofline ceiling met an MLPerf throughput that sits `{python} ResNet50RooflineCheck.gap_mult_str` below it. MobileNetV2's accelerator speedup narrowed once the whole frame path on the edge board was timed. Keyword spotting showed that idle power, not inference, sets a duty-cycled device's battery life.
 
-```{python}
-#| echo: false
-#| label: precision-energy-summary-anchor
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ PRECISION ENERGY SUMMARY ANCHOR
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Summary takeaway on precision as an energy lever.
-# │
-# │ Goal: Keep the MobileNet FP32-to-INT8 total energy ratio local to the summary.
-# │ Show: Combined memory-load and compute-energy savings for MobileNetV2.
-# │ How: Recompute the same FP32 and INT8 totals from model and energy constants.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Models, Hardware
-from mlsysim.fmt import fmt, check
-
-# ┌── LEGO ───────────────────────────────────────────────
-class PrecisionEnergySummary:
-    """Local summary ratio for MobileNetV2 FP32 vs. INT8 inference energy."""
-
-    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    m_params = Models.Vision.MobileNetV2.parameters.to(Mparam).magnitude
-    m_ops = Models.Vision.MobileNetV2.inference_flops.to(MFLOPs).magnitude
-    ENERGY_DRAM_PJ_PER_BYTE = Hardware.Tech.Memory.DRAM.energy_per_byte
-    ENERGY_FLOP_FP32_PJ = Hardware.Tech.Op.FlopFp32.energy
-    ENERGY_OP_INT8_PJ = Hardware.Tech.Op.OpInt8.energy
-    dram_pj = ENERGY_DRAM_PJ_PER_BYTE.to(pJ / byte).magnitude
-    fp32_pj = ENERGY_FLOP_FP32_PJ.to(pJ / flop).magnitude
-    int8_pj = ENERGY_OP_INT8_PJ.to(pJ / flop).magnitude
-
-    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    e_fp32_load = (m_params * MILLION * 4 * dram_pj) / MILLION
-    e_fp32_compute = (m_ops * MILLION * fp32_pj) / MILLION
-    e_int8_load = (m_params * MILLION * 1 * dram_pj) / MILLION
-    e_int8_compute = (m_ops * MILLION * int8_pj) / MILLION
-    s_total = (e_fp32_load + e_fp32_compute) / (e_int8_load + e_int8_compute)
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(6 < s_total < 7, f"Expected MobileNetV2 INT8 total-energy ratio near 6.6x, got {s_total:.1f}x.")
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    total_savings_factor_mult_str = fmt_multiple(s_total, precision=1, commas=False)
-```
-
 The lenses reveal different failure modes: system benchmarks expose underdelivered throughput, tail latency, and thermal behavior; model benchmarks test accuracy, calibration, robustness, and other properties that an optimization may alter; and data benchmarks examine coverage, label quality, leakage, and alignment with deployment. Standardized suites such as MLPerf Training and Inference provide comparable system evidence, whereas model and data protocols supply the quality and representativeness evidence that a hardware result cannot establish.
 
 Optimization claims need measured execution rather than analytical proxies. Wall-clock timing captures DRAM bandwidth saturation, kernel launch serialization, and host-device transfer overhead that FLOP counts omit. Percentile profiling under concurrent load exposes queuing delays and thermal throttling that arithmetic means conceal. Evaluating workloads against production-representative data reveals dynamic shape variations and memory churn that uniform synthetic inputs never trigger.
@@ -5155,7 +5056,7 @@ The chapter's measurement formulas fit on one page (@tbl-benchmarking-key-equati
 * **Unaccelerated pipeline stages cap component speedups**: In the chapter's vision pipeline, unchanged preprocessing at `{python} AmdahlBenchmarkCalc.preprocess_pct_str` of latency dilutes a `{python} AmdahlBenchmarkCalc.bench_inf_speedup_mult_str` inference speedup to `{python} AmdahlBenchmarkCalc.bench_e2e_improvement_mult_str` end to end, bounded by Amdahl's law (@eq-amdahl) at `{python} AmdahlBenchmarkCalc.amdahl_ceiling_mult_str`.
 * **Energy follows the measurement boundary and duty cycle**: For always-on keyword spotting on a microcontroller board, standby draw accounts for `{python} KwsDutyCycle.idle_share_pct_str` of average power, so energy benchmarks must declare device boundaries, windows, and duty cycles rather than per-inference energy alone.
 * **Statistical resolution bounds every comparison**: Paired per-example tests and repeated-run confidence intervals separate genuine improvements from noise while certifying behavior only on the sampled population at the stated tolerance and confidence.
-* **Efficiency gains require whole-system quality evidence**: INT8 cuts raw weight storage `{python} MobileNetLighthouseSetup.mobilenet_v2_compression_ratio_mult_str` and reduces simplified component energy by `{python} PrecisionEnergySummary.total_savings_factor_mult_str`, yet deployment still depends on whole-device power, calibration, subgroup robustness, and out-of-distribution checks.
+* **Efficiency gains require whole-system quality evidence**: INT8 cuts raw weight storage `{python} MobileNetLighthouseSetup.mobilenet_v2_compression_ratio_mult_str` and lowers circuit-level operation energy, yet deployment still depends on whole-device power, calibration, subgroup robustness, and out-of-distribution checks.
 
 :::
 

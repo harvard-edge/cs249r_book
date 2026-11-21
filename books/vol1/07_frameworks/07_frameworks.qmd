@@ -3,7 +3,7 @@ number-offset: [6]
 quiz: frameworks_quizzes.json
 concepts: frameworks_concepts.yml
 engine: jupyter
-notation-local: [\CompilationBreakevenCount, \CompilationTime, \CompiledExecutionTime, \CompilerBackendCount, \CompilerFrontendCount, \DevelopmentIterationCount, \DeviceHardwareTime, \DispatchedOperationCount, \DropoutProbability, \DualNumberInfinitesimal, \EagerExecutionTime, \ElementaryOperationCount, \FunctionInputAdjoint, \FunctionInputTangent, \FunctionInputVariable, \FunctionJacobian, \FunctionOutputDimension, \FunctionOutputElement, \FunctionOutputVariable, \FunctionOutputVector, \FunctionSecondInputVariable, \GraphNodeIndex, \HiddenActivationMatrix, \HostSoftwareTime, \IllustrativeFunction, \IndicatorFunction, \LayerSavedTensorCount, \LossAdjointSeed, \OperationDispatchOverhead, \ParentNodeIndex, \ProductionExecutionCount, \TangentSeedVector, \TapeIntermediateResult, \TensorAxisCount, \TraceIntermediateTangent, \UpstreamGradientElement, \UpstreamGradientVector, \WorkedTraceProduct, \WorkedTraceProductAdjoint, \WorkedTraceSine, \WorkedTraceSineAdjoint, \WorkedTraceSquare, \WorkedTraceSquareAdjoint]
+notation-local: [\CompilationBreakevenCount, \CompilationTime, \CompiledExecutionTime, \CompilerBackendCount, \CompilerFrontendCount, \DevelopmentIterationCount, \DeviceHardwareTime, \DispatchedOperationCount, \DropoutProbability, \DualNumberInfinitesimal, \EagerExecutionTime, \ElementaryOperationCount, \FunctionInputAdjoint, \FunctionInputTangent, \FunctionInputVariable, \FunctionJacobian, \FunctionOutputDimension, \FunctionOutputElement, \FunctionOutputVariable, \FunctionOutputVector, \FunctionSecondInputVariable, \GraphNodeIndex, \HiddenActivationMatrix, \HostSoftwareTime, \IllustrativeFunction, \IndicatorFunction, \LayerSavedTensorCount, \LossAdjointSeed, \OperationDispatchOverhead, \OutputAdjointVector, \ParentNodeIndex, \ProductionExecutionCount, \TangentSeedVector, \TensorAxisCount, \TraceIntermediateTangent, \UpstreamGradientElement, \WorkedTraceProduct, \WorkedTraceProductAdjoint, \WorkedTraceSine, \WorkedTraceSineAdjoint, \WorkedTraceSquare, \WorkedTraceSquareAdjoint]
 ---
 
 # ML Frameworks {#sec-ml-frameworks}
@@ -604,19 +604,19 @@ To support gradient computation on that dynamic graph, the framework records a h
 import torch
 
 x = torch.tensor([1.0], requires_grad=True)
-y = x * 2  # Executes immediately; records MulBackward node
-z = y + 1  # Executes immediately; records AddBackward node
+v = x * 2  # Executes immediately; records MulBackward node
+z = v + 1  # Executes immediately; records AddBackward node
 # The autograd tape exists NOW, built during execution
 ```
 
 :::
 
-After these two operations, the framework has constructed an autograd tape with two nodes: one for the multiplication and one for the addition. The tape records that `z` depends on `y`, and `y` depends on `x`. PyTorch names each node after its operation with a numeric suffix, so the two nodes in the listing's comments appear at runtime as `MulBackward0` and `AddBackward0`.
+After these two operations, the framework has constructed an autograd tape with two nodes: one for the multiplication and one for the addition. The tape records that `z` depends on `v`, and `v` depends on `x`. PyTorch names each node after its operation with a numeric suffix, so the two nodes in the listing's comments appear at runtime as `MulBackward0` and `AddBackward0`.
 
 Calling `z.backward()` traverses this tape in reverse topological order, applying the chain rule at each node:
 
 1. Compute $\frac{\partial \FunctionOutputVariable}{\partial \FunctionOutputVariable} = 1$ (seed gradient)
-2. Call `AddBackward0.backward()` $\rightarrow \frac{\partial \FunctionOutputVariable}{\partial \TapeIntermediateResult} = 1$
+2. Call `AddBackward0.backward()` $\rightarrow \frac{\partial \FunctionOutputVariable}{\partial \TraceIntermediateVariable} = 1$
 3. Call `MulBackward0.backward()` $\rightarrow \frac{\partial \FunctionOutputVariable}{\partial \FunctionInputVariable} = 2$
 4. Accumulate gradient in `x.grad`
 
@@ -1623,7 +1623,7 @@ Graph-capture compilers such as PyTorch 2.0's `torch.compile`[^fn-torch-compile-
 
 [^fn-cuda-dispatch-overhead]: **CUDA (compute unified device architecture)**\index{CUDA!dispatch overhead}: NVIDIA's parallel computing platform, released in 2007, serving as the foundational layer between high-level Python operations and GPU silicon; when PyTorch executes `torch.matmul(A, W)`, the call traverses the framework's dispatcher, selects a cuBLAS kernel, and launches it on the GPU. Each launch adds the `{python} FusionSpeedup.kernel_launch_only_us_str` kernel-launch share of the per-operation overhead on top of the framework's Python dispatch. For small operations, this dispatch overhead $(\Latency)$ can exceed useful compute time. Fusing compatible groups of operations then reduces launch count as well as intermediate memory traffic; capturing the graph alone does not imply a single kernel.
 
-The backends that compile those captured regions occupy different points on the flexibility-performance spectrum. A JIT\index{Just-in-time compilation} compiler compiles captured regions at runtime and pays warmup latency on the first pass. An **ahead-of-time (AOT)**\index{Ahead-of-time compilation} compiler instead compiles captured computation before deployment, shifting compilation out of the hot path and enabling a standalone runtime when the export target supports one. A general JIT backend, such as TorchInductor behind `torch.compile` or XLA, optimizes ordinary training and serving workloads with moderate compilation cost. A specialized ahead-of-time inference compiler, such as NVIDIA's TensorRT, can apply deeper fusion, precision lowering, and autotuning when the deployment target is fixed. An ahead-of-time mobile or embedded runtime, such as ExecuTorch or TensorFlow Lite, removes even more flexibility to gain footprint and predictability. The same rule governs all of them: the narrower the target and the more stable the graph, the more optimization the compiler can safely perform.
+The backends that compile those captured regions occupy different points on the flexibility-performance spectrum. A JIT\index{Just-in-time compilation} compiler compiles captured regions at runtime and pays warmup latency on the first pass. An **ahead-of-time (AOT)**\index{Ahead-of-time compilation} compiler instead compiles captured computation before deployment, shifting compilation out of the hot path and enabling a standalone runtime when the export target supports one. A general JIT backend, such as TorchInductor behind `torch.compile` or XLA, optimizes ordinary training and serving workloads with moderate compilation cost. A specialized ahead-of-time inference compiler, such as NVIDIA's TensorRT, can apply deeper fusion, precision lowering, and autotuning (empirically benchmarking candidate kernel schedules on the target chip) when the deployment target is fixed. An ahead-of-time mobile or embedded runtime, such as ExecuTorch or TensorFlow Lite, removes even more flexibility to gain footprint and predictability. The same rule governs all of them: the narrower the target and the more stable the graph, the more optimization the compiler can safely perform.
 
 Compilation shortens the list of kernels; a second mechanism removes the per-launch cost of whatever list remains. CUDA Graphs\index{CUDA Graphs!launch replay} record a fixed sequence of kernel launches, with their arguments and memory addresses, once, and then replay the whole sequence with a single submission from the host [@nvidia2026cudaGraphs]. The price is rigidity, because replay requires static shapes and fixed buffer addresses. For the GPT-2 XL decoding step that opened the chapter, replay turns `{python} GPT2DecodeDispatch.n_kernels_str` separate launches into one submission, so the host's launch rate no longer sets the step time. What remains is the weight read of about `{python} GPT2DecodeDispatch.weight_read_ms_str` plus the device-side cost of running those kernels back to back, which fusion attacks.
 
@@ -2217,9 +2217,9 @@ Forward mode mechanizes this paired tracking through dual numbers\index{Automati
 x, dx = 2.0, 1.0  # seed: track the derivative with respect to x
 
 a = x * x  # value:      4.0
-da = 2 * x  # derivative: 4.0
+da = 2 * x * dx  # derivative: 4.0
 b = sin(x)  # value:      0.9093
-db = cos(x)  # derivative: -0.4161
+db = cos(x) * dx  # derivative: -0.4161
 c = a * b  # value:      3.637
 dc = a * db + b * da  # derivative: 1.973
 ```
@@ -2262,9 +2262,9 @@ class JacobianMemory:
 
 An intermediate layer that maps an input vector $\FunctionInputVector\in \mathbb{R}^{\FunctionInputDimension}$ to an output $\FunctionOutputVector\in \mathbb{R}^{\FunctionOutputDimension}$ of width $\FunctionInputDimension= \FunctionOutputDimension= 100{,}000$ has a full Jacobian $\FunctionJacobian\in \mathbb{R}^{\FunctionOutputDimension\times \FunctionInputDimension}$ of $10^{10}$ elements, which would require `{python} JacobianMemory.jacobian_gb_str` of memory in FP32 to store one layer's derivatives. Neither mode of automatic differentiation materializes this matrix. Forward mode would need one pass per input direction, while reverse-mode automatic differentiation\index{Automatic differentiation!reverse mode}\index{Automatic differentiation!reverse-mode backpropagation} needs one pass per output, a single pass for a scalar loss, which matches the many-parameters-to-one-loss shape of neural network training\index{Backpropagation!computational asymmetry}. Instead of propagating tangents forward from inputs, reverse mode propagates adjoints $\TraceIntermediateAdjoint_i = \partial \LossFunction / \partial \TraceIntermediateVariable_i$ backward from the single scalar loss $\LossFunction$ to all parameters.
 
-While forward mode computes Jacobian-vector products ($\FunctionJacobian\TangentSeedVector$), reverse mode evaluates vector-Jacobian products (VJPs), $\UpstreamGradientVector^T \FunctionJacobian= \sum_{j=1}^{\FunctionOutputDimension} \UpstreamGradientElement_j \, \partial \FunctionOutputElement_j / \partial \FunctionInputVector$, where $\UpstreamGradientElement_j = \partial \LossFunction / \partial \FunctionOutputElement_j$ is one element of the upstream gradient vector $\UpstreamGradientVector= \frac{\partial \LossFunction}{\partial \FunctionOutputVector} \in \mathbb{R}^{\FunctionOutputDimension}$. Because training optimizes a single scalar loss $\LossFunction$, the backward pass only ever needs to multiply this upstream gradient vector by each local operation's derivative rule, never the `{python} JacobianMemory.jacobian_gb_str` full Jacobian matrix.
+While forward mode computes Jacobian-vector products ($\FunctionJacobian\TangentSeedVector$), reverse mode evaluates vector-Jacobian products (VJPs), $\OutputAdjointVector^T \FunctionJacobian= \sum_{j=1}^{\FunctionOutputDimension} \UpstreamGradientElement_j \, \partial \FunctionOutputElement_j / \partial \FunctionInputVector$, where the upstream gradient vector $\OutputAdjointVector= \frac{\partial \LossFunction}{\partial \FunctionOutputVector} \in \mathbb{R}^{\FunctionOutputDimension}$ has components $\UpstreamGradientElement_j = \partial \LossFunction / \partial \FunctionOutputElement_j$. Because training optimizes a single scalar loss $\LossFunction$, the backward pass only ever needs to multiply this upstream gradient vector by each local operation's derivative rule, never the `{python} JacobianMemory.jacobian_gb_str` full Jacobian matrix.
 
-To see how VJPs sidestep the full matrix, consider a simple element-wise operation such as $\FunctionOutputVector= \text{ReLU}(\FunctionInputVector)$ with an input vector $\FunctionInputVector= [-1.0, 2.0, 3.0]$ and an upstream gradient $\UpstreamGradientVector= [0.5, 0.5, 0.5]$ flowing backward from the loss. Because the derivative of ReLU is $1$ when $\FunctionInputVariable> 0$ and $0$ otherwise, the local gradient vector is $\frac{\partial \FunctionOutputVector}{\partial \FunctionInputVector} = [0, 1, 1]$. Instead of building a $3{\times}3$ diagonal matrix and executing a matrix multiplication, the VJP computes the element-wise product $\UpstreamGradientVector\odot \frac{\partial \FunctionOutputVector}{\partial \FunctionInputVector} = [0.0, 0.5, 0.5]$ directly. It streams vectors without ever materializing the full $\FunctionOutputDimension\times \FunctionInputDimension$ matrix in memory. Seeding the reverse sweep with $\LossAdjointSeed = 1$ yields the complete parameter gradient vector $\nabla_{\ModelParameters}\LossFunction$ in a single backward pass, regardless of whether the model contains ten parameters or ten billion.
+To see how VJPs sidestep the full matrix, consider a simple element-wise operation such as $\FunctionOutputVector= \text{ReLU}(\FunctionInputVector)$ with an input vector $\FunctionInputVector= [-1.0, 2.0, 3.0]$ and an upstream gradient $\OutputAdjointVector= [0.5, 0.5, 0.5]$ flowing backward from the loss. Because the derivative of ReLU is $1$ when $\FunctionInputVariable> 0$ and $0$ otherwise, the local gradient vector is $\frac{\partial \FunctionOutputVector}{\partial \FunctionInputVector} = [0, 1, 1]$. Instead of building a $3{\times}3$ diagonal matrix and executing a matrix multiplication, the VJP computes the element-wise product $\OutputAdjointVector\odot \frac{\partial \FunctionOutputVector}{\partial \FunctionInputVector} = [0.0, 0.5, 0.5]$ directly. It streams vectors without ever materializing the full $\FunctionOutputDimension\times \FunctionInputDimension$ matrix in memory. Seeding the reverse sweep with $\LossAdjointSeed = 1$ yields the complete parameter gradient vector $\nabla_{\ModelParameters}\LossFunction$ in a single backward pass, regardless of whether the model contains ten parameters or ten billion.
 
 Reverse mode operates on the same three-operation function $\IllustrativeFunction(\FunctionInputVariable) = \FunctionInputVariable^2\sin(\FunctionInputVariable)$ from @lst-auto_diff_intro, where $\FunctionInputVariable$ reaches the output through two distinct computational paths: the square and the sine. @Algo-reverse-mode-ad-trace defines the reverse-mode traversal algorithm over a directed acyclic graph before tracing this concrete evaluation.
 
@@ -2300,12 +2300,12 @@ class GPT3ReverseModeParams:
 \begin{algorithm}
 \caption{Reverse-mode automatic differentiation}
 \begin{algorithmic}
-\Require directed acyclic graph with scalar output $\FunctionOutputElement$; nodes $\TraceIntermediateVariable_1,\dots,\TraceIntermediateVariable_{\ElementaryOperationCount}$ in topological order; a local derivative rule for each node
+\Require directed acyclic graph with scalar output $\FunctionOutputElement = \TraceIntermediateVariable_{\ElementaryOperationCount}$; nodes $\TraceIntermediateVariable_1,\dots,\TraceIntermediateVariable_{\ElementaryOperationCount}$ in topological order; a local derivative rule for each node
 \Ensure adjoints $\TraceIntermediateAdjoint_{\GraphNodeIndex} = \partial \FunctionOutputElement / \partial \TraceIntermediateVariable_{\GraphNodeIndex}$ for the requested input or parameter nodes
 \For{$\GraphNodeIndex = 1$ to $\ElementaryOperationCount$}
     \State compute $\TraceIntermediateVariable_{\GraphNodeIndex}$, record dependencies, and save values requested by its derivative rule \Comment{forward pass}
 \EndFor
-\State $\TraceIntermediateAdjoint_{\GraphNodeIndex} \gets 0$ for all $\GraphNodeIndex$; $\UpstreamGradientElement \gets 1$
+\State $\TraceIntermediateAdjoint_{\GraphNodeIndex} \gets 0$ for all $\GraphNodeIndex < \ElementaryOperationCount$; $\TraceIntermediateAdjoint_{\ElementaryOperationCount} \gets 1$
 \For{$\GraphNodeIndex = \ElementaryOperationCount$ down to $1$}
     \For{each parent $\TraceIntermediateVariable_{\ParentNodeIndex}$ of $\TraceIntermediateVariable_{\GraphNodeIndex}$}
         \State $\TraceIntermediateAdjoint_{\ParentNodeIndex} \gets \TraceIntermediateAdjoint_{\ParentNodeIndex} + \TraceIntermediateAdjoint_{\GraphNodeIndex} \, \partial \TraceIntermediateVariable_{\GraphNodeIndex} / \partial \TraceIntermediateVariable_{\ParentNodeIndex}$ \Comment{accumulate via the chain rule}
@@ -2345,8 +2345,8 @@ output = activated * w2
 
 # --- Backward pass consumes them ---
 d_output = 1.0  # Seed gradient
-d_w2 = activated  # = 2.0
-d_activated = w2  # = 3.0
+d_w2 = d_output * activated  # = 2.0
+d_activated = d_output * w2  # = 3.0
 d_hidden = d_activated * (1 if hidden > 0 else 0)  # ReLU gate: 3.0
 d_w1 = x * d_hidden  # = 3.0
 d_x = w1 * d_hidden  # = 6.0
@@ -3299,21 +3299,21 @@ Streams and events hide transfers behind computation, but scheduling cannot help
 ↩ The feeding problem, in which data delivery must keep pace with accelerator consumption, is established in @sec-data-engineering-feeding-problem.
 :::
 
-Worker processes come first. With `num_workers > 0`, the DataLoader spawns CPU processes that load and preprocess samples independently, distributes sample indices to them through a shared queue, and assembles their completed samples into batches in the main process. Multiple workers overlap I/O wait with decoding and augmentation when one process is too slow to feed the accelerator; once the pipeline meets demand, extra workers add overhead rather than throughput. Each worker also runs in its own process with its own view of the Dataset, so more workers can raise host memory use, and in-memory changes one worker makes do not reach the others.
+Worker processes come first. With `num_workers > 0`, the DataLoader spawns CPU processes that load and preprocess samples independently, distributes sample indices to them through a shared queue, and assembles their completed samples into batches in the main process. Each worker runs in its own process with its own view of the Dataset, so more workers raise host memory use and in-memory changes one worker makes do not reach the others.
 
 ::: {.column-margin}
-![](images/svg/vol1_frameworks_margin_003.svg){width="100%" fig-alt="Vertical pipeline: four worker boxes feed a host-memory queue of eight batch slots, which drains into a solid pinned host buffer and then crosses to the GPU."}
+![](images/svg/vol1_frameworks_margin_003.svg){width="100%" fig-alt="Vertical pipeline: worker boxes feed a host-memory prefetch queue of batch slots, which drains into a solid pinned host buffer and then crosses to the GPU."}
 
-*Four workers fill eight prefetched batches, which drain through pinned memory to the GPU.*
+*Worker processes fill a host-memory prefetch queue, which drains through pinned memory to the GPU.*
 :::
 
-Prefetching\index{Prefetching!data loader pipeline} sets pipeline depth. The `prefetch_factor` parameter controls how many batches each worker prepares in advance, so four workers with `prefetch_factor=2` keep up to eight batches in flight, at a cost in host memory proportional to the queued data. Prefetching raises the chance that input work overlaps accelerator computation but cannot prevent stalls when storage, decoding, or contention makes production slower than consumption.
+Prefetching\index{Prefetching!data loader pipeline} sets queue depth. The `prefetch_factor` parameter controls how many batches each worker queues ahead of the consumer, keeping prepared batches in host memory ready for transfer; how that queue absorbs preparation variance and where prefetching hits stall and memory bounds belongs to @sec-model-training-prefetching-mechanics-2ba2.
 
 Pinned memory completes the path to the device. The `pin_memory=True` option places batches in the page-locked host memory of @sec-ml-frameworks-device-memory-management-9404, so their host-to-device copies skip pageable-memory staging and can overlap device work. For a batch of `{python} DataloaderThroughput.batch_size_str` FP32 images at $224{\times}224{\times}3$ (`{python} DataloaderThroughput.batch_mb_str`), dividing by the H100's `{python} DataloaderThroughput.host_link_name_str` peak gives `{python} DataloaderThroughput.batch_transfer_ms_str`; this is a bandwidth-only lower bound, not a measured pinned-transfer latency. The realized benefit over pageable memory depends on the platform, batch size, pipeline, and overlap. Pinning has a cost of its own, because every pinned page is one the operating system can no longer swap out for other processes.
 
-The DataLoader configuration in @lst-dataloader-throughput is useful only when each parameter is tied to a bottleneck: `num_workers` sets loading parallelism, `prefetch_factor` sets pipeline depth, and `pin_memory` enables DMA transfers.
+The DataLoader interface in @lst-dataloader-throughput exposes those three framework knobs alongside per-worker random-seed initialization: `num_workers` sets worker parallelism, `prefetch_factor` sets per-worker queue depth, and `pin_memory` stages batches in page-locked memory for DMA transfers.
 
-::: {#lst-dataloader-throughput lst-cap="**DataLoader Throughput Configuration**: Four workers with a prefetch depth of two keep up to eight batches in flight through pinned memory, and a per-worker seed function makes NumPy and Python augmentation reproducible."}
+::: {#lst-dataloader-throughput lst-cap="**DataLoader API Configuration**: The framework exposes loading parallelism (`num_workers`), per-worker queue depth (`prefetch_factor`), page-locked staging (`pin_memory`), and per-worker RNG seeding (`worker_init_fn`) behind one iterable interface."}
 
 ```{.python}
 import random
@@ -3333,15 +3333,11 @@ loader = DataLoader(
     dataset,
     batch_size=64,
     shuffle=True,
-    num_workers=4,  # Parallel worker processes (mechanism 1)
-    prefetch_factor=2,  # Batches prepared ahead per worker (mechanism 2)
-    pin_memory=True,  # Page-locked memory for DMA (mechanism 3)
+    num_workers=n_workers,  # Parallel CPU worker processes (mechanism 1)
+    prefetch_factor=prefetch_depth,  # Batches queued ahead per worker (mechanism 2)
+    pin_memory=True,  # Page-locked host memory for DMA (mechanism 3)
     worker_init_fn=seed_worker,  # Reproducible augmentation per worker
 )
-
-# Pipeline effect: while GPU processes batch N,
-# 4 workers load batches N+1..N+8 into pinned memory,
-# ready for DMA transfer when the GPU finishes.
 ```
 
 :::
@@ -3461,7 +3457,7 @@ class KernelDispatchAnchor:
 
 The kernel manager dispatches\index{Kernel dispatch!hardware selection} each supported operation to an implementation for the current backend. For matrix multiplication, this may be a CPU BLAS backend such as Intel oneMKL or OpenBLAS [@intelOneMKL; @openblasDocs], cuBLAS\index{cuBLAS!kernel selection} on NVIDIA GPUs [@nvidia_cublas], or accelerator-specific tensor instructions. Selection depends on dimensions, dtype, layout, backend, and library heuristics. A $4096{\times}4096$ FP16 GEMM on an H100\index{H100!Tensor Core throughput} may use a Tensor Core path whose published dense peak is `{python} KernelDispatchAnchor.h100_fp16_tflop_per_s_str` [@choquette2023; @nvidia2022h100]. If the backend has no implementation for an operator, execution may fall back, be partitioned, or fail, depending on the framework and runtime.
 
-The memory abstraction layer moves tensors among pageable or pinned host memory, device memory, and unified memory, and transforms data layouts to match hardware preferences. Because physical memory is the one-dimensional byte array of @sec-ml-frameworks-tensor-structure-dimensions-4a14, layout formats dictate how 4D image dimensions map to linear addresses: *channels-first* NCHW\index{Memory layout!NCHW vs. NHWC} places all spatial pixels of one channel contiguously before storing the next channel, whereas *channels-last* NHWC groups all channel values for a single spatial coordinate consecutively. Accelerator matrix units often prefer NHWC because loading all channels for a pixel aligns with a single, contiguous 128-byte memory transaction. A framework may therefore execute kernels in NHWC for peak hardware utilization while preserving NCHW for user-facing APIs.
+The memory abstraction layer moves tensors among pageable or pinned host memory, device memory, and unified memory (a single address space shared across CPU and GPU), and transforms data layouts to match hardware preferences. Because physical memory is the one-dimensional byte array of @sec-ml-frameworks-tensor-structure-dimensions-4a14, layout formats dictate how 4D image dimensions map to linear addresses: *channels-first* NCHW\index{Memory layout!NCHW vs. NHWC} places all spatial pixels of one channel contiguously before storing the next channel, whereas *channels-last* NHWC groups all channel values for a single spatial coordinate consecutively. Accelerator matrix units often prefer NHWC because loading all channels for a pixel aligns with a single, contiguous 128-byte memory transaction. A framework may therefore execute kernels in NHWC for peak hardware utilization while preserving NCHW for user-facing APIs.
 
 The execution controller coordinates work across multiple processing units and memory spaces. On a modern GPU, graph runtimes or explicit stream use can overlap independent kernels when dependency analysis proves they are ready and the kernels leave enough resources unused to run concurrently. Eager default-stream execution often serializes this work instead. A graph runtime or the default stream preserves dependency ordering when multiple execution units access the same tensor, preventing races during concurrent operations, whereas explicit streams leave that ordering to the program through events or stream waits. The controller inserts synchronization barriers where data dependencies require them, tracks event completions to trigger dependent operations, and routes hardware errors to the framework's error handling path.
 
@@ -3875,7 +3871,7 @@ During the forward pass\index{Forward pass!kernel dispatch}, executing `h = torc
 1. Python dispatch\index{Python dispatch!overhead}: The Python interpreter invokes `torch.matmul`, which routes through PyTorch's C++ dispatcher to select the CUDA backend, incurring the Python-dispatch share of the per-operation overhead (about `{python} FusionSpeedup.python_dispatch_us_str` in this chapter's model) before issuing work to the device.
 2. Kernel selection\index{Kernel dispatch!BLAS kernel selection}: cuBLAS selects a GEMM kernel configured for dimensions `{python} TrainingStepDims.train_batch_str` $\times$ `{python} TrainingStepDims.train_input_str` $\times$ `{python} TrainingStepDims.train_hidden_str`, one that splits the matrix product into blocks sized to fit the accelerator's on-chip memory.
 3. Kernel launch: The host thread enqueues the launch descriptor into the GPU command stream, consuming driver launch latency while asynchronous execution allows host execution to proceed without blocking on completion.
-4. GPU execution: The streaming multiprocessors stream `W1` from HBM[^fn-hbm-capacity-constraint] through L2 cache into registers and the FP32 arithmetic units (Tensor Cores engage only when a reduced-precision matrix format, either TF32 or a 16-bit data type, is enabled), evaluate the matrix product, and write the output activations back to HBM.
+4. GPU execution: The streaming multiprocessors stream `W1` from HBM[^fn-hbm-capacity-constraint] through L2 cache into registers and the FP32 arithmetic units, evaluate the matrix product, and write the output activations back to HBM. Tensor Cores engage only when a reduced-precision matrix format is enabled, either a 16-bit data type or TF32 (TensorFloat-32, NVIDIA's 19-bit format pairing FP32 range with FP16 mantissa precision).
 5. Autograd recording: Concurrently on the host, PyTorch's autograd engine instantiates an `MmBackward` node on the dynamic tape, saving references to the device tensors needed for the requested gradients. Here the weight gradient requires `x`; no input gradient is requested.
 
 ```{python}
@@ -4177,7 +4173,7 @@ TensorFlow's architecture\index{TensorFlow!graph-first architecture} spans eager
 
 Within a captured `tf.function`, TensorFlow can apply graph optimizations such as constant folding, kernel fusion, and layout planning. The SavedModel serialization format is the boundary that separates training from deployment (@fig-tensorflow-architecture). Training workflows on the left, including `tf.data` preprocessing, the Keras modeling API, and distribution strategies across CPUs, GPUs, and TPUs, serialize into one SavedModel artifact. From this central interface, graph definitions pass through supported serving or target-specific conversion paths into deployment runtimes on the right (TensorFlow Serving\index{TensorFlow Serving!production deployment}, TensorFlow Lite, TensorFlow.js\index{TensorFlow.js!browser deployment}, and native language bindings\index{SavedModel!TensorFlow export format}) without retaining Python runtime dependencies.
 
-::: {#fig-tensorflow-architecture fig-env="figure" fig-pos="htb" fig-cap="**TensorFlow Training-to-Deployment Pipeline**: The SavedModel format provides a boundary between training and deployment by capturing graph structure, weights, and signatures. The right-hand paths include direct serving and target-specific conversion for Lite and JavaScript runtimes. Supported operators and conversion determine whether each path can run without Python in production." fig-alt="Two-column diagram. Training: data preprocessing, tf.keras, TensorFlow Hub, Premade Estimators, Distribution Strategy across CPU/GPU/TPU. Deployment via SavedModel to TensorFlow Serving, Lite, JS, and language bindings."}
+::: {#fig-tensorflow-architecture fig-env="figure" fig-pos="htb" fig-cap="**TensorFlow Training-to-Deployment Pipeline**: The SavedModel format provides a boundary between training and deployment by capturing graph structure, weights, and signatures. The right-hand paths include direct serving and target-specific conversion for Lite and JavaScript runtimes. Supported operators and conversion determine whether each path can run without Python in production." fig-alt="Two-column diagram. Training: data preprocessing with tf.data and Keras preprocessing, tf.keras, TensorFlow Hub, custom tf.Module and tf.function loops, and Distribution Strategy across CPU, GPU, and TPU. Deployment via SavedModel to TensorFlow Serving, Lite, JS, and language bindings."}
 
 ```{.tikz}
 \begin{tikzpicture}[font=\sffamily\small]
@@ -4189,17 +4185,17 @@ Within a captured `tf.function`, TensorFlow can apply graph optimizations such a
     node distance=0.6,
     draw=BlueLine,
     line width=0.75pt,
-    fill=BlueL,,
+    fill=BlueL,
     minimum height=10mm
   },
 }
 
 \node[Box,text width=70mm,fill= BrownL,
-            draw= BrownLine](B1){\textbf{Read \& Preprocess Data}\\ tf.data, feature columns};
+            draw= BrownLine](B1){\textbf{Read \& Preprocess Data}\\ tf.data, Keras preprocessing};
 \node[Box,fill= BrownL,draw= BrownLine,below=of B1.south west,minimum width=20mm,
              anchor=north west](B2){\textbf{tf.keras}};
-\node[Box,fill= BrownL,draw= BrownLine,below=of B1.south east,,minimum width=20mm,
-             anchor=north east](B3){\textbf{Premade}\\\textbf{Estimators}};
+\node[Box,fill= BrownL,draw= BrownLine,below=of B1.south east,minimum width=20mm,
+             anchor=north east](B3){\textbf{tf.Module /}\\\textbf{tf.function}};
 \node[Box,fill= BrownL,draw= BrownLine,
               minimum width=20mm](B4)at($(B2.east)!0.5!(B3.west)$){\textbf{TensorFlow}\\\textbf{Hub}};
 %
@@ -4236,7 +4232,7 @@ Within a captured `tf.function`, TensorFlow can apply graph optimizations such a
 \draw[latex-,Line](B7)--(B5.south-|B7);
 \draw[latex-,Line](B8)--(B5.south-|B8);
 \draw[Line](B6)--++(270:0.8)-|(B7);
-\draw[-latex,Line](B8)-++(270:1.1)-|(B9);
+\draw[-latex,Line](B8)--++(270:0.8)-|(B9);
 \foreach \x in {1,2,3,4}
 \draw[-latex,Line](B9.east)--(L\x.west);
 \end{tikzpicture}
@@ -4409,7 +4405,7 @@ For the fixed-shape vision model, the first filter is successful conversion of e
 
 #### Software dependencies {#sec-ml-frameworks-software-dependencies-5245}
 
-Embedded Linux supplies operating-system services, so an OS dependency does not eliminate either candidate in this project. A bare-metal microcontroller would impose a different filter, which the TensorFlow Lite for Microcontrollers column of @tbl-tf-comparison describes. TensorFlow Lite Micro links a selected operator set into a small C/C++ application and can read a model FlatBuffer compiled into flash, which removes the need for a POSIX filesystem or heap allocation during inference, savings that matter on bare metal but give a Linux device no reason to choose it. The platform rows of @tbl-tf-comparison separate that requirement from model access and accelerator integration; availability of a runtime on one tier does not imply availability on another.
+Embedded Linux supplies operating-system services, so an OS dependency does not eliminate either candidate in this project. A bare-metal microcontroller would impose a different filter, which the TensorFlow Lite for Microcontrollers column of @tbl-tf-comparison describes. TensorFlow Lite Micro links a selected operator set into a small C/C++ application and can read a model FlatBuffer (a zero-copy serialized binary buffer) compiled into flash, which removes the need for a POSIX filesystem or heap allocation during inference, savings that matter on bare metal but give a Linux device no reason to choose it. The platform rows of @tbl-tf-comparison separate that requirement from model access and accelerator integration; availability of a runtime on one tier does not imply availability on another.
 
 On that accelerator-integration row, the CPU-only project needs a supported CPU implementation of every required operator in both ONNX Runtime and TensorFlow Lite; it cannot count on a mobile NPU delegate or a server GPU backend.
 
@@ -4520,7 +4516,7 @@ class BatchActivationScaling:
 
 **Pitfall**: *Increasing batch size without modeling activation memory.*
 
-Engineers assume that if memory is available, larger batches always improve throughput. Larger mini-batches amortize fixed dispatch overhead, but they also scale the activation memory that must stay live until the backward pass consumes it. In the illustrative ResNet-50 scenario of @sec-ml-frameworks-principle-2-memorycompute-tradeoff-19f2, batch `{python} BatchActivationScaling.base_batch_str` already holds `{python} ResNetMemory.resnet_act_min_gb_str`--`{python} ResNetMemory.resnet_act_max_gb_str` of saved activations. Batch `{python} BatchActivationScaling.batch_mid_str` holds `{python} BatchActivationScaling.mid_min_gb_str`--`{python} BatchActivationScaling.mid_max_gb_str`, and batch `{python} BatchActivationScaling.batch_big_str` holds `{python} BatchActivationScaling.big_min_gb_str`--`{python} BatchActivationScaling.big_max_gb_str`, which on an `{python} BatchActivationScaling.h100_mem_gb_str` H100 forces activation checkpointing. Recomputation then adds roughly one extra forward pass per step, which can cost more throughput than the larger batch gained, and materialized attention scores make the effect sharper for transformers because they grow with the square of sequence length. Teams that blindly maximize batch size can achieve lower throughput than smaller batches that avoid recomputation.
+Engineers assume that if memory is available, larger batches always improve throughput. Larger mini-batches amortize fixed dispatch overhead, but they also scale the activation memory that must stay live until the backward pass consumes it. In the illustrative ResNet-50 scenario of @sec-ml-frameworks-principle-2-memorycompute-tradeoff-19f2, batch `{python} BatchActivationScaling.base_batch_str` already holds `{python} ResNetMemory.resnet_act_min_gb_str`--`{python} ResNetMemory.resnet_act_max_gb_str` of saved activations. Batch `{python} BatchActivationScaling.batch_mid_str` holds `{python} BatchActivationScaling.mid_min_gb_str`--`{python} BatchActivationScaling.mid_max_gb_str`, and batch `{python} BatchActivationScaling.batch_big_str` holds `{python} BatchActivationScaling.big_min_gb_str`--`{python} BatchActivationScaling.big_max_gb_str`, which can exceed an `{python} BatchActivationScaling.h100_mem_gb_str` H100 and force activation checkpointing. Recomputation then adds roughly one extra forward pass per step, which can cost more throughput than the larger batch gained, and materialized attention scores make the effect sharper for transformers because they grow with the square of sequence length. Teams that blindly maximize batch size can achieve lower throughput than smaller batches that avoid recomputation.
 
 :::
 
@@ -4579,7 +4575,7 @@ class CompilationOverheadCalc:
 
 **Fallacy**: *Compilation overhead is negligible.*
 
-Engineers assume compilation overhead is a one-time cost that pays off quickly. The hypothetical values in @tbl-training-benchmark assign ResNet-50 higher compiled throughput and a compile window of `{python} CompilationOverheadCalc.compile_min_s_str` to `{python} CompilationOverheadCalc.compile_max_s_str` per graph change. Under those assumptions, and timed with the table's inference throughputs, a `{python} CompilationOverheadCalc.n_images_str`-image experiment with `{python} CompilationOverheadCalc.n_recompilations_str` code changes completes in `{python} CompilationOverheadCalc.eager_total_s_str` in eager mode and `{python} CompilationOverheadCalc.compiled_total_s_str` in compiled mode, including recompilation overhead. The compiled workflow is therefore about `{python} CompilationOverheadCalc.compiled_slowdown_mult_str` slower in this illustrative rapid-prototyping scenario; a training loop would add backward work to every pass but pay the same recompilation cost. Teams that enable compilation during rapid prototyping can waste time waiting for recompilations that negate throughput gains.
+Engineers assume compilation overhead is a one-time cost that pays off quickly. The hypothetical values in @tbl-training-benchmark assign ResNet-50 higher compiled throughput and a compile window of `{python} CompilationOverheadCalc.compile_min_s_str` to `{python} CompilationOverheadCalc.compile_max_s_str` per graph change. Under those assumptions, evaluated at the `{python} CompilationOverheadCalc.compile_max_s_str` upper end of that compile window and timed with the table's inference throughputs, a `{python} CompilationOverheadCalc.n_images_str`-image experiment that compiles `{python} CompilationOverheadCalc.n_recompilations_str` times, once per code change, completes in `{python} CompilationOverheadCalc.eager_total_s_str` in eager mode and `{python} CompilationOverheadCalc.compiled_total_s_str` in compiled mode, including recompilation overhead. The compiled workflow is therefore about `{python} CompilationOverheadCalc.compiled_slowdown_mult_str` slower in this illustrative rapid-prototyping scenario; a training loop would add backward work to every pass but pay the same recompilation cost. Teams that enable compilation during rapid prototyping can waste time waiting for recompilations that negate throughput gains.
 
 :::
 

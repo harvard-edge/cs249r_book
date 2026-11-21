@@ -812,7 +812,7 @@ class Scenarios(Registry):
     Rank128Factorization4096 = _optimization_compression.Rank128Factorization4096
     ResNet50Conv256FusionH100 = _optimization_compression.ResNet50Conv256FusionH100
     WearableMobileNetV2SparseFlash = _optimization_compression.WearableMobileNetV2SparseFlash
-    PrunedInt8PaperVsMeasured = _optimization_compression.PrunedInt8PaperVsMeasured
+    PrunedInt8PaperVsRealized = _optimization_compression.PrunedInt8PaperVsRealized
     IrregularSparsityLatencyTrace = _optimization_compression.IrregularSparsityLatencyTrace
     BertBaseMobileCompression = _optimization_compression.BertBaseMobileCompression
     ModelFifthOfRequestLatency = _optimization_compression.ModelFifthOfRequestLatency

@@ -1165,7 +1165,7 @@ The table's freshness classes are budgets on feature freshness latency, the even
 
 **Diagnosis**: Suppose the daily batch pipeline delivers relevant interactions with freshness latency $\FeatureFreshnessLatency\approx 12\text{--}24\text{ h}$. Those features cannot reflect activity from the current session, even if other recommendation inputs change. A streaming pipeline (Kafka/Flink) operating at $\FeatureFreshnessLatency\approx 1\text{--}5\text{ s}$ can incorporate that activity sooner; whether it updates the vector before the next user action depends on the session's timing.
 
-**Systems lesson**: Feature freshness latency is a physical system metric ($\FeatureFreshnessLatency= \FeatureRecordTime - \SourceEventTime$). Reducing freshness latency can improve decisions that depend on recent behavior, but engagement lift must be measured in an experiment. The business benefit must justify the additional streaming capacity and operational complexity.
+**Systems lesson**: Feature freshness latency is a physical system metric ($\FeatureFreshnessLatency = \FeatureRecordTime - \SourceEventTime$, where $\FeatureRecordTime$ is the time the feature record becomes available for serving and $\SourceEventTime$ is the source event time). Reducing freshness latency can improve decisions that depend on recent behavior, but engagement lift must be measured in an experiment. The business benefit must justify the additional streaming capacity and operational complexity.
 
 :::
 
@@ -1837,7 +1837,7 @@ $$\RequiredUsersPerVariant = \frac{7.84 \times 0.095}{0.000025} = \frac{0.7448}{
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: @eq-ops-scale-ab-sample-size worked example—sample size, duration.
-from mlsysim.fmt import check, fmt_count, fmt_time
+from mlsysim.fmt import check, fmt, fmt_count, fmt_display_math, fmt_int, fmt_percent, fmt_time
 
 class AbSampleSize:
     # ┌── 1. LOAD ──────────────────────────────────────────
@@ -1858,23 +1858,59 @@ class AbSampleSize:
     # ┌── 4. OUTPUT ────────────────────────────────────────
     per_variant_str = fmt_count(n_per_variant, commas=True, label="sample")
     total_str = fmt_count(n_total, commas=True, label="observation")
+    requests_day_str = fmt_count(requests_per_day, commas=False, scale="M", scale_style="word", label="request")
+    duration_bound_str = fmt_time(2, "hour", precision=0, commas=False, style="word")
+
+    # Second case (added 2026-11-20; typed in prose before): a 1 percent baseline and a
+    # 5 percent relative lift, 0.05 percentage points absolute, on the same traffic.
+    low_baseline, low_relative = 0.01, 0.05  # scenario assumption
+    low_delta = low_baseline * low_relative
+    z_sq = (z_alpha + z_beta) ** 2
+    low_num = z_sq * 2 * low_baseline * (1 - low_baseline)
+    low_n = low_num / low_delta**2
+    low_hours = 2 * low_n / requests_per_day * 24
+    check(abs(low_n - 620_928) < 1, "Low-CTR example: 620,928 per variant")
+    low_baseline_str = fmt_percent(low_baseline, precision=0, commas=False, style="prose")
+    low_relative_str = fmt_percent(low_relative, precision=0, commas=False, style="prose")
+    low_delta_pp_str = fmt(low_delta * 100, precision=2, commas=False)
+    low_eq_math = fmt_display_math(
+        rf"\RequiredUsersPerVariant = \frac{{{z_sq:.2f} \times 2 \times {low_baseline} \times {1 - low_baseline:.2f}}}"
+        rf"{{{low_delta:.4f}^2}} = \frac{{{low_num:.6f}}}{{{low_delta ** 2:.8f}}} = " + f"{low_n:,.0f}".replace(",", "{,}")
+    )
+    low_n_k_str = fmt_int(round(low_n / 1000), commas=False)
+    low_hours_str = fmt_time(round(low_hours), "hour", precision=0, commas=False, style="word")
+
+    # Multiple testing (same scenario's significance and family size).
+    alpha = _test.significance
+    family = _test.family_size
+    fwer = 1 - (1 - alpha) ** family
+    bonferroni = alpha / family
+    sidak = 1 - (1 - alpha) ** (1 / family)
+    fwer_math = fmt_display_math(
+        rf"\Pr(\text{{at least one false positive}}) = 1 - (1-\HypothesisTestSignificanceLevel)^{{\TestFamilySize}}= 1 - {1 - alpha:.2f}^{{{family}}} = {fwer:.3f}"
+    )
+    fwer_pct_str = fmt_percent(round(fwer, 2), precision=0, commas=False, style="prose")
+    family_str = fmt(family, precision=0, commas=False)
+    alpha_str = fmt(alpha, precision=2, commas=False)
+    bonferroni_str = fmt(bonferroni, precision=4, commas=False)
+    sidak_str = fmt(sidak, precision=5, commas=False)
 ```
 
-Each variant requires approximately `{python} AbSampleSize.per_variant_str`, totaling `{python} AbSampleSize.total_str`. If requests supply independent eligible observations with immediately available outcomes, 1 million requests per day split evenly between variants collects that sample in less than 2 hours. However, for a model with 1 percent baseline CTR detecting a 5 percent relative improvement (0.05 percentage points), the calculation yields:
+Each variant requires approximately `{python} AbSampleSize.per_variant_str`, totaling `{python} AbSampleSize.total_str`. If requests supply independent eligible observations with immediately available outcomes, `{python} AbSampleSize.requests_day_str` per day split evenly between variants collects that sample in less than `{python} AbSampleSize.duration_bound_str`. However, for a model with `{python} AbSampleSize.low_baseline_str` baseline CTR detecting a `{python} AbSampleSize.low_relative_str` relative improvement (`{python} AbSampleSize.low_delta_pp_str` percentage points), the calculation yields:
 
-$$\RequiredUsersPerVariant = \frac{7.84 \times 2 \times 0.01 \times 0.99}{0.0005^2} = \frac{0.155232}{0.00000025} = 620{,}928$$
+`{python} AbSampleSize.low_eq_math`
 
-Now each variant needs approximately 621K samples. Under the same independence and outcome-availability assumptions, 1M total requests/day split evenly between the two variants collects that sample in about 30 hours. Required observation windows can extend either experiment beyond its collection time. Here, the lower baseline and smaller relative improvement also imply a much smaller absolute effect. At a fixed relative improvement, rarer outcomes require more observations; a fixed absolute effect would give a different comparison.
+Now each variant needs approximately `{python} AbSampleSize.low_n_k_str`K samples. Under the same independence and outcome-availability assumptions, `{python} AbSampleSize.requests_day_str` per day split evenly between the two variants collects that sample in about `{python} AbSampleSize.low_hours_str`. Required observation windows can extend either experiment beyond its collection time. Here, the lower baseline and smaller relative improvement also imply a much smaller absolute effect. At a fixed relative improvement, rarer outcomes require more observations; a fixed absolute effect would give a different comparison.
 
 #### Multiple testing correction {#sec-ml-operations-scale-multiple-testing-correction-023f}
 
-Running multiple A/B tests simultaneously or sequentially without correction inflates the familywise error rate, the probability that at least one test in the family reports a false positive. With 20 independent tests whose null hypotheses are all true, at $\HypothesisTestSignificanceLevel = 0.05$, that probability is:
+Running multiple A/B tests simultaneously or sequentially without correction inflates the familywise error rate, the probability that at least one test in the family reports a false positive. With `{python} AbSampleSize.family_str` independent tests whose null hypotheses are all true, at $\HypothesisTestSignificanceLevel$ = `{python} AbSampleSize.alpha_str`, that probability is:
 
-$$\Pr(\text{at least one false positive}) = 1 - (1-\HypothesisTestSignificanceLevel)^{\TestFamilySize}= 1 - 0.95^{20} = 0.642$$
+`{python} AbSampleSize.fwer_math`
 
-The result is a 64 percent chance of at least one false rejection; a two-sided rejection can point in either direction. Two families of correction address this problem.
+The result is a `{python} AbSampleSize.fwer_pct_str` chance of at least one false rejection; a two-sided rejection can point in either direction. Two families of correction address this problem.
 
-Bonferroni correction adjusts the significance threshold to $\PerTestSignificanceLevel = \frac{\HypothesisTestSignificanceLevel}{\TestFamilySize}$ for $\TestFamilySize$ tests. This is conservative but simple. For 20 tests with $\HypothesisTestSignificanceLevel = 0.05$, use $\PerTestSignificanceLevel = 0.0025$ for each test. This controls the familywise error rate but reduces statistical power; the Šidák variant, which sets the per-test level so that independent tests reach the familywise target exactly, is only slightly more lenient (0.00256 per test for 20 tests).
+Bonferroni correction adjusts the significance threshold to $\PerTestSignificanceLevel = \frac{\HypothesisTestSignificanceLevel}{\TestFamilySize}$ for $\TestFamilySize$ tests. This is conservative but simple. For `{python} AbSampleSize.family_str` tests with $\HypothesisTestSignificanceLevel$ = `{python} AbSampleSize.alpha_str`, use $\PerTestSignificanceLevel$ = `{python} AbSampleSize.bonferroni_str` for each test. This controls the familywise error rate but reduces statistical power; the Šidák variant, which sets the per-test level so that independent tests reach the familywise target exactly, is only slightly more lenient (`{python} AbSampleSize.sidak_str` per test for `{python} AbSampleSize.family_str` tests).
 
 False discovery rate (FDR) control using the Benjamini-Hochberg procedure bounds the expected proportion of false discoveries among rejected hypotheses under independence or suitable positive dependence. It is not a hard cap on the probability of making at least one false discovery in a batch, which makes it appropriate when screening many candidate changes where a small fraction of false positives is acceptable. Order the $\TestFamilySize$ observed p-values from smallest to largest, ${\ObservedSignificanceLevel}_{(1)} \leq {\ObservedSignificanceLevel}_{(2)} \leq \ldots \leq {\ObservedSignificanceLevel}_{(\TestFamilySize)}$, and find the largest rank $\OrderedTestRank$ whose p-value satisfies:
 
@@ -2019,6 +2055,8 @@ For marketplace dynamics where network connections cannot be partitioned cleanly
 
 The chosen design determines the infrastructure needed to support its claims. Graph-based assignment needs maintained topology and cluster records; a switchback needs an auditable schedule and outcome timing; an exposure-specific estimator needs the peer-assignment information its exposure model uses. Analysis must respect the randomization unit, and monitoring must track the spillovers that could invalidate the comparison. The sensitivity example shows why this work can matter: under its stated assumption, spillover halves the observed lift. The platform must estimate the relevant effect before treating that observed contrast as evidence for or against promotion.
 
+Fleet experimentation must also budget interference across concurrent experiments, not only between users inside one test [@kohavi2020trustworthy]. When many teams evaluate candidate models simultaneously on the same serving surface, independent hashing across orthogonal traffic layers lets unrelated experiments each receive 100 percent of eligible traffic without shrinking one another's arrival rate, provided their treatments do not interact across layers. Experiments that modify coupled models, shared features, or competing ranking stages violate that independence and must instead share a mutually exclusive traffic domain, where each user enters at most one experiment at a time. Partitioning a domain trades traffic share directly against sample-collection time. Dividing eligible traffic evenly among four mutually exclusive experiments gives each one quarter of the arrival rate and quadruples the duration needed to collect the per-variant sample of @eq-ops-scale-ab-sample-size. The platform therefore budgets cross-experiment interference explicitly like sample size, using the model dependency graph to decide which releases can overlap in orthogonal layers and which must divide a mutually exclusive domain.
+
 ### Staged rollout strategies {#sec-ml-operations-scale-staged-rollout-strategies-2d1f}
 
 Cutting 100 percent of live traffic over to a new ranking model all at once exposes every user to a latent bug until operators can roll back, whereas starting at a 5 percent canary cuts that initial blast radius twentyfold. Experiment design fixes how much evidence a release needs; staged rollout fixes how much live traffic may carry the candidate while that evidence accumulates, turning deployment risk into a controllable exposure budget. Traffic increases only after the model earns each larger blast radius through continued acceptable performance.
@@ -2101,7 +2139,7 @@ where $\CanaryStageDuration$ is the time needed to collect the planned observati
 
 #### Canary duration calculation {#sec-ml-operations-scale-worked-example-canary-duration-calculation-9448}
 
-Applying that collection-time bound to a concrete service, suppose a model serves 1 million requests per hour. Suppose its canary plan specifies approximately 10,000 samples per variant. That is a guardrail sample, sized to catch a large regression quickly before exposure widens, not the sample needed to confirm a small improvement. The sample-size derivation of @sec-ml-operations-scale-ab-testing-statistical-foundations-b9bd takes the baseline rate, effect size, confidence, and power as inputs. Its worked example needs about 30,000 samples per variant to detect a 10 percent relative change at a 5 percent baseline click-through rate. Smaller effects need far more, so promotion evidence comes from the full experiment, while the following canary stages take their guardrail sample as an input.
+Applying that collection-time bound to a concrete service, suppose a model serves 1 million requests per hour. Suppose its canary plan specifies approximately 10,000 samples per variant. That is a guardrail sample, sized to catch a large regression quickly before exposure widens, not the sample needed to confirm a small improvement. The sample-size derivation of @sec-ml-operations-scale-ab-testing-statistical-foundations-b9bd takes the baseline rate, effect size, confidence, and power as inputs. Its worked example needs about `{python} AbSampleSize.per_variant_str` per variant to detect a 10 percent relative change at a 5 percent baseline click-through rate. Smaller effects need far more, so promotion evidence comes from the full experiment, while the following canary stages take their guardrail sample as an input.
 
 ```{python}
 #| echo: false
@@ -2796,7 +2834,11 @@ Fraud monitoring binds on adversarial urgency. Missed fraud creates immediate fi
 
 LLM monitoring binds on semantic quality, which is difficult to measure from service metrics alone. Latency, token generation rate, error rate, and safety-classifier scores establish operational health; user satisfaction signals such as thumbs-up/thumbs-down rates, regeneration rate, and task-completion proxies add delayed quality evidence. Safety metrics such as toxicity detections, refusal rate, and hallucination indicators remain partial, so they should trigger review rather than claim complete coverage.
 
-Service-health metrics alone cannot detect semantic safety failures such as persuasive misinformation or skilled manipulation. Here, red teaming\index{Red teaming!safety evaluation} supplies an additional monitoring channel: human evaluators or automated probes attempt jailbreaks\index{Jailbreak!detection} before deployment, and a smaller continuous probe set checks production behavior against known failure cases. Sampling outputs for delayed human review adds evidence about failures that automated metrics miss. Neither a passing probe set nor a reviewed sample establishes complete safety coverage.
+Service-health metrics alone cannot detect semantic safety failures such as persuasive misinformation or skilled manipulation. Here, red teaming\index{Red teaming!safety evaluation} supplies an additional monitoring channel: human evaluators or automated probes attempt jailbreaks\index{Jailbreak!detection}, prompts crafted to bypass alignment and safety guardrails, before deployment, and a smaller continuous probe set checks production behavior against known failure cases. Sampling outputs for delayed human review adds evidence about failures that automated metrics miss. Neither a passing probe set nor a reviewed sample establishes complete safety coverage.
+
+::: {.column-margin .margin-pointer}
+↪ Prompt injection, jailbreaking, and alignment bypass are developed in @sec-security-privacy-llmspecific-threat-vectors-65f2.
+:::
 
 ### Observability architecture {#sec-ml-operations-scale-observability-architecture-ba87}
 
@@ -3149,7 +3191,7 @@ Suppose profiling attributes the idle time to input stalls and a data-loading re
 Use daily cluster spend (`{python} GpuClusterEfficiency.daily_spend_str`) and busy-capacity value, utilization times spend and an upper bound on useful work (`{python} GpuClusterEfficiency.useful_before_str` at `{python} GpuClusterEfficiency.util_before_pct_str` utilization), to extend the analysis to annual scale and compare against the platform ROI argument.
 
 - [ ] **Underutilization cost**: calculate the annual cost of underutilization for the `{python} GpuClusterEfficiency.n_gpus_str`-GPU cluster at `{python} GpuClusterEfficiency.util_before_pct_str` utilization, the cost after optimization to `{python} GpuClusterEfficiency.util_after_pct_str`, and the annual value of recovered capacity. State when that value would become cash savings.
-- [ ] **Queue dynamics**: Little's law (theorem \ref{thrm-inference-littles-law-inference}) holds for any stable queue, rather than serving requests alone. Applied to the training-job queue, the average number of jobs waiting equals the job arrival rate times the average queue wait. Calculate the job arrival rate for a 4-hour average wait with 100 jobs in queue and explain what additional job-size, service-time, and arrival-pattern measurements are needed to choose expansion or utilization optimization.
+- [ ] **Queue dynamics**: Little's law, established in @sec-inference-scale-physics-batching-efficiency-curve-021c, holds for any stable queue, rather than serving requests alone. Applied to the training-job queue, the average number of jobs waiting equals the job arrival rate times the average queue wait. Calculate the job arrival rate for a 4-hour average wait with 100 jobs in queue and explain what additional job-size, service-time, and arrival-pattern measurements are needed to choose expansion or utilization optimization.
 - [ ] **Savings vs. platform**: compare the annual recovered-capacity value from cluster optimization to the \$2M/year platform investment scenario. Holding the utilization gain and chargeback rate fixed, determine the GPU count where annual recovered-capacity value equals that investment, and state what must happen for the capacity value to become cash savings.
 
 :::
@@ -3611,7 +3653,7 @@ class TcoScenario:
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(onprem_node_annual < cloud_node_annual, "On-prem should be cheaper at 80% util")
     check(amortization_years == 3, "Prose spells out a three-year amortization")
-    check(42.4 < breakeven < 42.6, f"Break-even utilization drifted to {breakeven:.1f}%")
+    check(42.3 < breakeven < 42.5, f"Break-even utilization drifted to {breakeven:.1f}%")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     cloud_cost_str = fmt_usd(cloud_node_annual, precision=0)
@@ -3944,7 +3986,7 @@ class H100TdpEfficiencyRecap:
 # │       dense FP16 basis of @tbl-power-efficiency, at fixed arithmetic
 # │       ceiling and at fixed accelerator power.
 # │ Show: ~130 H100s match 1,024 V100s at ~91 kW vs. 307.2 kW; the same
-# │       307.2 kW feeds 438 H100s (~3.4x ceiling); HBM falls 35.2 -> 11.2 TB.
+# │       307.2 kW feeds 438 H100s (~3.4x ceiling); HBM falls 32.8 -> 10.4 TB.
 # │ How: Peak FLOP/s and TDP from the hardware registry; accelerator power only.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
@@ -3965,13 +4007,14 @@ class RefreshScreening:
     # Fixed accelerator power: most new devices the old power budget can feed.
     n_new_equal_power = math.floor((old_power / new_gpu.tdp).to('').magnitude)
     ceiling_gain = (n_new_equal_power * new_gpu.compute.peak_flops / old_ceiling).to('').magnitude
-    old_memory = (n_old * old_gpu.memory.capacity).to(TB)
-    new_memory_equal_flops = (n_new_equal_flops * new_gpu.memory.capacity).to(TB)
+    old_memory = (n_old * old_gpu.memory.labeled_capacity).to(TB)
+    new_memory_equal_flops = (n_new_equal_flops * new_gpu.memory.labeled_capacity).to(TB)
     device_ratio = n_old / n_new_equal_flops
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(n_new_equal_flops < n_new_equal_power < n_old, "Refresh screening ordering drift")
     check(new_power_equal_flops < old_power, "Throughput-matched fleet should draw less accelerator power")
     check(ceiling_gain > 1, "Power-matched fleet should raise the arithmetic ceiling")
+    check(new_memory_equal_flops < old_memory, "Throughput-matched fleet should carry less aggregate HBM")
     # ┌── 4. OUTPUT ────────────────────────────────────────
     n_old_str = fmt(n_old, precision=0, commas=True)
     old_power_str = fmt_power(old_power, unit=kW, precision=1)
@@ -4072,6 +4115,7 @@ class TcoDecisionExercise:
     cluster_gpus = 8
     cloud_gpu_hour_usd = Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate.to(USD / hour).magnitude
     node_price_usd = Infrastructure.Pricing.Capital.DgxH100NodeUsd.rate.to(USD).magnitude
+    lifecycle_years = Infrastructure.Pricing.Capital.AcceleratorServiceLifeYears.rate
     electricity_rate = Infrastructure.Pricing.OnPremises.ElectricityPerKwh.rate.to(USD / kWh).magnitude
     pue = Infrastructure.FacilityCooling.StateOfArt.pue
 
@@ -4086,6 +4130,7 @@ class TcoDecisionExercise:
         per="GPU-hour",
     )
     node_price_str = fmt_usd(node_price_usd, precision=0)
+    lifecycle_years_str = fmt(lifecycle_years, precision=0, commas=False)
     electricity_rate_str = fmt_usd(electricity_rate, precision=2, commas=False, per="kWh")
     pue_str = fmt(pue, precision=1, commas=False)
 ```
@@ -4106,8 +4151,8 @@ class H100TdpExerciseRecap:
 An organization needs to train `{python} TcoDecisionExercise.models_per_year_str`, each requiring `{python} TcoDecisionExercise.gpu_hours_per_model_str` on H100s, evaluating an on-premises cluster with `{python} TcoDecisionExercise.cluster_gpus_str` against cloud instances at `{python} TcoDecisionExercise.cloud_gpu_hour_usd_str`.
 
 - [ ] **Cloud cost estimate**: calculate the annual cloud cost from the training volume and hourly rate.
-- [ ] **On-premises TCO**: calculate the annualized on-premises cost, assuming `{python} TcoDecisionExercise.node_price_str` per 8-GPU node, `{python} TcoDecisionExercise.electricity_rate_str` electricity at PUE `{python} TcoDecisionExercise.pue_str`, and `{python} H100TdpExerciseRecap.tdp_w_str` per GPU.
-- [ ] **Break-even volume**: solve for the number of annual training runs at which on-premises becomes cheaper.
+- [ ] **On-premises TCO**: calculate the annualized on-premises cost over a `{python} TcoDecisionExercise.lifecycle_years_str`-year straight-line amortization life, assuming `{python} TcoDecisionExercise.node_price_str` per 8-GPU node, `{python} TcoDecisionExercise.electricity_rate_str` electricity at PUE `{python} TcoDecisionExercise.pue_str`, and `{python} H100TdpExerciseRecap.tdp_w_str` per GPU billed only during active GPU-hours (excluding idle, host, network, facility, and staffing costs).
+- [ ] **Break-even volume**: under the same cost boundary, solve for the number of annual training runs at which on-premises becomes cheaper.
 
 :::
 
@@ -4633,7 +4678,7 @@ where:
 - $\DailyQueryVolume$ is the daily query volume
 - $\AcceleratorTargetQueryRate$ is sustained queries per second per GPU at the target latency SLO, including batching and operating headroom
 - $\AcceleratorCount$ is the integer number of continuously provisioned GPUs
-- $\AcceleratorHourlyPrice$ is the hourly GPU cost
+- $\AcceleratorHourlyPrice$ is the all-in hourly GPU cost (the cloud rental rate when rented, or the effective owned rate including the energy and PUE adder of @eq-training-cost)
 
 Inference cost therefore grows with query volume in discrete capacity steps. Utilization and batching reduce cost only when they improve measured throughput at the target latency SLO; they should not be applied again as independent divisors.
 
@@ -5277,7 +5322,7 @@ In multi-model platforms, system-level and per-model metrics answer different qu
 
 **Pitfall**: *Defaulting to batch pipelines for all features to simplify architecture.*
 
-A daily batch policy is appropriate only when its delay fits the feature contract. The freshness definition $\FeatureFreshnessLatency= \FeatureRecordTime - \SourceEventTime$ measures event-to-availability delay; it does not determine a universal batch or streaming latency. The scenarios $\FeatureFreshnessLatency\approx 12\text{--}24 \text{ hours}$ and $\FeatureFreshnessLatency\approx 1\text{--}5 \text{ seconds}$ illustrate different operating points whose quality effects require measurement. For the recommendation example in @tbl-feature-freshness-engagement, the 2.1-point gap between hourly and real-time features is assumed to be worth \$10 million a year. A batch default forgoes that value silently, so the streaming decision belongs in the freshness break-even of checkpoint \ref{chk-ops-scale-freshness-revenue} rather than in a blanket preference for simpler pipelines. Fraud systems likewise need timely evidence, but the exploitable delay depends on their other detection and containment controls.
+A daily batch policy is appropriate only when its delay fits the feature contract. The freshness definition $\FeatureFreshnessLatency = \FeatureRecordTime - \SourceEventTime$ measures the delay from source event time $\SourceEventTime$ to feature availability time $\FeatureRecordTime$; it does not determine a universal batch or streaming latency. The scenarios $\FeatureFreshnessLatency\approx 12\text{--}24 \text{ hours}$ and $\FeatureFreshnessLatency\approx 1\text{--}5 \text{ seconds}$ illustrate different operating points whose quality effects require measurement. For the recommendation example in @tbl-feature-freshness-engagement, the 2.1-point gap between hourly and real-time features is assumed to be worth \$10 million a year. A batch default forgoes that value silently, so the streaming decision belongs in the freshness break-even of checkpoint \ref{chk-ops-scale-freshness-revenue} rather than in a blanket preference for simpler pipelines. Fraud systems likewise need timely evidence, but the exploitable delay depends on their other detection and containment controls.
 
 :::
 

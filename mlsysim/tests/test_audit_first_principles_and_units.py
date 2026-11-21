@@ -282,8 +282,8 @@ def test_hardware_tech_frozen_and_ridge_point_precision():
     assert len(caught) == 0
     assert rp_h100.m_as("flop/byte") > 250.0
 
-    # JetsonAGXOrin has peak_flops=275 TOPS (INT8 sparse) and precision_flops['fp16']=43.17 TFLOP/s;
-    # bf16 must match fp16 (~210.8 flop/byte), not peak_flops (~1348 flop/byte)
+    # JetsonAGXOrin has peak_flops=43 TFLOP/s (dense FP16) and int8_sparse=275 TOPS;
+    # bf16 must match fp16 (~210.8 flop/byte), not sparse INT8 (~1348 flop/byte)
     rp_orin_bf16 = Hardware.Edge.JetsonAGXOrin.ridge_point("bf16")
     rp_orin_fp16 = Hardware.Edge.JetsonAGXOrin.ridge_point("fp16")
     assert math.isclose(rp_orin_bf16.m_as("flop/byte"), rp_orin_fp16.m_as("flop/byte"), rel_tol=1e-9)

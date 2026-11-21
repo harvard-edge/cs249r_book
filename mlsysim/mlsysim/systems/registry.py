@@ -17,11 +17,14 @@ from ..core.registry import Registry
 from ..core.types import Metadata
 from ..core import provenance_catalog as pc
 
-# Fabric α latencies for α-β communication models.
-IB_NDR_LATENCY_US = sourced(5, pc.FABRIC_LATENCY_ASSUMPTIONS, name="InfiniBand NDR latency (μs)", description="One-way α latency for NDR fabrics.")
-IB_HDR_LATENCY_US = sourced(7, pc.FABRIC_LATENCY_ASSUMPTIONS, name="InfiniBand HDR latency (μs)", description="One-way α latency for HDR fabrics.")
-ROCE_LATENCY_US = sourced(10, pc.FABRIC_LATENCY_ASSUMPTIONS, name="RoCE latency (μs)", description="One-way α latency for RoCE v2.")
-TCP_LATENCY_US = sourced(50, pc.FABRIC_LATENCY_ASSUMPTIONS, name="TCP latency (μs)", description="One-way α latency for TCP over Ethernet.")
+# Multi-hop end-to-end cluster fabric one-way transit latencies (leaf-spine-leaf
+# switches, optical cabling, and FEC across racks). Distinct from SwitchFabric's
+# single-hop adjacent-rank collective-launch anchors (AlphaNdr 1.5 us, AlphaRoce
+# 5.0 us), which model one hop inside a leaf/rail domain.
+IB_NDR_LATENCY_US = sourced(5, pc.FABRIC_LATENCY_ASSUMPTIONS, name="InfiniBand NDR multi-hop fabric latency (μs)", description="End-to-end multi-hop cluster transit latency for InfiniBand NDR fabrics.")
+IB_HDR_LATENCY_US = sourced(7, pc.FABRIC_LATENCY_ASSUMPTIONS, name="InfiniBand HDR multi-hop fabric latency (μs)", description="End-to-end multi-hop cluster transit latency for InfiniBand HDR fabrics.")
+ROCE_LATENCY_US = sourced(10, pc.FABRIC_LATENCY_ASSUMPTIONS, name="RoCE multi-hop fabric latency (μs)", description="End-to-end multi-hop cluster transit latency for RoCE v2 fabrics.")
+TCP_LATENCY_US = sourced(50, pc.FABRIC_LATENCY_ASSUMPTIONS, name="TCP latency (μs)", description="One-way end-to-end latency for TCP over Ethernet.")
 
 _INFINIBAND_HDR_BW = 200 * Gbps
 _INFINIBAND_NDR_BW = 400 * Gbps
@@ -477,10 +480,10 @@ class SwitchFabric(Registry):
         name="400G pluggable optics power", description="Per-module power for a 400G pluggable transceiver.")
     OpticsCpo400G = sourced_qty(10 * watt, pc.SWITCH_OPTICS_REFERENCE,
         name="400G co-packaged optics power", description="Per-port power for 400G co-packaged optics.")
-    # α-β model latency anchors. NOTE: AlphaNdr (1.5 µs) is the per-message base latency used in
-    # the ring-allreduce model; it is DISTINCT from the end-to-end
-    # Fabrics.InfiniBand_NDR.latency (5 µs). Both values are preserved as-is here — reconciling
-    # which is canonical is a separate editorial decision, not a taxonomy move.
+    # Single-hop adjacent-rank collective-launch α anchors for the ring-allreduce
+    # model (RDMA NIC + single leaf hop + communication library launch). Distinct
+    # from Fabrics.InfiniBand_NDR.latency (5 µs) and Fabrics.RoCE_100G.latency
+    # (10 µs), which represent multi-hop end-to-end cluster fabric transit.
     AlphaNdr = sourced_qty(1.5 * ureg.microsecond, pc.FABRIC_LATENCY_ASSUMPTIONS,
         name="α (NDR base latency)", description="Per-message base latency for the NDR α-β model.")
     AlphaRoce = sourced_qty(5.0 * ureg.microsecond, pc.FABRIC_LATENCY_ASSUMPTIONS,

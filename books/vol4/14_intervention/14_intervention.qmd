@@ -116,7 +116,7 @@ class DisengagementRecord:
     dl_n_str = fmt_int(dl["disengagements"])
 ```
 
-:::: {#fig-14-disengagement-record fig-env="figure" fig-pos="htb" fig-cap="**A decade of reported takeovers**: Waymo's annual filings to the California DMV. (a) Autonomous miles driven on public roads under the safety-driver testing permit and the driverless testing permit. (b) Miles per reported disengagement under each permit, on a logarithmic axis. Each company defines which disengagements are reportable, and the regulator notes that the reports are not designed for comparison across companies; commercial deployment miles are excluded. Early years are transcribed from the filed PDFs. Data from @cadmv2026disengagement." fig-alt="Two panels with report years 2015 to 2025. Panel a is a stacked bar chart of autonomous miles in millions, safety-driver testing in blue and driverless testing in green, rising from under half a million miles to over 7 million in 2025. Panel b plots miles per disengagement on a logarithmic axis: a blue line for safety-driver testing rises from about 1,000 in 2015 to about 30,000 in 2020, falls to about 8,000 in 2021, and ends near 19,000 in 2025; a green line with square markers for driverless testing runs from 2023 to 2025, the last point near 72,000."}
+:::: {#fig-14-disengagement-record fig-env="figure" fig-pos="htb" fig-cap="**A decade of reported takeovers**: Waymo's annual filings to the California DMV. (a) Autonomous miles driven on public roads under the safety-driver testing permit and the driverless testing permit. (b) Miles per reported disengagement under each permit, on a logarithmic axis. Each company defines which disengagements are reportable, and the regulator notes that the reports are not designed for comparison across companies; commercial deployment miles are excluded. Early years are transcribed from the filed PDFs. Data from @cadmv2026disengagement." fig-alt="Two panels with report years 2015 to 2025. Panel a is a stacked bar chart of autonomous miles in millions, safety-driver testing in blue and driverless testing in green, rising from under half a million miles to over 7 million in 2025. Panel b plots miles per disengagement on a logarithmic axis: a blue line for safety-driver testing rises from about 1,000 in 2015 to about 30,000 in 2020, falls to about 8,000 in 2021, and ends near 19,000 in 2025; green square markers for driverless testing appear from 2023 to 2025, the last point near 72,000."}
 
 ```{python}
 #| echo: false
@@ -263,7 +263,7 @@ Cutting power to a moving base lets it coast, whereas cutting power to a loaded 
 ↩ The fallback ladder, from which the arbiter selects a state-matched protective response on every tick, is established in @sec-enforcement-fallback-ladder.
 :::
 
-Autonomous and manual proposal rights operate under separate, explicit leases. The learned policy proposes trajectories under the action-chunk lease established in @sec-nervous-lease-sizing, while a teleoperation session receives a distinct, clearance-budgeted manual lease. Rejecting an invalid replacement command from an operator does not invalidate an active, previously admitted setpoint whose evidence, state bounds, and lease duration remain healthy. If either controller exhausts its lease duration or violates its underlying safety premises, the permission path immediately triggers the appropriate local fallback.
+Autonomous and manual proposal rights operate under separate, explicit leases. The learned policy proposes trajectories under the action-chunk lease established in @sec-nervous-lease-sizing, while a teleoperation session receives a distinct, clearance-budgeted manual lease (@sec-appendix-control-teleop-leases derives both the watchdog lease and teleoperation round-trip latency bounds). Rejecting an invalid replacement command from an operator does not invalidate an active, previously admitted setpoint whose evidence, state bounds, and lease duration remain healthy. If either controller exhausts its lease duration or violates its underlying safety premises, the permission path immediately triggers the appropriate local fallback.
 
 The permission path prevents split-brain command contention by pairing an upstream source arbiter with **exclusive actuator-output ownership**. In the `{python} InterventionSharedAuthorityScene.permission_rate_str` control architecture analyzed here, the right to propose on a set of channels is a single object, the **proposal token**\index{Proposal token}, and the arbiter grants it to one source at a time. An authority commit revokes the learned policy's proposal token and latches its last approved setpoint; the admission enforcer remains the sole, non-bypassable writer to the physical actuators before, during, and after the transition. Standard bus protocols such as Controller Area Network (CAN) arbitration serialize message frames from multiple transmitters, but bus-level arbitration does not establish control-layer authority. If two nodes broadcast conflicting yet syntactically valid frames to the same motor drive, the actuator chatters between setpoints and loses stability. Gating the output path in firmware and selecting a single source per tick prevents that contention. Across continuous state spaces, the enforcer executes a bumpless transfer, a command handoff without reference step discontinuities (@sec-intervention-bumpless-transfer), interpolating between validated endpoints while enforcing command-rate limits and honoring measured plant limits.
 
@@ -1715,9 +1715,9 @@ class InterventionBlendBudget:
     arm_budget_str = fmt_latency(arm_budget, unit=millisecond, precision=0)
 ```
 
-The enforcer blends with the quintic smoothstep. For normalized progress $\BumplessTransferProgress = (\TimeInstant - \BumplessTransferStartInstant) / \BlendingTransitionWindow \in [0, 1]$, the polynomial weighting function is:
-$$\BumplessTransferBlend(\BumplessTransferProgress) = 10\BumplessTransferProgress^3 - 15\BumplessTransferProgress^4 + 6\BumplessTransferProgress^5.$$ {#eq-intervention-quintic-smoothstep}
-The polynomial in @eq-intervention-quintic-smoothstep is the fixed-endpoint result derived in @sec-appendix-control-splines. Its derivative $\BumplessTransferBlendSlope(\BumplessTransferProgress) = 30\BumplessTransferProgress^2(1-\BumplessTransferProgress)^2$ peaks at $\BumplessTransferProgress = 1/2$ with value $30/16 = 1.875$, so the profile's peak slope is $1.875/\BlendingTransitionWindow$ and an acceleration change must satisfy:
+The enforcer blends between the latched endpoints $\ControlCommand_0$ and $\ControlCommand_1$ with the quintic smoothstep. For normalized progress $\BumplessTransferProgress = (\TimeInstant - \TimeInstant_0) / \BlendingTransitionWindow \in [0, 1]$ from commit time $\TimeInstant_0$, the blended command and its polynomial weighting function are:
+$$\ControlCommand(\TimeInstant) = (1 - \BumplessTransferBlend(\BumplessTransferProgress))\ControlCommand_0 + \BumplessTransferBlend(\BumplessTransferProgress)\ControlCommand_1, \qquad \BumplessTransferBlend(\BumplessTransferProgress) = 10\BumplessTransferProgress^3 - 15\BumplessTransferProgress^4 + 6\BumplessTransferProgress^5.$$ {#eq-intervention-quintic-smoothstep}
+The polynomial in @eq-intervention-quintic-smoothstep is the fixed-endpoint result derived in @sec-appendix-control-splines. With command difference $\FiniteChange \ControlCommand = \ControlCommand_1 - \ControlCommand_0$, differentiating with respect to time gives $d\ControlCommand/d\TimeInstant = (\BumplessTransferBlendSlope(\BumplessTransferProgress)/\BlendingTransitionWindow)\,\FiniteChange \ControlCommand$. Its normalized derivative $\BumplessTransferBlendSlope(\BumplessTransferProgress) = 30\BumplessTransferProgress^2(1-\BumplessTransferProgress)^2$ peaks at $\BumplessTransferProgress = 1/2$ with value $30/16 = 1.875$, so the weighting function's peak time-rate is $1.875/\BlendingTransitionWindow$ and the command profile's peak rate is $1.875\lVert \FiniteChange \ControlCommand \rVert/\BlendingTransitionWindow$. An acceleration change must therefore satisfy:
 $$\BlendingTransitionWindow \ge \frac{1.875 \lVert \FiniteChange \ControlCommand \rVert}{\JerkLimit}.$$ {#eq-intervention-blend-window}
 
 For a torque command, replace the acceleration difference and jerk ceiling with the torque difference and torque-rate ceiling. The illustrative `{python} InterventionBlendBudget.arm_delta_str` joint-torque change under a `{python} InterventionBlendBudget.arm_rate_str` ceiling therefore requires `{python} InterventionBlendBudget.arm_blend_str`, rounded up to `{python} InterventionBlendBudget.arm_budget_str` on the permission clock. These bounds assume stationary endpoint derivatives; a transfer from a moving ramp must match its boundary state explicitly.[^fn-math-quintic-boundary]
@@ -1970,6 +1970,8 @@ class InterventionAuthBudget:
     t_mac = r.mac_time.to(microsecond)
     travel_sig = r.verify_travel.to(millimeter)
     left_sig = r.spare_after_verify.to(millimeter)
+    spare_da = auth.budget.result.machine_with_dispatch.spare.to(millimeter)
+    left_sig_da = (spare_da - travel_sig).to(millimeter)
     travel_mac = r.mac_travel.to(millimeter)
     dx_fresh = r.freshness_travel.to(millimeter)
     left_fresh = r.spare_after_freshness.to(millimeter)
@@ -1982,7 +1984,12 @@ class InterventionAuthBudget:
     check(abs(t_mac.magnitude - 4.96275) < 1e-6, f"one AES-128 CMAC frame: {t_mac}")
     check(t_sig < t_auth_max, "One signature verification must fit the deadline.")
     check(t_sig > 300 * t_mac, "A signature must cost hundreds of MACs.")
-    check(abs(left_sig.magnitude - 128.67) < 5e-3, f"spare left after one signature: {left_sig}")
+    check(abs(left_sig.magnitude - 128.67) < 5e-3, f"partial spare left after one signature: {left_sig}")
+    check(abs(left_sig_da.magnitude - 46.36) < 5e-3, f"complete spare left after one signature: {left_sig_da}")
+    check(
+        abs((left_sig_da - (r.deadline_after_admission - t_sig) * v).to(millimeter).magnitude) < 1e-6,
+        "Charged spare left matches charged deadline minus verification time.",
+    )
     check(dx_fresh < spare and left_fresh.magnitude < 2.0, "A replay at the freshness edge must consume nearly the whole spare.")
     check(tau_fresh > InterventionAdmissionAllocation.left_aisle, "Charged with Delta_da, a replay at the freshness edge must overrun the spare.")
     check(t_sig < InterventionAdmissionAllocation.left_aisle, "One signature must still fit once Delta_da is charged.")
@@ -1995,12 +2002,13 @@ class InterventionAuthBudget:
     t_mac_str = fmt_latency(t_mac, unit=microsecond, precision=1)
     travel_sig_str = fmt_length(travel_sig, unit=millimeter, precision=2)
     left_sig_str = fmt_length(left_sig, unit=millimeter, precision=1)
+    left_sig_da_str = fmt_length(left_sig_da, unit=millimeter, precision=1)
     tau_fresh_str = fmt_latency(tau_fresh, unit=millisecond, precision=0)
     dx_fresh_str = fmt_length(dx_fresh, unit=millimeter, precision=0)
     left_fresh_str = fmt_length(left_fresh, unit=millimeter, precision=1)
 ```
 
-Authentication adds delay to the remote intervention path, so it is priced against the same deadline as every other latency source, the latest fallback deadline $\FallbackDeadline$ of @eq-intervention-latest-fallback. At the warehouse aisle velocity of `{python} InterventionAuthBudget.v_str`, the partial spare permits at most `{python} InterventionAuthBudget.t_auth_max_str` of added delay before charging the admission latency $\DispatchAdmissionInterval$, which drops to `{python} InterventionAdmissionAllocation.left_aisle_str` once the placement allocation is charged. Transferring published Cortex-M4 cycle counts to the reference microcontroller clock gives an illustrative estimate of `{python} InterventionAuthBudget.t_sig_str` for one Ed25519 signature verification[^fn-ed25519-signature-verify] [@owens2024ed25519], which translates into `{python} InterventionAuthBudget.travel_sig_str` of physical travel and leaves `{python} InterventionAuthBudget.left_sig_str` of spare displacement margin. The same cycle-count and clock-rate estimate for an AES-128 CMAC over one command frame is `{python} InterventionAuthBudget.t_mac_str` [@dworkin2005cmac; @schwabe2016aes]. Per packet, both estimates fit within the deadline; loaded measurements on the target must qualify them. The design problem is therefore not choosing an algorithm but meeting five requirements on the admission path that carries the packets:
+Authentication adds delay to the remote intervention path, so it is priced against the same deadline as every other latency source, the latest fallback deadline $\FallbackDeadline$ of @eq-intervention-latest-fallback. At the warehouse aisle velocity of `{python} InterventionAuthBudget.v_str`, the partial spare permits at most `{python} InterventionAuthBudget.t_auth_max_str` of added delay before charging the admission latency $\DispatchAdmissionInterval$, which drops to `{python} InterventionAdmissionAllocation.left_aisle_str` once the placement allocation is charged. Transferring published Cortex-M4 cycle counts to the reference microcontroller clock gives an illustrative estimate of `{python} InterventionAuthBudget.t_sig_str` for one Ed25519 signature verification[^fn-ed25519-signature-verify] [@owens2024ed25519], which translates into `{python} InterventionAuthBudget.travel_sig_str` of physical travel, leaving `{python} InterventionAuthBudget.left_sig_str` of the partial spare and `{python} InterventionAuthBudget.left_sig_da_str` once $\DispatchAdmissionInterval$ is charged. The same cycle-count and clock-rate estimate for an AES-128 CMAC over one command frame is `{python} InterventionAuthBudget.t_mac_str` [@dworkin2005cmac; @schwabe2016aes]. Per packet, both estimates fit within the deadline; loaded measurements on the target must qualify them. The design problem is therefore not choosing an algorithm but meeting five requirements on the admission path that carries the packets:
 
 1. **Protective stops never wait for verification.** The local hardware fallback timer and independently wired emergency inputs act unconditionally, regardless of whether cryptographic routines have completed or stalled. If a verification routine overruns its deadline, the permission subsystem marks remote assistance as unavailable and cedes control to the autonomous protection layer; it never postpones an emergency deceleration. As analyzed in the verifier-flooding pitfall of @sec-intervention-fallacies-pitfalls, what causes a cryptographic verifier to miss real-time deadlines is rarely the algorithmic cost of an individual packet, but rather the ingress volume of hostile or unvetted network traffic saturating the execution queue.
 2. **Takeover requests must be attributable to an individual.** Because a symmetric Message Authentication Code (MAC) relies on a shared key known to both endpoints, a valid tag proves frame integrity but cannot prove which endpoint originated the transmission. An asymmetric digital signature, however, cryptographically binds the takeover request to the teleoperator's private key, supporting attribution when credential enrollment, key custody, and compromise evidence also identify the operator. The architecture therefore mandates an asymmetric digital signature on the session-initiating `manual_drive` request, while subsequent streaming commands and periodic heartbeats rely on the lower-overhead symmetric MAC.
@@ -2291,7 +2299,7 @@ Verification draws its test inputs from the static manifest and its evidence fro
 
 - **A1.** Exactly one qualified enforcer output path writes each actuator channel. Source arbitration and hardware access controls prevent a second sender from bypassing that path while the policy and remote assistant both propose commands; successful bus arbitration alone does not satisfy this claim.
 - **A2.** No lower-tier source bypasses an active higher-tier source or the independent permission check. An autonomous policy proposal during `MAN` is ignored, and an assistant command that opposes the enforcer's admitted barrier limit is clamped or rejected.
-- **A3.** An unacknowledged handover or stalled manual lease decays authority by $\HandoverTimeout$ of @sec-intervention-clearance-deadlines, initiating controlled fallback by the earlier of the configured lease ceiling and the clearance-derived deadline of @eq-intervention-latest-fallback. This clearance deadline has a partial-budget upper bound of `{python} InterventionAssistantSession.t_latest_in_str` at the `{python} InterventionAssistantSession.v_in_str` slow-down before an in-loop takeover, and `{python} InterventionAssistantSession.t_latest_str` for a handover requested by the policy at the `{python} InterventionAssistantSession.v_aisle_str` aisle speed. Both values represent additional-delay allocations in the capture-origin budget. The runtime deadline evaluates the actual event history and future delay budgets without double-charging for elapsed capture-to-admission transit.
+- **A3.** An unacknowledged handover in `PEND` expires by $\HandoverTimeout$ of @sec-intervention-clearance-deadlines, initiating controlled fallback no later than the earlier of the configured protocol ceiling $\HandoverTimeoutCeiling$ and the clearance-derived deadline $\FallbackDeadline$ of @eq-intervention-latest-fallback (or any earlier active lease or evidence expiry). Once in `MAN`, a stalled manual session revokes authority and initiates fallback when the manual lease $\ManualLease$ (`{python} InterventionAssistantSession.manual_lease_str` in @eq-intervention-lease-age) or remaining stopping clearance expires. The handover clearance deadline $\FallbackDeadline$ has a partial-budget upper bound of `{python} InterventionAssistantSession.t_latest_in_str` at the `{python} InterventionAssistantSession.v_in_str` slow-down before an in-loop takeover, and `{python} InterventionAssistantSession.t_latest_str` for a handover requested by the policy at the `{python} InterventionAssistantSession.v_aisle_str` aisle speed. Both values represent additional-delay allocations in the capture-origin budget. The runtime deadline evaluates the actual event history and future delay budgets without double-charging for elapsed capture-to-admission transit.
 - **A4.** The enforcer rejects replayed `veto_path`, `manual_drive`, or `accept_item` packets, and packets with invalid authentication tags or expired sequence counters, without modifying still-valid channel authority. It logs each rejection in the evidence tuple while allowing the active lease to age normally.
 
 These authority rules turn the event log into a checkable contract. The same synchronized hardware timestamps also mark which controller generated each segment of an intervention trajectory, and that separation must exist before any segment can serve as a training target for imitation learning.
@@ -2376,7 +2384,7 @@ A supervisory intervention does not occur as a single monolithic demonstration. 
 2. **Atomic handover and enforcer blend ($\CommitmentInstant \le \TimeInstant < \CommitmentInstant + \BlendingTransitionWindow$)**: The safety microcontroller latches the channel endpoints and computes a $\TwiceDifferentiableClass$ continuous smoothstep trajectory between controllers.
    - *Masking policy*: The system sets $\CausalInterventionMask(\TimeInstant) = 0$ unconditionally. Dispatched setpoints $\ControlCommand(\TimeInstant)$ during this window are synthetic interpolation splines generated by the enforcer's deterministic quintic polynomial profile. Because they reflect neither learned neural policy intent nor human cognitive demonstration, training on this interval would condition the network to emit open-loop kinematic ramps detached from environmental feedback.
 3. **Operator re-orientation and hunting ($\CommitmentInstant + \BlendingTransitionWindow \le \TimeInstant < \OperatorStabilizationInstant$)**: Upon receiving the active manual lease ($\ManualLease$), the operator experiences neuromuscular latency, visual parallax, and control re-orientation, producing high-jerk, oscillatory corrections while regaining situational awareness.
-- *Masking policy*: The system enforces $\CausalInterventionMask(\TimeInstant) = 0$. Bainbridge documented this control hunting directly. An operator whose active manual skill has lapsed during passive monitoring makes abrupt step corrections, oscillating around the setpoint before settling into smooth tracking [@bainbridge1983ironies]. Control stabilization often takes significantly longer than the physical handover itself. In driving simulator studies, operators resuming control from automated systems required approximately `{python} InterventionLearningEvidence.merat_stable_str` before their lateral steering stabilized [@merat2014transition], at least `{python} InterventionLearningEvidence.merat_over_pre_mult_str` the length of the machine's `{python} InterventionLearningEvidence.t_pre_str` pre-trigger window. Post-trigger masking therefore cannot rely on a fixed time constant; logging systems must evaluate empirical stabilization criteria. Discarding these initial frames prevents hesitation and oscillatory hunting from corrupting the imitation buffer. This exclusion involves an engineering trade-off, because interval 3 also contains the operator's initial corrective inputs, which certain human-gated methods retain (@tbl-14-intervention-learning). The enforcer marks the stabilization boundary $\OperatorStabilizationInstant$ only after tracking error and command slew have remained within calibrated limits for a declared dwell interval. Later violations mask the affected samples again. The limits are:
+   - *Masking policy*: The system enforces $\CausalInterventionMask(\TimeInstant) = 0$. Bainbridge documented this control hunting directly. An operator whose active manual skill has lapsed during passive monitoring makes abrupt step corrections, oscillating around the setpoint before settling into smooth tracking [@bainbridge1983ironies]. Control stabilization often takes significantly longer than the physical handover itself. In driving simulator studies, operators resuming control from automated systems required approximately `{python} InterventionLearningEvidence.merat_stable_str` before their lateral steering stabilized [@merat2014transition], at least `{python} InterventionLearningEvidence.merat_over_pre_mult_str` the length of the machine's `{python} InterventionLearningEvidence.t_pre_str` pre-trigger window. Post-trigger masking therefore cannot rely on a fixed time constant; logging systems must evaluate empirical stabilization criteria. Discarding these initial frames prevents hesitation and oscillatory hunting from corrupting the imitation buffer. This exclusion involves an engineering trade-off, because interval 3 also contains the operator's initial corrective inputs, which certain human-gated methods retain (@tbl-14-intervention-learning). The enforcer marks the stabilization boundary $\OperatorStabilizationInstant$ only after tracking error and command slew have remained within calibrated limits for a declared dwell interval. Later violations mask the affected samples again. The limits are:
    $$\lVert \TakeoverTrackingError(\TimeInstant) \rVert \le \StabilizationErrorThreshold \quad \text{and} \quad \lVert \HumanCommandRate(\TimeInstant) \rVert \le \StabilizationSlewCeiling.$$
    Here, $\TakeoverTrackingError(\TimeInstant)$ is the difference between the admitted manual setpoint and the measured plant response, $\HumanCommandRate(\TimeInstant)$ is the time derivative of the operator's command, and the parameter $\StabilizationSlewCeiling$ denotes a channel-specific slew ceiling, representing an acceleration derivative (jerk) only when the underlying command vector represents acceleration. Both thresholds must hold continuously across the dwell window before the logger lifts the mask.
 4. **Stabilized expert recovery ($\TimeInstant \ge \OperatorStabilizationInstant$)**: The operator executes coherent, task-directed recovery maneuvers once measured control metrics stabilize. Smooth motion alone does not validate a recovery; the episode must also satisfy formal task-completion criteria before its samples qualify as expert targets.
@@ -2401,7 +2409,7 @@ Reinforcement learning and advantage-conditioned methods drop the assumption of 
 
 Individual learning algorithms change, but every one of them must answer the same three systems questions: who held write authority over each sample, whether the takeover serves as a supervised label, an importance weight, or a reward penalty, and which physical intervals enter the training set. Downstream training pipelines cannot recover those ownership boundaries from trajectory kinematics alone. Recording the commit, blend-end, and stabilization timestamps on the safety microcontroller's clock grounds dataset curation and fleet-level intervention rates directly in hardware measurements.
 
-When an engineering team assembles the safety case for release (@sec-release-argument-plant-alignment), the authority record also supplies the primary evidence that runtime handovers obey rules A1 through A4 (claim C6 in @tbl-16-cae-scorecard). That release dossier pairs the static authority manifest with the loaded stopping and blending measurements from @sec-intervention-bumpless-transfer and hardware-in-the-loop traces that verify an unbroken audit chain. Because a handover that looks clean on the communication bus can still slip a wheel on a wet floor or jolt a loaded tote rack, the dossier always checks bus timestamps against independent plant sensors. It treats measured preemption times as empirical percentiles rather than analytical worst-case bounds.
+When an engineering team assembles the safety case for release (@sec-release-argument-plant-alignment), the authority record also supplies the primary evidence for its authority-transfer claim, showing that runtime handovers obey rules A1 through A4. That release dossier pairs the static authority manifest with the loaded stopping and blending measurements from @sec-intervention-bumpless-transfer and hardware-in-the-loop traces that verify an unbroken audit chain. Because a handover that looks clean on the communication bus can still slip a wheel on a wet floor or jolt a loaded tote rack, the dossier always checks bus timestamps against independent plant sensors. It treats measured preemption times as empirical percentiles rather than analytical worst-case bounds.
 
 ::: {.column-margin .margin-pointer}
 ↩ The distinction between an empirical latency percentile and a response-time bound is established in @sec-nervous-deterministic-fieldbuses.
@@ -2434,10 +2442,12 @@ Flipping a bit in an authority register does not complete a safe supervisory han
 # │
 # │ Goal:    Show that one configured window fits at the crawl and overruns at
 # │          the aisle speed.
-# │ Show:    Travel during the window and the overrun at 1.3 m/s; the spare
-# │          and T_latest at the out-of-loop crawl.
-# │ How:     Finished stopping budget (jerk-limited resident stop, all
-# │          overheads) at each speed, the window added to tau_delay.
+# │ Show:    Travel during the window and the complete-budget overrun at
+# │          1.3 m/s; the complete-budget margin left after waiting out the
+# │          window at the out-of-loop crawl.
+# │ How:     Complete stopping budget (jerk-limited resident stop, Delta_da
+# │          allocation, and all overheads) at each speed, the window added to
+# │          tau_delay.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import meter, second, millimeter, millisecond
@@ -2459,26 +2469,36 @@ class InterventionFixedWindowPitfall:
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
     fast, slow = at_aisle.result, at_crawl.result
     budget = fast.machine.required_distance.to(millimeter)
+    budget_da = fast.machine_with_dispatch.required_distance.to(millimeter)
     travel = fast.takeover_travel.to(millimeter)
-    overrun = (-fast.with_takeover.spare).to(millimeter)
-    spare_crawl = slow.machine.spare.to(millimeter)
-    t_latest_crawl = (spare_crawl / v_crawl).to(millisecond)
-    # Stop with the window waited out, at each speed (margin figure).
-    d_stop = fast.with_takeover.required_distance.to(millimeter)
-    d_stop_crawl = slow.with_takeover.required_distance.to(millimeter)
+    overrun = (-fast.with_takeover_and_dispatch.spare).to(millimeter)
+    spare_crawl = slow.machine_with_dispatch.spare.to(millimeter)
+    t_latest_crawl = slow.deadline_after_admission.to(millisecond)
+    t_left_crawl = slow.time_left_after_admission.to(millisecond)
+    # Complete-budget stop with the window waited out, at each speed (margin figure).
+    d_stop = fast.with_takeover_and_dispatch.required_distance.to(millimeter)
+    d_stop_crawl = slow.with_takeover_and_dispatch.required_distance.to(millimeter)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(abs(budget.magnitude - 968.99) < 5e-3, f"finished budget at the aisle speed: {budget}")
+    check(abs(budget.magnitude - 968.99) < 5e-3, f"partial budget at the aisle speed: {budget}")
+    check(abs(budget_da.magnitude - 1051.30) < 5e-3, f"complete budget at the aisle speed: {budget_da}")
     check(abs((at_aisle.takeover - window).to(millisecond).magnitude) < 1e-12, "The waited window is the configured ceiling.")
-    check(abs((t_latest_crawl - slow.deadline).to(millisecond).magnitude) < 1e-6, "The crawl's spare as time is its fallback deadline.")
-    # margin_fixed_window_stop_envelope.svg fig-alt hand-types 500 ms, 1619 mm, 307 mm, 1100 mm
-    check(round(d_stop.magnitude) == 1619 and round(d_stop_crawl.magnitude) == 307, f"window stops: {d_stop}, {d_stop_crawl}")
+    check(
+        abs((spare_crawl / v_crawl - t_latest_crawl).to(millisecond).magnitude) < 1e-6, "The crawl's complete spare as time is its charged deadline."
+    )
+    check(
+        abs((t_latest_crawl - window - t_left_crawl).to(millisecond).magnitude) < 1e-6, "Margin left after the window equals deadline minus window."
+    )
+    check(abs(overrun.magnitude - 601.30) < 5e-3, f"complete-budget aisle overrun: {overrun}")
+    check(abs(t_left_crawl.to(second).magnitude - 5.2245) < 5e-4, f"complete-budget margin left after window at crawl: {t_left_crawl}")
+    # margin_fixed_window_stop_envelope.svg fig-alt hand-types 500 ms, 1.70 m (1701 mm), 0.32 m (316 mm), 1.10 m (1100 mm)
+    check(round(d_stop.magnitude) == 1701 and round(d_stop_crawl.magnitude) == 316, f"window stops: {d_stop}, {d_stop_crawl}")
     check(
         round(window.to(millisecond).magnitude) == 500 and round(d_clear.to(millimeter).magnitude) == 1100, "window and clear distance in the fig-alt"
     )
     check(abs(v_crawl.to(meter / second).magnitude - 0.15) < 1e-9, f"crawl speed in the fig-alt: {v_crawl}")
     check(overrun.magnitude > 0, "The window must overrun the clear distance at the aisle speed.")
-    check(t_latest_crawl > window, "The same window must fit at the crawl.")
+    check(t_latest_crawl > window, "The same window must leave positive margin at the crawl.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     v_str = fmt_velocity(v, unit=meter / second, precision=1)
@@ -2487,11 +2507,11 @@ class InterventionFixedWindowPitfall:
     travel_str = fmt_length(travel, unit=meter, precision=2)
     d_clear_str = fmt_length(d_clear, unit=meter, precision=2)
     overrun_str = fmt_length(overrun, unit=meter, precision=2)
-    t_latest_crawl_str = fmt_latency(t_latest_crawl, unit=second, precision=1)
+    t_left_crawl_str = fmt_latency(t_left_crawl, unit=second, precision=1)
 ```
 
 ::: {.column-margin}
-![](images/svg/margin_fixed_window_stop_envelope.svg){width="100%" fig-alt="Two bars of stopping distance with a 500-millisecond acknowledgment window waited out: 1.62 meters at 1.3 meters per second, crossing a red dashed limit at the 1.10 meter rack-end clearance, and 0.31 meters at 0.15 meters per second, well inside it."}
+![](images/svg/margin_fixed_window_stop_envelope.svg){width="100%" fig-alt="Two bars of stopping distance with a 500-millisecond acknowledgment window waited out on the complete budget: 1.70 meters at 1.3 meters per second, crossing a red dashed limit at the 1.10 meter rack-end clearance, and 0.32 meters at 0.15 meters per second, well inside it."}
 
 *One `{python} InterventionFixedWindowPitfall.window_str` window overruns at aisle speed and idles at a crawl.*
 :::
@@ -2500,7 +2520,7 @@ class InterventionFixedWindowPitfall:
 
 **Pitfall**: *Treating human takeover timeout as a static time delay rather than a dynamic spatial stopping budget.*
 
-Consider a mobile manipulator that initiates a takeover request at its operational `{python} InterventionFixedWindowPitfall.v_str` aisle speed under a statically configured `{python} InterventionFixedWindowPitfall.window_str` acknowledgment window\index{Handover!takeover request}. If the controller waits out that full window before commanding brakes, the vehicle covers `{python} InterventionFixedWindowPitfall.travel_str` of unbraked travel. When combined with the jerk-limited resident stop profile and actuator execution overheads, the total stopping distance ends `{python} InterventionFixedWindowPitfall.overrun_str` beyond the `{python} InterventionFixedWindowPitfall.d_clear_str` rack-end clearance, causing a physical collision. Conversely, at an out-of-loop crawl speed of `{python} InterventionFixedWindowPitfall.v_crawl_str`, that same window consumes negligible distance, leaving `{python} InterventionFixedWindowPitfall.t_latest_crawl_str` of margin before fallback braking must begin. The wait costs travel in proportion to speed, and the stop that follows grows with its square, so a timeout that leaves ample response time at a crawl overruns the clear distance at aisle speed. Real-time supervisory handovers cannot treat human response intervals as fixed wall-clock durations. The permissible wait time must be computed dynamically from instantaneous velocity, remaining obstacle clearance, and validated brake deceleration envelopes. Autonomous fallback\index{Handover!autonomous fallback} must begin the moment the remaining clearance matches the required stopping profile.
+Consider a mobile manipulator that initiates a takeover request at its operational `{python} InterventionFixedWindowPitfall.v_str` aisle speed under a statically configured `{python} InterventionFixedWindowPitfall.window_str` acknowledgment window\index{Handover!takeover request}. If the controller waits out that full window before commanding brakes, the vehicle covers `{python} InterventionFixedWindowPitfall.travel_str` of unbraked travel. When combined with the jerk-limited resident stop profile, the dispatch-to-admission allocation $\DispatchAdmissionInterval$, and actuator execution overheads, the total stopping distance ends `{python} InterventionFixedWindowPitfall.overrun_str` beyond the `{python} InterventionFixedWindowPitfall.d_clear_str` rack-end clearance, causing a physical collision. Conversely, at an out-of-loop crawl speed of `{python} InterventionFixedWindowPitfall.v_crawl_str`, that same window consumes negligible distance, leaving `{python} InterventionFixedWindowPitfall.t_left_crawl_str` of margin before fallback braking must begin. The wait costs travel in proportion to speed, and the stop that follows grows with its square, so a timeout that leaves ample response time at a crawl overruns the clear distance at aisle speed. Real-time supervisory handovers cannot treat human response intervals as fixed wall-clock durations. The permissible wait time must be computed dynamically from instantaneous velocity, remaining obstacle clearance, and validated brake deceleration envelopes. Autonomous fallback\index{Handover!autonomous fallback} must begin the moment the remaining clearance matches the required stopping profile.
 
 **A supervisory timeout is not a static timer; it is a dynamically bounded spatial margin that must fit the instantaneous stopping budget.**
 
@@ -2541,9 +2561,11 @@ In addition, manual intervention must operate under strictly bounded, perishable
 # │          they cause and the arrival rate they need; the same count for
 # │          MAC-only frames.
 # │ How:     Serial verification on the permission processor, each signed
-# │          packet taking t_sig of InterventionAuthBudget; the genuine veto
-# │          finishes after (n + 1) verifications; the forgeries must arrive
-# │          within that interval (Scenarios.WarehouseRemoteCommandAuthentication).
+# │          packet taking t_sig of InterventionAuthBudget; n forgeries queued
+# │          ahead of the genuine veto finish it after (n + 1) verifications,
+# │          and preventing that backlog from draining requires sustaining at
+# │          least ceil(1 / t_sig) packets per second
+# │          (Scenarios.WarehouseRemoteCommandAuthentication).
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import millisecond, second, hertz
@@ -2562,7 +2584,7 @@ class InterventionVerifierFloodPitfall:
     # Fewest forged packets n with (n + 1) * t_verify > t_latest.
     n_forged = flood.forged_to_miss
     t_admit = flood.veto_verified_at.to(millisecond)
-    # Whole packets per second the forger must sustain, rounded up.
+    # Whole packets per second needed to saturate the serial verifier (ceil(1 / t_verify)).
     arrival_rate = flood.forged_rate
     n_forged_mac = flood.forged_mac_to_miss
     # The same count once the allocated Delta_da of @sec-placement-dispatch-admission is charged.
@@ -2572,6 +2594,10 @@ class InterventionVerifierFloodPitfall:
     check(n_forged == 55, f"forged packets that push the veto past T_latest: {n_forged}")
     check(t_admit > t_latest, "The queued forgeries must push the veto past T_latest.")
     check(n_forged * t_verify <= t_latest, "One fewer forgery must still let the veto fit.")
+    check(
+        arrival_rate == 556 and arrival_rate * t_verify.to(second).magnitude >= 1.0,
+        f"sustained saturation rate must meet or exceed 1/t_verify: {arrival_rate}",
+    )
     check(n_forged_mac > 100 * n_forged, "A MAC-only flood needs far more frames than a signature flood.")
     check(n_forged_da == 20, f"forged packets once Delta_da is charged: {n_forged_da}")
     check(abs((flood.verify_time - t_verify).to(millisecond).magnitude) < 1e-12, "The flood prices the same verification as the authentication cell.")
@@ -2593,7 +2619,7 @@ class InterventionVerifierFloodPitfall:
 
 Cryptographic authentication guarantees message authenticity and integrity, but it introduces an asymmetric computation cost that an adversary or a misbehaving transceiver can exploit to starve real-time processing. Suppose an admission controller validates incoming signed remote takeover requests (@sec-intervention-authenticating-intervention) using an embedded microcontroller that requires `{python} InterventionVerifierFloodPitfall.t_verify_str` to verify each Ed25519 digital signature\index{Authentication!signature verification}. Malformed inputs may be rejected cheaply, but well-formed invalid signatures can still reach the expensive verification path. The following queue model charges every such request the stated verification time.
 
-If a malfunctioning or compromised device on the network link\index{Network!availability} floods the interface with bogus signed `manual_drive` packets, as few as `{python} InterventionVerifierFloodPitfall.n_forged_str` forged requests queued ahead of a critical `veto_path` message from a remote supervisor will delay its verification to `{python} InterventionVerifierFloodPitfall.t_admit_str`. At aisle speed, this delay exceeds the fallback deadline $\FallbackDeadline$ of `{python} InterventionVerifierFloodPitfall.t_latest_str`. When charging the allocated downstream admission delay $\DispatchAdmissionInterval$, the usable admission margin shrinks to `{python} InterventionVerifierFloodPitfall.left_da_str`, meaning just `{python} InterventionVerifierFloodPitfall.n_forged_da_str` forged packets suffice to cause a deadline violation. Sustaining this denial-of-service attack requires an injection rate of only `{python} InterventionVerifierFloodPitfall.arrival_rate_str` packets per second, a trivial load for even a low-bandwidth industrial wireless channel.
+If a malfunctioning or compromised device on the network link\index{Network!availability} floods the interface with bogus signed `manual_drive` packets, a burst of as few as `{python} InterventionVerifierFloodPitfall.n_forged_str` forged requests queued ahead of a critical `veto_path` message from a remote supervisor delays its verification to `{python} InterventionVerifierFloodPitfall.t_admit_str`. At aisle speed, this delay exceeds the fallback deadline $\FallbackDeadline$ of `{python} InterventionVerifierFloodPitfall.t_latest_str`. When charging the allocated downstream admission delay $\DispatchAdmissionInterval$, the usable admission margin shrinks to `{python} InterventionVerifierFloodPitfall.left_da_str`, meaning a burst of just `{python} InterventionVerifierFloodPitfall.n_forged_da_str` forged packets queued ahead of the veto suffices to cause a deadline violation. Preventing that backlog from draining once formed requires sustaining an injection rate of at least `{python} InterventionVerifierFloodPitfall.arrival_rate_str` packets per second (exceeding the serial verifier's service rate), a trivial load for even a low-bandwidth industrial wireless channel.
 
 Substituting symmetric MACs shifts the computational bottleneck to the network transceiver without eliminating the underlying vulnerability. Validating a MAC requires far fewer cycles, so roughly `{python} InterventionVerifierFloodPitfall.n_forged_mac_str` forged frames within the same window are needed to induce a miss, yet the queue remains susceptible to line-rate saturating traffic. The robot's independently wired protective stops and hardware lease timers must never share queues with network ingress. Those local safety channels must remain fully operational even when the cryptographic verifier is saturated. To protect real-time responsiveness, the ingestion pipeline must deploy hardware mailbox filters and per-source rate limiters\index{Network!rate limiting} ahead of the verification queue, and safety qualification tests must evaluate worst-case intervention latency under full adversarial packet inundation.
 
