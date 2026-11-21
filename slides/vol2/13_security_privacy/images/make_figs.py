@@ -103,21 +103,21 @@ def threatmodel(path):
 threatmodel('threatmodel.svg')
 
 def llm_stream(path):
-    W, H = (5.8, 1.9)
+    W, H = (5.8, 1.62)
     fig, ax = canvas(W, H)
-    segs = [('System\ninstructions', V2['c3_l'], V2['c3'], 1.05), ('User\ntext', V2['frame_l'], V2['frame'], 0.75), ('Retrieved page:\n“ignore previous…”', V2['risk_l'], V2['risk'], 1.55)]
-    x = 0.05
+    segs = [('System\ninstructions', V2['c3_l'], V2['c3'], 1.10), ('User\ntext', V2['frame_l'], V2['frame'], 0.66), ('Retrieved page:\n“ignore previous…”', V2['risk_l'], V2['risk'], 1.64)]
+    x = 0.03
     for t, f, s, w in segs:
-        box(ax, x, 1.0, w, 0.75, t, f, s, fs=10.5)
+        box(ax, x, 0.82, w, 0.74, t, f, s, fs=11.2)
         x += w + 0.05
-    ax.text(0.05, 0.82, 'one token stream: control and data share it', ha='left', va='top', fontsize=10.5, color=V2['gray'])
-    box(ax, 3.62, 1.0, 0.68, 0.75, 'Model', V2['c1_l'], V2['c1'], fs=11)
-    arrow(ax, (3.52, 1.375), (3.62, 1.375), V2['gray'])
-    box(ax, 4.55, 1.0, 1.2, 0.75, 'Policy check\nprincipal,\npermissions', V2['ok_l'], V2['ok'], fs=10)
-    arrow(ax, (4.3, 1.375), (4.55, 1.375), V2['gray'])
-    box(ax, 4.55, 0.05, 1.2, 0.55, 'Tools, data', V2['frame_l'], V2['frame'], fs=10.5)
-    arrow(ax, (5.15, 1.0), (5.15, 0.6), V2['ok'])
-    ax.text(4.45, 0.33, 'output is untrusted input', ha='right', va='center', fontsize=10.5, color=V2['ok'], fontweight='bold')
+    ax.text(0.03, 0.68, 'one token stream: control and data share it', ha='left', va='top', fontsize=11.5, color=V2['gray'])
+    box(ax, 3.67, 0.82, 0.64, 0.74, 'Model', V2['c1_l'], V2['c1'], fs=11.5)
+    arrow(ax, (3.53, 1.19), (3.67, 1.19), V2['gray'])
+    box(ax, 4.53, 0.82, 1.24, 0.74, 'Policy check\nprincipal,\npermissions', V2['ok_l'], V2['ok'], fs=10.8)
+    arrow(ax, (4.31, 1.19), (4.53, 1.19), V2['gray'])
+    box(ax, 4.53, 0.04, 1.24, 0.50, 'Tools, data', V2['frame_l'], V2['frame'], fs=11.5)
+    arrow(ax, (5.15, 0.82), (5.15, 0.54), V2['ok'])
+    ax.text(4.42, 0.29, 'output is untrusted input', ha='right', va='center', fontsize=11.5, color=V2['ok'], fontweight='bold')
     save(fig, path)
 llm_stream('llm_stream.svg')
 
@@ -298,7 +298,7 @@ ax.bar(range(3), vals, color=[C['memory'], C['memory'], C['compute']], width=0.6
 for i, k in enumerate(keys):
     ax.text(i, vals[i] + 3, f"{ {'r18_int8_mb': '11.7', 'r50_int8_mb': '25.6', 'r50_fp32_mb': '102.2'}[k]} MB", ha='center', fontsize=11, fontweight='bold')
 ax.axhline(134.2, color=C['danger'], ls='--', lw=1.8)
-ax.text(2.4, 134.2 + 3.8, 'EPC 128 MiB = 134.2 MB', ha='right', va='bottom', fontsize=11, color=C['danger'], fontweight='bold')
+ax.text(2.4, 134.2 + 3.8, 'EPC limit: 134.2 MB', ha='right', va='bottom', fontsize=11, color=C['danger'], fontweight='bold')
 ax.set_xticks(range(3))
 ax.set_xticklabels(labels, fontsize=11)
 ax.set_ylim(0, 165)

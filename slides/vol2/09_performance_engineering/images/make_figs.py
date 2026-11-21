@@ -312,6 +312,7 @@ def waterfall(path, step, compare=False):
     ax.set_xticks(range(4), names, fontsize=11.5)
     ax.set_xlim(-0.5, 3.6)
     ax.set_ylim(0, 130 if compare else 112)
+    ax.set_yticks([0, 25, 50, 75, 100])
     ax.set_ylabel('% of fleet capacity')
     sp.save(fig, path)
 for k in (1, 2, 3):
@@ -359,7 +360,7 @@ for k_iso in (1, 2):
         ax.annotate('', xy=(P1, base / P1), xytext=(P1, R0 - 0.01), arrowprops=dict(arrowstyle='-|>', color=COL['R'], lw=1.8, ls='--'))
         ax.plot([P1], [base / P1], 'o', ms=9, mfc='white', mec=COL['R'], mew=2, zorder=5)
         ax.text(P1 + 0.01, 0.73, 'break-even:\nR may fall 26%', ha='left', va='center', fontsize=11, fontweight='bold', color=COL['R'], linespacing=0.95)
-    ax.set_xlim(0.3, 0.75)
+    ax.set_xlim(0.3, 0.79)
     ax.set_ylim(0.55, 1.05)
     ax.set_xlabel('Program goodput P')
     ax.set_ylabel('Runtime goodput R')
@@ -367,12 +368,12 @@ for k_iso in (1, 2):
 
 # 4-step Explore visuals: fig-fusion-before-after & fig-performance-engineering-flashattention-tiling
 def kernel_fusion_flash():
-    w, h = 940, 348
+    w, h = 940, 382
     for k in (1, 2, 3, 4):
         items = []
         # Panel 1 (Step 1): Unfused kernels
-        items.append('<rect x="14" y="12" width="442" height="142" rx="8" fill="#f8fafc" stroke="#dc2626" stroke-width="2"/>')
-        items.append('<text x="26" y="38" font-size="20" font-weight="bold" fill="#b91c1c">1. Unfused: 4 HBM transfers</text>')
+        items.append('<rect x="14" y="10" width="442" height="140" rx="8" fill="#f8fafc" stroke="#dc2626" stroke-width="2"/>')
+        items.append('<text x="26" y="36" font-size="20" font-weight="bold" fill="#b91c1c">1. Unfused: 4 HBM transfers</text>')
         boxes1 = [(24, 64, 'Lin', '#EAF1F8', '#1F407A', '#14294E'),
                   (104, 82, 'HBM I1', '#fee2e2', '#dc2626', '#b91c1c'),
                   (202, 62, 'Act', '#EAF1F8', '#1F407A', '#14294E'),
@@ -380,45 +381,46 @@ def kernel_fusion_flash():
                   (378, 66, 'Norm', '#EAF1F8', '#1F407A', '#14294E')]
         for idx, (bx, bw, lab, fc, ec, tc) in enumerate(boxes1):
             dash = ' stroke-dasharray="5,3"' if 'HBM' in lab else ''
-            items.append(f'<rect x="{bx}" y="54" width="{bw}" height="52" rx="6" fill="{fc}" stroke="{ec}" stroke-width="2"{dash}/>')
-            items.append(f'<text x="{bx + bw / 2}" y="87" font-size="19" font-weight="bold" fill="{tc}" text-anchor="middle">{lab}</text>')
+            items.append(f'<rect x="{bx}" y="52" width="{bw}" height="52" rx="6" fill="{fc}" stroke="{ec}" stroke-width="2"{dash}/>')
+            items.append(f'<text x="{bx + bw / 2}" y="85" font-size="19" font-weight="bold" fill="{tc}" text-anchor="middle">{lab}</text>')
             if idx < len(boxes1) - 1:
                 nx = boxes1[idx + 1][0]
-                items.append(f'<line x1="{bx + bw}" y1="80" x2="{nx - 4}" y2="80" stroke="#64748b" stroke-width="2.6" marker-end="url(#arrG)"/>')
-        items.append('<text x="235" y="136" font-size="19" fill="#475569" text-anchor="middle">Intermediates I1, I2 cross HBM twice each</text>')
+                items.append(f'<line x1="{bx + bw}" y1="78" x2="{nx - 4}" y2="78" stroke="#64748b" stroke-width="2.6" marker-end="url(#arrG)"/>')
+        items.append('<text x="235" y="134" font-size="19" fill="#475569" text-anchor="middle">Intermediates I1, I2 cross HBM twice each</text>')
         # Panel 2 (Step 2): Fused kernel
         if k >= 2:
-            items.append('<rect x="484" y="12" width="442" height="142" rx="8" fill="#f8fafc" stroke="#16a34a" stroke-width="2"/>')
-            items.append('<text x="496" y="38" font-size="20" font-weight="bold" fill="#15803d">2. Fused kernel: 0 HBM intermediates</text>')
-            items.append('<rect x="502" y="50" width="406" height="60" rx="7" fill="#dcfce7" stroke="#16a34a" stroke-width="2.2"/>')
+            items.append('<rect x="484" y="10" width="442" height="140" rx="8" fill="#f8fafc" stroke="#16a34a" stroke-width="2"/>')
+            items.append('<text x="496" y="36" font-size="20" font-weight="bold" fill="#15803d">2. Fused kernel: 0 HBM intermediates</text>')
+            items.append('<rect x="502" y="48" width="406" height="60" rx="7" fill="#dcfce7" stroke="#16a34a" stroke-width="2.2"/>')
             fboxes = [(518, 96, 'Linear'), (654, 86, 'Act'), (780, 112, 'Norm')]
             for idx, (bx, bw, lab) in enumerate(fboxes):
-                items.append(f'<rect x="{bx}" y="58" width="{bw}" height="44" rx="5" fill="#EAF1F8" stroke="#1F407A" stroke-width="1.8"/>')
-                items.append(f'<text x="{bx + bw / 2}" y="87" font-size="19" font-weight="bold" fill="#14294E" text-anchor="middle">{lab}</text>')
+                items.append(f'<rect x="{bx}" y="56" width="{bw}" height="44" rx="5" fill="#EAF1F8" stroke="#1F407A" stroke-width="1.8"/>')
+                items.append(f'<text x="{bx + bw / 2}" y="85" font-size="19" font-weight="bold" fill="#14294E" text-anchor="middle">{lab}</text>')
                 if idx < len(fboxes) - 1:
                     nx = fboxes[idx + 1][0]
-                    items.append(f'<line x1="{bx + bw}" y1="80" x2="{nx - 4}" y2="80" stroke="#15803d" stroke-width="3" marker-end="url(#arrOk)"/>')
-            items.append('<text x="705" y="136" font-size="19" font-weight="bold" fill="#15803d" text-anchor="middle">I1, I2 stay in registers / SRAM (1 load, 1 store)</text>')
-        # Panel 3 (Step 3): FlashAttention SRAM tiling
+                    items.append(f'<line x1="{bx + bw}" y1="78" x2="{nx - 4}" y2="78" stroke="#15803d" stroke-width="3" marker-end="url(#arrOk)"/>')
+            items.append('<text x="705" y="134" font-size="19" font-weight="bold" fill="#15803d" text-anchor="middle">I1, I2 stay in registers / SRAM (1 load, 1 store)</text>')
+        # Panel 3 (Step 3): FlashAttention SRAM tiling (enlarged + inline glossary)
         if k >= 3:
-            items.append('<rect x="14" y="170" width="598" height="166" rx="8" fill="#f8fafc" stroke="#1F407A" stroke-width="2"/>')
-            items.append('<text x="26" y="196" font-size="20" font-weight="bold" fill="#1F407A">3. FlashAttention: stream K/V blocks into SRAM</text>')
-            items.append('<rect x="26" y="210" width="234" height="78" rx="6" fill="#EAF1F8" stroke="#1F407A" stroke-width="1.8"/>')
-            items.append('<text x="143" y="238" font-size="19" font-weight="bold" fill="#14294E" text-anchor="middle">Block 1: s=1, v=2</text>')
-            items.append('<text x="143" y="268" font-size="19" fill="#334155" text-anchor="middle">m=1, l=1.00, a=2.00</text>')
-            items.append('<line x1="260" y1="249" x2="294" y2="249" stroke="#d97706" stroke-width="3.2" marker-end="url(#arrA)"/>')
-            items.append('<rect x="300" y="210" width="298" height="78" rx="6" fill="#fef3c7" stroke="#d97706" stroke-width="2"/>')
-            items.append('<text x="449" y="238" font-size="19" font-weight="bold" fill="#b45309" text-anchor="middle">Block 2: s=3, v=6 (α=0.135)</text>')
-            items.append('<text x="449" y="268" font-size="19" fill="#78350f" text-anchor="middle">m=3, l=1.135, a=6.271</text>')
-            items.append('<text x="313" y="318" font-size="19" fill="#475569" text-anchor="middle">Online softmax rescales prior (l, a) by exp(1 - 3) = 0.135</text>')
+            items.append('<rect x="14" y="166" width="614" height="206" rx="8" fill="#f8fafc" stroke="#1F407A" stroke-width="2"/>')
+            items.append('<text x="26" y="195" font-size="21" font-weight="bold" fill="#1F407A">3. FlashAttention: stream K/V blocks into SRAM</text>')
+            items.append('<rect x="26" y="210" width="242" height="82" rx="6" fill="#EAF1F8" stroke="#1F407A" stroke-width="1.8"/>')
+            items.append('<text x="147" y="240" font-size="20" font-weight="bold" fill="#14294E" text-anchor="middle">Block 1: s=1, v=2</text>')
+            items.append('<text x="147" y="272" font-size="20" fill="#334155" text-anchor="middle">m=1, l=1.00, a=2.00</text>')
+            items.append('<line x1="268" y1="251" x2="304" y2="251" stroke="#d97706" stroke-width="3.2" marker-end="url(#arrA)"/>')
+            items.append('<rect x="310" y="210" width="306" height="82" rx="6" fill="#fef3c7" stroke="#d97706" stroke-width="2"/>')
+            items.append('<text x="463" y="240" font-size="20" font-weight="bold" fill="#b45309" text-anchor="middle">Block 2: s=3, v=6 (α=0.135)</text>')
+            items.append('<text x="463" y="272" font-size="20" fill="#78350f" text-anchor="middle">m=3, l=1.135, a=6.271</text>')
+            items.append('<text x="321" y="324" font-size="19.5" font-weight="bold" fill="#1e293b" text-anchor="middle">Online softmax rescales prior (l, a) by α = exp(1 - 3) = 0.135</text>')
+            items.append('<text x="321" y="354" font-size="18.5" fill="#475569" text-anchor="middle">State: s score, v value, m running max, l softmax sum, a numerator</text>')
         # Panel 4 (Step 4): Final output without N x N HBM matrix
         if k >= 4:
-            items.append('<rect x="628" y="170" width="298" height="166" rx="8" fill="#f8fafc" stroke="#16a34a" stroke-width="2"/>')
-            items.append('<text x="642" y="196" font-size="20" font-weight="bold" fill="#15803d">4. Final exact output</text>')
-            items.append('<rect x="642" y="210" width="270" height="78" rx="6" fill="#dcfce7" stroke="#16a34a" stroke-width="2"/>')
-            items.append('<text x="777" y="238" font-size="20" font-weight="bold" fill="#15803d" text-anchor="middle">O = a / l = 5.523</text>')
-            items.append('<text x="777" y="268" font-size="19" fill="#166534" text-anchor="middle">Single write back to HBM</text>')
-            items.append('<text x="777" y="318" font-size="19" font-weight="bold" fill="#b91c1c" text-anchor="middle">No N x N matrix in HBM</text>')
+            items.append('<rect x="642" y="166" width="284" height="206" rx="8" fill="#f8fafc" stroke="#16a34a" stroke-width="2"/>')
+            items.append('<text x="656" y="195" font-size="21" font-weight="bold" fill="#15803d">4. Final exact output</text>')
+            items.append('<rect x="656" y="214" width="256" height="88" rx="6" fill="#dcfce7" stroke="#16a34a" stroke-width="2"/>')
+            items.append('<text x="784" y="248" font-size="21" font-weight="bold" fill="#15803d" text-anchor="middle">O = a / l = 5.523</text>')
+            items.append('<text x="784" y="280" font-size="19" fill="#166534" text-anchor="middle">Single write back to HBM</text>')
+            items.append('<text x="784" y="340" font-size="19.5" font-weight="bold" fill="#b91c1c" text-anchor="middle">No N x N matrix in HBM</text>')
         svg = (
             f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}" width="{w}" height="{h}" font-family="Helvetica, Arial, sans-serif">\n'
             '<defs>'
@@ -445,4 +447,26 @@ ax.set_xlabel('Time to result (relative to 8,192 GPUs)')
 ax.set_ylabel('GPU-hours per\nunit of work')
 ax.set_yticks([1.0, 1.025, 1.05], ['1.00', '1.025', '1.05'])
 sp.save(fig, out / 'frontier_llama3.svg')
+
+# P37: Shared compile elapsed payback visual (log bar: 12 s vs 26 min; aggregate 32 GPU-h moved to separate cost callout)
+fig, ax = plt.subplots(figsize=(3.3, 0.92))
+_cp = [
+    ('128 shared', 12.23, C['data'], '12 s'),
+    ('1 replica', 1566.0, C['compute'], '26 min'),
+]
+for i, (lab, sec, col, txt) in enumerate(_cp):
+    y = 1 - i
+    ax.barh(y, sec, color=col, height=0.58)
+    ax.text(sec * 1.45, y, txt, va='center', ha='left', fontsize=16.5, fontweight='bold', color=col)
+ax.set_xscale('log')
+ax.set_xlim(1, 5e4)
+ax.set_ylim(-0.55, 1.55)
+ax.set_yticks([0, 1])
+ax.set_yticklabels(['1 replica', '128 shared'], fontsize=16.0, fontweight='bold')
+ax.set_xticks([10, 600, 3600])
+ax.set_xticklabels(['10 s', '10 m', '1 h'], fontsize=15.5)
+ax.minorticks_off()
+ax.spines['left'].set_visible(False)
+ax.set_xlabel('Elapsed payback (log)', fontsize=15.5)
+sp.save(fig, out / 'compile_payback.svg')
 print('figures written to', out)

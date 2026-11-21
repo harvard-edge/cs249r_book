@@ -312,20 +312,23 @@ def ci(path, k):
     y = np.maximum(1.0, x / BAL)
     ax.plot(x, y, color=C['text'], lw=3)
     ax.axvline(BAL, color=RED, lw=1.6, ls='--')
-    ax.text(BAL / 1.4, 150, 'fabric balance\n8.0×10$^{-5}$ B/FLOP\n(A100, one 200 Gb/s link)', color=RED, fontsize=10, fontweight='bold', va='top', ha='right')
-    ax.text(3e-07, 1.45, 'compute sets the step', color=C1, fontsize=10.5, fontweight='bold', ha='center')
-    ax.text(0.0015, 2.2, 'network\nsets the\nstep', color=C2T, fontsize=10.5, fontweight='bold', ha='left')
+    ax.text(BAL / 1.4, 165, 'fabric balance\n8.0×10$^{-5}$ B/FLOP\n(A100, 200 Gb/s)', color=RED, fontsize=10, fontweight='bold', va='top', ha='right')
+    ax.text(1.5e-06, 0.45, 'compute sets the step', color=C1, fontsize=10.5, fontweight='bold', ha='center', va='center')
+    ax.text(0.0014, 1.8, 'network\nsets the\nstep', color=C2T, fontsize=10.5, fontweight='bold', ha='left')
     if k >= 2:
         ax.plot([OURS], [max(1, OURS / BAL)], 'o', ms=11, color=C2, mec='white', mew=1.5, zorder=5)
-        ax.annotate('175B worker\n8.1×10$^{-5}$', (OURS, 1.0), xytext=(-60, 26), textcoords='offset points', fontsize=10, fontweight='bold', color=C2T, ha='right', arrowprops=dict(arrowstyle='-', color=C2T, lw=1))
+        ax.annotate('175B worker\n8.1×10$^{-5}$', (OURS, 1.05), xytext=(-22, 26), textcoords='offset points', fontsize=10, fontweight='bold', color=C2T, ha='right', va='bottom', arrowprops=dict(arrowstyle='-', color=C2T, lw=1.1))
     if k >= 3:
-        for lab, v, off in [('Alpha 10$^{-7}$', 1e-07, (0, -9)), ('Beta 10$^{-4}$', 0.0001, (10, -6))]:
+        for lab, v, off, ha, va in [
+            ('Alpha 10$^{-7}$', 1e-07, (0, 12), 'center', 'bottom'),
+            ('Beta 10$^{-4}$', 0.0001, (10, -8), 'left', 'center'),
+        ]:
             yy = max(1, v / BAL)
             ax.plot([v], [yy], 's', ms=10, color=C3, mec='white', mew=1.5, zorder=5)
-            ax.annotate(lab, (v, yy), xytext=off, textcoords='offset points', fontsize=10, fontweight='bold', color=C3T, ha='center' if off[0] == 0 else 'left', va='top' if off[0] == 0 else 'center')
+            ax.annotate(lab, (v, yy), xytext=off, textcoords='offset points', fontsize=10, fontweight='bold', color=C3T, ha=ha, va=va)
     ax.set_xscale('log')
     ax.set_yscale('log')
-    ax.set_ylim(0.28, 200)
+    ax.set_ylim(0.26, 200)
     ax.set_yticks([])
     ax.minorticks_off()
     ax.set_xlabel('bytes sent per local FLOP', fontsize=10)
@@ -440,4 +443,90 @@ def anplot(path, k):
     sp.save(fig, path)
 anplot(out / 'an_step1.svg', 1)
 anplot(out / 'an_step2.svg', 2)
+
+# Visual anchor for F3 Recall (C3 chips + 3.05 h failure interval)
+def _recall_c3_mttf():
+    fig, ax = plt.subplots(figsize=(4.2, 1.65))
+    ax.set_xlim(0, 10)
+    ax.set_ylim(0, 4.4)
+    ax.axis('off')
+    chips = [
+        ('Compute', 'C1', 0.1, C1L, C1, C1T),
+        ('Comm.', 'C2', 3.4, C2L, C2, C2T),
+        ('Coord.', 'C3', 6.7, C3L, C3, C3T),
+    ]
+    for name, tag, x, fc, ec, tc in chips:
+        rbox(ax, x, 2.55, 3.15, 1.55, fc, ec, lw=2.0, r=0.18)
+        ax.text(x + 1.575, 3.62, tag, ha='center', va='center', fontsize=15, fontweight='bold', color=tc)
+        ax.text(x + 1.575, 2.95, name, ha='center', va='center', fontsize=13.5, fontweight='bold', color=tc)
+    rbox(ax, 0.1, 0.15, 9.75, 1.95, REDL, RED, lw=1.8, r=0.16)
+    ax.text(4.975, 1.48, '50,000 h ÷ 16,384 GPUs = 3.05 h', ha='center', va='center', fontsize=13.0, fontweight='bold', color='#b91c1c')
+    ax.text(4.975, 0.68, '~7.9 interruptions/day (independent)', ha='center', va='center', fontsize=12.5, color='#334155')
+    sp.save(fig, out / 'recall_c3_mttf.svg')
+
+# Visual anchor for F15 CAP partition vote
+def _cap_partition():
+    fig, ax = plt.subplots(figsize=(3.5, 2.4))
+    ax.set_xlim(0, 8.2)
+    ax.set_ylim(0, 5.6)
+    ax.axis('off')
+    for i, (wx, wy) in enumerate([(1.3, 4.3), (1.3, 2.8), (1.3, 1.3)]):
+        rbox(ax, wx - 0.9, wy - 0.45, 1.8, 0.9, C1L, C1, lw=2.0, r=0.12)
+        ax.text(wx, wy, f'W{i}', ha='center', va='center', fontsize=13, fontweight='bold', color=C1T)
+    ax.plot([1.3, 1.3], [3.85, 3.25], color=C1, lw=2.2)
+    ax.plot([1.3, 1.3], [2.35, 1.75], color=C1, lw=2.2)
+    ax.plot([3.65, 3.65], [0.55, 5.1], color=RED, lw=2.6, ls='--')
+    ax.text(3.65, 5.35, 'partition', ha='center', va='center', fontsize=12.5, fontweight='bold', color=RED)
+    rbox(ax, 5.2, 2.35, 2.4, 0.95, REDL, RED, lw=2.2, ls='--', r=0.12)
+    ax.text(6.4, 2.82, 'W3 silent', ha='center', va='center', fontsize=13, fontweight='bold', color='#b91c1c')
+    ax.plot([2.25, 5.15], [2.82, 2.82], color=GRAY, lw=1.8, ls=':')
+    rbox(ax, 4.45, 3.9, 3.5, 0.9, C3L, C3, lw=1.6, r=0.12)
+    ax.text(6.2, 4.35, 'A: wait (consistent)', ha='center', va='center', fontsize=11.5, fontweight='bold', color=C3T)
+    rbox(ax, 4.45, 0.75, 3.5, 0.9, C2L, C2, lw=1.6, r=0.12)
+    ax.text(6.2, 1.2, 'B: proceed (available)', ha='center', va='center', fontsize=11.5, fontweight='bold', color=C2T)
+    sp.save(fig, out / 'cap_partition.svg')
+
+# Visual anchor for F24 PyTorch step timeline strip
+def _pytorch_step_strip():
+    fig, ax = plt.subplots(figsize=(3.1, 1.15))
+    ax.set_xlim(0, 10)
+    ax.set_ylim(0, 2.65)
+    ax.axis('off')
+    segs = [
+        (0.1, 3.4, C1L, C1, C1T, 'C1', 'fwd+bwd'),
+        (3.65, 3.9, C2L, C2, C2T, 'C2', 'AllReduce'),
+        (7.7, 2.2, C3L, C3, C3T, 'C3', 'barrier'),
+    ]
+    for x, w, fc, ec, tc, top, bot in segs:
+        rbox(ax, x, 0.52, w, 1.8, fc, ec, lw=2.0, r=0.14)
+        ax.text(x + w / 2, 1.75, top, ha='center', va='center', fontsize=15, fontweight='bold', color=tc)
+        ax.text(x + w / 2, 1.0, bot, ha='center', va='center', fontsize=13.5, fontweight='bold', color=tc)
+    ax.text(5.0, 0.14, 'one sync step (no overlap)', ha='center', va='center', fontsize=13, color=GRAY, fontweight='bold')
+    sp.save(fig, out / 'pytorch_step_strip.svg')
+
+# Visual anchor for F27 Diagnose step profile bar
+def _diagnose_profile():
+    fig, ax = plt.subplots(figsize=(3.4, 1.55))
+    ax.barh(0, 0.8, color=C1, height=0.55)
+    ax.barh(0, 1.0, left=0.8, color=C2, height=0.55)
+    ax.barh(0, 0.2, left=1.8, color=C3, height=0.55)
+    ax.text(0.4, 0, '0.8 s', ha='center', va='center', fontsize=14, fontweight='bold', color='white')
+    ax.text(1.3, 0, '1.0 s', ha='center', va='center', fontsize=14, fontweight='bold', color='white')
+    ax.text(0.4, 0.44, 'compute', ha='center', va='bottom', fontsize=13.5, fontweight='bold', color=C1T)
+    ax.text(1.3, 0.44, 'comm', ha='center', va='bottom', fontsize=13.5, fontweight='bold', color=C2T)
+    ax.text(1.9, 0.44, 'sync\n0.2 s', ha='center', va='bottom', fontsize=13, fontweight='bold', color=C3T, linespacing=0.95)
+    ax.text(1.0, -0.58, 'total = 2.0 s  (overlap = 0)', ha='center', va='top', fontsize=13.5, fontweight='bold', color=C['text'])
+    ax.set_xlim(0, 2.2)
+    ax.set_ylim(-0.95, 1.0)
+    ax.set_yticks([])
+    ax.set_xticks([0, 0.8, 1.8, 2.0])
+    ax.spines['left'].set_visible(False)
+    ax.set_xlabel('seconds per step', fontsize=13)
+    ax.tick_params(labelsize=12.5)
+    sp.save(fig, out / 'diagnose_profile.svg')
+
+_recall_c3_mttf()
+_cap_partition()
+_pytorch_step_strip()
+_diagnose_profile()
 print('figures written to', out)

@@ -40,7 +40,7 @@ Scenario values are labeled "illustrative", as the chapter labels them.
     AI Benchmark ranking, snapshot 2026-10-12), as in EI figure 17.
   - Coverage funnel: illustrative cohort shares, after EI figure 13.
   - Forgetting: illustrative curves, after EI Sec. 11.5.2 figure.
-  - Shadow gate: EI figure 20 (redrawn; letters illustrative).
+  - Shadow check: EI figure 20 (redrawn; letters illustrative).
 
 Run from this folder: python3 make_figs.py
 """
@@ -214,7 +214,7 @@ def amplifier():
         out(fig, f'amp_step{step}')
 
 def memladder():
-    rows = [('Phone', 17179869184, '16 GB'), ('IoT device', 1073741824, 'up to 1 GB'), ('Microcontroller', 262144, '256 KB')]
+    rows = [('Phone', 17179869184, '16 GiB'), ('IoT device', 1073741824, 'up to 1 GiB'), ('Microcontroller', 262144, '256 KiB')]
     fig, ax = plt.subplots(figsize=(3.4, 2.4))
     for i, (lab, v, s) in enumerate(rows):
         y = 2 - i
@@ -224,9 +224,9 @@ def memladder():
     ax.set_xscale('log')
     ax.set_xlim(100000.0, 1000000000000.0)
     ax.set_yticks([])
-    ax.set_xticks([1000000.0, 1000000000.0])
-    ax.set_xticklabels(['1 MB', '1 GB'], fontsize=12)
-    ax.set_xlabel('Memory (log scale)', fontsize=12)
+    ax.set_xticks([1048576.0, 1073741824.0])
+    ax.set_xticklabels(['1 MiB', '1 GiB'], fontsize=12)
+    ax.set_xlabel('Memory (binary, log scale)', fontsize=12)
     out(fig, 'memladder')
 
 def npu_tops():
@@ -576,10 +576,13 @@ def coverage():
             for k, v in enumerate(reversed(d)):
                 kk = 2 - k
                 a1.bar(i, v, bottom=b, color=cols[kk], width=0.62, edgecolor='white')
+                if i == 0:
+                    a1.text(i, b + v / 2, f'{v}', ha='center', va='center', fontsize=12, fontweight='bold', color='white' if kk != 1 else TXT)
+                elif i == 3 and v >= 6:
+                    a1.text(i, b + v / 2, f'{v}', ha='center', va='center', fontsize=11.5, fontweight='bold', color='white' if kk != 1 else TXT)
                 b += v
             a1.text(i, b + 2, f'{sum(d)}', ha='center', va='bottom', fontsize=13.4, fontweight='bold')
-        a1.text(3.35, 1, 'budget\n5%', fontsize=12.3, color=C['danger'], va='bottom', fontweight='bold')
-        a1.text(-0.3, 4, '20%', fontsize=12.3, color='white', fontweight='bold')
+        a1.text(3.38, 1.5, '1 budget\n(5%)', fontsize=12.0, color=C['danger'], va='bottom', fontweight='bold')
         a1.set_xticks(range(4))
         a1.set_xticklabels(['Deployed', '\nAdmitted', 'Selected', '\nCompleted'], fontsize=11.8)
         a1.set_xlim(-0.5, 4.1)
@@ -651,9 +654,18 @@ def gate():
             arrow(ax, 5.55, 1.2, 5.55, 1.44, V['ok'])
         ax.text(x0, 0.22, 'label-free: flags change, not which is right', ha='left', va='center', fontsize=12.3, color=V['mute'])
         out(fig, f'gate_step{step}', tight=False)
+def recall_edge_shift():
+    W, H = (3.0, 1.55)
+    fig, ax = canvas(W, H)
+    box(ax, 0.08, 0.92, 2.84, 0.56, V['c1_l'], V['c1'], 'Server fleet (L10)\nSLO goodput, HBM', fs=14.5, r=0.06)
+    arrow(ax, 1.5, 0.92, 1.5, 0.64, V['c2'])
+    box(ax, 0.08, 0.06, 2.84, 0.56, V['c2_l'], V['c2'], 'Phone fleet (L11)\napp SLO + round', fs=14.5, r=0.06)
+    out(fig, 'recall_edge_shift', tight=False)
+
 if __name__ == '__main__':
     hook()
     fleetlaw_edge()
+    recall_edge_shift()
     boundary()
     deadlines()
     amplifier()

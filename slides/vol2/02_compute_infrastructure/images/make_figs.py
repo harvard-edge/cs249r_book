@@ -234,7 +234,7 @@ for k in (1, 2):
         bot += v
     a1.bar(0, 250, 0.6, bottom=bot, color=C['data_l'], edgecolor=C['data'], hatch='//')
     a1.text(0.36, bot + 125, 'activations', va='center', fontsize=12.5, color=C['data'], fontweight='bold', linespacing=1.0)
-    a1.axhline(640.0, color=C['danger'], lw=2, ls='--')
+    a1.plot([-1.9, 0.32], [640.0, 640.0], color=C['danger'], lw=2, ls='--')
     a1.text(-1.85, 700, 'node\n640 GB', color=C['danger'], fontsize=13, fontweight='bold', ha='left', va='bottom', linespacing=1.0)
     a1.text(0, 3330, '2.8 TB + act.', ha='center', fontsize=13.5, fontweight='bold', color=C['text'])
     a1.set_xlim(-1.9, 1.5)
@@ -244,15 +244,15 @@ for k in (1, 2):
     a1.set_title('175B training state', fontsize=14.5, fontweight='bold', color=C['text'])
     shown = k >= 2
     al = 1.0 if shown else 0.0
-    gp = [('weights, grads', 87.5, C['memory']), ('master', 87.5, C['neutral']), ('Adam m, v', 175.0, C['compute']), ('other', 25.0, C['data'])]
+    gp = [('weights, grads', 87.5, C['memory']), ('master', 87.5, C['neutral']), ('Adam m, v', 175.0, C['compute']), ('act. + work.', 25.0, C['data'])]
     bot = 0
     for lab, v, col in gp:
         a2.bar(0, v, 0.6, bottom=bot, color=col, edgecolor='white', alpha=al)
         label(a2, 0.36, bot + v / 2, lab, col, shown, va='center', fontsize=12.5)
         bot += v
-    a2.axhline(80.0, color=C['danger'], lw=2, ls='--', alpha=al)
-    label(a2, -1.85, 92, 'H100\n80 GB', C['danger'], shown, fontsize=13, ha='left', va='bottom', linespacing=1.0)
-    label(a2, 0, 385, '375 GB', C['text'], shown, ha='center', fontsize=13.5)
+    a2.plot([-1.9, 0.32], [80.0, 80.0], color=C['danger'], lw=2, ls='--', alpha=al)
+    label(a2, -1.85, 92, '80 GB\navailable', C['danger'], shown, fontsize=13, ha='left', va='bottom', linespacing=1.0)
+    label(a2, 0, 385, '375 GB/GPU', C['text'], shown, ha='center', fontsize=13.5)
     a2.set_xlim(-1.9, 1.5)
     a2.set_ylim(0, 430)
     a2.set_xticks([])
@@ -376,17 +376,17 @@ for k, upto in ((1, 2), (2, 3), (3, 6)):
     ax.set_ylabel('Hours of wall clock')
     ax.text(-0.4, 28.2, 'derived', fontsize=12.5, color=C['neutral'], fontweight='bold')
     sp.save(fig, out / f'pod_chain_step{k}.svg')
-sp.hbars(out / 'delivered.svg', [('Decode, batch 1', 0.34, 'memory', '0.34%'), ('Local training', 45.0, 'compute', '45%'), ('Llama 3 405B (16K)', 41.0, 'data', '41% MFU'), ('8,192-GPU scenario', 21.0, 'network', '21%')], '%', log=False, xlabel='Share of peak that becomes progress, %', size=(4.3, 2.15))
-_W, _A, _CAP = (43.75, 1.4, 80.0)
+sp.hbars(out / 'delivered.svg', [('Decode, batch 1 (FP16)', 0.34, 'memory', '0.34%'), ('Local training (FP8)', 45.0, 'compute', '45%'), ('Llama 3 405B (BF16)', 41.0, 'data', '41% MFU'), ('8,192-GPU scenario (FP8)', 21.0, 'network', '21%')], '%', log=False, xlabel='Share of peak that becomes progress, %', size=(4.5, 2.15))
+_W, _A, _CAP = (43.75, 2.05, 80.0)
 for k in (1, 2, 3):
-    fig, ax = plt.subplots(figsize=(3.4, 1.15))
+    fig, ax = plt.subplots(figsize=(3.5, 1.15))
     ax.barh(0, _W, 0.6, color=C['memory'])
     label(ax, _W / 2, 0, 'weights 43.75', 'white', ha='center', va='center', fontsize=11)
     ax.barh(0, _A, 0.6, left=_W, color=C['compute'], alpha=1.0 if k >= 2 else 0.0)
-    label(ax, _W + _A + 1.5, 0.45, '+ Adam 1.4', C['compute'], k >= 2, va='bottom', fontsize=11)
-    label(ax, _W + _A + 1.5, -0.05, '= 45.1 GB', C['text'], k >= 3, va='center', fontsize=12)
+    label(ax, _W + _A + 1.5, 0.45, '+ opt. 2.05', C['compute'], k >= 2, va='bottom', fontsize=11)
+    label(ax, _W + _A + 1.5, -0.05, '= 45.8 GB', C['text'], k >= 3, va='center', fontsize=12)
     ax.axvline(_CAP, color=C['danger'], lw=2, ls='--')
-    label(ax, _CAP - 1, -0.65, 'H100 80 GB', C['danger'], ha='right', va='center', fontsize=11)
+    label(ax, _CAP - 3.5, -0.65, 'H100 80 GB', C['danger'], ha='right', va='center', fontsize=11)
     ax.set_xlim(0, 90)
     ax.set_ylim(-0.9, 1.0)
     ax.set_yticks([])
@@ -396,7 +396,7 @@ for k in (1, 2, 3):
     sp.save(fig, out / f'zero_mem_step{k}.svg')
 _lo, _hi = (400.0, 700.0)
 _ts, _tf = (1.0, 100.0 / 10 ** 3)
-_ds, _df = (19.0, 187.0)
+_ds, _df = (18.75, 187.5)
 _t0 = 0.5
 for k in (1, 2):
     fig, (a1, a2) = plt.subplots(2, 1, figsize=(3.4, 1.85), sharex=True, gridspec_kw={'hspace': 0.3})
@@ -410,7 +410,7 @@ for k in (1, 2):
     a2.plot([0, _t0, _t0, _t0 + _ts, _t0 + _ts, 2.2], [0, 0, -_ds, -_ds, 0, 0], color=C['memory'], lw=2.2)
     a2.plot([0, _t0, _t0, _t0 + _tf, _t0 + _tf, 2.2], [0, 0, -_df, -_df, 0, 0], color=C['danger'], lw=2.2, alpha=1.0 if k >= 2 else 0.0)
     a2.text(_t0 + _ts + 0.05, -_ds - 8, '−19 mV', color=C['memory'], fontsize=10.5, fontweight='bold', va='top')
-    a2.text(_t0 + _tf + 0.06, -_df + 10, '−187 mV', color=C['danger'], fontsize=10.5, fontweight='bold', va='bottom', alpha=1.0 if k >= 2 else 0.0)
+    a2.text(_t0 + _tf + 0.06, -_df + 10, '−188 mV', color=C['danger'], fontsize=10.5, fontweight='bold', va='bottom', alpha=1.0 if k >= 2 else 0.0)
     a2.set_ylim(-_df - 30, 30)
     a2.set_yticks([0, -round(_df, -2)])
     a2.set_ylabel('mV', fontsize=10)
