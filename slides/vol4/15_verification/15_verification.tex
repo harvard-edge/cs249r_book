@@ -94,9 +94,9 @@
     \end{column}
     \begin{column}{0.58\textwidth}
       \small
-      \onslide<1->{\textbf{Testimony, 2013:} the watchdog (a timer that forces a safe reset unless fed) was fed by a timer interrupt, which ran whether or not the throttle task did.\\[0.12cm]}
-      \onslide<2->{A dead throttle task could freeze its last command while the watchdog stayed satisfied.\\[0.12cm]}
-      \onslide<3->{NASA found no electronic cause; it did find a 248~$\Omega$ whisker short in a pedal sensor.\\[0.18cm]}
+      \onslide<1->{\textbf{Testimony, 2013:} a timer interrupt fed the watchdog (safe-reset timer) whether or not the throttle task ran.\\[0.12cm]}
+      \onslide<2->{A dead throttle task froze its last command while the watchdog stayed satisfied.\\[0.12cm]}
+      \onslide<3->{NASA found no electronic cause, but found a 248~$\Omega$ tin-whisker short in a pedal sensor.\\[0.18cm]}
       \choice{A}{yes, given enough miles}\\[0.05cm]
       \answerat{4}{B}{only a test that kills the task on purpose}
     \end{column}
@@ -223,17 +223,29 @@
 
 \begin{frame}{Which watchdog notices the frozen task?}
   \mlsysactivity{Predict}{2 min}
-  \small A control task issues a command every 10~ms; at 500~ms the harness freezes it and leaves its timer running. Watchdog \textbf{A} is fed by the timer; watchdog \textbf{B} only when the task finishes a cycle.\\[0.2cm]
-  \uncover<2->{\begin{logblock}[8.7]
-\lbrack\,504.2 ms\rbrack STATUS cmd= 4.1 age= 9 ms A=ok B=ok\\
-\lbrack\,506.3 ms\rbrack HARNESS control task frozen (deadlock injected); timer left running\\
-\textcolor{figred}{\textbf{\lbrack\,556.7 ms\rbrack WATCHDOG B BITE: no feed for 61 ms -> stop commanded}}\\
-\lbrack\,604.4 ms\rbrack STATUS cmd= 4.1 age= 109 ms A=ok B=BITTEN\\
-\lbrack\,705.6 ms\rbrack STATUS cmd= 4.1 age= 210 ms A=ok B=BITTEN\\
-\lbrack\,811.1 ms\rbrack STATUS cmd= 4.1 age= 316 ms A=ok B=BITTEN
-      \end{logblock}\vspace{0.15cm}
-  {\small\textbf{\textcolor{figred}{Only B bites, 61~ms after its last feed.}} A reports ``ok'' while the command ages to 316~ms.}}
-  \mlsyscredit{Our run: images/watchdog\_run.py, threads on a laptop (excerpt of images/data/watchdog\_run.log; earlier status lines omitted). Adversarial Verification, \S15.3.}
+  \begin{columns}[c]
+    \begin{column}{0.36\textwidth}
+      \begin{mlsyscard}{mlsysaccent}\footnotesize
+        Control task commands every 10~ms; at 500~ms harness freezes it, leaving its timer alive.\\[0.08cm]
+        \textbf{A:} fed by timer interrupt\\
+        \textbf{B:} fed on task completion
+      \end{mlsyscard}
+      \vspace{0.12cm}
+      \uncover<2->{\footnotesize\textbf{\textcolor{figred}{Only B bites (61~ms).}} A stays ``ok'' while the command ages to 316~ms.}
+    \end{column}
+    \begin{column}{0.62\textwidth}
+      \only<1|handout:0>{\normalsize Which watchdog bites after the freeze, and when?}%
+      \uncover<2->{\begin{logblock}[7.8]
+\lbrack\,504.2 ms\rbrack STATUS cmd=4.1 age=9 ms A=ok B=ok\\
+\lbrack\,506.3 ms\rbrack HARNESS task frozen; timer left running\\
+\textcolor{figred}{\textbf{\lbrack\,556.7 ms\rbrack WATCHDOG B BITE: 61 ms -> stop}}\\
+\lbrack\,604.4 ms\rbrack STATUS cmd=4.1 age=109 ms A=ok B=BITTEN\\
+\lbrack\,705.6 ms\rbrack STATUS cmd=4.1 age=210 ms A=ok B=BITTEN\\
+\lbrack\,811.1 ms\rbrack STATUS cmd=4.1 age=316 ms A=ok B=BITTEN
+      \end{logblock}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Our run: images/watchdog\_run.py, threads on a laptop (excerpt of images/data/watchdog\_run.log). Adversarial Verification, \S15.3.}
   \note{[2 min] [CORE] This is the F1 injection in miniature, run on a laptop. A control task writes a command every 10 ms. Watchdog A is fed by a periodic timer, as in the Toyota testimony. Watchdog B is fed only when the control task completes a cycle, the rule Lecture 4 drew from that testimony. Both bite after 60 ms without a feed. ENGAGE: predict which bites, and when. Step 2: the real output. B bites 61 ms after the last completed cycle and commands a stop. A reports ok to the end, while the command sits frozen at 4.1 and ages to 316 ms. The F1 harness does the same on the machine: it kills or freezes the chunk policy one tick after a renewal and keeps its heartbeat interrupt alive, so superficial liveness cannot renew the lease. WARN: the timing here is a laptop's and says nothing of a vehicle's; the point is which watchdog can see the failure at all. A host daemon can keep reporting a valid heartbeat after the inference thread froze, so F1 passes only on deceleration measured at the drives.}
 \end{frame}
 
@@ -295,9 +307,9 @@
 
 \begin{frame}{A late onset fails by 30 ms while its travel passes by 1 mm}
   \centering
-  \mlsyssteps[width=0.97\textwidth,height=6.4cm,keepaspectratio]{f1trace_step}{2}
-  \mlsyscredit{Adversarial Verification, \S15.9.1 and figure 4 (model timelines; values derived).}
-  \note{[2 min] [OPTIONAL] Step 1: the channels an F1 trial must witness, timed from the last valid renewal. The lease is high until it expires at 60 ms; the permission tick commands the stop at 61 ms; the drive frame arrives at 62; deceleration must begin by 82 ms, the green bound. Below, speed falls in an S-curve from 1.3 m/s to rest at 1,013 ms, 711.9 mm of travel. A refused probe replayed at 65 ms tests that an expired lease cannot be renewed. Step 2: a trace that brakes at 112 ms. The onset margin is minus 30 ms. The base travels 39 mm further, 750.9 mm, and keeps a margin of plus 1 mm against 751.9. The verdict is FAIL, because a precommitted oracle checks both predicates. ENGAGE: the stop command issued on time; where would you look? (Expected: command delivery, the drive, or the brake; the lease check worked.) WARN: margins stay in their own units. Combining them requires scales fixed in advance; with the bounds as scales, minus 0.366 for onset and 0.0013 for distance.}
+  \mlsyssteps[width=0.97\textwidth,height=6.0cm,keepaspectratio]{f1trace_step}{3}
+  \mlsyscredit{Adversarial Verification, \S15.9.1, fig.\ 4 (derived); Explore: Hardware Fault Injection on mlsysbook.ai.}
+  \note{[2 min] [CORE] Step 1: the channels an F1 trial must witness, timed from the last valid renewal. The lease drops at 60 ms; the permission tick commands stop at 61 ms; the drive frame arrives at 62; the precommitted oracle demands onset by 82 ms and travel within 751.9 mm. Step 2: on-time deceleration begins by 82 ms and reaches rest at 1,013 ms in 711.9 mm (PASS). A refused probe replayed at 65 ms tests that an expired lease cannot be renewed. Step 3: a trace that brakes at 112 ms has onset margin minus 30 ms. The base travels 39 mm further, 750.9 mm, keeping +1 mm against 751.9. The verdict is FAIL because a precommitted oracle checks both predicates. ENGAGE: the stop command issued on time; where would you look? (Expected: command delivery, the drive, or the brake; the lease check worked.) WARN: margins stay in their own units.}
 \end{frame}
 
 \begin{frame}{Diagnose: what verdict does each trial get?}
@@ -488,7 +500,7 @@
       $\rho\,(\text{always } \varphi) = \min_t \rho(\varphi, t)$\\[0.05cm]
       {\footnotesize $\rho$: signed margin of a trace against a temporal requirement $\varphi$}\\[0.2cm]
       \uncover<2->{Falsification: choose the start state and disturbance that \textbf{minimize} $\rho$, within what a test bench can deliver.\\[0.15cm]}
-      \uncover<3->{\footnotesize A search that finds no violation certifies nothing.}
+      \uncover<3->{\footnotesize Tools: S-TaLiRo, Breach, VerifAI (Dreossi et al.\ 2019). An empty search certifies nothing.}
     \end{column}
   \end{columns}
   \mlsyscredit{Adversarial Verification, \S15.9.1 and \S15.9.2 (signal temporal logic: Maler and Nickovic 2004; robustness: Fainekos and Pappas 2009). Traces illustrative.}
@@ -535,10 +547,10 @@
       \wstep{2}{Coverage: $1 - 100/9{,}800 = \textbf{98.98\%}$}
       \wstep{3}{Zero misses: $n \ge \ln 0.05 / \ln 0.9898 = 292.1$, so \textbf{293} (rule of three: 294)}
       \wstep{4}{{\normalsize Your turn: a 10 FIT target?}\enspace\uncover<5->{\textbf{\textcolor{figred}{99.90\%, 2,935 injections}}}}
-      \uncover<5->{\footnotesize Sample in proportion: 144 of 293 hit gate drivers.}
+      \uncover<5->{\footnotesize ISO 26262 targets: ASIL-B 100 FIT, ASIL-D 10 FIT. Sample proportionally: 144 of 293 hit gate drivers.}
     \end{column}
   \end{columns}
-  \mlsyscredit{Adversarial Verification, Napkin Math 15.3 (derived); zero-failure bound from Lecture 7. Recomputed from inputs.}
+  \mlsyscredit{Adversarial Verification, NM 15.3 (derived); zero-failure bound from Lecture 7.}
   \note{[2.5 min] [CORE] Worked example and estimate, Napkin Math 15.3. FIT is failures in time, one per billion operating hours. Step 1: the four component strata sum to 9,800 FIT. Step 2: to leave at most 100 FIT unmitigated, diagnostic coverage, the rate-weighted fraction of faults whose effect is caught, must be 98.98 percent. Step 3: each injection misses with probability 1 minus coverage; zero misses in n trials bounds that at 95 percent confidence when n is at least ln 0.05 over ln 0.9898, 293. Lecture 7's rule of three gives 294. Step 4: students compute the 10 FIT case, 60 seconds. Step 5: 99.90 percent and 2,935 injections. A tenfold tighter target costs tenfold more trials; the length of the fault list does not set the campaign size. WARN: the count holds only if injections are drawn in proportion to the rates, 144 to gate drivers, 75 to transceivers and power, 45 to sensors, and 30 to compute; uniform injection tests a different distribution. Repeated hot stops also couple trials through winding and lining heat. LINK: Lecture 7's exposure wall says fleet hours cannot replace this: bounding $10^{-9}$ per hour needs about $3 \times 10^9$ failure-free hours, and they count only for the configuration that logged them.}
 \end{frame}
 
@@ -574,7 +586,7 @@
     \end{column}
     \begin{column}{0.42\textwidth}
       \small
-      Extreme value theory fits only the exceedances past a high threshold.\\[0.15cm]
+      Extreme value theory (like a 100-year flood model) fits only exceedances past a high threshold.\\[0.15cm]
       Tail shape $\xi$: heavy ($>0$), exponential ($=0$), or bounded ($<0$).\\[0.15cm]
       \uncover<2->{F1 has zero physical trials, so it supports no tail fit at all. The reserve is 48.7~mm after allocation.}
     \end{column}
@@ -656,11 +668,11 @@ signature\_ed25519: b1f0b3e9c142e5181ed9...
 \end{frame}
 
 \begin{frame}{Takeaways}
-  \thumbline{thumb_corner_step2.pdf}{A claim holds over a declared envelope that includes the machine's own state; 1.3~m/s on a 0.12 floor needs 1.19~m.}\\[0.12cm]
-  \thumbline{thumb_refevents_step3.pdf}{An oracle is fixed before the run and scored from the event the fault disrupts: F1 is 82~ms and 751.9~mm from renewal.}\\[0.12cm]
-  \thumbline{thumb_wang_patch.pdf}{Faults come from inverted records, physics, shared resources, and attacks; a wrong action inside the limits is a deficit.}\\[0.12cm]
-  \thumbline{thumb_ladder_step4.pdf}{A mechanism fails only on a rung that contains it; simulated margins count after the transfer discount.}\\[0.12cm]
-  \thumbline{thumb_is_ladder_step3.pdf}{A 100 FIT target needs 293 zero-miss injections; rates need weights, and the record keeps every gap.}
+  \thumbline{thumb_corner_step2.pdf}{Claims hold over declared envelopes including internal state; 1.3~m/s on a 0.12 floor needs 1.19~m.}\\[0.12cm]
+  \thumbline{thumb_refevents_step3.pdf}{Precommit oracles from the disrupted event: F1 bounds onset at 82~ms and travel at 751.9~mm.}\\[0.12cm]
+  \thumbline{thumb_wang_patch.pdf}{Derive faults from records, physics, shared hardware, and attacks; wrong actions are deficits.}\\[0.12cm]
+  \thumbline{thumb_ladder_step4.pdf}{Faults fail only on rungs containing them; discount simulated margins by measured transfer error.}\\[0.12cm]
+  \thumbline{thumb_is_ladder_step3.pdf}{Proving 100 FIT takes 293 zero-miss injections; rates need weights, and records keep all gaps.}
   \note{[1 min] [CORE] One line per segment, with the last two lines splitting the final segment. Ask students which slide taught each line. If short on time, read the second and the fifth.}
 \end{frame}
 
@@ -684,9 +696,10 @@ signature\_ed25519: b1f0b3e9c142e5181ed9...
 \end{frame}
 
 \begin{frame}{Read and explore}
-  \small
-  \begin{itemize}\setlength{\itemsep}{0.03cm}
+  \footnotesize
+  \begin{itemize}\setlength{\itemsep}{0.05cm}
     \item \textbf{Read:} Adversarial Verification, \S15.1 to \S15.13; Checkpoints 15.1 to 15.3; Napkin Math 15.1 to 15.3 by hand.
+    \item \textbf{Explore:} interactive \emph{Hardware Fault Injection} figure on mlsysbook.ai.
     \item Arlat et al., ``Fault Injection for Dependability Validation,'' \emph{IEEE TSE}, 1990.
     \item Leveson, \emph{Engineering a Safer World}, MIT Press, 2011.
     \item Fainekos and Pappas, ``Robustness of Temporal Logic Specifications,'' \emph{TCS}, 2009.
