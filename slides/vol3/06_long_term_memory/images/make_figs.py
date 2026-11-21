@@ -130,8 +130,8 @@ def fit_fig(path, k):
         ax.text(body_only * body + 80, y1, '???', va='center', fontsize=14, fontweight='bold', color=C['danger'])
     ax.text(-60, y1, 'Count bodies:\n12 records', ha='right', va='center', fontsize=12, fontweight='bold')
     ax.text(-60, y0, 'Count serialized:\n10 records', ha='right', va='center', fontsize=12, fontweight='bold', alpha=1.0 if k >= 2 else 0.0)
-    ax.axvline(a, color=C['text'], lw=1.6, ls='--')
-    ax.text(a, 1.5, ' allowance 6,144', fontsize=11, fontweight='bold', va='bottom', ha='center')
+    ax.plot([a, a], [-0.48, 1.36], color=C['text'], lw=1.6, ls='--')
+    ax.text(a, 1.46, 'allowance 6,144', fontsize=11, fontweight='bold', va='bottom', ha='center')
     ax.set_xlim(0, 10200)
     ax.set_ylim(-0.5, 1.75)
     ax.set_yticks([])
@@ -192,13 +192,14 @@ def scan_floor(path, k):
         ax.text(1200.0, budget_ms * 1.25, '10 ms search budget', fontsize=11, color=C['neutral'], fontweight='bold')
         t_filtered = 0.3072
         ax.plot([10000], [t_filtered], 'o', ms=11, color=C['data'], mec='white')
-        ax.annotate('10,000: 0.31 ms', (10000, t_filtered), xytext=(10, -14), textcoords='offset points', fontsize=12, fontweight='bold', color=C['data'])
+        ax.annotate('10,000: 0.31 ms', (10000, t_filtered), xytext=(10, -14), textcoords='offset points', fontsize=11.5, fontweight='bold', color=C['data'])
         ax.axvline(325520.8333, color=C['neutral'], lw=1.2, ls=':')
         ax.text(325520.8333 * 1.25, 0.02, 'ceiling about 326,000', fontsize=11, color=C['text'], fontweight='bold')
     ax.set_xscale('log')
     ax.set_yscale('log')
     ax.set_xlim(1000.0, 100000000.0)
     ax.set_ylim(0.01, 5000)
+    ax.tick_params(labelsize=12)
     ax.set_xlabel('Eligible vectors (768 dims, FP16)')
     ax.set_ylabel('Scan floor (ms)')
     ax.text(0.01, 0.97, 'derived, 50 GB/s host', transform=ax.transAxes, ha='left', va='top', fontsize=10, color=C['neutral'])
@@ -306,7 +307,7 @@ for k in (1, 2):
 
 def write_fig(path, k):
     s = Svg(900, 395)
-    rows = [('1  Commit the raw', 'observation', 'memory', ['tool output, revision, task id: durable before', 'any summary or embedding runs']), ('2  Admission gate', '', 'storage', ['permission and consent, record kind and scope,', 'evidence; a fidelity check for prose']), ('3  Identity, then', 'update', 'tools', ['same scope: supersede if its base version is', 'unchanged; other scope: keep both; unclear: flag']), ('4  Only then', 'deduplicate', 'compute', ['similarity may merge storage only when the', 'new record changes no state and no scope'])]
+    rows = [('1  Commit the raw', 'observation', 'memory', ['tool output, revision, task id: durable before', 'any summary or embedding runs']), ('2  Admission check', '', 'storage', ['permission and consent, record kind and scope,', 'evidence; a fidelity check for prose']), ('3  Identity, then', 'update', 'tools', ['same scope: supersede if its base version is', 'unchanged; other scope: keep both; unclear: flag']), ('4  Only then', 'deduplicate', 'compute', ['similarity may merge storage only when the', 'new record changes no state and no scope'])]
     shown = {1: 1, 2: 2, 3: 4}[k]
     for i, (h1, h2, role, det) in enumerate(rows[:shown]):
         y = 6 + i * 82
@@ -372,17 +373,23 @@ def generations_fig(path, k):
     for x, g in zip(gx, gens):
         s.parts.append(f'<line x1="{x}" y1="204" x2="{x}" y2="218" stroke="#475569" stroke-width="2"/>')
         s.text(x, 238, g, size=20, bold=True, color='#0f172a', anchor='middle')
-    bars = [('summary [r16, r18)', gx[0], gx[2], 46, 'struct', '#64748b'), ('pool.py r17 [r17, r18)', gx[1], gx[2], 106, 'tools', '#b45309'), ('pool.py r18 [r18, open)', gx[2], 605, 166, 'memory', '#15803d')]
-    for lab, x1, x2, y, role, col in bars:
-        s.parts.append(f'<line x1="{x1}" y1="{y}" x2="{x2}" y2="{y}" stroke="{col}" stroke-width="10"/>')
-        s.text(x1, y - 12, lab, size=20, color=col, bold=True)
     s.parts.append('<line x1="295" y1="16" x2="295" y2="206" stroke="#64748b" stroke-width="2" stroke-dasharray="5,4"/>')
-    s.text(286, 192, 'q@r17: 2', size=19, color='#475569', bold=True, anchor='end')
+    s.text(286, 194, 'q@r17: 2', size=19, color='#475569', bold=True, anchor='end')
     s.parts.append('<line x1="445" y1="16" x2="445" y2="206" stroke="#16a34a" stroke-width="2.5" stroke-dasharray="6,4"/>')
-    s.text(454, 192, 'q@r18: 1', size=19, role='memory', bold=True)
+    s.text(454, 194, 'q@r18: 1', size=19, role='memory', bold=True)
+    bars = [
+        ('summary [r16, r18)', gx[0], gx[2], 48, 'struct', '#64748b', 205),
+        ('pool.py r17 [r17, r18)', gx[1], gx[2], 108, 'tools', '#b45309', 238),
+        ('pool.py r18 [r18, open)', gx[2], 605, 168, 'memory', '#15803d', 248),
+    ]
+    for lab, x1, x2, y, role, col, bw in bars:
+        s.parts.append(f'<line x1="{x1}" y1="{y}" x2="{x2}" y2="{y}" stroke="{col}" stroke-width="10"/>')
+        tx = x1 if x1 + bw <= 625 else 625 - bw
+        s.parts.append(f'<rect x="{tx - 4}" y="{y - 31}" width="{bw}" height="24" rx="4" fill="white" fill-opacity="0.96"/>')
+        s.text(tx, y - 12, lab, size=20, color=col, bold=True)
     if k >= 2:
         s.rect(14, 254, 612, 70, 'compute', sw=2)
-        s.text(28, 282, '2. Commit r18: exclude r17 in 0.4 us', size=20, role='compute', bold=True)
+        s.text(28, 282, '2. Commit r18: exclude r17 in 0.4 µs', size=20, role='compute', bold=True)
         s.text(28, 310, 'Mid-rebuild queries read pool.py directly or say partial.', size=19, color='#0f172a')
     if k >= 3:
         s.rect(14, 336, 612, 70, 'fault', sw=2.5)

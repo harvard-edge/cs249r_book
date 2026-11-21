@@ -390,7 +390,7 @@ def dojo():
         ax.scatter(xs, ys, s=38, color=C['neutral'], alpha=0.75, zorder=2)
         e, l = (a['early'], a['late'])
         if k == 1:
-            ax.annotate('same model family, same utility:\n34% vs 1% attack success', (e['utility_pct'], e['targeted_asr_pct']), xytext=(40, 52), fontsize=11, ha='center', color=C['text'], arrowprops=dict(arrowstyle='-', color=C['text'], lw=1))
+            ax.annotate('same model family, same utility:\n34% vs. 1% attack success', (e['utility_pct'], e['targeted_asr_pct']), xytext=(40, 52), fontsize=11, ha='center', color=C['text'], arrowprops=dict(arrowstyle='-', color=C['text'], lw=1))
             ax.plot([e['utility_pct'], l['utility_pct']], [e['targeted_asr_pct'], l['targeted_asr_pct']], color=C['text'], lw=1, ls=':')
         if k == 2:
             ax.scatter([base['utility_pct']], [base['targeted_asr_pct']], s=60, color=C['text'], zorder=4)

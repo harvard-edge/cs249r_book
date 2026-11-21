@@ -84,8 +84,65 @@ def context_bars():
     ax.grid(axis='y', color=C['grid'], lw=0.6)
     ax.set_axisbelow(True)
     sp.save(fig, OUT / 'context_bars.svg')
+
+
+def course_map():
+    """Tall two-column course map for the Map activity slide (readable at half-slide).
+    Step 1: plain map for voting; Step 2: highlights L2 (a), L11 (b), L14 (c)."""
+    cols = [
+        [
+            ('Start', None, [('L1', 'Introduction', True)]),
+            ('Part I', 'The Model', [('L2', 'Foundation Model', False), ('L3', 'Test-Time Compute', False)]),
+            ('Part II', 'Agent Memory', [('L4', 'Context Engineering', False), ('L5', 'KV Cache', False), ('L6', 'Long-Term Memory', False)]),
+            ('Part III', 'Tool Use', [('L7', 'Tool Calling', False), ('L8', 'Sandboxes', False), ('L9', 'Agent Security', False)]),
+        ],
+        [
+            ('Part IV', 'The Agent Runtime', [('L10', 'Agent Harness', False), ('L11', 'Durable Execution', False), ('L12', 'Failure Recovery', False), ('L13', 'Agent Evaluation', False), ('L14', 'Operating Agents', False)]),
+            ('Part V', 'Learning', [('L15', 'Trajectory Curation', False), ('L16', 'Fine-Tuning', False), ('L17', 'RLVR', False)]),
+            ('Part VI', 'Agents at Scale', [('L18', 'Multi-Agent', False), ('L19', 'Agent Economics', False)]),
+            ('Close', None, [('L20', 'Conclusion', True)]),
+        ],
+    ]
+    answers = {'L2': 'a', 'L11': 'b', 'L14': 'c'}
+    W, H = 680, 512
+    col_w = 328
+    xs = [4, 348]
+    card_h, card_gap = 31, 4
+    hdr_h, sec_gap = 22, 11
+    FONT = 'Helvetica, Arial, sans-serif'
+    for step in (1, 2):
+        parts = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" viewBox="0 0 {W} {H}" role="img" aria-label="Course map">',
+                 f'<rect width="{W}" height="{H}" fill="white"/>']
+        for ci, sections in enumerate(cols):
+            x = xs[ci]
+            y = 4
+            for si, (part, sub, items) in enumerate(sections):
+                if si > 0:
+                    y += sec_gap
+                parts.append(f'<text x="{x + 3}" y="{y + 13}" font-family="{FONT}" font-size="19" font-weight="700" fill="#475569">{part}</text>')
+                if sub:
+                    dx = 74 if part in ('Part I', 'Part V') else 82 if part in ('Part II', 'Part IV', 'Part VI') else 86
+                    parts.append(f'<text x="{x + dx}" y="{y + 13}" font-family="{FONT}" font-size="17" font-weight="600" fill="#64748b">{sub}</text>')
+                y += hdr_h
+                for code, name, soft in items:
+                    hit = step == 2 and code in answers
+                    fill_op = '1.0' if hit else ('0.06' if soft else '0.13')
+                    sw = '2.2' if hit else '1.3'
+                    txt_col = '#FFFFFF' if hit else '#1A1A2E'
+                    num_col = '#FDE68A' if hit else '#581C87'
+                    parts.append(f'<rect x="{x}" y="{y}" width="{col_w}" height="{card_h}" rx="7" fill="#581C87" fill-opacity="{fill_op}" stroke="#581C87" stroke-width="{sw}"/>')
+                    parts.append(f'<text x="{x + 10}" y="{y + 21}" font-family="{FONT}" font-size="21" font-weight="700" fill="{txt_col}"><tspan fill="{num_col}">{code}</tspan> {name}</text>')
+                    if hit:
+                        parts.append(f'<circle cx="{x + col_w - 17}" cy="{y + card_h / 2:.1f}" r="11" fill="#FDE68A"/>')
+                        parts.append(f'<text x="{x + col_w - 17}" y="{y + 21}" font-family="{FONT}" font-size="18" font-weight="700" fill="#581C87" text-anchor="middle">{answers[code]}</text>')
+                    y += card_h + card_gap
+        parts.append('</svg>\n')
+        (OUT / f'course_map_step{step}.svg').write_text('\n'.join(parts))
+
+
 if __name__ == '__main__':
     trend_plot()
     loop_bars()
     context_bars()
+    course_map()
     print('figures written')

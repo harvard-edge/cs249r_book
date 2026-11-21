@@ -530,7 +530,7 @@ def gain():
     fig, ax = plt.subplots(figsize=(3.05, 1.8))
     xs = np.linspace(0, 0.9, 200)
     ax.plot(xs * 100, 1 / (1 - xs), color=C['data'], lw=2.6)
-    pts = [(0.1875, 1.25, 'repair: 1.25×', (28, 0.15)), (0.7058823529, 3.365853659, 'repair, shared\nworkspace: 3.4×', (3, 4.6)), (0.75, 4.0, 'support: 4.0×', (30, 8.3))]
+    pts = [(0.1875, 1.25, 'repair: 1.25×', (26, 1.85)), (0.7058823529, 3.365853659, 'repair, shared\nworkspace: 3.4×', (3, 4.6)), (0.75, 4.0, 'support: 4.0×', (30, 8.3))]
     for f, g, lab, xy in pts:
         ax.plot(f * 100, g, 'o', ms=8, color=C['memory'], mec='white', mew=1.5, zorder=3)
         ax.annotate(lab, (f * 100, g), xytext=xy, textcoords='data', fontsize=11, fontweight='bold', color=C['text'], arrowprops=dict(arrowstyle='-', color=C['neutral'], lw=0.8))

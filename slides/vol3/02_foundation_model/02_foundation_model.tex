@@ -59,7 +59,11 @@
 % =============================================================================
 % TITLE AND HOOK
 % =============================================================================
-\mlsysnote{[0.5 min] [CORE] Read the thesis aloud once. Lecture 1 put a model inside a loop that a runtime closes. Today opens the smallest unit of that loop, one model call, and asks what the runtime must check around it and what it costs. The running case is the repair agent's first inspection, read\_file("src/pool.py"), and we run it for real on a small open model. The notes total about 70.5 minutes; the core alone runs about 61. FLEX: cut the [OPTIONAL] frames first (the real call, tokenizer, top-p code, truncated call, self-review data, open questions); each carries a real artifact whose point the next core frame restates.}
+\mlsysnote{%
+  \mlsysnotemeta{0.5 min}{Core}%
+  A model call returns a token-bounded proposal across an untrusted boundary, so the runtime must check every reply, while output length and resent input govern its time and price. Lecture 1 placed the model inside a runtime-closed loop; Lecture 2 opens that loop's smallest unit using the repair agent's first inspection call, \cd{read\_file("src/pool.py")}, executed on a real 0.5B open model. The full lecture runs 70.5 minutes; omitting the six optional slides yields a complete 61.5-minute core lecture.
+
+  \notecue{Next}{Open with a 2025 production postmortem showing why identical prompts and unchanged weights still require runtime checks.}}
 \mlsystitle{The Foundation Model}{A model call is a token-bounded proposal across an untrusted boundary, so the runtime checks it, and output length and resent input set its time and price.}{cover_processor_blueprint.png}
 
 \begin{frame}{Same request, same weights: what would notice?}
@@ -69,7 +73,15 @@
   {\small Three serving bugs in 2025. Requests and model weights did not change. Green: fix or rollback.}\\[0.12cm]
   {\small\choice{A}{schema check}\quad\choice{B}{HTTP status}\quad\answerat{2}{C}{a test of the output}\quad\choice{D}{temperature 0}}
   \mlsyscredit{Dates and shares redrawn from Anthropic, ``A postmortem of three recent issues,'' September 2025 (anthropic.com/engineering). The Foundation Model, War Story 2.1.}
-  \note{[3 min] [CORE] Step 1: the dates and shares come from a real public postmortem; the original figure returns at the end of the lecture. Between August and early September 2025, three serving-side bugs degraded a production model's answers. A routing bug sent short requests to servers configured for a much longer context window, first 0.8 percent of one model's requests, then 16 percent at the worst hour; about 30 percent of active coding-agent users met at least one misrouted request. A kernel bug assigned high probability to unlikely tokens, and an approximate top-k selection was miscompiled. Requests and weights did not change. ENGAGE: vote with fingers; which check in an agent's runtime would have noticed? Step 2: C. The corrupted tokens arrived in well-formed responses with clean stop reasons, so the schema check (A) and the transport status (B) passed. Temperature 0 (D) does not help, because the serving path computes the logits. Only a check of the output against the world, a compiler or a test, sees a wrong token. WARN: students who pick A assume malformed text; the failure was fluent text. The synthesis returns to this timeline with the full list of records that help.}
+  \note{%
+  \mlsysnotemeta{3 min}{Core}%
+  Between August and early September 2025, Anthropic documented three serving-side defects that degraded replies while prompts and weights stayed unchanged. First, a routing bug sent short requests to long-context servers (0.8\% of one model's requests, spiking to 16\% at peak, touching roughly 30\% of active coding-agent users). Second, a kernel defect boosted low-probability tokens, and a miscompiled approximate top-k kernel dropped high logits. When the answer reveals, choice C (a test of the output) is the only check that catches the corruption.
+
+  \notecue{Check}{Predict which runtime check notices before revealing C. Schema validation (A) and HTTP status (B) pass because corrupted tokens still arrive in well-formed responses, and temperature 0 (D) cannot fix logits already skewed on the serving path.}
+
+  \notecue{Watch for}{These were fluent, schema-valid wrong replies rather than garbled crashes; the closing synthesis returns to this timeline with the full audit checklist.}
+
+  \notecue{Next}{Before examining one model call in detail, recall Lecture 1's two trajectory-level equations and see where one call sits in H$\cdot$S$\cdot$A space.}}
 \end{frame}
 
 \begin{frame}{What does a 30-step repair cost to finish?}
@@ -86,7 +98,13 @@
     \end{column}
   \end{columns}
   \mlsyscredit{Lecture 1: horizon compounding (Napkin Math 1.1) and cost per accepted task (Napkin Math 1.2). Locator: The Foundation Model, \S2.1.}
-  \note{[1.5 min] [CORE] Retrieval from Lecture 1. Give 45 seconds. Step 2: horizon compounding with per-step error rate $\epsilon$ and horizon $H$ in turns gives 0.99 to the 30th power, 74.0 percent. Cost per accepted task $C_{\text{eff}}$ divides the expected attempt cost by the acceptance probability: \$5.25. Both numbers are properties of the whole trajectory. Point to the locator: H, S, and A are the three exposures from Lecture 1, and a single model call sits at the origin of that space. ENGAGE: if one call is the smallest unit, what can go wrong inside it that the loop must catch? Take two answers and keep them for the synthesis. FLEX: a student who missed Lecture 1 needs only the two formulas on this slide.}
+  \note{%
+  \mlsysnotemeta{1.5 min}{Core}%
+  Recall both equations from Lecture 1 before revealing Step 2. Across $H = 30$ unchecked turns at per-step error $\epsilon = 1\%$, horizon compounding gives $(1-\epsilon)^H = 0.99^{30} = 74.0\%$. Cost per accepted task divides expected attempt spend by acceptance probability: $C_{\text{eff}} = \$2.10 / 0.40 = \$5.25$. On the right, the H$\cdot$S$\cdot$A locator puts a single model call at the origin: one turn, zero carried state, and zero ambient authority.
+
+  \notecue{Check}{Write both numbers from memory before checking the reveal, and ask what can fail inside a single call that the enclosing loop must intercept.}
+
+  \notecue{Next}{The goals slide maps those failure points onto four concrete engineering skills for this lecture.}}
 \end{frame}
 
 \begin{frame}{Why does a capable model need a contract per call?}
@@ -96,13 +114,23 @@
   \thumbline{thumb_deadline_step2.pdf}{Estimate a call's time from its output length, and the input a trajectory resends.}\\[0.12cm]
   {\footnotesize\textcolor{midgray}{Running case: the repair agent's inspection call, read\_file("src/pool.py"), run on a real 0.5B model.}}\\[0.1cm]
   \hsathread{adds no exposure; one call sits at the origin}
-  \note{[1 min] [CORE] The driving question from the chapter's Purpose: why does a capable model still need a precise contract around every call? Four goals, one per part of the lecture after the boundary; each thumbnail is the figure that teaches it. The running case is the repair agent from Lecture 1, inspecting src/pool.py before proposing a fix to a connection-pool race. To show real artifacts we ran that exact request on Qwen2.5-Coder-0.5B-Instruct, a small open model, on a laptop (images/run\_model.py). Its outputs are real, and its mistakes are real. WARN: a 0.5B model makes more mistakes than a frontier model; the lecture uses it only to show what the runtime receives.}
+  \note{%
+  \mlsysnotemeta{1 min}{Core}%
+  The driving question asks why even a capable model requires an explicit contract around every single call. Four thumbnail rows preview the four segments after the boundary: token-measured admission, decoding and replayability, invocation status and verification layers, and latency plus trajectory resend. Throughout, the running case is the repair agent inspecting \cd{src/pool.py}, run directly on Qwen2.5-Coder-0.5B-Instruct on a laptop so every wire format, logit distribution, and mistake is measured rather than simulated.
+
+  \notecue{Watch for}{A 0.5B model errs more often than a frontier model; we use it solely to inspect concrete artifacts arriving at the runtime boundary.}
+
+  \notecue{Next}{Section 1 opens at that boundary, separating model proposals from runtime actions and token admission.}}
 \end{frame}
 
 % =============================================================================
 % SECTION: BOUNDARY
 % =============================================================================
-\mlsysnote{[0.5 min] [CORE] First: who decides what happens to a model's output, and does the request even fit?}
+\mlsysnote{%
+  \mlsysnotemeta{0.5 min}{Core}%
+  Before asking how tokens are sampled or priced, Section 1 defines who acts on a model's output and how the runtime decides whether a serialized request fits the window.
+
+  \notecue{Next}{Trace the exact three-stage handoff between the inference service and the agent runtime.}}
 \mlsysdivider{Who acts on a model's output, and does the request fit?}{The Foundation Model, \S2.2 and \S2.3}
 \section{Boundary}
 
@@ -110,7 +138,13 @@
   \centering
   \mlsyssteps[width=0.98\textwidth,height=5.6cm,keepaspectratio]{boundary_step}{3}\\
   {\footnotesize Inference service: the system that hosts the weights and samples tokens.}
-  \note{[2.5 min] [CORE] Step 1: the model and the inference service, the system that hosts the weights and samples tokens, produce only text: read\_file("src/pool.py"). The chapter calls it a proposal (Definition 2.1): it carries zero ambient authority and changes nothing until the runtime validates, authorizes, and executes it. Step 2: the runtime first checks the schema (path is a string, no extra keys), then checks the path against the task's grant, so ../../etc/passwd fails here. Step 3: the tool runs in a sandbox, and the runtime appends the observation, the file excerpt, to the next prompt. The model has no memory between calls; it sees the file only because the runtime resends it. LINK: these are the six phases of a turn from Lecture 1; only the call belongs to the model. ENGAGE: what does a rejected proposal cost? (One model call, counted in $C_{\text{eff}}$; no change to the world.) WARN: logging a tool request as an executed action lets fluent text stand in for evidence. Lecture 7 owns how the runtime mediates every call.}
+  \note{%
+  \mlsysnotemeta{2.5 min}{Core}%
+  Follow the build across the proposal boundary. First, the model and its inference service (which hosts weights and samples tokens) emit only text: \cd{read\_file("src/pool.py")}. Definition 2.1 treats that output as a proposal with zero ambient authority. Second, the runtime checks the schema (string path, no extra fields) and checks authorization against the task grant, rejecting traversals like \cd{../../etc/passwd}. Third, the sandbox runs the tool and appends the file excerpt to the next prompt; because the model is stateless, it sees the file only when the runtime resends it.
+
+  \notecue{Watch for}{A rejected proposal still bills one model call into $C_{\text{eff}}$ without changing the world, and logging a model's tool request as an executed action mistakes fluent text for evidence (Lecture 7 develops full tool mediation).}
+
+  \notecue{Next}{Inspect the actual JSON output produced when we sent this exact request to Qwen2.5-Coder-0.5B-Instruct.}}
 \end{frame}
 
 \begin{frame}{A real model proposed a well-formed read of the wrong file}
@@ -138,7 +172,15 @@
     \end{column}
   \end{columns}
   \mlsyscredit{Qwen2.5-Coder-0.5B-Instruct (revision ea3f247), Hugging Face transformers 5.20.1, CPU; request = the chapter's Listing 1. Script: images/run\_model.py.}
-  \note{[2 min] [OPTIONAL] This is the real reply to the chapter's Listing 1 request: a system message, the user's request to inspect the locking logic in src/pool.py, and one advertised tool, read\_file with a required string path. The model finished normally after 35 tokens. Its reply parses as JSON and names the right tool. It also names a file that does not exist, and it wraps the call in a Markdown code fence instead of the tool-call tags the chat template asks for. ENGAGE: which runtime stage catches each problem? (A strict tool-call parser catches the wrapper; the schema check passes the path; only authorization and the file system catch the path.) LINK: Lecture 1 called this a fail-plausible fault, output that looks well formed while the intended property fails. WARN: a larger model would more likely name src/pool.py; the runtime must still check, because the same tokens could come from a corrupted serving path, as in the hook.}
+  \note{%
+  \mlsysnotemeta{2 min}{Optional}%
+  This card displays the real greedy output of Qwen2.5-Coder-0.5B-Instruct for Chapter 2's Listing 1 request asking to inspect \cd{src/pool.py} using one declared tool, \cd{read\_file}. Generation ended cleanly at end-of-sequence after 35 tokens with valid JSON and the right function name, yet it invented a nonexistent path (\cd{/path/to/repair/workspace/file.txt}) and used a Markdown fence instead of the template's \cd{<tool\_call>} tags. That illustrates Lecture 1's fail-plausible fault in live code: strict parsing catches the wrapper, schema checks pass the path, and only authorization and the filesystem reject the target.
+
+  \notecue{Watch for}{Larger models name \cd{src/pool.py} more reliably, yet the runtime must still validate every field because serving bugs can corrupt any model's tokens.}
+
+  \notecue{Optional}{For a 50-minute class, skip this slide; the next core slide uses the same request to measure wire token overhead.}
+
+  \notecue{Next}{Compare the human-written message length against the full serialized token count sent on the wire.}}
 \end{frame}
 
 \begin{frame}{The wire request holds 176 tokens; the messages hold 23}
@@ -162,15 +204,28 @@
     \end{column}
     \begin{column}{0.29\textwidth}
       \centering
-      {\Huge\bfseries\textcolor{mlsysaccent}{176}}\\[0.05cm]
-      {\small tokens on the wire}\\[0.3cm]
-      {\Large\bfseries 23}\\[0.05cm]
-      {\small tokens of message text}\\[0.3cm]
+      {\Huge\bfseries\textcolor{mlsysaccent}{176}}\\[0.04cm]
+      {\small tokens on the wire}\\[0.2cm]
+      \begin{tikzpicture}
+        \fill[mlsysaccent] (0,0) rectangle (0.52,0.42);
+        \fill[midgray!35] (0.52,0) rectangle (4.0,0.42);
+        \draw[darktext!40] (0,0) rectangle (4.0,0.42);
+        \node[font=\scriptsize\bfseries, text=white] at (0.26,0.21) {23};
+        \node[font=\scriptsize\bfseries, text=darktext] at (2.26,0.21) {153 framing (87\%)};
+      \end{tikzpicture}\\[0.2cm]
+      {\Large\bfseries 23}\\[0.04cm]
+      {\small tokens of message text}\\[0.2cm]
       \uncover<2->{\footnotesize Role markers, tool schemas, and format rules: 153 tokens (derived)}
     \end{column}
   \end{columns}
   \mlsyscredit{Real serialized request: Qwen2.5-Coder-0.5B-Instruct chat template with tools=[read\_file] (excerpt; [...] marks elided text; lines wrapped). Counts by the model's own tokenizer. images/run\_model.py.}
-  \note{[2 min] [CORE] Step 1: the runtime builds structured messages and tool definitions, but the model receives one serialized sequence. This is the exact wire text for our request, produced by the model's own chat template; gray is framing, purple is the text a person would count. The model's tokenizer counts 176 tokens on the wire against 10 for the system message and 13 for the user message. Step 2: 176 minus 23 is 153 tokens of role markers, tool schema, and format instructions. ENGAGE: the runtime estimates prompt size from the visible messages; by what factor is it wrong here? (7.7 times.) WARN: a remote service may add its own hidden wrapper; then the runtime must use the provider's token-counting endpoint. The admission rule on the next slides counts this whole sequence, never characters or messages. LINK: token-measured admission is this lecture's; Lecture 4 decides what goes into the working set.}
+  \note{%
+  \mlsysnotemeta{2 min}{Core}%
+  First, look at the exact wire text produced by the model's chat template for our inspection request. Purple highlights the 23 tokens a human author writes (10 in the system message, 13 in the user message), while gray marks the serialized framing. Next, Step 2 quantifies the gap: the model's tokenizer counts 176 wire tokens in total, meaning 153 tokens (87\%) come from role delimiters, tool schemas, and formatting instructions. Estimating request size from visible message text alone undercounts by 7.7$\times$ here.
+
+  \notecue{Watch for}{Remote APIs may prepend hidden provider wrappers, so runtimes should use the provider's token-counting endpoint rather than local character estimates. Token admission counts the entire wire sequence; Lecture 4 decides what enters the working set.}
+
+  \notecue{Next}{An optional detour inspects how subword tokenization splits ordinary code lines and file paths.}}
 \end{frame}
 
 \begin{frame}{Four spaces of indentation change the token sequence}
@@ -178,45 +233,71 @@
   \safeimg[width=0.94\textwidth,height=4.2cm,keepaspectratio]{tokens.pdf}\\[0.15cm]
   {\small \cd{src/pool.py} is one argument at the tool and 4 tokens at the model: \cd{src}, \cd{/p}, \cd{ool}, \cd{.py}.}
   \mlsyscredit{Real tokenizer output: tiktoken 0.14.0, cl100k\_base byte-pair encoding (BPE). The Foundation Model, \S2.3.1 and figure 2.}
-  \note{[1.5 min] [OPTIONAL] Real tokenizer output from tiktoken's cl100k\_base vocabulary, the example the chapter uses (\S2.3.1). Byte-pair encoding, BPE, learns frequent fragments from a training corpus, so token boundaries rarely match words or identifiers. The flush line def get\_user\_id(): is 5 tokens, starting with def at id 755. Indented by four spaces it is 6 tokens: three spaces (262), then " def" with the fourth space fused to it (711), then the same four tokens. A compiler's lexer sees the same keyword at both indents; the model sees a different opening sequence. The path src/pool.py is 4 tokens. ENGAGE: why can a runtime not use a fixed characters-per-token ratio? (Indentation, escaping, and rare identifiers change the count unpredictably.) WARN: counts differ across model families; this vocabulary differs from the 0.5B model's. FLEX: skip if short on time; the previous slide carries the rule.}
+  \note{%
+  \mlsysnotemeta{1.5 min}{Optional}%
+  This figure shows exact tokenizations from \texttt{tiktoken}'s \texttt{cl100k\_base} byte-pair encoding (BPE), matching \S2.3.1. Because BPE merges frequent training fragments, token boundaries diverge from program identifiers: \cd{src/pool.py} is one argument to a tool yet 4 tokens to the model. Flush \cd{def get\_user\_id():} takes 5 tokens starting with \cd{def} (755), whereas indenting by four spaces yields 6 tokens because three spaces form token 262 and the fourth fuses into \cd{" def"} (711).
+
+  \notecue{Watch for}{Fixed characters-per-token ratios fail on code because indentation, escaping, and rare identifiers shift token counts, and vocabularies differ across model families.}
+
+  \notecue{Optional}{For a 50-minute class, skip this slide; the previous slide already establishes counting full serialized tokens.}
+
+  \notecue{Next}{Turn serialized token counts into the formal admission inequality that reserves room for the reply.}}
 \end{frame}
 
 \begin{frame}{Admission counts the prompt and reserves the reply}
   \centering
   {\large Token-measured admission\qquad $S \;\le\; S_{\max} - K_{\max}$}\\[0.05cm]
   {\footnotesize $S$: serialized prompt tokens\quad $S_{\max}$: context window\quad $K_{\max}$: reserved output tokens}\\[0.1cm]
-  \mlsyssteps[width=0.96\textwidth,height=4.8cm,keepaspectratio]{admit_step}{3}
+  \mlsyssteps[width=0.96\textwidth,height=4.7cm,keepaspectratio]{admit_step}{2}
   \mlsyscredit{The Foundation Model, equation 1, \S2.3.2 and \S2.3.3 (scenario values).}
-  \note{[2 min] [CORE] Equation 1: a request is admitted only if its serialized length $S$ fits in the context window $S_{\max}$ with $K_{\max}$ tokens reserved for the reply. Step 1: the chapter's scenario, a window of 8,192 tokens and a reserve of 1,024, so the input ceiling is 7,168; a 6,000-token prompt leaves 1,168 to spare. Step 2: attach a screenshot of the failing dashboard. The vision front end reports 2,048 more context positions, so demand is 9,072, 880 over the window, and admission fails before the call is sent. Step 3: the next slide's question. WARN: reasoning models spend hidden reasoning tokens before the visible reply, and those count against $K_{\max}$; a three-line answer can exhaust a generous reserve. ENGAGE: what can the runtime do instead of failing? (Compress history, take a narrower file slice, downscale the image, or route to a larger window.) LINK: Lecture 5 prices what those tokens hold in memory.}
+  \note{%
+  \mlsysnotemeta{2 min}{Core}%
+  Equation 1 states token-measured admission: $S \le S_{\max} - K_{\max}$, where $S$ is the serialized prompt, $S_{\max}$ is the context window, and $K_{\max}$ is the reserved output budget. First, in Chapter 2's scenario ($S_{\max} = 8{,}192$, $K_{\max} = 1{,}024$), the input ceiling is 7,168 tokens, leaving 1,168 spare tokens after a 6,000-token prompt. Second, attaching a dashboard screenshot adds 2,048 vision context positions, pushing total demand to 9,072 tokens (880 over the window), so admission rejects the request before sending it.
+
+  \notecue{Watch for}{Reasoning models spend hidden reasoning tokens out of $K_{\max}$ before emitting visible text, so even a short answer can exhaust a generous reserve. When admission fails, the runtime compacts history, trims files, downscales images, or routes to a wider window (Lecture 5 prices the KV memory of admitted tokens).}
+
+  \notecue{Next}{Test this admission rule directly on a proposed workaround: halving the reply reserve.}}
 \end{frame}
 
 \begin{frame}{Does halving the reply reserve admit the image?}
   \mlsysactivity{Estimate}{2.5 min}
-  \begin{columns}[T]
-    \begin{column}{0.40\textwidth}
-      \begin{mlsyscard}{mlsysaccent}
-        \small\textbf{Given (Checkpoint 2.1)}\\[0.05cm]
-        Window: 8,192\\
-        Prompt: 6,000\\
-        Image: 2,048\\
-        Reserve: 1,024 $\rightarrow$ 512
-      \end{mlsyscard}
+  \begin{columns}[c]
+    \begin{column}{0.36\textwidth}
+      \begin{mlsyscard}[top=0.14em,bottom=0.14em]{mlsysaccent}
+        \footnotesize\textbf{Given (Checkpoint 2.1)}\\[0.03cm]
+        Window: 8,192 \quad Prompt: 6,000\\
+        Image: 2,048 \quad Reserve: 1,024 $\rightarrow$ 512
+      \end{mlsyscard}\par\vspace{0.08cm}
+      \footnotesize
+      \uncover<2->{$6{,}000 + 2{,}048 + 512 = 8{,}560$}\\[0.08cm]
+      \uncover<2->{$8{,}560 - 8{,}192 = \mathbf{\textcolor{RedLine}{368}}$ tokens over}\\[0.10cm]
+      \uncover<3->{Still rejected; a 512-token reserve also risks cutting a tool call mid-argument (\cd{TRUNCATED}).}
     \end{column}
-    \begin{column}{0.56\textwidth}
-      \small
-      \wstep{2}{$6{,}000 + 2{,}048 + 512 = 8{,}560$}
-      \wstep{2}{$8{,}560 - 8{,}192 = \mathbf{\textcolor{RedLine}{368}}$ tokens over (derived)}
-      \uncover<3->{The request still fails, and a 512-token reserve can cut a tool call mid-argument. The reply then ends \cd{TRUNCATED}.}
+    \begin{column}{0.61\textwidth}
+      \centering
+      \uncover<2->{\safeimg[width=\textwidth,height=4.4cm,keepaspectratio]{admit_step3.pdf}}
     \end{column}
   \end{columns}
   \mlsyscredit{The Foundation Model, Checkpoint 2.1. Derived.}
-  \note{[2.5 min] [CORE] ENGAGE: one minute alone, then compare with a neighbor. A teammate proposes halving the output reserve instead of shrinking the image. Does the request fit? Step 2: 6,000 plus 2,048 plus 512 is 8,560, still 368 over. Step 3: and even if it fit, a smaller reserve risks a reply that stops mid-argument; the next segment shows what that reply looks like. Expected answers: most students compute 368 correctly; the common error is to subtract only the image. WARN: shrinking the reserve to force admission trades a visible failure now for an invisible one later. The better moves are a narrower file slice, a downscaled image (at the cost of blurred error codes), or a larger window.}
+  \note{%
+  \mlsysnotemeta{2.5 min}{Core}%
+  In Checkpoint 2.1, a teammate suggests halving the output reserve from 1,024 to 512 tokens so the 6,000-token prompt plus 2,048-token screenshot fits an 8,192-token window. Step 2 runs the arithmetic: $6{,}000 + 2{,}048 + 512 = 8{,}560$, still 368 tokens over the ceiling. Step 3 adds the engineering consequence: even if cutting the reserve made the request fit, shrinking $K_{\max}$ risks truncating a tool call mid-argument.
+
+  \notecue{Check}{Calculate the surplus before revealing Step 2. Listeners who subtract only the 2,048-token image overlook the remaining reserve, missing that 368 tokens still overflow.}
+
+  \notecue{Watch for}{Shrinking $K_{\max}$ trades a clean pre-send rejection for a truncated mid-call failure; prefer narrowing file slices, downscaling the image (trading off fine text), or routing to a larger window.}
+
+  \notecue{Next}{Section 2 opens inside the inference service to examine how logits become tokens and why repeated calls diverge.}}
 \end{frame}
 
 % =============================================================================
 % SECTION: GENERATION
 % =============================================================================
-\mlsysnote{[0.5 min] [CORE] Land the first segment aloud: the model proposes, the runtime decides, and a request is admitted by its full token count with the reply reserved. Now: how does the service turn a fixed request into tokens, and why do repeated calls differ?}
+\mlsysnote{%
+  \mlsysnotemeta{0.5 min}{Core}%
+  Section 1 established that models propose while runtimes admit and execute. Section 2 examines how sampling turns logits into tokens and why even greedy calls do not replay identically on shared hardware.
+
+  \notecue{Next}{Inspect real next-token probabilities from our 0.5B inspection call under changing temperature and top-$p$.}}
 \mlsysdivider{Why do repeated calls differ, and what replays exactly?}{The Foundation Model, \S2.4}
 \section{Generation}
 
@@ -225,7 +306,13 @@
   \mlsyssteps[width=0.96\textwidth,height=5.0cm,keepaspectratio]{probs_step}{3}\\[0.02cm]
   {\footnotesize Next token after \cd{"path": "}. Sampling shapes candidates; only a check decides correctness.}
   \mlsyscredit{Real next-token probabilities: Qwen2.5-Coder-0.5B-Instruct on the chapter's Listing 1 request (images/run\_model.py; top 8 of 151,936 tokens).}
-  \note{[2.5 min] [CORE] Real data from our run. At each step the model scores every token in its 151,936-token vocabulary; the scores are logits, and softmax with temperature $T$ (equation 3) turns them into probabilities. Step 1: at the first token of the path, at $T = 1$, the model puts 34.6 percent on "path" (the start of /path/to/...), 16.3 percent on "C", and only 11.3 percent on "src", the file the prompt names. Greedy decoding takes "path". Step 2: halving the temperature to 0.5 raises "path" to 69.2 percent and cuts "src" to 7.4 percent. Lower temperature concentrates mass on the token the model already prefers; it does not move mass toward the correct one. Step 3: top-p 0.90 keeps the shortest set of tokens whose mass reaches 0.90; here that is 32 tokens, because this distribution is flat. ENGAGE: which setting is "more accurate"? (Neither; only a pass rate on the task can say.) WARN: students read high probability as confidence in correctness. Training rewarded predicting the next token; nothing in it scored whether a task was finished.}
+  \note{%
+  \mlsysnotemeta{2.5 min}{Core}%
+  At every decode step, the model scores all 151,936 vocabulary tokens with logits and applies temperature-scaled softmax (Equation 3). First, right after \cd{"path": "} at $T = 1$, our real 0.5B run places 34.6\% probability on \cd{path} (the invented path), 16.3\% on \cd{C}, and only 11.3\% on \cd{src}, the requested directory. Second, halving temperature to $T = 0.5$ lifts \cd{path} to 69.2\% while cutting \cd{src} to 7.4\%: lower temperature sharpens whatever the model already favors rather than moving probability toward truth. Third, top-$p = 0.90$ retains 32 tokens here because the distribution is flat.
+
+  \notecue{Watch for}{High next-token probability reflects training-distribution preference, not task correctness; neither temperature setting is ``more accurate'' until measured by task acceptance.}
+
+  \notecue{Next}{Quantify how sharply halving temperature collapses the non-top probability tail.}}
 \end{frame}
 
 \begin{frame}{How much mass does halving temperature move?}
@@ -233,7 +320,7 @@
   \begin{columns}[c]
     \begin{column}{0.56\textwidth}
       \centering
-      \mlsyssteps[width=\textwidth,height=4.85cm,keepaspectratio]{nm21_step}{2}\\
+      \mlsyssteps[width=\textwidth,height=4.25cm,keepaspectratio]{nm21_step}{2}\\
       {\footnotesize Bars: tokens $v_1$ to $v_5$, labeled by logit.}
     \end{column}
     \begin{column}{0.40\textwidth}
@@ -244,7 +331,13 @@
     \end{column}
   \end{columns}
   \mlsyscredit{The Foundation Model, Napkin Math 2.1 (hypothetical logits). Derived.}
-  \note{[2.5 min] [CORE] The chapter's worked example, with logits held fixed so only the decoding setting changes. ENGAGE: vote. Halving $T$ doubles every exponent. Step 2: B, 95.0 percent. The non-top tail falls from 21.6 to 5.0 percent, a 4.3 times cut, and no token reaches zero. Students who choose C confuse low temperature with greedy decoding; only the limit $T \rightarrow 0$, or an explicit argmax, removes the tail. Students who choose A underestimate the exponential. Top-p 0.90 at $T = 1$: $v_1$ alone has 0.7840, short of 0.90; adding $v_2$ reaches 0.9589, so the nucleus is two tokens, renormalized to 0.8176 and 0.1824. Compare the real call on the previous slide, where top-p 0.90 kept 32 tokens: top-p adapts to the spread. LINK: the tail is the diversity Lecture 3 spends when it samples many candidates.}
+  \note{%
+  \mlsysnotemeta{2.5 min}{Core}%
+  Napkin Math 2.1 holds five hypothetical logits $[12, 10.5, 9, 6, 3]$ fixed so only decoding changes. At $T = 1$, token $v_1$ holds 78.4\% of the mass and the remaining four tokens hold 21.6\%. When Step 2 reveals, choice B (95\%) holds: halving $T$ to 0.5 doubles every logit gap in the exponent, raising $p(v_1)$ to 95.0\% and cutting the tail 4.3$\times$ to 5.0\% without driving any token to zero. By contrast, top-$p = 0.90$ at $T = 1$ stops after two tokens ($v_1 + v_2 = 0.9589$, renormalized to 0.8176 and 0.1824), adapting to spread unlike the 32-token nucleus on the previous slide.
+
+  \notecue{Check}{Predict $p(v_1)$ at $T = 0.5$ before revealing B (95\%). Choice C (100\%) confuses low temperature with argmax ($T \to 0$), while choice A (80\%) underestimates exponential scaling.}
+
+  \notecue{Next}{Lecture 3 spends that tail diversity across parallel candidates; first, see how simple and task-blind a real top-$p$ filter is in framework code.}}
 \end{frame}
 
 \begin{frame}{Top-p sampling is twelve lines that never see the task}
@@ -273,7 +366,13 @@
     \end{column}
   \end{columns}
   \mlsyscredit{Hugging Face transformers 5.20.1, src/transformers/generation/logits\_process.py, TopPLogitsWarper.\_\_call\_\_ (lines 543 to 555; type hints and two comments dropped, lines wrapped).}
-  \note{[1 min] [OPTIONAL] The real top-p filter from a widely used framework. It sorts the scores, accumulates probability, marks the low-probability tail, and fills those scores with negative infinity so the sampler never draws them. Its only inputs are the scores and a threshold. Nothing here can know that src/pool.py exists or that /path/to/... does not. ENGAGE: where in the runtime does that knowledge enter? (Authorization and the tool observation, after the call.) WARN: the code sorts ascending and removes the tail below $1 - p$; it is the same rule as the slide before, written from the other end. FLEX: skip if short on time.}
+  \note{%
+  \mlsysnotemeta{1 min}{Optional}%
+  This twelve-line method is the actual \texttt{TopPLogitsWarper.\_\_call\_\_} from Hugging Face \texttt{transformers}. It sorts logits ascending, computes cumulative softmax probabilities, masks the low-probability tail below $1 - p$ to $-\infty$, and returns the filtered scores. Its sole inputs are numeric logits and a scalar threshold; it has zero visibility into filesystems, task grants, or tests, which enter only in runtime validation and tool observations afterward.
+
+  \notecue{Optional}{For a 50-minute class, skip this code slide; the previous two slides already cover how top-$p$ filters candidates without verifying correctness.}
+
+  \notecue{Next}{Even with temperature set to zero, real hardware measurements show why shared batching still moves logits.}}
 \end{frame}
 
 \begin{frame}{Sharing a batch changed 98.8\% of one request's logits}
@@ -299,7 +398,13 @@
     \end{column}
   \end{columns}
   \mlsyscredit{Measured: Qwen2.5-Coder-0.5B-Instruct, CPU, alone vs.\ left-padded batch of 2 (images/run\_model.py). Photo: Geekerwan, CC BY 3.0. \S2.4.3.}
-  \note{[2 min] [CORE] A real measurement. We computed the next-token logits for our request alone, then again inside a batch of two with a longer request, which pads ours with 295 tokens. In 32-bit floats, 150,078 of 151,936 logits changed (98.8 percent), by at most $3.9 \times 10^{-5}$; in bf16, 140,555 changed, by up to 0.25. The top token stayed the same here. Step 2: floating-point addition is not associative, so a different batch shape sums the same numbers in a different order (\S2.4.3). When two tokens nearly tie, that is enough to flip a greedy choice, and every later token then differs. ENGAGE: does fixing the random seed prevent this? (No; the seed controls only the sampler, and the arithmetic changes with the batch.) WARN: in production the batch depends on other users' traffic, which the caller cannot see. LINK: Lecture 11 builds record and replay into the runtime; today the rule is only that a recorded response replays and a served call does not.}
+  \note{%
+  \mlsysnotemeta{2 min}{Core}%
+  These measurements run our exact 176-token request on Qwen2.5-Coder-0.5B-Instruct first alone, then left-padded inside a batch of two alongside a 471-token request. In 32-bit float, 150,078 of 151,936 logits shifted (98.8\%) by up to $3.9 \times 10^{-5}$; in bfloat16, 140,555 shifted by up to 0.25, though the top token held here. Step 2 explains why: floating-point addition is non-associative, so changing batch shape alters reduction order (\S2.4.3). Whenever two candidates nearly tie, that drift flips greedy argmax and diverges every subsequent token.
+
+  \notecue{Watch for}{Fixing a random seed controls only sampler draws, not batch reduction order from concurrent tenant traffic. Log model revision and serving settings, and replay the recorded response rather than resending live requests (Lecture 11 builds durable replay).}
+
+  \notecue{Next}{Beyond normal floating-point drift, real serving kernels can fail outright, as shown in the third bug from our opening timeline.}}
 \end{frame}
 
 \begin{frame}{A miscompiled top-k kernel dropped the largest logit}
@@ -328,7 +433,13 @@
     \end{column}
   \end{columns}
   \mlsyscredit{Reproduction code: Anthropic, ``A postmortem of three recent issues,'' 2025 (excerpted). Photo: Norman P. Jouppi et al., CC BY 4.0, Wikimedia Commons. The Foundation Model, War Story 2.1.}
-  \note{[1.5 min] [CORE] The third bug from the hook, in the code the engineers used to reproduce it, published in the postmortem. The test builds an array of 12,000 zeros with a single one and asks both the approximate and the exact top-k for the largest value. On the accelerator the approximate routine failed for every position at or after 10,240. In a sampler, that means the most likely token can silently drop out of the candidate set. The fix replaced it with an exact top-k in 32-bit precision, trading a little throughput for correct selection. ENGAGE: would a caller's logs show this? (Only if they record the serving configuration and test outputs against the world; the request and the response format looked normal.) WARN: the bug sat in the serving path, so retraining would not fix it. FLEX: [CORE].}
+  \note{%
+  \mlsysnotemeta{1.5 min}{Core}%
+  This excerpt reproduces the third serving bug from Anthropic's 2025 postmortem. The script builds an array of 12,000 zeros with a single 1.0 at index $i$ and compares \cd{lax.approx\_max\_k} against exact \cd{lax.top\_k}. On the accelerator, the miscompiled approximate kernel dropped the 1.0 for every index $i \ge 10{,}240$, silently excluding the highest-scoring token from sampling. Engineers fixed it by switching to exact 32-bit top-k at a modest throughput cost.
+
+  \notecue{Watch for}{Because the defect sat in the serving kernel while weights and output schemas looked clean, retraining could not fix it; only serving telemetry paired with external output tests surfaces it.}
+
+  \notecue{Next}{Test your understanding of serving variation with a quick true-or-false check on greedy replay.}}
 \end{frame}
 
 \begin{frame}{True or false: greedy decoding replays a call?}
@@ -340,13 +451,23 @@
     Greedy fixes the choice for given logits, but the serving path computes the logits. Batch shape (98.8\% of logits shifted) and serving changes (16\% of requests at peak) both move them.
   \end{mlsyscard}}
   \mlsyscredit{The Foundation Model, \S2.10 (fallacy: greedy decoding makes a served call reproducible).}
-  \note{[2 min] [CORE] The chapter's fallacy as a concept question. Vote, discuss with a neighbor for 30 seconds, vote again. Step 2: false. Greedy selection is deterministic for a fixed logit vector and tie rule, but two causes change the vector. On a healthy serving path, batch-dependent reduction order shifts logits (our measurement, 98.8 percent of logits moved). A change in the serving path itself, as in the hook, changed outputs for identical requests (16 percent of one model's requests at the worst hour). ENGAGE: what should the runtime log with every call? (The serialized prompt, model and tokenizer identifiers, sampling settings, token limits, routing or seed metadata, the raw response, its stop reason, and token usage.) Then replay the recorded response to test downstream logic, and resend the live request only to measure variation. WARN: students who vote true are thinking of a single machine running one request.}
+  \note{%
+  \mlsysnotemeta{2 min}{Core}%
+  Evaluate the common claim that setting temperature to 0 makes a failed agent run reproducible by resending the same prompt. Step 2 reveals False: greedy selection is deterministic only for a fixed logit vector, whereas shared batching shifted 98.8\% of logits on healthy hardware and serving-path bugs altered up to 16\% of requests at peak.
+
+  \notecue{Check}{Vote true or false before revealing False. Listeners who vote True imagine an isolated single-request machine; in hosted serving, log the serialized prompt, model and tokenizer IDs, sampling settings, routing metadata, raw reply, stop reason, and usage, then replay the recorded response locally.}
+
+  \notecue{Next}{Section 3 moves from token generation to the invocation contract that checks whether a complete candidate arrived at all.}}
 \end{frame}
 
 % =============================================================================
 % SECTION: CONTRACT
 % =============================================================================
-\mlsysnote{[0.5 min] [CORE] Land the second segment: sampling reshapes candidates without testing them, and only a recorded call replays exactly. Now: how does the runtime know a complete candidate arrived at all?}
+\mlsysnote{%
+  \mlsysnotemeta{0.5 min}{Core}%
+  Sampling shapes candidate text without validating it, and only recorded responses replay cleanly. Section 3 builds the invocation contract that reads call status before touching any payload.
+
+  \notecue{Next}{See why an unchecked truncated reply can look completely valid while doing far more harm than intended.}}
 \mlsysdivider{How does the runtime know a whole candidate arrived?}{The Foundation Model, \S2.5}
 \section{Contract}
 
@@ -355,7 +476,13 @@
   \safeimg[width=0.86\textwidth,height=4.6cm,keepaspectratio]{rmrf.pdf}\\[0.1cm]
   {\small Both strings are valid shell commands. Only the call's status tells them apart.}
   \mlsyscredit{The Foundation Model, \S2.5 and \S2.5.2.}
-  \note{[1.5 min] [CORE] The chapter's example. The model starts a cleanup command for /tmp/scratch/cache\_dir and hits its token limit right after /tmp/scratch. The cut-off prefix is a valid shell command, and it deletes the whole parent directory: build outputs, results, everything beside the cache. A runtime that reads only the text cannot tell an intended short command from a cut one. ENGAGE: which field must arrive with the text to tell them apart? (How the call ended: completed, or stopped at the limit.) WARN: students propose checking whether the text parses; both strings parse. This is why the invocation contract pairs every payload with a status.}
+  \note{%
+  \mlsysnotemeta{1.5 min}{Core}%
+  Suppose the model begins generating a cleanup command targeting \cd{/tmp/scratch/cache\_dir}, and generation hits the output token cap right after \cd{/tmp/scratch}. The truncated prefix is still a syntactically valid shell command, yet executing it wipes the entire parent directory alongside the cache. Parsing the text alone cannot separate an intended short path from a cut-off path.
+
+  \notecue{Watch for}{Syntax checks cannot distinguish these two strings; the runtime must inspect the call's termination status before treating text as an executable candidate.}
+
+  \notecue{Next}{Define the seven normalized invocation statuses and the host quarantine rule.}}
 \end{frame}
 
 \begin{frame}{The runtime reads the status before the payload}
@@ -386,22 +513,43 @@
     \end{column}
   \end{columns}
   \mlsyscredit{The Foundation Model, Definition 2.2, table 2, and Listing 3 (variable renamed and message shortened to fit).}
-  \note{[2.5 min] [CORE] The invocation contract (Definition 2.2) is a pair of records: the request (prompt, model id, output limit, deadline, stop sequences, sampling settings) and a normalized envelope (status, payload, metadata with stop reason and token usage). Step 1: the runtime adapter maps every provider's signals onto seven statuses. COMPLETED means generation ended normally within limits, and nothing more: syntax, permission, and truth are still unchecked. TRANSPORT\_FAILURE records an unknown remote outcome, because a local timeout cannot tell a lost request from a lost reply (Birrell and Nelson's remote procedure call problem); the call may have run and been billed. Step 2: the quarantining rule as code. Anything not COMPLETED goes to a diagnostic log and never to dispatch. WARN: repairing a fragment by closing its braces invents a call the model never made. LINK: the next slide opens streaming rejection and cancellation; Lecture 12 decides recovery for each status.}
+  \note{%
+  \mlsysnotemeta{2.5 min}{Core}%
+  Definition 2.2 defines the invocation contract as a request record paired with a normalized response envelope carrying status, payload, and metadata. First, walk down the seven statuses mapped by the runtime adapter: only \cd{COMPLETED} enters candidate checks, and even it certifies nothing about syntax, authorization, or truth. \cd{TRUNCATED}, \cd{REFUSED}, \cd{REJECTED}, \cd{CANCELED}, and \cd{FAULTED} stay quarantined, while \cd{TRANSPORT\_FAILURE} marks an unknown remote outcome because a timeout cannot separate a lost request from a lost reply (Birrell and Nelson, 1984). Second, Listing 3 shows the quarantine guard raising an error on any status except \cd{COMPLETED}.
+
+  \notecue{Watch for}{Never auto-repair truncated JSON by closing dangling braces; that fabricates arguments the model never completed. Lecture 12 specifies recovery policies per status.}
+
+  \notecue{Next}{When replies stream token by token, the runtime can quarantine malformed outputs early rather than waiting for thousands of tokens.}}
 \end{frame}
 
 \begin{frame}{Early rejection stops dispatch; savings need an honored cancel}
   \centering
-  \mlsyssteps[width=0.96\textwidth,height=5.2cm,keepaspectratio]{cancel_step}{3}\\[0.06cm]
+  \mlsyssteps[width=0.96\textwidth,height=4.7cm,keepaspectratio]{cancel_step}{3}\\[0.06cm]
   {\footnotesize Local quarantine is guaranteed; stopping remote decode depends on the serving engine.}
   \mlsyscredit{The Foundation Model, \S2.5.3 (Explore: Streaming Cancellation on mlsysbook.ai); 21.075 ms reference floor (derived).}
-  \note{[2 min] [CORE] Waiting for a 4,096-token reply before validating wastes accelerator time when an early key violates the schema. Step 1: streaming lets the host inspect prefixes as chunks arrive; at step 96 the validator detects a prefix that can no longer complete into valid structure. Step 2: the host marks status REJECTED (distinct from CANCELED for a policy abort, or TRANSPORT\_FAILURE for a timeout), discards the partial payload locally so it never enters dispatch, and sends a cancel signal. Step 3: keeping the fragment out of dispatch is a local guarantee. Freeing the accelerator and sparing the remaining 4,000 steps (84.3 s at the 21.075 ms floor) happens only if the serving engine honors cancel; closing a client socket alone does not stop remote decoding or billing. ENGAGE: if the client closes the socket after 96 tokens, which side is certain? (Only local non-dispatch.) FLEX: [CORE].}
+  \note{%
+  \mlsysnotemeta{2 min}{Core}%
+  Waiting for a 4,096-token reply before validating wastes accelerator time once an early token breaks the schema. First, streaming lets the runtime validate prefixes incrementally, detecting an unrecoverable schema breach at token 96. Second, the host marks status \cd{REJECTED} (distinct from policy \cd{CANCELED} or timeout \cd{TRANSPORT\_FAILURE}), quarantines the fragment locally, and issues a cancel signal. Third, local non-dispatch is guaranteed immediately, whereas sparing the remaining 4,000 steps (84.3 s at the 21.075 ms floor) requires the remote serving engine to honor cancellation.
+
+  \notecue{Watch for}{Closing a client TCP socket does not guarantee the remote server stops decoding or billing; local quarantine is certain, remote compute savings are conditional.}
+
+  \notecue{Next}{An optional real example shows our 0.5B model cut cleanly at 24 tokens and why closing braces invents a bad call.}}
 \end{frame}
 
 \begin{frame}{A real call cut at 24 tokens still looks like a tool call}
+  \centering
+  \begin{tikzpicture}[scale=0.95, transform shape]
+    \fill[GreenL] (0,0) rectangle (8.4,0.42);
+    \draw[GreenLine, thick] (0,0) rectangle (8.4,0.42);
+    \node[font=\scriptsize\bfseries, text=GreenLine] at (3.2,0.21) {tok 1..24 (identical prefix)};
+    \node[font=\scriptsize\bfseries, text=GreenLine] at (7.0,0.21) {25..35 EOS};
+    \draw[RedLine, very thick, dashed] (5.75,-0.12) -- (5.75,0.54);
+    \node[font=\scriptsize\bfseries, text=RedLine, anchor=west] at (8.6,0.21) {Cut at 24 $\rightarrow$ TRUNCATED};
+  \end{tikzpicture}\\[0.14cm]
   \begin{columns}[T]
     \begin{column}{0.53\textwidth}
-      {\small\textbf{max\_new\_tokens = 128}}\\[0.05cm]
-      \begin{mlsyscard}{GreenLine}\ttfamily\codesize
+      {\small\textbf{max\_new\_tokens = 128}}\\[0.04cm]
+      \begin{mlsyscard}[top=0.22em,bottom=0.22em]{GreenLine}\ttfamily\codesize
         \{\\
         \ind"name": "read\_file",\\
         \ind"arguments": \{\\
@@ -413,20 +561,28 @@
       {\footnotesize status COMPLETED (end of sequence), 35 tokens}
     \end{column}
     \begin{column}{0.44\textwidth}
-      {\small\textbf{max\_new\_tokens = 24}}\\[0.05cm]
-      \begin{mlsyscard}{RedLine}\ttfamily\codesize
+      {\small\textbf{max\_new\_tokens = 24}}\\[0.04cm]
+      \begin{mlsyscard}[top=0.22em,bottom=0.22em]{RedLine}\ttfamily\codesize
         \{\\
         \ind"name": "read\_file",\\
         \ind"arguments": \{\\
         \ind\ind"path":\\
         \ind\ind"/path/to
       \end{mlsyscard}
-      {\footnotesize status TRUNCATED (length), 24 tokens}\\[0.1cm]
+      {\footnotesize status TRUNCATED (length), 24 tokens}\\[0.08cm]
       \uncover<2->{\footnotesize Closing the braces would invent \cd{read\_file("/path/to")}.}
     \end{column}
   \end{columns}
   \mlsyscredit{Real outputs, same request, greedy, two output limits (fence lines omitted; break added at the path). Qwen2.5-Coder-0.5B-Instruct; images/run\_model.py.}
-  \note{[1.5 min] [OPTIONAL] Two real calls with the same request, differing only in the output limit. With 128 tokens the model finishes after 35 and the engine reports end of sequence: status COMPLETED. With 24 tokens it stops mid-path and the engine reports the length limit: status TRUNCATED. The first three lines are identical, and the fragment is a legal JSON prefix. Step 2: a lenient "repair parser" that closes the string and braces would produce read\_file("/path/to"), a request no one made, for a directory instead of a file. ENGAGE: which record, kept with the payload, prevents that? (The stop reason, mapped to TRUNCATED.) WARN: retrying the same request at the same limit truncates again; the fix is a larger allowance or a more compact output format.}
+  \note{%
+  \mlsysnotemeta{1.5 min}{Optional}%
+  Running the identical greedy request twice on Qwen2.5-Coder-0.5B-Instruct illustrates truncation in live output. At \cd{max\_new\_tokens = 128}, generation finishes at end-of-sequence after 35 tokens (\cd{COMPLETED}). At \cd{max\_new\_tokens = 24}, the prefix matches identically through token 24 and stops mid-path at \cd{"/path/to} (\cd{TRUNCATED}). Step 2 highlights the hazard: a lenient repair parser that closes quotes and braces fabricates \cd{read\_file("/path/to")}, turning a file read into a directory call nobody proposed.
+
+  \notecue{Watch for}{Retrying the same request under the same 24-token limit truncates again; recover by raising the reserve or tightening the output format.}
+
+  \notecue{Optional}{For a 50-minute class, skip this slide; the \cd{rm -rf} example already demonstrates why truncated prefixes cannot be repaired or dispatched.}
+
+  \notecue{Next}{Diagnose four real invocation symptoms to map each to its status and proper recovery action.}}
 \end{frame}
 
 \begin{frame}{Which status, and which next action?}
@@ -441,13 +597,23 @@
   \end{tabular}\\[0.12cm]
   \uncover<3->{\footnotesize Blind retries repeat the cause in rows 2 to 4; in row 1 the remote call may still be running.}
   \mlsyscredit{The Foundation Model, table 2 and \S2.10 (pitfall: collapsing every unsuccessful outcome into the same retry).}
-  \note{[3 min] [CORE] ENGAGE: pairs, two minutes. For each symptom name the status the adapter records and the next action. Step 2: (1) a local deadline expiry is TRANSPORT\_FAILURE with an unknown remote outcome; the server may have finished and billed the call. (2) TRUNCATED; the same request truncates again at the same limit. (3) REFUSED; a refusal refuses again. (4) is the trap: the call is COMPLETED, because generation ended normally; the failure is in authorization or the file system, and the fix is a fresh observation, such as listing the directory. Step 3: the chapter's pitfall. A runtime that treats every failure like a dropped packet resends the identical request and repeats the cause. Expected errors: students mark row 4 as a failed call; the status describes generation and says nothing about the task. LINK: Lecture 12 owns the order of recovery decisions; Lecture 7 owns retrying an uncertain action safely.}
+  \note{%
+  \mlsysnotemeta{3 min}{Core}%
+  Map all four symptoms from Table 2 before revealing Steps 2 and 3. Row 1: a 15 s deadline expiry is \cd{TRANSPORT\_FAILURE} with an unknown remote outcome, requiring reconciliation before resending because the server may still bill or execute. Row 2: hitting \cd{max\_output\_tokens} is \cd{TRUNCATED}, fixed by raising the allowance or shortening the format. Row 3: a safety refusal is \cd{REFUSED}, routed to refusal policy without blind retries. Row 4: valid JSON naming a missing file is \cd{COMPLETED}, because generation succeeded; authorization fails downstream and the fix is a fresh observation such as listing the directory. Step 3 lands the pitfall: blind retries repeat the root cause in rows 2--4.
+
+  \notecue{Check}{Diagnose status and action for all four rows before revealing Step 2. Row 4 is the trap: students often mark a wrong file path as a failed model call, confusing generation status with task validity.}
+
+  \notecue{Next}{Once status is \cd{COMPLETED}, Section 4 asks what each downstream check actually proves about the candidate.}}
 \end{frame}
 
 % =============================================================================
 % SECTION: CHECKS
 % =============================================================================
-\mlsysnote{[0.5 min] [CORE] Land the third segment: the status says whether a complete candidate arrived, and nothing else. Now: what does each check on a completed candidate actually prove?}
+\mlsysnote{%
+  \mlsysnotemeta{0.5 min}{Core}%
+  A \cd{COMPLETED} status guarantees only that decoding finished inside limits. Section 4 orders the verification layers above a completed candidate and quantifies what each layer can and cannot certify.
+
+  \notecue{Next}{Walk up the four-layer verification ladder from cheapest syntax check to execution tests.}}
 \mlsysdivider{What does each check on a candidate prove?}{The Foundation Model, \S2.6 and \S2.7}
 \section{Checks}
 
@@ -455,7 +621,13 @@
   \centering
   \mlsyssteps[width=0.98\textwidth,height=6.3cm,keepaspectratio]{ladder_step}{4}
   \mlsyscredit{The Foundation Model, table 3 and \S2.6.3.}
-  \note{[2.5 min] [CORE] The chapter's four verification layers, ordered from cheap to costly. Step 1: a parser and schema validator certify fields and types; the read\_file call from our run passes, wrong path and all. Step 2: authorization checks the target against the task's grant at the moment of access, Saltzer and Schroeder's complete mediation; it says nothing about whether the read serves the goal. Step 3: a compiler or linter certifies what its analysis covers under its flags. Step 4: tests certify the inputs they exercised; a passing single-threaded test says nothing about the race in the connection pool. ENGAGE: an inspection call needs which rows before dispatch? (The first two; reading the file produces only an observation.) A patch needs all four, in a sandbox. WARN: ordering by cost saves compute, but each row certifies its own property, and no row is a stricter copy of another. LINK: Lecture 1's closure evidence levels rank this same kind of evidence.}
+  \note{%
+  \mlsysnotemeta{2.5 min}{Core}%
+  Build Chapter 2's four verification layers from cheapest to most expensive. First, parsers and schema validators verify field names and types; our 0.5B \cd{read\_file} call passes with its invented path intact. Second, authorization checks target paths against task grants at access time (complete mediation), though it cannot prove the read helps fix the bug. Third, compilers and linters prove only what their static flags cover. Fourth, tests certify only the exercised inputs: a passing single-threaded test misses a connection-pool race. An inspection read needs rows 1--2 before dispatch; a code patch needs all four inside a sandbox.
+
+  \notecue{Watch for}{Running cheap checks first saves compute, yet each layer certifies an independent property rather than acting as a stronger copy of the layer below, aligning with Lecture 1's evidence levels.}
+
+  \notecue{Next}{An optional empirical slide tests whether asking the model to double-check itself substitutes for external checks.}}
 \end{frame}
 
 \begin{frame}{Self-review without new evidence lowered GPT-4's accuracy}
@@ -463,29 +635,48 @@
   \mlsyssteps[width=0.90\textwidth,height=4.9cm,keepaspectratio]{huang_step}{2}\\[0.02cm]
   {\footnotesize Same model, asked to review and revise its own answer twice, with no new information.}
   \mlsyscredit{Huang et al., ``Large Language Models Cannot Self-Correct Reasoning Yet,'' ICLR 2024, Table 3 (intrinsic self-correction) and Table 2 (oracle labels), GPT-4 rows.}
-  \note{[2 min] [OPTIONAL] Published measurements, read from the paper's tables. Step 1: GPT-4's accuracy with one answer (gray) and after two rounds of asking it to review and revise its own answer (red): 95.5 to 89.0 on GSM8K math, 82.0 to 80.0 on CommonSenseQA, 49.0 to 43.0 on HotpotQA. Self-review is one more generation from the same weights and the same context; a mistaken assumption usually survives it, and correct answers get changed to wrong ones. Step 2: green, the same loop stopped by the true label, an external oracle: 97.5, 85.5, and 59.0. External evidence helped; the extra calls alone lowered accuracy. ENGAGE: in an agent, what plays the role of the oracle? (A compiler, a test run, a file read; something outside the model.) WARN: the oracle numbers use labels a real agent does not have; they show where the gain comes from, and a deployed agent has no such labels. LINK: learned judges are graded in Lecture 13.}
+  \note{%
+  \mlsysnotemeta{2 min}{Optional}%
+  Huang et al. (ICLR 2024) measured GPT-4 on GSM8K, CommonSenseQA, and HotpotQA with no new external evidence. First, Step 1 compares single-pass accuracy (gray) against two rounds of intrinsic self-review (red): accuracy dropped on every benchmark, from 95.5\% to 89.0\%, 82.0\% to 80.0\%, and 49.0\% to 43.0\%. Because self-review resamples from the same weights and prompt, flawed assumptions persist while right answers flip wrong. Second, Step 2 adds external oracle feedback (green), lifting scores to 97.5\%, 85.5\%, and 59.0\%: external evidence drives the gain.
+
+  \notecue{Watch for}{Deployed agents lack oracle labels and rely instead on compilers, tests, and file observations; learned judges are evaluated separately in Lecture 13.}
+
+  \notecue{Optional}{For a 50-minute class, skip this slide and note on the next Bayes slide that only independent external checks reduce residual defects.}
+
+  \notecue{Next}{Use Bayes' rule to compute how many defective patches slip past an imperfect check.}}
 \end{frame}
 
 \begin{frame}{How many passing patches are still defective?}
   \mlsysactivity{Estimate}{3 min}
-  \begin{columns}[T]
-    \begin{column}{0.36\textwidth}
-      \begin{mlsyscard}{mlsysaccent}
-        \small\textbf{Given (Sys.\ Persp.\ 2.1)}\\[0.05cm]
-        Defective: 18\%\\
-        Passes a defective patch: 0.65\\
-        Passes a valid patch: 0.85
+  \begin{columns}[c]
+    \begin{column}{0.38\textwidth}
+      \begin{mlsyscard}[top=0.22em,bottom=0.22em]{mlsysaccent}
+        \footnotesize\textbf{Given (Sys.\ Persp.\ 2.1)}\\[0.04cm]
+        Defective share: 18\% (valid: 82\%)\\
+        False-accept rate (\textbf{FA}): 0.65\\
+        Valid-accept rate: 0.85
       \end{mlsyscard}
-      {\footnotesize $\Pr(\text{Def}\mid\text{PASS}) = \dfrac{0.65 \times 0.18}{0.65 \times 0.18 + 0.85 \times 0.82}$}
     \end{column}
-    \begin{column}{0.60\textwidth}
+    \begin{column}{0.59\textwidth}
       \centering
-      \mlsyssteps[width=\textwidth,height=3.6cm,keepaspectratio]{bayes_step}{3}\\[0.05cm]
-      \uncover<3->{\footnotesize Rerunning the same check buys nothing: its errors repeat on the same patches.}
+      \mlsyssteps[width=\textwidth,height=3.3cm,keepaspectratio]{bayes_step}{3}
     \end{column}
   \end{columns}
+  \vspace{0.15cm}
+  \centering
+  \uncover<2->{\small $\Pr(\text{Def}\mid\text{PASS}) = \dfrac{0.65 \times 0.18}{0.65 \times 0.18 + 0.85 \times 0.82} = \mathbf{14.4\%}$}%
+  \uncover<3->{\qquad Halving FA ($0.65 \rightarrow 0.325$) $\Rightarrow \mathbf{7.7\%}$}\\[0.1cm]
+  \uncover<3->{\footnotesize Rerunning the same check buys nothing: its errors repeat on the same patches.}
   \mlsyscredit{The Foundation Model, Systems Perspective 2.1 and equation 4 (assumed rates). Derived.}
-  \note{[3 min] [CORE] ENGAGE: two minutes with a neighbor; of the patches that pass, what share is defective? Step 1: 18 percent of generated patches violate the concurrency property. Step 2: Bayes' rule (equation 4): 0.65 times 0.18 over that plus 0.85 times 0.82 gives 14.37 percent. The check moved the defect share only from 18 to 14.4 percent, because it rejects only 35 percent of defective patches while also rejecting 15 percent of valid ones. Step 3: the lever is the false-accept rate. Halving it to 0.325 lowers the residual to 7.7 percent. Repeating the same check does not, because its behavior on the survivors is correlated with the first pass. Expected errors: students answer 0.65 times 0.18 = 11.7 percent, the joint probability, forgetting to divide by all passes. WARN: every defective patch that passes also inflates the acceptance probability in $C_{\text{eff}}$. LINK: Lecture 3 owns verifier precision when choosing among many candidates.}
+  \note{%
+  \mlsysnotemeta{3 min}{Core}%
+  In Systems Perspective 2.1, 18\% of generated patches are defective (82\% valid), and a weak check accepts 65\% of defective patches (false-accept rate FA = 0.65) and 85\% of valid patches. Step 1 sets the base rates. Step 2 applies Bayes' rule (Equation 4): $\Pr(\text{Def}\mid\text{PASS}) = (0.65 \times 0.18) / (0.65 \times 0.18 + 0.85 \times 0.82) = 14.4\%$ (exact 14.37\%), barely improving on 18\%. Step 3 shows the true lever: halving false acceptance from 0.65 to 0.325 drops residual defects to 7.7\%, whereas rerunning the identical check buys nothing because its errors correlate across passes.
+
+  \notecue{Check}{Compute the posterior defect share before revealing Step 2. Listeners who answer 11.7\% ($0.65 \times 0.18$) compute the joint probability of defective-and-passing and forget to divide by all passing patches.}
+
+  \notecue{Watch for}{False acceptances also artificially inflate $p_{\text{acc}}$ in $C_{\text{eff}}$; Lecture 3 extends verifier precision to multi-candidate pools.}
+
+  \notecue{Next}{Examine whether grammar-constrained decoding removes the need for those downstream checks.}}
 \end{frame}
 
 \begin{frame}{A grammar mask keeps every legal token, including wrong paths}
@@ -493,13 +684,23 @@
   \safeimg[width=0.96\textwidth,height=5.0cm,keepaspectratio]{mask.pdf}\\[0.05cm]
   {\small The mask sets illegal logits to $-\infty$, so a \textbf{completed} reply is valid syntax.}
   \mlsyscredit{Candidates and probabilities: the real call (images/run\_model.py). The Foundation Model, Definition 2.3, equation 5, and table 4.}
-  \note{[2.5 min] [CORE] Grammar-constrained decoding (Definition 2.3): the engine tracks a parser state for the target grammar, and at each step adds a mask to the logits, 0 for tokens that keep a viable prefix and minus infinity for the rest (equation 5). Engines compile the schema once into an automaton so each step is a lookup. Applied to our real call at the first token of the path, the parser is inside a JSON string, so every one of the eight real candidates is legal, including "path", which leads to the invented file. Only raw control characters and bad escapes are removed. The mask moves the first row of the check ladder into generation and leaves the other rows where they were. ENGAGE: if the output limit cuts a masked reply at "src/po, may the runtime dispatch it? (No; it is TRUNCATED, and the mask never promotes an unfinished prefix.) WARN: a schema that requires a path and offers no "unknown" branch forces the model to invent one when the context lacks it; add an explicit unknown variant. FLEX: [CORE].}
+  \note{%
+  \mlsysnotemeta{2.5 min}{Core}%
+  Grammar-constrained decoding (Definition 2.3, Equation 5) compiles a schema into an automaton and masks logits at every step: 0 for tokens keeping a valid prefix, $-\infty$ for illegal tokens. Applied to our real 0.5B call inside the JSON path string, all eight top candidates remain legal, including \cd{path} leading to the invented file; only control characters and invalid escapes are masked out. Thus grammar masking pulls Layer 1 (syntax) into generation while leaving authorization, compilation, and testing untouched.
+
+  \notecue{Watch for}{A masked call cut off mid-string is still \cd{TRUNCATED} and must never dispatch. Also include an explicit ``unknown'' schema branch so forced syntax does not compel the model to invent missing arguments.}
+
+  \notecue{Next}{Section 5 moves from correctness contracts to latency floors and cumulative trajectory token costs.}}
 \end{frame}
 
 % =============================================================================
 % SECTION: COST
 % =============================================================================
-\mlsysnote{[0.5 min] [CORE] Land the fourth segment: each check certifies one property, self-review adds none, and a grammar mask guarantees syntax only for a completed reply. Last: what does a call cost in time, and what does a trajectory of calls resend?}
+\mlsysnote{%
+  \mlsysnotemeta{0.5 min}{Core}%
+  Every check and interface design carries a serving bill. Section 5 derives why output tokens dominate single-call latency and why multi-turn resend grows quadratically with horizon.
+
+  \notecue{Next}{Derive the hardware prefill and decode latency floors from model weights and HBM bandwidth.}}
 \mlsysdivider{What sets a call's time, and what does a trajectory resend?}{The Foundation Model, \S2.8 and \S2.9}
 \section{Cost}
 
@@ -518,15 +719,27 @@
     \end{column}
   \end{columns}
   \mlsyscredit{Photo: AMD Fiji package, C. Spille/pcgameshardware.de, CC BY-SA 4.0, Wikimedia Commons. Floors: The Foundation Model, equations 7 and 8, \S2.8.2.}
-  \note{[2.5 min] [CORE] The photo shows an accelerator package: the large compute die in the center and four stacks of high-bandwidth memory beside it. The weights live in those stacks. Prefill reads the whole prompt in one parallel pass, so each weight is fetched once and reused across thousands of prompt tokens: about $2P$ operations per token at the peak rate, 71.35 microseconds per token for the chapter's reference deployment. Decode produces one token per pass at batch one, so every output token reads every weight: 70.6 GB over 3.35 TB/s, at least 21.075 ms. Step 2: the ratio (equation 8) is about 295, independent of model size. This is output-bound latency, the Part I principle. The chapter's first repair turn makes it concrete: 8,000 prompt tokens take 0.571 s, 200 output tokens take 4.215 s; output is 2.4 percent of the tokens and 88.1 percent of the time. WARN: these are computed floors for unbatched decode; a real service batches requests, which amortizes the weight read (the Inference Cost Foundations appendix derives the batched bound).}
+  \note{%
+  \mlsysnotemeta{2.5 min}{Core}%
+  The package photo shows a compute die flanked by four high-bandwidth memory (HBM) stacks holding the model weights. Prefill processes the entire prompt in parallel, amortizing one weight read across thousands of tokens: $\tau_{\text{prefill}} \approx 2P/R_{\text{peak}} = 71.35\,\mu\text{s}$ per prompt token at the reference 70.6B 8-bit deployment ($R_{\text{peak}} = 1{,}979\text{ TFLOP/s}$). Unbatched decode emits one token per pass, streaming all 70.6 GB across 3.35 TB/s: $\tau_{\text{decode}} \ge Pb/BW = 21.075\text{ ms}$ per output token. Step 2 reveals Equation 8: one output token costs roughly 295 prompt tokens independent of model size. On the repair agent's first turn (8,000 prompt tokens = 0.571 s; 200 output tokens = 4.215 s), output is 2.4\% of tokens yet 88.1\% of time.
+
+  \notecue{Watch for}{These are unbatched latency floors; batching concurrent requests amortizes weight reads across users (derived in the Inference Cost Foundations appendix).}
+
+  \notecue{Next}{See why client-observed time to first token exceeds server prefill time alone.}}
 \end{frame}
 
 \begin{frame}{Client time to first token exceeds server prefill}
   \centering
-  \mlsyssteps[width=0.96\textwidth,height=5.2cm,keepaspectratio]{first_token_step}{3}\\[0.06cm]
+  \mlsyssteps[width=0.96\textwidth,height=4.7cm,keepaspectratio]{first_token_step}{3}\\[0.06cm]
   {\footnotesize Streamed latency adds client TTFT and $K - 1$ later intervals without double-counting token 1.}
   \mlsyscredit{The Foundation Model, \S2.8.1 (Explore: First-Token Accounting on mlsysbook.ai); schematic timeline, distances not to scale.}
-  \note{[2 min] [CORE] Step 1: prefill reads the prompt and emits the logits for the first output token; that server interval is only one piece of client delay. Step 2: client time to first token (TTFT) spans sending the request, network transit, server queueing, prompt prefill, first-token sampling, and delivering token 1. Step 3: only the remaining $K - 1$ tokens need later decode passes, and services often batch several streamed tokens into one network chunk. ENGAGE: if client TTFT doubles on a fixed prompt, does that prove prefill got slower? (No; a congested queue can burn the entire deadline before prefill begins, and chunk arrival times do not isolate per-step accelerator time.) WARN: diagnosing latency needs server queueing and execution boundaries, not finer client chunk timestamps. FLEX: [CORE].}
+  \note{%
+  \mlsysnotemeta{2 min}{Core}%
+  Trace a streamed request end to end in three clicks. First, server prefill processes the prompt and emits logits for token 1. Second, client time to first token (TTFT) includes request upload, network transit, server queueing, prefill, first-token sampling, and first-chunk delivery. Third, only the remaining $K - 1$ tokens require subsequent decode steps, and gateways often coalesce multiple tokens into one network chunk without double-counting token 1.
+
+  \notecue{Watch for}{A sudden doubling of client TTFT on a fixed prompt does not prove prefill slowed down: server queue congestion can consume an entire deadline before prefill begins, so latency diagnosis requires server-side timestamps.}
+
+  \notecue{Next}{Validate this output-bound asymmetry against real CPU measurements and a production code-completion trace.}}
 \end{frame}
 
 \begin{frame}{Real traffic is mostly input tokens; time goes to output}
@@ -539,51 +752,73 @@
     \begin{column}{0.48\textwidth}
       \centering{\small\textbf{Code-completion trace, 8,819 requests}}\\[0.05cm]
       \safeimg[width=\textwidth,height=3.9cm,keepaspectratio]{azure.pdf}\\[0.1cm]
-      {\small Input: 98.7\% of tokens; output: 80\% of time.}
+      {\small Trace totals: 98.7\% input tokens; 80\% output time.}
     \end{column}
   \end{columns}
   \mlsyscredit{Left: images/run\_model.py, CPU float32, batch 1, medians of 5 and 3 runs. Right: Azure LLM inference trace 2023, code (Patel et al., ISCA 2024), CC BY 4.0; time share derived.}
-  \note{[2 min] [CORE] Two real measurements. Left: our 0.5B model on a laptop CPU, batch one. A 2,048-token prompt prefilled in 2.05 s, about 1.0 ms per token; decode took 35.1 ms per token. One output token cost about 35 prompt tokens of time (25 to 41 across runs). The ratio is smaller than 295 because a laptop CPU does not reach its arithmetic peak on prefill; the direction is the same. Right: a public trace of 8,819 production code-completion requests to an LLM service. The median request sent 1,469 prompt tokens and received 13 output tokens; input is 98.7 percent of all tokens. If those requests ran at the chapter's reference floors, output would still take 80 percent of the service time (derived). ENGAGE: an engineer wants to cut latency by 10 percent; trim the prompt or the reply? (The reply, unless queueing or a very long prompt dominates.) WARN: the trace comes from code completion; it shows the token mix of real traffic, and agent traffic differs in detail. FLEX: [CORE].}
+  \note{%
+  \mlsysnotemeta{2 min}{Core}%
+  Two measured datasets confirm output-bound latency outside theory. Left, on a laptop CPU at batch 1, our 0.5B model prefilled 2,048 tokens in 2.05 s ($\approx 1.0\text{ ms/token}$) and decoded at 35.1 ms/token, making one output token equal roughly 35 prompt tokens (25--41 across runs; smaller than 295 because CPU prefill runs below peak FLOP/s). Right, across 8,819 production Azure code-completion requests (Patel et al., ISCA 2024; median 1,469 input, 13 output tokens), input accounts for 98.7\% of tokens, yet output still consumes 80\% of service time at our reference floors.
+
+  \notecue{Watch for}{Trimming reply verbosity usually cuts latency faster than trimming prompts unless queueing or very long prompts dominate, though agent trajectories differ in shape from single-turn code completion.}
+
+  \notecue{Next}{Scale from one call to a full trajectory by predicting how much resent input grows when turns double.}}
 \end{frame}
 
 \begin{frame}{Double the turns: how much more resend?}
   \mlsysactivity{Predict}{3 min}
   \begin{columns}[c]
-    \begin{column}{0.36\textwidth}
-      \begin{mlsyscard}{mlsysaccent}
-        \small\textbf{Given (Napkin Math 2.2)}\\[0.05cm]
-        First prompt: 8,000\\
-        Appended per turn: 1,500\\
-        Output per call: 200\\
-        30 turns resend \textbf{892,500}
+    \begin{column}{0.37\textwidth}
+      \begin{mlsyscard}[top=0.2em,bottom=0.2em]{mlsysaccent}
+        \small\textbf{Given (NM 2.2)}\\[0.04cm]
+        First prompt $S_0$: 8,000\\
+        Append $\Delta$/turn: 1,500; out: 200\\
+        $S = H S_0 + \Delta H(H-1)/2$\\
+        30 turns: \textbf{892,500} tokens
       \end{mlsyscard}
-      \vspace{0.1cm}
-      {\small At 60 turns, re-sent input grows:\\[0.05cm] \choice{A}{2$\times$}\quad \answerat{2}{B}{3.5$\times$}\quad \choice{C}{4$\times$}}
+      \vspace{0.08cm}
+      {\small At 60 turns, re-sent input grows:\\[0.04cm] \choice{A}{2$\times$}\quad \answerat{2}{B}{3.5$\times$}\quad \choice{C}{4$\times$}}
     \end{column}
-    \begin{column}{0.60\textwidth}
+    \begin{column}{0.59\textwidth}
       \centering
-      \mlsyssteps[width=\textwidth,height=4.2cm,keepaspectratio]{resend60_step}{3}\\[0.02cm]
-      \uncover<3->{\footnotesize Resend is quadratic in turns; fresh prefill is linear. At 30 turns, prefill takes 63.68 s, or 3.67 s with reuse; decode takes 126.45 s.}
+      \mlsyssteps[width=\textwidth,height=4.35cm,keepaspectratio]{resend60_step}{3}\\[0.02cm]
+      \uncover<3->{\footnotesize Resend is quadratic; fresh prefill is linear. At 30 turns: prefill 63.68 s (3.67 s reused); decode 126.45 s.}
     \end{column}
   \end{columns}
   \mlsyscredit{The Foundation Model, Napkin Math 2.2 and equation 9 (scenario values); reference floors from equations 7 and 8. Derived.}
-  \note{[2.5 min] [CORE] LINK: 30 turns resend 892,500 tokens because the runtime resends the whole history on every call (equation 9: $H \cdot 8{,}000 + 1{,}500 \cdot H(H-1)/2$). Recall it in 15 seconds. ENGAGE: vote on the growth when the run doubles to 60 turns. Step 2: B, 3.5 times, 3,135,000 tokens. The appended term grows 4.07 times and the first-prompt term 2.0 times, so the total lands between them. Students who pick A treat resend as linear; students who pick C forget the fixed first prompt. Step 3: with prefix reuse the server keeps the attention state of a repeated prefix, so only the new suffix needs fresh prefill: 96,500 tokens, 1.9 times the 30-turn 51,500 (already 17.3 times less than the resend). At the reference floors, 30 turns of prefill take 63.68 s without reuse and 3.67 s with it; decode takes 126.45 s either way. Once the prefix is reused, output tokens set the time again. WARN: reuse requires an exact token prefix; one changed early token, such as a timestamp in the system prompt, forces fresh prefill from there. LINK: Lecture 4 orders context for reuse; Lecture 5 owns the cache; Lecture 19 prices it. FLEX: [CORE].}
+  \note{%
+  \mlsysnotemeta{2.5 min}{Core}%
+  From Napkin Math 2.2 (Equation 9), starting at $S_0 = 8{,}000$ tokens and appending $\Delta = 1{,}500$ per turn resends $S = H S_0 + \Delta H(H-1)/2 = 892{,}500$ tokens over 30 turns. Step 2 reveals choice B (3.5$\times$): doubling to 60 turns sends 3,135,000 tokens because the appended triangle grows 4.07$\times$ while the initial prompt term doubles. Step 3 contrasts prefix reuse: keeping attention state across turns leaves only 51,500 fresh tokens at 30 turns (17.3$\times$ less) and 96,500 at 60 turns (1.9$\times$). At reference floors, 30-turn prefill drops from 63.68 s to 3.67 s, leaving 126.45 s of decode dominant again.
+
+  \notecue{Check}{Vote on the 60-turn multiplier before revealing B (3.5$\times$). Choice A (2$\times$) assumes linear growth, while choice C (4$\times$) forgets the fixed $H S_0$ term.}
+
+  \notecue{Watch for}{Prefix reuse demands an exact token match from position 0: inserting a timestamp early in the prompt forces fresh prefill onward (Lectures 4, 5, and 19 own layout, caching, and pricing).}
+
+  \notecue{Next}{Apply output-bound latency directly to an interface choice: whole-file rewrites versus localized diffs.}}
 \end{frame}
 
 \begin{frame}{A whole-file edit misses a 15 s deadline that a diff meets}
   \begin{columns}[c]
-    \begin{column}{0.62\textwidth}
+    \begin{column}{0.59\textwidth}
       \centering
-      \mlsyssteps[width=\textwidth,height=4.6cm,keepaspectratio]{deadline_step}{2}
+      \mlsyssteps[width=\textwidth,height=4.5cm,keepaspectratio]{deadline_step}{2}
     \end{column}
-    \begin{column}{0.35\textwidth}
-      \small Whole file: 1,850 output tokens.\\ Local edit: 80.\\[0.15cm]
-      \uncover<2->{The edit is 17.5$\times$ faster, and 57\% of trials end accepted ($0.95 \times 0.60$).\\[0.1cm]
+    \begin{column}{0.38\textwidth}
+      \footnotesize
+      \textbf{Whole file:} $8{,}350\times71.4\,\mu\text{s} + 1{,}850\times21.1\,\text{ms} = \mathbf{39.6\,\text{s}}$\\[0.12cm]
+      \textbf{Local edit:} $8{,}120\times71.4\,\mu\text{s} + 80\times21.1\,\text{ms} = \mathbf{2.3\,\text{s}}$\\[0.18cm]
+      \uncover<2->{\small The edit is 17.5$\times$ faster, and 57\% of trials end accepted ($0.95 \times 0.60$).\\[0.08cm]
       {\footnotesize Every trial stays in the denominator.}}
     \end{column}
   \end{columns}
   \mlsyscredit{The Foundation Model, Napkin Math 2.3 and table 5 (scenario values, reference floors). Derived.}
-  \note{[2.5 min] [CORE] Two output interfaces for the same repair. Step 1: a whole-file replacement adds 350 instruction tokens to the 8,000-token context and generates 1,850 output tokens: 39.58 s at the reference floors, 98.5 percent of it decode, 24.6 s past the 15 s deadline. Step 2: a localized edit adds 120 instruction tokens and generates 80: 2.27 s, 17.5 times faster, with a 6.6 times margin. But a local edit must find its anchor text: in the chapter's hypothetical, 95 percent apply and 60 percent of those pass the tests, so 57 percent of all trials yield an accepted repair. That 57 percent is the acceptance probability in $C_{\text{eff}}$. ENGAGE: if the deadline were 60 s, which format wins? (Then applicability decides; a whole file that always applies can beat a diff that misses stale anchors.) WARN: a fair comparison fixes the model, tools, tests, limits, and retry policy, and keeps every timed-out or unparsable trial in the denominator. LINK: Lecture 13 owns matched-budget evaluation of whole agents.}
+  \note{%
+  \mlsysnotemeta{2.5 min}{Core}%
+  Napkin Math 2.3 compares two patch interfaces on an 8,000-token context against a 15 s deadline. Step 1: a whole-file rewrite adds 350 instruction tokens and generates 1,850 output tokens, taking 39.58 s at reference floors (98.5\% decode), missing the deadline by 24.6 s. Step 2: a localized edit adds 120 instruction tokens and generates only 80 tokens, finishing in 2.27 s (17.5$\times$ faster with 6.6$\times$ headroom). However, local edits must match anchor text: if 95\% apply and 60\% of those pass tests, overall trial acceptance is $0.95 \times 0.60 = 57\%$, feeding directly into $C_{\text{eff}}$.
+
+  \notecue{Watch for}{Under a relaxed 60 s deadline, applicability can tip the balance back toward whole-file output. Fair interface comparisons hold model, tools, tests, and limits fixed and keep timed-out or unparsable trials in the denominator (Lecture 13).}
+
+  \notecue{Next}{Close the loop by returning to the opening 2025 serving postmortem to see which runtime records catch each bug.}}
 \end{frame}
 
 % =============================================================================
@@ -592,16 +827,23 @@
 \begin{frame}{Which records would have caught the bugs?}
   \mlsysactivity{Retrieval}{3 min}
   \centering
-  \safeimg[width=0.92\textwidth,height=3.2cm,keepaspectratio]{postmortem_timeline.png}\\[0.02cm]
-  {\footnotesize Requests unchanged; outputs corrupted for weeks.}\\[0.08cm]
+  \safeimg[width=0.98\textwidth,height=3.65cm,keepaspectratio]{hook_timeline.pdf}\par\vspace{0.08cm}
   \only<1|handout:0>{\normalsize For each runtime record, say what it would have shown.}%
-  \only<2->{\scriptsize
-  \begin{tabular}{@{}P{2.6cm}P{2.6cm}P{2.6cm}P{2.6cm}P{2.6cm}@{}}\toprule
-    \textbf{Status envelope} & \textbf{Schema check} & \textbf{Serving config log} & \textbf{External tests} & \textbf{Recorded responses} \\\midrule
-    nothing (replies were COMPLETED) & nothing (replies parsed) & which path served each call & the wrong tokens, in code & replay a failure exactly \\\bottomrule
+  \only<2->{\footnotesize
+  \begin{tabular}{@{}P{2.7cm}P{2.4cm}P{2.6cm}P{2.5cm}P{2.5cm}@{}}\toprule
+    \textbf{Status envelope} & \textbf{Schema check} & \textbf{Serving log} & \textbf{External tests} & \textbf{Recorded reply} \\\midrule
+    none (\cd{COMPLETED}) & none (parsed) & serving path & wrong tokens & exact replay \\\bottomrule
   \end{tabular}}
   \mlsyscredit{Timeline: Anthropic 2025 postmortem. The Foundation Model, War Story 2.1 and \S2.4.3.}
-  \note{[3 min] [CORE] Back to the hook. Step 1: retrieval, 60 seconds. Step 2: the status envelope and the schema check, the two cheapest records, show nothing, because the corrupted replies finished normally and parsed. That is the fail-plausible fault. A log of model revision and serving configuration per call shows which path served each failing call, which is how the routing bug could be traced. External tests, the compiler and test runner in the repair loop, see the wrong token in the code. Recorded responses let an engineer replay the failure exactly, since resending the request lands on a different path. The provider's own fix added continuous canary evaluations on production traffic, an external check at the provider's side. ENGAGE: of the answers you gave at the start, which were right? WARN: none of these makes the model reliable; they make its failures visible to the runtime, which is the point of the contract.}
+  \note{%
+  \mlsysnotemeta{3 min}{Core}%
+  Return to Anthropic's 2025 serving timeline and recall what each runtime record reveals before uncovering Step 2. Both the status envelope (\cd{COMPLETED}) and schema check (valid syntax) report nothing wrong, the hallmark of a fail-plausible fault. Per-call serving logs recording model revision and routing metadata trace which serving path handled failing calls; external compilers and test suites detect corrupted tokens; and recorded responses enable exact local replay when resending hits another path. Anthropic itself added continuous production canary evaluations as an external provider check.
+
+  \notecue{Check}{List what each of the five records shows before checking Step 2, and compare against your opening vote from Slide 2.}
+
+  \notecue{Watch for}{None of these records makes the model infallible; together they make silent failures observable and replayable under the call contract.}
+
+  \notecue{Next}{Consolidate the five takeaways from Lecture 2.}}
 \end{frame}
 
 \begin{frame}{Takeaways}
@@ -610,7 +852,11 @@
   \thumbline{thumb_rmrf.pdf}{Read the status before the payload: only COMPLETED enters the candidate path.}\\[0.12cm]
   \thumbline{thumb_ladder_step4.pdf}{Each check certifies one property; self-review adds none, and a mask guarantees only syntax.}\\[0.12cm]
   \thumbline{thumb_resend_step3.pdf}{One output token costs about 295 prompt tokens; resent history grows with the square of the horizon.}
-  \note{[1 min] [CORE] One line per segment. Ask students which slide taught each line. If short on time, read the first and the last.}
+  \note{%
+  \mlsysnotemeta{1 min}{Core}%
+  Each line distills one segment of Lecture 2: proposals cross an untrusted boundary into runtime validation and execution; sampling reshapes candidates without certifying them and only recorded responses replay; status precedes payload; each check certifies one named property; and output tokens ($\approx 295\times$ prompt tokens) plus quadratic resend drive serving cost. Focus on the first and last lines when wrapping up quickly.
+
+  \notecue{Next}{Three open questions highlight active trade-offs across provider transparency, masking overhead, and hidden reasoning budgets.}}
 \end{frame}
 
 \begin{frame}{Open questions}
@@ -620,7 +866,13 @@
     \item Grammar masks remove syntax errors at a per-token cost. When should a runtime prefer streaming rejection instead?
     \item Reasoning models spend hidden output tokens. Should the runtime or the provider set that budget?
   \end{itemize}
-  \note{[1 min] [OPTIONAL] No single answer. The first follows from War Story 2.1 and \S2.5.1 on mutable aliases and pinned revisions. The second is the chapter's Exercise 6 as a discussion: compare added latency per proposal under post-hoc validation, streaming rejection, and masking. The third follows from \S2.3.2: hidden reasoning tokens debit the output reserve, so they change both admission and cost. Assign one as a short written response.}
+  \note{%
+  \mlsysnotemeta{1 min}{Optional}%
+  These three prompts work well for short discussion or reflection. The first extends War Story 2.1 and \S2.5.1 on mutable model aliases versus pinned revisions; the second adapts Exercise 6 comparing latency under post-hoc validation, streaming rejection, and grammar masking; the third ties hidden reasoning tokens (\S2.3.2) to output-reserve admission and billing.
+
+  \notecue{Optional}{For a 50-minute class, skip this slide or assign one question alongside the Chapter 2 reading.}
+
+  \notecue{Next}{Review the primary chapter sections and systems papers supporting today's derivations.}}
 \end{frame}
 
 \begin{frame}{Read and explore}
@@ -634,7 +886,11 @@
     \item Pope et al., ``Efficiently Scaling Transformer Inference,'' MLSys 2023: prefill and decode floors.
     \item Huang et al., ``LLMs Cannot Self-Correct Reasoning Yet,'' ICLR 2024.
   \end{itemize}
-  \note{[0.5 min] [CORE] The chapter first, with its checkpoints and the three napkin-math notebooks. Exercise 9 transfers the truncation rule to the remediation agent, where a fragment like --replicas=1 changes production. Birrell and Nelson explain why a timeout leaves the outcome unknown. Holtzman et al. introduce top-p. Willard and Louf compile grammars to token masks. Pope et al. derive the two serving floors. Huang et al. measure self-correction. FLEX: run images/run\_model.py in a lab to let students see their own model's wire text and logits.}
+  \note{%
+  \mlsysnotemeta{0.5 min}{Core}%
+  Read Chapter 2 (\S2.2 to \S2.9), work Checkpoints 2.1--2.4, Napkin Math 2.1--2.3, and Exercises 1, 4, and 9 (which applies truncation hazards to remediation flags like \cd{--replicas=1}), and explore both interactive figures on \texttt{mlsysbook.ai}. The cited papers anchor unknown RPC outcomes (Birrell and Nelson, 1984), nucleus sampling (Holtzman et al., 2020), automaton grammar masking (Willard and Louf, 2023), serving floors (Pope et al., 2023), and self-correction limits (Huang et al., 2024). Running \texttt{images/run\_model.py} reproduces our wire request and logit shifts locally.
+
+  \notecue{Next}{Lecture 3 builds directly on one model call by asking when spending additional test-time compute pays off.}}
 \end{frame}
 
 \begin{frame}[c]
@@ -647,7 +903,11 @@
       {\LARGE\bfseries When is another token, candidate, check, or model call worth its cost?}
     \end{column}
   \end{columns}
-  \note{[0.5 min] [CORE] Today ended at one call and one candidate. A completed candidate can still rest on the wrong diagnosis. Lecture 3 asks how to spend more before committing, through a longer derivation, more sampled candidates, or a targeted test, and why only the test adds a fact the model did not have.}
+  \note{%
+  \mlsysnotemeta{0.5 min}{Core}%
+  Lecture 2 ended at one completed candidate from one model call, yet a valid candidate can still act on a flawed diagnosis.
+
+  \notecue{Next}{Lecture 3 (Test-Time Compute) evaluates spending extra tokens, parallel samples, or executed checks before committing, and proves why only an executed check supplies a new fact.}}
 \end{frame}
 
 \end{document}

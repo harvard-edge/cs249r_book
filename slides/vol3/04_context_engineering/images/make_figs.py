@@ -384,7 +384,7 @@ def scope():
     s.text(731, 76, 'r17, this test, this schedule', size=18, anchor='middle')
     s.text(731, 116, 'not about r18 or other tests', size=18, anchor='middle', fill=V['bad_t'], weight='bold')
     s.rect(570, 182, 322, 140, V['sto_f'], V['sto_s'], sw=2.5, rx=8)
-    s.text(731, 216, 'Host gate, outside the prompt', size=19, anchor='middle', weight='bold', fill=V['sto_t'])
+    s.text(731, 216, 'Host check, outside the prompt', size=19, anchor='middle', weight='bold', fill=V['sto_t'])
     s.text(731, 246, 'sandbox, read-only mounts,', size=18, anchor='middle')
     s.text(731, 272, 'no production deploy:', size=18, anchor='middle')
     s.text(731, 302, 'enforces what may run', size=18, anchor='middle', fill=V['sto_t'], weight='bold')

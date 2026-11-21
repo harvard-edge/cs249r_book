@@ -27,6 +27,7 @@
 \usepackage{courier}
 \renewcommand{\familydefault}{\sfdefault}
 \usepackage{booktabs,amsmath}
+\usetikzlibrary{arrows.meta,positioning}
 \graphicspath{{images/}}
 \setcounter{mlsystotalsections}{5}
 
@@ -59,7 +60,11 @@
 % =============================================================================
 % TITLE AND HOOK
 % =============================================================================
-\mlsysnote{[0.5 min] [CORE] Read the thesis aloud once. Lecture 4 decided what goes into each call; today follows that context into the machine that serves it and asks what it costs to keep. The notes total about 70 minutes; the core, with every [OPTIONAL] frame cut, is about 60.5 minutes. Cut first the attention-design bars, the fragmentation strips, the regime map, pool telemetry, and the open questions. Every derived number on a slide is computed from the chapter, MLSysIM, or a named paper; most scenario inputs are the chapter's own hypothetical values and the slides say so.}
+\mlsysnote{%
+  \mlsysnotemeta{0.5 min}{Core}%
+  Retained attention state, and how long it stays resident in accelerator memory, determines how many agent turns a serving node can sustain. Lecture 4 decided which tokens enter each call; Lecture 5 follows that context into an 8-GPU DGX H100 serving node running Llama 3 70B geometry (16-bit) on the repair agent's r18 turn. The full lecture runs 70 minutes; omitting the seven optional slides yields a complete 60.5-minute core session.
+
+  \notecue{Next}{Open by predicting how much throughput a node recovers when it releases idle KV state during a 45-second test.}}
 \mlsystitle{KV Cache Management}{Retained attention state, and how long it stays resident, sets how many agent turns a serving node can sustain.}{cover_virtual_memory_blueprint.png}
 
 \begin{frame}{Predict: what does releasing idle state buy?}
@@ -79,7 +84,15 @@
     \end{column}
   \end{columns}
   \mlsyscredit{Image: NVIDIA, DGX H100/H200 User Guide. Scenario: KV Cache Management, Napkin Math 5.4 (illustrative; Llama 3 70B geometry, 16-bit).}
-  \note{[3 min] [CORE] LINK: Lecture 1's repair agent is at revision r18; its reproducer passes and the harness launches a 45-second integration test. NARRATE: the image is the GPU tray of the kind of node the chapter sizes: eight H100 accelerators beside four NVSwitch chips. Step 1: memory fits 41 such repair contexts. If each keeps its attention state in accelerator memory through the test, a slot is busy for 50 seconds per turn, so memory allows 41 / 50 = 0.82 turns per second. ENGAGE: vote with fingers: if the engine releases the state during the wait, how many more turns per second can memory serve? Step 2: C. Released, a slot is busy for only the 5 seconds of generation: 41 / 5 = 8.2 turns per second, ten times more, while the waiting agent generates nothing either way. Students who say A reason that an idle agent costs nothing; students who say D divide 45 by 1. The ratio is 1 + 45/5. WARN: 8.2 is a memory bound only; prefill and link bandwidth may bind first (segment 4). This is the tool-wait problem from Lecture 1, now priced in memory. Today explains every number on this slide; the synthesis returns to it.}
+  \note{%
+  \mlsysnotemeta{3 min}{Core}%
+  At revision r18, the repair agent generates for 5 s and then waits 45 s while an integration test runs (Napkin Math 5.4). Left shows an 8-H100 GPU tray whose memory fits 41 repair contexts. First, Step 1 holds KV state in HBM through the test, occupying each slot for 50 s and yielding $41 / 50 = 0.82$ turns/s. Next, Step 2 reveals choice C (10$\times$): releasing state during the 45 s wait occupies each slot only during the 5 s of generation, lifting the memory bound to $41 / 5 = 8.2$ turns/s, a factor of $1 + 45/5 = 10$.
+
+  \notecue{Check}{Vote on the throughput multiplier before revealing C (10$\times$). Choice A assumes an idle agent consumes no resources, while choice D divides 45 by 1 instead of $(5 + 45)/5$.}
+
+  \notecue{Watch for}{8.2 turns/s is a memory-capacity bound only; prefill compute or PCIe link bandwidth can cap throughput earlier (Section 4). Today derives every number on this slide.}
+
+  \notecue{Next}{Recall Lecture 4's prompt ordering and Lecture 2's resend numbers before tracking where that reused state lives.}}
 \end{frame}
 
 \begin{frame}{Recall: what goes first in a prompt, and why?}
@@ -96,10 +109,18 @@
     \end{column}
   \end{columns}
   \mlsyscredit{Lecture 4 (change-rate ordering); Lecture 2 (resend arithmetic, The Foundation Model, Napkin Math 2.2). Totals computed.}
-  \note{[1.5 min] [CORE] Give 45 seconds of silence. Step 2: Lecture 4 ordered context by how fast each part changes: instructions and tool schemas first, the slow-changing workspace next, the latest observation last, so the longest possible prefix stays identical from turn to turn. Lecture 2 priced what that buys: a 30-turn trajectory that starts at 8,000 tokens and appends 1,500 per turn resends 892,500 input tokens in all; with the prefix reused it prefills only 51,500 fresh tokens, 17.3 times fewer. ENGAGE: where does that reused prefix physically live between turns? (Expected: in the serving engine's memory, as attention state; today's subject.) FLEX: a student who missed Lectures 2 and 4 needs only this slide.}
+  \note{%
+  \mlsysnotemeta{1.5 min}{Core}%
+  Recall both results from Lectures 2 and 4 before revealing Step 2. Lecture 4 placed the stable root (instructions and tool schemas) first and the volatile leaf last so prefixes stay identical across turns. Lecture 2 showed that across 30 turns (8,000 initial tokens plus 1,500 appended per turn), resending totals 892,500 input tokens, whereas prefix reuse leaves only 51,500 fresh tokens (17.3$\times$ less prefill). That saved prefix lives physically as attention keys and values inside the serving node's memory.
+
+  \notecue{Check}{Recall what goes first in a prompt and where the reused state sits physically between turns before revealing Step 2.}
+
+  \notecue{Watch for}{Prefix reuse saves prefill only for as long as the serving node keeps that state resident.}
+
+  \notecue{Next}{Frame today's four engineering goals around the state exposure axis.}}
 \end{frame}
 
-\begin{frame}{This lecture builds the memory layer and closes the state exposure}
+\begin{frame}{Why can an idle agent exhaust its serving node?}
   \begin{columns}[c]
     \begin{column}{0.25\textwidth}
       \centering\mlsyskitfig[width=\textwidth,height=3.0cm,keepaspectratio]{stack_memory}\\[0.1cm]
@@ -113,13 +134,23 @@
       \goalline{thumb_regimes.pdf}{Choose keep, move, or drop for paused state; turn slots into a rate.}
     \end{column}
   \end{columns}
-  \note{[1 min] [CORE] The driving question: why can an agent that is generating nothing still exhaust the memory of the machine serving it? Left: the six-layer stack with the memory layer lit, and the H·S·A locator from Lecture 1 with the state axis lit. Part II builds closure for state; this lecture prices the state the serving engine carries for a trajectory. Four goals, each with the figure that teaches it. One running case: the repair agent's r18 turn, a 32,768-token request on one DGX H100 node with the Llama 3 70B geometry in 16-bit precision, the chapter's reference configuration. WARN: serving physics stays at agent altitude; the derivations of prefill and decode cost live in the Inference Cost Foundations appendix.}
+  \note{%
+  \mlsysnotemeta{1 min}{Core}%
+  The driving question asks why an agent generating zero tokens can still exhaust its serving node's memory. Left highlights the Memory layer and the State axis of the H$\cdot$S$\cdot$A locator. Four thumbnail goals map today's segments: sizing per-token KV footprint and node fit, recovering fragmentation with paged blocks and copy-on-write, reusing compatible prefixes via radix trees without confusing hits for currency, and applying Little's law to paused-state policies. All calculations track our reference r18 repair turn (32,768 tokens, Llama 3 70B geometry, 16-bit, one DGX H100 node).
+
+  \notecue{Watch for}{We work at agent-system altitude here; full prefill and decode hardware derivations live in the Inference Cost Foundations appendix.}
+
+  \notecue{Next}{Section 1 computes the exact byte footprint of one retained agent context.}}
 \end{frame}
 
 % =============================================================================
 % SECTION: FOOTPRINT
 % =============================================================================
-\mlsysnote{[0.5 min] [CORE] First, the size of the thing: how many bytes does one agent's context occupy once the model has read it?}
+\mlsysnote{%
+  \mlsysnotemeta{0.5 min}{Core}%
+  Capacity engineering starts with sizing. Section 1 computes how many bytes each retained token occupies in HBM and how many full contexts fit on an eight-accelerator node.
+
+  \notecue{Next}{See how Lecture 4's structured prompt zones flatten into uniform key-value tensors across all 80 layers.}}
 \mlsysdivider{How much memory does one agent context hold, and how many fit?}{KV Cache Management, \S5.1 and \S5.2}
 \section{Footprint}
 
@@ -127,7 +158,13 @@
   \centering
   \mlsyssteps[width=0.95\textwidth,height=6.1cm,keepaspectratio]{zones_step}{2}
   \mlsyscredit{KV Cache Management, \S5.2 and its context figure (zone sizes); 10.7 GB computed.}
-  \note{[2 min] [CORE] LINK: Lecture 4's zones, now as the serving engine sees them. Step 1: the r18 request is 32,768 tokens: system prompt 2,048, tool schemas 4,096, workspace 8,192, turn history 16,384, latest observation 2,048. The first three, 14,336 tokens or 43.8 percent, form the shared invariant prefix. Step 2: none of that structure survives into memory. Every token, whatever zone it came from, leaves a key vector and a value vector in every layer, so that later tokens can attend to it without recomputing them. That stored state is the KV cache, short for key-value cache. For this model each token keeps 327,680 bytes; the whole context keeps 10.7 GB. ENGAGE: does a request reach its peak footprint at prefill or at the end of generation? (Expected: at the end; every output token appends its own keys and values.) WARN: the cache is not compressed text; rebuilding it needs the exact tokens through the same weights.}
+  \note{%
+  \mlsysnotemeta{2 min}{Core}%
+  First, Step 1 displays the r18 repair request's 32,768 tokens across Lecture 4's zones: 2,048 system prompt, 4,096 tool schemas, 8,192 workspace (14,336 invariant prefix tokens, 43.8\%), 16,384 turn history, and 2,048 latest observation. Second, Step 2 shows what the serving engine actually retains: none of the semantic structure survives. Every token deposits a key vector and a value vector in every transformer layer so subsequent tokens attend without recomputing projections. At 327,680 bytes per token for Llama 3 70B, this single context occupies 10.7 GB of HBM.
+
+  \notecue{Watch for}{Peak footprint occurs at the end of decode because every generated output token appends its own keys and values, and the KV cache is derived tensor state rather than compressed text: rebuilding it requires running the exact token sequence through identical weights.}
+
+  \notecue{Next}{Derive 327,680 bytes per token directly from the model's real \texttt{config.json} file.}}
 \end{frame}
 
 \begin{frame}[fragile]{One Llama 70B token keeps 327,680 bytes of attention state}
@@ -157,29 +194,43 @@
     \end{column}
   \end{columns}
   \mlsyscredit{Meta Llama 3.1 70B config.json (Hugging Face, NousResearch mirror, retrieved 2026-10-18). KV Cache Management, equation 1 and Napkin Math 5.1.}
-  \note{[2.5 min] [CORE] Worked example 1. NARRATE: this is the model's real configuration file, unchanged except that lines are left out. Step 1: the head dimension is the hidden size over the query heads, 8,192 / 64 = 128. Step 2: the payload per token is 2 (a key and a value) times 80 layers times 8 key-value heads times 128 values times 2 bytes for 16-bit storage. Step 3: 327,680 bytes, about a third of a megabyte, for every token the agent carries; 32,768 tokens hold 10.7 GB. WARN: the formula counts the 8 key-value heads; the 64 query heads store nothing of their own. This model uses grouped-query attention: 8 query heads share each stored key-value head, which divides the cache by 8. A student who uses 64 gets 2.6 MB per token. Note for the room: Llama 3 70B has the same layers and heads with an 8,192-token window; Llama 3.1 extends the window to 131,072. ENGAGE: which line would you change to halve the cache, and what must you check before shipping it? (Expected: 1-byte KV storage; validate task accuracy.)}
+  \note{%
+  \mlsysnotemeta{2.5 min}{Core}%
+  Inspect the real \texttt{config.json} excerpt from Meta Llama 3.1 70B and trace Equation 1 in three clicks. First, head dimension equals \texttt{hidden\_size} divided by \texttt{num\_attention\_heads}: $8{,}192 / 64 = 128$. Second, multiply 2 (keys and values) $\times$ 80 layers $\times$ 8 key-value heads $\times$ 128 head dimension $\times$ 2 bytes (\texttt{bfloat16}). Third, the product is exactly 327,680 bytes (about a third of a megabyte) per token, giving $32{,}768 \times 327{,}680\text{ B} = 10.7\text{ GB}$ per context. Halving KV precision to 1-byte FP8/INT8 halves footprint but requires task-accuracy validation.
+
+  \notecue{Watch for}{Count the 8 \texttt{num\_key\_value\_heads}, not the 64 query heads: grouped-query attention shares each KV head across 8 query heads, shrinking cache 8$\times$ (using 64 erroneously yields 2.6 MB/token). Llama 3 70B shares this exact layer and head geometry with an 8,192-token window, extended to 131,072 in Llama 3.1.}
+
+  \notecue{Next}{Use this 10.74 GB context size to estimate how many contexts fit on one 8-GPU DGX H100 node.}}
 \end{frame}
 
 \begin{frame}{Estimate: how many 32K contexts fit here?}
   \mlsysactivity{Estimate}{3 min}
   \begin{columns}[T]
     \begin{column}{0.44\textwidth}
-      \centering\mlsysphoto[width=\textwidth,height=2.2cm,keepaspectratio]{nvidia-h100-pcie.jpg}\\[0.05cm]
+      \centering\safeimg[width=\textwidth,height=2.2cm,keepaspectratio]{dgx-h100-gpu-tray.png}\\[0.05cm]
       \begin{mlsyscard}{mlsysaccent}\small
-        HBM (accelerator memory): 687.2 GB\\
-        Weights 141.2 GB; reserve 20 GB\\
-        One context: 10.7 GB
+        HBM (accelerator memory): 687.2~GB\\
+        Weights 141.2~GB; reserve 20~GB\\
+        One context: 10.74~GB
       \end{mlsyscard}
     \end{column}
     \begin{column}{0.54\textwidth}
       \small
-      \wstep{2}{KV pool $= 687.2 - 141.2 - 20 = 526.0$ GB}
-      \wstep{2}{$\lfloor 526.0 / 10.7 \rfloor = \mathbf{\textcolor{mlsysaccent}{48}}$ contexts}
-      \wstep{3}{\begin{tabular}{@{}rrr@{}}\toprule Tokens & GB each & Fit\\\midrule 8,192 & 2.7 & 195\\ 32,768 & 10.7 & 48\\ 131,072 & 42.9 & 12\\\bottomrule\end{tabular}}
+      \wstep{2}{KV pool $= 687.2 - 141.2 - 20 = 526.0$~GB}
+      \wstep{2}{$\lfloor 526.0 / 10.74 \rfloor = \mathbf{\textcolor{mlsysaccent}{48}}$ contexts}
+      \wstep{3}{\begin{tabular}{@{}rrr@{}}\toprule Tokens & GB each & Fit\\\midrule 8,192 & 2.684 & 195\\ 32,768 & 10.74 & 48\\ 131,072 & 42.95 & 12\\\bottomrule\end{tabular}}
     \end{column}
   \end{columns}
-  \mlsyscredit{Photo: Geekerwan, CC BY 3.0, Wikimedia Commons (NVIDIA H100). KV Cache Management, Napkin Math 5.1 and table 1; derived.}
-  \note{[3 min] [CORE] ENGAGE: two minutes with a neighbor before any reveal. The image is the node's GPU tray: eight H100 accelerators, 80 GiB of high-bandwidth memory (HBM) each, which is 85.9 GB in decimal units, 687.2 GB in all. Step 2: the weights take 141.2 GB in 16-bit precision (70.6 billion parameters times 2 bytes) and the runtime keeps 20 GB for activations, leaving a KV pool of 526.0 GB. That pool holds 48 contexts of 10.7 GB. Step 3: the chapter's table. A fourfold longer context leaves a quarter of the residents: 195 at 8,192 tokens, 12 at 131,072. Common errors: forgetting the weights (64), or using 80 GB as decimal (44). WARN: these are raw payloads with perfectly balanced shards; block rounding, headroom, and output allowances shrink them (segment 5 gets 41). FLEX: [CORE].}
+  \mlsyscredit{Image: NVIDIA, DGX H100/H200 User Guide (8$\times$ H100 GPU tray). KV Cache Management, Napkin Math 5.1 and table 1; exact byte basis derived.}
+  \note{%
+  \mlsysnotemeta{3 min}{Core}%
+  Work Napkin Math 5.1 on one DGX H100 node: eight 80 GiB HBM3 GPUs hold $8 \times 85.9 = 687.2\text{ GB}$ in decimal units. Step 2 subtracts 141.2 GB of 16-bit weights ($70.6\text{B} \times 2\text{ B}$) and 20 GB of activation reserve, leaving a 526.0 GB KV pool, which holds $\lfloor 526.0 / 10.74 \rfloor = 48$ raw 32,768-token contexts (exact 10.737 GB each). Step 3 tabulates how fit scales inversely with context length: 195 contexts at 8,192 tokens (2.684 GB), 48 at 32,768, and only 12 at 131,072 (42.95 GB).
+
+  \notecue{Check}{Compute the pool and context count before revealing Step 2 (48 contexts). Common mistakes omit the 141.2 GB weights (getting 64) or treat 80 GiB as 80 decimal GB (getting 44).}
+
+  \notecue{Watch for}{48 is an idealized raw-payload ceiling with perfectly balanced shards; reserving output tokens, 16-token blocks, and 10\% headroom brings it down to 41 slots in Section 5.}
+
+  \notecue{Next}{An optional log-log plot highlights why retained context length sets capacity just as strongly as model choice.}}
 \end{frame}
 
 \begin{frame}{Resident fit falls as one over retained context length}
@@ -193,7 +244,13 @@
     \end{column}
   \end{columns}
   \mlsyscredit{Llama 3 70B geometry, 16-bit, 526.0 GB pool. KV Cache Management, \S5.2 and \S5.9; curve derived.}
-  \note{[1.5 min] [OPTIONAL] The table from the last slide as a line on log-log axes: sequences that fit equals the pool divided by tokens times bytes per token. Doubling the retained context halves the residents. The point marked r18 is the running case. LINK: Lecture 4's working set is therefore a capacity decision as well as a quality decision. The harness chooses how many tokens each call retains; the serving engine only stores them. WARN: the chapter's first fallacy. Holding the model fixed, the same pool serves 195 sequences at 8,192 tokens and 12 at 131,072. A smaller model helps only as far as it shrinks bytes per token or frees HBM for the pool. ENGAGE: an operator wants 100 resident repair contexts on this node; what is the longest context each may keep? (Expected: 526.0 GB / 100 / 327,680 bytes, at most 16,052 tokens.) FLEX: [OPTIONAL]; the table on the previous slide carries the numbers.}
+  \note{%
+  \mlsysnotemeta{1.5 min}{Optional}%
+  Plotting the table from Slide 8 on log-log axes yields a slope of $-1$: resident fit equals pool size divided by tokens times bytes per token, so doubling retained context halves resident capacity. This directly refutes Chapter 5's first fallacy that model parameter count alone determines serving concurrency: on fixed weights, moving from 8K to 131K tokens cuts capacity from 195 to 12 contexts. Holding 100 resident contexts on this 526.0 GB pool caps each context at $526.0\text{ GB} / 100 / 327{,}680\text{ B} = 16{,}052$ tokens, tying Lecture 4's working-set budget straight to node capacity.
+
+  \notecue{Optional}{For a 50-minute class, skip this curve; the table on the previous slide already displays the 195 / 48 / 12 scaling.}
+
+  \notecue{Next}{An optional architectural comparison shows how pretrained attention designs set the bytes-per-token slope.}}
 \end{frame}
 
 \begin{frame}{Attention design, fixed in pretraining, sets bytes per token}
@@ -201,13 +258,23 @@
   \safeimg[width=0.92\textwidth,height=5.1cm,keepaspectratio]{designs.pdf}\\[0.05cm]
   {\small GPT-3 keeps 67$\times$ the per-token state of DeepSeek-V3; Llama 70B keeps 4.7$\times$.}
   \mlsyscredit{MLSysIM model registry, 16-bit KV (the chapter's attention-design figure). MHA: multi-head; GQA: grouped-query; MLA: multi-head latent attention.}
-  \note{[1 min] [OPTIONAL] Six published model geometries, bytes kept per token at 16 bits, log scale. GPT-3 stores a key and value for each of its 96 query heads (multi-head attention, MHA): 4,719 KB per token. The four Llama and Mixtral models share each stored head among several query heads (grouped-query attention, GQA). DeepSeek-V3 compresses keys and values into one low-rank latent vector per token (multi-head latent attention, MLA): 70.3 KB, although it is the largest model here. At 131,072 tokens, one Llama 70B session holds 42.9 GB and one DeepSeek-V3 session 9.2 GB. NARRATE the point: the choice of model fixes the slope of every capacity line today; the runtime's levers (retained tokens, sharing, precision, eviction) move along that slope. A serving allocator cannot drop heads from a trained checkpoint. Land the segment aloud: an agent's context costs a fixed number of bytes per token, and the pool left after the weights divided by that cost sets how many contexts fit at once. FLEX: [OPTIONAL].}
+  \note{%
+  \mlsysnotemeta{1 min}{Optional}%
+  Comparing six published models at 16-bit KV precision illustrates how attention architecture fixes the per-token slope before serving begins. GPT-3's multi-head attention (MHA) stores 96 KV heads (4,719 KB/token); Llama and Mixtral use grouped-query attention (GQA) to shrink state; DeepSeek-V3's multi-head latent attention (MLA) compresses KV into a low-rank latent vector of 70.3 KB/token (67$\times$ smaller than GPT-3 and 4.7$\times$ smaller than Llama 70B), cutting a 131K context from 42.9 GB to 9.2 GB. A serving allocator cannot drop heads from trained weights; it tunes retained tokens, sharing, precision, and eviction along this fixed slope.
+
+  \notecue{Optional}{For a 50-minute class, skip this architecture bar chart and jump straight to Section 2 on paging.}
+
+  \notecue{Next}{Section 2 explains why contiguous allocators strand most of that 526 GB pool and how paging recovers it.}}
 \end{frame}
 
 % =============================================================================
 % SECTION: PAGING
 % =============================================================================
-\mlsysnote{[0.5 min] [CORE] The 48 assumes every byte holds a token. How much of the pool does a naive allocator actually fill?}
+\mlsysnote{%
+  \mlsysnotemeta{0.5 min}{Core}%
+  The 48-context calculation assumed every byte of the KV pool holds active tokens. Section 2 shows how contiguous allocation wastes up to 80\% of HBM and how block tables and copy-on-write reclaim it.
+
+  \notecue{Next}{Examine measured memory utilization before PagedAttention from Kwon et al. (SOSP 2023).}}
 \mlsysdivider{Why does a naive allocator strand most of the pool, and how do blocks fix it?}{KV Cache Management, \S5.3 and \S5.4}
 \section{Paging}
 
@@ -216,14 +283,26 @@
   \safeimg[width=0.95\textwidth,height=5.1cm,keepaspectratio]{kwon_fig2.pdf}\\[0.05cm]
   {\small Chapter scenario: a request ending at 2,048 tokens under a 32,768 cap fills \textbf{6.25\%} of its slot.}
   \mlsyscredit{Measured: Kwon et al., ``PagedAttention,'' SOSP 2023, Figure 2 (OPT-13B serving, \S6.2 experiment), redrawn. Scenario: KV Cache Management, \S5.3.1.}
-  \note{[2.5 min] [CORE] Measured data. Kwon et al. profiled three versions of an earlier serving system, Orca, each reserving contiguous memory for a request: for the model's maximum length (Max), for the next power of two (Pow2), or for the exact final length known in advance (Oracle). Green is memory holding token states: 20.4, 26.8, and 38.2 percent. Orange is reservation, slots held for tokens not yet generated; red is internal fragmentation, slots inside an allocation never filled; gray is external fragmentation, free gaps too small to use. Their paged system, vLLM, filled 96.3 percent. The chapter's scenario: requests capped at 32,768 tokens that finish at a mean of 2,048 fill 6.25 percent of their reservations, and the pool still admits only 48. ENGAGE: Oracle knows every length in advance; why does it still waste 62 percent? (Expected: reservation for tokens not yet generated, and external gaps.) WARN: this is a 2023 measurement on one model and trace; the shape carries the point, and the decimals will differ elsewhere. FLEX: [CORE].}
+  \note{%
+  \mlsysnotemeta{2.5 min}{Core}%
+  Kwon et al. (SOSP 2023) profiled contiguous KV allocators on OPT-13B under three length strategies: reserving for the model's maximum length (Max), next power of two (Pow2), or even exact oracle final lengths known in advance (Oracle). Actual token state (green) occupied only 20.4\%, 26.8\%, and 38.2\% of KV memory; the remainder was lost to reserved future slots (orange), internal slack (red), and unusable external gaps (gray), whereas paged vLLM reached 96.3\%. In Chapter 5's scenario, requests capped at 32,768 tokens that average 2,048 tokens fill just 6.25\% of their slots while still capping admission at 48.
+
+  \notecue{Watch for}{Even Oracle wastes 62\% because contiguous pre-allocation locks slots for future decode tokens and leaves external gaps between uneven spans; these 2023 OPT-13B measurements show the structural waste rather than universal exact percentages.}
+
+  \notecue{Next}{An optional diagram separates internal reservation slack from external contiguity gaps.}}
 \end{frame}
 
 \begin{frame}{Reservation strands slots inside; contiguity strands gaps outside}
   \centering
   \mlsyssteps[width=0.95\textwidth,height=5.6cm,keepaspectratio]{frag_step}{2}
   \mlsyscredit{KV Cache Management, \S5.3.2 and table 2 (illustrative extents); Randell, CACM 1969.}
-  \note{[1.5 min] [OPTIONAL] Step 1: internal fragmentation. A full-cap reservation locks 32,768 slots at admission; a request that ends at 2,048 leaves 30,720 slots that no other request can use. Step 2: external fragmentation. Three free extents of 256 slots sit between live allocations: 768 free slots in all, yet a new request for 512 contiguous slots fails. The contiguity requirement causes the failure; the pool has enough free memory. Standard attention kernels find a token's keys by a fixed stride from one base pointer, so each sequence needs one unbroken span; the restriction is in software. Each loss has its own remedy: allocate on demand to stop reservation slack; make every allocation the same size so any free unit fits any request. Randell named the two losses in 1969. ENGAGE: which of the two would knowing every final length remove? (Expected: reservation slack; the external gaps remain.) FLEX: [OPTIONAL]; the measured bars on the previous slide carry the point.}
+  \note{%
+  \mlsysnotemeta{1.5 min}{Optional}%
+  This two-step diagram separates Randell's (1969) two fragmentation losses. First, reserving a 32,768-token contiguous slot at admission strands 30,720 unused slots when a request finishes at 2,048 tokens (internal fragmentation and reservation slack). Second, three free 256-slot extents total 768 free slots yet reject a 512-slot request because standard attention kernels index by fixed stride from one base pointer (external fragmentation). Even knowing exact final lengths removes only internal slack while external gaps remain; on-demand fixed-size blocks eliminate both.
+
+  \notecue{Optional}{For a 50-minute class, skip this diagram; the measured breakdown on Slide 12 already carries the fragmentation argument.}
+
+  \notecue{Next}{Connect KV paging to its 1962 virtual-memory ancestor: the Manchester Atlas computer.}}
 \end{frame}
 
 \begin{frame}{Paging solved the same problem for programs in 1962}
@@ -231,14 +310,26 @@
   \safeimg[width=0.78\textwidth,height=5.0cm,keepaspectratio]{atlas-manchester-1963.jpg}\\[0.1cm]
   {\small The Atlas one-level store mapped a program's contiguous addresses onto scattered page frames.}
   \mlsyscredit{Photo: University of Manchester Atlas, January 1963. Iain MacCallum, CC BY 3.0, Wikimedia Commons. Kilburn et al., IRE Trans. Electronic Computers, 1962.}
-  \note{[0.5 min] [CORE] The Atlas computer at the University of Manchester, photographed in January 1963. Its one-level store introduced paging: a table translated each program's contiguous virtual addresses to fixed-size page frames anywhere in core memory, so a program no longer needed one contiguous region. The KV cache had exactly this problem sixty years later; PagedAttention borrowed the answer. WARN: the next slide's block table is a software table that the attention kernel reads; the accelerator's hardware page table plays no part. FLEX: [CORE].}
+  \note{%
+  \mlsysnotemeta{0.5 min}{Core}%
+  Photographed in January 1963, the University of Manchester Atlas introduced paged virtual memory (Kilburn et al., 1962): a page table translated a program's contiguous logical addresses onto scattered fixed-size frames in physical core memory. Sixty years later, PagedAttention applied that exact indirection to KV caches.
+
+  \notecue{Watch for}{Unlike Atlas, a KV block table is a software structure read by the attention kernel; the GPU hardware MMU page table is not involved.}
+
+  \notecue{Next}{Walk step by step through how a KV block table indexes tokens scattered across HBM.}}
 \end{frame}
 
 \begin{frame}{A block table maps token positions to blocks anywhere in HBM}
   \centering
   \mlsyssteps[width=0.95\textwidth,height=6.0cm,keepaspectratio]{blocktable_step}{3}
   \mlsyscredit{KV Cache Management, \S5.4.1 (Explore: PagedAttention on mlsysbook.ai; 4-token blocks). After Kwon et al., SOSP 2023.}
-  \note{[2.5 min] [CORE] Step 1: a ten-token prefix in logical blocks of 4 tokens: block 0 holds positions 0 to 3, block 1 positions 4 to 7, block 2 positions 8 and 9 with two empty slots. Step 2: the sequence's block table says where each logical block lives: 3, 7, 9. Those physical blocks sit anywhere in one shared pool, between other requests' blocks. A growing sequence takes any free block and appends its number; nothing is copied or reserved ahead. Step 3: how the kernel reads position 9: logical block 9 // 4 = 2, table entry 2 says physical block 9, slot 9 mod 4 = 1. ENGAGE: what does a request waste at most? (Expected: the unused tail of its last block, under one block.) With 16-token blocks that is 15 slots, 4.92 MB here; with 64-token blocks 20.64 MB, 0.2 percent of a 32,768-token context. Any free block fits any request, so external fragmentation disappears at block granularity. WARN: a mapped block has capacity, but only its initialized slots hold valid keys and values.}
+  \note{%
+  \mlsysnotemeta{2.5 min}{Core}%
+  Follow the three-step build using 4-token blocks. First, a 10-token sequence splits into logical blocks 0 (tokens 0--3), 1 (4--7), and 2 (8--9, leaving two empty slots). Second, the sequence's block table maps logical blocks 0, 1, 2 to non-contiguous physical blocks 3, 7, and 9 anywhere in HBM; growing sequences simply grab any free physical block without copying or pre-reserving. Third, the kernel locates token 9 via logical block $\lfloor 9/4 \rfloor = 2 \to$ physical block 9, offset $9 \bmod 4 = 1$. Any free block serves any request, removing external fragmentation completely, while worst-case internal waste is under one block (15 slots = 4.92 MB for 16-token blocks; 20.64 MB, or 0.2\% of 32K, for 64-token blocks).
+
+  \notecue{Watch for}{A mapped physical block provides capacity, yet only initialized slots contain valid keys and values.}
+
+  \notecue{Next}{Predict how many shorter requests fit in the same 526 GB pool once allocation is paged.}}
 \end{frame}
 
 \begin{frame}{Predict: how many fit once memory is paged?}
@@ -248,7 +339,15 @@
   {\small Same 526 GB pool, same requests: cap 32,768 tokens, mean final length 2,048.}\\[0.1cm]
   \uncover<2->{\small About \textbf{\textcolor{mlsysaccent}{16$\times$}}, near 32,768 / 2,048. A request that grows to the cap, like r18, gains nothing.}
   \mlsyscredit{KV Cache Management, \S5.4.2 (capped exponential lengths, a modeling assumption; 16-token blocks waste 0.4\%). Computed with MLSysIM.}
-  \note{[1.5 min] [CORE] ENGAGE: one minute; write a number. Step 2: 780 final-length snapshots against 48, about 16 times. The chapter models final lengths as exponential with mean 2,048, capped at 32,768; 16-token blocks then waste 0.4 percent of allocated memory and 64-token blocks 1.5 percent. The gain is close to the cap over the mean length, so it measures how far the population falls short of the cap. WARN: a snapshot at completion is not live admission capacity; running requests are still growing, and the controller must reserve their promised output. And the r18 request, which really does reach 32,768 tokens, gains no resident capacity from paging. What paging still gives it is growth without relocation and sharing with forked candidates, next. FLEX: [CORE].}
+  \note{%
+  \mlsysnotemeta{1.5 min}{Core}%
+  Keep the 526 GB pool and 32,768-token cap fixed, with final lengths drawn from a capped exponential distribution averaging 2,048 tokens (MLSysIM). Step 2 reveals roughly 16$\times$ more completed snapshots: 780 versus 48 (close to $32{,}768 / 2{,}048$), with 16-token blocks wasting just 0.4\% of allocated memory (1.5\% for 64-token blocks).
+
+  \notecue{Check}{Estimate the concurrency multiplier before revealing Step 2 ($\approx 16\times$). Notice that paging's capacity boost reflects how far typical requests fall below the cap, so a full-cap context like r18 gains zero resident capacity from paging alone.}
+
+  \notecue{Watch for}{Completed-length snapshots overstate live admission capacity because active requests still grow and need output headroom; r18 still benefits from relocation-free growth and block sharing across forks.}
+
+  \notecue{Next}{See how block tables enable copy-on-write sharing when Lecture 3's breadth forks parallel candidates.}}
 \end{frame}
 
 \begin{frame}{Forked candidates share prefix blocks and copy only a shared tail}
@@ -262,7 +361,13 @@
     \end{column}
   \end{columns}
   \mlsyscredit{KV Cache Management, \S5.4.3 and table 3. Photo: DECSYSTEM-10 KL10, Joe Mabel, CC BY-SA 3.0, Wikimedia Commons. Bobrow et al., CACM 1972.}
-  \note{[2.5 min] [CORE] LINK: Lecture 3 sampled several candidate repairs from one prompt (the breadth axis). Without sharing, four candidates that each copy an 8,192-token prefix write 10.7 GB of KV state, the footprint of a whole 32,768-token context. Step 1: with paging, forking copies only the block table: both candidates point at blocks 3, 7, and 9, and each block's reference count goes to 2. No tensor moves. Step 2: candidate B writes token 10. Block 9 is shared and only partly full, so B cannot append in place without corrupting A. The engine allocates block 14, copies the two valid entries of block 9, points B's table at 14, and B writes there. This is copy-on-write, the trick TENEX used for memory pages in 1972. ENGAGE: what if the fork happened at an exact block boundary? (Expected: no copy; B allocates a fresh block.) WARN: memory consumed counts unique physical blocks, so logical tokens that share a block add nothing; a discarded candidate frees only blocks whose count reaches zero.}
+  \note{%
+  \mlsysnotemeta{2.5 min}{Core}%
+  When Lecture 3's breadth policy forks four candidates from an 8,192-token prompt, unshared copies write 10.7 GB of redundant KV state. First, Step 1 shows paged forking copying only the block table: Candidates A and B both point to physical blocks 3, 7, and 9 with reference counts raised to 2 and zero tensor copies. Second, Step 2 shows Candidate B decoding token 10: because shared block 9 is partially full, writing in place would corrupt A, so the engine allocates block 14, copies the two valid entries from block 9, updates B's table, and writes token 10. This applies TENEX's 1972 copy-on-write mechanism (PDP-10) directly to KV blocks (forking on a block boundary skips even that tail copy).
+
+  \notecue{Watch for}{Physical memory tracks unique blocks rather than logical tokens, and discarding a branch frees only blocks whose reference count drops to zero.}
+
+  \notecue{Next}{Check three subtle true-or-false claims about what paging changes and when blocks actually free.}}
 \end{frame}
 
 \begin{frame}{Check: what does paging change?}
@@ -274,13 +379,23 @@
   \choice{3}{Ending a request returns all of its blocks to the free pool at once.}\uncover<2->{\enspace\textbf{\textcolor{RedLine}{False}}}\\[0.4cm]
   \uncover<2->{\small Paging decides where blocks live and who shares them; the model decides how many bytes each token needs.}
   \mlsyscredit{KV Cache Management, \S5.4 and Checkpoint 5.1.}
-  \note{[2 min] [CORE] Peer instruction: vote, one minute with a neighbor, vote again. Step 2: (1) false. Bytes per token come from layers, key-value heads, head dimension, and precision; paging changes none of them. (2) true. Paging's 16 times came from requests that stop short of the cap; a request at the cap needs the same bytes either way. (3) false, the subtle one. A block returns to the pool only when its reference count reaches zero and every device operation on it has finished: a forked sibling may still hold it, a transfer may still read it, and the prefix cache, next segment, may keep it on purpose for the next turn. Students who say true to (3) will later double-count free memory. Land the segment aloud: reserving for the cap strands most of the pool; fixed blocks through a block table give it back, and forks share blocks until one writes. FLEX: [CORE].}
+  \note{%
+  \mlsysnotemeta{2 min}{Core}%
+  Evaluate all three statements from Checkpoint 5.1 before revealing Step 2. Statement 1 is False: layers, KV heads, head dimension, and precision set bytes per token, untouched by paging. Statement 2 is True: paging's 16$\times$ gain comes from short requests avoiding cap reservations, so a cap-length r18 request uses the same bytes either way. Statement 3 is False: ending a request frees a block only once its reference count hits zero and all device kernels or transfers finish, because forked siblings, host transfers, or prefix caches may still hold it.
+
+  \notecue{Check}{Vote on all three statements before revealing Step 2. Marking Statement 3 True leads to double-counting free pool memory whenever blocks stay shared or cached.}
+
+  \notecue{Next}{Section 3 turns from intra-request forks to finding and reusing cached prefixes across separate turns.}}
 \end{frame}
 
 % =============================================================================
 % SECTION: PREFIX REUSE
 % =============================================================================
-\mlsysnote{[0.5 min] [CORE] Forks share state the engine knows is related. The next turn of the same trajectory arrives as a new request. How does the engine find what it already computed?}
+\mlsysnote{%
+  \mlsysnotemeta{0.5 min}{Core}%
+  Forked candidates share state the scheduler knows belongs together, whereas the next turn of a trajectory arrives as a separate request. Section 3 indexes cached prefixes across turns and clarifies what a cache hit proves.
+
+  \notecue{Next}{Walk through SGLang's radix tree for longest-prefix matching and leaf-first eviction.}}
 \mlsysdivider{How does the next turn find the state the last turn left behind?}{KV Cache Management, \S5.5 and \S5.6}
 \section{Prefix Reuse}
 
@@ -288,7 +403,13 @@
   \centering
   \mlsyssteps[width=0.92\textwidth,height=6.0cm,keepaspectratio]{radix_step}{3}
   \mlsyscredit{KV Cache Management, \S5.5.2 to \S5.5.3 (Explore: Radix Cache on mlsysbook.ai). Zheng et al., ``SGLang,'' 2024.}
-  \note{[2.5 min] [CORE] Each node holds a run of tokens and the KV blocks for them; a request's cached state is the path from the root to its node. Step 1: the running repair request's path is green: the shared prefix of instructions and tool schemas, the repair history, the newest test-log turn. To serve a new turn the scheduler walks from the root, matching tokens edge by edge, until the first token that differs; that point is the longest reusable prefix. A radix tree stores a chain of single-child steps as one edge, so the index grows with the number of prefixes and stays independent of their length. Step 2: under memory pressure, only dormant leaves may go: the rejected branch and the other task's final turn. Step 3: evicting the final turn makes its parent a leaf, eligible next. Eviction never removes an ancestor first, because under causal attention a suffix is useless without every token before it. ENGAGE: why would a system prompt shared by hundreds of workers survive pure recency eviction poorly? (Expected: it may sit idle between calls yet saves the most work.)}
+  \note{%
+  \mlsysnotemeta{2.5 min}{Core}%
+  In SGLang's radix cache (Zheng et al., 2024), each tree edge stores a compressed run of tokens and its KV blocks so index size scales with prefix count rather than length. First, Step 1 traces the green running repair path from root through instructions, tools, history, and latest test log; a new turn walks from the root edge by edge until the first differing token to locate the longest reusable prefix. Second, Step 2 shows memory pressure evicting only unlocked dormant leaves (a rejected branch and another task's final turn). Third, Step 3 shows that removing a leaf turns a childless parent into a newly evictable leaf, preserving causal ancestors because a suffix is useless without every prior token.
+
+  \notecue{Watch for}{Pure recency eviction can drop a widely shared system prompt during brief idle lulls even though it saves the most aggregate prefill work.}
+
+  \notecue{Next}{An optional excerpt shows SGLang's exact Python eviction loop implementing leaf-first cascading.}}
 \end{frame}
 
 \begin{frame}[fragile]{SGLang's evictor pops the oldest unlocked leaf, then its parent}
@@ -321,7 +442,13 @@ def evict(self, num_tokens: int,
     \end{column}
   \end{columns}
   \mlsyscredit{SGLang, python/sglang/srt/mem\_cache/radix\_cache.py, tag v0.4.0, lines 165 to 186, two lines for a disabled cache omitted, signature wrapped (Apache 2.0).}
-  \note{[1.5 min] [OPTIONAL] Real code from a real engine, unchanged except two omitted lines. NARRATE line by line: the evictor collects the tree's leaves and orders them in a heap by last access time, so the least recently used leaf comes out first. A leaf whose lock reference count is above zero belongs to a running request and is skipped. Otherwise the callback frees its KV blocks, and if its parent now has no children, the parent joins the heap. That last line is leaf-first eviction cascading upward, the previous slide's step 3, in two lines. ENGAGE: where would a caller's hint, such as this agent resumes in 45 seconds, enter this loop? (Expected: in the heap's ordering key; recency alone cannot see the future, Belady 1966.) FLEX: [OPTIONAL].}
+  \note{%
+  \mlsysnotemeta{1.5 min}{Optional}%
+  This real excerpt from SGLang v0.4.0 (\texttt{radix\_cache.py}) implements Step 3 in twenty lines. It collects leaves into a min-heap ordered by last access time, skips any leaf with \texttt{lock\_ref > 0} (actively pinned by a running request), invokes \texttt{evict\_callback} to free its KV blocks, deletes the leaf, and pushes its parent onto the heap whenever the parent loses its last child. Caller-supplied resume hints (such as a known 45-second test wait) would enter the heap ordering key, reflecting Belady's (1966) result that optimal eviction needs future reuse times.
+
+  \notecue{Optional}{For a 50-minute class, skip this code listing; the three-step radix diagram on Slide 20 already explains leaf-first eviction.}
+
+  \notecue{Next}{Measure how much prefill time a prefix cache hit saves on both hardware math and production chat traffic.}}
 \end{frame}
 
 \begin{frame}{A hit replaces 169 ms of prefill with one 5 ms pass}
@@ -338,33 +465,64 @@ def evict(self, num_tokens: int,
   \vspace{0.2cm}
   {\small Hit rate $=$ prompt tokens reused $/$ prompt tokens, after eviction, permission, and block rounding.}
   \mlsyscredit{KV Cache Management, \S5.5.4 and equation 2; derived. Zheng et al., ``SGLang,'' arXiv 2312.07104, \S6 (Chatbot Arena deployment).}
-  \note{[2 min] [CORE] Left, derived: rebuilding a 4,096-token prefix of instructions and tool schemas costs about 578 trillion operations for the weights plus 22 trillion for attention, 169 ms at a sustained 3,560 trillion operations per second. On a hit, a 32-token suffix needs one pass bounded by reading the weights, about 5 ms. The saving recurs on every turn that keeps its prefix. Right, measured: SGLang's radix cache in a public chat service served 52.4 and 74.1 percent of prompt tokens from cache over a month, from shared system messages, reused images, and chat histories. The bottom line is the token-weighted hit rate (equation 2): count only tokens actually reused. If a 10-token match lands on 4-token blocks and the engine reuses only full blocks, 8 count and 2 are prefilled. WARN: a hosted API's cached-token count is this numerator for one request; a drop to zero after a long tool wait is consistent with idle eviction, but routing or a serialization change looks the same. LINK: Lecture 19 turns this into price.}
+  \note{%
+  \mlsysnotemeta{2 min}{Core}%
+  Left derives the prefill saving on our 8-GPU Llama 3 70B node at 45\% of 16-bit peak (3,560 TFLOP/s): recomputing a 4,096-token system and tools prefix requires roughly 578 TFLOP for weights plus 22 TFLOP for attention, taking 169 ms, whereas a cache hit prefills only a 32-token suffix in one weight-read pass of about 5 ms. Right shows SGLang's production Chatbot Arena deployment over one month: 52.4\% and 74.1\% token-weighted hit rates across two models and 1.7$\times$ lower TTFT on Vicuna-33B. Equation 2 defines token-weighted hit rate after eviction, tenant checks, and block rounding (matching 10 tokens on 4-token full-block reuse credits 8 tokens and prefills 2).
+
+  \notecue{Watch for}{A sudden drop to zero cached tokens on a hosted API after a long tool wait suggests idle eviction, yet load-balancer rerouting or a serialization shift produces the identical symptom (Lecture 19 turns hit rates into dollars).}
+
+  \notecue{Next}{Vote on a critical boundary rule: does a prefix cache hit prove that the cached evidence is still current?}}
 \end{frame}
 
 \begin{frame}{Vote: does a hit prove the evidence current?}
   \mlsysactivity{Vote}{2.5 min}
-  \small The r18 turn hits a cached 24,576-token prefix whose workspace text still reports the r17 test failure.\\[0.3cm]
+  \centering
+  \begin{tikzpicture}[>=Stealth, scale=0.95, transform shape]
+    \node[draw=GreenLine, fill=GreenL, rounded corners=3pt, inner xsep=8pt, inner ysep=3pt, font=\scriptsize\bfseries, text=GreenLine] (c) at (0,0) {Cache: tokens + weights match $\Rightarrow$ Reusable};
+    \node[draw=RedLine, fill=RedL, rounded corners=3pt, inner xsep=8pt, inner ysep=3pt, font=\scriptsize\bfseries, text=RedLine] (h) at (7.4,0) {Harness: repo moved r17 $\to$ r18 $\Rightarrow$ Stale};
+    \draw[dashed, thick, midgray] (3.65,-0.32) -- (3.65,0.32);
+  \end{tikzpicture}\\[0.22cm]
+  \raggedright
+  {\small The r18 turn hits a cached 24,576-token prefix whose workspace text still reports the r17 test failure.}\\[0.2cm]
   \normalsize
-  \choice{A}{The hit proves the r17 evidence still holds.}\\[0.2cm]
-  \answerat{2}{B}{The hit proves the tokens and model configuration match.}\\[0.2cm]
-  \choice{C}{The cache will invalidate the entry once r18 exists.}\\[0.35cm]
-  \uncover<2->{\begin{mlsyscard}{mlsysaccent}\small\textbf{Reusable} $=$ compatible (same tokens, weights, adapters, positions) $+$ available (still resident) $+$ permitted (same tenant). \textbf{Applicable} means the evidence is still current; only the harness checks it, by rewriting the prompt.\end{mlsyscard}}
+  \choice{A}{The hit proves r17 evidence still holds.}\\[0.14cm]
+  \answerat{2}{B}{The hit proves tokens and model config match.}\\[0.14cm]
+  \choice{C}{The cache invalidates the entry once r18 exists.}\\[0.25cm]
+  \uncover<2->{\begin{mlsyscard}[top=0.22em,bottom=0.22em]{mlsysaccent}\footnotesize\textbf{Reusable} $=$ compatible (tokens, weights, positions) $+$ resident $+$ same tenant. \textbf{Applicable} means current; only the harness enforces it by rewriting the prompt.\end{mlsyscard}}
   \mlsyscredit{KV Cache Management, \S5.5.1, definition 5.3, and \S5.9 (third fallacy).}
-  \note{[2.5 min] [CORE] ENGAGE: vote, then 45 seconds with a neighbor, then vote again. Step 2: B. Under causal attention a token's keys and values depend on every token before it and on the exact weights, adapters (such as LoRA), positions, and masks, so a hit certifies that all of those match. It says nothing about the world the tokens describe: the r17 tensors are numerically correct for a prompt that is now stale. Students who choose C expect the cache to watch the repository; it watches only tokens. LINK: Lecture 4 owns context invalidation: the harness withdraws the stale observation, the prompt changes at that token, the match stops there, and the turn pays a fresh prefill for the rest. That lost saving is the correct price of current evidence; Lecture 6 names the source of record each claim must answer to. WARN: never keep an obsolete observation in place to preserve a cache hit. FLEX: [CORE].}
+  \note{%
+  \mlsysnotemeta{2.5 min}{Core}%
+  Suppose the r18 turn hits a cached 24,576-token prefix whose workspace section still describes the r17 test failure. Step 2 reveals choice B: a hit proves only that tokens, weights, adapters (such as LoRA), positions, and masks match within the same tenant. The cache watches tokens, never the repository, so it returns numerically exact KV tensors for stale text.
+
+  \notecue{Check}{Vote before revealing B. Listeners picking C expect the serving engine to track workspace revisions; only the harness enforces applicability by rewriting the prompt on invalidation (Lecture 4), intentionally taking a cache miss as the honest price of current evidence.}
+
+  \notecue{Watch for}{Never preserve an obsolete observation just to maintain a high cache hit rate (Lecture 6 binds claims to sources of record).}
+
+  \notecue{Next}{When uncached prefixes must be prefilled, see how chunked prefill protects ongoing decode streams from long stalls.}}
 \end{frame}
 
 \begin{frame}{Chunked prefill bounds the gap that other streams see}
   \centering
   \mlsyssteps[width=0.95\textwidth,height=4.8cm,keepaspectratio]{chunk_step}{3}\\[0.08cm]
-  \uncover<2->{\small Gap per token: 168 $\rightarrow$ 22 ms (+11 ms prefill: 173 vs 162 ms).}
+  \uncover<2->{\small Gap per token: 168 $\rightarrow$ 22 ms (+11 ms on 162 ms weight-only prefill $\rightarrow$ 173 ms).}
   \mlsyscredit{KV Cache Management, \S5.6.2 (Explore: Chunked Prefill on mlsysbook.ai); Agrawal et al., Sarathi-Serve, OSDI 2024. Derived.}
-  \note{[2 min] [CORE] What the cache misses must be prefilled. LINK: Lecture 2's prefill and decode phases. Step 1: 32 requests are decoding, each step about 5 ms. A test log brings a 4,096-token uncached prompt; run as one unit, its 162 ms of arithmetic sits between two decode steps, so every ongoing stream waits about 168 ms for its next token. Step 2: the scheduler splits the prompt into 512-token chunks and runs one per iteration beside the 32 decodes: 544 positions, about 22 ms. Every stream now gets a token each iteration; the new prompt finishes after 8 iterations, 173 ms instead of 162. Step 3: trading 11 ms on the new prompt cuts the decode stall eightfold; in Sarathi-Serve (OSDI 2024), chunked prefill raised serving capacity 2.6 to 5.6 times under p99 inter-token latency SLOs. The budget rule (equation 3): chunk tokens plus one per decode must not exceed the per-iteration token budget. ENGAGE: if streams need at most 25 ms between tokens, should the chunk grow or shrink? (Expected: it may grow a little; measured attention traffic shrinks it again.) FLEX: [CORE]. Land the segment aloud: a radix cache finds what earlier turns computed, a hit saves prefill only, and freshness stays with the harness.}
+  \note{%
+  \mlsysnotemeta{2 min}{Core}%
+  When a cache miss requires prefilling a 4,096-token test log alongside 32 active decode streams (each step $\approx 5\text{ ms}$), Step 1 runs the prefill monolithically: 162 ms of weight-only arithmetic (versus 169 ms including attention on Slide 22) blocks every decode stream for 168 ms. Step 2 splits the prompt into eight 512-token chunks piggybacked onto the 32 decodes (544 positions per step, $\approx 22\text{ ms}$), finishing prefill in 173 ms (+11 ms) while cutting per-token decode stalls nearly 8$\times$. Step 3 cites Sarathi-Serve (OSDI 2024), where chunked prefill boosted serving capacity 2.6$\times$ to 5.6$\times$ under p99 inter-token SLOs (a looser 25 ms inter-token budget allows slightly larger chunks).
+
+  \notecue{Watch for}{Chunked prefill explicitly trades a small TTFT increment (+11 ms here) to bound tail inter-token latency for concurrent users.}
+
+  \notecue{Next}{Section 4 returns directly to the opening hook: what should the serving node do with 10.7 GB of KV state while a tool runs?}}
 \end{frame}
 
 % =============================================================================
 % SECTION: PAUSES
 % =============================================================================
-\mlsysnote{[0.5 min] [CORE] Now the hook's question. The agent stops generating and waits on its tool. What should the engine do with its 10.7 GB meanwhile?}
+\mlsysnote{%
+  \mlsysnotemeta{0.5 min}{Core}%
+  Between turns, an agent stops generating while external tools execute. Section 4 measures real tool waits, compares keep, move, and drop policies, and exposes burst reload bottlenecks and lossy eviction risks.
+
+  \notecue{Next}{Inspect measured tool-wait durations from InferCept across five orders of magnitude.}}
 \mlsysdivider{What should the engine do with an agent's state while its tool runs?}{KV Cache Management, \S5.7}
 \section{Pauses}
 
@@ -373,7 +531,13 @@ def evict(self, num_tokens: int,
   \safeimg[width=0.92\textwidth,height=5.0cm,keepaspectratio]{tool_waits.pdf}\\[0.05cm]
   {\small Recomputing context after each pause took 37 to 40\% of model forwarding time.}
   \mlsyscredit{Measured: Abhyankar et al., ``InferCept,'' ICML 2024, Table 1 (mean interception time; chatbot and image partly estimated by the authors) and abstract. Round trip: KV Cache Management, \S5.7.3.}
-  \note{[1 min] [CORE] Measured data from InferCept, the paper that framed the tool-wait problem for serving engines. Mean pause per workload: a calculator call returns in 0.09 ms, a virtual-environment step in 90 ms, a Wikipedia question-answering call in 690 ms, text-to-speech and image generation in 17 to 20 s, and a human chat reply in 28.6 s. The dashed line is the 42 ms it takes to move the r18 state out to host memory and back, derived on the next slides. Pauses left of the line end before the state could make the round trip. The paper also measured what engines did then, discarding context at every pause: recomputation took 37 to 40 percent of all model forwarding time. ENGAGE: which workloads here could never profit from moving state out? (Expected: the calculator and the virtual environment.) WARN: these are means; the chapter warns that a test may fail in a second or hang for minutes.}
+  \note{%
+  \mlsysnotemeta{1 min}{Core}%
+  Abhyankar et al. (InferCept, ICML 2024) measured mean pause lengths across agent tools: 0.09 ms for a calculator, 90 ms for a virtual environment step, 690 ms for Wikipedia QA, 17--20 s for audio or image generation, and 28.6 s for human replies. The vertical dashed line marks the 42 ms host-memory round trip for our 10.74 GB r18 context (derived next): fast tools left of that line finish before offloading could even complete. Prior engines that naively dropped KV state on every pause spent 37\% to 40\% of total model forwarding time recomputing contexts.
+
+  \notecue{Watch for}{These are mean pauses; real test suites exhibit heavy tails, failing in one second on syntax errors or hanging for minutes.}
+
+  \notecue{Next}{Compare the three lossless options for handling paused KV blocks on a DGX H100 host.}}
 \end{frame}
 
 \begin{frame}{A paused-state policy keeps, moves, or drops private blocks}
@@ -394,7 +558,13 @@ def evict(self, num_tokens: int,
     \end{column}
   \end{columns}
   \mlsyscredit{Image: NVIDIA, DGX H100/H200 User Guide (motherboard tray). KV Cache Management, \S5.7.1 to \S5.7.2 and table 4.}
-  \note{[2 min] [CORE] The image is the node's motherboard tray: two x86 processors and 32 memory modules, 2 TB of host memory, the place a moved state goes. Three choices for the paused state. Keep: no work on return, but the bytes compete with every other request. Move: copy to host memory, free the HBM once the copy lands, reload before the next turn. Drop: free the blocks and rebuild them by prefill from the recorded tokens. Only uniquely reclaimable blocks count: a system prompt shared with running requests stays, and so does any block a transfer is still reading. LINK: Lecture 1's invariant closure. The decision sits below the model: the model cannot see the pool and nothing in a proposal can force a release; the harness may pass hints such as the expected wait (Lecture 10 supervises the wait). WARN: dropping loses no evidence only because the tokens are kept in the trajectory log, which Lecture 11 owns; the cache is never the task record.}
+  \note{%
+  \mlsysnotemeta{2 min}{Core}%
+  The motherboard photo shows two x86 CPUs and 2 TB of host DDR5 memory reachable over PCIe, providing the staging tier for moved KV state. Three lossless policies apply to uniquely reclaimable blocks (shared prefixes and in-flight transfers stay pinned): Keep holds HBM with zero resume cost; Move copies blocks to host RAM, frees HBM once the copy lands, and reloads on resume; Drop frees blocks immediately and prefills again from the trajectory log on resume.
+
+  \notecue{Watch for}{Under invariant closure (Lecture 1), the serving engine decides eviction below the model, using wait-duration hints from the harness (Lecture 10). Dropping state loses zero task evidence only because durable tokens remain in the trajectory log (Lecture 11).}
+
+  \notecue{Next}{Predict whether reloading 10.74 GB over host PCIe links beats recomputing prefill on 8 H100s.}}
 \end{frame}
 
 \begin{frame}{Predict: reload over host links, or recompute?}
@@ -414,7 +584,15 @@ def evict(self, num_tokens: int,
     \end{column}
   \end{columns}
   \mlsyscredit{Topology: NVIDIA, DGX H100/H200 User Guide. KV Cache Management, \S5.7.3 and equation 4 (weight work only); derived.}
-  \note{[2.5 min] [CORE] Worked example. The diagram is the node's real topology: each of the eight accelerators reaches the host processors through PCIe switches, so each moves its eighth of the state over its own link. ENGAGE: two minutes; estimate both times. Step 2: reload is 10.74 GB over 512 GB/s, 21 ms. Recompute is 2 operations per parameter per token, 2 times 70.6 billion times 32,768, at 3,560 trillion per second: 1.3 s. Reload wins by 62 times, and by 15 even if contention cuts the links to a quarter. Both times grow linearly with the context, so the ratio does not depend on length (equation 4). Moving out immediately frees the HBM for 44.98 of the 45 seconds. Keeping the state ties up 483 GB-seconds of memory time. WARN: this comparison counts weight work only; attention makes recompute slower still, while contended links make reload slower. Students who pick recompute picture prefill as fast because it is parallel.}
+  \note{%
+  \mlsysnotemeta{2.5 min}{Core}%
+  The DGX H100 topology routes each GPU through its own PCIe switch to host memory, delivering $8 \times 64 = 512\text{ GB/s}$ aggregate host bandwidth. Step 2 compares both resume paths for 10.74 GB (32,768 tokens): reloading over PCIe takes $10.74\text{ GB} / 512\text{ GB/s} = 21\text{ ms}$, whereas recomputing weight FLOPs ($2 \times 70.6\text{B} \times 32{,}768$ at 3,560 TFLOP/s) takes 1.3 s. Reload wins by 62$\times$, and still wins by 15$\times$ at one-quarter link bandwidth (Equation 4 stays independent of context length because both scale linearly). Moving state out frees HBM for 44.98 of the 45 s wait rather than tying up 483 GB-seconds.
+
+  \notecue{Check}{Estimate both times before revealing Step 2 (21 ms versus 1.3 s). Listeners picking recompute assume parallel prefill is faster than PCIe I/O, overlooking the 4.6 quadrillion FLOPs required.}
+
+  \notecue{Watch for}{Counting only weight FLOPs understates recompute time (attention adds more), while PCIe contention slows reload.}
+
+  \notecue{Next}{An optional regime map locates keep, move, and park/drop across wait time and context length.}}
 \end{frame}
 
 \begin{frame}{Offloading pays only when the wait exceeds the round trip}
@@ -429,7 +607,15 @@ def evict(self, num_tokens: int,
     \end{column}
   \end{columns}
   \mlsyscredit{KV Cache Management, \S5.7.3 and its regime figure (redrawn); host-pressure boundary illustrative. Round trip computed.}
-  \note{[2 min] [OPTIONAL] Two axes, both log: expected tool wait across, context length up. The blue line is the round trip, twice the state over the link bandwidth; it moves right as context grows. Left of it (green) the pause ends before the state could leave and return, so keep it if memory allows. Right of it (violet) moving to host memory frees HBM for almost the whole wait at the cost of one reload. Far right (gray) parked state piles up in host memory; the boundary depends on host capacity and on how fast paused trajectories arrive, so it is drawn illustratively near a minute. Then the engine parks state on solid-state storage or drops it. The r18 test sits deep in the move region. WARN: the chapter's pitfall. Moving out when the pool has free blocks buys nothing and adds 21 ms to the resume; treat a tool call as a moment to decide, and evict only when other requests need the memory. ENGAGE: where does a 10-minute human approval land? (Expected: far right; park or drop.) FLEX: [OPTIONAL].}
+  \note{%
+  \mlsysnotemeta{2 min}{Optional}%
+  Plotting context length against expected tool wait on log-log axes separates three regimes. Left of the blue round-trip line ($2 \times \text{state}/\text{bandwidth}$, 42 ms for r18), pauses end before state could move out and back, so keep it in HBM. Right of that line (violet), offloading to host DRAM frees HBM across nearly the whole wait, where our 45 s r18 test sits. Far right (gray, near a minute, depending on host RAM and arrival rate), parked contexts saturate host memory, forcing SSD parking or dropping (such as a 10-minute human approval).
+
+  \notecue{Watch for}{Avoid always offloading on pause: moving blocks when HBM already has free slots buys zero capacity and adds a needless 21 ms resume tax; evict only under pressure.}
+
+  \notecue{Optional}{For a 50-minute class, skip this regime diagram; Slide 28 already contrasts reload versus recompute for r18.}
+
+  \notecue{Next}{Diagnose why 32 agents resuming together stall far longer than 21 ms.}}
 \end{frame}
 
 \begin{frame}{Diagnose: why does the last resume stall?}
@@ -444,19 +630,27 @@ def evict(self, num_tokens: int,
     \end{column}
     \begin{column}{0.62\textwidth}
       \centering
-      \only<1|handout:0>{\vspace{1.8cm}{\Large\bfseries What binds?}\vspace{1.8cm}}%
+      \only<1|handout:0>{\vspace{1.8cm}{\Large\bfseries Which resource limits throughput?}\vspace{1.8cm}}%
       \only<2-|handout:1>{\safeimg[width=\textwidth,height=4.9cm,keepaspectratio]{burst.pdf}}
     \end{column}
   \end{columns}
   \mlsyscredit{KV Cache Management, \S5.7.4 (scenario); derived.}
-  \note{[2 min] [CORE] ENGAGE: one minute; name the binding resource before the reveal. Step 2: the shared host links. Thirty-two states of 10.74 GB are 344 GB; at the full 512 GB/s the last reload finishes after 0.67 s, 32 times the isolated 21 ms, and any contention at the PCIe root complexes lengthens the tail. Correlated returns are normal for agents: a fleet of repair workers launches tests together, and tree-search agents fan out together. Remedies: admission control on reloads, headroom held in HBM, prefetching from return-time hints, streaming the state in layer by layer so attention on layer one starts while layer two arrives. Students who blame the model or the test runner are reasoning from the symptom; the clue is that one reload alone is fast. WARN: summing per-link rates is valid only if the topology does not block under load. FLEX: [CORE].}
+  \note{%
+  \mlsysnotemeta{2 min}{Core}%
+  Suppose 32 offloaded repair agents finish a parallel test wave simultaneously; one reload takes 21 ms in isolation, yet the last agent waits much longer. Step 2 identifies the limiting resource: the shared PCIe host links. Reloading $32 \times 10.74 = 344\text{ GB}$ at peak 512 GB/s takes at least 0.67 s (32$\times$ one reload), and root-complex contention stretches the tail further. Correlated returns occur routinely across fleets and tree-search fan-outs; mitigations include reload admission control, HBM headroom, hint-driven prefetching, and layer-by-layer streaming.
+
+  \notecue{Check}{Name the bottleneck before revealing Step 2 (host PCIe links, 0.67 s). Blaming model decode or the test runner misses the clue that an isolated reload finishes in 21 ms.}
+
+  \notecue{Watch for}{Summing per-link PCIe bandwidth assumes non-blocking topology under load.}
+
+  \notecue{Next}{Examine why lossy KV token eviction breaks agent tasks even when perplexity looks fine.}}
 \end{frame}
 
 \begin{frame}{Evicting tokens by past attention can break the computation}
   \begin{columns}[c]
     \begin{column}{0.52\textwidth}
       \centering\safeimg[width=\textwidth,height=4.5cm,keepaspectratio]{stream.pdf}\\[0.05cm]
-      {\footnotesize Sliding window vs window plus the first 4 tokens}
+      {\footnotesize Sliding window vs.\ window plus the first 4 tokens}
     \end{column}
     \begin{column}{0.46\textwidth}
       \small Agent traces hide tokens that matter later:\\[0.15cm]
@@ -468,13 +662,23 @@ def evict(self, num_tokens: int,
     \end{column}
   \end{columns}
   \mlsyscredit{Measured: Xiao et al., ``StreamingLLM,'' ICLR 2024, Tables 1 and 2 (PG19 text). KV Cache Management, \S5.7.5.}
-  \note{[2 min] [CORE] Keep, move, and drop are lossless: the next turn computes exactly what it would have. Lossy approximations change the computation: dropping tokens by attention score, keeping only a sliding window, or storing keys and values in fewer bits. Measured: Llama-2-13B with only the most recent 1,024 tokens reached a perplexity of 5,158; keeping the first 4 tokens as well restored 5.40. Llama-2-7B: 3,360 against 9.59. Softmax must put attention somewhere, and models park it on the first tokens (attention sinks); evicting them breaks the model. Right: three ways agent traces defeat the rule that a token ignored so far is safe to drop. ENGAGE: which failure does a perplexity benchmark miss? (Expected: all three; each breaks one task, and a perplexity average hides it.) WARN: validate any lossy scheme against the task's hard dependencies, measured by task success. Land the segment aloud: the engine moves only reclaimable blocks, reload beats recompute when links are free, and only lossless policies leave the turn unchanged.}
+  \note{%
+  \mlsysnotemeta{2 min}{Core}%
+  Keep, move, and drop are lossless, leaving the next turn's math bit-identical. Lossy schemes drop low-attention tokens or keep sliding windows. Left, Xiao et al. (StreamingLLM, ICLR 2024) measured catastrophic perplexity collapse on PG19 with a 1,024-token sliding window alone (5,158 on Llama-2-13B; 3,360 on Llama-2-7B), restored to 5.40 and 9.59 simply by preserving the first 4 ``attention sink'' tokens where softmax parks leftover mass. Right highlights three agent-specific dependencies that past attention scores cannot predict: dormant turn-1 constraints needed at turn 30, once-quoted commit hashes, and tool-schema syntax.
+
+  \notecue{Watch for}{Average perplexity hides single-token failures that break a task; validate any lossy KV compression or eviction policy strictly on end-to-end task acceptance.}
+
+  \notecue{Next}{Section 5 connects slot capacity to sustained turn rate using Little's law.}}
 \end{frame}
 
 % =============================================================================
 % SECTION: CAPACITY
 % =============================================================================
-\mlsysnote{[0.5 min] [CORE] Back to the hook's 41 slots. Fit is a count; the service needs a rate. What turns one into the other?}
+\mlsysnote{%
+  \mlsysnotemeta{0.5 min}{Core}%
+  Resident fit counts how many slots a node holds, yet operators care about sustained agent turns per second. Section 5 converts slots into throughput, prices prefix sharing, and compares repair against support workloads.
+
+  \notecue{Next}{Apply Little's law to derive the exact residency tax of holding KV state across tool waits.}}
 \mlsysdivider{How many agent turns per second can a full pool sustain?}{KV Cache Management, \S5.8}
 \section{Capacity}
 
@@ -485,7 +689,13 @@ def evict(self, num_tokens: int,
   \safeimg[width=0.92\textwidth,height=3.0cm,keepaspectratio]{residency.pdf}\\[0.1cm]
   \uncover<2->{\small Residency tax of a kept wait $= 1 + T_{\text{tool}}/T_{\text{model}} = 1 + 45/5 = \mathbf{\textcolor{mlsysaccent}{10}}$}
   \mlsyscredit{Little, Operations Research, 1961. KV Cache Management, theorem 5.1 and \S5.8.2.}
-  \note{[2 min] [CORE] Little's law: in any stable system, the average number of items inside equals the arrival rate times the average time each stays. It assumes nothing about arrival patterns, which is why it is safe to use here, and also why it says nothing about peaks. Rearranged, turns per second equals slots over residence time. Step 1: the bars are one repair turn. Kept, the slot is held for 5 s of generation plus 45 s of test: W is 50 s. Released, W is 5 s. Step 2: for the same number of slots, the two rates differ by 1 + (tool time / generation time), the residency tax. Here it is 10. ENGAGE: if the test took 90 s, what would the tax be? (Expected: 19.) WARN: leaving the idle wait out of W overstates throughput by exactly this factor. Later lectures on sandboxes, the harness, curation, and economics reuse this one line; this is where it is taught.}
+  \note{%
+  \mlsysnotemeta{2 min}{Core}%
+  Little's law (1961), $L = \lambda W$, holds for any stable queueing system regardless of arrival distribution: average occupied slots $L$ equal turn rate $\lambda$ times mean slot residence time $W$, so $\lambda = L / W$. Step 1 contrasts one repair turn: holding KV state across the 45 s test gives $W = 5 + 45 = 50\text{ s}$, whereas releasing state during the test gives $W = 5\text{ s}$. Step 2 isolates the residency tax of keeping paused state: $1 + T_{\text{tool}}/T_{\text{model}} = 1 + 45/5 = 10$ (a 90 s test would yield a 19$\times$ tax).
+
+  \notecue{Watch for}{Omitting idle tool waits from $W$ overstates memory-bounded throughput by exactly $1 + T_{\text{tool}}/T_{\text{model}}$, and because Little's law governs averages, burst sizing requires separate headroom. Later lectures on sandboxes, harnesses, and economics reuse this exact relation.}
+
+  \notecue{Next}{Combine Little's law with workspace prefix sharing to compute full node turn rates.}}
 \end{frame}
 
 \begin{frame}{Holding state through the test cuts the turn rate tenfold}
@@ -501,35 +711,48 @@ def evict(self, num_tokens: int,
     \end{column}
   \end{columns}
   \mlsyscredit{Photo: Carl Lender, CC BY 2.0, Wikimedia Commons. KV Cache Management, NM 5.3--5.4 (derived); Qin et al., FAST 2025.}
-  \note{[2 min] [CORE] Worked example 3, the hook's numbers. Step 1: the same node, 41 slots once each request also reserves its 2,048-token output allowance, 16-token blocks, and 10 percent headroom (next slide derives it). Keeping state through the test: 41 / 50 s = 0.82 turns per second. Releasing it: 41 / 5 s = 8.2. Step 2: with a shared workspace prefix the same pool holds 138 slots: 2.76 kept, 27.6 released. Sharing and releasing multiply. WARN: the chapter's fallacy. A memory full of resident contexts looks busy, yet most of it is idle state waiting on tests; occupancy stays high while the turn rate stays low. 8.2 and 27.6 are memory-only bounds; prefill, link bandwidth, and scheduling can bind first. ENGAGE: where else does this factor appear? (Expected: in the memory term of each attempt's cost, so in cost per accepted task, Lecture 1.) FLEX: [CORE].}
+  \note{%
+  \mlsysnotemeta{2 min}{Core}%
+  Step 1 prices our 41-slot node (derived on the next slide after output reserves, block rounding, and 10\% headroom): keeping state through the 45 s test yields $41 / 50 = 0.82\text{ turns/s}$, whereas releasing yields $41 / 5 = 8.2\text{ turns/s}$. Step 2 adds workspace prefix sharing, expanding capacity to 138 slots and lifting memory-bounded rates to 2.76 kept and 27.6 released: sharing and releasing multiply. Measured validation from Mooncake (FAST 2025) shows DRAM/SSD KV pooling serving 75\% more Kimi requests.
+
+  \notecue{Watch for}{High memory occupancy is not high throughput: a full HBM pool packed with waiting contexts looks busy while sustaining only 0.82 turns/s, inflating memory cost inside $C_{\text{eff}}$. Again, 8.2 and 27.6 are memory bounds only.}
+
+  \notecue{Next}{Derive the exact 41 unshared slots and 138 shared slots from Napkin Math 5.3.}}
 \end{frame}
 
 \begin{frame}{Sharing the workspace prefix fits 3.4 times as many requests}
   \begin{columns}[c]
-    \begin{column}{0.46\textwidth}
-      \small
-      \begin{mlsyscard}{mlsysaccent}\footnotesize
-        32,768 in $+$ 2,048 out; 16-token blocks\\
+    \begin{column}{0.47\textwidth}
+      \footnotesize
+      \begin{mlsyscard}[top=0.18em,bottom=0.18em]{mlsysaccent}\footnotesize
+        32,768 in $+$ 2,048 out; 16-token blocks (5.243~MB)\\
         Common prefix 24,576; headroom 10\%
-      \end{mlsyscard}
-      \wstep{2}{Usable: 90,292 blocks of 5.24 MB}
-      \wstep{2}{Unshared: 2,176 blocks each $\rightarrow$ \textbf{41}}
-      \wstep{3}{Shared: $(90{,}292 - 1{,}536) / 640 \rightarrow$ \textbf{138}}
-      \wstep{3}{Shared fraction 70.6\%: \textbf{\textcolor{mlsysaccent}{3.4$\times$}}}
+      \end{mlsyscard}\par\vspace{0.12cm}
+      \wstep{2}{Usable: $(525.99\text{ GB}\times0.90)/5.243\text{ MB} = \mathbf{90{,}292}$ blocks}
+      \wstep{2}{Unshared: $(32{,}768{+}2{,}048)/16 = 2{,}176$ $\rightarrow \mathbf{41}$}
+      \wstep{3}{Shared: $(90{,}292 - 1{,}536) / 640 \rightarrow \mathbf{138}$ (prefix 1,536)}
+      \uncover<3->{Shared fraction $24{,}576/34{,}816 = 70.6\%$: \textbf{\textcolor{mlsysaccent}{3.4$\times$}}}
     \end{column}
-    \begin{column}{0.52\textwidth}
+    \begin{column}{0.51\textwidth}
       \centering\uncover<4->{\safeimg[width=\textwidth,height=4.6cm,keepaspectratio]{gain_curve.pdf}}
     \end{column}
   \end{columns}
-  \mlsyscredit{KV Cache Management, Napkin Math 5.3, equation 6, and Lighthouse 5.1; derived.}
-  \note{[2.5 min] [CORE] Worked example 2. A fleet of repair workers on one repository snapshot shares its first 24,576 tokens: instructions, tool schemas, and the workspace. Step 2: withhold 10 percent of the pool and divide by 5.24 MB per 16-token block: 90,292 usable blocks. An unshared request needs (32,768 + 2,048) / 16 = 2,176 blocks, so 41 fit; fewer than 48 because of the output allowance, the headroom, and rounding. Step 3: store the prefix once (1,536 blocks) and give each request its 640 private blocks: 138 fit, 3.4 times as many. Step 4: in a large pool the gain approaches 1 / (1 - f), where f is the shared fraction of each request; 70.6 percent gives 3.4. The curve is steep near the right: prompt layout decides f. The same repair agent sharing only its 6,144-token prompt has f = 18.8 percent and gains 1.25 times. ENGAGE: what does Lecture 4's ordering rule do to f? (Expected: keeps every invariant token in front, maximizing it.)}
+  \mlsyscredit{KV Cache Management, Napkin Math 5.3, equation 6, and Lighthouse 5.1 (exact byte basis); derived.}
+  \note{%
+  \mlsysnotemeta{2.5 min}{Core}%
+  Trace Napkin Math 5.3 for a fleet sharing a 24,576-token prefix (instructions, schemas, workspace) inside 32,768 input + 2,048 output tokens with 16-token blocks (5.243 MB each) and 10\% headroom. Step 2 calculates usable pool blocks: $(525.99\text{ GB} \times 0.90) / 5.243\text{ MB} = 90{,}292$ blocks; an unshared request needs $(32{,}768 + 2{,}048)/16 = 2{,}176$ blocks, yielding $\lfloor 90{,}292/2{,}176 \rfloor = 41$ slots (down from 48 raw). Step 3 stores the shared prefix once (1,536 blocks) plus 640 private blocks per worker, fitting $\lfloor (90{,}292 - 1{,}536)/640 \rfloor = 138$ slots (3.4$\times$). Step 4 shows the $1/(1-f)$ curve: shared fraction $f = 24{,}576/34{,}816 = 70.6\%$ yields 3.4$\times$, whereas sharing only 6,144 tokens ($f = 18.8\%$) yields 1.25$\times$.
+
+  \notecue{Watch for}{Lecture 4's change-rate ordering maximizes $f$, yet altering a single early token collapses block sharing from 138 straight back to 41.}
+
+  \notecue{Next}{Compare pause policies across two contrasting lighthouses: Repair versus Support.}}
 \end{frame}
 
 \begin{frame}{Estimate: how should a support agent wait?}
   \mlsysactivity{Estimate}{2.5 min}
   \begin{columns}[T]
-    \begin{column}{0.60\textwidth}
+    \begin{column}{0.56\textwidth}
       \small
+      \renewcommand{\arraystretch}{1.04}
       \begin{tabular}{@{}lrr@{}}\toprule
         & \textbf{Repair} & \textbf{Support}\\\midrule
         Tokens kept & 32,768 & 8,192\\
@@ -538,17 +761,27 @@ def evict(self, num_tokens: int,
         Generate, then wait & 5 s, 45 s & 2 s, 20 s\\
         Reload; recompute & 21 ms; 1.3 s & 5 ms; 0.32 s\\
         Resume waits on & a test & a customer\\\bottomrule
-      \end{tabular}
+      \end{tabular}\\[0.08cm]
+      {\scriptsize\textcolor{midgray}{Raw 526~GB pool, 6,144-token shared system+tools prefix (no output reserve or headroom).}\par}
     \end{column}
-    \begin{column}{0.38\textwidth}
-      \raggedright\small Support agent: what is its residency tax, and may it drop paused state?\\[0.3cm]
-      \uncover<2->{{\Large\bfseries\textcolor{mlsysaccent}{11$\times$}}\\[0.15cm]
-      Support: keep or move (drop costs a customer 0.32 s).\\[0.15cm]
-      Repair: may drop (+2.6\% of a turn).}
+    \begin{column}{0.42\textwidth}
+      \raggedright\small Support agent: what is its residency tax, and may it drop paused state?\\[0.22cm]
+      \uncover<2->{%
+      {\footnotesize\textbf{Support residency tax}} {\scriptsize(total slot time / gen.):}\\[0.08cm]
+      {\normalsize$\dfrac{T_{\text{wait}} + T_{\text{gen}}}{T_{\text{gen}}} = \dfrac{20 + 2}{2} = \mathbf{\textcolor{mlsysaccent}{11\times}}$}\\[0.22cm]
+      {\small\textbf{Drop paused state?}}\\[0.06cm]
+      {\footnotesize\textbf{Support:} keep or move (0.32~s recompute lands in front of a customer).\\[0.10cm]
+      \textbf{Repair:} may drop (1.3~s is $+2.6\%$ of a 50~s turn behind a test).}}
     \end{column}
   \end{columns}
   \mlsyscredit{KV Cache Management, Lighthouse 5.1 and table 5 (support values are scenario inputs); derived.}
-  \note{[2.5 min] [CORE] ENGAGE: two minutes in pairs. Both agents share a 6,144-token prefix of system prompt and tool schemas, with no customer or repository data in it. Step 2: the support agent's tax is 1 + 20/2 = 11, close to the repair agent's 10, so both should free memory while they wait. The policy differs because of who waits. A support customer waits for the first token, so dropping and recomputing 0.32 s lands in front of a person: keep or move instead. The repair agent's resume waits behind a 45-second test; even dropping adds only 1.3 s, 2.6 percent of a 50-second turn, so it may drop when host memory is tight. Sharing pays four times for support, because the prefix is 75 percent of each session, and 1.25 times for repair, unless the workspace is shared too (3.4 times, last slide). WARN: students who pick the same policy for both forget the person at the other end. FLEX: [CORE].}
+  \note{%
+  \mlsysnotemeta{2.5 min}{Core}%
+  Compare Repair (32K tokens, 5 s generate, 45 s wait) against Support (8K tokens, 2 s generate, 20 s wait), both sharing a 6,144-token system-and-tools prefix on the raw 526 GB pool (Lighthouse 5.1). Step 2 calculates Support's residency tax: $(20 + 2)/2 = 11\times$, nearly matching Repair's $10\times$, so both benefit from releasing HBM while idle. Yet the resume policy diverges because of who waits: a live support customer feels a 0.32 s recompute immediately, favoring Keep or Move (5 ms reload), whereas Repair resumes behind a 45 s test where a 1.3 s recompute adds just 2.6\%, making Drop safe under host memory pressure. Prefix sharing also boosts Support 4$\times$ ($f = 75\%$: 195 $\to$ 780) versus 1.25$\times$ for unshared-workspace Repair (48 $\to$ 60).
+
+  \notecue{Check}{Compute Support's residency tax ($11\times$) and decide whether Support may drop state before revealing Step 2. Choosing identical policies for both ignores the waiting user's TTFT.}
+
+  \notecue{Next}{An optional slide defines the four mutually exclusive telemetry states needed to detect KV pool thrashing.}}
 \end{frame}
 
 \begin{frame}{Pool telemetry counts every block once, in exactly one state}
@@ -578,7 +811,13 @@ def evict(self, num_tokens: int,
   \end{tabular}\\[0.1cm]
   {\small Churn (evict, then reload soon after) + rising tail latency: the working set exceeds memory.}
   \mlsyscredit{KV Cache Management, \S5.8.3 and table 6; Denning, AFIPS 1968 (thrashing).}
-  \note{[1 min] [OPTIONAL] Two runs can both show 90 percent occupancy: one full of dormant prefixes it can drop at once, one full of pinned active state with no room to grow. A single occupancy number cannot tell them apart; these four states can, if every physical block is in exactly one and shared blocks count once. While a paused trajectory copies out, its source blocks stay pinned until the copy lands. The failure to watch for is churn, evicting blocks and soon reloading or recomputing them, together with rising tail latency under steady load. That is thrashing, which time-sharing systems met in the 1960s; Denning's remedy was admission control, which admits fewer programs until their working sets fit. ENGAGE: which metrics would distinguish useful eviction from churn? (Expected: recomputed tokens and reloads per eviction, with p99 latency.) FLEX: [OPTIONAL]. Land the segment aloud: fit is a count of slots; Little's law turns it into a rate, and every second a slot is held idle divides that rate.}
+  \note{%
+  \mlsysnotemeta{1 min}{Optional}%
+  A headline ``90\% occupancy'' metric hides whether HBM holds evictable dormant prefixes or pinned active requests with zero growth headroom. Counting each physical block once in exactly one of four states (active/pinned, reserved/in-flight, reclaimable dormant, free) separates safe utilization from pressure; source blocks stay pinned while offloading until the copy finishes. Churn (evicting blocks then quickly reloading or recomputing them) alongside rising p99 latency signals classic Denning thrashing (1968), fixed by admission control and tracked via recomputed tokens and reloads per eviction.
+
+  \notecue{Optional}{For a 50-minute class, skip this telemetry breakdown and jump directly to synthesizing the opening hook.}
+
+  \notecue{Next}{Return to the opening DGX H100 hook to connect all three throughput levers into one summary table.}}
 \end{frame}
 
 % =============================================================================
@@ -605,7 +844,15 @@ def evict(self, num_tokens: int,
     \end{column}
   \end{columns}
   \mlsyscredit{Image: NVIDIA, DGX H100/H200 User Guide (GPU tray). KV Cache Management, Napkin Math 5.1, 5.3, and 5.4 (illustrative scenario); derived.}
-  \note{[3 min] [CORE] Back to the hook. Step 1: retrieval, 60 seconds. Step 2: an agent generating nothing keeps 10.7 GB of attention state per 32,768-token context, and a node fits only tens of those after its weights. Fit becomes a rate only through residence: kept through a 45-second test, 41 slots serve 0.82 turns per second; released, 8.2. Sharing the workspace prefix raises the slots to 138, and with release memory allows 27.6 turns per second, 34 times the first row (derived). The three levers: the harness's retained context (bytes per slot), prompt layout and block sharing (slots per pool), and the paused-state policy (seconds per slot). ENGAGE: which lever belongs to the agent harness and which to the serving engine? (Expected: retained tokens and layout to the harness; blocks and pause policy to the engine; hints cross the boundary.) WARN: every rate here is a memory bound; check prefill and links before promising it.}
+  \note{%
+  \mlsysnotemeta{3 min}{Core}%
+  Return to the opening hook and retrieve the three levers that govern turns per second before revealing Step 2. Each 32,768-token context consumes 10.7 GB, so 41 unshared slots held across a 45 s test sustain only 0.82 turns/s. Releasing paused state lifts that 10$\times$ to 8.2 turns/s; sharing the workspace prefix raises slots to 138 (2.76 kept); combining sharing and release reaches 27.6 turns/s, 34$\times$ the baseline. The harness controls retained tokens (bytes per slot) and prompt layout (prefix sharing), while the serving engine owns block allocation and pause policy, coordinated by wait-duration hints across the boundary.
+
+  \notecue{Check}{Name all three levers and identify which belong to the harness versus the serving engine before revealing Step 2.}
+
+  \notecue{Watch for}{Every rate in the table remains a memory-capacity bound; verify prefill compute and PCIe bandwidth before committing to an SLO.}
+
+  \notecue{Next}{Review the five distilled takeaways from Lecture 5.}}
 \end{frame}
 
 \begin{frame}{Takeaways}
@@ -614,7 +861,11 @@ def evict(self, num_tokens: int,
   \thumbline{thumb_radix_step3.pdf}{A radix cache reuses compatible, resident, permitted prefixes; the harness alone keeps evidence current.}\\[0.06cm]
   \thumbline{thumb_regimes.pdf}{Paused state is kept, moved, or dropped by the engine; reload beats recompute while links are free.}\\[0.06cm]
   \thumbline{thumb_residency.pdf}{Little's law turns slots into turns per second; an idle wait held in memory divides the rate by $1 + T_{\text{tool}}/T_{\text{model}}$.}
-  \note{[1 min] [CORE] One line per segment. Ask students which slide taught each line. If short on time, read the first and the last.}
+  \note{%
+  \mlsysnotemeta{1 min}{Core}%
+  Five takeaways span the lecture: model geometry sets bytes per token and raw fit; fixed blocks recover reservation waste while forks share via copy-on-write; radix caches reuse compatible prefixes while only the harness keeps evidence current; reload beats recompute while PCIe links stay free; and Little's law divides turn rate by $1 + T_{\text{tool}}/T_{\text{model}}$ whenever idle waits hold HBM. Emphasize lines 1 and 5 in a rapid close.
+
+  \notecue{Next}{Three open questions probe hosted cache retention contracts, validating lossy eviction, and hint accountability.}}
 \end{frame}
 
 \begin{frame}{Open questions}
@@ -624,7 +875,13 @@ def evict(self, num_tokens: int,
     \item Can any lossy KV scheme be validated for agents whose constraints stay dormant for dozens of turns?
     \item Should the harness tell the engine how long each tool will take, and who is liable when the hint is wrong?
   \end{itemize}
-  \note{[1 min] [OPTIONAL] No single answer. The first comes from the reuse contract in \S5.5.4: retention lifetime is part of a hosted API's contract, and Lecture 19 prices it. The second is the chapter's open problem in \S5.11: no measurement yet shows that token eviction preserves long-range agent dependencies. The third follows from Belady's result: optimal replacement needs the future, and the harness holds part of it, as expected tool durations. Assign one as a short written response.}
+  \note{%
+  \mlsysnotemeta{1 min}{Optional}%
+  Pick one prompt for brief discussion or written response: hosted API retention lifetimes (\S5.5.4, priced in Lecture 19), whether any lossy KV eviction can reliably protect dormant multi-turn agent constraints (\S5.11), and who bears liability when harness wait-duration hints miss Belady's ideal prediction.
+
+  \notecue{Optional}{For a 50-minute class, skip this slide or assign one question with the Chapter 5 reading.}
+
+  \notecue{Next}{Review the primary chapter sections and serving systems papers behind today's mechanisms.}}
 \end{frame}
 
 \begin{frame}{Read and explore}
@@ -638,7 +895,11 @@ def evict(self, num_tokens: int,
     \item Xiao et al., ``Efficient Streaming Language Models with Attention Sinks,'' ICLR 2024.
     \item Denning, ``Virtual Memory,'' ACM Computing Surveys, 1970.
   \end{itemize}
-  \note{[1 min] [CORE] The chapter first; Exercise 1 sizes state for a session target, Exercise 5 works reload, recompute, and a return burst, Exercise 6 combines sharing with residence time. Kwon et al. measured the waste and built the block table. Zheng et al. built the radix prefix cache. Abhyankar et al. framed keep, swap, and discard for tool waits and measured their cost. Xiao et al. show why evicting the first tokens breaks a model. Denning's survey is the virtual-memory discipline that every mechanism today repeats. FLEX: add the serving lab your course uses.}
+  \note{%
+  \mlsysnotemeta{1 min}{Core}%
+  Read Chapter 5 (\S5.2 to \S5.9), complete Checkpoints 5.1--5.2 and Exercises 1, 5, and 6 (sizing sessions, burst reloads, and combined sharing plus residence), and inspect the interactive \emph{PagedAttention}, \emph{Radix Cache}, and \emph{Chunked Prefill} figures on \texttt{mlsysbook.ai}. Primary references cover PagedAttention (Kwon et al., 2023), SGLang (Zheng et al., 2024), InferCept (Abhyankar et al., 2024), StreamingLLM (Xiao et al., 2024), and Denning's virtual-memory survey (1970).
+
+  \notecue{Next}{Close with the transition from disposable serving state to persistent cross-session memory in Lecture 6.}}
 \end{frame}
 
 \begin{frame}[c]
@@ -651,7 +912,11 @@ def evict(self, num_tokens: int,
       {\LARGE\bfseries Why does an agent that can search everything it has stored still act on the wrong facts?}
     \end{column}
   \end{columns}
-  \note{[0.5 min] [CORE] Today's state was derived and disposable: drop it, and the engine rebuilds it from the token log. The repair's next session still needs the evidence itself, the candidate at r18, the r17 failure, the checks still open, after this serving session ends. Lecture 6 asks which information should persist, how it stays current as its sources change, and how a later session retrieves what its task needs.}
+  \note{%
+  \mlsysnotemeta{0.5 min}{Core}%
+  Every byte of KV cache today was derived and disposable: drop it, and the serving engine rebuilds it from the token log. Once the session ends, however, the next repair session still needs the r17 failure, the r18 candidate, and the open checks.
+
+  \notecue{Next}{Lecture 6 (Long-Term Memory) examines what survives across sessions, how stored claims stay bound to sources of record, and why full search can still surface stale facts.}}
 \end{frame}
 
 \end{document}
