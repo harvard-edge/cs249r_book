@@ -15,7 +15,7 @@ schematic redraws of the chapter's figures (AH = The Agent Harness):
   states_step1-3     AH Sec. 10.4, figure 2 (trajectory state machine), redrawn
   late_step1-3       AH Sec. 10.4.2 (settlement vs observation staging)
   pause_step1-3      measured: data/pause_latency.json; AH Sec. 10.5.1 reference
-  escrow_step1-3     AH Sec. 10.7, figure 3 (approval gate), redrawn
+  escrow_step1-3     AH Sec. 10.7, figure 3 (approval check), redrawn
   drr_step1-2        AH NM 10.1 (illustrative; simulated in calcs)
   runaway_step1-3    AH Sec. 10.9.1, figure 4 and table 9, redrawn
   admit_step1-2      AH NM 10.2 (illustrative)
@@ -168,39 +168,43 @@ def harness():
 def turn():
     """One supervised turn of the r18 repair (AH table 1), in four steps."""
     x0 = 160
-    segs = [('READY', 150, 240, 'white'), ('CALLING_MODEL', 240, 465, 'model'), ('WAITING_TOOL', 465, 670, 'tool'), ('', 670, 684, 'white'), ('PAUSED', 684, 800, 'struct'), ('READY', 800, 890, 'white')]
+    dy = 18
+    segs = [('READY', 150, 240, 'white'), ('CALLING_MODEL', 240, 465, 'model'), ('WAITING_TOOL', 465, 658, 'tool'), ('', 658, 678, 'white'), ('PAUSED', 678, 800, 'struct'), ('READY', 800, 890, 'white')]
     show_until = {1: 2, 2: 3, 3: 5, 4: 6}
     for k in range(1, 5):
-        s = Svg(900, 350)
-        for name, y in (('State', 44), ('Model', 120), ('Test job', 196), ('Operator', 262)):
+        s = Svg(900, 368)
+        for name, y in (('State', 44 + dy), ('Model', 120 + dy), ('Test job', 196 + dy), ('Operator', 262 + dy)):
             s.text(10, y + 8, name, 22, INK, anchor='start', weight='bold')
             if name != 'State':
                 s.line(x0, y, 890, y, '#cbd5e1', 3)
         for i, (name, a, b, role) in enumerate(segs):
             if i >= show_until[k]:
                 break
-            s.rect(a, 20, b - a, 48, role, rx=4, sw=2)
+            s.rect(a, 20 + dy, b - a, 48, role, rx=4, sw=2)
             if name:
-                s.text((a + b) / 2, 52, name, 20, ROLE[role][2] if role != 'white' else INK, weight='bold')
-        s.num(240, 90, 1)
-        s.rect(240, 108, 225, 24, 'model', rx=4)
-        s.text(252, 160, 'reserve, then send', 20, ROLE['model'][2], anchor='start')
-        if k >= 2:
-            s.num(465, 90, 2)
-            s.rect(465, 184, 295 if k >= 4 else 160 if k == 2 else 295, 24, 'tool', rx=4)
-            s.text(475, 234, 'reserve, register,', 20, ROLE['tool'][2], anchor='start')
-            s.text(475, 258, 'then send the test', 20, ROLE['tool'][2], anchor='start')
+                s.text((a + b) / 2, 52 + dy, name, 20, ROLE[role][2] if role != 'white' else INK, weight='bold')
         if k >= 3:
-            s.num(610, 290, 3, RED)
-            s.text(600, 320, 'pause: stop admitting,', 20, ROLE['fault'][2], anchor='end')
-            s.text(600, 344, 'keep owning the test', 20, ROLE['fault'][2], anchor='end')
+            s.text(668, 26, 'via READY', 18, GRAY, weight='bold')
+            s.line(668, 30, 668, 38, GRAY, 2)
+        s.num(240, 90 + dy, 1)
+        s.rect(240, 108 + dy, 225, 24, 'model', rx=4)
+        s.text(252, 160 + dy, 'reserve, then send', 20, ROLE['model'][2], anchor='start')
+        if k >= 2:
+            s.num(465, 90 + dy, 2)
+            s.rect(465, 184 + dy, 295 if k >= 4 else 160 if k == 2 else 295, 24, 'tool', rx=4)
+            s.text(475, 234 + dy, 'reserve, register,', 20, ROLE['tool'][2], anchor='start')
+            s.text(475, 258 + dy, 'then send the test', 20, ROLE['tool'][2], anchor='start')
+        if k >= 3:
+            s.num(610, 290 + dy, 3, RED)
+            s.text(600, 320 + dy, 'pause: stop admitting,', 20, ROLE['fault'][2], anchor='end')
+            s.text(600, 344 + dy, 'keep owning the test', 20, ROLE['fault'][2], anchor='end')
         if k >= 4:
-            s.num(760, 196, 4, GREEN)
-            s.text(886, 150, 'result settles its charge;', 20, ROLE['memory'][2], anchor='end')
-            s.text(886, 174, 'the turn stays paused', 20, ROLE['memory'][2], anchor='end')
-            s.num(800, 290, 5)
-            s.text(886, 320, 'resume:', 20, ROLE['sys'][2], anchor='end')
-            s.text(886, 344, 'recheck all', 20, ROLE['sys'][2], anchor='end')
+            s.num(760, 196 + dy, 4, GREEN)
+            s.text(886, 150 + dy, 'result settles its charge;', 20, ROLE['memory'][2], anchor='end')
+            s.text(886, 174 + dy, 'the turn stays paused', 20, ROLE['memory'][2], anchor='end')
+            s.num(800, 290 + dy, 5)
+            s.text(886, 320 + dy, 'resume:', 20, ROLE['sys'][2], anchor='end')
+            s.text(886, 344 + dy, 'recheck all', 20, ROLE['sys'][2], anchor='end')
         s.save(f'turn_step{k}')
 
 def record_fields():
@@ -331,7 +335,7 @@ def escrow():
         s.text(450, 207, 'approval digest binds the proposal and every field', 21, ROLE['sys'][2], weight='bold')
         s.line(10, 238, 890, 238, '#cbd5e1', 2, dash=True)
         if k >= 2:
-            s.text(10, 268, '(b) The gate', 22, INK, anchor='start', weight='bold')
+            s.text(10, 268, '(b) Approval check', 22, INK, anchor='start', weight='bold')
             s.box(10, 300, 200, 74, 'tool', '1 Hold', 'not sent', fs=22, sfs=20, dash=True)
             s.arrow(210, 337, 238, 337, 'gray')
             s.box(240, 300, 170, 74, 'struct', '2 Reviewer', 'sees (a)', fs=22, sfs=20, title_color=INK)
@@ -427,15 +431,15 @@ def admit():
             ax.barh(y, 0.21144, left=start, color='none', height=0.26, alpha=al, edgecolor=C['data'] if fits else C['danger'], lw=2.2, hatch=None if fits else '////')
             ax.text(-0.06, y, lab, ha='right', va='center', fontsize=11, fontweight='bold', color=C['text'])
             free = '0.92' if i == 0 else '0.12'
-            ax.text(allow + 0.12, y, f'free ${free}\n' + ('call fits' if fits else 'call does\nnot fit'), ha='left', va='center', fontsize=10.5, fontweight='bold', color=C['data'] if fits else C['danger'], alpha=al)
+            ax.text(allow + 0.26, y, f'free ${free}\n' + ('call fits' if fits else 'call does\nnot fit'), ha='left', va='center', fontsize=10.5, fontweight='bold', color=C['data'] if fits else C['danger'], alpha=al)
         ax.text(settled / 2, 1, 'settled\n$2.58', ha='center', va='center', fontsize=10.5)
         ax.text(settled / 2, 0, 'settled\n$2.58', ha='center', va='center', fontsize=10.5, alpha=1.0 if k >= 2 else 0.0)
         ax.text(settled + reserved / 2, 0.42, 'test $0.50', ha='center', fontsize=10, alpha=1.0 if k >= 2 else 0.0)
-        ax.text(allow, -0.5, 'final $0.30', ha='right', fontsize=10, alpha=1.0 if k >= 2 else 0.0)
-        ax.axvline(allow, color=C['text'], lw=1.6)
-        ax.text(allow, 1.45, 'allowance $3.50', ha='right', fontsize=10.5, color=C['text'])
-        ax.set_xlim(0, 4.6)
-        ax.set_ylim(-0.65, 1.6)
+        ax.text(settled + reserved + final / 2 - 0.14, -0.44, 'final $0.30', ha='center', va='top', fontsize=10, alpha=1.0 if k >= 2 else 0.0)
+        ax.plot([allow, allow], [-0.30, 1.33], color=C['text'], lw=1.6)
+        ax.text(allow - 0.06, 1.44, 'allowance $3.50', ha='right', fontsize=10.5, color=C['text'])
+        ax.set_xlim(0, 5.05)
+        ax.set_ylim(-0.65, 1.65)
         ax.set_yticks([])
         ax.set_xticks([0, 1, 2, 3])
         ax.set_xticklabels(['$0', '$1', '$2', '$3'])

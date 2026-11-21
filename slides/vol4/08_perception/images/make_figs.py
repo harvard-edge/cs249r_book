@@ -222,7 +222,7 @@ def kitti_strip():
     save(fig, 'kitti_strip')
 
 def rows(step):
-    fig, ax = plt.subplots(figsize=cm(6.2, 4.4))
+    fig, ax = plt.subplots(figsize=cm(6.2, 4.2))
     fig.subplots_adjust(0.24, 0.22, 0.96, 0.78)
     r = np.array([0, 3040])
     x = 1.5 * r * 16.6 / 3040
@@ -232,18 +232,17 @@ def rows(step):
         x0 = 1.5 * r0 * 16.6 / 3040
         ax.fill_betweenx(r0, x0 - blur / 2, x0 + blur / 2, color=C['sense_l'], lw=0)
         ax.plot(x0, r0, color=C['sense'], lw=2.6)
-        ax.text(20, 1520, '3,040 rows in 16.6 ms\nbottom skew = ? mm', color=C['neutral'], fontsize=10.5, fontweight='bold', ha='center', va='center', bbox=dict(boxstyle='round,pad=0.28', fc='#F8FAFC', ec=C['neutral'], ls='--', lw=1.2))
+        ax.text(22, 1520, '3,040 rows in 16.6 ms\nbottom skew = ? mm', color=C['neutral'], fontsize=10.5, fontweight='bold', ha='center', va='center', bbox=dict(boxstyle='round,pad=0.28', fc='#F8FAFC', ec=C['neutral'], ls='--', lw=1.2))
     else:
         ax.fill_betweenx(r, x - blur / 2, x + blur / 2, color=C['sense_l'], lw=0)
         ax.plot(x, r, color=C['sense'], lw=2.6)
-        ax.text(24.9 + 1.5, 3040 - 150, '24.9 mm', color=C['sense'], fontsize=11.0, fontweight='bold', va='center')
+        ax.text(24.9 + 1.4, 3040 - 140, '24.9 mm', color=C['sense'], fontsize=9.5, fontweight='bold', va='center', ha='left')
     if step >= 3:
         ax.axvline(50.0, color=C['veto'], lw=1.8, ls='--')
-        ax.text(50.0 - 1.5, 180, '50 mm\nlimit', color=C['veto'], fontsize=10.2, ha='right', va='top', fontweight='bold')
-        ax.text(24.9 + 1.5, 2200, '50% of\nlimit', color=C['veto'], fontsize=10.0, fontweight='bold', va='center')
-        ax.text(-12.5, 2520, '+9.1 mm yaw\nIMU unwarp', color=C['permit'], fontsize=9.8, fontweight='bold', va='center', bbox=dict(boxstyle='round,pad=0.2', fc='#DCFCE7', ec=C['permit'], lw=1.0))
+        ax.text(47.2, 220, '50 mm\nlimit', color=C['veto'], fontsize=10.0, ha='right', va='top', fontweight='bold')
+        ax.text(47.2, 1850, '50% of\nlimit', color=C['veto'], fontsize=9.8, fontweight='bold', va='center', ha='right')
     ax.set_ylim(3040 + 180, -180)
-    ax.set_xlim(-14, 56)
+    ax.set_xlim(-15, 58)
     ax.set_yticks([0, 1000, 2000, 3040])
     ax.set_yticklabels(['0', '1,000', '2,000', '3,040'])
     ax.set_ylabel('image row', fontsize=10.5)
@@ -529,7 +528,7 @@ def stereo(step):
     ax.axhline(50.0, color=C['slate'], lw=1.4, ls=':')
     ax.axhline(150.0, color=C['veto'], lw=1.6, ls='--')
     ax.text(9.9, 50.0 + 6, '50 mm localization', fontsize=10, color=C['slate'], ha='right')
-    ax.text(0.4, 150.0 + 5, '150 mm side clearance', fontsize=10, color=C['veto'])
+    ax.text(0.4, 150.0 + 11, '150 mm side clearance', fontsize=10, color=C['veto'])
     if step >= 3:
         for c, key, col in [(50.0, 'st_z_loc', C['slate']), (150.0, 'st_z_side', C['veto'])]:
             zc = {50.0: 4.0, 150.0: 6.92820323}[c]

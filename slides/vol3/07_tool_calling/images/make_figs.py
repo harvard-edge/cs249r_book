@@ -158,7 +158,21 @@ def cas():
 
 def gh_bars():
     rows = [('Tools listed', 131.0, 'neutral'), ('Mutating', 71.0, 'compute'), ('Repo is any string', 106.0, 'danger'), ('Declared destructive', 13.0, 'network'), ('Declared idempotent', 2.0, 'data')]
-    sp.hbars(str(OUT / 'gh_bars.svg'), rows, '', log=False, size=(3.6, 2.0), value_fmt='{:,.0f}', xlabel='Tools in the GitHub MCP server (measured)')
+    fig, ax = plt.subplots(figsize=(3.6, 2.0))
+    n = len(rows)
+    for i, (lab, v, ck) in enumerate(rows):
+        y = n - 1 - i
+        ax.barh(y, v, color=C[ck], height=0.62)
+        ax.text(-3.5, y, lab, ha='right', va='center', fontsize=11, fontweight='bold', color=C['text'])
+        ax.text(v + 3.2, y, f'{v:,.0f}', ha='left', va='center', fontsize=11, fontweight='bold', color=C[ck])
+    ax.set_xlim(0, 155)
+    ax.set_ylim(-0.6, n - 0.4)
+    ax.set_yticks([])
+    ax.spines['left'].set_visible(False)
+    ax.grid(axis='x', color=C['grid'], lw=0.6)
+    ax.set_axisbelow(True)
+    ax.set_xlabel('Tools in the GitHub MCP server (measured)')
+    sp.save(fig, OUT / 'gh_bars.svg')
 
 def incident():
     calls = [('1', 'list_issues', 'public repo', 'memory'), ('2', 'get_file_contents', 'private repo', 'fault'), ('3', 'create_pull_request', 'public repo', 'tool')]
@@ -242,14 +256,15 @@ def dup_plot():
     ax.bar(x + 0.19, meas, 0.36, color=[C['danger']] * 3 + [C['data']])
     for xi, p, m in zip(x, pred, meas):
         if p:
-            ax.text(xi - 0.21, p + 15, f'{p:.0f}', ha='right', fontsize=10, color=C['neutral'])
-        ax.text(xi + 0.21, m + 15, f'{m}', ha='left', fontsize=11, fontweight='bold', color=C['data'] if m == 0 else C['danger'])
+            ax.text(xi - 0.19, p + 18, f'{p:.0f}', ha='center', fontsize=10, color=C['neutral'])
+        ax.text(xi + 0.19, m + 18, f'{m}', ha='center', fontsize=11, fontweight='bold', color=C['data'] if m == 0 else C['danger'])
     ax.set_xticks(x)
     ax.set_xticklabels(labels, fontsize=12)
     ax.set_xlabel('Reply loss (request loss 2%)')
     ax.set_ylabel('Duplicate restarts\nper 20,000 ops')
+    ax.set_xlim(-0.65, 3.65)
     ax.set_ylim(0, 1100)
-    ax.text(-0.45, 990, 'gray = formula, red = measured', fontsize=11, color=C['text'])
+    ax.text(-0.55, 990, 'gray = formula, red = measured', fontsize=11, color=C['text'])
     sp.save(fig, OUT / 'dup_plot.svg')
 
 def delayed():
@@ -380,17 +395,18 @@ def poll_plot():
     fig, ax = plt.subplots(figsize=(3.9, 2.0))
     ivs = [5, 10, 20, 30, 60]
     costs = [0.87639072, 0.43076832, 0.20795712, 0.13368672, 0.05941632]
-    ax.plot(ivs, costs, '-o', color=C['compute'], lw=2.5, ms=7)
-    for i, c_ in zip(ivs, costs):
-        ax.text(i + 1.2, c_ + 0.03, f'${c_:.2f}', fontsize=11, color=C['compute'], fontweight='bold')
+    ax.plot(ivs, costs, '-o', color=C['compute'], lw=2.5, ms=7, zorder=3)
+    offsets = [(1.4, 0.03), (1.4, 0.04), (1.6, 0.03), (1.2, 0.04), (-2.0, 0.06)]
+    for i, c_, (dx, dy) in zip(ivs, costs, offsets):
+        ax.text(i + dx, c_ + dy, f'${c_:.2f}', ha='center' if dx == 0 else 'left', fontsize=10.5, color=C['compute'], fontweight='bold')
     runtime = 10
-    ax.plot([runtime], [0], 's', color=C['data'], ms=10, clip_on=False)
-    ax.annotate(f'runtime polls every {runtime:.0f} s: $0', xy=(10.5, 0.01), xytext=(24, 0.45), fontsize=11, color=C['data'], fontweight='bold', arrowprops=dict(arrowstyle='->', color=C['data']))
-    ax.text(22, 0.8, 'model polls: halving the delay\ndoubles the cost', fontsize=11, color=C['compute'])
+    ax.plot([runtime], [0.0], 's', color=C['data'], ms=9, clip_on=False, zorder=4)
+    ax.annotate(f'runtime polls every {runtime:.0f} s: $0', xy=(10.8, 0.025), xytext=(27, 0.46), fontsize=10.5, color=C['data'], fontweight='bold', arrowprops=dict(arrowstyle='->', color=C['data'], lw=1.6, connectionstyle='arc3,rad=0.30'))
+    ax.text(22, 0.80, 'model polls: halving the delay\ndoubles the cost', fontsize=10.5, color=C['compute'])
     ax.set_xlabel('Poll interval = worst detection delay (s)')
     ax.set_ylabel('Extra $ per 300 s job')
-    ax.set_xlim(0, 66)
-    ax.set_ylim(0, 1.0)
+    ax.set_xlim(0, 68)
+    ax.set_ylim(-0.02, 1.02)
     sp.save(fig, OUT / 'poll_plot.svg')
 
 def catalog():

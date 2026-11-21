@@ -105,21 +105,29 @@ def price_trend():
     fig, ax = plt.subplots(figsize=(5.8, 2.7))
     end = dt.datetime(2025, 3, 1)
     style = [(('MMLU', 'GPT-3'), 'GPT-3-level knowledge (MMLU)', C['neutral']), (('MMLU', 'GPT-4-0314'), 'GPT-4-level knowledge (MMLU)', C['memory']), (('GPQA Diamond', 'GPT-4-0314'), 'GPT-4-level science (GPQA)', VIO)]
-    ylab = {('MMLU', 'GPT-3'): 8, ('MMLU', 'GPT-4-0314'): 70, ('GPQA Diamond', 'GPT-4-0314'): 24}
-    short = {('MMLU', 'GPT-3'): 'GPT-3 level, MMLU', ('MMLU', 'GPT-4-0314'): 'GPT-4 level, MMLU', ('GPQA Diamond', 'GPT-4-0314'): 'GPT-4 level, GPQA'}
     for key, lab, col in style:
         pts = sorted((p for p in PR_ROWS if (p['benchmark'], p['threshold_model']) == key), key=lambda p: p['release_date'])
         d = [dt.datetime.fromisoformat(p['release_date']) for p in pts]
         v = [float(p['usd_per_mtok']) for p in pts]
         ax.step(d + [end], v + [v[-1]], where='post', color=col, lw=2.4)
         ax.scatter(d, v, color=col, s=26, zorder=4)
-        ax.text(dt.datetime(2024, 6, 15), ylab[key], f"{short[key]}: { {'GPT-3-level knowledge (MMLU)': '12', 'GPT-4-level knowledge (MMLU)': '16', 'GPT-4-level science (GPQA)': '42'}[lab]}× per year", color=col, fontsize=11, fontweight='bold', va='center')
+    ax.annotate('GPT-3, MMLU\n12× per year',
+                xy=(dt.datetime(2023, 3, 6), 2.0), xytext=(dt.datetime(2021, 10, 15), 0.8),
+                color=C['neutral'], fontsize=11, fontweight='bold', va='center', ha='left',
+                arrowprops=dict(arrowstyle='-', color=C['neutral'], lw=1.2))
+    ax.annotate('GPT-4, MMLU\n16× per year',
+                xy=(dt.datetime(2024, 9, 15), 2.19), xytext=(dt.datetime(2024, 5, 1), 36),
+                color=C['memory'], fontsize=11, fontweight='bold', va='center', ha='left',
+                arrowprops=dict(arrowstyle='-', color=C['memory'], lw=1.2))
+    ax.annotate('GPT-4, GPQA\n42× per year',
+                xy=(dt.datetime(2024, 2, 26), 6.0), xytext=(dt.datetime(2024, 1, 15), 5.0),
+                color=VIO, fontsize=11, fontweight='bold', va='center', ha='right',
+                arrowprops=dict(arrowstyle='-', color=VIO, lw=1.2))
     ax.set_yscale('log')
-    ax.set_ylim(0.02, 150)
-    ax.set_xlim(dt.datetime(2021, 9, 1), dt.datetime(2025, 3, 15))
-    ax.set_ylim(0.03, 150)
+    ax.set_xlim(dt.datetime(2021, 9, 1), dt.datetime(2025, 4, 1))
+    ax.set_ylim(0.025, 160)
     ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f'${v:g}'))
-    ax.set_ylabel('Cheapest $ per M tokens', fontsize=11)
+    ax.set_ylabel('Cheapest $ per million tokens', fontsize=10.5)
     ax.tick_params(labelsize=11)
     import matplotlib.dates as mdates
     ax.xaxis.set_major_locator(mdates.YearLocator())
@@ -133,16 +141,16 @@ def swe_cohort(step):
     fig, ax = plt.subplots(figsize=(5.8, 2.7))
     import numpy as np
     x = np.arange(len([(SimpleNamespace(cost_limit=None, cost_per_attempt=1.713719808, cost_per_resolved=5.100356571, input_output_ratio=104.2579578, max_cost=4.201617, max_overshoot=None, mean_calls=33.63, mean_overshoot=None, mean_resolved_cost=1.156898054, mean_unresolved_cost=1.995485033, median_calls=27.0, median_input_output_ratio=102.131244, median_input_tokens=387195.5, median_output_tokens=3852.5, output_token_share=0.009500469336, over_limit_runs=None, resolve_rate=0.336, resolved=168, survivor_understatement=4.408648243, tasks=500, unresolved_share=0.7731731032), '2024 run A'), (SimpleNamespace(cost_limit=None, cost_per_attempt=1.163070661, cost_per_resolved=1.638127692, input_output_ratio=13.88317394, max_cost=3.00501825, max_overshoot=None, mean_calls=59.96, mean_overshoot=None, mean_resolved_cost=1.041257051, mean_unresolved_cost=1.461303983, median_calls=54.5, median_input_output_ratio=14.33224632, median_input_tokens=32082.5, median_output_tokens=2050.5, output_token_share=0.06718996928, over_limit_runs=None, resolve_rate=0.71, resolved=71, survivor_understatement=1.573221223, tasks=100, unresolved_share=0.3643614864), '2025 run B'), (SimpleNamespace(cost_limit=3.0, cost_per_attempt=0.5515226445, cost_per_resolved=0.7295273075, input_output_ratio=62.92777844, max_cost=3.2862315, max_overshoot=0.2862315, mean_calls=28.932, mean_overshoot=0.05713146875, mean_resolved_cost=0.4464282348, mean_unresolved_cost=0.8771430287, median_calls=23.0, median_input_output_ratio=47.04383618, median_input_tokens=183674.5, median_output_tokens=3925.5, output_token_share=0.01564265214, over_limit_runs=8, resolve_rate=0.756, resolved=378, survivor_understatement=1.634142401, tasks=500, unresolved_share=0.388058226), '2026 run C'), (SimpleNamespace(cost_limit=None, cost_per_attempt=0.4735670177, cost_per_resolved=0.6505041452, input_output_ratio=48.19999609, max_cost=2.6613013, max_overshoot=None, mean_calls=35.04, mean_overshoot=None, mean_resolved_cost=0.3981253827, mean_unresolved_cost=0.6754843349, median_calls=31.0, median_input_output_ratio=37.82420344, median_input_tokens=399758.5, median_output_tokens=10431.0, output_token_share=0.02032520487, over_limit_runs=None, resolve_rate=0.728, resolved=364, survivor_understatement=1.633917789, tasks=500, unresolved_share=0.3879741034), '2026 run D')]))
-    w = 0.4
+    w = 0.36
     a = [1.156898054, 1.041257051, 0.4464282348, 0.3981253827]
     b = [5.100356571, 1.638127692, 0.7295273075, 0.6505041452]
-    ax.bar(x - w / 2, a, w, color=C['neutral_l'], edgecolor=C['neutral'], lw=1.2)
+    ax.bar(x - w / 2 - 0.02, a, w, color=C['neutral_l'], edgecolor=C['neutral'], lw=1.2)
     for i, v in enumerate(a):
-        ax.text(x[i] - w / 2, v + 0.08, money(v), ha='center', fontsize=12, color=C['neutral'], fontweight='bold')
+        ax.text(x[i] - w / 2 - 0.06, v + 0.12, money(v), ha='center', fontsize=11, color=C['neutral'], fontweight='bold')
     if step >= 2:
-        ax.bar(x + w / 2, b, w, color=VIO)
+        ax.bar(x + w / 2 + 0.02, b, w, color=VIO)
         for i, v in enumerate(b):
-            ax.text(x[i] + w / 2, v + 0.08, money(v), ha='center', fontsize=12, color=VIO, fontweight='bold')
+            ax.text(x[i] + w / 2 + 0.06, v + 0.12, money(v), ha='center', fontsize=11, color=VIO, fontweight='bold')
     ax.set_xticks(x)
     ax.set_xticklabels(['2024 A\n168/500', '2025 B\n71/100', '2026 C\n378/500', '2026 D\n364/500'], fontsize=13)
     ax.set_ylabel('Dollars', fontsize=13)
@@ -204,16 +212,16 @@ def payback():
         n = sorted({'cached read at 10%': {1: 0.0585, 2: 0.05295, 3: 0.0474, 4: 0.04185, 5: 0.0363, 6: 0.03075, 7: 0.0252, 8: 0.01965, 9: 0.0141, 10: 0.00855, 11: 0.003, 12: -0.00255, 13: -0.0081, 14: -0.01365, 15: -0.0192, 16: -0.02475, 17: -0.0303, 18: -0.03585, 19: -0.0414, 20: -0.04695, 21: -0.0525, 22: -0.05805, 23: -0.0636, 24: -0.06915, 25: -0.0747, 26: -0.08025, 27: -0.0858, 28: -0.09135, 29: -0.0969, 30: -0.10245}, 'cached read at 5%': {1: 0.0585, 2: 0.055725, 3: 0.05295, 4: 0.050175, 5: 0.0474, 6: 0.044625, 7: 0.04185, 8: 0.039075, 9: 0.0363, 10: 0.033525, 11: 0.03075, 12: 0.027975, 13: 0.0252, 14: 0.022425, 15: 0.01965, 16: 0.016875, 17: 0.0141, 18: 0.011325, 19: 0.00855, 20: 0.005775, 21: 0.003, 22: 0.000225, 23: -0.00255, 24: -0.005325, 25: -0.0081, 26: -0.010875, 27: -0.01365, 28: -0.016425, 29: -0.0192, 30: -0.021975}}[lab])
         ax.plot(n, {'cached read at 10%': [5.85, 5.295, 4.74, 4.185, 3.63, 3.075, 2.52, 1.965, 1.41, 0.855, 0.3, -0.255, -0.81, -1.365, -1.92, -2.475, -3.03, -3.585, -4.14, -4.695, -5.25, -5.805, -6.36, -6.915, -7.47, -8.025, -8.58, -9.135, -9.69, -10.245], 'cached read at 5%': [5.85, 5.5725, 5.295, 5.0175, 4.74, 4.4625, 4.185, 3.9075, 3.63, 3.3525, 3.075, 2.7975, 2.52, 2.2425, 1.965, 1.6875, 1.41, 1.1325, 0.855, 0.5775, 0.3, 0.0225, -0.255, -0.5325, -0.81, -1.0875, -1.365, -1.6425, -1.92, -2.1975]}[lab], color=col, lw=2.8)
         ax.plot([{'cached read at 10%': 12, 'cached read at 5%': 23}[lab]], [{'cached read at 10%': -0.00255, 'cached read at 5%': -0.00255}[lab] * 100], 'o', ms=9, color=col, mec='white', zorder=5)
-        ax.text(0.0, ytxt, f"{lab}: payback { {'cached read at 10%': 12, 'cached read at 5%': 23}[lab]} calls", fontsize=14, color=col, fontweight='bold', clip_on=False)
+        ax.text(0.0, ytxt, f"{lab}: payback { {'cached read at 10%': 12, 'cached read at 5%': 23}[lab]} calls", fontsize=15.5, color=col, fontweight='bold', clip_on=False)
     ax.axhline(0, color=INK, lw=1.2)
     rest = 15.0
     ax.plot([rest, rest], [-3.5, 6.5], color=RED, lw=1.6, ls='--')
-    ax.text(rest + 0.3, 5.4, '15 calls remain', color=RED, fontsize=14, fontweight='bold')
-    ax.set_xlabel('Calls remaining after compaction (NM 19.3, illustrative)', fontsize=13)
-    ax.set_ylabel('Compact minus keep (¢)', fontsize=13)
+    ax.text(rest + 0.3, 5.4, '15 calls remain', color=RED, fontsize=15.5, fontweight='bold')
+    ax.set_xlabel('Calls remaining after compaction (NM 19.3, illustrative)', fontsize=15)
+    ax.set_ylabel('Compact minus keep (¢)', fontsize=15)
     ax.set_xlim(0, 30)
     ax.set_ylim(-11, 6.5)
-    ax.tick_params(labelsize=13)
+    ax.tick_params(labelsize=15)
     tidy(ax)
     sp.save(fig, out / 'payback.svg')
 payback()
@@ -233,12 +241,12 @@ def waterfall(step):
         ax.text(-4, y, lab, ha='right', va='center', fontsize=14, fontweight='bold', color=C['text'])
         if show:
             ax.text(floor + m + 3, y, txt, va='center', fontsize=14, fontweight='bold', color=C['text'])
-    ax.text(c5['tests'] / 2, 3.47, 'required tests', ha='center', fontsize=14, color=P['tool'][2], fontweight='bold')
-    ax.text(c5['tests'] + c5['sandbox'] / 2, 3.47, 'sandbox', ha='center', fontsize=14, color=P['tool'][2], fontweight='bold')
-    ax.text(floor + 32, 3.47, 'model', ha='left', fontsize=14, color=SKY, fontweight='bold')
-    ax.axvline(floor, color=RED, ls='--', lw=1.8)
+    ax.text(c5['tests'] / 2, 3.52, 'required tests', ha='center', fontsize=14, color=P['tool'][2], fontweight='bold')
+    ax.text(c5['tests'] + c5['sandbox'] / 2 - 4, 3.52, 'sandbox', ha='center', fontsize=14, color=P['tool'][2], fontweight='bold')
+    ax.text(floor + 20, 3.52, 'model', ha='left', fontsize=14, color=SKY, fontweight='bold')
+    ax.plot([floor, floor], [-0.45, 3.33], color=RED, ls='--', lw=1.8)
     ax.set_xlim(0, 430)
-    ax.set_ylim(-0.5, 3.8)
+    ax.set_ylim(-0.5, 3.88)
     ax.set_yticks([])
     ax.spines['left'].set_visible(False)
     ax.set_xlabel('Elapsed seconds, one serial episode (NM 19.5, illustrative)', fontsize=13)
@@ -293,7 +301,7 @@ class Svg:
 def cascade(step):
     s = Svg(900, 430)
     x0, wmax = (250, 260)
-    tiers = [('Tier 1: small', '$0.0004 + $0.0010 gate'), ('Tier 2: mid', '$0.0020 + $0.0010 gate'), ('Tier 3: frontier', '$0.0600 + $0.0010 gate')]
+    tiers = [('Tier 1: small', '$0.0004 + $0.0010 check'), ('Tier 2: mid', '$0.0020 + $0.0010 check'), ('Tier 3: frontier', '$0.0600 + $0.0010 check')]
     total = 100000
     for i, (name, price) in enumerate(tiers):
         y = 14 + i * 112
@@ -370,7 +378,7 @@ def breakeven():
     ax.plot(u * 100, api, color=AMB, lw=3)
     ax.plot(u * 100, ded, color=SKY, lw=3)
     ax.text(58, 76, 'per-token API', color=AMB, fontsize=15, fontweight='bold')
-    ax.text(72, 24, 'dedicated', color=SKY, fontsize=15, fontweight='bold')
+    ax.text(72, 18, 'dedicated', color=SKY, fontsize=15, fontweight='bold')
     us = 0.3768303187 * 100
     ax.axvline(us, color=GRY, ls='--', lw=1.6)
     ax.plot([us], [31.25581395], 'o', ms=12, color=VIO, mec='white', zorder=5)
@@ -378,8 +386,8 @@ def breakeven():
     load = 0.52 * 100
     ax.plot([load], [43.13088], 'o', ms=10, color=AMB, mec='white', zorder=5)
     ax.plot([load], [32.4928], 'o', ms=10, color=SKY, mec='white', zorder=5)
-    ax.text(load - 2, 50, '$43.13', ha='right', color=AMB, fontsize=14, fontweight='bold')
-    ax.text(load + 2, 32.4928 - 10, '$32.49', color=SKY, fontsize=14, fontweight='bold')
+    ax.text(load + 3, 41.5, '$43.13', ha='left', color=AMB, fontsize=14, fontweight='bold')
+    ax.text(load + 2, 22.0, '$32.49', ha='left', color=SKY, fontsize=14, fontweight='bold')
     ax.set_xlabel('Delivered load (% of reference rate)', fontsize=15)
     ax.set_ylabel('Dollars per hour', fontsize=15)
     ax.set_xlim(0, 100)

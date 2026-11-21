@@ -377,12 +377,12 @@ handout:
 	{ echo "  ✗ handout build failed"; exit 1; }
 	@cd vol$(V)/$(D) && rm -f $(D)-handout.{aux,log,nav,out,snm,toc,vrb}
 
-# Instructor notes: each slide with its speaker notes on the right.
+# Study & presenter notes: Portrait US Letter (handout slide on top, notes below).
 notes:
 	@mkdir -p $(BUILD_DIR)/vol$(V)
 	@cd vol$(V)/$(D) && \
-	$(LATEX) $(LATEX_FLAGS) -jobname=$(D)-notes "\def\mlsysshownotes{}\input{$(D).tex}" > /dev/null 2>&1 && \
-	$(LATEX) $(LATEX_FLAGS) -jobname=$(D)-notes "\def\mlsysshownotes{}\input{$(D).tex}" > /dev/null 2>&1 && \
+	$(LATEX) $(LATEX_FLAGS) -jobname=$(D)-notes "\PassOptionsToClass{handout}{beamer}\def\mlsysshownotes{}\input{$(D).tex}" > /dev/null 2>&1 && \
+	$(LATEX) $(LATEX_FLAGS) -jobname=$(D)-notes "\PassOptionsToClass{handout}{beamer}\def\mlsysshownotes{}\input{$(D).tex}" > /dev/null 2>&1 && \
 	mv $(D)-notes.pdf ../../$(BUILD_DIR)/vol$(V)/ && echo "  ✓ $(BUILD_DIR)/vol$(V)/$(D)-notes.pdf" || \
 	{ echo "  ✗ notes build failed"; exit 1; }
 	@cd vol$(V)/$(D) && rm -f $(D)-notes.{aux,log,nav,out,snm,toc,vrb}

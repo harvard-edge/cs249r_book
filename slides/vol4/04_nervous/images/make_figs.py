@@ -213,14 +213,14 @@ def twoproc(step):
     ax.text(2.1, 2.97, 'Untrusted board link: CRC and sequence number', fontsize=FS_S, color=GRAY, va='center')
     if step >= 2:
         box(ax, 0.1, 0.1, 9.6, 2.45, fc=GREEN_L, ec=GREEN, lw=1.4)
-        ax.text(0.25, 2.33, 'Safety microcontroller (may command)', fontsize=FS, color=GREEN_D, fontweight='bold', va='center')
+        ax.text(0.25, 2.33, 'Safety microcontroller (may command)', fontsize=FS, color=GREEN_D, fontweight='bold', ha='left', va='center')
         arrow(ax, 1.65, 3.5, 1.65, 2.05, BLUE, ls='--')
         box(ax, 0.3, 0.95, 2.7, 1.1, 'Mailbox\n(own SRAM)', fc='white', ec=GREEN)
         box(ax, 3.5, 0.8, 2.9, 1.3, 'Permission tick\n1 kHz: freshness,\nlease, limits', fc='white', ec=GREEN_D, lw=1.6, fs=FS_S)
         arrow(ax, 3.0, 1.5, 3.5, 1.5, GREEN_D)
         box(ax, 6.9, 0.95, 2.6, 1.1, 'Drive\nregisters', fc=SLATE_L, ec=SLATE, r=0.0)
         arrow(ax, 6.4, 1.5, 6.9, 1.5, GREEN, lw=2.2)
-        ax.text(8.2, 2.33, 'sole writer', fontsize=FS_S, color=GREEN_D, fontweight='bold', ha='center', va='center')
+        ax.text(9.55, 2.33, 'sole writer', fontsize=FS_S, color=GREEN_D, fontweight='bold', ha='right', va='center')
         box(ax, 10.3, 0.1, 4.2, 2.0, 'Drives and motors\n(current loops)', fc='white', ec=SLATE, r=0.0)
         arrow(ax, 9.5, 1.5, 10.3, 1.5, SLATE, lw=2)
         ax.plot([10.3, 4.95], [0.38, 0.38], color=SLATE, lw=1.3)
@@ -228,10 +228,10 @@ def twoproc(step):
         ax.text(7.7, 0.45, 'encoders: measured state', fontsize=FS_S, color=SLATE, ha='center', va='bottom')
     if step >= 3:
         ax.text(10.0, 4.6, 'No wire from the host\nto any drive register', fontsize=FS, color=RED_D, fontweight='bold', va='center')
-        arrow(ax, 9.75, 4.0, 11.2, 2.15, RED, ls='--', lw=1.6)
-        ax.plot([10.15, 10.65], [2.75, 3.25], color=RED, lw=3)
-        ax.plot([10.15, 10.65], [3.25, 2.75], color=RED, lw=3)
-        ax.text(14.5, 3.6, 'Two chips are a hypothesis\nloaded tests must confirm', fontsize=FS_S, color=TEXT, ha='right', va='top')
+        arrow(ax, 9.75, 4.0, 10.55, 2.15, RED, ls='--', lw=1.6)
+        ax.plot([9.95, 10.35], [2.88, 3.28], color=RED, lw=2.8)
+        ax.plot([9.95, 10.35], [3.28, 2.88], color=RED, lw=2.8)
+        ax.text(14.55, 3.42, 'Two chips are a hypothesis\nloaded tests must confirm', fontsize=FS_S - 0.3, color=TEXT, ha='right', va='top')
     save_slot(fig, f'twoproc_step{step}')
 
 def queue(step):
@@ -549,9 +549,9 @@ def solewriter(step):
 
 def pathfinder(step):
     """Priority inversion on Mars Pathfinder (Jones 1997), schematic: no time scale."""
-    w, h = (14.6, 4.7)
+    w, h = (15.6, 4.7)
     fig, ax = canvas(w, h)
-    x0, sc, lh = (3.7, 2.0, 0.42)
+    x0, sc, lh = (3.85, 2.02, 0.42)
     lanes = [('Bus task (high)', NAVY), ('Comms task (medium)', AMBER), ('Weather task (low)', SLATE)]
     panels = [('As flown, without priority inheritance', [3.8, 3.25, 2.7], 4.5, 1), ('The fix, with priority inheritance', [1.55, 1.0, 0.45], 2.25, 2)]
     for title, ys, ty, k in panels:
@@ -563,25 +563,25 @@ def pathfinder(step):
         ax.text(x0, ty, title, ha='left', va='center', fontsize=FS, color=TEXT, fontweight='bold')
         for (lab, c), y in zip(lanes, ys):
             ax.text(x0 - 0.15, y + lh / 2, lab, ha='right', va='center', fontsize=FS_S, color=c, fontweight='bold')
-        ax.plot([x0, x0 + sc * 5.2], [ys[2] - 0.1, ys[2] - 0.1], color=GRAY, lw=1.0)
-        ax.text(x0 + sc * 5.2, ys[2] - 0.15, 'time', ha='right', va='top', fontsize=FS_S, color=GRAY)
-        run(0.0, 1.2, 2, SLATE, text='takes lock')
-        run(1.2, 1.6, 0, NAVY)
+        ax.plot([x0, x0 + sc * 5.55], [ys[2] - 0.1, ys[2] - 0.1], color=GRAY, lw=1.0)
+        ax.text(x0 + sc * 5.55, ys[2] - 0.15, 'time', ha='right', va='top', fontsize=FS_S, color=GRAY)
+        run(0.0, 1.15, 2, SLATE, text='takes lock')
+        run(1.15, 1.55, 0, NAVY)
         if k == 1:
-            run(1.6, 4.6, 0, NAVY, fc='white', ec=RED, hatch='////')
-            ax.text(x0 + sc * 3.1, ys[0] + lh / 2, 'B: blocked on the lock, no bound', ha='center', va='center', fontsize=FS_S, color=RED_D, fontweight='bold', bbox=dict(fc='white', ec='none', pad=0.6))
-            run(1.6, 1.9, 2, SLATE)
-            run(1.9, 4.6, 1, AMBER, text='runs as long as it likes')
-            run(1.9, 4.6, 2, SLATE, fc='white', ec=SLATE, ls='--', text='preempted', tc=SLATE)
-            ax.plot([x0 + sc * 4.65] * 2, [ys[2] - 0.1, ys[0] + lh + 0.05], color=RED_D, lw=2.0)
-            ax.text(x0 + sc * 4.7, ys[1] + lh / 2, 'watchdog\nreset', ha='left', va='center', fontsize=FS_S, color=RED_D, fontweight='bold', linespacing=1.0)
+            run(1.55, 4.70, 0, NAVY, fc='white', ec=RED, hatch='////')
+            ax.text(x0 + sc * 3.125, ys[0] + lh / 2, 'B: blocked on the lock, no bound', ha='center', va='center', fontsize=FS_S, color=RED_D, fontweight='bold', bbox=dict(fc='white', ec='none', pad=0.6))
+            run(1.55, 1.85, 2, SLATE)
+            run(1.85, 4.70, 1, AMBER, text='runs as long as it likes')
+            run(1.85, 4.70, 2, SLATE, fc='white', ec=SLATE, ls='--', text='preempted', tc=SLATE)
+            ax.plot([x0 + sc * 4.76] * 2, [ys[2] - 0.1, ys[0] + lh + 0.05], color=RED_D, lw=2.0)
+            ax.text(x0 + sc * 4.92, ys[1] + lh / 2, 'watchdog\nreset', ha='left', va='center', fontsize=FS_S, color=RED_D, fontweight='bold', linespacing=1.05)
         else:
-            run(1.6, 2.5, 0, NAVY, fc='white', ec=RED, hatch='////')
-            run(1.6, 2.5, 2, NAVY, text='inherits')
-            run(2.5, 3.4, 0, NAVY)
-            run(1.9, 3.4, 1, AMBER, fc='white', ec=AMBER, ls='--', text='waits', tc=AMBER)
-            run(3.4, 4.6, 1, AMBER)
-            ax.text(x0 + sc * 3.5, ys[0] + lh / 2, 'B: one critical section', ha='left', va='center', fontsize=FS_S, color=GREEN_D, fontweight='bold')
+            run(1.55, 2.45, 0, NAVY, fc='white', ec=RED, hatch='////')
+            run(1.55, 2.45, 2, NAVY, text='inherits')
+            run(2.45, 3.35, 0, NAVY)
+            run(1.85, 3.35, 1, AMBER, fc='white', ec=AMBER, ls='--', text='waits', tc=AMBER)
+            run(3.35, 4.65, 1, AMBER)
+            ax.text(x0 + sc * 3.45, ys[0] + lh / 2, 'B: one critical section', ha='left', va='center', fontsize=FS_S, color=GREEN_D, fontweight='bold')
     save_slot(fig, f'pathfinder_step{step}')
 if __name__ == '__main__':
     for s in (1, 2):

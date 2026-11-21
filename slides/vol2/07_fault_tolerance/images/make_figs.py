@@ -110,10 +110,10 @@ def measured(path, k):
     ax.plot([10000], [3.87], 'X', ms=10, color=C['compute'], alpha=b, zorder=5)
     txt(ax, 4500, 0.16, 'chapter model, GPU+PCIe+NIC: 3.87 h', C['compute'], k >= 3, fontsize=10, ha='right', va='bottom')
     for n in (16384, 131072):
-        ax.plot([n], [KOK[n]], 'o', ms=10, mfc='white', mec=C['memory'], mew=2, alpha=b, zorder=5)
-    ax.plot([16384], [LLAMA_H], 'D', ms=10, color=C['danger'], alpha=b, zorder=6)
-    txt(ax, 22000, 9, 'Llama 3 405B,\nmeasured: 3.1 h', C['danger'], k >= 3, fontsize=10.5, va='bottom', ha='left', linespacing=1.0)
-    txt(ax, 16384, 0.8, 'projected:\n1.8 h', C['memory'], k >= 3, fontsize=10.5, va='top', ha='center', linespacing=1.0)
+        ax.plot([n], [KOK[n]], 'o', ms=8.5, mfc='white', mec=C['memory'], mew=2, alpha=b, zorder=5)
+    ax.plot([16384], [LLAMA_H], 'D', ms=8.5, color=C['danger'], mec='white', mew=0.8, alpha=b, zorder=6)
+    txt(ax, 23000, 7.5, 'Llama 3 405B,\nmeasured: 3.1 h', C['danger'], k >= 3, fontsize=10.5, va='bottom', ha='left', linespacing=1.0)
+    txt(ax, 16384, 0.72, 'projected:\n1.8 h', C['memory'], k >= 3, fontsize=10.5, va='top', ha='center', linespacing=1.0)
     ax.set_xscale('log')
     ax.set_yscale('log')
     ax.set_xlim(4, 300000.0)
@@ -313,35 +313,35 @@ sp.save(fig, out / 'dcp_trace.svg')
 def budget(path, k):
     """3-step Checkpoint Recovery Timeline matching Explore fig-checkpoint-recovery-timeline
     and Napkin Math 7.3 (detect 60s + restart 180s + load 24.5s + warmup 120s = 6.4 min + rework)."""
-    fig, ax = plt.subplots(figsize=(5.8, 1.85))
+    fig, ax = plt.subplots(figsize=(4.4, 1.55))
     # Top timeline track (y=1.15): progress sawtooth matching Explore
     # 0 -> 140: progress climbs to durable checkpoint (140, 1.85)
     ax.plot([0, 140], [0.85, 1.55], color=V['c1'], lw=2.6)
     ax.plot([140, 140], [0.82, 1.72], color=V['ok'], lw=2.2, ls='--')
     ax.plot([140], [1.55], 'o', ms=8, color=V['ok'], zorder=5)
-    txt(ax, 140, 1.78, 'durable ckpt', V['ok'], ha='center', va='bottom', fontsize=10.5)
+    txt(ax, 108, 1.78, 'durable ckpt', V['ok'], ha='center', va='bottom', fontsize=13.5)
     # 140 -> 240: unsaved progress climbs, then crashes at x=240
     ax.plot([140, 240], [1.55, 1.98], color=V['c2'], lw=2.4)
     ax.plot([240, 240], [1.98, 1.55], color=V['bad'], lw=2.0, ls=':')
     ax.plot([240], [1.98], 'X', ms=10, color=V['bad'], zorder=6)
-    txt(ax, 240, 2.13, 'fault', V['bad'], ha='center', va='bottom', fontsize=10.5)
+    txt(ax, 240, 2.13, 'fault', V['bad'], ha='center', va='bottom', fontsize=13.5)
     # Step 2: flatline during 6.4 min recovery (x=240 -> 585)
     if k >= 2:
         ax.plot([240, 585], [1.55, 1.55], color=V['bad'], lw=2.4, ls='--')
-        txt(ax, 428, 1.65, 'progress flat (6.4 min)', V['bad'], ha='center', va='bottom', fontsize=10)
+        txt(ax, 428, 1.65, 'flat (6.4 min)', V['bad'], ha='center', va='bottom', fontsize=13)
     # Step 3: rework climbs back to pre-fault level (585 -> 685) then resumes new work (685 -> 760)
     if k >= 3:
         ax.plot([585, 685], [1.55, 1.98], color=V['bad'], lw=2.6)
         ax.plot([685, 755], [1.98, 2.28], color=V['ok'], lw=2.6)
-        txt(ax, 720, 2.30, 'resumed', V['ok'], ha='center', va='bottom', fontsize=10.5)
+        txt(ax, 720, 2.30, 'resumed', V['ok'], ha='center', va='bottom', fontsize=13.5)
     # Bottom phase bar track (y=0.0)
     parts = [('detect', 60.0, 'c3'), ('restart', 180.0, 'c1'), ('load', 24.5, 'ok'), ('warm up', 120.0, 'c2')]
     scale = 345.0 / 384.5  # maps 384.5 s cleanly onto x=240..585
     # Show T_ckpt / unsaved bars on left (x=0..240)
     ax.barh(0, 140, left=0, color=V['c1_l'], edgecolor=V['c1'], height=0.52, lw=1.2)
-    txt(ax, 70, 0, '$T_{\\text{ckpt}}$', V['c1'], ha='center', va='center', fontsize=10.5)
+    txt(ax, 70, 0, '$T_{\\text{ckpt}}$', V['c1'], ha='center', va='center', fontsize=13.5)
     ax.barh(0, 100, left=140, color=V['c2_l'], edgecolor=V['c2'], height=0.52, lw=1.2)
-    txt(ax, 190, 0, 'unsaved', '#b45309', ha='center', va='center', fontsize=10.5)
+    txt(ax, 190, 0, 'unsaved', '#b45309', ha='center', va='center', fontsize=12.5)
     # Step 2: recovery segments
     x = 240.0
     a2 = 1.0 if k >= 2 else 0.0
@@ -349,9 +349,9 @@ def budget(path, k):
         w = sec * scale
         ax.barh(0, w, left=x, color=V[ck], height=0.52, edgecolor='white', lw=1.2, alpha=a2)
         if lab == 'load':
-            txt(ax, x + w / 2, 0.50, 'load 24.5s', V[ck], k >= 2, ha='center', va='bottom', fontsize=10)
+            txt(ax, x + w / 2, 0.50, 'load 24.5 s', V[ck], k >= 2, ha='center', va='bottom', fontsize=13)
         else:
-            txt(ax, x + w / 2, -0.45, f'{lab}\n{sec:g} s', V[ck], k >= 2, ha='center', va='top', fontsize=10, linespacing=0.95)
+            txt(ax, x + w / 2, -0.45, f'{lab}\n{sec:g} s', V[ck], k >= 2, ha='center', va='top', fontsize=12.5, linespacing=0.92)
         x += w
     # Step 3: rework bar
     a3 = 1.0 if k >= 3 else 0.0
@@ -520,8 +520,8 @@ def degrade(path, k):
     ax.set_xscale('log')
     ax.set_xlim(2, 8000)
     ax.set_ylim(70, 93)
-    ax.set_xticks([3, 10, 30, 100, 300, 1000])
-    ax.set_xticklabels(['3M', '10M', '30M', '100M', '300M', '1B'], fontsize=10)
+    ax.set_xticks([3, 10, 30, 100, 1000])
+    ax.set_xticklabels(['3M', '10M', '30M', '100M', '1B'], fontsize=10)
     ax.minorticks_off()
     ax.set_xlabel('Parameters (fallback order: right to left)')
     ax.set_ylabel('ImageNet top-1 (%)')
@@ -576,4 +576,85 @@ def sdc_trace(path):
     ax.set_ylabel('Gradient norm', fontsize=13)
     sp.save(fig, path)
 sdc_trace(out / 'sdc_trace.svg')
+
+# F14: 3-panel compact fault signature banner for Diagnose cards
+def fault_sigs():
+    fig, axes = plt.subplots(1, 3, figsize=(4.5, 1.02))
+    # Panel A: Intermittent (passes cold, errors spike under heat)
+    ax = axes[0]
+    ax.plot([0, 3, 4, 4.3, 4.6, 5.5, 6.2, 6.5, 6.8, 8, 9], [0.2, 0.2, 0.2, 0.9, 0.2, 0.2, 0.2, 0.95, 0.2, 0.2, 0.85], color=V['c1'], lw=2)
+    ax.axvspan(3.5, 9.2, color=V['c2_l'], alpha=0.65)
+    txt(ax, 1.7, 0.82, 'cold: OK', V['ok'], ha='center', fontsize=12)
+    txt(ax, 6.4, 1.08, 'hot: err', V['c2'], ha='center', fontsize=12)
+    ax.set_title('A: Load bursts', fontsize=13, fontweight='bold', color=V['c1'], pad=3)
+    # Panel B: Fail-stop (heartbeats stop -> timeout)
+    ax = axes[1]
+    for t in (0.5, 1.5, 2.5, 3.5):
+        ax.plot([t, t], [0.15, 0.75], color=V['c3'], lw=2.2)
+    ax.plot([5.6], [0.45], 'X', ms=9, color=V['bad'])
+    txt(ax, 6.1, 0.45, 'timeout', V['bad'], ha='left', va='center', fontsize=12)
+    ax.set_title('B: Rank silence', fontsize=13, fontweight='bold', color=V['c2'], pad=3)
+    # Panel C: Correlated (driver rollout -> all crash together)
+    ax = axes[2]
+    for y in (0.2, 0.5, 0.8):
+        ax.plot([0, 4.6], [y, y], color=V['c1'], lw=2.2)
+        ax.plot([4.6], [y], 'X', ms=7.5, color=V['bad'])
+    ax.axvline(4.6, color=V['bad'], lw=1.4, ls='--')
+    txt(ax, 5.1, 0.5, 'driver\nrollout', V['bad'], ha='left', va='center', fontsize=12, linespacing=0.92)
+    ax.set_title('C: Fleet crash', fontsize=13, fontweight='bold', color=V['bad'], pad=3)
+    for a_ in axes:
+        a_.set_xlim(0, 9.5)
+        a_.set_ylim(0, 1.25)
+        a_.set_xticks([]); a_.set_yticks([])
+        for sp_ in a_.spines.values():
+            sp_.set_color('#cbd5e1')
+    fig.subplots_adjust(wspace=0.14)
+    sp.save(fig, out / 'fault_sigs.svg')
+
+# F25: torchrun 4-rank restart lifecycle diagram
+def torchrun_lifecycle():
+    fig, ax = plt.subplots(figsize=(2.8, 2.55))
+    ax.set_xlim(0, 10)
+    ax.set_ylim(-0.3, 9.2)
+    ax.axis('off')
+    stages = [
+        (7.7, '1. Rank 1 exits (code 1)', V['bad_l'], V['bad']),
+        (5.5, '2. SIGTERM to R0, R2, R3', V['c2_l'], V['c2']),
+        (3.3, '3. Rendezvous (restart=1)', V['c3_l'], V['c3']),
+        (1.1, '4. All 4 pass barrier', V['ok_l'], V['ok']),
+    ]
+    for idx, (y, lab, fc, ec) in enumerate(stages):
+        box(ax, 0.3, y, 9.4, 1.35, fc, ec, lw=1.8, r=0.22)
+        txt(ax, 5.0, y + 0.68, lab, ec, ha='center', va='center', fontsize=11)
+        if idx < 3:
+            ax.annotate('', xy=(5.0, y - 0.8), xytext=(5.0, y - 0.05), arrowprops=dict(arrowstyle='-|>', color=V['text'], lw=1.8))
+    txt(ax, 5.0, 0.3, 'Cold restart: every rank reloads', C['neutral'], ha='center', va='center', fontsize=10, fontweight='normal')
+    sp.save(fig, out / 'torchrun_lifecycle.svg')
+
+# F26: RPO & RTO promise check (2-step)
+for k in (1, 2):
+    fig, ax = plt.subplots(figsize=(5.6, 1.35))
+    # Top row: RPO check (30 min interval vs 15 min promise)
+    ax.barh(1, 30, color=V['c2_l'], edgecolor=V['c2'], height=0.5, lw=1.5)
+    ax.axvline(15, ymin=0.52, ymax=0.95, color=V['c1'], lw=2.2, ls='--')
+    txt(ax, 15, 1.34, 'RPO limit: 15 min', V['c1'], ha='center', va='bottom', fontsize=10)
+    txt(ax, 7.5, 1, '30 min interval', '#b45309', ha='center', va='center', fontsize=10.5)
+    txt(ax, 31.2, 1, 'FAIL (up to 30 min lost)' if k >= 2 else '?', V['bad'] if k >= 2 else C['neutral'], ha='left', va='center', fontsize=11)
+    # Bottom row: RTO check (12 min reload vs 10 min promise)
+    ax.barh(0, 12, color=V['c3_l'], edgecolor=V['c3'], height=0.5, lw=1.5)
+    ax.axvline(10, ymin=0.06, ymax=0.48, color=V['c1'], lw=2.2, ls='--')
+    txt(ax, 10, -0.34, 'RTO limit: 10 min', V['c1'], ha='center', va='top', fontsize=10)
+    txt(ax, 6, 0, '12 min', V['c3'], ha='center', va='center', fontsize=10.5)
+    txt(ax, 13.2, 0, 'FAIL (reload alone > 10 min)' if k >= 2 else '?', V['bad'] if k >= 2 else C['neutral'], ha='left', va='center', fontsize=11)
+    ax.set_xlim(0, 56)
+    ax.set_ylim(-0.68, 1.68)
+    ax.set_yticks([0, 1])
+    ax.set_yticklabels(['RTO\n(delay)', 'RPO\n(loss)'], fontsize=11, fontweight='bold')
+    ax.set_xticks([])
+    for sp_ in ('top', 'right', 'bottom'):
+        ax.spines[sp_].set_visible(False)
+    sp.save(fig, out / f'rpo_rto_step{k}.svg')
+
+fault_sigs()
+torchrun_lifecycle()
 print('figures written to', out)

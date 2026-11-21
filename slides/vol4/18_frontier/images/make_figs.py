@@ -186,8 +186,8 @@ def friction_knee():
     ax.axvspan(0, mu_min, color=RED_L, alpha=0.7, lw=0)
     ax.plot(mu, a, color=AMBER, lw=3)
     ax.axvline(mu_min, color=PLANT, lw=1.5, ls='--')
-    ax.text(mu_min / 2, 2.35, 'floor binds', color=RED, fontsize=15, ha='center', fontweight='bold')
-    ax.text(0.47, 2.35, 'brake binds', color=PLANT, fontsize=15, ha='center', fontweight='bold')
+    ax.text(mu_min / 2, 2.35, 'floor limits', color=RED, fontsize=15, ha='center', fontweight='bold')
+    ax.text(0.47, 2.35, 'brake limits', color=PLANT, fontsize=15, ha='center', fontweight='bold')
     ax.text(mu_min + 0.01, 0.1, 'μ = 0.204', color=PLANT, fontsize=14)
     pts = [('dry 0.60', 0.6, 2.0, PLANT, (0.6, 1.62)), ('inspected 0.12', 0.12, 1.176798, AMBER, (0.25, 1.05)), ('film 0.05', 0.05, 0.4903325, RED, (0.25, 0.4))]
     for lab, m, y, col, xy in pts:
@@ -202,7 +202,7 @@ def friction_knee():
 
 def trl_friction():
     mu_min = 0.2039432426
-    rows = [('Concrete, dry, skid cars', 0.85), ('Concrete, wet, smooth tyre', 0.52), ('Concrete, diesel, skid cars', 0.44), ('Concrete, diesel, smooth tyre', 0.24), ('Asphalt, engine oil, skid cars', 0.41), ('Asphalt, engine oil, smooth tyre', 0.01)]
+    rows = [('Concrete, dry, skid cars', 0.85), ('Concrete, wet, smooth tire', 0.52), ('Concrete, diesel, skid cars', 0.44), ('Concrete, diesel, smooth tire', 0.24), ('Asphalt, engine oil, skid cars', 0.41), ('Asphalt, engine oil, smooth tire', 0.01)]
     fig, ax = plt.subplots(figsize=(5.8, 2.6))
     for i, (lab, mu) in enumerate(rows):
         y = len(rows) - 1 - i
@@ -211,7 +211,7 @@ def trl_friction():
         ax.text(mu + 0.012, y, f'{mu:.2f}', va='center', fontsize=12, fontweight='bold', color=col)
         ax.text(-0.012, y, lab, va='center', ha='right', fontsize=11.5, color=TEXT, fontweight='bold')
     ax.axvline(mu_min, color=RED, lw=1.8, ls='--')
-    ax.text(mu_min + 0.01, 5.55, 'floor binds below 0.204', color=RED, fontsize=11, fontweight='bold', va='bottom')
+    ax.text(mu_min + 0.01, 5.55, 'floor limits below 0.204', color=RED, fontsize=11, fontweight='bold', va='bottom')
     ax.set_xlim(0, 1.0)
     ax.set_ylim(-0.6, 6.1)
     ax.set_yticks([])
@@ -236,10 +236,10 @@ def film_terms(step):
         tot = x / 1000
         total = '969.0' + ' mm' if row == 'dry' else '2.13' + ' m'
         ax.text(max(x, 1100.0) + 30, y, total, va='center', fontsize=12, fontweight='bold', color=RED if x > 1100.0 else PLANT, alpha=a)
-    ax.axvline(1100.0, color=RED, lw=2, ls='--')
+    ax.plot([1100.0, 1100.0], [-0.42, 1.48], color=RED, lw=2, ls='--')
     ax.text(1100.0 + 15, 1.5, 'clear distance 1,100 mm', color=RED, fontsize=11, fontweight='bold', va='bottom')
-    legend = 'delay 173.7   ramp 182.8   overheads 190 mm'
-    ax.text(1150, -0.72, legend, color=PLANT, fontsize=11, fontweight='bold', va='top')
+    legend = 'delay 173.7   ramp 182.8 (dry) / 44.8 (film)   overheads 190 mm'
+    ax.text(1300, -0.72, legend, color=PLANT, fontsize=10.5, fontweight='bold', ha='center', va='top')
     ax.set_xlim(0, 2600)
     ax.set_ylim(-1.05, 1.85)
     ax.set_yticks([])

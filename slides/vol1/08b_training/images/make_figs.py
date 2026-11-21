@@ -225,7 +225,7 @@ for k in (1, 2):
     ax.text(-19, 250, 'sub-\nnormal', color=C['data'], fontsize=11, ha='center', va='top', linespacing=1.0)
     ax.text(-43, 250, 'becomes zero in FP16', color=C['danger'], fontsize=12, fontweight='bold', ha='center', va='top')
     ax.text(-60.5, 1.6, '+ 67% exactly\nzero (own bin)', color=C['neutral'], fontsize=10.5, ha='left', va='center', linespacing=1.0)
-    label(ax, -7.5, 0.045, 'orange: × 8, shift by 3:\nSSD then matched FP32', C['compute'], k == 2, ha='left', va='bottom', fontsize=11, linespacing=1.05)
+    label(ax, 15.3, 0.062, 'orange: × 8 (shift +3):\nSSD matched FP32', C['compute'], k == 2, ha='right', va='bottom', fontsize=10.0, linespacing=1.08)
     ax.set_yscale('log')
     ax.set_ylim(0.005, 300)
     ax.set_yticks([0.01, 0.1, 1, 10], ['0.01%', '0.1%', '1%', '10%'])
@@ -532,43 +532,42 @@ mixed_precision_steps()
 
 def grad_accum_steps():
     """3-step vector diagram matching vol1:fig-grad-accumulation (§8.6.5)."""
-    W, H = 900, 315
+    W, H = 900, 250
     for step in (1, 2, 3):
         s = []
         # Micro-batch 1 (always shown)
-        s.append(_box(22, 18, 208, 108, C['data_l'], C['data'], 2.4))
-        s.append(text(126, 46, 'Micro-batch 1 (b)', C['data'], 21, 700, 'middle'))
-        s.append(text(126, 76, 'fwd: alloc A1', C['text'], 20, 400, 'middle'))
-        s.append(text(126, 104, 'bwd: free A1, +g1', C['compute'], 20, 700, 'middle'))
-        s.append(_arr(126, 130, 126, 174, C['compute']))
+        s.append(_box(18, 10, 212, 106, C['data_l'], C['data'], 2.4))
+        s.append(text(124, 37, 'Micro-batch 1 (b)', C['data'], 23, 700, 'middle'))
+        s.append(text(124, 67, 'fwd: alloc A1', C['text'], 23, 400, 'middle'))
+        s.append(text(124, 96, 'bwd: free A1, +g1', C['compute'], 23, 700, 'middle'))
+        s.append(_arr(124, 120, 124, 158, C['compute']))
 
         # Persistent gradient accumulator bar
-        s.append(_box(22, 178, 650, 56, C['compute_l'], C['compute'], 2.6))
-        g_txt = 'Accumulated gradient buffer (persistent):  g = g1' if step == 1 else 'Accumulated gradient buffer (persistent):  g = g1 + g2 + g3'
-        s.append(text(347, 206, g_txt, C['compute'], 21, 700, 'middle'))
+        s.append(_box(18, 162, 658, 78, C['compute_l'], C['compute'], 2.6))
+        g_txt = 'Accumulated gradient buffer:  g = g1' if step == 1 else 'Accumulated gradient buffer:  g = g1 + g2 + g3'
+        s.append(text(347, 187, g_txt, C['compute'], 23.5, 700, 'middle'))
+        s.append(text(347, 220, 'Each g1..gK = mean gradient over b examples', C['text'], 23, 400, 'middle'))
 
         # Step 2: Micro-batches 2 and 3 reuse the same activation slot
         if step >= 2:
-            for idx, (x0, a_lbl, g_lbl) in enumerate([(244, 'A2', 'g2'), (466, 'A3', 'g3')], 2):
-                s.append(_box(x0, 18, 208, 108, C['data_l'], C['data'], 2.4))
-                s.append(text(x0 + 104, 46, f'Micro-batch {idx} (b)', C['data'], 21, 700, 'middle'))
-                s.append(text(x0 + 104, 76, f'reuses slot: {a_lbl}', C['text'], 20, 400, 'middle'))
-                s.append(text(x0 + 104, 104, f'bwd: free {a_lbl}, +{g_lbl}', C['compute'], 20, 700, 'middle'))
-                s.append(_arr(x0 + 104, 130, x0 + 104, 174, C['compute']))
-            s.append(_box(722, 18, 160, 108, C['data_l'], C['data'], 2.4))
-            s.append(text(802, 46, 'Peak live', C['data'], 21, 700, 'middle'))
-            s.append(text(802, 76, '1 micro-batch', C['text'], 20, 700, 'middle'))
-            s.append(text(802, 104, '(b, not K·b)', C['data'], 20, 400, 'middle'))
+            for idx, (x0, a_lbl, g_lbl) in enumerate([(241, 'A2', 'g2'), (464, 'A3', 'g3')], 2):
+                s.append(_box(x0, 10, 212, 106, C['data_l'], C['data'], 2.4))
+                s.append(text(x0 + 106, 37, f'Micro-batch {idx} (b)', C['data'], 23, 700, 'middle'))
+                s.append(text(x0 + 106, 67, f'reuses slot: {a_lbl}', C['text'], 23, 400, 'middle'))
+                s.append(text(x0 + 106, 96, f'bwd: free {a_lbl}, +{g_lbl}', C['compute'], 23, 700, 'middle'))
+                s.append(_arr(x0 + 106, 120, x0 + 106, 158, C['compute']))
+            s.append(_box(720, 10, 164, 106, C['data_l'], C['data'], 2.4))
+            s.append(text(802, 37, 'Peak live', C['data'], 23, 700, 'middle'))
+            s.append(text(802, 67, '1 micro-batch', C['text'], 23, 700, 'middle'))
+            s.append(text(802, 96, '(b, not K·b)', C['data'], 23, 400, 'middle'))
 
         # Step 3: One optimizer step after K micro-batches
         if step >= 3:
-            s.append(_arr(676, 206, 718, 206, C['memory'], 3.5))
-            s.append(_box(722, 140, 160, 132, C['memory_l'], C['memory'], 2.8))
-            s.append(text(802, 172, '1 Update', C['memory'], 22, 700, 'middle'))
-            s.append(text(802, 206, 'g ÷ K', C['compute'], 22, 700, 'middle'))
-            s.append(text(802, 240, 'θ0 → θ1', C['text'], 21, 700, 'middle'))
-            s.append(_box(22, 254, 650, 46, C['memory_l'], C['memory'], 2.0))
-            s.append(text(347, 277, 'Same gradient as batch B = K·b; weights fixed until step K.', C['memory'], 21, 700, 'middle'))
+            s.append(_arr(680, 201, 716, 201, C['memory'], 3.5))
+            s.append(_box(720, 128, 164, 112, C['memory_l'], C['memory'], 2.8))
+            s.append(text(802, 155, '1 Update', C['memory'], 23.5, 700, 'middle'))
+            s.append(text(802, 187, 'g ÷ K', C['compute'], 23.5, 700, 'middle'))
+            s.append(text(802, 219, 'θ0 → θ1', C['text'], 23, 700, 'middle'))
 
         (out / f'grad_accum_step{step}.svg').write_text(
             f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" viewBox="0 0 {W} {H}">\n'

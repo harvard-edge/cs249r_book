@@ -72,8 +72,8 @@ def horovod(k, col=False):
         ax.bar(i - w / 2, tf[i], w, color=C['bad'], alpha=1.0 if k >= 2 else 0.0)
         ax.bar(i + w / 2, hv[i], w, color=C['c2'], alpha=1.0 if k >= 3 else 0.0)
         label(ax, i - w / 2, tf[i] + 500, f"{ {0: '53', 1: '41'}[i]}%", C['bad'], k >= 2, ha='center', fontsize=13)
-        label(ax, i + w / 2, hv[i] + 500, f"{ {0: '88', 1: '88'}[i]}%", C['c2_t'], k >= 3, ha='center', fontsize=13)
-        label(ax, i, ideal[i] + 1500, f"ideal { {0: '17,000', 1: '15,000'}[i]}", C['text'], True, ha='center', fontsize=11, fontweight='normal')
+        label(ax, i + w / 2, hv[i] - 750, f"{ {0: '88', 1: '88'}[i]}%", 'white', k >= 3, ha='center', va='top', fontsize=12.5)
+        label(ax, i, ideal[i] + 1000, f"ideal { {0: '17,000', 1: '15,000'}[i]}", C['text'], True, ha='center', va='bottom', fontsize=11, fontweight='normal')
     if col:
         label(ax, -0.55, 23500, 'TensorFlow', C['bad'], k >= 2, fontsize=12)
         label(ax, 0.55, 23500, 'Horovod', C['c2_t'], k >= 3, fontsize=12)
@@ -96,7 +96,7 @@ def traffic(k):
     fig, ax = blank((5.8, 2.1))
     ax.set_xlim(0, 12.4)
     ax.set_ylim(-0.5, 5.6)
-    heads = [(0.0, 'Split'), (4.4, 'Primitive'), (8.7, 'Binds on')]
+    heads = [(0.0, 'Split'), (4.4, 'Primitive'), (8.7, 'Limited by')]
     for j, (x, h) in enumerate(heads):
         label(ax, x, 5.15, h, C['neutral'], j == 0 or k > j, fontsize=12)
     for i, (sname, prim, bind) in enumerate(rows):
@@ -219,8 +219,8 @@ def crossover():
     ax.text(mx * 1.25, 130, 'crossover\n≈ 1.1 MB', color=C['neutral'], fontsize=12.5, fontweight='bold', va='bottom')
     ax.text(2000.0, 2000.0, 'ring', color=C['c2_t'], fontsize=13, fontweight='bold')
     ax.text(15000.0, 300, 'tree', color=C['c1'], fontsize=13, fontweight='bold')
-    ax.text(40000000.0, 20000.0, 'tree', color=C['c1'], fontsize=13, fontweight='bold')
-    ax.text(40000000.0, 2200.0, 'ring', color=C['c2_t'], fontsize=13, fontweight='bold')
+    ax.text(16000000.0, 48000.0, 'tree', color=C['c1'], fontsize=13, fontweight='bold', ha='right', va='bottom')
+    ax.text(45000000.0, 2400.0, 'ring', color=C['c2_t'], fontsize=13, fontweight='bold', ha='center', va='top')
     m_b = 1000000.0
     ax.plot([m_b], [1456.9], 'o', color=C['c2'], ms=8)
     ax.plot([m_b], [1320.0], 'o', color=C['c1'], ms=8)
@@ -279,23 +279,43 @@ def hier(k):
     sp.save(fig, out / f'hier_step{k}.svg')
 
 def a2a_matrix():
-    fig, ax = plt.subplots(figsize=(2.7, 2.5))
+    fig, ax = plt.subplots(figsize=(2.95, 3.05))
     n = int(8.0)
     for s in range(n):
         for d in range(n):
             local = s == d
-            ax.add_patch(Rectangle((d, n - 1 - s), 1, 1, facecolor=C['neutral_l'] if local else C['c2_l'], edgecolor='white', lw=1.5))
-            ax.text(d + 0.5, n - 0.5 - s, '64', ha='center', va='center', fontsize=9, color=C['neutral'] if local else C['c2_t'], fontweight='bold')
-    ax.set_xlim(0, n)
-    ax.set_ylim(0, n)
+            if s == 0:
+                if local:
+                    fc, ec, tc, lw = '#cbd5e1', '#475569', '#1e293b', 1.6
+                else:
+                    fc, ec, tc, lw = C['c2'], 'white', 'white', 1.5
+                ax.add_patch(Rectangle((d, n - 1 - s), 1, 1, facecolor=fc, edgecolor=ec, lw=lw, zorder=3))
+                ax.text(d + 0.5, n - 0.5 - s, '64', ha='center', va='center', fontsize=9.5, color=tc, fontweight='bold', zorder=4)
+            else:
+                fc = C['neutral_l'] if local else C['c2_l']
+                tc = C['neutral'] if local else C['c2_t']
+                ax.add_patch(Rectangle((d, n - 1 - s), 1, 1, facecolor=fc, edgecolor='white', lw=1.5, alpha=0.42))
+                ax.text(d + 0.5, n - 0.5 - s, '64', ha='center', va='center', fontsize=8.5, color=tc, alpha=0.55)
+    # Outline GPU 0's 7 remote cells so the factor 7 stands out immediately
+    ax.add_patch(Rectangle((1, n - 1), 7, 1, facecolor='none', edgecolor=C['c2_t'], lw=2.2, zorder=5))
+    # Compact legend directly below the matrix
+    ax.add_patch(Rectangle((0.0, -0.78), 0.52, 0.45, facecolor='#cbd5e1', edgecolor='#475569', lw=1.2, clip_on=False))
+    ax.text(0.68, -0.56, '1 local (kept)', ha='left', va='center', fontsize=9.0, fontweight='bold', color='#334155')
+    ax.add_patch(Rectangle((4.10, -0.78), 0.52, 0.45, facecolor=C['c2'], edgecolor=C['c2_t'], lw=1.2, clip_on=False))
+    ax.text(4.78, -0.56, '7 remote sends', ha='left', va='center', fontsize=9.0, fontweight='bold', color=C['c2_t'])
+    ax.set_xlim(-0.05, n + 0.05)
+    ax.set_ylim(-1.05, n + 0.05)
     ax.set_xticks(np.arange(n) + 0.5)
-    ax.set_xticklabels([str(i) for i in range(n)], fontsize=11)
+    ax.set_xticklabels([str(i) for i in range(n)], fontsize=10.5)
     ax.set_yticks(np.arange(n) + 0.5)
-    ax.set_yticklabels([str(i) for i in range(n)][::-1], fontsize=11)
+    ax.set_yticklabels([str(i) for i in range(n)][::-1], fontsize=10.5)
+    # Emphasize row 0 tick label
+    ax.get_yticklabels()[-1].set_fontweight('bold')
+    ax.get_yticklabels()[-1].set_color(C['c2_t'])
     ax.xaxis.tick_top()
     ax.xaxis.set_label_position('top')
-    ax.set_xlabel('Receiving GPU', fontsize=12)
-    ax.set_ylabel('Sending GPU', fontsize=12)
+    ax.set_xlabel('Receiving GPU', fontsize=11.5)
+    ax.set_ylabel('Sending GPU (row 0 highlighted)', fontsize=10.8)
     ax.tick_params(length=0)
     for s in ['left', 'bottom', 'top', 'right']:
         ax.spines[s].set_visible(False)
@@ -382,7 +402,8 @@ def overlap(k):
         ax.text(-20, y, nm, ha='right', va='center', fontsize=11, fontweight='bold', color=C['text'], alpha=a)
         ax.text(end + 20, y - 0.2, f"{ {0: '1,344', 1: '879', 2: '487.6'}[j]} ms", va='center', fontsize=12, fontweight='bold', color=[C['bad'], C['c2_t'], C['ok']][j], alpha=a)
     ax.text(240, 2.6, 'backward, 15 ms per layer', ha='center', fontsize=11, color=C['c1'], fontweight='bold')
-    ax.text(1150, 0.15, 'reduction, 27 ms\nper layer', ha='center', va='center', fontsize=11, color=C['c2_t'], fontweight='bold')
+    ax.text(1150, 0.42, 'reduction, 27 ms\nper layer', ha='center', va='center', fontsize=11, color=C['c2_t'], fontweight='bold')
+    label(ax, 1150, -0.18, '9 buckets × 0.85 ms\n= 7.6 ms/layer', C['ok'], k >= 3, ha='center', va='center', fontsize=10.2)
     ax.set_xlim(0, 1550)
     ax.set_ylim(-0.6, 2.9)
     ax.set_yticks([])
@@ -502,27 +523,31 @@ def errfb_steps():
     steps = np.array([1, 2, 3, 4, 5])
     res = np.array([0.4, -0.3, -0.1, 0.3, -0.4])
     sent = np.array([0.0, 1.0, 0.0, 0.0, 1.0])
+    # Offsets chosen clear of both the polyline and the threshold/box
+    pos = [
+        (0.86, 0.38, 'right', 'center'),   # step 1: +0.4 left of dot
+        (2.00, -0.46, 'center', 'top'),    # step 2: -0.3 below trough
+        (3.14, -0.24, 'left', 'top'),      # step 3: -0.1 below-right
+        (3.84, 0.33, 'right', 'center'),   # step 4: +0.3 left of peak, below 0.5
+        (5.16, -0.38, 'left', 'center'),   # step 5: -0.4 right of dot, clear of box
+    ]
     for k in (1, 2, 3):
-        fig, ax = plt.subplots(figsize=(3.8, 2.55))
+        fig, ax = plt.subplots(figsize=(3.9, 2.65))
         ax.axhline(0.0, color=C['neutral'], lw=1.0)
         ax.axhline(0.5, color=C['ok'], lw=1.4, ls='--')
-        ax.text(3.5, 0.56, 'threshold 0.5', ha='center', va='bottom', fontsize=10.5, fontweight='bold', color=C['ok'])
+        ax.text(3.45, 0.57, 'threshold 0.5', ha='center', va='bottom', fontsize=10.5, fontweight='bold', color=C['ok'])
         n_show = 1 if k == 1 else 5
         ax.plot(steps[:n_show], res[:n_show], '-o', color=C['c1'], lw=2.5, ms=8, zorder=4)
         for i in range(n_show):
             if sent[i] > 0:
                 ax.bar(steps[i], sent[i], width=0.34, color=C['ok_l'], edgecolor=C['ok'], lw=1.8, zorder=2)
                 ax.text(steps[i], 1.04, 'sent 1', ha='center', va='bottom', fontsize=10.5, fontweight='bold', color=C['ok'])
-            dy = -0.17 if i in (0, 1, 2, 4) else -0.17
-            if i == 3:
-                dy = -0.18
-            if i == 0:
-                dy = -0.17
-            ax.text(steps[i], res[i] + dy, f'{res[i]:+.1f}', ha='center', va='center', fontsize=10.5, fontweight='bold', color=C['c1'])
+            px, py, ha_, va_ = pos[i]
+            ax.text(px, py, f'{res[i]:+.1f}', ha=ha_, va=va_, fontsize=10.5, fontweight='bold', color=C['c1'])
         if k >= 3:
-            ax.text(3.0, -0.84, 'True 1.6 = Sent 2.0 + Res (-0.4)\nNaive (no residual): 0.0', ha='center', va='center', fontsize=10.2, fontweight='bold', color=C['text'], bbox=dict(facecolor='#f8fafc', edgecolor=C['c1'], boxstyle='round,pad=0.32'))
-        ax.set_xlim(0.5, 5.5)
-        ax.set_ylim(-1.12, 1.26)
+            ax.text(3.0, -1.04, 'True 1.6 = Sent 2.0 + Res (-0.4)\nNaive (no residual): 0.0', ha='center', va='center', fontsize=10.0, fontweight='bold', color=C['text'], bbox=dict(facecolor='#f8fafc', edgecolor=C['c1'], boxstyle='round,pad=0.30'))
+        ax.set_xlim(0.32, 5.78)
+        ax.set_ylim(-1.38, 1.28)
         ax.set_xticks([1, 2, 3, 4, 5])
         ax.set_yticks([-0.5, 0.0, 0.5, 1.0])
         ax.set_xlabel('Step', fontsize=11.5)
@@ -530,6 +555,47 @@ def errfb_steps():
         ax.tick_params(labelsize=10.5)
         ax.grid(axis='y', color=C['grid'], lw=0.6)
         sp.save(fig, out / f'errfb_step{k}.svg')
+
+def recall_ab_strip():
+    """Compact visual anchor for F6 Recall: alpha-beta message model & DGX H100 tiers."""
+    fig, ax = blank((5.8, 1.15))
+    ax.set_xlim(0, 10)
+    ax.set_ylim(0, 2.2)
+    # Left box: alpha + n/beta breakdown
+    ax.add_patch(FancyBboxPatch((0.1, 0.2), 4.6, 1.75, boxstyle='round,pad=0.02,rounding_size=0.12', fc=C['c1_l'], ec=C['c1'], lw=1.6))
+    ax.text(2.4, 1.62, 'One message of n bytes', ha='center', va='center', fontsize=13.5, fontweight='bold', color=C['c1'])
+    ax.add_patch(Rectangle((0.35, 0.42), 1.1, 0.78, fc=C['c2'], ec='white', lw=1.2))
+    ax.text(0.90, 0.81, 'α\n1.5 μs', ha='center', va='center', fontsize=12.5, fontweight='bold', color='white', linespacing=0.92)
+    ax.add_patch(Rectangle((1.48, 0.42), 2.95, 0.78, fc=C['c1'], ec='white', lw=1.2))
+    ax.text(2.96, 0.81, 'n / β  (transfer)', ha='center', va='center', fontsize=12.5, fontweight='bold', color='white')
+    # Right box: NVLink vs NDR bandwidth bars
+    ax.add_patch(FancyBboxPatch((5.0, 0.2), 4.9, 1.75, boxstyle='round,pad=0.02,rounding_size=0.12', fc=C['frame_l'], ec=C['frame'], lw=1.4))
+    ax.text(7.45, 1.62, 'DGX H100 per-GPU β (1 dir.)', ha='center', va='center', fontsize=13, fontweight='bold', color=C['text'])
+    ax.add_patch(Rectangle((5.25, 0.96), 3.1, 0.38, fc=C['c2'], ec='none'))
+    ax.text(5.35, 1.15, 'NVLink (node)', ha='left', va='center', fontsize=12, fontweight='bold', color='white')
+    ax.text(8.42, 1.15, '450 GB/s', ha='left', va='center', fontsize=12.5, fontweight='bold', color=C['c2_t'])
+    ax.add_patch(Rectangle((5.25, 0.42), 0.35, 0.38, fc=C['c1'], ec='none'))
+    ax.text(5.72, 0.61, 'IB NDR (fabric): 50 GB/s', ha='left', va='center', fontsize=12, fontweight='bold', color=C['c1'])
+    sp.save(fig, out / 'recall_ab_strip.svg')
+
+def rs_ag_strip():
+    """Compact schematic for F10: AllReduce = ReduceScatter + AllGather."""
+    fig, ax = blank((4.7, 0.98))
+    ax.set_xlim(0, 11.4)
+    ax.set_ylim(0, 1.85)
+    boxes = [
+        (0.1, 2.7, 'Full tensors\non N ranks', C['c1_l'], C['c1']),
+        (4.15, 3.0, 'ReduceScatter\nkeep 1/N sum', C['c2_l'], C['c2_t']),
+        (8.45, 2.85, 'AllGather\nall hold sum', C['ok_l'], C['ok']),
+    ]
+    for x, w, txt, fc, ec in boxes:
+        ax.add_patch(FancyBboxPatch((x, 0.18), w, 1.48, boxstyle='round,pad=0.02,rounding_size=0.12', fc=fc, ec=ec, lw=1.8))
+        ax.text(x + w / 2, 0.92, txt, ha='center', va='center', fontsize=13, fontweight='bold', color=ec, linespacing=1.12)
+    ax.annotate('', xy=(4.05, 0.92), xytext=(2.9, 0.92), arrowprops=dict(arrowstyle='-|>', color=C['c2'], lw=2.4))
+    ax.text(3.48, 1.32, '≈ M', ha='center', va='center', fontsize=12.5, fontweight='bold', color=C['c2_t'])
+    ax.annotate('', xy=(8.35, 0.92), xytext=(7.25, 0.92), arrowprops=dict(arrowstyle='-|>', color=C['ok'], lw=2.4))
+    ax.text(7.80, 1.32, '≈ M', ha='center', va='center', fontsize=12.5, fontweight='bold', color=C['ok'])
+    sp.save(fig, out / 'rs_ag_strip.svg')
 
 def horovod_trace_steps():
     trace = load_series('slides/vol2/05_collective_communication/images/data/horovod_timeline_trace.csv').entries
@@ -601,4 +667,6 @@ if __name__ == '__main__':
     a2a_matrix()
     payback()
     onebit()
+    recall_ab_strip()
+    rs_ag_strip()
     print('figures written to', out)

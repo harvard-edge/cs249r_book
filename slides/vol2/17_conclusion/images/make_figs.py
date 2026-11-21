@@ -75,7 +75,7 @@ for i, (name, number, lec) in enumerate(rows):
     g.text(884, y + 21, lec, 19, ETH, 'bold', 'end')
 g.write('stack_numbers', 1)
 g = Svg(900, 380)
-bands = [(4, 96, 'Governance', [('5  Responsibility constrains design', 'spends compute; approval gates add coordination'), ('6  Sustainability is a first-order cost', "a step's energy = average power × T_step")], GREEN, 3), (106, 60, 'Serving', [('4  Serving is bounded by its contract', 'the same terms, counted per request')], VIOLET, 2), (172, 126, 'Distribution', [('2  Communication can dominate', 'T_comm(N) and T_sync(N) need not shrink'), ('3  Failure is routine', 'recovery adds to T_sync(N); rollback adds work')], AMBER, 1), (304, 72, 'Infrastructure', [('1  Infrastructure determines capability', 'sets the rates behind T_compute / N and T_comm(N)')], ETH, 1)]
+bands = [(4, 96, 'Governance', [('5  Responsibility constrains design', 'spends compute; approval checks add coordination'), ('6  Sustainability is a first-order cost', "a step's energy = average power × T_step")], GREEN, 3), (106, 60, 'Serving', [('4  Serving is bounded by its contract', 'the same terms, counted per request')], VIOLET, 2), (172, 126, 'Distribution', [('2  Communication can dominate', 'T_comm(N) and T_sync(N) need not shrink'), ('3  Failure is routine', 'recovery adds to T_sync(N); rollback adds work')], AMBER, 1), (304, 72, 'Infrastructure', [('1  Infrastructure determines capability', 'sets the rates behind T_compute / N and T_comm(N)')], ETH, 1)]
 for y, h, band, prin, color, step in bands:
     g.rect(64, y, 832, h, '#ffffff', color, sw=2.5, first=step, rx=6)
     g.text(78, y + h / 2, band, 19, color, 'bold', 'start', first=step)
@@ -121,7 +121,7 @@ for k in (1, 2):
     ax.grid(color=C['grid'], lw=0.6)
     sp.save(fig, out / f'mtbi_step{k}.svg')
 fig, ax = plt.subplots(figsize=(2.9, 1.35))
-bars = [('run time', 1 + -0.4964585305, '−50%'), ('accel.-hours', 1 + 0.007082939005, '+0.7%')]
+bars = [('run time', 1 + -0.4964585305, '≈ −50%'), ('accel.-hours', 1 + 0.007082939005, '+0.7%')]
 for i, (lab, r, txt) in enumerate(bars):
     y = 1 - i
     ax.barh(y + 0.19, 1, height=0.34, color=C['neutral_l'], edgecolor=C['neutral'])
@@ -222,4 +222,24 @@ g.write('agent_loop', 1)
 moe_rows = [('MoE, all experts resident', 1342.0, 'memory', '1,342 GB'), ('Dense 400B, read per step', 800.0, 'neutral', '800 GB'), ('MoE, active per token', 74.0, 'compute', '74 GB')]
 for k, step in ((1, 2), (2, 3)):
     sp.hbars(out / f'moe_bytes_step{k}.svg', moe_rows, '', log=False, step=step, size=(5.8, 1.9))
+
+fig, ax = plt.subplots(figsize=(4.4, 1.15))
+ax.barh(1, 1.0, height=0.58, color=C['compute'], edgecolor='white', lw=1.2)
+ax.barh(1, 0.25, left=1.0, height=0.58, color=C['danger_l'], edgecolor=C['danger'], hatch='//', lw=1.4)
+ax.barh(0, 1.25, height=0.58, color=C['network'], edgecolor='white', lw=1.2)
+ax.axvline(1.25, color=C['danger'], ls='--', lw=2.0, zorder=5)
+ax.text(-0.03, 1, '7,999 fast', ha='right', va='center', fontsize=14.0, fontweight='bold', color=C['text'])
+ax.text(-0.03, 0, '1 slow (80%)', ha='right', va='center', fontsize=14.0, fontweight='bold', color=C['network'])
+ax.text(0.50, 1, 'compute (1.0×)', ha='center', va='center', fontsize=13.5, fontweight='bold', color='white')
+ax.text(1.125, 1, 'wait', ha='center', va='center', fontsize=13.0, fontweight='bold', color=C['danger'])
+ax.text(0.625, 0, 'compute (1.25×)', ha='center', va='center', fontsize=13.5, fontweight='bold', color='white')
+ax.text(1.28, 0.5, 'barrier\n(+25%)', ha='left', va='center', fontsize=13.5, fontweight='bold', color=C['danger'])
+ax.set_xlim(0, 1.56)
+ax.set_ylim(-0.48, 1.48)
+ax.set_yticks([])
+ax.set_xticks([0, 0.5, 1.0, 1.25])
+ax.set_xticklabels(['0', '0.5×', '1.0×', '1.25×'])
+ax.spines['left'].set_visible(False)
+ax.tick_params(labelsize=13.5)
+sp.save(fig, out / 'barrier_straggler.svg')
 print('figures written')

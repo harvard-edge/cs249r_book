@@ -10,7 +10,7 @@ Buolamwini 2019), Literature.TrainingRuns (Strubell et al. 2019), and the
 fairness Scenarios.* (credit service, its price and feedback loop, the
 evaluation budget, the shared threshold, the frontier, the proxy and goal).
 Figure-only values are layout: coordinates, axis limits, and the illustrative
-gate slices A, B, and D (slice C's interval is the evaluation budget's).
+check slices A, B, and D (slice C's interval is the evaluation budget's).
 The verification panel quotes the chapter quiz's recruiting-tool figures.
 
 The Patterson, DLRM TCO, fleet-share, lineage, and DP-SGD figures moved to
@@ -156,9 +156,9 @@ for k in (1, 2):
     ax.set_axisbelow(True)
     ax.set_xlabel('Error on darker-skinned women (%)')
     sp.save(fig, out / f'raji_step{k}.svg')
-metrics = [('False positive rate', 44.85, 23.45, 1), ('False negative rate', 27.99, 47.72, 1), ('Precision (PPV)', 63.0, 59.0, 2), ('Base rate (derived)', 100 * 0.5143398268, 100 * 0.3936430318, 2)]
+metrics = [('False positive rate', 44.85, 23.45, 1), ('False negative rate', 27.99, 47.72, 1), ('Positive predictive\nvalue (PPV)', 63.0, 59.0, 2), ('Base rate (derived)', 100 * 0.5143398268, 100 * 0.3936430318, 2)]
 for k in (1, 2):
-    fig, ax = plt.subplots(figsize=(3.45, 1.85))
+    fig, ax = plt.subplots(figsize=(3.85, 2.0))
     nm = len(metrics)
     for i, (name, b, w, first) in enumerate(metrics):
         y = nm - 1 - i
@@ -166,20 +166,21 @@ for k in (1, 2):
         a = 1.0 if on else 0.0
         ax.barh(y + 0.19, b, height=0.36, color=C['compute'], alpha=a)
         ax.barh(y - 0.19, w, height=0.36, color=C['memory'], alpha=a)
-        ax.text(b + 1.0, y + 0.19, f'{b:.0f}%', va='center', fontsize=10, color=C['compute'], fontweight='bold', alpha=a)
-        ax.text(w + 1.0, y - 0.19, f'{w:.0f}%', va='center', fontsize=10, color=C['memory'], fontweight='bold', alpha=a)
-        ax.text(-0.01, y, name, transform=ax.get_yaxis_transform(), ha='right', va='center', fontsize=10, fontweight='bold', color=C['text'], alpha=a)
-    ax.text(72, 3.15, 'Black', color=C['compute'], fontsize=10, fontweight='bold')
-    ax.text(72, 2.7, 'White', color=C['memory'], fontsize=10, fontweight='bold')
+        tag_b = f'{b:.0f}% Black' if i in (0, 2) else f'{b:.0f}%'
+        tag_w = f'{w:.0f}% White' if i in (0, 2) else f'{w:.0f}%'
+        ax.text(b + 1.2, y + 0.19, tag_b, va='center', fontsize=12, color=C['compute'], fontweight='bold', alpha=a)
+        ax.text(w + 1.2, y - 0.19, tag_w, va='center', fontsize=12, color=C['memory'], fontweight='bold', alpha=a)
+        ax.text(-0.01, y, name, transform=ax.get_yaxis_transform(), ha='right', va='center', fontsize=12, fontweight='bold', color=C['text'], alpha=a, linespacing=0.95)
     ax.axhline(1.5, color=C['grid'], lw=1, alpha=1.0 if k >= 2 else 0.0)
     ax.set_yticks([])
-    ax.set_xlim(0, 90)
+    ax.set_xlim(0, 102)
     ax.set_ylim(-0.6, nm - 0.4)
     ax.spines['left'].set_visible(False)
     ax.grid(axis='x', color=C['grid'], linewidth=0.6)
     ax.set_axisbelow(True)
     ax.set_xticks([0, 20, 40, 60, 80])
-    ax.set_xlabel('Percent')
+    ax.tick_params(axis='x', labelsize=11.5)
+    ax.set_xlabel('Percent', fontsize=12)
     sp.save(fig, out / f'compas_step{k}.svg')
 bar_steps('price', [('Before (TPR 60%)', 150.0, 'memory', '$150', 1), ('TPR raised to 90%', 75.0, 'danger', '$75   half the utility', 1)], 1, (4.4, 1.3), 260, 'Group B utility per applicant (US$)')
 q = np.arange(0, 9)
@@ -188,7 +189,7 @@ decay = np.array([3.0, 2.7, 2.43, 2.187, 1.9683, 1.77147, 1.594323, 1.4348907, 1
 for k in (1, 2):
     fig, ax = plt.subplots(figsize=(5.3, 2.05))
     ax.axhline(5.0, color=C['danger'], lw=1.6, ls='--')
-    ax.text(0.1, 5.0 - 0.15, 'Release gate: 5 points', color=C['danger'], fontsize=11, fontweight='bold', va='top')
+    ax.text(0.1, 5.0 - 0.15, 'Release limit: 5 points', color=C['danger'], fontsize=11, fontweight='bold', va='top')
     ax.plot(q, grow, '-o', color=C['compute'], lw=3, ms=6)
     ax.plot([6], [5.314683], 'o', ms=12, color=C['danger'], zorder=5)
     ax.annotate('Quarter 6: 5.3', (6, 5.314683), xytext=(-10, 10), textcoords='offset points', ha='right', fontsize=11, fontweight='bold', color=C['danger'])
@@ -288,16 +289,16 @@ g.text(140, 82, 'latency OK\nconfidence high\nuptime OK', 20, C['text'], first=2
 g.write('fanout', 2)
 g = Svg(900, 400)
 x0, x1 = (260, 660)
-GATE, SLICE_C = (5.0, 100 * 0.035)
+LIMIT, SLICE_C = (5.0, 100 * 0.035)
 
 def gx(v):
     return x0 + (x1 - x0) * v / 10.0
 g.add(1, f'''<line x1="{x0}" y1="330" x2="{x1}" y2="330" stroke="{C['neutral']}" stroke-width="2"/>''')
-for v in (0, GATE, 10):
+for v in (0, LIMIT, 10):
     g.text(gx(v), 355, f'{v:.0f}', 22, C['neutral'])
 g.text((x0 + x1) / 2, 388, 'TPR gap between groups (points)', 22, C['neutral'])
-g.add(1, f'''<line x1="{gx(GATE)}" y1="30" x2="{gx(GATE)}" y2="330" stroke="{C['danger']}" stroke-width="2.5" stroke-dasharray="8 5"/>''')
-g.text(gx(GATE), 18, 'Gate: 5 points', 22, C['danger'], 'bold')
+g.add(1, f'''<line x1="{gx(LIMIT)}" y1="30" x2="{gx(LIMIT)}" y2="330" stroke="{C['danger']}" stroke-width="2.5" stroke-dasharray="8 5"/>''')
+g.text(gx(LIMIT), 18, 'Limit: 5 points', 22, C['danger'], 'bold')
 slices = [('Slice A', 1.8, 0.8, 'PASS', 'data', 1, 70), ('Slice B', 8.0, 1.0, 'FAIL', 'danger', 1, 145), ('Slice C: few labels', SLICE_C, SLICE_C, 'INSUFFICIENT', 'compute', 2, 220), ('Slice D', 2.6, 1.0, 'PASS', 'data', 3, 295)]
 for name, v, h, verdict, ck, first, y in slices:
     g.text(10, y, name, 22, C['text'], 'bold', 'start', first=first)

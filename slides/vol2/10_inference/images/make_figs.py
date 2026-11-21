@@ -131,8 +131,8 @@ for k in (1, 2):
 HW = [('h100', 'H100', 'neutral'), ('h200', 'H200', 'memory'), ('mi355x', 'MI355X', 'data'), ('b200', 'B200', 'compute'), ('gb200', 'GB200 NVL72', 'network')]
 b200_peak = (13.34, 6256.29)
 b200_100 = 208.02
-LABX = {'h100': 75, 'h200': 150, 'mi355x': 185, 'b200': 225, 'gb200': 95}
-LABDY = {'h100': 0.4, 'h200': 0.4, 'mi355x': 0.4, 'b200': 2.0, 'gb200': 2.0}
+LABX = {'h100': 120, 'h200': 152, 'mi355x': 195, 'b200': 225, 'gb200': 95}
+LABDY = {'h100': 0.90, 'h200': 0.45, 'mi355x': 0.68, 'b200': 2.0, 'gb200': 2.0}
 
 def ixplot(k):
     fig, ax = plt.subplots(figsize=(5.8, 2.6))
@@ -145,7 +145,7 @@ def ixplot(k):
         ax.plot([p[0] for p in f], [p[1] for p in f], color=C[ck], lw=2.4, alpha=1.0 if vis else 0.0)
         lx = LABX[h]
         ly = max([p[1] for p in f if p[0] >= lx] or [f[-1][1]])
-        ax.text(lx, ly * LABDY[h], lab, ha='left', va='center', fontsize=11, color=C[ck], fontweight='bold', alpha=1.0 if vis else 0.0)
+        ax.text(lx, ly * LABDY[h], lab, ha='right' if h == 'h100' else 'left', va='center', fontsize=11, color=C[ck], fontweight='bold', alpha=1.0 if vis else 0.0)
     if k == 1:
         ax.plot(*b200_peak, 'o', ms=9, color=C['compute'], mec='white')
         ax.annotate('6,256 at 13 tok/s per user', b200_peak, xytext=(25, 2), textcoords='offset points', fontsize=11, fontweight='bold', color=C['compute'])
@@ -172,13 +172,13 @@ for k in (1, 2, 3):
 def knee():
     fig, ax = plt.subplots(figsize=(5.8, 2.3))
     B = np.logspace(0, 3, 300)
-    for lab, kn, ck, xy in (('vision: knee at\n2 ms / 1 ms = 2', 2.0, 'data', (2.6, 0.2)), ('LLM decode: knee at\n40 ms / 0.5 ms = 80', 80.0, 'memory', (120, 0.2))):
+    for lab, kn, ck, xy in (('vision: knee at\n2 ms / 1 ms = 2', 2.0, 'data', (3.4, 0.44)), ('LLM decode: knee at\n40 ms / 0.5 ms = 80', 80.0, 'memory', (115, 0.22))):
         y = B / (kn + B)
         ax.plot(B, y, color=C[ck], lw=3)
         ax.plot([kn], [0.5], 'o', ms=10, color=C[ck], mec='white', mew=1.5)
         ax.text(xy[0], xy[1], lab, fontsize=11, fontweight='bold', color=C[ck], va='center')
     ax.axhline(1.0, color=C['neutral'], ls='--', lw=1.2)
-    ax.text(1.05, 1.03, 'asymptote 1 / t_req', fontsize=10.5, color=C['neutral'])
+    ax.text(1.05, 1.03, r'asymptote $1 / t_{\mathrm{req}}$', fontsize=10.5, color=C['neutral'])
     ax.set_xscale('log')
     ax.set_ylim(0, 1.15)
     ax.set_xlim(1, 1000)
@@ -429,21 +429,44 @@ for k in (1, 2):
     chunk(k)
 
 def disagg():
-    fig, axs = plt.subplots(1, 2, figsize=(5.4, 2.9), sharey=True)
+    # Exact top measured output_tok_s_gpu from embedded InferenceX DeepSeek-R1 FP8 rows
+    vals = {
+        ('b200', 25.0): {1.0: 3630.15, 0.0: 1330.04},
+        ('b200', 50.0): {1.0: 2268.81, 0.0: 778.80},
+        ('b200', 100.0): {1.0: 148.18, 0.0: 208.02},
+        ('h200', 25.0): {1.0: 1736.83, 0.0: 890.30},
+        ('h200', 50.0): {1.0: 363.36, 0.0: 218.79},
+        ('h200', 100.0): {1.0: 50.97, 0.0: 52.40},
+    }
+    fig, axs = plt.subplots(1, 2, figsize=(5.8, 2.9), sharey=True)
     for ax, (h, lab) in zip(axs, (('b200', 'B200'), ('h200', 'H200'))):
-        for j, t in enumerate([25.0, 50.0, 100.0]):
-            j = 1.4 * j
-            for d, ck, dx in ((1.0, 'network', -0.22), (0.0, 'neutral', 0.22)):
-                v = {1.0: 3630.15, 0.0: 1330.04}[d]
+        for idx, t in enumerate([25.0, 50.0, 100.0]):
+            j = 2.05 * idx
+            v_sp, v_co = vals[(h, t)][1.0], vals[(h, t)][0.0]
+            close_pair = max(v_sp, v_co) / min(v_sp, v_co) < 1.5
+            for d, ck, dx in ((1.0, 'network', -0.28), (0.0, 'neutral', 0.28)):
+                v = vals[(h, t)][d]
                 ax.bar(j + dx, v, width=0.38, color=C[ck])
-                ax.text(j + dx + (0.19 if dx < 0 else -0.19), v * 1.12, f'{v:,.0f}', ha='right' if dx < 0 else 'left', va='bottom', fontsize=11, fontweight='bold', color=C[ck])
+                if close_pair:
+                    tx = j + dx + (-0.06 if dx < 0 else 0.06)
+                    ha = 'right' if dx < 0 else 'left'
+                elif d == 0.0 and v_co < v_sp:
+                    tx = j + 0.10
+                    ha = 'left'
+                elif d == 1.0 and v_sp < v_co:
+                    tx = j - 0.10
+                    ha = 'right'
+                else:
+                    tx = j + dx
+                    ha = 'center'
+                ax.text(tx, v * 1.15, f'{v:,.0f}', ha=ha, va='bottom', fontsize=10.5, fontweight='bold', color=C[ck])
         ax.set_yscale('log')
         ax.set_ylim(20, 30000)
-        ax.set_xticks([0, 1.4, 2.8])
+        ax.set_xticks([0, 2.05, 4.10])
         ax.set_xticklabels(['25', '50', '100'])
         ax.set_xlabel('tok/s per user, at least')
         ax.set_title(lab, fontsize=13, fontweight='bold', loc='left')
-        ax.set_xlim(-0.95, 3.55)
+        ax.set_xlim(-0.85, 5.05)
         ax.minorticks_off()
     axs[0].set_ylabel('top tok/s per GPU')
     axs[1].text(0.55, 0.93, 'split pools', transform=axs[1].transAxes, color=C['network'], fontsize=11, fontweight='bold')
@@ -638,3 +661,68 @@ def synth():
     rows = [('13 tok/s\nper user', 2.321925712, 'data', '\\$2.32  (479 tok/s/GPU)'), ('50 tok/s\nper user', 13.53363107, 'compute', '\\$13.53  (82 tok/s/GPU)'), ('100 tok/s\nper user', 80.45699574, 'danger', '\\$80.46  (14 tok/s/GPU)')]
     sp.hbars(out / 'synth_cost.svg', rows, '', log=True, size=(5.8, 1.9), xlabel='\\$ per million output tokens, H100 (derived)')
 synth()
+
+# P4 Recall visual: S x R x P -> SLO filter -> SLO goodput
+def recall_slo_filter():
+    fig, ax = plt.subplots(figsize=(3.6, 1.65))
+    ax.set_xlim(0, 10)
+    ax.set_ylim(0, 4.4)
+    ax.axis('off')
+    ax.add_patch(FancyBboxPatch((0.2, 2.65), 9.6, 1.45, boxstyle='round,pad=0.05,rounding_size=0.22', fc=C['memory_l'], ec=C['memory'], lw=1.8))
+    ax.text(5.0, 3.65, 'Lecture 9: ML goodput', ha='center', va='center', fontsize=12.5, fontweight='bold', color=C['memory'])
+    ax.text(5.0, 3.05, 'S × R × P  (no deadline)', ha='center', va='center', fontsize=12.5, fontweight='bold', color=C['text'])
+    ax.annotate('', xy=(5.0, 1.75), xytext=(5.0, 2.58), arrowprops=dict(arrowstyle='-|>', color=C['compute'], lw=2.2))
+    ax.add_patch(FancyBboxPatch((0.2, 0.2), 9.6, 1.45, boxstyle='round,pad=0.05,rounding_size=0.22', fc=C['data_l'], ec=C['data'], lw=2.0))
+    ax.text(5.0, 1.2, 'Lecture 10: SLO filter', ha='center', va='center', fontsize=12.5, fontweight='bold', color=C['data'])
+    ax.text(5.0, 0.6, 'on-time TTFT & TPOT only', ha='center', va='center', fontsize=12.5, fontweight='bold', color=C['text'])
+    sp.save(fig, out / 'recall_slo_filter.svg')
+
+# P8 Vote visual: X (1,200 total, 840 SLO) vs Y (1,000 total, 950 SLO)
+def slo_vote():
+    for k in (1, 2):
+        fig, ax = plt.subplots(figsize=(3.3, 1.05))
+        if k == 1:
+            ax.barh(1, 1200, color=C['neutral_l'], edgecolor=C['neutral'], height=0.58, lw=1.4)
+            ax.barh(0, 1000, color=C['neutral_l'], edgecolor=C['neutral'], height=0.58, lw=1.4)
+            ax.text(600, 1, '1,200/s (70%)', ha='center', va='center', fontsize=16.0, fontweight='bold', color=C['text'])
+            ax.text(500, 0, '1,000/s (95%)', ha='center', va='center', fontsize=16.0, fontweight='bold', color=C['text'])
+        else:
+            ax.barh(1, 840, color=C['compute'], height=0.58)
+            ax.barh(1, 360, left=840, color=C['danger_l'], edgecolor=C['danger'], hatch='//', height=0.58, lw=1.2)
+            ax.text(420, 1, '840 SLO', ha='center', va='center', fontsize=16.0, fontweight='bold', color='white')
+            ax.text(1245, 1, '360 late', ha='left', va='center', fontsize=15.5, fontweight='bold', color=C['danger'])
+            ax.barh(0, 950, color=C['data'], height=0.58)
+            ax.barh(0, 50, left=950, color=C['danger_l'], edgecolor=C['danger'], height=0.58, lw=1.2)
+            ax.text(475, 0, '950 SLO', ha='center', va='center', fontsize=16.0, fontweight='bold', color='white')
+        ax.set_yticks([0, 1])
+        ax.set_yticklabels(['Y', 'X'], fontsize=16.5, fontweight='bold')
+        ax.set_xlim(0, 1850)
+        ax.set_ylim(-0.5, 1.5)
+        ax.set_xticks([0, 500, 1000])
+        ax.tick_params(axis='x', labelsize=15.5)
+        ax.set_xlabel('requests / s', fontsize=15.5)
+        ax.spines['left'].set_visible(False)
+        sp.save(fig, out / f'slo_vote_step{k}.svg')
+
+# P14 Estimate visual: Little's Law log bar (Vision 100 vs Chat 10,550 in flight)
+def littles_law_bars():
+    fig, ax = plt.subplots(figsize=(3.2, 0.95))
+    ax.barh(1, 100, color=C['memory'], height=0.58)
+    ax.barh(0, 10550, color=C['danger'], height=0.58)
+    ax.text(165, 1, '100', va='center', ha='left', fontsize=16.5, fontweight='bold', color=C['memory'])
+    ax.text(16500, 0, '10,550 (106×)', va='center', ha='left', fontsize=16.5, fontweight='bold', color=C['danger'])
+    ax.set_xscale('log')
+    ax.set_xlim(1, 3.5e6)
+    ax.set_ylim(-0.5, 1.5)
+    ax.set_yticks([0, 1])
+    ax.set_yticklabels(['Chat decode\n10.55 s', 'Vision\n0.10 s'], fontsize=15.5, fontweight='bold')
+    ax.set_xticks([10, 1000, 100000])
+    ax.set_xticklabels(['10', '10³', '10⁵'], fontsize=16.0)
+    ax.minorticks_off()
+    ax.spines['left'].set_visible(False)
+    ax.set_xlabel('in-flight requests (log)', fontsize=16.0)
+    sp.save(fig, out / 'littles_law_bars.svg')
+
+recall_slo_filter()
+slo_vote()
+littles_law_bars()

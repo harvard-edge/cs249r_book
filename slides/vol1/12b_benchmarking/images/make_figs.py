@@ -4,7 +4,7 @@
 Every drawn value comes from MLSysIM through calcs.py, which this script
 imports: the MLPerf Training v4.0 ResNet-50 runs and the Scenarios.* built on
 them (scores, Welch intervals, run counts, the paired accuracy comparison),
-the sample-size, run-order, beam, calibration, and acceptance-gate scenarios,
+the sample-size, run-order, beam, calibration, and acceptance-criterion scenarios,
 and the Literature entries and series of published results (AnandTech 2013;
 Recht et al. 2019; Zhang et al. 2024; Sandler et al. 2018; Chu et al. 2021;
 Guo et al. 2017; Koh et al. 2021). Labels print the values calcs.py records
@@ -210,14 +210,14 @@ for k in (1, 2, 3, 4, 5):
     a1.axvline(0, color=C['neutral'], lw=1.5, ls='--', alpha=on)
     a1.plot(w['d'], 0.5, 'o', ms=10, color=C['compute'], zorder=5, alpha=on)
     if k >= 3:
-        a1.annotate('', xy=(w['d'] - w['se'], 1.15), xytext=(w['d'] + w['se'], 1.15), arrowprops=dict(arrowstyle='|-|', color=C['neutral'], lw=1.5))
-        a1.text(w['d'] + w['se'] + 0.008, 1.15, '±1 SE', va='center', fontsize=10.5, color=C['neutral'], fontweight='bold')
+        a1.annotate('', xy=(w['d'] - w['se'], 1.12), xytext=(w['d'] + w['se'], 1.12), arrowprops=dict(arrowstyle='|-|,widthA=0.25,widthB=0.25', color=C['neutral'], lw=1.5))
+        a1.text(w['d'], 1.42, '±1 SE', ha='center', va='bottom', fontsize=10, color=C['neutral'], fontweight='bold')
     if k >= 4:
-        a1.plot([w['lo'], w['hi']], [0.5, 0.5], color=C['compute'], lw=6, solid_capstyle='butt', zorder=4)
-        a1.text(w['hi'] + 0.006, 0.5, '0.026 to 0.182', va='center', fontsize=11, fontweight='bold', color=C['compute'])
+        a1.plot([w['lo'], w['hi']], [0.46, 0.46], color=C['compute'], lw=6, solid_capstyle='butt', zorder=4)
+        a1.text(w['hi'] + 0.008, 0.46, '95% CI:\n0.026 to 0.182', va='center', fontsize=10, fontweight='bold', color=C['compute'], linespacing=1.0)
     a1.text(-0.075, 0.5, 'Eos − Dell', ha='right', va='center', fontsize=11, fontweight='bold', color=C['compute'], alpha=on)
-    a1.set_xlim(-0.07, 0.36)
-    a1.set_ylim(-0.2, 1.5)
+    a1.set_xlim(-0.07, 0.40)
+    a1.set_ylim(-0.2, 2.0)
     a1.set_yticks([])
     a1.spines['left'].set_visible(False)
     a1.set_xticks([0, 0.1, 0.2, 0.3])
@@ -230,7 +230,7 @@ for k in (1, 2, 3, 4, 5):
     a2.axvline(0, color=C['neutral'], lw=1.5, ls='--', alpha=al)
     a2.plot([h['lo'], h['hi']], [0.5, 0.5], color=C['data'], lw=6, solid_capstyle='butt', alpha=al)
     a2.plot(h['d'], 0.5, 'o', ms=10, color=C['data'], alpha=al, zorder=5)
-    a2.text(h['lo'] - 0.03, 0.5, '1.16 to 1.31', ha='right', va='center', fontsize=11, fontweight='bold', color=C['data'], alpha=al)
+    a2.text(h['lo'] - 0.035, 0.5, '95% CI: 1.16 to 1.31', ha='right', va='center', fontsize=10.5, fontweight='bold', color=C['data'], alpha=al)
     a2.text(-0.075 * 1.45 / 0.43, 0.5, 'Eos − H200', ha='right', va='center', fontsize=11, fontweight='bold', color=C['data'], alpha=al)
     a2.set_xlim(-0.07 * 1.45 / 0.43, 1.45)
     a2.set_ylim(-0.2, 1.5)

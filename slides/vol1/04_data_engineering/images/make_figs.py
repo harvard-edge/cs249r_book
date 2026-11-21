@@ -186,7 +186,8 @@ def skew(k):
         s += box(685, 218, 195, 86, C['data_l'], C['data'], f'x = 50\nz = {z_ok:+.2f}', 22, True, C['data'])
         s += arrow(455, 130, 455, 218, C['data'])
         s += txt(470, 168, 'frozen artifact bundled with model', 20, True, C['data'], 'start')
-        s += txt(450, 360, '0.00σ skew: identical preprocessing state across all three paths.', 23, True, C['data'])
+        s += txt(450, 344, '0.00σ skew across all three paths.', 22, True, C['data'])
+        s += txt(450, 376, f'vs. Step 2 refit on [50, 70, 90]: z = {z_bad:+.2f} ({skew_sig:.2f}σ skew)', 22, False, C['danger'])
     svg(out / f'skew_step{k}.svg', s, h=395)
 for k in (1, 2, 3):
     skew(k)
@@ -200,14 +201,14 @@ def pipeline(k):
     if k >= 2:
         s += txt(10, 150, 'Keyword spotter pipeline', 25, True, C['data'], 'start')
         stages = [('Ingest', 'contracts,\nK-S'), ('Label', 'rubric,\nkappa'), ('Process', 'frozen\nstatistics'), ('Release', 'speaker-hash\nsplits'), ('Deliver', 'sized to the\naccelerator'), ('Monitor', 'drift,\nfalse wakes')]
-        for j, (name, gate) in enumerate(stages):
+        for j, (name, check_lbl) in enumerate(stages):
             x = 10 + j * 149
             later = j >= 4
             col = '#999999' if later else C['data']
             s += box(x, 172, 134, 62, '#F7F7F7' if later else C['data_l'], col, name, 23, True, color='#888888' if later else None, dash=later)
             if j < len(stages) - 1:
                 s += arrow(x + 134, 203, x + 149, 203, col, 2.5)
-            for m, ln in enumerate(gate.split('\n')):
+            for m, ln in enumerate(check_lbl.split('\n')):
                 s += txt(x + 67, 262 + m * 26, ln, 20, False, '#999999' if later else '#333333')
         s += txt(747, 150, 'Part 2', 22, True, '#888888')
         s += txt(450, 340, 'Each stage turns a silent data failure into a loud one.', 24, True, C['text'])

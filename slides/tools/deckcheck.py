@@ -55,16 +55,22 @@ unused-images  (error)   A file git ships in images/ that the .tex does not
 style          (error)   An em dash (the character or ---) in slide text,
                          notes, credits or titles; a British spelling (colour,
                          behaviour, optimise, centre, modelling, labelled,
-                         cancelled, ...).
+                         cancelled, ...); banned prose-craft tokens ("ledger",
+                         "binding constraint/limit/...", and metaphorical
+                         "gate/gates/gated/gating" outside technical ML,
+                         hardware, or physical-gate contexts).
                (warning) A hype word (crucial, massive, game-changing,
                          revolutionary, unprecedented, cutting-edge) outside
                          credits; an em dash used as an empty table cell.
-notes          (error)   Every frame has a note that opens with [N min]; every
-                         content note carries [CORE] or [OPTIONAL] (anywhere,
-                         usually in FLEX); notes total 68 to 73 minutes; no
-                         note over 220 words (the notes PDF cuts it off
-                         silently); no \\note between frames and no
-                         \\mlsysnote replaced before a theme frame uses it.
+notes          (error)   Every frame has a note that opens with
+                         \\mlsysnotemeta{N min}{Core|Optional} (or legacy
+                         [N min] + [CORE]/[OPTIONAL]); no robotic ALL-CAPS
+                         note tags (NARRATE:, ENGAGE:, WARN:, LINK:, FLEX:,
+                         LAND:, BEAT:); notes total 68 to 73 minutes; no
+                         note over 220 words (keeps Portrait US Letter study
+                         notes cleanly clear of the footer); no \\note between
+                         frames and no \\mlsysnote replaced before a theme
+                         frame uses it.
                (warning) Untagged title, divider, or closing notes
                          (takeaways, open questions, reading, next lecture).
 activity       (error)   At least 3 \\mlsysactivity frames, and no stretch of
@@ -966,6 +972,17 @@ BRITISH = re.compile(r"\b(colou?r(?<=colour)\w*|behaviour\w*|favour\w*|optimis(?
                      r"organis(?:e|ed|es|ing|ation)\b|grey\b)", re.I)
 HYPE = re.compile(r"\b(crucial(?:ly)?|massive(?:ly)?|game[- ]changing|game[- ]changer|revolutionary|"
                   r"revolutioni[sz]e[sd]?|unprecedented|cutting[- ]edge)\b", re.I)
+LEDGER = re.compile(r"\bledgers?\b", re.I)
+BINDING_CONSTRAINT = re.compile(
+    r"\bbinding\s+(?:constraint|limit|resource|bottleneck|term|stage|axis|budget|wall|factor|cap)s?\b", re.I)
+GATE_WORD = re.compile(r"\b(?:gates?|gated|gating)\b", re.I)
+GATE_TECH_ALLOW = re.compile(
+    r"gate/\.style|\b(?:LSTM|GRU|forget|input|output|candidate|update|reset|valves?|four\s+gate\s+maps|"
+    r"logic|AND|OR|NAND|NOR|XOR|CMOS|transistor|inverter|clock|power|quantum|FPGA|silicon|"
+    r"SwiGLU|GeGLU|MLP|MLPs|MoE|expert|experts|network|networks|human-gated|HG-DAgger|"
+    r"spring|latch|fence|fenced|track|carton|carriage|stop\s+line|chains|poles|driver|drivers|"
+    r"delay|oxide|voltage|channel|source|drain|gate\s+case|stops?\s+before\s+the\s+gate|when\s+a\s+gate\s+opens)\b",
+    re.I)
 
 
 def rule_style(deck, vol, out):
@@ -986,9 +1003,10 @@ def rule_style(deck, vol, out):
                 f"em dash as an empty table cell; prefer a blank cell or \"n/a\": \"{context(s, off)}\"")
             continue
         out("style", "error", slide, line, f"em dash: \"{context(s, off)}\"")
-    # Prose regions only: slide text, titles, notes, credits.
+    # Prose regions only: slide text, titles, figure labels, notes, credits.
     for f in deck.frames:
-        regions = [("slide", f.text), ("note", detex(f.note))] + [("credit", detex(c)) for c in f.credits]
+        regions = [("slide", f.text), ("figure", f.figtext), ("note", detex(f.note))] + [
+            ("credit", detex(c)) for c in f.credits]
         for where, text in regions:
             for m in BRITISH.finditer(text):
                 w = m.group(0)
@@ -999,19 +1017,35 @@ def rule_style(deck, vol, out):
                 continue   # titles of cited papers are quoted as published
             for m in HYPE.finditer(text):
                 out("style", "warning", f.num, f.line, f"hype word \"{m.group(0)}\" in the {where}")
+            for m in LEDGER.finditer(text):
+                out("style", "error", f.num, f.line,
+                    f"banned coined noun \"{m.group(0)}\" in the {where} (name the artifact: log, catalog, audit trail, table)")
+            for m in BINDING_CONSTRAINT.finditer(text):
+                out("style", "error", f.num, f.line,
+                    f"banned phrase \"{m.group(0)}\" in the {where} (use \"limiting ...\")")
+            for m in GATE_WORD.finditer(text):
+                ctx = text[max(0, m.start() - 60):min(len(text), m.end() + 60)]
+                if not GATE_TECH_ALLOW.search(ctx):
+                    out("style", "error", f.num, f.line,
+                        f"metaphorical \"{m.group(0)}\" in the {where} (use check, criterion, threshold, or hold): \"{ctx.strip()}\"")
 
 
 def context(s, off, width=40):
     return re.sub(r"\s+", " ", s[max(0, off - width):off + width]).strip()
 
 
-MIN_RE = re.compile(r"^\s*\[(\d+(?:\.\d+)?)\s*min\]")
-TAG_RE = re.compile(r"\[(CORE|OPTIONAL)\b[^\]]*\]")
+MIN_RE = re.compile(
+    r"^\s*(?:\[(\d+(?:\.\d+)?)\s*min\]|\\mlsysnotemeta\{(\d+(?:\.\d+)?)\s*min\})")
+TAG_RE = re.compile(
+    r"\[(CORE|OPTIONAL)\b[^\]]*\]|\\mlsysnotemeta\{[^}]*\}\{(Core|Optional)\b[^}]*\}", re.I)
+LLM_NOTE_TAG = re.compile(r"\b(NARRATE|ENGAGE|WARN|LINK|FLEX|LAND|BEAT)\s*:")
 
 
 def note_minutes(text):
     m = MIN_RE.match(text)
-    return float(m.group(1)) if m else None
+    if not m:
+        return None
+    return float(m.group(1) or m.group(2))
 
 
 CLOSING_TITLE = re.compile(r"^(Takeaways|Open questions|Read and explore|Read, practice|Five things)", re.I)
@@ -1071,6 +1105,10 @@ def rule_notes(deck, vol, out):
                 total += mins
             if not TAG_RE.search(text):
                 untagged.append(f)
+            bad_tag = LLM_NOTE_TAG.search(text)
+            if bad_tag:
+                out("notes", "error", f.num, deck.line_of(off),
+                    f"robotic note tag \"{bad_tag.group(0)}\"; write natural prose with \\mlsysnotemeta and \\notecue{{Check|Watch for|Next}}{{...}}")
             n = len(detex(re.sub(r"\\[A-Za-z]+", " ", text)).split())
             if n > NOTE_WORD_LIMIT:
                 out("notes", "error", f.num, deck.line_of(off),

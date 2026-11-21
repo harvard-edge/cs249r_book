@@ -460,11 +460,11 @@ def takeover():
             ax.axvline(x, color=C['grid'], lw=1, zorder=0)
             ax.text(x, 1.64, lab, ha='center', fontsize=12.5, color=C['text'])
         look = 5.0
-        ax.annotate('', (tt - look + 0.05, 1.24), (tt - 0.05, 1.24), arrowprops=dict(arrowstyle='<->', color=C['memory'], lw=1.8))
-        ax.text(tt - look / 2, 1.30, '5 s lookback, frozen at takeover', ha='center', fontsize=10.5, color=C['memory'], fontweight='bold')
+        ax.annotate('', (tt - look + 0.08, 1.24), (tt - 0.05, 1.24), arrowprops=dict(arrowstyle='<->', color=C['memory'], lw=1.8))
+        ax.text(0.18, 1.31, '5 s lookback, frozen at takeover', ha='left', fontsize=9.8, color=C['memory'], fontweight='bold')
         a2, a3, a4 = (alpha(k >= 2), alpha(k >= 3), alpha(k >= 4))
-        for x, lab, col in (((td + tt) / 2, 'drift', C['danger']), ((tt + tb) / 2 - 0.15, 'blend', C['neutral']), ((tb + ts) / 2 + 0.35, 're-orient', C['neutral']), ((ts + tr) / 2 + 0.35, 'stabilized', C['data'])):
-            ax.text(x, -0.28, lab, ha='center', fontsize=11, fontweight='bold', color=col, alpha=a2)
+        for x, lab, col in (((td + tt) / 2, 'drift', C['danger']), ((tt + tb) / 2 - 0.12, 'blend', C['neutral']), ((tb + ts) / 2, 're-orient', C['neutral']), ((ts + tr) / 2 + 0.15, 'stabilized', C['data'])):
+            ax.text(x, -0.28, lab, ha='center', fontsize=10.2, fontweight='bold', color=col, alpha=a2)
         for x, lab, col in (((td + tt) / 2, 'states: relabel\ncommands: mask', C['danger']), ((tb + ts) / 2 - 0.25, 'excluded', C['neutral']), ((ts + tr) / 2, 'expert labels', C['data'])):
             ax.text(x, -0.55, lab, ha='center', va='top', fontsize=10.5, color=col, alpha=a3)
         if k >= 4:

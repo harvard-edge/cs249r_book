@@ -120,7 +120,7 @@ def hook_timeline(k):
     s.text(X(dr + rb) + 8, 141, 'about 24 h', 18, P['fault'][2], anchor='start', show=sh3)
     if k >= 4:
         s.rect(10, 230, 880, 68, P['band'][0], P['band'][1], rx=6)
-        for x, a, b in ((117, 'No criterion', 'for sycophancy'), (X(d1 + mon / 2), 'Detected outside', 'the declared gate'), (X(dr + rb / 2) + 20, 'Admission stop,', 'then settlement')):
+        for x, a, b in ((117, 'No criterion', 'for sycophancy'), (X(d1 + mon / 2), 'Detected outside', 'the declared checks'), (X(dr + rb / 2) + 20, 'Admission stop,', 'then settlement')):
             s.text(x, 258, a, 18, '#0f172a', bold=True)
             s.text(x, 284, b, 18)
     s.save(f'hook_step{k}.svg')
@@ -283,7 +283,7 @@ sp.hbars(str(out / 'retention.svg'), [('Keep all', 336.0, 'neutral', '336 GB'), 
 
 def findings(k):
     s = Svg(560, 384)
-    items = [('Observation adapter', 'cut the result, no notice', 'fault', 'interface', 'defect'), ('Model', 'proposed an out-of-scope edit', 'think', 'model', 'behavior'), ('Runtime gate', 'refused before dispatch', 'ok', 'gate', 'worked')]
+    items = [('Observation adapter', 'cut the result, no notice', 'fault', 'interface', 'defect'), ('Model', 'proposed an out-of-scope edit', 'think', 'model', 'behavior'), ('Runtime check', 'refused before dispatch', 'ok', 'check', 'worked')]
     for i, (t_, sub, role, v1, v2) in enumerate(items):
         y = 6 + i * 128
         sh = k >= i + 1
@@ -352,7 +352,7 @@ sp.save(fig, out / 'wilson.svg')
 
 def stages(k):
     s = Svg(560, 436)
-    st = [('Offline gate', 'paired comparison', 'tool'), ('Shadow', 'copied inputs, no live effects', 'think'), ('Canary', 'fraction f of live tasks', 'tool'), ('Wider release', 'next stage, own question', 'ok')]
+    st = [('Offline check', 'paired comparison', 'tool'), ('Shadow', 'copied inputs, no live effects', 'think'), ('Canary', 'fraction f of live tasks', 'tool'), ('Wider release', 'next stage, own question', 'ok')]
     for i, (t_, sub, role) in enumerate(st):
         y = 6 + i * 108
         sh = k >= i + 1

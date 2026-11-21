@@ -202,12 +202,17 @@ def supply_fig(k):
     fig, ax = plt.subplots(figsize=cm(8.4, 3.7))
     fig.subplots_adjust(left=0.3, right=0.97, top=0.82, bottom=0.3)
     rows = [('one setpoint\nper pass', 560000000000.0 / 1000000000.0, C['danger'], '560'), ('chunk of 16', 35000000000.0 / 1000000000.0, C['data'], '35')]
+    ax.axvline(142800000000.0 / 1000000000.0, color=C['memory'], ls='--', lw=1.5, zorder=1)
+    ax.text(142800000000.0 / 1000000000.0, -0.62, 'sustained 142.8 GB/s', color=C['memory'], fontsize=SFS, fontweight='bold', ha='center', va='bottom')
     for i, (lab, v, col, txt) in enumerate(rows):
         a = 1.0 if i < k else 0.0
-        ax.barh(i, v, color=col, height=0.6, alpha=a)
-        ax.text(v + 8, i, f'{txt} GB/s', va='center', fontsize=FS, fontweight='bold', color=col, alpha=a)
-    ax.axvline(142800000000.0 / 1000000000.0, color=C['memory'], ls='--', lw=1.5)
-    ax.text(142800000000.0 / 1000000000.0, -0.62, 'sustained 142.8 GB/s', color=C['memory'], fontsize=SFS, fontweight='bold', ha='center', va='bottom')
+        ax.barh(i, v, color=col, height=0.6, alpha=a, zorder=3)
+        if i == 1:
+            ax.annotate(f'{txt} GB/s', xy=(v + 4, i), xytext=(158, i), va='center', ha='left',
+                        fontsize=FS, fontweight='bold', color=col, alpha=a, zorder=6,
+                        arrowprops=dict(arrowstyle='-', color=col, lw=1.0, alpha=a))
+        else:
+            ax.text(v + 8, i, f'{txt} GB/s', va='center', fontsize=FS, fontweight='bold', color=col, alpha=a, zorder=6)
     ax.set_yticks([0, 1])
     ax.set_yticklabels([r[0] for r in rows], fontsize=FS)
     ax.tick_params(axis='y', length=0)

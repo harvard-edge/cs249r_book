@@ -225,7 +225,7 @@ def intent():
 
 def crashrun():
     """The two measured Temporal runs as lanes on one time axis."""
-    c = {'RepairNaive': {'model_calls': 1, 'launches': 2, 'reused': 0, 'ledger': [('model_call', None, 1, 0.0), ('job_launched', 'job_tests_1', 1, 0.007030010223), ('job_launched', 'job_tests_2', 2, 3.889447212)]}, 'RepairKeyed': {'model_calls': 1, 'launches': 1, 'reused': 1, 'ledger': [('model_call', None, 1, 0.0), ('job_launched', 'job_tests_1', 1, 0.008343219757), ('job_reused', 'job_tests_1', 2, 3.888708115)]}}
+    c = {'RepairNaive': {'model_calls': 1, 'launches': 2, 'reused': 0, 'events': [('model_call', None, 1, 0.0), ('job_launched', 'job_tests_1', 1, 0.007030010223), ('job_launched', 'job_tests_2', 2, 3.889447212)]}, 'RepairKeyed': {'model_calls': 1, 'launches': 1, 'reused': 1, 'events': [('model_call', None, 1, 0.0), ('job_launched', 'job_tests_1', 1, 0.008343219757), ('job_reused', 'job_tests_1', 2, 3.888708115)]}}
     for k in (1, 2):
         s = Svg(900, 420)
         x0, sc = (250, 140)
@@ -238,7 +238,7 @@ def crashrun():
             run = c[name]
             s.text(10, y + 8, lab, 22, INK, anchor='start', weight='bold')
             s.line(x0, y, x0 + 4.6 * sc, y, '#cbd5e1', 3)
-            for ev, job, att, t in run['ledger']:
+            for ev, job, att, t in run['events']:
                 if ev == 'model_call':
                     continue
                 if att == 1:
@@ -390,7 +390,7 @@ def cadence():
         y = {20.0: 0.632455532, 0.1: 0.04472135955}[curve_per.magnitude]
         ax.plot([x], [y], 'o', ms=10, color=C[ck], mec='white', mew=1.5, zorder=5)
     ax.text(0.03, 0.96, 'turns re-executed: optimum 1.6', transform=ax.transAxes, va='top', fontsize=13.5, fontweight='bold', color=C['danger'])
-    ax.annotate('turns logged: optimum 22', (k['s_log'], 0.04472135955), xytext=(0, -32), textcoords='offset points', ha='center', fontsize=13.5, fontweight='bold', color=C['memory'])
+    ax.annotate('turns logged: optimum 22', (k['s_log'], 0.04472135955), xytext=(0, 22), textcoords='offset points', ha='center', fontsize=13.5, fontweight='bold', color=C['memory'])
     ax.set_xscale('log')
     ax.set_yscale('log')
     ax.set_xticks([1, 2, 5, 10, 25, 50])
@@ -493,7 +493,7 @@ def feynman():
 
 def replay():
     """Live execution vs replay (DE figure 3), redrawn for the slide."""
-    nodes = [('Harness', 'records', 'struct'), ('Model', 'sampled', 'model'), ('Gate', 'authorizes', 'struct'), ('Tools', 'real effects', 'tool')]
+    nodes = [('Harness', 'records', 'struct'), ('Model', 'sampled', 'model'), ('Policy', 'authorizes', 'struct'), ('Tools', 'real effects', 'tool')]
     log = ['ContextBuilt', 'ModelReplied', 'ToolIntent', 'ToolResult']
     global FLOOR
     FLOOR = 26
@@ -516,7 +516,7 @@ def replay():
             for i, lab in enumerate(log):
                 s.rect(xs[i], 284, w + (40 if i < 3 else 0), 44, 'sys', rx=0)
                 s.text(xs[i] + w / 2, 316, lab, 26, INK)
-            states = [('Harness', 'replaying', 'struct', False), ('Model', 'stubbed', 'white', True), ('Gate', 'authorizes', 'struct', False), ('Tools', 'disconnected', 'white', True)]
+            states = [('Harness', 'replaying', 'struct', False), ('Model', 'stubbed', 'white', True), ('Policy', 'authorizes', 'struct', False), ('Tools', 'disconnected', 'white', True)]
             for i, (a, b, role, dash) in enumerate(states):
                 s.box(xs[i], 396, w, 84, role, a, b, fs=28, sfs=26, dash=dash, title_color=GRAY if dash else INK)
             s.arrow(0, 0, 0, 0, 'violet', sw=3, path='M780,330 L780,346 L105,346 L105,394')

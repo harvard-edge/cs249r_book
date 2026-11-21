@@ -113,15 +113,16 @@ for w, name, ck in WL:
         ax.scatter(x, y, s=34, marker=mk, color=C[ck], alpha=0.85, edgecolor='white', linewidth=0.5)
 for (w, name, ck), (tx, ty) in zip(WL, [(200, 2.6), (200, 1.0), (200, 0.38)]):
     ax.text(tx, ty, name, color=C[ck], fontsize=12.5, fontweight='bold')
-ax.text(1.1, 400, 'circle: A100   triangle: H100', fontsize=11, color=C['text'])
+ax.text(1.05, 580, 'circle: A100  |  triangle: H100', fontsize=10.5, color=C['text'], bbox=dict(fc='white', ec='none', alpha=0.85, pad=1.5))
 ax.set_xscale('log')
 ax.set_yscale('log')
+ax.set_ylim(top=1500)
 ax.set_xlabel('Emulated accelerators')
 ax.set_ylabel('Read throughput (GB/s)')
 ax.grid(color=C['grid'], lw=0.6)
 ax.minorticks_off()
 sp.save(fig, out / 'mlperf_scatter.svg')
-tiers = [('GPU HBM', 'c1', '80 GB', '3.35 TB/s per GPU', '~273 ns'), ('Host DRAM', 'c1', '0.5 to 2 TB', '200 GB/s per node', '~100 ns'), ('Local NVMe', 'st', '4 to 30 TB', '7 to 25 GB/s', '~100 µs'), ('Parallel file system', 'st', '100+ PB', '1+ TB/s shared', '~1 ms'), ('Object storage', 'st', 'very large', '100 GB/s shared', '~50 ms'), ('Archive', 'fr', 'very large', '1 GB/s', 'min to h')]
+tiers = [('GPU HBM', 'c1', '80 GB', '3.35 TB/s per GPU', '~273 ns'), ('Host DRAM', 'c1', '0.5 to 2 TB', '200 GB/s per node', '~100 ns'), ('Local NVMe', 'st', '4 to 30 TB', '7 to 25 GB/s', '~100 µs'), ('Parallel file system', 'st', '100+ PB', '1+ TB/s shared', '~1 ms'), ('Object storage', 'st', 'exabytes', '100 GB/s shared', '~50 ms'), ('Archive', 'fr', 'exabytes+', '1 GB/s', 'min to h')]
 for k in (1, 2):
     s = Svg(900, 345)
     top, rh, gap = (36, 47, 4)
@@ -176,7 +177,7 @@ ax.grid(color=C['grid'], lw=0.6)
 sp.save(fig, out / 'cache_hit.svg')
 sp.hbars(out / 'demand.svg', [('Images, 256 per GPU', 303.1887864, 'danger', '303 GB/s'), ('Text, 4,096 tokens per GPU', 0.16777216, 'data', '168 MB/s'), ('175B job, 30-day average', 0.002314814815, 'neutral', '2.3 MB/s')], 'GB/s', log=True, size=(4.1, 1.05), xlabel='GB/s for 2,048 GPUs (log scale)')
 for k in (1, 2, 3, 4):
-    s = Svg(920, 330)
+    s = Svg(960, 392)
     # Band 1: Sequential (250 ms Read + 200 ms Train = 450 ms/step, 55.6% stalled)
     s.text(10, 22, '1. Sequential: read 250 ms, then compute 200 ms', 21, V['text'], 'bold', anchor='start')
     s.text(98, 52, 'Read', 20, V['st_text'], 'bold', anchor='end')
@@ -194,39 +195,45 @@ for k in (1, 2, 3, 4):
     # Band 2: Overlapped with I/O > compute (250 ms/step, 20% stalled)
     op2 = 1.0 if k >= 2 else 0.0
     s.text(10, 126, '2. Overlapped (I/O 250 ms &gt; compute 200 ms)', 21, V['text'], 'bold', anchor='start', op=op2)
-    s.text(98, 156, 'Read', 20, V['st_text'], 'bold', anchor='end', op=op2)
-    s.text(98, 190, 'GPU', 20, V['c1_text'], 'bold', anchor='end', op=op2)
+    s.text(98, 160, 'Read', 20, V['st_text'], 'bold', anchor='end', op=op2)
+    s.text(98, 194, 'GPU', 20, V['c1_text'], 'bold', anchor='end', op=op2)
     for b in range(3):
         rx = x0 + b * 250 * u
-        box(s, rx, 136, 250 * u - 3, 30, 'st', f'R{b+1}', tsize=19, op=op2)
+        box(s, rx, 140, 250 * u - 3, 30, 'st', f'R{b+1}', tsize=19, op=op2)
         if b < 2:
             tx = x0 + (b + 1) * 250 * u
-            box(s, tx, 170, 200 * u - 3, 30, 'c1', f'T{b+1}', tsize=19, op=op2)
-            s.rect(tx + 200 * u, 170, 50 * u - 3, 30, V['bad_fill'], V['bad'], sw=1.5, op=op2)
-    s.rect(x0, 170, 250 * u - 3, 30, V['bad_fill'], V['bad'], sw=1.5, dash='5,4', op=op2)
-    s.text(x0 + 125 * u, 192, 'fill', 19, V['bad_text'], 'bold', op=op2)
-    s.text(685, 160, '250 ms/step', 21, V['bad_text'], 'bold', anchor='start', op=op2)
-    s.text(685, 188, '20% stalled (50 ms)', 20, V['bad_text'], 'bold', anchor='start', op=op2)
-    # Band 3: 3-stage pipeline when Read & Prep <= 200 ms (0% GPU stall)
+            box(s, tx, 174, 200 * u - 3, 30, 'c1', f'T{b+1}', tsize=19, op=op2)
+            s.rect(tx + 200 * u, 174, 50 * u - 3, 30, V['bad_fill'], V['bad'], sw=1.5, op=op2)
+    s.rect(x0, 174, 250 * u - 3, 30, V['bad_fill'], V['bad'], sw=1.5, dash='5,4', op=op2)
+    s.text(x0 + 125 * u, 196, 'fill', 19, V['bad_text'], 'bold', op=op2)
+    if k >= 4:
+        s.rect(x0 + 250 * u - 4, 136, 500 * u + 4, 72, 'none', V['c3'], sw=2.5, dash='7,4', rx=6)
+    s.text(685, 164, '250 ms/step', 21, V['bad_text'], 'bold', anchor='start', op=op2)
+    s.text(685, 192, '20% stalled (50 ms)', 20, V['bad_text'], 'bold', anchor='start', op=op2)
+    # Band 3: 3-stage pipeline when Read & Prep <= 200 ms (0% input stall in steady state)
     op3 = 1.0 if k >= 3 else 0.0
-    s.text(10, 224, '3. 3-stage pipeline (Read, Prep &lt;= 200 ms): 3 in flight', 21, V['text'], 'bold', anchor='start', op=op3)
-    s.text(98, 250, 'Read', 19, V['st_text'], 'bold', anchor='end', op=op3)
-    s.text(98, 279, 'Prep', 19, V['c2_text'], 'bold', anchor='end', op=op3)
-    s.text(98, 308, 'GPU', 19, V['c1_text'], 'bold', anchor='end', op=op3)
+    s.text(10, 240, '3. 3-stage pipeline (Read, Prep ≤ 200 ms): 3 in flight', 21, V['text'], 'bold', anchor='start', op=op3)
+    s.text(98, 297, 'Read', 19, V['st_text'], 'bold', anchor='end', op=op3)
+    s.text(98, 326, 'Prep', 19, V['c2_text'], 'bold', anchor='end', op=op3)
+    s.text(98, 355, 'GPU', 19, V['c1_text'], 'bold', anchor='end', op=op3)
     cw = 112
+    # Show initial pipeline fill explicitly in empty GPU slots before T1
+    s.rect(x0, 337, 2 * cw - 4, 24, V['bad_fill'], V['bad'], sw=1.4, dash='5,4', op=op3)
+    s.text(x0 + cw - 2, 355, 'pipeline fill', 17.5, V['bad_text'], 'bold', op=op3)
     for b in range(5):
         if b < 4:
-            box(s, x0 + b * cw, 232, cw - 4, 24, 'st', f'R{b+1}', tsize=19, op=op3)
+            box(s, x0 + b * cw, 279, cw - 4, 24, 'st', f'R{b+1}', tsize=19, op=op3)
         if 1 <= b <= 4:
-            box(s, x0 + b * cw, 261, cw - 4, 24, 'c2', f'P{b}', tsize=19, op=op3)
+            box(s, x0 + b * cw, 308, cw - 4, 24, 'c2', f'P{b}', tsize=19, op=op3)
         if 2 <= b <= 4:
-            box(s, x0 + b * cw, 290, cw - 4, 24, 'c1', f'T{b-1}', tsize=19, op=op3)
-    s.text(685, 264, '200 ms/step', 21, V['st_text'], 'bold', anchor='start', op=op3)
-    s.text(685, 292, '0% GPU stall', 21, V['st_text'], 'bold', anchor='start', op=op3)
-    # Step 4: highlight steady-state column
+            box(s, x0 + b * cw, 337, cw - 4, 24, 'c1', f'T{b-1}', tsize=19, op=op3)
+    s.text(685, 300, '200 ms/step', 21, V['st_text'], 'bold', anchor='start', op=op3)
+    s.text(685, 327, '0% input stall', 20.5, V['st_text'], 'bold', anchor='start', op=op3)
+    s.text(685, 354, '(steady state)' if k < 4 else '(steady state: 3 active)', 19, V['c3_text'] if k >= 4 else V['st_text'], 'bold', anchor='start', op=op3)
+    # Step 4: highlight steady-state interval with explicit header above box
     if k >= 4:
-        s.rect(x0 + 2 * cw - 4, 228, 2 * cw + 4, 91, 'none', V['c3'], sw=3, dash='7,4', rx=6)
-        s.text(685, 318, 'steady state: 3 active', 19, V['c3_text'], 'bold', anchor='start')
+        s.text(x0 + 3 * cw - 2, 267, 'After pipeline fill', 19, V['c3_text'], 'bold')
+        s.rect(x0 + 2 * cw - 4, 274, 2 * cw + 4, 92, 'none', V['c3'], sw=3, dash='7,4', rx=6)
     s.save(out / f'stall_step{k}.svg')
 WIN, P99 = (200, 500)
 fig, ax = plt.subplots(figsize=(5.0, 0.85))
@@ -420,7 +427,7 @@ for k in (1, 2):
     ax.set_ylabel('Thousand $ per year')
     ax.grid(color=C['grid'], lw=0.6)
     sp.save(fig, out / f'stage_cost_step{k}.svg')
-_cs_rows = [('Object store, 1 GB/s', 350.0, 'danger', '350 s'), ('File system share, 4 GB/s', 87.5, 'compute', '87.5 s'), ('One NVMe, 14 GB/s', 25.0, 'data', '25 s'), ('Eight NVMe, 7 GB/s each', 6.25, 'data', '6.2 s'), ('Host DRAM, 200 GB/s', 1.75, 'memory', '1.8 s')]
+_cs_rows = [('Object store, 1 GB/s', 350.0, 'danger', '350 s'), ('File system share, 4 GB/s', 87.5, 'compute', '87.5 s'), ('One NVMe, 14 GB/s', 25.0, 'data', '25 s'), ('Eight NVMe, 7 GB/s each', 6.25, 'data', '6.25 s'), ('Host DRAM, 200 GB/s', 1.75, 'memory', '1.8 s')]
 for k in (1, 2):
     fig, ax = plt.subplots(figsize=(4.4, 1.75))
     n = len(_cs_rows)
@@ -453,18 +460,34 @@ try:
 except FileNotFoundError:
     pass
 for k in (1, 2):
-    s = Svg(900, 220)
+    s = Svg(900, 225)
     s.line(190, 182, 880, 182, V['mute'], 2, arrow=True)
-    s.text(880, 210, 'time', 22, V['mute'], anchor='end')
-    s.text(175, 62, 'First read', 24, V['text'], 'bold', anchor='end')
-    s.rect(195, 36, 640, 44, V['bad_fill'], V['bad'])
-    s.text(634, 66, 'server A: slow, in the tail', 22, V['bad_text'], 'bold')
+    s.text(880, 212, 'time', 26, V['mute'], anchor='end')
+    s.text(175, 62, 'First read', 28, V['text'], 'bold', anchor='end')
+    s.rect(195, 34, 640, 48, V['bad_fill'], V['bad'])
+    s.text(634, 67, 'server A: slow, in the tail', 26, V['bad_text'], 'bold')
     if k >= 2:
-        s.line(430, 24, 430, 182, V['c1'], 2.5, dash='7 5')
-        s.text(436, 210, 'p99 delay', 22, V['c1'], 'bold', anchor='middle')
-        s.text(175, 132, 'Second read', 24, V['text'], 'bold', anchor='end')
-        s.rect(432, 106, 180, 44, V['st_fill'], V['st'])
-        s.text(522, 136, 'replica B', 22, V['st_text'], 'bold')
-        s.text(626, 136, 'first response wins', 24, V['st_text'], 'bold', anchor='start')
+        s.line(430, 22, 430, 182, V['c1'], 2.5, dash='7 5')
+        s.text(436, 212, 'p99 delay', 26, V['c1'], 'bold', anchor='middle')
+        s.text(175, 134, 'Second read', 28, V['text'], 'bold', anchor='end')
+        s.rect(432, 106, 180, 48, V['st_fill'], V['st'])
+        s.text(522, 139, 'replica B', 26, V['st_text'], 'bold')
+        s.text(626, 139, 'first response wins', 27, V['st_text'], 'bold', anchor='start')
     s.save(out / f'hedge_timeline_step{k}.svg')
+
+# Recall F5: RDMA path mini-diagram (GPU -> NIC -> Switch -> NIC -> GPU, bypassing CPU)
+s = Svg(900, 200)
+box(s, 125, 8, 245, 48, 'fr', 'Host CPU bypassed', tsize=24, dash='6,4')
+box(s, 530, 8, 245, 48, 'fr', 'Host CPU bypassed', tsize=24, dash='6,4')
+box(s, 10, 76, 146, 66, 'c1', 'GPU HBM', tsize=25)
+s.line(156, 109, 196, 109, V['st'], 3.5, arrow=True)
+box(s, 202, 76, 114, 66, 'st', 'NIC', tsize=26)
+s.line(316, 109, 366, 109, V['c2'], 3.5, arrow=True)
+box(s, 372, 76, 156, 66, 'c2', 'Switch', 'shared buffer', tsize=24, ssize=21)
+s.line(528, 109, 578, 109, V['c2'], 3.5, arrow=True)
+box(s, 584, 76, 114, 66, 'st', 'NIC', tsize=26)
+s.line(698, 109, 738, 109, V['st'], 3.5, arrow=True)
+box(s, 744, 76, 146, 66, 'c1', 'GPU HBM', tsize=25)
+s.text(450, 178, 'shared switch queues: slowest flow sets collective finish', 25, V['c2_text'], 'bold')
+s.save(out / 'rdma_recall_strip.svg')
 print('figures written to', out)

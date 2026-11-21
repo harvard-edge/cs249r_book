@@ -106,8 +106,8 @@ def ofqual_flows():
     grade lower, or two or more lower. Column slot about 7 x 5.3 cm."""
     split = [(0, 61.0, 36.0, 3.0), (1.0, 56.0, 39.0, 3.0), (1.0, 59.0, 37.0, 3.0), (2.0, 59.0, 34.0, 4.0), (5.0, 59.0, 31.0, 4.0), (12.0, 60.0, 28.0, 0), (20.0, 79.0, 0, 0)]
     grades = ['A*', 'A', 'B', 'C', 'D', 'E', 'U']
-    cols = [('higher', C['data']), ('same', C['neutral_l']), ('one lower', RED_L), ('two or more lower', RED)]
-    fig, ax = plt.subplots(figsize=(4.3, 3.3))
+    cols = [('higher', C['data']), ('same', C['neutral_l']), ('one lower', '#fca5a5'), ('two or more lower', RED)]
+    fig, ax = plt.subplots(figsize=(4.05, 3.1))
     for i, s in enumerate(split):
         y = len(split) - 1 - i
         left = 0
@@ -115,19 +115,21 @@ def ofqual_flows():
             ax.barh(y, v, left=left, height=0.7, color=col, edgecolor='white', lw=0.8)
             left += v
         lower = s[2] + s[3]
-        ax.text(101.5, y, f'{lower:.0f}%', va='center', ha='left', fontsize=12, fontweight='bold', color=RED if lower else GRAY)
-    ax.text(101.5, len(split) - 0.35, 'lower', va='bottom', ha='left', fontsize=12, color=RED)
+        ax.text(101.5, y, f'{lower:.0f}%', va='center', ha='left', fontsize=13.5, fontweight='bold', color=RED if lower else GRAY)
+    ax.text(101.5, len(split) - 0.35, 'total', va='bottom', ha='left', fontsize=13.0, color=RED, fontweight='bold')
     top = len(split) - 0.35
-    ax.text(0, top, 'higher', ha='left', va='bottom', fontsize=12, color=C['data'])
-    ax.text(36, top, 'same', ha='center', va='bottom', fontsize=12, color=GRAY)
-    ax.text(80, top, 'one lower', ha='center', va='bottom', fontsize=12, color=RED, fontweight='bold')
+    ax.text(0, top, 'higher', ha='left', va='bottom', fontsize=13.0, color=C['data'], fontweight='bold')
+    ax.text(30, top, 'same', ha='center', va='bottom', fontsize=13.0, color=GRAY, fontweight='bold')
+    ax.text(68, top, '1 lower', ha='center', va='bottom', fontsize=13.0, color='#ef4444', fontweight='bold')
+    ax.text(98, top, '2+', ha='right', va='bottom', fontsize=13.0, color=RED, fontweight='bold')
     ax.set_yticks(range(len(split)))
-    ax.set_yticklabels(list(reversed(grades)), fontsize=12)
-    ax.set_ylabel('Teacher grade', fontsize=12)
+    ax.set_yticklabels(list(reversed(grades)), fontsize=13.5)
+    ax.set_ylabel('Teacher grade', fontsize=13.5)
     ax.set_xlim(0, 100)
     ax.set_ylim(-0.6, len(split) + 0.3)
     ax.set_xticks([0, 50, 100])
-    ax.set_xlabel('Calculated grade, share of entries (%)', fontsize=12)
+    ax.tick_params(axis='x', labelsize=13.5)
+    ax.set_xlabel('Calculated grade, share of all entries (%)', fontsize=13.5)
     ax.spines['left'].set_visible(False)
     ax.tick_params(axis='y', length=0)
     sp.save(fig, out('ofqual_flows.svg'))
@@ -136,18 +138,18 @@ def ofqual_candidates():
     """Ofqual Table 2 as bars: candidates by the number of A levels lowered."""
     n = [78470.0, 95580.0, 55730.0, 16100.0, 220.0]
     pct = [100 * v / 246110.0 for v in n]
-    fig, ax = plt.subplots(figsize=(4.4, 1.8))
+    fig, ax = plt.subplots(figsize=(4.1, 1.85))
     for k, p in enumerate(pct):
         ax.bar(k, p, width=0.7, color=GRAY if k == 0 else RED)
-        ax.text(k, p + 1.5, f'{p:.0f}%' if p >= 0.5 else '<0.5%', ha='center', va='bottom', fontsize=12, color=GRAY if k == 0 else RED, fontweight='bold')
+        ax.text(k, p + 1.5, f'{p:.0f}%' if p >= 0.5 else '<0.5%', ha='center', va='bottom', fontsize=13.0, color=GRAY if k == 0 else RED, fontweight='bold')
     at_least = 68.1
     ax.plot([0.7, 4.3], [52, 52], color=RED, lw=1.5)
     for x in (0.7, 4.3):
         ax.plot([x, x], [49, 52], color=RED, lw=1.5)
-    ax.text(2.5, 54, f'{at_least:.0f}% had at least one lowered', ha='center', va='bottom', fontsize=12, fontweight='bold', color=RED)
+    ax.text(2.5, 54, f'{at_least:.0f}% of students had ≥1 lowered', ha='center', va='bottom', fontsize=13.0, fontweight='bold', color=RED)
     ax.set_xticks(range(5))
-    ax.set_xticklabels(['0', '1', '2', '3', '4'], fontsize=12)
-    ax.set_xlabel('A levels lowered per student', fontsize=12)
+    ax.set_xticklabels(['0', '1', '2', '3', '4'], fontsize=13.5)
+    ax.set_xlabel('A levels lowered per student', fontsize=13.5)
     ax.set_ylim(0, 66)
     ax.set_yticks([])
     ax.spines['left'].set_visible(False)
@@ -381,7 +383,7 @@ def architecture():
             b += box(10, 320, 200, 90, VIOLET_L, VIOLET, ['Parity', 'updates now'], size=22)
             b += box(230, 320, 240, 90, VIOLET_L, VIOLET, ['Error rates', 'when labels land'], size=22)
             b += box(490, 320, 230, 90, 'white', RED, ['Thin group', 'insufficient, not 0'], size=22, color=RED, dash='6,4')
-            b += box(745, 320, 150, 90, VIOLET_L, VIOLET, ['Release', 'gate: owner'], size=22)
+            b += box(745, 320, 150, 90, VIOLET_L, VIOLET, ['Release', 'sign-off: owner'], size=19)
             b += path_arrow('M365,198 L110,318', 'purple', w=2)
             b += path_arrow('M380,240 L330,318', 'purple', w=2)
             b += path_arrow('M720,365 L743,365', 'purple', w=2)
@@ -555,7 +557,22 @@ def loop():
 def autobias():
     best = 96.5
     rows = [('Radiologist alone', 92.0, 'neutral', '92%'), ('AI alone', 95.0, 'memory', '95%'), ('Team, best case', best, 'compute', f'at most {best:.1f}%')]
-    sp.hbars(out('autobias.svg'), rows, '%', log=False, size=(4.4, 1.7), xlabel='Tumors found among patients with tumors (%)')
+    fig, ax = plt.subplots(figsize=(4.4, 1.75))
+    for i, (lab, v, ck, txt) in enumerate(rows):
+        y = len(rows) - 1 - i
+        ax.barh(y, v, color=C[ck], height=0.62)
+        ax.text(-2.2, y, lab, ha='right', va='center', fontsize=12.5, fontweight='bold', color=INK)
+        ax.text(v + 2.0, y, txt, ha='left', va='center', fontsize=12.5, fontweight='bold', color=C[ck])
+    ax.set_xlim(0, 134)
+    ax.set_ylim(-0.55, len(rows) - 0.45)
+    ax.set_xticks([0, 25, 50, 75, 100])
+    ax.set_xticklabels(['0', '25', '50', '75', '100'])
+    ax.set_yticks([])
+    ax.spines['left'].set_visible(False)
+    ax.grid(axis='x', color=C['grid'], lw=0.6)
+    ax.set_axisbelow(True)
+    ax.set_xlabel('Tumors found among patients with tumors (%)', fontsize=12.5)
+    sp.save(fig, out('autobias.svg'))
 
 def waymo():
     import datetime as dt

@@ -180,8 +180,12 @@ for (name, col), pts, eff, (_, (_, _, _, acc)) in zip(names_ml, [[{'round': 'v3.
     t = [r['score_minutes'] for r in pts]
     ax.plot(n, t, '-o', ms=5, lw=2.2, color=col, zorder=3)
     ax.plot([n[0], n[-1]], [t[0], t[0] * n[0] / n[-1]], '--', lw=1.2, color=col, alpha=0.7)
-    dy = -11 if acc == 'TPU-trillium' else 5 if acc == 'Blackwell' else 0
-    ax.annotate(f'{eff:.0%}', (n[-1], t[-1]), xytext=(6, dy), textcoords='offset points', fontsize=11, fontweight='bold', color=col, va='center')
+    if acc == 'TPU-trillium':
+        ax.annotate(f'{eff:.0%}', (n[-1], t[-1]), xytext=(5200, 18.5), textcoords='data', fontsize=10.5, fontweight='bold', color=col, va='center', ha='left', arrowprops=dict(arrowstyle='-', color=col, lw=0.9))
+    elif acc == 'Blackwell':
+        ax.annotate(f'{eff:.0%}', (n[-1], t[-1]), xytext=(3350, 28.5), textcoords='data', fontsize=10.5, fontweight='bold', color=col, va='center', ha='left', arrowprops=dict(arrowstyle='-', color=col, lw=0.9))
+    else:
+        ax.annotate(f'{eff:.0%}', (n[-1], t[-1]), xytext=(6, 0), textcoords='offset points', fontsize=11, fontweight='bold', color=col, va='center')
     ax.plot([], [], '-o', color=col, lw=2.2, ms=5, label=name)
 ax.set_xscale('log')
 ax.set_yscale('log')
@@ -479,17 +483,18 @@ def build_1f1b(p=4, m=8):
 
 _sched_1f1b = build_1f1b()
 for k in (1, 2, 3):
-    s = SVG(940, 340)
-    cw, rh, x0, y0 = 34, 44, 92, 62
-    s.text(460, 24, '1F1B schedule (p = 4 stages, m = 8 microbatches)', 22, V['text'])
+    s = SVG(985, 372)
+    cw, rh, x0, y0 = 34, 44, 86, 74
+    s.text(460, 22, '1F1B schedule (p = 4 stages, m = 8 microbatches)', 22, V['text'])
     # Phase labels at top
-    s.text(x0 + 2 * cw, 48, 'Warm-up', 19, V['c1'])
+    s.text(x0 + 2 * cw, 54, 'Warm-up', 19, V['c1'])
     if k >= 2:
-        s.text(x0 + 10.5 * cw, 48, 'Steady 1F1B (free each act. on B)', 19, V['ok'])
+        s.text(x0 + 10.5 * cw, 54, 'Steady 1F1B (free each act. on B)', 19, V['ok'])
     if k >= 3:
-        s.text(x0 + 19.2 * cw, 48, 'Cooldown', 19, '#b45309')
+        s.text(x0 + 19.2 * cw, 54, 'Cooldown', 19, '#b45309')
     peaks = [4, 3, 2, 1]
-    s.text(892, 48, 'Peak', 19, V['ok'])
+    s.text(910, 42, 'Peak live', 18, V['ok'])
+    s.text(910, 62, 'activations', 18, V['ok'])
     for st in range(4):
         y = y0 + st * (rh + 12)
         s.text(x0 - 12, y + rh / 2, f'GPU {st}', 20, V['gray'], anchor='end')
@@ -508,13 +513,23 @@ for k in (1, 2, 3):
             else:
                 s.rect(x, y, cw - 3, rh, V['bad_l'], 'none', 0, 4)
         if k >= 2:
-            s.text(892, y + rh / 2, f'{peaks[st]}', 22, V['ok'])
+            s.text(910, y + rh / 2, f'{peaks[st]}', 22, V['ok'])
+    # Compact visual key: F = forward, B = backward, bubble
+    ky = 304
+    s.rect(256, ky, 26, 22, V['c1_l'], V['c1'], 1.6, 3)
+    s.text(269, ky + 11, 'F', 15, V['c1'])
+    s.text(290, ky + 11, '= forward', 18, V['text'], weight='normal', anchor='start')
+    s.rect(418, ky, 26, 22, V['c2_l'], V['c2'], 1.6, 3)
+    s.text(431, ky + 11, 'B', 15, '#b45309')
+    s.text(452, ky + 11, '= backward', 18, V['text'], weight='normal', anchor='start')
+    s.rect(598, ky, 26, 22, V['bad_l'], 'none', 0, 3)
+    s.text(632, ky + 11, '= pipeline bubble', 18, V['text'], weight='normal', anchor='start')
     cap = {
         1: 'Step 1 (Warm-up): stage s runs p - s forwards (4, 3, 2, 1) to fill the pipe.',
-        2: 'Step 2 (Steady 1F1B): each B frees one activation -> peak live = [4, 3, 2, 1] vs GPipe 8.',
+        2: 'Step 2 (Steady 1F1B): each B frees one activation -> peak live = [4, 3, 2, 1] vs. GPipe 8.',
         3: 'Step 3 (Cooldown): same 3/11 (27.3%) bubble as GPipe, half the activation memory.',
     }[k]
-    s.text(470, 316, cap, 20, V['text'])
+    s.text(492, 352, cap, 20, V['text'])
     s.save(out / f'pipe_1f1b_step{k}.svg')
 
 # Explore figures vol2:fig-ulysses-ownership-transpose & vol2:fig-moe-all-to-all-routing + DLRM (3-step)
@@ -583,14 +598,17 @@ for k in (1, 2):
         f = np.array([calc_pipeline_bubble(p, int(mm)) for mm in m])
         ax.plot(m, 100 * f, color=col, lw=2.6, alpha=1 if show else 0)
         label(ax, 240, ly, f'p = {p} stages', col, show, fontsize=15, ha='right')
-    pts = [(SimpleNamespace(bubble=0.4285714286, fill_slots=3, idle_slots=6, microbatches=4, name='GPipe, four stages and four microbatches', phase_slots=7, slots=14, stages=4), C['memory'], 'p=4, m=4: 43%', None, True), (SimpleNamespace(bubble=0.1794871795, fill_slots=7, idle_slots=14, microbatches=32, name='Eight pipeline stages at 32 microbatches', phase_slots=39, slots=78, stages=8), C['compute'], 'p=8, m=32: 18%', (-10, -22), True), (SimpleNamespace(bubble=0.3191489362, fill_slots=15, idle_slots=30, microbatches=32, name='Sixteen pipeline stages at 32 microbatches', phase_slots=47, slots=94, stages=16), C['network'], 'm=32: 32%', (8, 8), k >= 2)]
+    pts = [(SimpleNamespace(bubble=0.4285714286, fill_slots=3, idle_slots=6, microbatches=4, name='GPipe, four stages and four microbatches', phase_slots=7, slots=14, stages=4), C['memory'], 'p=4, m=4: 43%', None, True), (SimpleNamespace(bubble=0.1794871795, fill_slots=7, idle_slots=14, microbatches=32, name='Eight pipeline stages at 32 microbatches', phase_slots=39, slots=78, stages=8), C['compute'], 'p=8, m=32: 18%', None, True), (SimpleNamespace(bubble=0.3191489362, fill_slots=15, idle_slots=30, microbatches=32, name='Sixteen pipeline stages at 32 microbatches', phase_slots=47, slots=94, stages=16), C['network'], 'm=32: 32%', (10, 14), k >= 2)]
     for sc, col, lab, off, show in pts:
         p, mm, v = (sc.stages, sc.microbatches, 100 * sc.bubble)
         ax.plot([mm], [v], 'o', ms=9, color=col, mec='white', mew=1.5, alpha=1 if show else 0)
-        if p in (4, 8):
-            ax.annotate(lab, (mm, v), xytext=(1.15, 19 if p == 4 else 3), fontsize=15, fontweight='bold', color=col, arrowprops=dict(arrowstyle='->', color=col, lw=1.2))
+        if p == 4:
+            ax.annotate(lab, (mm, v), xytext=(1.15, 19), fontsize=14, fontweight='bold', color=col, arrowprops=dict(arrowstyle='->', color=col, lw=1.2))
             continue
-        ax.annotate(lab, (mm, v), xytext=off, textcoords='offset points', fontsize=15, fontweight='bold', color=col, alpha=1 if show else 0)
+        if p == 8:
+            ax.annotate(lab, (mm, v), xytext=(46, 26), fontsize=13.5, fontweight='bold', color=col, arrowprops=dict(arrowstyle='->', color=col, lw=1.2))
+            continue
+        ax.annotate(lab, (mm, v), xytext=off, textcoords='offset points', fontsize=14, fontweight='bold', color=col, alpha=1 if show else 0)
     ax.axhline(10.0, color=C['neutral'], lw=1.4, ls='--')
     ax.text(1.05, 10.0 + 2, '10%', color=C['neutral'], fontsize=14, fontweight='bold')
     ax.set_xscale('log', base=2)
@@ -753,3 +771,76 @@ for k in (1, 2):
     ax.set_ylim(-0.4, 1.8)
     ax.axis('off')
     sp.save(fig, out / f'rlhf_state_step{k}.svg')
+
+# F25: ZeRO-3 175B on 64 GPUs: fits memory, stalls on wire (2-step)
+for k in (1, 2):
+    fig, (a1, a2) = plt.subplots(2, 1, figsize=(4.6, 2.35), gridspec_kw={'height_ratios': [1, 1], 'hspace': 0.78})
+    # Top: Memory bar (fits 80 GB)
+    a1.barh(0, 43.75, color=C['memory'], height=0.58)
+    a1.barh(0, 4.8, left=43.75, color=C['data'], height=0.58)
+    a1.axvline(80, color=C['danger'], lw=2, ls='--')
+    a1.text(22, 0, 'state 43.8 GB', ha='center', va='center', fontsize=13.5, fontweight='bold', color='white')
+    a1.text(49.5, 0, '48.6 GB', ha='left', va='center', fontsize=13.5, fontweight='bold', color=C['data'])
+    a1.text(82.0, 0, '80 GB HBM', ha='left', va='center', fontsize=13.5, fontweight='bold', color=C['danger'])
+    a1.set_xlim(0, 122)
+    a1.set_ylim(-0.45, 0.55)
+    a1.set_yticks([])
+    a1.tick_params(axis='x', labelsize=12.5)
+    a1.spines['left'].set_visible(False)
+    a1.set_title('Memory per GPU (64 GPUs): FITS', loc='left', fontsize=14, fontweight='bold', color=C['data'], pad=3)
+    # Bottom: Step time bar (wire 10x compute)
+    al = 1.0 if k >= 2 else 0.0
+    a2.barh(0, 2.1, color=C['memory'], height=0.58, alpha=al)
+    a2.barh(0, 22.0, left=2.1, color=C['danger'], height=0.58, alpha=al)
+    a2.text(13.1, 0, 'regather ~1.1 TB (~22 s)', ha='center', va='center', fontsize=13.5, fontweight='bold', color='white', alpha=al)
+    a2.text(24.7, 0, '~10×', ha='left', va='center', fontsize=14.5, fontweight='bold', color=C['danger'], alpha=al)
+    a2.set_xlim(0, 30)
+    a2.set_ylim(-0.45, 0.55)
+    a2.set_yticks([])
+    a2.spines['left'].set_visible(False)
+    a2.set_xlabel('seconds per step (compute 2.1 s vs. wire)', fontsize=13.5, alpha=al)
+    a2.tick_params(axis='x', labelsize=12.5, colors=C['text'] if k >= 2 else 'white')
+    a2.spines['bottom'].set_alpha(al)
+    a2.set_title('Wire time per step (1 NDR port): STALLS', loc='left', fontsize=14, fontweight='bold', color=C['danger'], pad=3, alpha=al)
+    sp.save(fig, out / f'zero3_175b_step{k}.svg')
+
+# F26: DDP vs FSDP compact schematic
+s = SVG(420, 310)
+s.rect(10, 14, 400, 128, V['c1_l'], V['c1'], sw=2, rx=8)
+s.text(210, 38, 'DDP: Full Copy on Every GPU', 20, V['c1'])
+for gi in range(3):
+    gx = 28 + gi * 128
+    s.rect(gx, 56, 110, 44, 'white', V['c1'], sw=1.8, rx=5)
+    s.text(gx + 55, 78, f'GPU {gi}: 16B/p', 17, V['c1'])
+s.text(210, 122, '1 AllReduce/step (2Ψ bytes)', 18, V['gray'], weight='normal')
+s.rect(10, 164, 400, 134, V['c2_l'], V['c2'], sw=2, rx=8)
+s.text(210, 188, 'FSDP (FULL_SHARD): 1/N State', 20, '#b45309')
+for gi in range(3):
+    gx = 28 + gi * 128
+    s.rect(gx, 206, 110, 44, 'white', V['c2'], sw=1.8, rx=5)
+    s.text(gx + 55, 228, f'GPU {gi}: 16/N', 17, '#b45309')
+s.text(210, 274, 'AllGather + ReduceScatter (3Ψ bytes)', 18, '#b45309', weight='normal')
+s.save(out / 'ddp_vs_fsdp.svg')
+
+# F41: Activation recomputation cost bar (3 fwd -> 4 fwd, +33%)
+fig, ax = plt.subplots(figsize=(4.4, 1.35))
+ax.barh(1, 1.0, color=C['memory'], height=0.56, edgecolor='white', lw=1.2)
+ax.barh(1, 2.0, left=1.0, color=C['compute'], height=0.56, edgecolor='white', lw=1.2)
+ax.text(0.5, 1, 'Fwd', ha='center', va='center', fontsize=13, fontweight='bold', color='white')
+ax.text(2.0, 1, 'Bwd (2)', ha='center', va='center', fontsize=13, fontweight='bold', color='white')
+ax.text(3.12, 1, '3× fwd (1.1 TB)', ha='left', va='center', fontsize=13, fontweight='bold', color=C['text'])
+ax.barh(0, 1.0, color=C['memory'], height=0.56, edgecolor='white', lw=1.2)
+ax.barh(0, 1.0, left=1.0, color=C['danger'], height=0.56, edgecolor='white', lw=1.2)
+ax.barh(0, 2.0, left=2.0, color=C['compute'], height=0.56, edgecolor='white', lw=1.2)
+ax.text(0.5, 0, 'Fwd', ha='center', va='center', fontsize=13, fontweight='bold', color='white')
+ax.text(1.5, 0, 'Rec', ha='center', va='center', fontsize=12.5, fontweight='bold', color='white')
+ax.text(3.0, 0, 'Bwd (2)', ha='center', va='center', fontsize=13, fontweight='bold', color='white')
+ax.text(4.12, 0, '4× (+33%, 19 GB)', ha='left', va='center', fontsize=13, fontweight='bold', color=C['danger'])
+ax.set_yticks([0, 1])
+ax.set_yticklabels(['Full ckpt', 'Baseline'], fontsize=13.5, fontweight='bold')
+ax.set_xlim(0, 6.7)
+ax.set_ylim(-0.5, 1.55)
+ax.set_xticks([0, 1, 2, 3, 4])
+ax.set_xticklabels(['0', '1', '2', '3', '4'], fontsize=12.5)
+ax.set_xlabel('Forward-pass equivalents per step', fontsize=13)
+sp.save(fig, out / 'recomp_bars.svg')

@@ -441,8 +441,10 @@ def paper_crops():
     stack.paste(lamp, (0, 0))
     stack.paste(bottle, (3, 240))
     stack.save(OUT / 'voxposer_row2.jpg', quality=90)
-    knowno = Image.open(OUT / 'knowno_example.png')
-    knowno.crop((925, 400, 1633, 1165)).save(OUT / 'knowno_set.png')
+    knowno = Image.open(OUT / 'knowno_example.png').crop((925, 400, 1633, 1165)).convert('RGB')
+    from PIL import ImageDraw
+    ImageDraw.Draw(knowno).rectangle((0, 640, 26, 705), fill=(255, 255, 255))
+    knowno.save(OUT / 'knowno_set.png')
 
 def main():
     autort()

@@ -174,18 +174,23 @@ def zhang():
     fig, ax = plt.subplots(figsize=(5.8, 2.6))
     bins = np.arange(0, 10.01, 0.25)
     ax.hist(vals[vals <= 10], bins=bins, color=sp.C['memory_l'], edgecolor=sp.C['memory'], lw=0.8)
-    marks = [('median', 2.37, 'p50', 123), ('mean', 2.72, 'mean', 123), ('90th pct.', 4.33, 'p90', 80), ('99th pct.', 7.0, 'p99', 80)]
-    for lab, x, key, y in marks:
+    marks = [
+        ('median', 2.37, 'p50', 142, 144, 'right'),
+        ('mean', 2.72, 'mean', 142, 144, 'left'),
+        ('90th pct.', 4.33, 'p90', 96, 98, 'left'),
+        ('99th pct.', 7.0, 'p99', 70, 72, 'left'),
+    ]
+    speeds = {'median': 0.31924432, 'mean': 0.2853628359, '90th pct.': 0.1910752891, '99th pct.': 0.1229712742}
+    for lab, x, key, y, ymax, ha in marks:
         col = RED if key == 'p90' else SLATE
-        ax.axvline(x, color=col, lw=2, ls='--')
-        ha = 'right' if lab == 'median' else 'left'
-        dx = -0.08 if ha == 'right' else 0.08
-        ax.text(x + dx, y, f"{lab} {x:.2f} s\n{ {'median': 0.31924432, 'mean': 0.2853628359, '90th pct.': 0.1910752891, '99th pct.': 0.1229712742}[lab]:.2f} m/s", color=col, fontsize=11, fontweight='bold', ha=ha, va='top')
+        ax.plot([x, x], [0, ymax], color=col, lw=2, ls='--')
+        dx = -0.10 if ha == 'right' else 0.10
+        ax.text(x + dx, y, f"{lab} {x:.2f} s\n{speeds[lab]:.2f} m/s", color=col, fontsize=10.5, fontweight='bold', ha=ha, va='top')
     ax.set_xlim(0, 10)
-    ax.set_ylim(0, 126)
+    ax.set_ylim(0, 148)
     ax.set_xlabel('Mean take-over time of one study condition (s)', fontsize=12)
     ax.set_ylabel('Conditions', fontsize=12)
-    ax.text(9.95, 36, '1 condition at\n19.8 s off scale', ha='right', fontsize=10.5, color=sp.C['neutral'])
+    ax.text(9.95, 22, '1 condition at\n19.8 s off scale', ha='right', va='center', fontsize=10.5, color=sp.C['neutral'])
     save(fig, 'zhang_hist')
 
 def deadline():
@@ -400,18 +405,22 @@ def pallet():
 def flood():
     n = np.arange(0, 61)
     fin = (n + 1) * 0.0018 * 1000.0
-    fig, ax = plt.subplots(figsize=(5.4, 2.5))
+    fig, ax = plt.subplots(figsize=(5.4, 2.55))
     ax.plot(n, fin, color=SLATE, lw=2.6)
-    for budget, lab, col, nn in [(0.100775 * 1000.0, 'deadline 100.8 ms', RED, 55), ((0.100775 - 0.06331072) * 1000.0, 'after admission 37.5 ms', AMBER, 20)]:
+    specs = [
+        (0.100775 * 1000.0, 'deadline: 100.8 ms', RED, 55, (56.2, 95.0, 'left')),
+        ((0.100775 - 0.06331072) * 1000.0, 'after admission:\n37.5 ms', AMBER, 20, (21.8, 33.5, 'left')),
+    ]
+    for budget, lab, col, nn, (tx, ty, ha) in specs:
         ax.axhline(budget, color=col, lw=2, ls='--')
-        ax.text(1 if nn > 30 else 30, budget + 3, lab, color=col, fontsize=11.5, fontweight='bold', va='bottom')
-        ax.plot([nn], [(nn + 1) * 0.0018 * 1000.0], 'o', color=col, ms=8)
-        ax.text(nn + 1.5, (nn + 1) * 0.0018 * 1000.0 - 4, f'{nn} forged', color=col, fontsize=11.5, fontweight='bold', va='top')
-    ax.set_xlim(0, 60)
-    ax.set_ylim(0, 115)
+        ax.text(1.2, budget + 2.5, lab, color=col, fontsize=11.0, fontweight='bold', va='bottom', ha='left', linespacing=1.0)
+        ax.plot([nn], [(nn + 1) * 0.0018 * 1000.0], 'o', color=col, ms=8, zorder=5)
+        ax.text(tx, ty, f'{nn} forged', color=col, fontsize=11.5, fontweight='bold', va='top', ha=ha)
+    ax.set_xlim(0, 68)
+    ax.set_ylim(0, 118)
     ax.set_xlabel('Forged signed packets queued ahead of the veto', fontsize=12)
     ax.set_ylabel('Veto verified at (ms)', fontsize=12)
-    ax.text(58, 8, '1.8 ms per Ed25519 check\n(illustrative)', ha='right', fontsize=10.5, color=sp.C['neutral'])
+    ax.text(66.5, 6, '1.8 ms per Ed25519 check\n(illustrative)', ha='right', fontsize=10.5, color=sp.C['neutral'])
     save(fig, 'flood')
 
 def channels():
@@ -469,31 +478,41 @@ def lh2904():
     svg('lh2904', 900, 392, b)
 
 def masks():
-    cells = [('drift', 'policy drifts', '4.5 s', 'M = 0', RED_F, RED), ('blend', 'enforcer spline', '38 ms', 'M = 0', GREEN_F, GREEN), ('re-orient', 'operator hunts', 'until settled', 'M = 0', AMBER_F, AMBER), ('stable', 'operator steady', 'after a dwell', 'M = 1', BLUE_F, BLUE)]
+    cells = [
+        ('drift', 'policy drifts', '4.465 s (≈ 4.5 s)', 'M = 0', RED_F, RED),
+        ('blend', 'enforcer spline', '38 ms', 'M = 0', GREEN_F, GREEN),
+        ('re-orient', 'operator hunts', 'until settled', 'M = 0', AMBER_F, AMBER),
+        ('stable', 'operator steady', 'after a dwell', 'M = 1', BLUE_F, BLUE),
+    ]
     xs = [10, 233, 456, 679]
     w = 211
     stamps = ['divergence', 'commit', 'blend end', 'stabilized']
     for step in (1, 2):
         b = []
-        b.append(text(10, 30, 'MCU timestamps split one takeover into four intervals', 23, TXT, anchor='start', weight='bold'))
+        b.append(text(10, 26, 'Four intervals from MCU timestamps', 22, TXT, anchor='start', weight='bold'))
+        b.append(text(890, 26, 'M = training mask (1 trains, 0 excluded)', 21.5, SLATE, anchor='end', weight='bold'))
         for (name, who, dur, m, f, s), x in zip(cells, xs):
-            b.append(box(x, 96, w, 106, f if name == 'stable' else 'white', s, sw=3))
-            b.append(text(x + w / 2, 132, name, 25, s, weight='bold'))
-            b.append(text(x + w / 2, 162, who, 21, SLATE))
-            b.append(text(x + w / 2, 188, dur, 21, SLATE, italic=True))
-            b.append(text(x + w / 2, 236, m, 25, TXT if m == 'M = 1' else SLATE, weight='bold'))
+            b.append(box(x, 88, w, 118, f if (name == 'stable' and step >= 2) else 'white', s, sw=3))
+            b.append(text(x + w / 2, 120, name, 26, s, weight='bold'))
+            b.append(text(x + w / 2, 148, who, 22, SLATE))
+            b.append(text(x + w / 2, 174, dur, 21.5, SLATE, italic=True))
+            if step == 1:
+                b.append(text(x + w / 2, 238, 'M = ?', 24, GRAY, weight='bold'))
+            else:
+                b.append(text(x + w / 2, 238, m, 25, TXT if m == 'M = 1' else SLATE, weight='bold'))
         for x, st in zip(xs, stamps):
             xx = x if x == 10 else x - 6
-            b.append(line(xx, 70, xx, 214, SLATE, 2, dash='4,4'))
-            b.append(text(xx, 64, st, 21, SLATE, anchor='start' if x == 10 else 'middle'))
-        b += bracket(679, 890, 262, 'trains', BLUE, 22, up=False)
+            b.append(line(xx, 64, xx, 212, SLATE, 2, dash='4,4'))
+            b.append(text(xx, 58, st, 22, SLATE, anchor='start' if x == 10 else 'middle'))
         if step == 2:
+            b += bracket(679, 890, 264, 'trains', BLUE, 22, up=False)
             wx = 10 + w * (4.465 - 2.0) / 4.465
-            b.append(box(wx, 194, 10 + w - wx, 12, AMBER, AMBER, rx=2, sw=1))
-            b.append(text(10 + w - 6, 188, '2 s', 21, '#92400E', anchor='end', weight='bold'))
-            b.append(text(10, 326, 'A fixed 2 s window (Sirius) masks the last 2 s of a 4.5 s drift;', 22, '#92400E', anchor='start'))
-            b.append(text(10, 354, 'the first 2.5 s stay in the data as if they were good.', 22, '#92400E', anchor='start'))
-        svg(f'masks_step{step}', 900, 365, b)
+            bw = 10 + w - wx
+            b.append(box(wx, 184, bw, 20, AMBER, AMBER, rx=3, sw=1))
+            b.append(text(wx + bw / 2, 201, '2 s', 20, 'white', weight='bold'))
+            b.append(text(10, 326, 'A fixed 2 s window (Sirius) masks the last 2 s of the 4.465 s drift;', 22, '#92400E', anchor='start'))
+            b.append(text(10, 354, 'the first 2.465 s (2,465 ticks) stay in the data as if good.', 22, '#92400E', anchor='start'))
+        svg(f'masks_step{step}', 900, 366, b)
 
 def main():
     dmv()

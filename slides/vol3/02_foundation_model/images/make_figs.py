@@ -103,25 +103,35 @@ def admit(k):
     text, image = (6000.0, 2048.0)
     reserve, half = (1024.0, 512.0)
     window = 8192.0
-    rows = [('Text only', [(text, '6,000', C['memory']), (reserve, '1,024', C['neutral'])], '1,168 to spare', False), ('+ image', [(text, '', C['memory']), (image, '2,048', C['compute']), (reserve, '1,024', C['neutral'])], '880 over', True), ('+ image,\nhalf reserve', [(text, '', C['memory']), (image, '2,048', C['compute']), (half, '512', C['neutral'])], '368 over', True)]
+    rows = [
+        ('Text only', [(text, '6,000', C['memory']), (reserve, '1,024', C['neutral'])], '1,168 to spare', False),
+        ('+ image', [(text, '6,000', C['memory']), (image, '2,048', C['compute']), (reserve, '1,024', C['neutral'])], '880 over', True),
+        ('+ image,\nhalf reserve', [(text, '6,000', C['memory']), (image, '2,048', C['compute']), (half, '512', C['neutral'])], '368 over', True),
+    ]
+    ax.plot([window, window], [-0.48, 2.38], color=C['danger'], lw=2, ls='--', zorder=2)
     for i, (lab, segs, msg, over) in enumerate(rows):
         y = 2 - i
         vis = i < k
         x = 0
         for w, t, c in segs:
-            ax.barh(y, w, left=x, color=c, height=0.6, alpha=1 if vis else 0)
-            if t:
-                ax.text(x + w / 2, y, t, ha='center', va='center', fontsize=10.5, color='white', fontweight='bold', alpha=1 if vis else 0)
+            ax.barh(y, w, left=x, color=c, height=0.58, alpha=1 if vis else 0, zorder=3)
+            if t and vis:
+                if t == '1,024' and i == 1:
+                    ax.text(x + w + 160, y, '+1,024  (880 over)', ha='left', va='center', fontsize=10.5, color=C['danger'], fontweight='bold', zorder=5)
+                elif t == '512' and i == 2:
+                    ax.text(x + w + 160, y, '+512  (368 over)', ha='left', va='center', fontsize=10.5, color=C['danger'], fontweight='bold', zorder=5)
+                else:
+                    ax.text(x + w / 2, y, t, ha='center', va='center', fontsize=10.5, color='white', fontweight='bold', zorder=5)
             x += w
-        ax.text(-150, y, lab, ha='right', va='center', fontsize=12, fontweight='bold', color=C['text'], alpha=1)
-        ax.text(max(x, window) + 150, y, msg, va='center', fontsize=12, fontweight='bold', color=C['danger'] if over else C['data'], alpha=1 if vis else 0)
-    ax.axvline(window, color=C['danger'], lw=2, ls='--')
-    ax.text(window, 2.55, 'window 8,192', ha='center', fontsize=11, color=C['danger'], fontweight='bold')
-    ax.text(0, 2.55, 'prompt', fontsize=11, color=C['memory'], fontweight='bold')
-    ax.text(1500, 2.55, 'image', fontsize=11, color=C['compute'], fontweight='bold')
-    ax.text(2900, 2.55, 'output reserve', fontsize=11, color=C['neutral'], fontweight='bold')
-    ax.set_xlim(0, 11600)
-    ax.set_ylim(-0.5, 2.85)
+        ax.text(-150, y, lab, ha='right', va='center', fontsize=11.5, fontweight='bold', color=C['text'], alpha=1 if vis else 0)
+        if i == 0 and vis:
+            ax.text(window + 160, y, msg, va='center', fontsize=11.5, fontweight='bold', color=C['data'], zorder=5)
+    ax.text(window, 2.52, 'window 8,192', ha='center', va='bottom', fontsize=11, color=C['danger'], fontweight='bold', zorder=5)
+    ax.text(0, 2.52, 'prompt', va='bottom', fontsize=11, color=C['memory'], fontweight='bold')
+    ax.text(1500, 2.52, 'image', va='bottom', fontsize=11, color=C['compute'], fontweight='bold')
+    ax.text(2900, 2.52, 'output reserve', va='bottom', fontsize=11, color=C['neutral'], fontweight='bold')
+    ax.set_xlim(0, 12400)
+    ax.set_ylim(-0.5, 2.95)
     ax.set_yticks([])
     ax.spines['left'].set_visible(False)
     ax.set_xlabel('Tokens (scenario values, Ch. 2.3)')

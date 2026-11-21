@@ -204,10 +204,12 @@ def link_html(lec: dict) -> str:
 
 def chapter_html(ch: dict) -> list:
     esc = html.escape
-    read = (f'<a class="ch-read" href="{ch["book_url"]}">Read the chapter</a>'
-            if ch["book_url"] else "")
+    meta_links = []
+    if ch["book_url"]:
+        meta_links.append(f'<a class="ch-read" href="{ch["book_url"]}">Read the chapter</a>')
     if ch.get("sheet_url"):
-        read += f'<a class="ch-read" href="{ch["sheet_url"]}">Study sheet</a>'
+        meta_links.append(f'<a class="ch-read" href="{ch["sheet_url"]}">Study sheet</a>')
+    read = f'<span class="ch-meta">{"<span class=\"ch-sep\" aria-hidden=\"true\">·</span>".join(meta_links)}</span>' if meta_links else ""
 
     rows = [f'  <div class="ch" id="{ch["anchor"]}"><div class="ch-num">{ch["num"]}</div>'
             '<div class="ch-body">']

@@ -151,12 +151,12 @@ conv_slide()
 
 def kws_plot():
     """Column-size plot for the KWS frame: FP32 and INT8 weight bytes against
-    the 1 MB flash of an Arduino Nano 33 BLE Sense Rev2 (decimal KB)."""
+    the 1 MB flash of an Arduino Nano 33 BLE Sense Rev2 (consistent decimal KB)."""
     fp32 = 800.0
     int8 = 200.0
-    flash = 1048.576
+    flash = 1000.0
     fig, ax = sp.plt.subplots(figsize=(3.6, 2.1))
-    rows = [('FP32', fp32, 'danger', '800 KB, 76% of flash'), ('INT8', int8, 'data', '200 KB, 19%')]
+    rows = [('FP32', fp32, 'danger', '800 KB, 80% of flash'), ('INT8', int8, 'data', '200 KB, 20%')]
     for i, (label, v, ck, txt) in enumerate(rows):
         y = 1 - i
         ax.barh(y, v, color=C[ck], height=0.6)
@@ -165,7 +165,7 @@ def kws_plot():
         ax.text(v - 20 if inside else v + 20, y, txt, ha='right' if inside else 'left', va='center', fontsize=12, fontweight='bold', color='white' if inside else C[ck])
     ax.axvline(flash, color=C['neutral'], lw=2, ls='--')
     ax.text(flash - 15, 1.62, '1 MB flash', ha='right', va='center', fontsize=11, fontweight='bold', color=C['neutral'])
-    ax.set_xlim(0, flash * 1.05)
+    ax.set_xlim(0, flash * 1.07)
     ax.set_ylim(-0.5, 1.85)
     ax.set_yticks([])
     ax.set_xticks([0, 250, 500, 750, 1000])
