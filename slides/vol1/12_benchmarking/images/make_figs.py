@@ -550,9 +550,9 @@ thumb('thumb_throttle', _throttle)
 
 def _next(ax):
     for y, c, mid in ((1, C['memory'], 5.0), (0, C['compute'], 5.15)):
-        xs = [mid - 0.5 + 0.1 * i for i in range(10)]
+        xs = [mid - 0.4 + 0.2 * i for i in range(5)]
         ax.plot([min(xs), max(xs)], [y, y], color=c, lw=10, alpha=0.3, solid_capstyle='round')
-        ax.plot(xs, [y] * 10, 'o', ms=13, color=c, mec='white', mew=1.5, clip_on=False)
+        ax.plot(xs, [y] * 5, 'o', ms=13, color=c, mec='white', mew=1.5, clip_on=False)
     ax.set_xlim(4.35, 5.8)
     ax.set_ylim(-0.7, 1.7)
 thumb('thumb_next', _next, size=(2.9, 1.8))

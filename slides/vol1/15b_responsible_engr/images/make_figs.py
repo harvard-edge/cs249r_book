@@ -101,7 +101,7 @@ for k in (1, 2):
     ax1.set_xlabel('Energy per prompt (Wh)')
     a = 1.0 if k >= 2 else 0.0
     stacked(ax2, 0, [(0.023, 'network', 'Grid 0.023'), (0.01, 'neutral', '')], alpha=a)
-    ax2.text(0.0335, 0, ' + 0.010 Scope 1 and 3  = 0.03 g', va='center', fontsize=12, fontweight='bold', color=C['text'], alpha=a)
+    ax2.text(0.0335, 0, ' + 0.010 Scope 1 and 3  ≈ 0.03 g', va='center', fontsize=12, fontweight='bold', color=C['text'], alpha=a)
     ax2.set_xlim(0, 0.0473 * 0.36 / 0.34)
     ax2.set_ylim(-0.5, 0.5)
     ax2.set_yticks([])
@@ -161,7 +161,7 @@ for k in (1, 2):
     for name, v, ck in parts:
         ax1.barh(0, v, left=left, height=0.6, color=C[ck], edgecolor='white')
         left += v
-    ax1.text(0.04, 0.55, 'Training $38K (1.9%)', fontsize=11, color=C['text'], va='bottom', fontweight='bold')
+    ax1.text(0.04, 0.55, 'Training $38.4K (1.9%)', fontsize=11, color=C['text'], va='bottom', fontweight='bold')
     ax1.text(TRAIN_M + INF_M / 2, 0, 'Inference $1.52M (73.5%)', fontsize=11, color='white', ha='center', va='center', fontweight='bold')
     ax1.text(TRAIN_M + INF_M + OPS_M / 2, 0, 'Ops $510K', fontsize=11, ha='center', va='center', color=C['text'], fontweight='bold')
     ax1.set_xlim(0, 2.2)

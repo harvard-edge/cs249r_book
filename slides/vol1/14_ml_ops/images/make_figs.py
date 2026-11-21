@@ -343,7 +343,8 @@ def nodeday(k):
         if k < st:
             continue
         ax.add_patch(plt.Rectangle((x0, N - y0 - h), w, h, facecolor=C[f], edgecolor=C[e], lw=2))
-        ax.text(x0 + w / 2, N - y0 - h / 2, lab, ha='center', va='center', fontsize=10.5, color=C['text'], fontweight='bold' if st in (1, 4) else 'normal')
+        tx = (T + DAY) / 2 if st == 1 else x0 + w / 2
+        ax.text(tx, N - y0 - h / 2, lab, ha='center', va='center', fontsize=10.5, color=C['text'], fontweight='bold' if st in (1, 4) else 'normal', zorder=5)
     if k >= 3:
         ax.plot([T, T], [0, N], color=C['danger'], lw=1.8, ls='--')
         ax.text(0.3, 8.2, '0–6 h: 8/8 busy (canary waits)', ha='left', va='bottom', fontsize=10, color=C['danger'], fontweight='bold')
@@ -396,7 +397,7 @@ for k in (1, 2, 3):
                 p.append(text(xs[i] + 60, 416, s_, 24, C['network'], 'bold'))
                 if i < 3:
                     p.append(line(xs[i] + 124, 407, xs[i + 1] - 6, 407, '#555555', 3))
-                    p.append(text(xs[i] + 160, 396, 'gate', 20, C['neutral']))
+                    p.append(text(xs[i] + 160, 396, 'check', 20, C['neutral']))
     save_svg(p, f'release_step{k}.svg')
 print('release written')
 for k in (1, 2, 3):
@@ -483,17 +484,17 @@ rows = (('Needed', 745643.5748, 'danger', '745,644'), ('Have', 25000.0, 'data', 
 for i, (lab, v, ck, s_) in enumerate(rows):
     y = 1 - i
     ax.barh(y, v, color=C[ck], height=0.6)
-    ax.text(v * 1.3, y, s_, va='center', fontsize=11, color=C[ck], fontweight='bold')
-    ax.text(700, y, lab + ' ', ha='right', va='center', fontsize=11, color=C['text'], fontweight='bold')
+    ax.text(v * 1.3, y, s_, va='center', fontsize=14, color=C[ck], fontweight='bold')
+    ax.text(700, y, lab + ' ', ha='right', va='center', fontsize=14, color=C['text'], fontweight='bold')
 ax.set_xscale('log')
 ax.minorticks_off()
 ax.set_xlim(1000, 10000000.0)
 ax.set_xticks([1000.0, 10000.0, 100000.0, 1000000.0])
-ax.set_xticklabels(['1K', '10K', '100K', '1M'], fontsize=10)
+ax.set_xticklabels(['1K', '10K', '100K', '1M'], fontsize=13.5)
 ax.set_yticks([])
 ax.set_ylim(-0.6, 1.6)
 ax.spines['left'].set_visible(False)
-ax.set_xlabel('Users per variant (log)', fontsize=10)
+ax.set_xlabel('Users per variant (log)', fontsize=14)
 ax.grid(axis='x', color=C['grid'], linewidth=0.6)
 ax.set_axisbelow(True)
 sp.save(fig, out / 'ab_users.svg')

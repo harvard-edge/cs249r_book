@@ -318,7 +318,7 @@ for k in (1, 2):
         ax.annotate(f"{name}: { {'V100': '139', 'A100': '153', 'H100': '295', 'B200': '281'}[name]}", (year, ridge), xytext=(0, dy), textcoords='offset points', ha='center', fontsize=11, fontweight='bold', color=C['danger'])
     alpha = 1.0 if k == 2 else 0.0
     ax.axhline(200.0, color=C['memory'], lw=2, ls='--', alpha=alpha)
-    ax.text(2016.5, 200.0 * 1.04, '200 FLOP/byte kernel', color=C['memory'], fontsize=11, fontweight='bold', ha='left', va='bottom', alpha=alpha)
+    ax.text(2016.5, 208.0, '200 FLOP/byte\nkernel', color=C['memory'], fontsize=10.5, fontweight='bold', ha='left', va='bottom', linespacing=1.05, alpha=alpha)
     ax.set_xlim(2016.3, 2024.8)
     ax.set_ylim(0, 360)
     ax.set_xticks([2017, 2020, 2022, 2024])

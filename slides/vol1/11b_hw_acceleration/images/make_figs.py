@@ -121,7 +121,7 @@ for k in (1, 2, 3):
         a = 1.0 if i < upto else 0.0
         ax.barh(y, value, color=C[color_key], height=0.66, alpha=a)
         ax.text(-0.01, y, label, transform=ax.get_yaxis_transform(), ha='right', va='center', fontsize=12.5, fontweight='bold', color=C['text'], alpha=a)
-        text = f'{value:,.0f}' + (f'   {tag}' if tag else '')
+        text = f'{int(value + 0.5):,d}' + (f'   {tag}' if tag else '')
         ax.text(value * 1.12, y, text, va='center', fontsize=12.5, fontweight='bold', color=C[color_key], alpha=a)
     ax.set_xscale('log')
     ax.set_xlim(100, 2000000.0)
@@ -330,7 +330,7 @@ def coalesce_svg(step):
     for s in range(4):
         sx = 20 + s * 218
         used = (s == 0)
-        parts.append(rect(sx, 42, sec_w, sec_h, C['data_l'] if used else '#F5F5F5', C['data'] if used else '#CCCCCC', 2.6 if used else 1.4, 5))
+        parts.append(rect(sx, 42, sec_w, sec_h, C['data_l'] if used else '#F8FAFC', C['data'] if used else '#94A3B8', 2.6 if used else 1.5, 5))
         for w in range(4):
             wx = sx + 6 + w * 46
             addr = s * 16 + w * 4
@@ -338,9 +338,9 @@ def coalesce_svg(step):
                 parts.append(rect(wx, 48, 42, 34, C['data'], C['data'], 1.0, 3))
                 parts.append(svg_text(wx + 21, 65, str(addr), 20, '700', 'white'))
             else:
-                parts.append(rect(wx, 48, 42, 34, 'white', '#DDDDDD', 1.0, 3))
-                parts.append(svg_text(wx + 21, 65, str(addr), 20, '400', '#999999'))
-        parts.append(svg_text(sx + sec_w / 2, 104, f'S{s}: {s*16}–{s*16+15}', 20, '700' if used else '400', C['data'] if used else '#888888'))
+                parts.append(rect(wx, 48, 42, 34, 'white', '#94A3B8', 1.1, 3))
+                parts.append(svg_text(wx + 21, 65, str(addr), 20, '600', '#475569'))
+        parts.append(svg_text(sx + sec_w / 2, 104, f'S{s}: {s*16}–{s*16+15}', 20, '700' if used else '600', C['data'] if used else '#475569'))
 
     # Panel (b) Strided (step >= 2)
     if step >= 2:
@@ -353,9 +353,17 @@ def coalesce_svg(step):
                 wx = sx + 6 + w * 46
                 addr = s * 16 + w * 4
                 hit = (w == 0)
-                parts.append(rect(wx, 164, 42, 34, C['danger'] if hit else '#FFF0F0', C['danger'] if hit else '#E5B4B4', 1.2, 3))
-                parts.append(svg_text(wx + 21, 181, str(addr), 20, '700' if hit else '400', 'white' if hit else '#B87474'))
-            parts.append(svg_text(sx + sec_w / 2, 220, '4 B used / 12 B lost', 19.5, '700', C['danger']))
+                if hit:
+                    parts.append(rect(wx, 164, 42, 34, C['danger'], C['danger'], 1.2, 3))
+                    parts.append(svg_text(wx + 21, 181, str(addr), 20, '700', 'white'))
+                else:
+                    parts.append(rect(wx, 164, 42, 34, '#FFF8F8', '#64748B', 1.4, 3, dash='4,2'))
+                    parts.append(svg_text(wx + 21, 181, str(addr), 20, '600', '#334155'))
+        # Plain-language colorblind-safe legend row directly below strided sectors
+        parts.append(rect(20, 211, 22, 18, C['danger'], C['danger'], 1.2, 3))
+        parts.append(svg_text(50, 220, 'Solid = requested (4 B/sector, 16 B)', 18.5, '700', C['text'], 'start'))
+        parts.append(rect(405, 211, 22, 18, '#FFF8F8', '#64748B', 1.4, 3, dash='4,2'))
+        parts.append(svg_text(435, 220, 'Dashed = bytes fetched but unused (48 B wasted)', 18.5, '700', C['danger'], 'start'))
 
     # Panel (c) Dependent pointer / index chase (step >= 3)
     if step >= 3:

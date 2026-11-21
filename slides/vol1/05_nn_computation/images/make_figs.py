@@ -340,13 +340,13 @@ def gd_steps():
                             arrowprops=dict(arrowstyle='-|>,head_width=0.22,head_length=0.35', color=col, lw=1.8), zorder=3)
             ax.scatter(xs[:-1], ys[:-1], s=32, color='white', edgecolors=col, lw=1.6, zorder=4)
             ax.scatter([xs[-1]], [ys[-1]], s=65, color=col, zorder=5)
-            ax.text(w_min + 0.18, 0.45, 'min (w=2)', ha='left', va='bottom', fontsize=9.5, color=K['neutral'])
+            ax.text(w_min, -0.35, 'min (w=2)', ha='center', va='top', fontsize=9.2, color=K['neutral'])
             ax.text(0.50, 0.96, f'After {n_upd} {"step" if n_upd == 1 else "steps"}: w = {xs[-1]:.2f}, L = {ys[-1]:.3f}' if ys[-1] < 0.01 else f'After {n_upd} {"step" if n_upd == 1 else "steps"}: w = {xs[-1]:.2f}, L = {ys[-1]:.2f}',
                     transform=ax.transAxes, ha='center', va='top', fontsize=10.5, fontweight='bold', color=col,
                     bbox=dict(facecolor='white', alpha=0.95, edgecolor=col, lw=0.9, pad=2.5))
             ax.set_title(title, fontsize=11.5, fontweight='bold', color=col)
             ax.set_xlim(-1.8, 5.8)
-            ax.set_ylim(-0.4, 14.4)
+            ax.set_ylim(-1.6, 14.4)
             ax.set_yticks([0, 2.5, 5.0, 7.5, 10.0])
             ax.set_xlabel('Weight w')
             ax.grid(axis='y', color=K['grid'], lw=0.5)

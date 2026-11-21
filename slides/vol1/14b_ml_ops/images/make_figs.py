@@ -38,13 +38,13 @@ derived value says so.
   - Cost of waiting: Napkin Math 14.3.
   - K-S critical value: 1.36 sqrt(2/n) at 95 percent (Lecture 4b, Napkin
     Math 4.5): 0.061 at 1,000 and 0.006 at 100,000; 0.0019 at 1,000,000
-    derived. The 0.1 gate is the chapter's listing 2.
+    derived. The 0.1 threshold is the chapter's listing 2.
   - False alerts: derived from Napkin Math 14.5's 150 series (3 variants x 50
     metrics), each tested once a day. ICU alarms: Drew et al., PLOS ONE 2014
     (12,671 annotated arrhythmia alarms, 88.8 percent false).
   - PSI decomposition: chapter table 13; bands Sec. 14.5.2; severity
     deadlines chapter table 19 (illustrative policy).
-  - Retraining gate: chapter listing 5 and equation 10.
+  - Retraining criterion: chapter listing 5 and equation 10.
   - Retraining cadences: Hazelwood et al., HPCA 2018, Table II. Freshness:
     He et al. 2014, Fig. 2 is shown as the paper's own image (he_fig2.png),
     so no redraw is generated here.
@@ -459,7 +459,7 @@ for k in (1, 2):
         ax.text(n_ / 1.3 if below else n_ * 1.35, v * (0.5 if below else 1.25), s_ + lab, fontsize=12, color=C['memory'], fontweight='bold', ha='right' if below else 'left')
     a = 1.0 if k == 2 else 0.0
     ax.axhline(0.1, color=C['danger'], lw=2.5, ls='--', alpha=a)
-    ax.text(2200.0, 0.125, 'promotion gate in listing 2: 0.1', fontsize=11, color=C['danger'], fontweight='bold', alpha=a)
+    ax.text(2200.0, 0.125, 'promotion threshold in listing 2: 0.1', fontsize=11, color=C['danger'], fontweight='bold', alpha=a)
     ax.annotate('', xy=(1000000.0, 0.0021), xytext=(1000000.0, 0.092), arrowprops=dict(arrowstyle='<->', color=C['danger'], lw=1.8), alpha=a)
     ax.text(1400000.0, 0.02, '52 times\nsmaller', fontsize=11, color=C['danger'], fontweight='bold', alpha=a, va='center')
     ax.set_xscale('log')
@@ -510,37 +510,34 @@ ax.bar(x + 0.2, serve, 0.4, color=C['compute'])
 ax.text(5.6, 26.0, 'training', color=C['memory'], fontsize=11, fontweight='bold', ha='right')
 ax.text(5.6, 22.0, 'serving', color=C['compute'], fontsize=11, fontweight='bold', ha='right')
 ax.set_xticks(x)
-ax.set_xticklabels([b_.replace('–', '–\n') for b_ in bins], fontsize=10, linespacing=0.9)
-ax.tick_params(axis='y', labelsize=10)
-ax.set_ylabel('Users (%)', fontsize=11)
+ax.set_xticklabels([b_.replace('–', '–\n') for b_ in bins], fontsize=11.5, linespacing=0.9)
+ax.tick_params(axis='y', labelsize=11)
+ax.set_ylabel('Users (%)', fontsize=11.5)
 ax.set_ylim(0, 29)
 ax.set_yticks([0, 10, 20])
 axis_clean(ax, 'y')
 sp.save(fig, out / 'psi_bars.svg')
 for k in (1, 2):
-    p = svg_open(580, 470)
-    p.append(text(10, 30, 'PSI band', 26, C['neutral'], 'bold', 'start'))
-    bands = [('≥ 0.25', 'notify owner', 'danger', 'danger_l'), ('0.1 to 0.25', 'investigate', 'compute', 'compute_l'), ('< 0.1', 'log; watch outcomes', 'data', 'data_l')]
+    p = svg_open(580, 440)
+    p.append(text(14, 28, 'PSI escalation policy (bands)', 26, C['neutral'], 'bold', 'start'))
+    bands = [('≥ 0.25', 'notify owning team', 'danger', 'danger_l'), ('0.10 to 0.25', 'investigate pipeline & cohort', 'compute', 'compute_l'), ('< 0.10', 'log; watch outcomes', 'data', 'data_l')]
     for i, (rng, act, ck, fk) in enumerate(bands):
-        y = 48 + i * 116
-        p.append(rect(10, y, 280, 100, C[fk], C[ck], 3, 8))
-        p.append(text(28, y + 42, rng, 30, C[ck], 'bold', 'start'))
-        p.append(text(28, y + 80, act, 25, C['text'], anchor='start'))
-    p.append(text(150, 440, 'age feature: 0.029', 27, C['text'], 'bold'))
-    p.append(line(150, 412, 150, 384, C['text'], 3, 'n'))
+        y = 44 + i * 98
+        sw = 4.2 if (k == 2 and i == 2) else 2.8
+        p.append(rect(14, y, 552, 86, C[fk], C[ck], sw, 8))
+        p.append(text(34, y + 36, rng, 29, C[ck], 'bold', 'start'))
+        p.append(text(34, y + 71, act, 24.5, C['text'], anchor='start'))
     if k == 2:
-        p.append(text(340, 30, 'Severity', 26, C['neutral'], 'bold', 'start'))
-        unit = {'p0': 'min', 'p1': 'hour', 'p2': 'hours', 'p3': 'hours'}
-        sev = [('P0', '15 min'), ('P1', '1 hour'), ('P2', '4 hours'), ('P3', '24 hours')]
+        p.append(rect(322, 250, 232, 66, 'white', C['data'], 2.6, 6))
+        p.append(text(438, 278, 'age PSI = 0.029', 24, C['data'], 'bold'))
+        p.append(text(438, 307, '→ log (C)', 24, C['text'], 'bold'))
+        p.append(line(14, 346, 566, 346, '#CCCCCC', 1.8, None))
+        p.append(text(14, 375, 'Paging needs impact (severity):', 23.5, C['network'], 'bold', 'start'))
+        sev = [('P0', '15m'), ('P1', '1h'), ('P2', '4h'), ('P3', '24h')]
         for i, (lv, t_) in enumerate(sev):
-            y = 48 + i * 78
-            p.append(rect(340, y, 230, 64, 'white', C['network'], 2.5, 8))
-            p.append(text(358, y + 42, lv, 28, C['network'], 'bold', 'start'))
-            p.append(text(420, y + 42, t_, 27, C['text'], 'bold', 'start'))
-        p.append(text(455, 380, 'each with an', 24, C['network']))
-        p.append(text(455, 410, 'owner and a', 24, C['network']))
-        p.append(text(455, 440, 'deadline', 24, C['network']))
-        p.append(line(292, 98, 334, 98, C['network'], 3, 'n', '6 4'))
+            sx = 14 + i * 141
+            p.append(rect(sx, 389, 129, 44, 'white', C['network'], 2.0, 6))
+            p.append(text(sx + 64, 419, f'{lv} {t_}', 23.5, C['network'], 'bold'))
     save_svg(p, f'psi_ladder_step{k}.svg')
 for k in (1, 2, 3):
     p = svg_open(900, 470)
@@ -645,11 +642,11 @@ for i, (T_, v) in enumerate(cad):
     ax.text(-300, y, lab, ha='right', va='center', fontsize=12, color=C['text'], fontweight='bold' if T_ == best else 'normal')
 ax.set_xlim(0, 22000)
 ax.set_xticks([0, 10000, 20000])
-ax.set_xticklabels(['$0', '$10K', '$20K'])
+ax.set_xticklabels(['$0', '$10K', '$20K'], fontsize=12)
 ax.set_yticks([])
 ax.set_ylim(-0.6, len(cad) - 0.4)
 ax.spines['left'].set_visible(False)
-ax.set_xlabel('Total cost per day (derived)', fontsize=11)
+ax.set_xlabel('Total cost per day (derived)', fontsize=12.5)
 axis_clean(ax)
 sp.save(fig, out / 'tcost.svg')
 FLOOR = 0.88
@@ -751,12 +748,12 @@ for k in (1, 2):
     ax.axhline(1.0, color=C['danger'], lw=2, ls='--', alpha=a)
     ax.text(3.45, 2.1, 'score = 1', fontsize=11, color=C['danger'], fontweight='bold', ha='right', alpha=a)
     ax.set_xticks(range(4))
-    ax.set_xticklabels([c_[0] for c_ in cats], fontsize=10.5)
+    ax.set_xticklabels([c_[0] for c_ in cats], fontsize=12)
     ax.set_xlim(-0.5, 3.5)
     ax.set_ylim(0, 8.6)
     ax.set_yticks([0, 7.0])
-    ax.set_yticklabels(['0', '7'], fontsize=11)
-    ax.set_ylabel('Passed of 7', fontsize=11)
+    ax.set_yticklabels(['0', '7'], fontsize=12)
+    ax.set_ylabel('Passed of 7', fontsize=12.5)
     axis_clean(ax, 'y')
     sp.save(fig, out / f'mlts_step{k}.svg')
 from PIL import Image

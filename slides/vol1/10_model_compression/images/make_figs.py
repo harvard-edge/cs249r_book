@@ -479,7 +479,7 @@ for step in (1, 2, 3):
         if step == 2:
             body += text(758, 256, 'W(1,2) × X2 adds +24 to Y1', 19, C['compute'], 'bold', 'middle')
         else:
-            body += text(758, 256, '54 vs 81 MACs (3 skipped)', 19, C['data'], 'bold', 'middle')
+            body += text(758, 256, '54 vs. 81 MACs (3 skipped)', 19, C['data'], 'bold', 'middle')
 
     # Step 3: Green takeaway banner
     if step >= 3:
