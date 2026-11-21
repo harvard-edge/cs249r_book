@@ -54,7 +54,7 @@ def corner():
         ax.text(0.395, 1.3 + 0.012, 'aisle speed 1.3 m/s', ha='right', va='bottom', color=BLUE, fontsize=10.5, fontweight='bold')
         ax.text(0.395, 1.436694177 + 0.012, 'dry-floor ceiling 1.44 m/s', ha='right', va='bottom', color=SLATE, fontsize=10)
         ax.axvline(0.2039432426, color=GRAY, lw=1.2, ls=':')
-        ax.text(0.2039432426 + 0.006, 1.595, 'traction binds below 0.204', fontsize=9.5, color=GRAY, va='top')
+        ax.text(0.2039432426 + 0.006, 1.595, 'traction limits below 0.204', fontsize=9.5, color=GRAY, va='top')
         if step >= 2:
             bad = ceil < 1.3
             ax.fill_between(mus, ceil, 1.3, where=bad, color=RED_L, alpha=0.9)
@@ -118,16 +118,20 @@ def refevents():
         sp.save(fig, out(f'refevents_step{step}'))
 
 def speed_profile(t_on, t):
-    """Speed after an S-curve stop starting at t_on (s): jerk-limited ramp, then constant a."""
+    """Symmetric jerk-limited S-curve stop from t_on (s): ramp-up, constant a, ramp-down."""
     v0, a, j = (1.3, 2.0, 7.111111111)
     tr = a / j
-    v = np.full_like(t, v0)
+    t_stop = v0 / a + tr
+    v = np.full_like(t, v0, dtype=float)
     s = t - t_on
-    ramp = (s > 0) & (s <= tr)
-    v[ramp] = v0 - 0.5 * j * s[ramp] ** 2
+    m1 = (s > 0) & (s <= tr)
+    v[m1] = v0 - 0.5 * j * s[m1] ** 2
     v1 = v0 - 0.5 * j * tr ** 2
-    lin = s > tr
-    v[lin] = np.maximum(v1 - a * (s[lin] - tr), 0)
+    m2 = (s > tr) & (s <= t_stop - tr)
+    v[m2] = v1 - a * (s[m2] - tr)
+    m3 = (s > t_stop - tr) & (s < t_stop)
+    v[m3] = 0.5 * j * (t_stop - s[m3]) ** 2
+    v[s >= t_stop] = 0.0
     return v
 
 def f1trace():

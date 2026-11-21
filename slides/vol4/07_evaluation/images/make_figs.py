@@ -260,7 +260,7 @@ FIELDS = [('target_odd_boundary', 'nominal plate, 0.03 m/s, base stopped'), ('co
 MONITORS = ['Input support', 'Latency and freshness', 'Constraint margin', 'Intervention rate', 'Environmental assumption']
 
 def record(step):
-    w, h = (900, 470)
+    w, h = (950, 470)
     b = [arrow_defs(NERVOUS)]
     x, y, cw = (6, 6, 548)
     b.append(rect(x, y, cw, 458, 'white', PLANT, 2.5, rx=8))
@@ -272,17 +272,17 @@ def record(step):
         b.append(text(x + 20, yy + 23, f.replace('_', ' '), 22, TEXT, anchor='start', weight='bold'))
         b.append(text(x + 20, yy + 46, v, 21, '#334155', anchor='start'))
     a = 1.0 if step >= 2 else 0.0
-    mx, mw = (612, 282)
+    mx, mw = (602, 340)
     b.append(f'<g opacity="{a}">')
     b.append(text(mx + mw / 2, 30, 'Runtime monitors', 24, NERVOUS, weight='bold'))
     for i, m in enumerate(MONITORS):
         yy = 46 + i * 64
         b.append(rect(mx, yy, mw, 52, NERVOUS_L, NERVOUS, 2, rx=6))
-        b.append(text(mx + mw / 2, yy + 34, m, 22, TEXT, weight='bold'))
+        b.append(text(mx + mw / 2, yy + 34, m, 20.5, TEXT, weight='bold'))
     b.append(line(x + cw + 4, 410, mx - 6, 220, NERVOUS, 2.5, marker=True))
     b.append(rect(mx, 382, mw, 80, HAZARD_L, HAZARD, 2, rx=6))
-    b.append(text(mx + mw / 2, 414, 'Cannot be sensed:', 22, HAZARD, weight='bold'))
-    b.append(text(mx + mw / 2, 444, 'hard limit or barrier', 22, TEXT))
+    b.append(text(mx + mw / 2, 414, 'Cannot be sensed:', 21.5, HAZARD, weight='bold'))
+    b.append(text(mx + mw / 2, 444, 'hard limit or barrier', 21.5, TEXT))
     b.append('</g>')
     svg(OUT / f'record_step{step}.svg', w, h, b)
 

@@ -86,7 +86,7 @@ def hook(step):
         shown = i < step
         n = -math.log10(p)
         ax.barh(y, n, color=col, height=0.6, alpha=1 if shown else 0)
-        ax.text(-0.15, y, lab, ha='right', va='center', fontsize=FS, fontweight='bold', color=V4['text'])
+        ax.text(-0.15, y, lab, ha='right', va='center', fontsize=FS, fontweight='bold', color=V4['text'], alpha=1 if shown else 0)
         ax.text(n + 0.12, y, txt, va='center', fontsize=FS, fontweight='bold', color=col, alpha=1 if shown else 0)
     ax.set_xlim(0, 10.5)
     ax.set_ylim(-0.65, 2.45)
@@ -184,8 +184,8 @@ def dls():
     ax.plot(el, dm, color=V4['nervous'], lw=2.5)
     ax.axhline(10.0, color=V4['nervous'], lw=1.2, ls='--')
     ax.axhline(2.175, color=V4['plant'], lw=1.2, ls=':')
-    ax.text(72, 10.0 * 1.08, 'damped ceiling 10 rad/s', color=V4['nervous'], fontsize=FS_S, ha='left')
-    ax.text(88, 2.175 * 0.8, 'joint limit 2.175 rad/s', color=V4['plant'], fontsize=FS_S, ha='left', va='top')
+    ax.text(68, 10.0 * 1.15, 'damped ceiling 10 rad/s', color=V4['nervous'], fontsize=FS_S, ha='left', va='bottom')
+    ax.text(88, 2.175 * 0.88, 'joint limit 2.175 rad/s', color=V4['plant'], fontsize=FS_S, ha='left', va='top')
     ax.text(22, 40, 'exact inverse', color=V4['veto'], fontsize=FS, fontweight='bold', ha='right')
     ax.text(62, 3.1, 'damped least squares', color=V4['nervous'], fontsize=FS, fontweight='bold', ha='left', va='center')
     g, b = (90, 10)
@@ -194,9 +194,9 @@ def dls():
         ax.plot([e], [{90: 4.619814502, 10: 8.272409621}[e]], 'o', color=V4['nervous'], ms=7)
     ax.annotate('37.8', (b, 37.76039566), xytext=(8, -2), textcoords='offset points', fontsize=FS, color=V4['veto'], fontweight='bold')
     ax.annotate('8.3', (b, 8.272409621), xytext=(-6, -16), ha='right', textcoords='offset points', fontsize=FS, color=V4['nervous'], fontweight='bold')
-    ax.annotate('4.9 / 4.6', (g, 4.896751281), xytext=(6, 9), textcoords='offset points', fontsize=FS_S, color=V4['text'], ha='left')
+    ax.text(88, 5.8, '4.9 / 4.6', fontsize=FS_S, color=V4['text'], ha='left', va='bottom', fontweight='bold')
     ax.set_yscale('log')
-    ax.set_ylim(1.5, 150)
+    ax.set_ylim(1.3, 175)
     ax.set_yticks([2, 5, 10, 20, 50, 100])
     ax.set_yticklabels(['2', '5', '10', '20', '50', '100'])
     ax.minorticks_off()
@@ -250,7 +250,7 @@ def repl(step):
     ax.text(x + 2, y0, '114.9 ms', va='center', fontsize=FS + 1, fontweight='bold', color=V4['text'], alpha=a2)
     ax.text(-3, y0, 'One replacement', ha='right', va='center', fontsize=FS, fontweight='bold')
     for xv, lab, ls, ha in ((50.0, 'renewal 50 ', '--', 'right'), (60.0, ' lease 60', ':', 'left')):
-        ax.plot([xv, xv], [2.55, 3.55], color=V4['veto'], lw=1.5, ls=ls)
+        ax.plot([xv, xv], [2.70, 3.55], color=V4['veto'], lw=1.5, ls=ls)
         ax.text(xv, 3.58, lab, color=V4['veto'], fontsize=FS_S, ha=ha, va='bottom')
     a3 = 1 if step >= 3 else 0
     for i in range(3):
@@ -408,7 +408,7 @@ def phase():
     up, dn = (40.16089205, 65.07043544)
     ax.plot(s, np.sqrt(2 * up * s), color=V4['gray'], lw=1.3, ls='--')
     ax.plot(s, np.sqrt(2 * dn * (0.5 - s)), color=V4['gray'], lw=1.3, ls='--')
-    ax.text(0.03, 3.3, 'torque limit alone', fontsize=FS_S, color=V4['gray'])
+    ax.text(0.25, 3.38, 'torque limit alone (dashed)', fontsize=FS_S, color=V4['gray'], ha='center', va='center')
     a = 7.5
     bang = np.minimum(np.sqrt(2 * a * s), np.sqrt(2 * a * (0.5 - s)))
     ax.plot(s, bang, color=V4['veto'], lw=4.5)
@@ -490,7 +490,7 @@ def timeline(step):
     seg(y1, 60.0, 82.0, V4['lag'])
     seg(y1, 82.0, 82.0 + 1000 * 0.275, V4['veto'], 'S-curve stop')
     ax.text(82.0 + 1000 * 0.275 + 6, y1, '219.5 of 300 mm', va='center', fontsize=FS, color=V4['text'])
-    ax.text(60.0, y1 + 0.26, 'lease lapses 60', ha='center', fontsize=FS_S, color=V4['lag'])
+    ax.text(60.0, y1 + 0.31, 'lease lapses 60', ha='center', va='bottom', fontsize=FS_S, color=V4['lag'])
     ax.text(-8, y1, 'Running lease', ha='right', va='center', fontsize=FS, fontweight='bold')
     a = 1 if step >= 2 else 0
     seg(y2, 0, 300.0, V4['nervous'], 'track', a=a)
@@ -505,7 +505,7 @@ def timeline(step):
     ax.text(575.0 + 6, y2, '197.5 of 300 mm', va='center', fontsize=FS, color=V4['text'], alpha=a)
     ax.text(-8, y2, 'Longer lease', ha='right', va='center', fontsize=FS, fontweight='bold', alpha=a)
     ax.set_xlim(0, 760)
-    ax.set_ylim(-0.75, 1.5)
+    ax.set_ylim(-0.75, 1.62)
     ax.set_yticks([])
     ax.spines['left'].set_visible(False)
     ax.set_xlabel('Milliseconds after tracking starts', fontsize=FS)

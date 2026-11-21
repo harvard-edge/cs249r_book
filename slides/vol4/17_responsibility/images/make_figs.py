@@ -331,19 +331,20 @@ def shortfall():
 
 def li_conv():
     names = list({'YOLOX': (4, SimpleNamespace(distance_lost=Q_(0.1083333333, 'm'), extra_frames=5, extra_time=Q_(83.33333333, 'ms'), frames=9, impact_energy=Q_(79.73333333, 'J'), impact_speed=Q_(0.6582805886, 'm / s'), per_frame_detection=0.5753)), 'RetinaNet': (4, SimpleNamespace(distance_lost=Q_(0.1083333333, 'm'), extra_frames=5, extra_time=Q_(83.33333333, 'ms'), frames=9, impact_energy=Q_(79.73333333, 'J'), impact_speed=Q_(0.6582805886, 'm / s'), per_frame_detection=0.5567)), 'Faster RCNN': (3, SimpleNamespace(distance_lost=Q_(0.065, 'm'), extra_frames=3, extra_time=Q_(50.0, 'ms'), frames=6, impact_energy=Q_(47.84, 'J'), impact_speed=Q_(0.5099019514, 'm / s'), per_frame_detection=0.7394)), 'Cascade RCNN': (3, SimpleNamespace(distance_lost=Q_(0.065, 'm'), extra_frames=3, extra_time=Q_(50.0, 'ms'), frames=6, impact_energy=Q_(47.84, 'J'), impact_speed=Q_(0.5099019514, 'm / s'), per_frame_detection=0.7343)), 'ALFNet': (7, SimpleNamespace(distance_lost=Q_(0.1083333333, 'm'), extra_frames=5, extra_time=Q_(83.33333333, 'ms'), frames=12, impact_energy=Q_(79.73333333, 'J'), impact_speed=Q_(0.6582805886, 'm / s'), per_frame_detection=0.4653)), 'CSP': (8, SimpleNamespace(distance_lost=Q_(0.065, 'm'), extra_frames=3, extra_time=Q_(50.0, 'ms'), frames=11, impact_energy=Q_(47.84, 'J'), impact_speed=Q_(0.5099019514, 'm / s'), per_frame_detection=0.4958)), 'MGAN': (7, SimpleNamespace(distance_lost=Q_(0.065, 'm'), extra_frames=3, extra_time=Q_(50.0, 'ms'), frames=10, impact_energy=Q_(47.84, 'J'), impact_speed=Q_(0.5099019514, 'm / s'), per_frame_detection=0.5347)), 'PRNet': (9, SimpleNamespace(distance_lost=Q_(0.13, 'm'), extra_frames=6, extra_time=Q_(100.0, 'ms'), frames=15, impact_energy=Q_(95.68, 'J'), impact_speed=Q_(0.7211102551, 'm / s'), per_frame_detection=0.3875))})
-    fig, ax = plt.subplots(figsize=(6.0, 2.6))
-    fig.subplots_adjust(left=0.22, right=0.96, bottom=0.22, top=0.97)
+    fig, ax = plt.subplots(figsize=(4.55, 2.85))
+    fig.subplots_adjust(left=0.27, right=0.98, bottom=0.20, top=0.96)
     for i, k in enumerate(names):
         y = len(names) - 1 - i
         _, row = {'YOLOX': (4, SimpleNamespace(distance_lost=Q_(0.1083333333, 'm'), extra_frames=5, extra_time=Q_(83.33333333, 'ms'), frames=9, impact_energy=Q_(79.73333333, 'J'), impact_speed=Q_(0.6582805886, 'm / s'), per_frame_detection=0.5753)), 'RetinaNet': (4, SimpleNamespace(distance_lost=Q_(0.1083333333, 'm'), extra_frames=5, extra_time=Q_(83.33333333, 'ms'), frames=9, impact_energy=Q_(79.73333333, 'J'), impact_speed=Q_(0.6582805886, 'm / s'), per_frame_detection=0.5567)), 'Faster RCNN': (3, SimpleNamespace(distance_lost=Q_(0.065, 'm'), extra_frames=3, extra_time=Q_(50.0, 'ms'), frames=6, impact_energy=Q_(47.84, 'J'), impact_speed=Q_(0.5099019514, 'm / s'), per_frame_detection=0.7394)), 'Cascade RCNN': (3, SimpleNamespace(distance_lost=Q_(0.065, 'm'), extra_frames=3, extra_time=Q_(50.0, 'ms'), frames=6, impact_energy=Q_(47.84, 'J'), impact_speed=Q_(0.5099019514, 'm / s'), per_frame_detection=0.7343)), 'ALFNet': (7, SimpleNamespace(distance_lost=Q_(0.1083333333, 'm'), extra_frames=5, extra_time=Q_(83.33333333, 'ms'), frames=12, impact_energy=Q_(79.73333333, 'J'), impact_speed=Q_(0.6582805886, 'm / s'), per_frame_detection=0.4653)), 'CSP': (8, SimpleNamespace(distance_lost=Q_(0.065, 'm'), extra_frames=3, extra_time=Q_(50.0, 'ms'), frames=11, impact_energy=Q_(47.84, 'J'), impact_speed=Q_(0.5099019514, 'm / s'), per_frame_detection=0.4958)), 'MGAN': (7, SimpleNamespace(distance_lost=Q_(0.065, 'm'), extra_frames=3, extra_time=Q_(50.0, 'ms'), frames=10, impact_energy=Q_(47.84, 'J'), impact_speed=Q_(0.5099019514, 'm / s'), per_frame_detection=0.5347)), 'PRNet': (9, SimpleNamespace(distance_lost=Q_(0.13, 'm'), extra_frames=6, extra_time=Q_(100.0, 'ms'), frames=15, impact_energy=Q_(95.68, 'J'), impact_speed=Q_(0.7211102551, 'm / s'), per_frame_detection=0.3875))}[k]
         dr, vi, ei = ({'YOLOX': 108.3333333, 'RetinaNet': 108.3333333, 'Faster RCNN': 65.0, 'Cascade RCNN': 65.0, 'ALFNet': 108.3333333, 'CSP': 65.0, 'MGAN': 65.0, 'PRNet': 130.0}[k], {'YOLOX': 0.6582805886, 'RetinaNet': 0.6582805886, 'Faster RCNN': 0.5099019514, 'Cascade RCNN': 0.5099019514, 'ALFNet': 0.6582805886, 'CSP': 0.5099019514, 'MGAN': 0.5099019514, 'PRNet': 0.7211102551}[k], {'YOLOX': 79.73333333, 'RetinaNet': 79.73333333, 'Faster RCNN': 47.84, 'Cascade RCNN': 47.84, 'ALFNet': 79.73333333, 'CSP': 47.84, 'MGAN': 47.84, 'PRNet': 95.68}[k])
-        ax.barh(y, dr, color=P['red'], height=0.62)
-        ax.text(dr + 2, y, f'{row.extra_frames} frames later: {vi:.2f} m/s, {ei:.0f} J', va='center', fontsize=11, color=P['red_d'])
+        is_worked = (k == 'YOLOX')
+        ax.barh(y, dr, color=P['red_d'] if is_worked else P['red'], alpha=1.0 if is_worked else 0.78, height=0.64)
+        ax.text(dr + 3, y, f'+{row.extra_frames} fr: {vi:.2f} m/s, {ei:.0f} J', va='center', fontsize=11.5, fontweight='bold' if is_worked else 'normal', color=P['red_d'])
     ax.set_yticks(range(len(names)))
-    ax.set_yticklabels(names[::-1], fontsize=11)
-    ax.set_xlim(0, 260)
-    ax.tick_params(axis='x', labelsize=11)
-    ax.set_xlabel('Clearance lost for children (mm), aisle speed 1.3 m/s', fontsize=11.5)
+    ax.set_yticklabels(names[::-1], fontsize=11.5)
+    ax.set_xlim(0, 290)
+    ax.tick_params(axis='x', labelsize=11.5)
+    ax.set_xlabel('Modeled clearance lost (mm) at 1.3 m/s', fontsize=12)
     save(fig, 'li_conv')
 
 def intervals():

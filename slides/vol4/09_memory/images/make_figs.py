@@ -69,20 +69,21 @@ def kalman():
         sp.save(fig, out(f'kalman_step{step}.svg'))
 
 def gates():
-    fig, ax = plt.subplots(figsize=(5.8, 1.6))
-    rows = [('Gate 3.84 (95%)', 'p95', 0.6301859166), ('Gate 6.63 (99%)', 'p99', 0.3883791284)]
+    fig, ax = plt.subplots(figsize=(4.6, 1.55))
+    rows = [('Threshold 3.84 (95%)', 'p95', 0.6301859166), ('Threshold 6.63 (99%)', 'p99', 0.3883791284)]
     for i, (lab, key, v) in enumerate(rows):
         y = 1 - i
-        ax.barh(y, v, color=C['memory'], height=0.6)
-        ax.text(v + 0.015, y, f"{ {0.6301859166: '0.63', 0.3883791284: '0.39'}[v]} caught", va='center', fontsize=13, color=C['memory'], fontweight='bold')
-        ax.text(-0.01, y, lab, transform=ax.get_yaxis_transform(), ha='right', va='center', fontsize=13, color=C['text'], fontweight='bold')
+        ax.barh(y, v, color=C['memory'], height=0.58)
+        ax.text(v + 0.015, y, f"{ {0.6301859166: '0.63', 0.3883791284: '0.39'}[v]}", va='center', fontsize=15.0, color=C['memory'], fontweight='bold')
+        ax.text(-0.01, y, lab, transform=ax.get_yaxis_transform(), ha='right', va='center', fontsize=15.5, color=C['text'], fontweight='bold')
     ax.axvline(1.0, color=C['neutral'], ls='--', lw=1.5)
-    ax.text(0.99, 1.45, 'every one caught', ha='right', fontsize=11, color=C['neutral'])
-    ax.set_xlim(0, 1.05)
-    ax.set_ylim(-0.5, 1.7)
+    ax.text(0.98, 1.44, 'every one caught', ha='right', fontsize=14.5, color=C['neutral'], fontweight='bold')
+    ax.set_xlim(0, 1.08)
+    ax.set_ylim(-0.5, 1.78)
     ax.set_yticks([])
+    ax.tick_params(axis='x', labelsize=14.5)
     ax.spines['left'].set_visible(False)
-    ax.set_xlabel('Share of single misdated updates the gate rejects')
+    ax.set_xlabel('Share of misdated updates rejected', fontsize=14.5)
     sp.save(fig, out('gates.svg'))
 
 def imu():
@@ -153,9 +154,9 @@ def epochs():
     svg('epochs.svg', '\n'.join(b), w=640, h=370)
 
 def lever():
-    e0, drift, swing, same = ((lambda q, u: q.to(u).magnitude)(q, 'mm') for q in (Q_(0.1, 'mm'), Q_(0.2, 'mm'), Q_(0.75, 'mm'), Q_(0.3069444444, 'mm')))
+    e0, drift, swing = (0.1, 0.2, 0.75)
     r_tol = 1.0
-    rows = [('Stale edge\n+ current wrist', [e0, drift, swing], '1.05'), ('Same-epoch\nchain', [e0, drift, same - e0 - drift], '0.31')]
+    rows = [('Stale edge\n+ current wrist', [e0, drift, swing], '1.05'), ('Same-epoch\nchain', [e0, drift], '0.30')]
     cols = [C['neutral'], C['memory'], C['compute']]
     for step in (1, 2, 3):
         fig, ax = plt.subplots(figsize=(5.8, 2.25))
@@ -174,13 +175,13 @@ def lever():
                     left += p
                 ax.text(left + 0.02, yy, f'{val_txt} mm', va='center', fontsize=13, fontweight='bold', color=C['danger'] if left > r_tol else C['data'], alpha=al)
                 ax.text(-0.02, yy, lab, ha='right', va='center', fontsize=12, color=C['text'], fontweight='bold', alpha=al)
-            key = [(0.0, 'initial 0.10', cols[0]), (0.3, 'drift 0.20', cols[1]), (0.58, 'lever arm 0.75', cols[2])]
+            key = [(0.0, 'initial 0.10', cols[0]), (0.26, 'drift 0.20', cols[1]), (0.50, 'lever arm 0.75', cols[2])]
             for x, s, c in key:
-                ax.text(x, 1.45, s, fontsize=11.5, color=c, fontweight='bold', ha='left')
+                ax.text(x, 1.48, s, fontsize=11.8, color=c, fontweight='bold', ha='left', va='center')
         ax.axvline(r_tol, color=C['danger'], ls='--', lw=1.6)
-        ax.text(r_tol + 0.02, -0.5, '1 mm slot\ntolerance', color=C['danger'], fontsize=11.5, ha='left', va='center', fontweight='bold')
-        ax.set_xlim(0, 1.35)
-        ax.set_ylim(-0.75, 1.7)
+        ax.text(r_tol + 0.03, 1.48, '1 mm slot\ntolerance', color=C['danger'], fontsize=11.8, ha='left', va='center', fontweight='bold', linespacing=0.95)
+        ax.set_xlim(0, 1.38)
+        ax.set_ylim(-0.55, 1.82)
         ax.set_yticks([])
         ax.spines['left'].set_visible(False)
         ax.set_xlabel('Finger error after one 16.7 ms frame (mm)')
@@ -252,7 +253,7 @@ def reads():
         vals = {'occupancy': [22449.2975, 1436.75504, 179.59438], 'octree': [202043.6775, 11494.04032, 1257.16066], 'ESDF': [8, 8, 8]}[lab]
         ax.bar(xs, vals, width=w * 0.92, color=col)
         for xx, v, k in zip(xs, vals, keys):
-            ax.text(xx, v * 1.3, _VALS[k], ha='center', fontsize=9.5, color=col, fontweight='bold')
+            ax.text(xx, v * 1.3, _VALS[k], ha='center', fontsize=11.0, color=col, fontweight='bold')
         ax.text(2.97, 2000000.0 / 6 ** j, lab, ha='right', va='top', fontsize=11.5, color=col, fontweight='bold')
     budget = 800.0
     ax.axhline(budget, color=C['danger'], ls='--', lw=1.5)

@@ -164,7 +164,7 @@ def portrait(step):
     save(fig, f'portrait_step{step}')
 for s in (1, 2, 3):
     portrait(s)
-fig, ax = plt.subplots(figsize=(4.6, 2.4))
+fig, ax = plt.subplots(figsize=(4.6, 2.2))
 data = [('Ascending', 11.34975369, 'stop_up', GREEN), ('No bias', 19.86206897, 'stop_free', SLATE), ('Descending', 79.44827586, 'stop_down', RED)]
 for i, (lab, w, key, col) in enumerate(data):
     ax.barh(i, w, color=col, height=0.6)
@@ -332,7 +332,10 @@ ax.bar(xs - 0.2, cvals, width=0.38, color=NAVY)
 ax.bar(xs + 0.2, nvals, width=0.38, color='#93C5FD')
 for x, c, n in zip(xs, cvals, nvals):
     ax.text(x - 0.2, c + 6, f'{c:.0f}', ha='center', fontsize=11, color=NAVY, fontweight='bold')
-    ax.text(x + 0.2, n + 6, f'{n:.0f}', ha='center', fontsize=11, color='#1D4ED8', fontweight='bold')
+    if 265 <= n <= 286:
+        ax.text(x + 0.2, n - 12, f'{n:.0f}', ha='center', va='top', fontsize=11, color='#1E3A8A', fontweight='bold')
+    else:
+        ax.text(x + 0.2, n + 6, f'{n:.0f}', ha='center', fontsize=11, color='#1D4ED8', fontweight='bold')
 ax.axhline(280.0, color=RED, ls='--', lw=2)
 ax.text(3.42, 280.0 + 12, 'set for\n280 N', color=RED, ha='left', va='bottom', fontsize=11, fontweight='bold')
 ax.set_xticks(xs)
@@ -361,7 +364,7 @@ ax.set_xlabel('Separation the arm must keep, before sensor and position margins 
 ax.tick_params(labelsize=10)
 save(fig, 'ssm')
 b = []
-rows = [('Model fidelity', 'observer: predicted vs measured'), ('Bounded push', 'observer against the force bound'), ('Torque available', 'current shunts, saturation flag'), ('Solver on time', 'watchdog and cycle counter'), ('Short tick', 'bus timestamps; 1.501 mm drift')]
+rows = [('Model fidelity', 'observer: predicted vs. measured'), ('Bounded push', 'observer against the force bound'), ('Torque available', 'current shunts, saturation flag'), ('Solver on time', 'watchdog and cycle counter'), ('Short tick', 'bus timestamps; 1.501 mm drift')]
 b.append(text(155, 30, 'Premise', 25, '#047857', weight='bold'))
 b.append(text(615, 30, 'Detector, every tick', 25, RED, weight='bold'))
 for i, (p, d) in enumerate(rows):
