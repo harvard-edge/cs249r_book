@@ -172,28 +172,85 @@ def accel_ratio():
     ax.set_ylabel('Joint acceleration (%)')
     sp.save(fig, out('accel_ratio'))
 
+def torque_step():
+    """3-step visual for 'True or false: a torque step arrives at once?':
+    step 1 = empty prompt axes (no vote spoiler); step 2 = winding current rise
+    (L/R = 2.7 ms, ~1.1 ms to 25 A on 42 V); step 3 = back-EMF headroom bars
+    at 1.5 m/s (braking 10.7 V vs driving 45.7 V > 42 V pack)."""
+    t = np.linspace(0, 5.0, 250)
+    tau_e = 1.885 / 0.7  # 2.693 ms
+    t_lin = 1.885 * 25.0 / 42.0  # 1.122 ms (optimistic L*di/dt = V)
+    curr = np.minimum(25.0, (42.0 / 1.885) * t)
+    for step in (1, 2, 3):
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(6.2, 2.05), gridspec_kw=dict(width_ratios=[1.15, 1.0]))
+        ax1.axhline(25.0, color=SLATE, lw=1.3, ls='--')
+        ax1.text(4.95, 26.6, 'target 25 A (60 N·m)', ha='right', va='bottom', fontsize=10.5, color=SLATE, fontweight='bold')
+        if step == 1:
+            ax1.text(2.5, 12.0, 'Does current jump to\n25 A at the next tick?', ha='center', va='center', fontsize=11.5, color=TEXT, fontweight='bold')
+        if step >= 2:
+            ax1.plot([0, 0, 5], [0, 25, 25], color=GRAY, lw=1.4, ls=':', alpha=0.8)
+            ax1.text(0.12, 26.6, 'ideal', fontsize=9.5, color=GRAY, ha='left', va='bottom')
+            ax1.plot(t, curr, color=TEAL, lw=2.8)
+            ax1.axvline(tau_e, color=AMBER, lw=1.4, ls=':')
+            ax1.text(tau_e + 0.14, 6.0, 'L/R = 2.7 ms', fontsize=10.5, color=AMBER, fontweight='bold', ha='left')
+            ax1.plot([t_lin], [25.0], 'o', ms=7, color=TEAL)
+            ax1.text(t_lin + 0.18, 17.5, '~1.1 ms\non 42 V', fontsize=10.5, color=TEAL, fontweight='bold', ha='left', va='top')
+        ax1.set_xlim(0, 5.0)
+        ax1.set_ylim(0, 33.5)
+        ax1.set_xticks([0, 1, 2, 3, 4, 5])
+        ax1.set_yticks([0, 10, 20, 25])
+        ax1.set_xlabel('Time from command (ms)', fontsize=10.5)
+        ax1.set_ylabel('Phase current (A)', fontsize=10.5)
+        ax1.tick_params(labelsize=10)
+        ax1.set_title('Winding inductance delays current', fontsize=11, fontweight='bold', color=TEXT, pad=9)
+
+        ax2.axvline(42.0, color=SLATE, lw=1.6, ls='--')
+        ax2.text(43.5, 1.52, '42 V pack', ha='left', va='center', fontsize=10, color=SLATE, fontweight='bold')
+        if step >= 3:
+            ax2.barh([1, 0], [10.7, 45.7], color=[GREEN, RED], height=0.52)
+            ax2.text(10.7 + 1.5, 1, '10.7 V', va='center', fontsize=11, color=GREEN, fontweight='bold')
+            ax2.text(45.7 + 1.5, 0, '45.7 V', va='center', fontsize=11, color=RED, fontweight='bold')
+            ax2.text(20.5, 0.5, 'back-EMF = 28.2 V', ha='center', va='center', fontsize=10, color=AMBER, fontweight='bold', bbox=dict(fc='white', ec='none', pad=1))
+        else:
+            ax2.text(20.0, 0.5, 'At 1.5 m/s,\nback-EMF = 28.2 V', ha='center', va='center', fontsize=10.5, color=GRAY)
+        ax2.set_yticks([1, 0])
+        ax2.set_yticklabels(['Braking', 'Driving'], fontsize=11, fontweight='bold')
+        ax2.set_xlim(0, 64)
+        ax2.set_ylim(-0.55, 1.82)
+        ax2.set_xlabel('Terminal voltage at 25 A (V)', fontsize=10.5)
+        ax2.tick_params(labelsize=10)
+        ax2.spines['left'].set_visible(False)
+        ax2.tick_params(axis='y', length=0)
+        ax2.set_title('Speed limits driving headroom', fontsize=11, fontweight='bold', color=TEXT, pad=9)
+        fig.tight_layout(w_pad=1.6)
+        sp.save(fig, out(f'torque_step{step}'))
+
 def envelope():
-    """S1 and S3 regions of the TQ ILM 70x18 (PB figure 6a): datasheet torques,
-    and the voltage limit from calc_voltage_limited_speed (no-load speed from
-    the data sheet)."""
+    """3-step S1/S3 torque-speed envelope of the TQ ILM 70x18 (PB figure 6a):
+    step 1 = S1 continuous ceiling; step 2 = S3 burst ceiling (3.2x);
+    step 3 = red back-EMF voltage-limit slope."""
     tp, tc = (4.05, 1.25)
-    fig, ax = plt.subplots(figsize=(3.6, 2.0))
-    ax.fill([0, 2110.0, 1942.048382, 0], [0, 0, tc, tc], color=SLATE_L)
-    ax.fill([0, 1942.048382, 1565.836758, 0], [tc, tc, tp, tp], color=AMBER_L)
-    ax.plot([2110.0, 1565.836758], [0, tp], color=RED, lw=2.5)
-    ax.text(150, tc / 2, 'S1 continuous', fontsize=12, fontweight='bold', color=SLATE, va='center')
-    ax.text(150, (tc + tp) / 2, 'S3 bursts', fontsize=12, fontweight='bold', color=AMBER, va='center')
-    ax.text(1810.710217 + 60, tp * 0.55, 'voltage\nlimit', fontsize=11.5, color=RED)
-    ax.text(700, tp + 0.15, 'peak 4.05', fontsize=11.5, color=TEXT)
-    ax.text(700, tc + 0.15, 'continuous 1.25', fontsize=11.5, color=TEXT)
-    ax.set_xlim(0, 2600)
-    ax.set_ylim(0, 5.0)
-    ax.set_xticks([0, 1000, 2000])
-    ax.set_yticks([0, 2, 4])
-    ax.tick_params(labelsize=11.5)
-    ax.set_xlabel('Motor speed (rpm)', fontsize=12)
-    ax.set_ylabel('Torque (N·m)', fontsize=12)
-    sp.save(fig, out('envelope'))
+    for step in (1, 2, 3):
+        fig, ax = plt.subplots(figsize=(3.6, 2.05))
+        ax.fill([0, 2110.0, 1942.048382, 0], [0, 0, tc, tc], color=SLATE_L)
+        ax.text(150, tc / 2, 'S1 continuous', fontsize=12, fontweight='bold', color=SLATE, va='center')
+        ax.text(700, tc + 0.15, 'continuous 1.25', fontsize=11.5, color=TEXT)
+        a2 = 1.0 if step >= 2 else 0.0
+        a3 = 1.0 if step >= 3 else 0.0
+        ax.fill([0, 1942.048382, 1565.836758, 0], [tc, tc, tp, tp], color=AMBER_L, alpha=a2)
+        ax.text(150, (tc + tp) / 2, 'S3 bursts (3.2x)', fontsize=11.5, fontweight='bold', color=AMBER, va='center', alpha=a2)
+        ax.text(700, tp + 0.15, 'peak 4.05', fontsize=11.5, color=TEXT, alpha=a2)
+        ax.plot([2110.0, 1565.836758], [0, tp], color=RED, lw=2.8, alpha=a3)
+        ax.plot([1565.836758], [tp], 'o', ms=7, color=RED, alpha=a3)
+        ax.text(1830, tp * 0.55, 'voltage\nlimit', fontsize=11.5, fontweight='bold', color=RED, alpha=a3)
+        ax.set_xlim(0, 2600)
+        ax.set_ylim(0, 5.0)
+        ax.set_xticks([0, 1000, 2000])
+        ax.set_yticks([0, 2, 4])
+        ax.tick_params(labelsize=11.5)
+        ax.set_xlabel('Motor speed (rpm)', fontsize=12)
+        ax.set_ylabel('Torque (N·m)', fontsize=12)
+        sp.save(fig, out(f'envelope_step{step}'))
 
 def burst():
     t = np.linspace(0, 100, 400)
@@ -266,6 +323,7 @@ if __name__ == '__main__':
     vceiling()
     decel_ceilings()
     volt_need()
+    torque_step()
     accel_ratio()
     envelope()
     burst()
