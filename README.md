@@ -51,6 +51,7 @@
   <b><a href="https://mlsysbook.ai/labs/">🔬 Labs</a></b> •
   <b><a href="https://mlsysbook.ai/kits/">🧰 Kits</a></b> •
   <b><a href="https://mlsysbook.ai/mlsysim/">🔮 MLSys·im</a></b> •
+  <b><a href="https://mlsysbook.ai/slides/">📊 Slides</a></b> •
   <b><a href="https://mlsysbook.ai/instructors/">🎓 Instructors</a></b> •
   <b><a href="https://mlsysbook.ai/staffml/">💼 StaffML</a></b> •
   <b><a href="taxonomy/">Taxonomy</a></b>
