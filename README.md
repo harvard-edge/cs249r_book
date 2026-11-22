@@ -36,6 +36,7 @@
   <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/labs-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/labs-validate-dev.yml?branch=dev&event=push&label=Labs&logo=jupyter&cacheSeconds=300" alt="Labs"></a>
   <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/kits-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/kits-validate-dev.yml?branch=dev&event=push&label=Kits&logo=arduino&cacheSeconds=300" alt="Kits"></a>
   <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/slides-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/slides-validate-dev.yml?branch=dev&event=push&label=Slides&logo=googleslides&cacheSeconds=300" alt="Slides"></a>
+  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/studysheets-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/studysheets-validate-dev.yml?branch=dev&event=push&label=Study%20Sheets&logo=readthedocs&cacheSeconds=300" alt="Study Sheets"></a>
   <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/instructors-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/instructors-validate-dev.yml?branch=dev&event=push&label=Instructors&logo=googleclassroom&cacheSeconds=300" alt="Instructors"></a>
   <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/staffml-preview-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/staffml-preview-dev.yml?branch=dev&event=push&label=StaffML&logo=target&cacheSeconds=300" alt="StaffML"></a>
 </p>
@@ -52,6 +53,7 @@
   <b><a href="https://mlsysbook.ai/kits/">🧰 Kits</a></b> •
   <b><a href="https://mlsysbook.ai/mlsysim/">🔮 MLSys·im</a></b> •
   <b><a href="https://mlsysbook.ai/slides/">📊 Slides</a></b> •
+  <b><a href="https://mlsysbook.ai/vol1/backmatter/studysheets.html">📝 Study Sheets</a></b> •
   <b><a href="https://mlsysbook.ai/instructors/">🎓 Instructors</a></b> •
   <b><a href="https://mlsysbook.ai/staffml/">💼 StaffML</a></b> •
   <b><a href="taxonomy/">Taxonomy</a></b>
