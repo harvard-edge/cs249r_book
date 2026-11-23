@@ -597,6 +597,4 @@ Thanks to these wonderful people who helped improve the book!
 
 ## License
 
-Book content is licensed under **Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International** (CC BY-NC-SA 4.0).
-
-See [LICENSE.md](../LICENSE.md) for details.
+Binder is licensed under **Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International** (CC BY-NC-SA 4.0); see [LICENSE](LICENSE). The textbook it builds is published by MIT Press under CC BY-NC-ND 4.0; see [LICENSE.md](../LICENSE.md).
