@@ -1039,6 +1039,29 @@ MIN_RE = re.compile(
 TAG_RE = re.compile(
     r"\[(CORE|OPTIONAL)\b[^\]]*\]|\\mlsysnotemeta\{[^}]*\}\{(Core|Optional)\b[^}]*\}", re.I)
 LLM_NOTE_TAG = re.compile(r"\b(NARRATE|ENGAGE|WARN|LINK|FLEX|LAND|BEAT)\s*:")
+# 2026-11-23: notes address the learner; classroom mechanics live only in
+# \notecue{Teach}{...}. These phrases outside a Teach cue mean the note is
+# talking to the instructor (see rules/slides/speaker-notes.md).
+INSTRUCTOR_VOICE = re.compile(
+    r"\b(?:Ask|Have|Give|Let|Invite|Poll|Remind)\s+(?:students|pairs|the class|anyone)\b"
+    r"|\b(?:Most|Many|Some) students\b|\bClick(?:ing)?\b(?: forward)?|\bshow of hands\b"
+    r"|\bthumbs (?:up|down)\b|\bvote with\b|\b50-minute class\b"
+    r"|\bStep \d+ (?:reveals|shows|adds|highlights|plots)\b")
+
+
+def strip_teach_cues(text):
+    """Remove every \\notecue{Teach}{...} (balanced braces) from a note."""
+    out, i, key = [], 0, "\\notecue{Teach}{"
+    while True:
+        j = text.find(key, i)
+        if j < 0:
+            return "".join(out) + text[i:]
+        out.append(text[i:j])
+        k, depth = j + len(key), 1
+        while k < len(text) and depth:
+            depth += {"{": 1, "}": -1}.get(text[k], 0)
+            k += 1
+        i = k
 
 
 def note_minutes(text):
@@ -1108,7 +1131,11 @@ def rule_notes(deck, vol, out):
             bad_tag = LLM_NOTE_TAG.search(text)
             if bad_tag:
                 out("notes", "error", f.num, deck.line_of(off),
-                    f"robotic note tag \"{bad_tag.group(0)}\"; write natural prose with \\mlsysnotemeta and \\notecue{{Check|Watch for|Next}}{{...}}")
+                    f"robotic note tag \"{bad_tag.group(0)}\"; write natural prose with \\mlsysnotemeta and \\notecue{{Check|Watch for|Teach|Next}}{{...}}")
+            voice = INSTRUCTOR_VOICE.search(strip_teach_cues(text))
+            if voice:
+                out("notes", "warning", f.num, deck.line_of(off),
+                    f"note speaks to the instructor (\"{voice.group(0)}\"); address the learner and move classroom mechanics into \\notecue{{Teach}}{{...}}")
             n = len(detex(re.sub(r"\\[A-Za-z]+", " ", text)).split())
             if n > NOTE_WORD_LIMIT:
                 out("notes", "error", f.num, deck.line_of(off),
