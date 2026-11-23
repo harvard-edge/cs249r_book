@@ -145,8 +145,10 @@ def deck_info(deck: Path, tex: Path) -> dict:
 
 def lecture_links(vol: str, deck: str) -> dict:
     name = f"{vol}_{deck}"
-    return {"pdf": f"{RELEASE}/{name}.pdf", "pptx": f"{RELEASE}/{name}.pptx",
-            "source": f"{SOURCE}/{vol}/{deck}"}
+    # notes: the student notes PDF (each slide with its notes below, without
+    # the instructor-only "In class" cues), released since 2026-11-23.
+    return {"pdf": f"{RELEASE}/{name}.pdf", "notes": f"{RELEASE}/{name}-student-notes.pdf",
+            "pptx": f"{RELEASE}/{name}.pptx", "source": f"{SOURCE}/{vol}/{deck}"}
 
 
 def volume(vol: str, slides_page: str) -> list:
@@ -193,13 +195,23 @@ def volume(vol: str, slides_page: str) -> list:
 
 
 def link_html(lec: dict) -> str:
+    # 2026-11-23: three pills, ordered by what visitors open most: the deck to
+    # project, the deck with its notes to study or prepare, and PowerPoint to
+    # present. Source is a text link under the title (source_html).
     return (
         '<span class="lec-links">'
-        f'<a href="{lec["pdf"]}">PDF</a>'
-        f'<a href="{lec["pptx"]}">PowerPoint</a>'
-        f'<a href="{lec["source"]}">Source</a>'
+        f'<a href="{lec["pdf"]}" title="The deck for projection (PDF)">Slides</a>'
+        f'<a href="{lec["notes"]}" title="Each slide with its notes below, for study or preparation (PDF)">Slides + notes</a>'
+        f'<a href="{lec["pptx"]}" title="PowerPoint, with the speaker notes in presenter view">PowerPoint</a>'
         "</span>"
     )
+
+
+def source_html(lec: dict) -> str:
+    return f'<a class="ch-read" href="{lec["source"]}" title="LaTeX source and figure scripts">Source</a>'
+
+
+SEP = '<span class="ch-sep" aria-hidden="true">·</span>'
 
 
 def chapter_html(ch: dict) -> list:
@@ -209,7 +221,7 @@ def chapter_html(ch: dict) -> list:
         meta_links.append(f'<a class="ch-read" href="{ch["book_url"]}">Read the chapter</a>')
     if ch.get("sheet_url"):
         meta_links.append(f'<a class="ch-read" href="{ch["sheet_url"]}">Study sheet</a>')
-    read = f'<span class="ch-meta">{"<span class=\"ch-sep\" aria-hidden=\"true\">·</span>".join(meta_links)}</span>' if meta_links else ""
+    read = f'<span class="ch-meta">{SEP.join(meta_links)}</span>' if meta_links else ""
 
     rows = [f'  <div class="ch" id="{ch["anchor"]}"><div class="ch-num">{ch["num"]}</div>'
             '<div class="ch-body">']
@@ -217,8 +229,9 @@ def chapter_html(ch: dict) -> list:
     if len(lectures) == 1:
         lec = lectures[0]
         sub = f'<span class="lec-sub">{esc(lec["subtitle"])}</span>' if lec["subtitle"] else ""
+        read1 = f'<span class="ch-meta">{SEP.join(meta_links + [source_html(lec)])}</span>'
         rows.append(f'    <div class="lec" id="{lec["anchor"]}"><span class="lec-name">'
-                    f'<span class="ch-title">{esc(ch["title"])}</span>{sub}{read}</span>'
+                    f'<span class="ch-title">{esc(ch["title"])}</span>{sub}{read1}</span>'
                     f'{link_html(lec)}</div>')
     else:
         rows.append(f'    <div class="ch-head"><span class="ch-title">{esc(ch["title"])}</span>'
@@ -226,7 +239,8 @@ def chapter_html(ch: dict) -> list:
         for lec in lectures:
             sub = f'<span class="lec-sub">{esc(lec["subtitle"])}</span>' if lec["subtitle"] else ""
             rows.append(f'    <div class="lec lec-part" id="{lec["anchor"]}"><span class="lec-name">'
-                        f'<span class="part-tag">{lec["label"]}</span>{sub}</span>'
+                        f'<span class="part-tag">{lec["label"]}</span>{sub}'
+                        f'<span class="ch-meta">{source_html(lec)}</span></span>'
                         f'{link_html(lec)}</div>')
     rows.append("  </div></div>")
     return rows
