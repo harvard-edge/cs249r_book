@@ -377,6 +377,18 @@ handout:
 	{ echo "  ✗ handout build failed"; exit 1; }
 	@cd vol$(V)/$(D) && rm -f $(D)-handout.{aux,log,nav,out,snm,toc,vrb}
 
+# Student notes: the same layout without the instructor-only \notecue{Teach} cues.
+# Activity frames print their first step (before the answer): tools/student_source.py.
+student-notes:
+	@mkdir -p $(BUILD_DIR)/vol$(V)
+	@$(PY) tools/student_source.py vol$(V)/$(D)/$(D).tex vol$(V)/$(D)/$(D)-student-src.tex > /dev/null
+	@cd vol$(V)/$(D) && \
+	$(LATEX) $(LATEX_FLAGS) -jobname=$(D)-student-notes "\PassOptionsToClass{handout}{beamer}\def\mlsysshownotes{}\def\mlsysstudentnotes{}\input{$(D)-student-src.tex}" > /dev/null 2>&1 && \
+	$(LATEX) $(LATEX_FLAGS) -jobname=$(D)-student-notes "\PassOptionsToClass{handout}{beamer}\def\mlsysshownotes{}\def\mlsysstudentnotes{}\input{$(D)-student-src.tex}" > /dev/null 2>&1 && \
+	mv $(D)-student-notes.pdf ../../$(BUILD_DIR)/vol$(V)/ && echo "  ✓ $(BUILD_DIR)/vol$(V)/$(D)-student-notes.pdf" || \
+	{ echo "  ✗ student notes build failed"; rm -f vol$(V)/$(D)/$(D)-student-src.tex; exit 1; }
+	@cd vol$(V)/$(D) && rm -f $(D)-student-notes.{aux,log,nav,out,snm,toc,vrb} $(D)-student-src.tex
+
 # Study & presenter notes: Portrait US Letter (handout slide on top, notes below).
 notes:
 	@mkdir -p $(BUILD_DIR)/vol$(V)

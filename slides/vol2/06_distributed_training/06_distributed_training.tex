@@ -60,9 +60,11 @@
 % =============================================================================
 \mlsysnote{%
   \mlsysnotemeta{0.5 min}{Core}%
-  This lecture puts Lecture 5's collective prices to work by designing complete distributed training plans across data, sharded, pipeline, and tensor parallelism. Read the subtitle thesis aloud: every parallelism strategy converts memory pressure into communication, barrier waiting, or idle bubbles, and a good plan routes that overhead onto the least constrained resource. We track the 175B-parameter reference job on 1,024 H100 GPUs from 15\% scaling efficiency up to 87\%. Full lecture notes total 70.5 minutes; cutting the Optional slides (8.5 minutes: SSP table, FSDP lifetime, DDP/FSDP code, Megatron scaling, extra axes, recomputation, and PPO/DPO) leaves a complete 62-minute Core lecture adaptable to a 50-minute session.
+  This lecture applies the collective communication costs from Lecture 5 to build complete distributed training plans across data, sharded, pipeline, and tensor parallelism. Every parallelism strategy converts memory pressure into communication, barrier waiting, or idle bubbles. A good plan sends that overhead to the least constrained resource. Across the lecture, the 175B-parameter reference job on 1,024 H100 GPUs rises from 15\% scaling efficiency to 87\%.
 
-  \notecue{Next}{Section 1 opens with Facebook's one-hour ImageNet run to test how scaling hardware interacts with optimization.}
+  \notecue{Teach}{Read the subtitle thesis aloud. Full notes run 70.5 minutes; cutting 8.5 minutes of Optional slides (SSP table, FSDP lifetime, DDP/FSDP code, Megatron scaling, extra axes, recomputation, and PPO/DPO) leaves a 62-minute Core lecture adaptable to a 50-minute session.}
+
+  \notecue{Next}{Section 1 opens with Facebook AI Research's 2017 one-hour ImageNet run to test how adding hardware interacts with optimization.}
 }
 \mlsystitle{Distributed Training}{Every parallelism strategy turns memory pressure into communication, waiting, or idle time; a good plan sends that overhead to the least constrained resource.}{cover_distributed_training_blueprint.png}
 
@@ -71,7 +73,7 @@
 % =============================================================================
 \mlsysnote{%
   \mlsysnotemeta{0.5 min}{Core}%
-  Keep the divider question visible as the lecture opens: why can adding accelerators sometimes make training slower or worse? Start with a landmark run that scaled from 8 to 256 GPUs.
+  Scaling a training job from 8 to 256 GPUs can raise throughput yet still slow progress or hurt model quality. This opening section tests that puzzle on Facebook AI Research's 2017 run, introduces today's 175B reference job, and states the driving question.
 
   \notecue{Next}{The next slide compares the 29-hour 8-GPU ResNet-50 baseline against Goyal et al.'s one-hour 256-GPU run.}
 }
@@ -104,11 +106,11 @@
   \mlsyscredit{Photo: FritzchensFritz (CC0), Wikimedia Commons. Goyal et al. 2017, ``Accurate, Large Minibatch SGD,'' \S1, \S4.3, \S5.5 (8 to 352 GPUs, about 90\% scaling efficiency). Distributed Training, War Story 6.1.}
   \note{%
     \mlsysnotemeta{1 min}{Core}%
-    The photograph shows NVIDIA's GP100 die and four HBM stacks inside each P100 GPU (War Story 6.1; Goyal et al., 2017). First, step 1 states the 2017 baseline: one 8-P100 server trained ResNet-50 on ImageNet for 90 epochs in 29 hours at global batch 256. Second, step 2 scales $32\times$ to 256 P100s across 32 servers, keeping 32 images per GPU for a global batch of 8,192 and cutting runtime to 1 hour. Third, step 3 notes about 90\% throughput scaling over 50 Gb/s Ethernet thanks to gradient overlap, raising the deeper question of whether the final model kept its accuracy.
+    In 2017, Facebook AI Research set out to push data parallelism past batch sizes earlier practice treated as safe by training the ResNet-50 image classifier on ImageNet in one hour (War Story 6.1; Goyal et al., 2017). The baseline used one server of 8 NVIDIA Pascal P100 GPUs (whose GP100 die with four stacks of high-bandwidth memory, or HBM, appeared in Lecture 5) to train for 90 epochs in 29 hours at a global batch, the total images processed per update across all GPUs, of 256 images. Scaling $32\times$ to 256 P100s across 32 servers kept 32 images per GPU, raising the global batch to 8,192 and cutting runtime to 1 hour. Overlapping gradient transfers with backward-pass computation preserved about 90\% of ideal throughput over 50 Gb/s Ethernet, leaving the harder question of whether model accuracy survived.
 
-    \notecue{Watch for}{One-hour wall-clock time settles only the hardware throughput half; accuracy at batch 8,192 is tested immediately next.}
+    \notecue{Watch for}{A one-hour wall-clock time settles only hardware throughput. Accuracy at batch 8,192 is tested next.}
 
-    \notecue{Next}{Students next predict what happened to ResNet-50's validation accuracy at global batch 8,192.}
+    \notecue{Next}{Next, predict what happened to ResNet-50's validation accuracy at global batch 8,192.}
   }
 \end{frame}
 
@@ -122,13 +124,15 @@
   \mlsyscredit{Goyal et al. 2017, Table 1 (ResNet-50, ImageNet top-1 validation error, mean of 5 runs).}
   \note{%
     \mlsysnotemeta{2.5 min}{Core}%
-    The gray baseline bar shows 23.60\% top-1 ImageNet validation error at batch 256 (Goyal et al., 2017, Table 1), with two 256-GPU bars left blank for now. Because global batch grew $32\times$ over the same 90 epochs, the optimizer takes $32\times$ fewer weight updates per epoch, so each step must change. Hold the exact verdict until Section 3 (Batches), where the paper's numbers settle the vote.
+    Hardware throughput scaled cleanly to 256 GPUs, leaving the statistical test of whether ResNet-50 kept its 23.60\% top-1 ImageNet validation error from the batch-256 baseline (Goyal et al., 2017, Table 1). Growing the global batch $32\times$ over the same 90 epochs gives $32\times$ fewer weight updates per epoch, so each step must change. Before reading on, choose among options A through D.
 
-    \notecue{Check}{Poll choices A through D and have students write down their choice before advancing without revealing C yet. Choice C (32$\times$ learning rate with gradual warmup) turns out to match baseline accuracy in Section 3. Most students pick B (32$\times$ learning rate alone) or A (unchanged learning rate), missing early-training instability at huge step sizes.}
+    \notecue{Check}{The answer is C, scaling the learning rate 32$\times$ with gradual warmup (ramping up the rate early in training), which matches baseline accuracy in Section 3 (Batches). A tempting answer is A, leaving the learning rate unchanged, which makes too little progress in $32\times$ fewer updates. Option B, scaling by 32$\times$ alone, fails because large initial steps destabilize training.}
 
-    \notecue{Watch for}{Emphasize that this question is strictly statistical: the hardware already ran at 90\% efficiency.}
+    \notecue{Watch for}{This question is strictly statistical, since the hardware already ran at 90\% efficiency.}
 
-    \notecue{Next}{The next slide sets up today's main running case: the 175B model on 1,024 H100 GPUs.}
+    \notecue{Teach}{Poll choices A through D and have students write down their pick before moving on. Hold back choice C until Section 3 settles the vote.}
+
+    \notecue{Next}{ResNet-50 fit on one GPU, whereas the next slide turns to today's 175B running case on 1,024 H100 GPUs.}
   }
 \end{frame}
 
@@ -156,9 +160,9 @@
   \mlsyscredit{Photos: Pokiiri (CC BY-SA 4.0); ChrisDag (CC BY 2.0); Wikimedia Commons. Numbers: Distributed Training, Definition 6.1, Napkin Math 6.7, \S6.5.3.}
   \note{%
     \mlsysnotemeta{1.5 min}{Core}%
-    Introduce the lecture's running job: a 175B-parameter dense transformer trained with mixed-precision Adam. First, step 1 multiplies 175B parameters by 16 B/param (2 B FP16 weights, 2 B gradients, 4 B FP32 master copy, 8 B Adam moments; Appendix A) to get 2,800 GB of persistent state. Second, step 2 divides by one H100's 80 GB HBM: fitting state alone requires at least 35 GPUs before activations. Third, step 3 specifies the 1,024-H100 cluster (128 nodes of 8) alongside Lecture 2's $9\times$ bandwidth cliff: 450 GB/s NVLink inside a node (illustrated by the eight-GPU HGX B200 layout) versus 50 GB/s per InfiniBand NDR port between nodes.
+    Unlike ResNet-50, today's running job, the 175B-parameter dense transformer trained with mixed-precision Adam from Lectures 1 and 2, cannot fit on one accelerator. Recall from Lecture 2 that persistent training state takes 16 B/param (2 B FP16 weights, 2 B gradients, 4 B FP32 master weights, and 8 B Adam moments; Appendix A), giving 2,800 GB in total. At 80 GB of HBM per H100, persistent state alone needs at least 35 GPUs before activations. The target cluster has 1,024 H100s in 128 nodes of 8, carrying Lecture 2's $9\times$ bandwidth cliff from 450 GB/s intra-node NVLink (illustrated by the eight-GPU HGX B200 board) down to 50 GB/s per inter-node InfiniBand NDR port.
 
-    \notecue{Next}{A quick retrieval tests Lecture 5's ring AllReduce formula on this 175B model's gradients.}
+    \notecue{Next}{Next, use Lecture 5 to test what happens when all 1,024 GPUs try to synchronize the 175B model's gradients across those 50 GB/s links.}
   }
 \end{frame}
 
@@ -173,13 +177,15 @@
   \mlsyscredit{Ring cost: Collective Communication; Distributed Training, \S6.1 and Napkin Math 6.5.}
   \note{%
     \mlsysnotemeta{1.5 min}{Core}%
-    This retrieval applies Lecture 5's ring AllReduce volume formula to our 175B model's 350 GB of FP16 gradients. Step 2 shows each GPU sends $\frac{2(N-1)}{N}M \approx 2M$, totaling 699 GB per GPU at $N = 1{,}024$, which takes roughly 14 s per step over a single 50 GB/s NDR port.
+    Before choosing a layout for those 1,024 GPUs, apply Lecture 5's ring AllReduce volume formula to the 175B model's 350 GB of FP16 gradients. Before reading on, write the bytes each of $N$ workers sends for an $M$-byte payload and compute the transfer time at 50 GB/s for $N = 1{,}024$.
 
-    \notecue{Check}{Give 45 seconds to write the ring volume and price 350 GB at 50 GB/s before revealing step 2. The 14 s figure ($699\text{ GB} / 50\text{ GB/s}$) stays constant no matter how large $N$ grows because $2(N-1)/N \to 2$. Students who divide 350 GB by 1,024 forget that every rank must transmit roughly $2M$ across the ring.}
+    \notecue{Check}{Each GPU sends $\frac{2(N-1)}{N}M \approx 2M$ bytes, totaling 699 GB per GPU at $N = 1{,}024$. Over one 50 GB/s NDR port, $699\text{ GB} / 50\text{ GB/s}$ takes roughly 14 s per step. That 14 s cost stays nearly constant for any large $N$ because $2(N-1)/N \to 2$. A tempting mistake is dividing 350 GB by 1,024, which overlooks that every GPU, or rank, must still transmit roughly $2M$ around the ring.}
 
-    \notecue{Watch for}{That single invariance (adding GPUs splits compute while wire volume stays near $2M$) motivates almost every technique in today's lecture.}
+    \notecue{Watch for}{That single invariance, where adding GPUs splits compute while wire volume stays near $2M$, motivates almost every technique in this lecture.}
 
-    \notecue{Next}{The next slide lays out today's driving question and four learning goals.}
+    \notecue{Teach}{Give 45 seconds to write the ring volume and price 350 GB at 50 GB/s before revealing the answer.}
+
+    \notecue{Next}{The next slide presents the lecture's driving question and four learning goals.}
   }
 \end{frame}
 
@@ -206,9 +212,9 @@
   \mlsyscredit{Photo: Carlos Jones/ORNL (CC BY 2.0), Wikimedia Commons.}
   \note{%
     \mlsysnotemeta{1.5 min}{Core}%
-    The title frames today's driving question beside Oak Ridge's Summit racks illustrating multi-rack cluster scale. The four goals trace the lecture's sections: scaling efficiency and the scaling wall, batches and barriers, sharding and model splits (pipeline and tensor), and joint placement across hardware tiers. None of these splits erases scale overhead; each moves it onto communication, waiting, or bubbles, and our Placement scoreboard tracks the 175B run through every step. As the accent footer notes, today acts on $T_{\text{comm}}(N)$ and $T_{\text{sync}}(N)$ across Communication ($C_2$) and Coordination ($C_3$).
+    Because ring traffic stays near $2M$ bytes per GPU regardless of cluster size, the lecture's driving question is how one 175B training job should split across a multi-rack fleet of 1,024 GPUs (illustrated by Oak Ridge National Laboratory's Summit GPU racks). Four goals map onto the sections ahead, moving from scaling efficiency and the scaling wall to batches and barriers, then state sharding and model splits (pipeline and tensor), and finally joint placement across hardware tiers. No split erases scale overhead; each moves it onto communication, waiting, or bubbles, tracked on a 175B scoreboard in the Placement section. In the volume's Fleet Law and $C^3$ framework, this lecture acts on $T_{\text{comm}}(N)$ and $T_{\text{sync}}(N)$ across Communication ($C_2$) and Coordination ($C_3$).
 
-    \notecue{Next}{Section 2 starts with the simplest split: replicating the model for data parallelism.}
+    \notecue{Next}{Section 2 starts with the simplest split, replicating the model for data parallelism.}
   }
 \end{frame}
 
@@ -217,9 +223,9 @@
 % =============================================================================
 \mlsysnote{%
   \mlsysnotemeta{0.5 min}{Core}%
-  Begin with plain data parallelism: every GPU holds an identical copy of the model and processes a distinct slice of the global batch.
+  This section asks when plain data parallelism, holding an identical model copy on every GPU while splitting the global batch, pays off and where network traffic stalls it.
 
-  \notecue{Next}{The next slide shows why averaging $N$ local gradients reproduces single-device SGD.}
+  \notecue{Next}{The next slide shows why averaging $N$ local gradients reproduces single-device stochastic gradient descent (SGD).}
 }
 \mlsysdivider{When does copying the model and splitting the batch pay?}{Distributed Training, \S6.3, \S6.4.1, \S6.4.2}
 \section{Replicas}
@@ -232,9 +238,9 @@
   \mlsyscredit{Distributed Training, \S6.3 and figure 3. Code: PyTorch torch.nn.parallel (BSD license).}
   \note{%
     \mlsysnotemeta{2 min}{Core}%
-    Trace data parallelism across three build steps. First, step 1 places a full model copy and a distinct batch slice on each GPU. Second, step 2 runs local forward and backward passes to produce local gradients $g_k$. Third, step 3 executes an AllReduce averaging $g = \frac{1}{N}\sum_k g_k$ so every replica applies the exact same optimizer update and never drifts; PyTorch's \texttt{DistributedDataParallel} hooks launch this AllReduce during backward. Mathematically, synchronous data parallelism is not a different optimizer; it is identical to single-device SGD at global batch $N \times b$.
+    Replicating a model across $N$ GPUs preserves single-device optimization when the combined update matches single-device training. Each GPU holds a full model copy, processes a distinct local slice of size $b$ from the global batch, and runs forward and backward passes to compute a local gradient $g_k$. An AllReduce then averages those gradients into $g = \frac{1}{N}\sum_k g_k$, so every replica applies the exact same optimizer update and stays in sync. PyTorch's \texttt{DistributedDataParallel} (introduced in Lecture 1) launches this AllReduce during the backward pass. Mathematically, synchronous data parallelism is therefore not a different optimizer; it reproduces single-device SGD at global batch $N \times b$.
 
-    \notecue{Watch for}{Unweighted averaging equals the combined-batch gradient only when local batch sizes match; variable-length sequences or uneven valid-token counts require weighted reductions, and optimizer state and step counts must stay identical across replicas.}
+    \notecue{Watch for}{Unweighted averaging equals the combined-batch gradient only when local batch sizes match. Variable-length sequences or uneven valid-token counts require weighted reductions, and optimizer state and step counts must stay identical across replicas.}
 
     \notecue{Next}{The next slide derives scaling efficiency directly from Lecture 1's Fleet Law.}
   }
@@ -251,11 +257,11 @@
   \mlsyscredit{Distributed Training, equations 1 and 2; the Fleet Law: Introduction.}
   \note{%
     \mlsysnotemeta{2 min}{Core}%
-    First, step 1 writes Lecture 1's Fleet Law where only $T_{\text{compute}}/N$ shrinks with $N$. Second, step 2 substitutes it into scaling efficiency $\etascale = T_{\text{compute}} / (N\,T_{\text{step}}(N)) = 1 / [1 + N(T_{\text{comm}} + T_{\text{sync}} - T_{\text{overlap}})/T_{\text{compute}}]$: 1.0 denotes ideal linear scaling, while 0.5 means half of all GPU-hours buy overhead. Third, step 3 highlights the scaling wall in the denominator: exposed per-step overhead is multiplied by $N$ against fixed single-device compute, so constant ring traffic near $2M/\beta$ drives efficiency toward zero as $N$ doubles.
+    Because replicas match single-device SGD mathematically, hardware overhead decides whether adding GPUs speeds up each step. In Lecture 1's Fleet Law, only $T_{\text{compute}}/N$ shrinks as $N$ grows. Substituting that step time into Lecture 1's scaling efficiency ratio gives $\etascale = T_{\text{compute}} / (N\,T_{\text{step}}(N)) = 1 / [1 + N(T_{\text{comm}} + T_{\text{sync}} - T_{\text{overlap}})/T_{\text{compute}}]$, where 1.0 is ideal linear scaling and 0.5 means half of all GPU-hours go to overhead. Because exposed per-step overhead is multiplied by $N$ against fixed single-device compute, constant ring traffic near $2M/\beta$ (at link bandwidth $\beta$) pushes efficiency toward zero as $N$ doubles, creating the scaling wall.
 
-    \notecue{Watch for}{Do not treat this like a static single-node Amdahl serial fraction: even a 1\% single-device residual fills about 84\% of each step at 512 GPUs (\S6.4.2).}
+    \notecue{Watch for}{Unlike Amdahl's fixed single-node serial fraction (the unparallelizable share of single-device time), fleet communication and sync overhead is external and can grow with $N$. Even a constant 1\% single-device residual sees its share of each step reach $512 \times 1\% / (1 + 512 \times 1\%) \approx 84\%$ at 512 GPUs (\S6.4.2).}
 
-    \notecue{Next}{The next slide plugs our 175B running case into this equation at 1,024 GPUs.}
+    \notecue{Next}{The next slide evaluates this equation on the 175B running case at 1,024 GPUs.}
   }
 \end{frame}
 
@@ -273,11 +279,11 @@
   \mlsyscredit{Distributed Training, Napkin Math 6.5 (2M tokens per update, FP8 compute at 50\% of 1,979 TFLOP/s, FP16 gradients, 50 GB/s per GPU). Top: illustrative. Photo: ChrisDag (CC BY 2.0), Wikimedia Commons.}
   \note{%
     \mlsysnotemeta{2.5 min}{Core}%
-    First, step 1 illustrates the mechanism: quadrupling GPUs quarters local compute while ring AllReduce stays fixed, exposing wire time that used to hide. Then, step 2 applies Napkin Math 6.5 as a communication counterfactual (pretending 2,800 GB fits per GPU): a 2M-token step on 175B parameters needs $2.1 \times 10^{18}$ FLOPs, taking 2.1 s across 1,024 H100s at 50\% of 1,979 TFLOP/s FP8 peak, while 350 GB of FP16 gradients require about 14.0 s over 50 GB/s NDR. With 2.1 s of overlap leaving 11.9 s exposed, $\etascale = 2.1 / 14.0 = 15\%$: the scaling wall of pure data parallelism (Lecture 5).
+    Evaluating that scaling-efficiency equation on the 175B job shows the scaling wall directly. Quadrupling GPU count quarters local compute while ring AllReduce stays fixed, exposing network time that once hid behind compute. As a counterfactual assuming all 2,800 GB fit on each GPU (Napkin Math 6.5), a 2M-token step on 175B parameters takes $2.1 \times 10^{18}$ FLOPs. Running at 50\% of an H100's 1,979 TFLOP/s FP8 peak across 1,024 GPUs takes 2.1 s. Syncing 350 GB of FP16 gradients over 50 GB/s NDR takes about 14.0 s. Under Lecture 5's overlap limit, hiding 2.1 s behind compute leaves 11.9 s exposed, giving $\etascale = 2.1 / 14.0 = 15\%$, the scaling wall of pure data parallelism.
 
-    \notecue{Watch for}{Notice the precision mismatch: FP8 compute shortened the compute window without shrinking FP16 gradient bytes, making the step even more communication-bound.}
+    \notecue{Watch for}{Notice the precision mismatch. Using FP8 shortened compute time without shrinking FP16 gradient bytes, making the step more communication-bound.}
 
-    \notecue{Next}{Students next price what crossing a slow off-node link does to GPT-2 efficiency and dollar cost.}
+    \notecue{Next}{Next, estimate what crossing a slow off-node link does to GPT-2 efficiency and dollar cost.}
   }
 \end{frame}
 
@@ -291,13 +297,15 @@
   \mlsyscredit{Distributed Training, Napkin Math 6.1, 6.2, 6.3 (scenario inputs; \$32 per node-hour).}
   \note{%
     \mlsysnotemeta{2.5 min}{Core}%
-    Napkin Math 6.1--6.3 compares GPT-2 (1.8 s compute/step) on 1 node (8 GPUs over 450 GB/s NVLink) versus 4 nodes (32 GPUs over 1.25 GB/s 10 GbE). First, step 2 computes both efficiencies: intra-node sync takes 11.7 ms against 1,800 ms compute (99.4\% efficiency), whereas 4-node hierarchical sync adds 3,600 ms (4.5 GB / 1.25 GB/s) for a 5,411.7 ms step (33.3\% efficiency, yielding just $10.6\times$ speedup from 32 GPUs). Then, step 3 matches global batch 512 on one node via 4-step gradient accumulation: 3.1 hours $\times$ 1 node costs \$100 versus 2.35 hours $\times$ 4 nodes at \$301 (\$32/node-hour).
+    Unlike the 175B job, GPT-2, a 2019 model fitting on one GPU, isolates off-node link cost (Napkin Math 6.1 to 6.3). Compare 1.8 s compute on 1 NVLink node (8 GPUs, 450 GB/s) against 4 nodes (32 GPUs, 1.25 GB/s 10-gigabit Ethernet, 10 GbE). Estimate both efficiencies.
 
-    \notecue{Check}{Give pairs 90 seconds to estimate both efficiencies before revealing steps 2 and 3. Efficiency plunges from 99.4\% to 33.3\% ($1.8 / 5.41$) because 3.6 s of 10 GbE communication swamps 1.8 s of compute. Staying on one node saves \$201 not because accumulation magically speeds GPUs, but because placement avoids the slow link entirely while keeping global batch equal.}
+    \notecue{Check}{On 1 node, NVLink adds 11.7 ms to 1,800 ms compute (99.4\%). Across 4 nodes, Lecture 5's hierarchical AllReduce adds 3,600 ms (3.6 s, 4.5 GB / 1.25 GB/s), a 5,411.7 ms step, giving 33.3\% ($1.8/5.41$) and $10.6\times$ speedup on 32 GPUs. On 1 node, 4-step gradient accumulation (averaging gradients across microsteps) matches batch 512 in $4 \times 1.8$ s versus 5.41 s on 4, one-third longer at one-quarter the rate, totaling \$100 (3.1 hours $\times$ 1 node) versus \$301 (2.35 hours $\times$ 4 nodes) at \$32/node-hour. A tempting belief is that accumulation speeds training; instead, avoiding 10 GbE on 1 node saves \$201.}
 
-    \notecue{Watch for}{10 GbE exaggerates the cliff for clarity, yet the exact same cost structure holds whenever cross-node bandwidth limits scaling.}
+    \notecue{Watch for}{10 GbE exaggerates the cliff, yet the same cost structure holds whenever cross-node bandwidth limits scaling.}
 
-    \notecue{Next}{The next slide compares these models against measured MLPerf Training scaling curves up to 10,752 H100s.}
+    \notecue{Teach}{Give pairs 90 seconds to estimate both efficiencies before revealing.}
+
+    \notecue{Next}{Next, compare these models against measured MLPerf Training curves up to 10,752 H100s.}
   }
 \end{frame}
 
@@ -314,11 +322,11 @@
   \mlsyscredit{MLCommons, MLPerf Training v3.1--v5.0 via MLSysIM; Distributed Training, \S6.4.2, fig.\ 9. Photo: Marco Abram, CSCS, CC BY-SA 3.0, Wikimedia Commons.}
   \note{%
     \mlsysnotemeta{1.5 min}{Core}%
-    These measured MLPerf Training v3.1--v5.0 time-to-quality curves (MLSysIM) plot multi-scale submissions from the same system beside dashed ideal scaling lines. NVIDIA's Eos cluster cut GPT-3 training from about 58 minutes on 512 H100s to 3.9 minutes on 10,752 H100s: $21\times$ the GPUs achieved $14.9\times$ speedup, or 71\% relative scaling efficiency; across all five series, top-scale runs keep 71--84\%. Even with every systems technique in today's lecture, communication, barriers, and larger global batches needing extra samples keep real fleets below 100\%.
+    Measured fleets confirm the scaling shortfall those models predict. MLPerf Training (v3.1 through v5.0, MLCommons via MLSysIM), the training counterpart to Lecture 4's MLPerf Storage benchmark, times multi-scale submissions from the same system to a fixed quality target beside ideal scaling lines. On NVIDIA's Eos H100 cluster, GPT-3 training dropped from about 58 minutes on 512 H100s to 3.9 minutes on 10,752 H100s, a $21\times$ GPU increase yielding $14.9\times$ speedup (71\% relative scaling efficiency). Across all five series, the largest runs keep 71\% to 84\%, never 100\%. Even with every systems technique in this lecture, communication, barriers, and large-batch sample growth keep real fleets below linear scaling.
 
     \notecue{Watch for}{Each series' percentage is measured relative to its own smallest submission, which already ran on hundreds of GPUs rather than one device.}
 
-    \notecue{Next}{Section 3 examines the two remaining limits on data-parallel replicas: stragglers at the barrier and the critical batch size.}
+    \notecue{Next}{Section 3 examines the two remaining limits on data-parallel replicas, stragglers at the barrier and the critical batch size.}
   }
 \end{frame}
 
@@ -327,9 +335,9 @@
 % =============================================================================
 \mlsysnote{%
   \mlsysnotemeta{0.5 min}{Core}%
-  Even with an infinitely fast fabric, two forces limit data-parallel replicas: waiting for the slowest GPU at the barrier, and running out of statistical usefulness as the global batch grows.
+  Even with an infinitely fast network fabric, two forces still limit data-parallel replicas. This section asks who sets the pace at a synchronous barrier, and how large the global batch can grow before losing statistical efficiency, meaning each added sample buys fewer saved optimizer steps.
 
-  \notecue{Next}{The next slide calculates how often 1,000 GPUs hit a straggler when each GPU is slow just 1\% of the time.}
+  \notecue{Next}{The next slide calculates how often 1,000 GPUs encounter a straggler when each GPU is late 1\% of the time.}
 }
 \mlsysdivider{Who waits at the barrier, and how large can the batch grow?}{Distributed Training, \S6.3.1 (synchronization models), \S6.4.3 to \S6.4.6}
 \section{Batches}
@@ -352,7 +360,7 @@
   \mlsyscredit{Distributed Training, \S6.3.1 (barrier semantics and failure modes); curve derived. Code: PyTorch torch.distributed docs (10 minutes is the NCCL default).}
   \note{%
     \mlsysnotemeta{1.5 min}{Core}%
-    A straggler computes valid results slowly due to thermal throttling, link congestion, or OS jitter. If each GPU is independently late on 1\% of steps, an entire synchronous step avoids stragglers with probability $0.99^N$: 92\% at 8 GPUs, 37\% at 100, and just 0.004\% at 1,000, because one late GPU stalls the barrier regardless of how fast the other 999 finish. PyTorch's \texttt{init\_process\_group} timeout (10 minutes default for NCCL) aborts truly dead workers yet cannot detect a slow-but-alive GPU (Lecture 7 treats stragglers as gray failures).
+    Under a synchronous barrier, a step finishes on time only when every GPU does. Recall from Lecture 1 that a straggler is a live worker computing valid results slowly, for example from thermal throttling (clock slowdowns from heat), link congestion, or operating-system (OS) jitter (brief host pauses). If each GPU is independently late on 1\% of steps, a clean step occurs with probability $0.99^N$, falling from 92\% at 8 GPUs to 37\% at 100 GPUs and 0.004\% at 1,000 GPUs, because even one late GPU stalls the barrier while the other 999 wait. PyTorch's \texttt{init\_process\_group} defaults to a 10-minute NCCL timeout, which aborts dead workers yet misses a slow live GPU, a gray failure whose detection Lecture 7 develops.
 
     \notecue{Next}{The next slide compares strict barriers (BSP) against relaxed synchronization models (SSP and ASP).}
   }
@@ -365,9 +373,9 @@
   \mlsyscredit{Distributed Training, \S6.3.1, \S6.4.4, figure 5, tables 2 and 4; Ho et al. 2013; Dutta et al. 2018. Timelines schematic.}
   \note{%
     \mlsysnotemeta{2.5 min}{Core}%
-    Trace four workers with W3 (red) acting as a straggler across three synchronization models (\S6.3.1, \S6.4.4). First, step 1 shows Bulk Synchronous Parallel (BSP): all ranks read the same weights and block at the violet barrier (gray idle gaps), preserving exact single-device SGD convergence while letting W3 pace every step. Second, step 2 shows Stale Synchronous Parallel (SSP; Ho et al., 2013): fast workers advance up to $s$ updates ahead before blocking, cutting idle wait at the cost of gradients computed on weights up to $s$ versions stale. Third, step 3 shows Asynchronous Parallel (ASP): removing global barriers eliminates waiting with unbounded staleness. Final production training runs almost always choose BSP for predictable convergence, judging any relaxed protocol strictly by wall-clock time to matched validation quality.
+    Because waiting for one straggler stalls almost every step at scale, distributed frameworks choose along a spectrum of synchronization models (\S6.3.1, \S6.4.4), shown across four workers with slow worker W3. Under Lecture 3's Bulk Synchronous Parallel (BSP) model, all ranks compute on identical weights and wait at each barrier, preserving exact single-device SGD convergence while letting W3 pace every step. Stale Synchronous Parallel (SSP), introduced by Ho et al. (2013) as a bounded-staleness middle ground, lets fast workers advance up to $s$ updates ahead before waiting, trimming idle time at the cost of gradients computed on weights up to $s$ versions old. Asynchronous Parallel (ASP) removes global barriers entirely, trading global-barrier waiting for unbounded staleness. Final production training runs almost always choose BSP for predictable convergence, and any relaxed protocol must win on wall-clock time to matched validation quality.
 
-    \notecue{Next}{The next slide turns from barriers to the statistical ceiling on batch size: the critical batch $\Bcrit$.}
+    \notecue{Next}{The next slide turns from barriers to the statistical ceiling on batch size, the critical batch $\Bcrit$.}
   }
 \end{frame}
 
@@ -389,11 +397,11 @@
   \mlsyscredit{Distributed Training, \S6.4.6, Definition 6.6, figure 10; gradient-noise model of McCandlish et al. 2018.}
   \note{%
     \mlsysnotemeta{2 min}{Core}%
-    McCandlish et al.'s (2018) gradient noise scale $\Bcrit \approx \operatorname{tr}(\Sigma) / \lVert \nabla\mathcal{L} \rVert^2$ compares per-sample gradient variance (noise) against squared true gradient magnitude (signal). Left of the dashed line ($B < \Bcrit$), doubling batch size halves optimizer steps with minimal extra samples; at $B = \Bcrit$, both steps and total samples sit at twice their minimum; past $\Bcrit$, step count flattens while total samples processed climb sharply. Step 2 translates this into maximum useful data-parallel width $N \approx \Bcrit / b$ for local batch $b$: pushing past it forces smaller $b$ (raising communication exposure) or large-batch optimizers.
+    Even when synchronous barriers under BSP are fast, adding replicas grows the global batch until extra samples stop cutting optimizer steps. To locate that statistical ceiling, McCandlish et al. (2018) modeled the critical batch $\Bcrit \approx \operatorname{tr}(\Sigma) / \lVert \nabla\mathcal{L} \rVert^2$, comparing per-sample gradient variance (noise) against squared true gradient magnitude (signal). Below $\Bcrit$ ($B < \Bcrit$), doubling batch size nearly halves optimizer steps with few extra samples. At $B = \Bcrit$, both steps and total samples sit at twice their minimum; past $\Bcrit$, step count flattens while total samples climb quickly. This ceiling bounds useful data-parallel width at $N \approx \Bcrit / b$ for local batch $b$. Pushing $N$ further forces smaller $b$, exposing more communication, or requires large-batch optimizers that adapt step sizes per layer.
 
-    \notecue{Watch for}{$\Bcrit$ shifts across models, datasets, and training phases (typically rising later in training); always validate by wall-clock time to matched target quality.}
+    \notecue{Watch for}{$\Bcrit$ shifts across models, datasets, and training phases, typically rising later in training. Always validate by wall-clock time to matched target quality.}
 
-    \notecue{Next}{The next slide resolves our opening ResNet-50 vote using Goyal et al.'s actual batch-scaling curve.}
+    \notecue{Next}{The next slide answers the opening ResNet-50 question using Goyal et al.'s measured batch-scaling curve.}
   }
 \end{frame}
 
@@ -410,11 +418,11 @@
   \mlsyscredit{Goyal et al. 2017, Table 1 (left) and the validation errors in Figure 3's legends (right); Distributed Training, \S6.4.5 and War Story 6.1.}
   \note{%
     \mlsysnotemeta{2 min}{Core}%
-    This resolves the opening vote: choice C. First, step 1 (left; Goyal et al., 2017, Table 1) shows scaling the learning rate $32\times$ without warmup degraded top-1 validation error from 23.60\% to 24.84\% because large initial updates destabilized early training; ramping the rate linearly over 5 epochs recovered 23.74\%, establishing the linear scaling rule with warmup. Then, step 2 (right) sweeps global batch size up to 64k: error holds within 0.3 points through 8k, then degrades sharply (24.79\% at 16k, 27.55\% at 32k, 33.96\% at 64k). Warmup extended ResNet-50's usable range up to its empirical critical batch near 8k without eliminating the statistical wall.
+    Goyal et al.'s (2017) ImageNet sweep displays that statistical ceiling in practice and settles Section 1's opening question in favor of choice C. Scaling the learning rate $32\times$ without warmup raised top-1 validation error from 23.60\% to 24.84\% (Table 1), because large initial updates destabilized early epochs when the loss surface changes fastest. Ramping the learning rate linearly over 5 epochs recovered 23.74\% error, establishing the linear scaling rule with gradual warmup. Sweeping global batch size up to 64k kept error within 0.3 points through 8k, before rising to 24.79\% at 16k, 27.55\% at 32k, and 33.96\% at 64k. Warmup extended ResNet-50's usable range to its empirical critical batch near 8k without erasing the statistical wall.
 
     \notecue{Watch for}{Reusing an 8-GPU learning rate unchanged on 256 GPUs is one of \S6.10's core pitfalls.}
 
-    \notecue{Next}{Students next calculate $\Bcrit$ and useful data-parallel width from a 7B pilot gradient trace.}
+    \notecue{Next}{Next, calculate $\Bcrit$ and useful data-parallel width from a 7B pilot gradient trace.}
   }
 \end{frame}
 
@@ -444,11 +452,13 @@
   \mlsyscredit{Inputs: Distributed Training, Checkpoint 6.2; results derived. Config keys: DeepSpeed configuration docs.}
   \note{%
     \mlsysnotemeta{2 min}{Core}%
-    Applying Checkpoint 6.2 to a 7B pilot trace ($\operatorname{tr}(\Sigma) = 1.6 \times 10^6$, $\lVert \nabla\mathcal{L} \rVert^2 = 100$) with 64 A100s running 4 sequences per GPU across 32 accumulation steps ($B = 8{,}192$): first, step 2 computes $\Bcrit \approx 1.6 \times 10^6 / 100 = 16{,}000$, placing 8,192 at roughly half of $\Bcrit$ inside the near-proportional regime; then, step 3 divides 16,000 by $4 \times 32 = 128$ sequences per GPU per update to find the statistical crossover at 125 GPUs (matching the DeepSpeed config keys below).
+    Engineers estimate $\Bcrit$ from a small pilot trace before scaling a cluster (Checkpoint 6.2). A 7B run on 64 A100s gives $\operatorname{tr}(\Sigma) = 1.6 \times 10^6$ and $\lVert \nabla\mathcal{L} \rVert^2 = 100$, with 4 sequences per GPU and 32 accumulation steps ($B = 8{,}192$). Before reading on, compute $\Bcrit$, test 8,192 against it, and find the useful GPU width.
 
-    \notecue{Check}{Give one minute alone to compute $\Bcrit$ and the GPU width before revealing steps 2 and 3. 8,192 sits safely below $\Bcrit = 16{,}000$, leaving room to scale to 125 GPUs at 128 sequences per GPU. Cutting gradient accumulation raises the statistical GPU limit but shrinks local compute per sync, exposing more AllReduce time.}
+    \notecue{Check}{The critical batch is $\Bcrit \approx 1.6 \times 10^6 / 100 = 16{,}000$, so 8,192 sits at roughly half of $\Bcrit$, still in the near-proportional regime. Each GPU processes $4 \times 32 = 128$ sequences per update (matching the DeepSpeed training config keys shown), so the statistical crossover lies at $16{,}000 / 128 = 125$ GPUs. A tempting shortcut is to cut gradient accumulation to raise the GPU limit, yet doing so shrinks local compute per sync and exposes more AllReduce time.}
 
-    \notecue{Watch for}{$\Bcrit$ measures statistical efficiency alone; verify step time separately with the Fleet Law.}
+    \notecue{Watch for}{$\Bcrit$ measures statistical efficiency alone. Check hardware step time separately with the Fleet Law.}
+
+    \notecue{Teach}{Give one minute alone to compute $\Bcrit$ and the GPU width before revealing the answers.}
 
     \notecue{Next}{An optional table compares BSP and SSP end-to-end when staleness adds iterations.}
   }
@@ -471,11 +481,11 @@
   \mlsyscredit{Distributed Training, Napkin Math 6.6 and table 5. Scenario inputs: 0.4 s/iter compute baseline, \$2 per GPU-hour.}
   \note{%
     \mlsysnotemeta{1 min}{Optional}%
-    Napkin Math 6.6 illustrates why faster per-step throughput can still lose in wall-clock time to target quality. At 64 workers, BSP needs 1,720 iterations at 45\% communication overhead, achieving $40.1\times$ speedup for \$35; relaxing to SSP ($s=4$) cuts communication overhead from 45\% to 25\%, yet stale updates push iterations up to 2,100, dropping speedup to $38.1\times$ and raising cost to \$37. SSP pays off only when severe heterogeneity or straggler delays inflate BSP waits far more than staleness inflates iterations (just as Lecture 5's gradient compression must be judged by time to quality).
+    Napkin Math 6.6's illustrative scenario checks hardware step time alongside statistical convergence, showing why faster steps can still lose in wall-clock time to target quality. At 64 workers, BSP needs 1,720 iterations with 45\% communication overhead, reaching $40.1\times$ speedup for \$35. Relaxing the barrier to SSP ($s=4$) cuts communication overhead from 45\% to 25\%, yet stale updates raise required iterations to 2,100, lowering speedup to $38.1\times$ and raising cost to \$37. SSP pays off only when severe heterogeneity or straggler delays inflate BSP waits far more than staleness inflates iterations; like Lecture 5's gradient compression, it must be judged by wall-clock time to target quality. Across this section, barriers and $\Bcrit$ cap data-parallel width even when models fit in memory.
 
-    \notecue{Optional}{For a 50-minute class, skip this slide and move straight to solving the single-GPU memory wall via sharding.}
+    \notecue{Teach}{For a 50-minute class, skip this slide and explain in one sentence that relaxing barriers saves per-step wait time only if added iterations do not erase the gain, then move to sharding.}
 
-    \notecue{Next}{Section 4 addresses memory capacity: how data-parallel replicas stop holding duplicate copies of training state.}
+    \notecue{Next}{Section 4 addresses memory capacity and how data-parallel replicas stop holding duplicate copies of training state.}
   }
 \end{frame}
 
@@ -484,7 +494,7 @@
 % =============================================================================
 \mlsysnote{%
   \mlsysnotemeta{0.5 min}{Core}%
-  Plain data parallelism replicates all 2,800 GB of 175B state on every GPU, which is impossible on 80 GB chips. This section eliminates redundant copies with ZeRO and FSDP.
+  Even below $\Bcrit$, plain data parallelism replicates all 2,800 GB of 175B training state on every GPU, overflowing 80 GB chips. This section asks how replicas remove those duplicate copies using ZeRO (introduced in Lecture 2) and PyTorch's FSDP (whose collectives Lecture 5 priced), and what bandwidth bill that capacity costs.
 
   \notecue{Next}{The next slide charts when frontier model training state crossed single-accelerator HBM capacity.}
 }
@@ -504,9 +514,9 @@
   \mlsyscredit{Epoch AI via MLSysIM ($\times 16$ B/param); Distributed Training, \S6.1, fig.\ 1. Photo: C. Spille/pcgameshardware.de, CC BY-SA 4.0, Wikimedia Commons.}
   \note{%
     \mlsysnotemeta{1.5 min}{Core}%
-    Comparing Epoch AI data (MLSysIM), single-GPU memory (blue squares, K80 to B300) grew roughly $24\times$, whereas training state at 16 B/param (red dots, driven by Lecture 1's scaling laws) grew over four orders of magnitude. The lines crossed at GPT-3 in 2020 (2.8 TB of state, roughly $35\times$ the largest GPU memory of that year), and every subsequent frontier model sits far above single-chip HBM. Even a $10\times$ jump in per-chip memory would leave the gap above $10\times$, making state partitioning permanent.
+    Waiting for bigger chips cannot close this capacity gap. Comparing Epoch AI's model dataset (via MLSysIM) against single-GPU memory shows device capacity growing roughly $24\times$ from the earlier NVIDIA K80 GPU to Lecture 2's B300. Over the same span, training state at 16 B/param, driven by Lecture 1's scaling laws, grew by more than four orders of magnitude. Demand crossed single-GPU capacity at GPT-3 in 2020, when 2.8 TB of state reached roughly $35\times$ the largest GPU memory of that year. Every later frontier model sits well above one chip's HBM, so even a $10\times$ capacity jump over that year's GPU would still leave a $3.5\times$ gap for GPT-3 alone, making multi-GPU state partitioning permanent.
 
-    \notecue{Next}{The next slide walks through ZeRO stages 1, 2, and 3 to shrink per-GPU state across replicas.}
+    \notecue{Next}{The next slide traces ZeRO stages 1, 2, and 3 to shrink per-GPU state across replicas.}
   }
 \end{frame}
 
@@ -525,9 +535,9 @@
   \mlsyscredit{Distributed Training, Napkin Math 6.4 and table 3 (7B, 16 B per parameter, 64 GPUs); ZeRO-1 and ZeRO-2 derived. Config: DeepSpeed configuration docs.}
   \note{%
     \mlsysnotemeta{2.5 min}{Core}%
-    Napkin Math 6.4 tracks a 7B model (112 GB state at 16 B/param) across 64 GPUs in four build steps alongside DeepSpeed's \texttt{zero\_optimization} stage key. First, step 1 (DDP, stage 0) replicates 112 GB per GPU, exceeding 80 GB HBM mostly because FP32 optimizer state alone takes 84 GB (75\%). Second, step 2 (ZeRO-1) shards optimizer state across 64 GPUs, slashing memory to 29.3 GB so the model already fits, while keeping DDP's $2\Psi$ wire volume (via ReduceScatter and AllGather from Lecture 5). Third, step 3 (ZeRO-2) shards gradients too, reaching 15.5 GB at the same $2\Psi$ traffic. Fourth, step 4 (ZeRO-3 / PyTorch FSDP) shards weights as well down to 1.75 GB ($112/64$), paying $1.5\times$ the wire volume ($3\Psi$).
+    Because single-chip memory cannot keep up, ZeRO (previewed in Lecture 2 and developed by Microsoft in DeepSpeed's \texttt{zero\_optimization} stages) eliminates duplicate state across replicas in three steps (Napkin Math 6.4, tracking a 7B model's 112 GB at 16 B/param on 64 GPUs). Under replicated DDP (stage 0), each GPU holds all 112 GB, overflowing 80 GB HBM because FP32 optimizer state takes 84 GB (75\%). ZeRO-1 shards optimizer state across 64 GPUs to 29.3 GB so the model fits, matching DDP's $2\Psi$ communication volume ($\Psi$ is parameter bytes) by replacing AllReduce with Lecture 5's ReduceScatter and AllGather. ZeRO-2 shards gradients too, reaching 15.5 GB at the same $2\Psi$ volume. ZeRO-3 (PyTorch FSDP, whose collectives Lecture 5 priced) shards parameters as well, reaching 1.75 GB ($112/64$) at $1.5\times$ wire volume ($3\Psi$).
 
-    \notecue{Watch for}{Check the traffic line beneath each bar: ZeRO-1 and ZeRO-2 match DDP bytes, whereas ZeRO-3 adds a second AllGather per step.}
+    \notecue{Watch for}{ZeRO-1 and ZeRO-2 match DDP's byte volume, whereas ZeRO-3 adds a second AllGather per step.}
 
     \notecue{Next}{An optional slide traces one layer's memory lifetime through an FSDP forward and backward pass.}
   }
@@ -540,13 +550,13 @@
   \mlsyscredit{Distributed Training, \S6.3.3 (Definition 6.3, figure 7; interactive Explore figure: FSDP Parameter Lifetime). $\Psi$: parameter bytes.}
   \note{%
     \mlsysnotemeta{1.5 min}{Optional}%
-    Trace one layer under ZeRO-3 / FSDP across four steps. First, step 1 holds only $1/N$ of parameters and optimizer state persistently. Second, step 2 AllGathers full layer weights right before forward compute and retains activations. Third, step 3 immediately discards gathered weights after forward while activations remain live. Fourth, step 4 runs a second AllGather for backward, computes gradients, frees activations, and ReduceScatters so each rank retains $1/N$ of gradients: $3L$ collectives and $\approx 3\Psi$ bytes per GPU ($1.5\times$ DDP), hidden only by prefetching the next layer during compute.
+    Why does ZeRO-3 pay $1.5\times$ DDP communication? At rest, each GPU stores only $1/N$ of a layer's parameters and optimizer state. Before the forward pass, an AllGather assembles full layer weights, which are discarded right after forward compute while activations stay in memory. Before the backward pass, a second AllGather rebuilds those weights to compute gradients, activations are freed, and a ReduceScatter returns $1/N$ of the gradients to each rank. Across $L$ layers, that costs $3L$ collectives and $\approx 3\Psi$ bytes per GPU ($1.5\times$ DDP), hidden only by prefetching the next layer during compute.
 
-    \notecue{Watch for}{Treating sharding as free memory is a pitfall: whenever state and activations already fit under DDP, FSDP adds pure bandwidth overhead.}
+    \notecue{Watch for}{Sharding is not free memory. Whenever state and activations already fit under DDP, FSDP adds pure bandwidth overhead.}
 
-    \notecue{Optional}{For a 50-minute class, skip this slide; the next prediction tests ZeRO-3's bandwidth bill directly on the 175B model.}
+    \notecue{Teach}{For a 50-minute class, skip this slide and note that ZeRO-3 gathers weights twice per step; the next prediction tests that bill on the 175B model.}
 
-    \notecue{Next}{Students next predict whether ZeRO-3 alone can fit and efficiently train the 175B model on 64 H100s.}
+    \notecue{Next}{Next, predict whether ZeRO-3 alone can fit and efficiently train the 175B model on 64 H100s.}
   }
 \end{frame}
 
@@ -572,9 +582,11 @@
   \mlsyscredit{Distributed Training, Napkin Math 6.7 and \S6.5 (regather traffic on the 1,024-GPU reference cluster).}
   \note{%
     \mlsysnotemeta{2.5 min}{Core}%
-    Napkin Math 6.7 tests our 175B model (2,800 GB state) under pure ZeRO-3 on 64 H100s (80 GB) with full activation checkpointing (2,048-token sequence). Step 2 reveals the two-part verdict: it fits in memory ($2{,}800 / 64 = 43.75$ GB persistent state plus 4.8 GB activations equals 48.6 GB $< 80$ GB), yet it runs painfully slowly because regathering all layer weights twice plus ReduceScatter moves about $1.1$ TB per GPU per step across NDR links (about 10$\times$ local compute), and sharding never divides single-layer activations or compute.
+    Sharding fit the smaller model, so the real test is whether pure ZeRO-3 can train the 175B model (2,800 GB state) on 64 H100s (80 GB each) with a 2,048-token sequence and full activation checkpointing, discarding intermediate forward activations and recomputing them in backward (Napkin Math 6.7). Before reading on, decide whether it fits and runs fast.
 
-    \notecue{Check}{Poll two separate votes before revealing step 2: fits vs.\ does not fit, then fast vs.\ slow. The right verdict is ``fits, but slow'' because 48.6 GB fits cleanly inside 80 GB while about 1.1 TB of cross-node regathering overwhelms NDR links. Most students guess ``does not fit,'' surprised to discover bandwidth rather than HBM capacity limits pure ZeRO-3.}
+    \notecue{Check}{The verdict is ``fits, but slow.'' Persistent state shrinks to $2{,}800 / 64 = 43.75$ GB, plus 4.8 GB of activations gives 48.6 GB $< 80$ GB. However, gathering all layer weights twice plus ReduceScatter moves three times the weight payload, about $1.1$ TB per GPU per step, taking roughly 10$\times$ the 2.1 s FP8 local compute of the 1,024-GPU reference step on one NDR port (as the bottom bar contrasts), without splitting any layer's activations or compute. A tempting answer is ``does not fit,'' because 2,800 GB looks large, yet bandwidth rather than HBM capacity is the limit.}
+
+    \notecue{Teach}{Take two separate votes before revealing the verdict, first fits versus does not fit, then fast versus slow.}
 
     \notecue{Next}{An optional slide compares PyTorch's one-line wrapper difference between DDP and FSDP.}
   }
@@ -604,9 +616,9 @@ model = FSDP(model, sharding_strategy=
   \mlsyscredit{PyTorch documentation, torch.nn.parallel and torch.distributed.fsdp (BSD license). Distributed Training, table 11.}
   \note{%
     \mlsysnotemeta{1 min}{Optional}%
-    In PyTorch, switching from replicated \texttt{DDP} to sharded \texttt{FSDP} with \texttt{FULL\_SHARD} (ZeRO-3) or \texttt{SHARD\_GRAD\_OP} (ZeRO-2) takes one wrapper line (corresponding to DeepSpeed ZeRO stages, Megatron's distributed optimizer, or JAX mesh sharding). That syntactic simplicity is hazardous: one line shifts collectives onto the forward and backward critical paths without surfacing the $1.5\times$ wire bill in code.
+    Despite that heavy bandwidth bill, framework interfaces hide the shift. In PyTorch, switching from replicated \texttt{DDP} to sharded \texttt{FSDP} with \texttt{FULL\_SHARD} (ZeRO-3) or \texttt{SHARD\_GRAD\_OP} (ZeRO-2) takes a single wrapper line. The same trade-off appears under different names in DeepSpeed ZeRO stages, Megatron-LM's distributed optimizer (which shards optimizer state), and the JAX framework's device-mesh sharding (which partitions state across a device grid). Changing one line moves collectives onto the forward and backward critical paths without showing the $1.5\times$ communication volume in code. Sharding therefore buys capacity with messages without splitting any layer's math.
 
-    \notecue{Optional}{For a 50-minute class, skip this slide and move straight to splitting model computation across GPUs.}
+    \notecue{Teach}{For a 50-minute class, skip this slide and note that PyTorch FSDP changes one wrapper line while changing the communication schedule, then move to splitting computation.}
 
     \notecue{Next}{Section 5 splits computation itself across GPUs using pipeline and tensor parallelism.}
   }
@@ -617,9 +629,9 @@ model = FSDP(model, sharding_strategy=
 % =============================================================================
 \mlsysnote{%
   \mlsysnotemeta{0.5 min}{Core}%
-  Sharding cuts stored state without dividing layers. This section cuts the model's computation itself: between layers (pipeline parallelism) and inside every layer (tensor parallelism).
+  Sharding lowers stored state per GPU without dividing any layer's math. This section asks how splitting computation itself, between layers with pipeline parallelism and inside each layer with tensor parallelism, divides the work and what each cut costs in idle time or interconnect traffic.
 
-  \notecue{Next}{The next slide illustrates pipeline parallelism and why microbatches shrink idle fill-and-drain wedges.}
+  \notecue{Next}{The next slide illustrates pipeline parallelism and shows why microbatches shrink idle fill-and-drain wedges.}
 }
 \mlsysdivider{How do we split the model's computation, and what does each cut cost?}{Distributed Training, \S6.5.1 to \S6.5.5}
 \section{Splitting}
@@ -630,11 +642,11 @@ model = FSDP(model, sharding_strategy=
   \mlsyscredit{Distributed Training, \S6.5.1--\S6.5.2, figures 12--13 (interactive Explore figure: Pipeline Parallelism). F: forward; B: backward; red: idle.}
   \note{%
     \mlsysnotemeta{2 min}{Core}%
-    Pipeline parallelism assigns consecutive blocks of layers to stages, sending only boundary activations point-to-point across nodes. First, step 1 sends one whole batch across four stages, leaving 6 of 8 slots idle (red). Second, step 2 applies GPipe by splitting the batch into $m = 4$ microbatches (slices of one global update): by slot 4 every stage computes concurrently, cutting idle time on GPU 0 to 6 of 14 slots (43\%). Third, step 3 highlights GPipe's memory trap: running all $m$ forward passes before starting any backward forces stage 0 to store activations for all $m$ microbatches simultaneously.
+    Recall from Lectures 2 and 5 that pipeline parallelism assigns consecutive layer blocks to stages and sends only boundary activations point-to-point across nodes. Sending one whole batch across four stages leaves 6 of 8 time slots idle while stages wait. In 2019, Google's GPipe schedule introduced synchronous microbatch pipelining, splitting one global update into $m = 4$ smaller slices called microbatches so stages run concurrently. By slot 4 every stage is busy, cutting idle time on GPU 0 to 6 of 14 slots (43\%). However, because GPipe finishes all $m$ forward passes before starting any backward pass, stage 0 must keep activations for all $m$ microbatches live at once.
 
-    \notecue{Watch for}{Microbatches slice one global batch inside the pipeline without changing optimizer update math.}
+    \notecue{Watch for}{Microbatches slice one global batch inside the pipeline without changing the optimizer update math.}
 
-    \notecue{Next}{The next slide introduces the 1F1B schedule that eliminates GPipe's activation memory buildup.}
+    \notecue{Next}{The next slide introduces the 1F1B schedule, which removes GPipe's activation memory buildup.}
   }
 \end{frame}
 
@@ -644,9 +656,9 @@ model = FSDP(model, sharding_strategy=
   \mlsyscredit{Distributed Training, \S6.5.2 (interactive Explore figure: 1F1B Pipeline Schedule); Narayanan et al. 2019.}
   \note{%
     \mlsysnotemeta{2 min}{Core}%
-    Walk through Narayanan et al.'s (2019) one-forward-one-backward (1F1B) schedule for $p = 4$ stages and $m = 8$ microbatches. First, step 1 (warm-up): stage $s$ launches $p - s$ forwards (4, 3, 2, 1) to fill the pipe until microbatch 1 reaches stage 3. Second, step 2 (steady 1F1B): every stage alternates one backward and one forward, freeing each microbatch's activations immediately after its backward so peak live activations stay capped at $[4, 3, 2, 1]$ instead of GPipe's 8 on every stage (stage 0 still holds $p$ because it waits for the round-trip back from stage 3). Third, step 3 (cooldown): remaining backwards drain cleanly, keeping the identical bubble fraction $(p-1)/(m+p-1) = 3/11$ (27.3\%) at half the activation memory (and larger savings as $m$ grows).
+    To eliminate GPipe's activation buildup, Narayanan et al.'s (2019) one-forward-one-backward (1F1B) schedule starts backward passes early, shown here for $p = 4$ stages and $m = 8$ microbatches. During warm-up, stage $s$ launches $p - s$ forward passes (4, 3, 2, and 1 across stages) until microbatch 1 reaches stage 3. In steady state, every stage alternates one backward pass and one forward pass, freeing each microbatch's activations right after its backward pass. Peak live activations stay capped at $[4, 3, 2, 1]$ rather than GPipe's 8 on every stage, with stage 0 holding $p$ during the round trip from stage 3. Cooldown then drains the remaining backward passes, leaving six of twenty-two slots idle on each stage, the same $3/11$ (27.3\%) bubble as GPipe at half the activation memory, with larger savings as $m$ grows.
 
-    \notecue{Next}{The next slide plots this bubble fraction formula against $p$ and $m$.}
+    \notecue{Next}{The next slide derives the general bubble fraction formula and plots it against $p$ and $m$.}
   }
 \end{frame}
 
@@ -666,9 +678,9 @@ model = FSDP(model, sharding_strategy=
   \mlsyscredit{Distributed Training, \S6.5.2, Napkin Math 6.8; Huang et al. 2019; Narayanan et al. 2019. Code: PyTorch torch.distributed.pipelining docs.}
   \note{%
     \mlsysnotemeta{1.5 min}{Core}%
-    Across $p$ stages and $m$ microbatches, fill and drain leave $p - 1$ idle slots beside $m$ useful slots, giving idle bubble fraction $(p-1)/(m+p-1)$ (Napkin Math 6.8): 43\% at $p=4, m=4$, and 18\% at $p=8, m=32$. Keeping bubble waste below 10\% requires $m > 9(p-1)$, which step 2 links directly back to 1F1B's activation cap ($p$ live microbatches) and PyTorch's \texttt{Schedule1F1B} API. Raising $m$ shrinks the bubble yet enlarges global batch size if microbatch size stays fixed, colliding with $\Bcrit$ (zero-bubble schedules in \S6.5.2 split backward into activation- and weight-gradient passes to fill gaps further).
+    1F1B solves activation buildup without removing fill-and-drain idle time. Across $p$ stages and $m$ microbatches, each microbatch pairs one forward and one backward pass, leaving $p - 1$ idle intervals beside $m$ useful ones for a bubble fraction of $(p-1)/(m+p-1)$ (Napkin Math 6.8), falling from 43\% at $p=4, m=4$ to 18\% at $p=8, m=32$. Keeping the bubble below 10\% requires $m > 9(p-1)$. Large $m$ fits in memory because 1F1B caps live activations at $p$ microbatches, as in PyTorch's \texttt{Schedule1F1B}. Raising $m$ shrinks the bubble, yet at fixed microbatch size it also grows the global batch toward $\Bcrit$. Zero-bubble schedules (\S6.5.2) split the backward pass into activation-gradient and weight-gradient passes to fill remaining gaps.
 
-    \notecue{Next}{Students next calculate the exact bubble fraction for a 16-stage pipeline with 32 microbatches.}
+    \notecue{Next}{Next, calculate the exact bubble fraction for a 16-stage pipeline with 32 microbatches.}
   }
 \end{frame}
 
@@ -690,9 +702,11 @@ model = FSDP(model, sharding_strategy=
   \mlsyscredit{Distributed Training, \S6.6.2 (16 stages, 32 microbatches) and Napkin Math 6.8.}
   \note{%
     \mlsysnotemeta{1.5 min}{Core}%
-    This quick calculation tests the exact 16-stage, 32-microbatch geometry used in our 16,384-GPU layout (\S6.6.2). Step 2 plots the point and computes $(16 - 1) / (32 + 16 - 1) = 15 / 47 = 31.9\%$ idle time, nearly one-third of every step; getting below 10\% would require $m > 9 \times 15 = 135$. Frontier runs sometimes accept a 31.9\% bubble because a shallower pipeline would quadruple data-parallel replicas and push global batch size past $\Bcrit$.
+    Deep frontier pipelines test that bubble-versus-batch trade-off directly on a 16-stage, 32-microbatch geometry used at 16,384-GPU scale (examined in the Placement section; \S6.6.2). Before reading on, compute the idle fraction and find how many microbatches would push the bubble below 10\%.
 
-    \notecue{Check}{Give 45 seconds to write the idle fraction before revealing step 2. The exact value is $15 / 47 = 31.9\%$ because total slots equal $m + p - 1 = 47$. Students who write $15 / 32 = 46.9\%$ forget to include the $p - 1$ fill slots in the denominator.}
+    \notecue{Check}{The bubble fraction is $(16 - 1) / (32 + 16 - 1) = 15 / 47 = 31.9\%$, nearly one-third of every step, because total slots equal $m + p - 1 = 47$. A tempting mistake is $15 / 32 = 46.9\%$, which omits the $p - 1$ fill slots from the denominator. Reaching below 10\% requires $m > 9 \times 15 = 135$. Frontier runs sometimes accept a 31.9\% bubble because a shallower pipeline (for example, four stages instead of 16) would quadruple data-parallel replicas and push the global batch past $\Bcrit$.}
+
+    \notecue{Teach}{Give 45 seconds to write the idle fraction before revealing the point and numbers.}
 
     \notecue{Next}{The next slide cuts inside each transformer layer using Megatron-LM tensor parallelism.}
   }
@@ -705,9 +719,9 @@ model = FSDP(model, sharding_strategy=
   \mlsyscredit{Distributed Training, \S6.5.3 and figure 15; Shoeybi et al. 2019 (Megatron-LM).}
   \note{%
     \mlsysnotemeta{1.5 min}{Core}%
-    Megatron-LM tensor parallelism (Shoeybi et al., 2019) splits individual layer matrices across GPUs across three steps. First, step 1 splits the first linear layer by columns so every GPU multiplies full input $X$ by its weight columns, yielding local intermediate slice $Y$ with zero communication. Second, step 2 splits the second matrix by rows so each GPU multiplies its local $Y$ slice by matching rows to obtain a partial output sum without exchanging intermediates. Third, step 3 executes one AllReduce summing partial outputs; pairing attention (QKV + projection) and MLP requires two AllReduces per transformer block in forward and two more in backward.
+    Pipeline stages keep every layer whole on one GPU, so when a single layer is too large or slow, tensor parallelism (previewed in Lecture 2) cuts inside its matrix multiplications. NVIDIA's Megatron-LM (the 512-GPU run from Lecture 0; Shoeybi et al., 2019) minimizes collectives by pairing column and row splits. Splitting the first linear layer by columns lets each GPU multiply the full input $X$ by its weight columns to produce a local intermediate slice $Y$ with zero communication. Splitting the second matrix by rows lets each GPU multiply $Y$ by matching weight rows into a partial output, and one AllReduce sums those partial outputs. Pairing attention (query, key, and value, or QKV, plus output projection) with the multilayer perceptron (MLP) needs two AllReduces per transformer block in forward and two in backward.
 
-    \notecue{Watch for}{Unlike data parallelism, tensor parallelism alters model code by replacing standard linear layers with column- and row-parallel layers.}
+    \notecue{Watch for}{Unlike data parallelism, tensor parallelism changes model code by replacing standard linear layers with column-parallel and row-parallel layers.}
 
     \notecue{Next}{The next slide checks whether tensor-parallel exchanges fit on NVLink versus cross-node InfiniBand.}
   }
@@ -727,9 +741,9 @@ model = FSDP(model, sharding_strategy=
   \mlsyscredit{Photo: Pokiiri (CC BY-SA 4.0), Wikimedia Commons. Distributed Training, Systems Perspective 6.1 (one GPT-3 layer, TP 8, one 2,048-token sequence, half of H100 dense FP16 peak).}
   \note{%
     \mlsysnotemeta{1.5 min}{Core}%
-    Systems Perspective 6.1 tests one 175B transformer layer split 8 ways (2,048-token sequence, 50\% of H100 dense FP16 peak): local compute takes about 1.9 ms per GPU. Its tensor-parallel AllReduce takes about 0.4 ms over 450 GB/s intra-node NVLink (comfortably smaller than compute) versus about 3.5 ms over one 50 GB/s NDR port, nearly twice the compute it serves across 96 layers. Tensor parallelism therefore belongs strictly inside the fast NVLink domain (eight GPUs on one board, whereas pipeline stages cross nodes because they send only one boundary activation per microbatch; Lecture 2's staircase).
+    Paying two AllReduces inside every block raises an immediate placement test of which interconnect can keep up with layer compute (Systems Perspective 6.1). Splitting one 175B transformer layer 8 ways on a 2,048-token sequence at 50\% of H100 dense FP16 peak takes about 1.9 ms of compute per GPU. The tensor-parallel AllReduce takes about 0.4 ms over 450 GB/s intra-node NVLink, well below compute, whereas over one 50 GB/s NDR port it takes about 3.5 ms, nearly twice the compute it serves across 96 layers. Tensor parallelism therefore belongs inside the fast eight-GPU NVLink domain, while pipeline stages can cross nodes because they send one boundary activation per microbatch, following Lecture 2's bandwidth staircase.
 
-    \notecue{Watch for}{The physical rule tracks the fast communication domain, not ``one server'': multi-node NVLink Switch fabrics extend that fast domain across boards (\S6.6.2).}
+    \notecue{Watch for}{The physical rule tracks the fast communication domain rather than ``one server.'' Recall from Lecture 2 that multi-node NVLink Switch fabrics extend that fast domain across boards (\S6.6.2).}
 
     \notecue{Next}{An optional slide checks Megatron-LM's measured tensor-parallel scaling curve.}
   }
@@ -742,11 +756,11 @@ model = FSDP(model, sharding_strategy=
   \mlsyscredit{Shoeybi et al. 2019, Figure 5 and \S5 (GPT-2-shaped models, 1.2B on 1 GPU to 8.3B on 8; DGX-2H, NVSwitch 300 GB/s); Distributed Training, \S6.5.3.}
   \note{%
     \mlsysnotemeta{1 min}{Optional}%
-    Shoeybi et al.'s (2019) weak-scaling measurements grow GPT-2 from 1.2B parameters on 1 V100 to 8.3B on 8 V100s inside one DGX-2H server (300 GB/s NVSwitch). Relative efficiency declines from 95\% to 82\% to 77\% at TP 8 because narrower matrix shards leave less local compute to hide exchanges; adding 64-way data parallelism holds 74\% across 512 GPUs, showing why TP stops at the fast-domain boundary rather than scaling to 64.
+    Even inside a fast NVSwitch domain, tensor parallelism (TP) loses efficiency as shards narrow. Shoeybi et al.'s (2019) weak-scaling runs grew GPT-2 with GPU count, from 1.2B parameters on 1 V100 to 8.3B on 8 V100s in one DGX-2H server (300 GB/s NVSwitch). Relative weak-scaling efficiency fell from 95\% to 82\% and 77\% at TP 8 as narrower shards left less compute to hide exchanges. The right-hand bars pair 64-way data parallelism with one-, two-, four-, and 8-way TP (so 64 GPUs runs TP 1 with DP 64 rather than TP 8), falling from its highest bar at 64 GPUs across the middle bars to 74\% at 512 GPUs as TP widens again, confirming why TP stops at the fast-domain boundary rather than scaling to 64.
 
-    \notecue{Watch for}{Absolute numbers come from 2019 V100s; the declining-efficiency shape carries over to modern H100s.}
+    \notecue{Watch for}{The absolute numbers come from 2019 V100s, while the declining-efficiency shape carries over to modern H100s.}
 
-    \notecue{Optional}{For a 50-minute class, skip this slide; the previous NVLink-versus-NDR comparison already established the TP-8 rule.}
+    \notecue{Teach}{For a 50-minute class, skip this slide and note that measured Megatron scaling confirms keeping TP at 8 inside the fast domain.}
 
     \notecue{Next}{A second optional slide previews context, expert, and embedding split axes.}
   }
@@ -759,11 +773,11 @@ model = FSDP(model, sharding_strategy=
   \mlsyscredit{Distributed Training, \S6.4.8, \S6.5.4--\S6.5.6 (interactive Explore figures: Ulysses Sequence Transpose; MoE All-to-All Routing).}
   \note{%
     \mlsysnotemeta{1.5 min}{Optional}%
-    Three additional AllToAll-driven axes extend 3D parallelism left to right. First, step 1 (Context): DeepSpeed Ulysses transposes token-sharded $[S/c, h]$ activations into head-sharded $[S, h/c]$ via AllToAll for local full-sequence attention, whereas Ring Attention circulates KV tiles (overlapping above 1,100 tokens/chunk on NVLink and 9,900 on NDR). Second, step 2 (MoE): tokens dispatch via AllToAll to expert GPUs and combine back, where hot experts (E2) overflow capacity buffers. Third, step 3 (DLRM): 10 TB+ embedding tables shard by row hash, where popular IDs skew receive ports. Remember the bottom rule: FP8 matrix math cuts wire time only if collectives also transmit FP8 bytes.
+    Dense 3D parallelism (data, pipeline, and tensor) leaves three extra walls, answered by Lecture 5's AllToAll collective or ring exchanges. For long contexts, DeepSpeed Ulysses uses AllToAll to transpose activations of sequence length $S$, context-parallel degree $c$, and $h$ attention heads from token-sharded $[S/c, h]$ into head-sharded $[S, h/c]$ slices for local full-sequence attention, whereas Ring Attention keeps query chunks local and passes key-value (KV) tiles point-to-point around a ring, overlapping above 1,100 tokens/chunk on NVLink or 9,900 on NDR. In Mixture-of-Experts (MoE) models (Lectures 2 and 5), AllToAll routes tokens to expert GPUs and back, where hot experts (E2) overflow their fixed token buffer. In Deep Learning Recommendation Models (DLRM, Lecture 1's Archetype B), 10 TB+ embedding tables shard rows by hashing item IDs, where popular IDs skew receive ports. Across all axes, FP8 math cuts network time only when collectives send FP8 bytes.
 
-    \notecue{Optional}{For a 50-minute class, skip this slide and move straight into combining DP, PP, and TP into one joint plan.}
+    \notecue{Teach}{For a 50-minute class, skip this slide and mention that context, expert, and embedding splits add extra communication axes, then move to combining DP, PP, and TP.}
 
-    \notecue{Next}{Section 6 combines all cuts onto our 1,024-GPU cluster and lifts the 175B run from 15\% to 87\%.}
+    \notecue{Next}{Section 6 combines these axes on the 1,024-GPU cluster and lifts the 175B run from 15\% to 87\%.}
   }
 \end{frame}
 
@@ -772,7 +786,7 @@ model = FSDP(model, sharding_strategy=
 % =============================================================================
 \mlsysnote{%
   \mlsysnotemeta{0.5 min}{Core}%
-  No single parallelism axis solves both memory and bandwidth for a 175B model. This section combines DP, PP, TP, and ZeRO-1 into one feasible joint plan mapped onto physical link tiers.
+  No single parallelism axis solves both memory capacity and network bandwidth for a 175B model. This section asks how to combine data parallelism (DP), pipeline parallelism (PP), tensor parallelism (TP), and ZeRO-1 into one feasible plan mapped onto physical link tiers, and how to diagnose layouts that break.
 
   \notecue{Next}{The next slide maps $\text{TP } 8 \times \text{PP } 4 \times \text{DP } 32$ onto 1,024 GPUs and lists the four feasibility tests.}
 }
@@ -787,11 +801,11 @@ model = FSDP(model, sharding_strategy=
   \mlsyscredit{Distributed Training, \S6.2, \S6.6 (configuration C), Definition 6.12. Flags: Megatron-LM arguments.}
   \note{%
     \mlsysnotemeta{1.5 min}{Core}%
-    Configuration C organizes 1,024 GPUs as $\text{TP } 8 \times \text{PP } 4 \times \text{DP } 32$ (expressed directly in the Megatron-LM flags shown, with DP inferred as the remaining factor). Each axis matches its hardware tier (aligned with Lecture 3's rail topology): TP 8 stays on intra-node NVLink (two AllReduces per layer), PP 4 sends boundary activations across neighboring nodes, and DP 32 synchronizes each GPU's $1/32$ gradient shard (about 10.9 GB) across matching ranks. Every plan must pass four joint checks: divisibility of heads/layers, per-GPU memory fit, global batch below $\Bcrit$, and wire traffic fitting each link tier.
+    A complete parallelism plan maps each coupled axis onto the link tier that can carry it, aligned with Lecture 3's rail-optimized topology (which links matching GPU positions across nodes). One complete plan arranges 1,024 GPUs as $\text{TP } 8 \times \text{PP } 4 \times \text{DP } 32$ (Configuration C on the next slide), where Megatron-LM flags set TP and PP directly and leave DP as the remaining factor. TP 8 stays on intra-node NVLink for its two AllReduces per layer, PP 4 passes boundary activations across neighboring nodes, and DP 32 syncs each GPU's $1/(8 \times 4) = 1/32$ model-split gradient shard (about 10.9 GB) across matching ranks. Every plan must pass four joint tests, namely dividing attention heads and layers evenly, fitting per-GPU memory, keeping global batch below $\Bcrit$, and matching traffic to each link tier.
 
-    \notecue{Watch for}{DP, PP, and TP are coupled degrees multiplying to $N$, not independent sliders: raising one forces another down and shifts overhead.}
+    \notecue{Watch for}{DP, PP, and TP are coupled factors multiplying to $N$, not independent sliders. Raising one forces another down and moves overhead elsewhere.}
 
-    \notecue{Next}{The next slide unveils the 175B scoreboard rising from 15\% to 87\% scaling efficiency.}
+    \notecue{Next}{The next slide shows the 175B scoreboard rising from 15\% to 87\% scaling efficiency.}
   }
 \end{frame}
 
@@ -802,9 +816,9 @@ model = FSDP(model, sharding_strategy=
   \mlsyscredit{Distributed Training, \S6.6 (1,024 H100s in 128 nodes of 8; 16 B per parameter; same overlap model as Napkin Math 6.5).}
   \note{%
     \mlsysnotemeta{2 min}{Core}%
-    Follow our 175B running case across three configurations on 1,024 H100s (128 nodes of 8, Napkin Math 6.5 overlap model). First, step 1 (Config A, pure DP 1,024): counterfactual 2,800 GB/GPU and 15\% scaling efficiency due to 14 s AllReduces. Second, step 2 (Config B, TP 8 inside nodes $\times$ DP 128): the single biggest leap, cutting cross-node DP gradients $8\times$ (350 to 43.75 GB, 14 s to 1.75 s) without leaving NVLink, lifting efficiency to about 83\% (54.5\% unoverlapped), though 350 GB/GPU still exceeds 80 GB. Third, step 3 (Config C, TP 8 $\times$ PP 4 $\times$ DP 32): DP shards shrink to 10.9 GB (0.44 s), paying an 8.6\% bubble ($3/35$ at $m=32$) for about 87\% efficiency, while ZeRO-1 over 32 replicas trims per-GPU state from 87.5 GB down to 23.9 GB ($10.9 + 10.9 + 2.1$ GB).
+    Applying those tier rules step by step lifts the 175B job from 15\% to 87\% on 1,024 H100s (128 nodes of 8, under Napkin Math 6.5's partial-overlap schedule, which hides at most three-quarters of each DP AllReduce). Configuration A uses pure DP 1,024, a counterfactual at 2,800 GB/GPU and 15\% efficiency from 14 s AllReduces. Configuration B puts TP 8 inside nodes with DP 128, cutting cross-node DP gradients $8\times$ (350 to 43.75 GB) and transfer time from 14 s to 1.75 s while keeping TP on NVLink. Leaving the final quarter of that DP transfer exposed lands near 83\% (54.5\% without overlap), though 350 GB/GPU still exceeds 80 GB. Configuration C adds PP 4 (TP 8 $\times$ PP 4 $\times$ DP 32), shrinking DP shards to 10.9 GB (0.44 s). That smaller exposed tail plus an 8.6\% bubble ($3/35$ at $m=32$) reaches about 87\%, and ZeRO-1 across 32 replicas cuts state from 87.5 GB to 23.9 GB (10.9 GB weights, 10.9 GB gradients, and 2.1 GB sharded optimizer state).
 
-    \notecue{Next}{The next slide checks these exact placement rules against Meta's published Llama 3 405B configurations.}
+    \notecue{Next}{The next slide checks these placement rules against Meta's published Llama 3 405B configurations.}
   }
 \end{frame}
 
@@ -832,11 +846,11 @@ model = FSDP(model, sharding_strategy=
   \mlsyscredit{Dubey et al. 2024, Table 4, \S3.3.2. Photo: Intel Free Press, CC BY 2.0, Wikimedia Commons (not claimed to be the 2024 site).}
   \note{%
     \mlsysnotemeta{1.5 min}{Core}%
-    Meta's Llama 3 405B training table (Dubey et al., 2024, Table 4) confirms every placement rule in production. Meta ordered axes innermost-to-outermost as TP, CP, PP, DP: TP remained fixed at 8 inside every NVLink node across all stages, doubling from 8,192 to 16,384 H100s doubled DP from 64 to 128 while keeping a fixed 16M-token batch (dropping BF16 MFU slightly from 43\% to 41\% as per-replica work halved; Lecture 9 owns MFU), and 131k-token context extension swapped DP for CP 16 (38\% MFU). Our chapter models the middle row at 21.9 GB persistent state per GPU and the 31.9\% ($15/47$) bubble computed earlier.
+    Testing those analytical rules against production confirms the same tier order. Meta's 2024 Llama 3 405B run from Lectures 0 and 2 (Dubey et al., 2024, Table 4) placed axes from innermost to outermost as TP, context parallelism (CP, which splits long sequences), PP, and DP. TP stayed fixed at 8 inside every NVLink node across all configurations. Doubling the cluster from 8,192 to 16,384 H100s doubled DP from 64 to 128 at a fixed 16M-token batch, lowering BF16 MFU (Lecture 1's share of peak compute doing useful model work, developed further in Lecture 9) from 43\% to 41\% because per-replica work halved. Extending context to 131k tokens traded DP for CP 16 at 38\% MFU. Applying that middle-row geometry to the previous slide's reference model (rather than Llama 3 itself) yields Chapter 6's 21.9 GB of persistent state per GPU and the 31.9\% ($15/47$) bubble computed earlier.
 
-    \notecue{Watch for}{The Prineville datacenter photograph is illustrative rather than claiming to be the exact 2024 training site.}
+    \notecue{Watch for}{The Prineville datacenter photograph is illustrative rather than a claim about the exact 2024 training site.}
 
-    \notecue{Next}{Students next diagnose three broken parallelism configurations from profiler symptoms.}
+    \notecue{Next}{Next, diagnose three broken parallelism configurations from their profiler symptoms.}
   }
 \end{frame}
 
@@ -868,11 +882,15 @@ model = FSDP(model, sharding_strategy=
   \mlsyscredit{Scenarios built on Distributed Training, Systems Perspective 6.1, Napkin Math 6.5, \S6.5.2, and the \S6.8 self-check.}
   \note{%
     \mlsysnotemeta{2 min}{Core}%
-    This diagnostic exercise synthesizes all three axes from observable cluster telemetry. Step 2 matches each run to its root cause and repair: Run A spans TP 8 across two nodes, pushing layer exchanges onto 50 GB/s NDR (3.5 ms comm vs.\ 1.9 ms compute) and tripling step time (fix: confine TP to one node); Run B runs PP 8 with $m=8$, leaving $(8-1)/(8+8-1) = 47\%$ idle bubbles with idle links (fix: raise $m$ under 1F1B within $\Bcrit$); Run C runs pure DP across 128 nodes into the scaling wall (fix: add TP and PP to shrink DP shards).
+    Violating these placement rules leaves distinct profiler symptoms. Before reading on, diagnose the limiting axis and fix for Runs A, B, and C.
 
-    \notecue{Check}{Assign pairs to diagnose all three runs in 90 seconds before revealing step 2. The telltale split between Run A and Run B is link utilization: saturated NDR links implicate TP off its tier, whereas idle links with low MFU point to pipeline bubbles. Watch out for jumping to ``bubble'' without inspecting a stage timeline, since stage imbalance and data stalls also show low MFU with idle links (\S6.8).}
+    \notecue{Check}{Run A spans TP 8 across two nodes, forcing exchanges onto 50 GB/s NDR (3.5 ms communication against 1.9 ms compute) and tripling step time; keep TP inside one node. Run B sets PP 8 with $m=8$, leaving $(8-1)/(8+8-1) = 47\%$ idle while links stay idle; raise $m$ under 1F1B within $\Bcrit$. Run C hits the pure-DP scaling wall across 128 nodes; add TP and PP to shrink DP shards. A tempting mistake is confusing Runs A and B, yet link use separates them, with saturated NDR pointing to off-tier TP and idle links with low MFU pointing to a bubble.}
 
-    \notecue{Next}{Two brief optional slides cover activation recomputation and multi-model RLHF alignment memory.}
+    \notecue{Watch for}{Always check a stage timeline before diagnosing a bubble, since uneven work across stages (stage imbalance) and data stalls also show low MFU with idle links (\S6.8).}
+
+    \notecue{Teach}{Give pairs 90 seconds to diagnose all three runs before revealing the answers.}
+
+    \notecue{Next}{Two optional slides cover activation recomputation and multi-model memory for post-training alignment.}
   }
 \end{frame}
 
@@ -895,11 +913,11 @@ model = FSDP(model, sharding_strategy=
   \mlsyscredit{Distributed Training, \S6.3.1 (compute phase); Chen et al. 2016; Korthikanti et al. 2023. Code: PyTorch torch.utils.checkpoint docs.}
   \note{%
     \mlsysnotemeta{1 min}{Optional}%
-    Activation checkpointing (\texttt{torch.utils.checkpoint}) trades extra compute for memory by discarding intermediate activations during forward and recomputing them during backward. Because backward costs roughly two forwards, full recomputation adds one extra forward (4 forward-equivalents instead of 3, about 33\% extra compute) while slashing unpartitioned 175B activations (4 sequences) from about 1.1 TB down to about 19.3 GB; selective recomputation reruns only memory-heavy cheap ops like attention softmax for a few percent overhead. Capacity planners must track MFU (useful model FLOPs only), never HFU (which counts recomputed FLOPs and looks deceptively high).
+    Even under a sound 3D layout, activations can overflow HBM unless the job trades arithmetic for memory through activation checkpointing (\texttt{torch.utils.checkpoint}), used earlier in the Sharding section's 175B test. Discarding intermediate activations in forward and recomputing them in backward adds one extra forward pass, turning 3 forward-equivalents into 4 (about 33\% extra compute, since backward costs roughly two forwards). On an unpartitioned 175B model with 4 sequences, that cuts activations from about 1.1 TB to about 19.3 GB. Selective recomputation reruns only large, inexpensive operations such as attention softmax for a few percent overhead. Capacity planners track MFU, which counts only useful model FLOPs, rather than Hardware FLOPs Utilization (HFU), which counts recomputed FLOPs too and appears artificially high.
 
-    \notecue{Optional}{For a 50-minute class, skip this slide and move toward the Wrap-Up.}
+    \notecue{Teach}{For a 50-minute class, skip this slide and note that activation checkpointing trades about a third more compute for large memory savings, then move toward the Wrap-Up.}
 
-    \notecue{Next}{A final optional content slide compares memory budgets across PPO and DPO post-training.}
+    \notecue{Next}{A final optional slide compares multi-model memory budgets across post-training alignment (PPO versus DPO).}
   }
 \end{frame}
 
@@ -921,11 +939,11 @@ model = FSDP(model, sharding_strategy=
   \mlsyscredit{Distributed Training, \S6.7, table 7, Napkin Math 6.9 (TP 8, PP 4, DP 8 on 256 H100s: 35 GB of policy state per GPU).}
   \note{%
     \mlsysnotemeta{1 min}{Optional}%
-    Post-training alignment multiplies memory pressure because PPO RLHF keeps four models resident simultaneously (Napkin Math 6.9): a trainable 70B policy (1,120 GB at 16 B/param; 35 GB/GPU under TP 8 $\times$ PP 4), frozen 70B reference (140 GB FP16), 13B reward (26 GB), and trainable 13B value (208 GB), totaling 1,494 GB before KV-cache rollouts (85.9 GB for 256 rollouts of 1,024 tokens; Lecture 10). Step 2 notes that DPO drops reward, value, and online rollouts (1,260 GB, 15.7\% less), trading away on-policy feedback on the model's own new generations.
+    Pretraining places one model on the fleet, whereas post-training alignment, tuning a pretrained model to match human preferences, multiplies memory demand under reinforcement learning from human feedback (RLHF) because Proximal Policy Optimization (PPO) keeps four models resident (Napkin Math 6.9). A trainable 70B policy takes 1,120 GB at 16 B/param (35 GB/GPU under TP 8 $\times$ PP 4), beside a frozen 70B reference (140 GB in FP16), a 13B reward model (26 GB), and a trainable 13B value model (208 GB). Together they take 1,494 GB before rollouts (generating candidate responses), whose key-value (KV) cache (stored past attention keys and values; developed in Lecture 10) adds 85.9 GB for 256 rollouts of 1,024 tokens. Direct Preference Optimization (DPO) drops the reward model, value model, and online rollouts to reach 1,260 GB (15.7\% less), giving up live feedback on the model's own new generations.
 
-    \notecue{Optional}{For a 50-minute class, skip this slide and open the Wrap-Up.}
+    \notecue{Teach}{For a 50-minute class, skip this slide and note that multi-model alignment multiplies static state, then open the Wrap-Up.}
 
-    \notecue{Next}{Section 7 tests four distributed-training misconceptions and closes the loop on Goyal's one-hour run.}
+    \notecue{Next}{Section 7 wraps up the lecture by tracing where every split sent its overhead.}
   }
 \end{frame}
 
@@ -934,9 +952,9 @@ model = FSDP(model, sharding_strategy=
 % =============================================================================
 \mlsysnote{%
   \mlsysnotemeta{0.5 min}{Core}%
-  Check four common distributed-training pitfalls, then trace where each strategy routed its overhead across both ResNet-50 and our 175B run.
+  With all parallelism axes placed on their hardware tiers, this closing section tests four distributed-training claims (three pitfalls and one true rule) and returns to both ResNet-50's one-hour run and the 175B job to trace where each split sent its cost.
 
-  \notecue{Next}{Students first vote true or false on four claims from \S6.10.}
+  \notecue{Next}{Next, judge four claims from \S6.10 as true or false.}
 }
 \mlsysdivider{Where did each split send its overhead?}{Distributed Training, \S6.10 and \S6.11}
 \section{Wrap-Up}
@@ -958,11 +976,13 @@ model = FSDP(model, sharding_strategy=
   \mlsyscredit{Distributed Training, \S6.10 (fallacies and pitfalls).}
   \note{%
     \mlsysnotemeta{2.5 min}{Core}%
-    Step 2 reveals three false fallacies and one true accounting rule from \S6.10. (1) False: $\etascale = 1/(1 + N \cdot \text{overhead}/\Tcomp)$ falls with $N$, and top MLPerf runs still keep 71--84\%. (2) False: gradient accumulation holds an extra buffer (14 GB FP16 for 7B) and enlarges effective batch size. (3) False: scaling GPUs grows global batch size, requiring learning-rate scaling and warmup (Goyal's no-warmup drop). (4) True: 50\% single-node MFU $\times$ 83\% scaling gives about 41\% fleet MFU; the pitfall is multiplying an already-measured cluster MFU by 83\% a second time (about 34\%) and overbuying GPUs.
+    Treating one Fleet Law term as the whole budget breeds recurring mistakes (\S6.10, three fallacies and one true rule). Before reading on, judge each claim true or false.
 
-    \notecue{Check}{Have students mark T or F on all four before revealing step 2. The surprise is claim (4), which is true; if many students mark (4) false, clarify the denominator of single-node MFU versus fleet-wide MFU so they never double-apply scaling loss.}
+    \notecue{Check}{Claim 1 is false because $\etascale = 1/(1 + N \cdot \text{overhead}/\Tcomp)$ falls as $N$ grows, and top MLPerf runs keep 71\% to 84\%. Claim 2 is false because gradient accumulation holds a 14 GB FP16 buffer for a 7B model and enlarges the effective batch. Claim 3 is false because adding GPUs grows the global batch, requiring learning-rate scaling with warmup, as Goyal et al.'s no-warmup drop showed. Claim 4 is true, since 50\% node MFU $\times$ 83\% scaling gives about 41\% fleet MFU. A tempting mistake is marking claim 4 false, or multiplying an already fleet-wide MFU (41\%) by 83\% a second time (yielding about 34\%) and overbuying GPUs.}
 
-    \notecue{Next}{The next slide synthesizes both the one-hour ImageNet run and our 175B plan in one table.}
+    \notecue{Teach}{Have students mark true or false on all four claims before revealing the verdicts. If many mark claim 4 false, contrast the denominators of single-node and fleet-wide MFU.}
+
+    \notecue{Next}{The next slide combines the one-hour ImageNet run and the 175B plan in one summary table.}
   }
 \end{frame}
 
@@ -990,9 +1010,9 @@ model = FSDP(model, sharding_strategy=
   \mlsyscredit{Goyal et al. 2017; Distributed Training, \S6.4.5, \S6.5, \S6.6, \S6.11. Photo: Pokiiri (CC BY-SA 4.0), Wikimedia Commons.}
   \note{%
     \mlsysnotemeta{1.5 min}{Core}%
-    Returning to Section 1's opening question (why adding accelerators can slow training), three rows summarize the entire lecture. Scaling ResNet-50 to batch 8,192 needed $32\times$ learning rate with 5-epoch warmup and still degraded past 8k. Fitting 2,800 GB of 175B state via ZeRO, TP, and PP relocated memory pressure into $1.5\times$ bytes, NVLink bandwidth, and pipeline bubbles. Rescuing 15\% pure-DP efficiency with TP 8 inside nodes, PP 4 across nodes, and DP 32 reached 87\% by accepting an 8.6\% bubble, proving that good parallelism plans route overhead onto the least constrained tier.
+    Returning to Section 1's opening hook and driving question shows why adding accelerators can slow training and how one 175B job splits across a multi-rack cluster. Scaling ResNet-50 to batch 8,192 hit the statistical wall, requiring a $32\times$ learning rate with 5-epoch warmup and still losing accuracy past 8k. Fitting 2,800 GB of 175B state hit the memory wall, which ZeRO, TP, and PP answered by converting capacity pressure into $1.5\times$ bytes, NVLink bandwidth, and pipeline bubbles. Lifting 15\% pure-DP efficiency past the scaling wall with TP 8 inside nodes, PP 4 across nodes, and DP 32 reached 87\% by accepting an 8.6\% bubble, confirming that a good plan routes overhead onto the least constrained tier.
 
-    \notecue{Next}{The next slide consolidates Lecture 6's five takeaways.}
+    \notecue{Next}{The next slide collects Lecture 6's five takeaways.}
   }
 \end{frame}
 
@@ -1007,7 +1027,7 @@ model = FSDP(model, sharding_strategy=
   \end{itemize}
   \note{%
     \mlsysnotemeta{1 min}{Core}%
-    These five points recap one headline per segment: data-parallel scaling walls from constant $2M$ AllReduces, stragglers and $\Bcrit$, ZeRO/FSDP trading memory for up to $1.5\times$ bytes, $(p-1)/(m+p-1)$ bubbles and intra-node NVLink for TP, and joint $DP \times PP \times TP$ feasibility.
+    Five laws govern every distributed training plan in this lecture. Data-parallel replicas hit scaling walls from constant $2M$ AllReduces, while stragglers and $\Bcrit$ cap useful width. ZeRO and FSDP trade memory for up to $1.5\times$ communication bytes, pipelines pay $(p-1)/(m+p-1)$ idle bubbles, tensor parallelism requires the fast NVLink domain, and a feasible plan picks one joint $DP \times PP \times TP$ point that fits memory, batch, and every hardware tier.
 
     \notecue{Next}{An optional slide poses three open questions on next-generation distributed training.}
   }
@@ -1022,11 +1042,11 @@ model = FSDP(model, sharding_strategy=
   \end{itemize}
   \note{%
     \mlsysnotemeta{0.5 min}{Optional}%
-    Each prompt pushes today's design rules onto emerging hardware: how multi-rack NVLink Switch domains expand TP and CP while leaving PP/DP on the inter-domain fabric (\S6.6.2); pricing lower MFU against shorter deadlines and GPU-hour costs on Llama 3; and whether heterogeneous clusters revive stale asynchronous updates.
+    Each question extends these placement rules to newer systems. The first asks how multi-rack NVLink Switch domains expand TP and CP while leaving PP and DP on the inter-domain fabric (\S6.6.2). The second weighs lower MFU against shorter deadlines and GPU-hour costs on Llama 3. The third asks whether heterogeneous clusters could make stale asynchronous updates practical again.
 
-    \notecue{Optional}{For a 50-minute class, skip this slide or assign one prompt as a brief written question.}
+    \notecue{Teach}{For a 50-minute class, skip this slide or assign one question as a brief written reflection.}
 
-    \notecue{Next}{The next slide lists Chapter 6 reading and foundational papers.}
+    \notecue{Next}{The next slide lists Chapter 6 readings and foundational papers.}
   }
 \end{frame}
 
@@ -1043,9 +1063,9 @@ model = FSDP(model, sharding_strategy=
   \end{itemize}
   \note{%
     \mlsysnotemeta{0.5 min}{Core}%
-    Assign Chapter 6 (\S6.3 to \S6.6 and \S6.10), self-checks, redoing Napkin Math 6.8 for $p = 16$, and the four online interactive figures (\emph{FSDP Parameter Lifetime}, \emph{Pipeline Parallelism}, \emph{1F1B}, \emph{Ulysses Transpose}, and \emph{MoE Routing}). The five papers anchor each segment: Goyal et al., Rajbhandari et al. (ZeRO), Narayanan et al. (Megatron-LM), McCandlish et al. ($\Bcrit$), and Dubey et al. \S3.3.
+    To deepen these calculations, read Chapter 6 (\S6.3 to \S6.6 and \S6.10), complete the self-checks, redo Napkin Math 6.8 for $p = 16$, and explore the four online interactive figures (\emph{FSDP Parameter Lifetime}, \emph{Pipeline Parallelism} and \emph{1F1B}, \emph{Ulysses Transpose}, and \emph{MoE Routing}). The five papers anchor the sections, covering Goyal et al. on large-batch warmup, Rajbhandari et al. (2020) on ZeRO's three sharding stages, Narayanan et al. (2021) on 3D parallelism in Megatron-LM, McCandlish et al. on $\Bcrit$, and Dubey et al. \S3.3 on Llama 3.
 
-    \notecue{Next}{The closing slide drops today's reliability assumption and hands off to Lecture 7.}
+    \notecue{Next}{The closing slide drops the perfect-reliability assumption and leads into Lecture 7.}
   }
 \end{frame}
 
@@ -1058,7 +1078,7 @@ model = FSDP(model, sharding_strategy=
   \mlsyscredit{Photo: Carlos Jones/ORNL (CC BY 2.0), Wikimedia Commons.}
   \note{%
     \mlsysnotemeta{0.5 min}{Core}%
-    Every plan today assumed all 1,024 GPUs arrive on time with uncorrupted data. At 50,000-hour per-GPU MTTF, a 1,024-GPU job loses a GPU roughly every 48.8 hours (\S6.1), and at 16,384 GPUs every few hours. Lecture 7 calculates how often large jobs fail and how often they should save state.
+    Every plan in this lecture assumed all 1,024 GPUs arrive on time with uncorrupted data. At a 50,000-hour per-GPU mean time to failure (MTTF), a 1,024-GPU job loses a GPU roughly every 48.8 hours (\S6.1), and a 16,384-GPU job loses one every few hours. Lecture 7 calculates how often large jobs fail and how often they should checkpoint their state.
 
     \notecue{Next}{Lecture 7 opens with Llama 3 405B surviving 419 unexpected interruptions in 54 days.}
   }
