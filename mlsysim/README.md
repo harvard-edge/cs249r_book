@@ -317,9 +317,9 @@ Thanks to these wonderful people for helping improve MLSys·im!
 
 **Code:** [Apache License 2.0](LICENSE.md) — free for commercial and non-commercial use, with patent grant and attribution requirement.
 
-**Documentation and textbook prose:** [Creative Commons Attribution-NonCommercial-ShareAlike 4.0 (CC-BY-NC-SA-4.0)](https://creativecommons.org/licenses/by-nc-sa/4.0/) — the tutorials and prose on [mlsysbook.ai/mlsysim](https://mlsysbook.ai/mlsysim) are part of the *Machine Learning Systems* textbook and carry its license.
+**Documentation:** [Creative Commons Attribution-NonCommercial-ShareAlike 4.0 (CC-BY-NC-SA-4.0)](https://creativecommons.org/licenses/by-nc-sa/4.0/) — the tutorials and prose on [mlsysbook.ai/mlsysim](https://mlsysbook.ai/mlsysim) are teaching materials that accompany the *Machine Learning Systems* textbook. The textbook itself is published by MIT Press under CC BY-NC-ND 4.0.
 
-The two licenses are intentionally separate: the Python package is permissively licensed so engineers and researchers can use it anywhere (including commercially), while the textbook prose retains its non-commercial protection to prevent republication as a derivative textbook.
+The two licenses are intentionally separate: the Python package is permissively licensed so engineers and researchers can use it anywhere (including commercially), while the documentation keeps a non-commercial license to prevent its republication as a paid course or textbook.
 
 Copyright &copy; 2026 Vijay Janapa Reddi and MLSys·im contributors.
 
