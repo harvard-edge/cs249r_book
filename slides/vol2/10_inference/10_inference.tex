@@ -59,9 +59,11 @@
 % =============================================================================
 \mlsysnote{%
   \mlsysnotemeta{0.5 min}{Core}%
-  Read the thesis aloud once. This lecture shifts from training efficiency to serving deployed models, starting inside one eight-GPU replica and scaling out to a fleet of replicas under live traffic. The complete lecture runs about 71.5 minutes; skipping the Optional slides leaves a self-contained 60-minute Core path (cut the model-class table, reasoning-budget slide, and open questions first, and trim brief pair discussions to fit a 50-minute class).
+  This lecture shifts from training efficiency to serving deployed models. It begins inside one eight-GPU serving replica, meaning a single complete copy of the model, and scales out to a fleet of replicas under live traffic. The thesis states that serving capacity is the rate of requests meeting their latency contract, and for language models, memory for attention state bounds that rate.
 
-  \notecue{Next}{The opening Predict activity compares a model's one-time training bill against a single year of serving it.}
+  \notecue{Teach}{Read the thesis aloud once. The full lecture runs about 71.5 minutes. Skipping optional slides leaves a 60-minute core path. To fit 50 minutes, cut the model-class table, reasoning-budget slide, and open questions first, and trim pair discussions.}
+
+  \notecue{Next}{Next, predict how a model's one-time training bill compares with a single year of serving it.}
 }
 \mlsystitle{Serving at Scale}{Serving capacity is the rate of requests that meet their latency contract, and for language models memory for attention state bounds that rate.}{cover_inference_blueprint.png}
 
@@ -74,13 +76,15 @@
   \mlsyscredit{Serving at Scale, Napkin Math 10.1 (cost per request assumed in the chapter).}
   \note{%
   \mlsysnotemeta{2.5 min}{Core}%
-  Walk through the setup in click order. Step 1: a team spends \$2M to train a 70B model. Step 2: in production, one million daily users send 50 requests each at an assumed \$0.001 per request on H100s. After students vote, reveal step 3: 50 million requests per day equals 18.25 billion per year, or \$18.25M (answer C), which is 9.1$\times$ the training run. Cutting cost per request by just 10\% saves roughly \$1.8M every year, nearly repaying the entire training run.
+  Training is paid once per model version, whereas serving recurs on every request. Suppose a team spends \$2M to train a 70-billion-parameter (70B) model, and on H100 GPUs one million daily users send 50 requests each at an assumed \$0.001 per request. Before reading on, choose the first year's serving bill from A (\$2M), B (\$5M), C (\$18M), or D (\$200M).
 
-  \notecue{Check}{Ask students to pick A (\$2M), B (\$5M), C (\$18M), or D (\$200M). Answer C holds because serving scales linearly with user traffic. Distractor A fails because students mistake training's peak GPU count for lifetime spend.}
+  \notecue{Check}{The answer is C. At 50 million requests per day, the service runs 18.25 billion requests a year for \$18.25M, or 9.1$\times$ training. Cutting request cost by 10\% saves roughly \$1.8M yearly, nearly repaying training. Option C holds because serving scales linearly with traffic. A tempting answer is A, because training's peak GPU count is easy to mistake for lifetime spend.}
 
-  \notecue{Watch for}{The \$0.001 per request is an explicit scenario input from Napkin Math 10.1; lower traffic or a larger training run reverses the ratio. The closing synthesis prices serving from measured data.}
+  \notecue{Watch for}{The \$0.001 per request is a scenario input from Napkin Math 10.1. Lower traffic or a larger training run reverses the ratio, and the closing synthesis prices serving from measured data.}
 
-  \notecue{Next}{The next slide specifies the eight-GPU 70B reference replica and real Azure traffic trace that anchor every calculation today.}
+  \notecue{Teach}{Take a vote on A through D before revealing the third bar.}
+
+  \notecue{Next}{Next, examine the eight-GPU 70B reference replica and Azure traffic trace that anchor every calculation.}
 }
 \end{frame}
 
@@ -109,11 +113,11 @@
   \mlsyscredit{Photo: Pokiiri, CC BY-SA 4.0, Wikimedia Commons. Replica: Serving at Scale, \S10.7. Trace: Azure LLM inference trace 2023 (Patel et al., ISCA 2024), CC BY.}
   \note{%
   \mlsysnotemeta{1.5 min}{Core}%
-  Introduce the running case. The reference replica runs a 70.6B grouped-query attention model (8 shared KV heads) across one 8$\times$ H100 node, splitting 141.2 GB of FP16 weights ($70.6\text{B} \times 2\text{ B}$) eight ways to roughly 17.6 GB per GPU. Because each 80 GB binary nameplate H100 holds 85.9 decimal GB, the node provides 687.2 decimal GB of HBM (derived; decimal GB is used throughout). The photo shows an HGX B200 baseboard with the same eight-GPU NVLink layout. Traffic comes from Microsoft's 2023 Azure LLM inference trace: 19,366 chat requests in one hour (about 5.38 req/s), with a median prompt of 1,020 tokens and median answer of 129 tokens.
+  To price serving from real hardware and traffic rather than an assumed rate, every calculation uses one reference replica and one measured trace. The replica runs a 70.6B grouped-query attention model, where query heads share 8 key-value (KV) heads to cut attention memory, on one 8$\times$ H100 node. Its FP16 weights total 141.2 GB ($70.6\text{B} \times 2\text{ B}$), about 17.6 GB per GPU. Each 80 GB binary nameplate H100 holds 85.9 decimal GB of HBM, giving 687.2 decimal GB per node (derived, using decimal GB throughout), matching the pictured HGX B200 eight-GPU NVLink layout. Traffic comes from Microsoft's 2023 Azure LLM inference trace (Patel et al., ISCA 2024), an open cloud production dataset grounding serving design in real request lengths. Its one-hour chat sample logs 19,366 requests, about 5.38 requests per second (req/s), with medians of 1,020 prompt and 129 answer tokens.
 
   \notecue{Watch for}{The Azure trace samples a larger production service, so 5.38 req/s reflects sample volume rather than total service load.}
 
-  \notecue{Next}{Before defining serving contracts, a quick retrieval connects today's deadline filter back to Lecture 9's ML goodput.}
+  \notecue{Next}{Next, recall Lecture 9's ML goodput to see what is missing when responses have deadlines.}
 }
 \end{frame}
 
@@ -137,11 +141,13 @@
   \mlsyscredit{Lecture 9 (Fleet Efficiency): ML goodput and its three factors.}
   \note{%
   \mlsysnotemeta{1.5 min}{Core}%
-  Give students 45 seconds to recall Lecture 9's three ML goodput factors before revealing step 2: scheduling ($S$), runtime ($R$), and program goodput ($P$, measured via MFU or MBU). In step 3, highlight the missing filter: none of those three factors checks whether a served answer arrived before the user's deadline. A replica achieving 90\% MBU while delivering half its responses late loses half of its useful output. Today adds SLO goodput on top of ML goodput.
+  Before sizing that replica for live traffic, test whether Lecture 9's efficiency yardstick still applies. Recall the three factors of ML goodput from Lecture 9 and decide which one sees a request that arrives too late, since a busy replica can still produce useless work if answers miss deadlines.
 
-  \notecue{Check}{Ask which of $S$, $R$, and $P$ catches a late response. None of them does, because all three measure hardware capacity conversion rather than per-request latency compliance.}
+  \notecue{Check}{The three factors are scheduling ($S$), runtime ($R$), and program goodput ($P$), where $P$ is measured via model FLOPs utilization (MFU) or model bandwidth utilization (MBU). None of them catches a late response. A tempting answer is runtime or program goodput, because both track execution efficiency, yet all three measure hardware capacity conversion rather than per-request latency compliance. A replica achieving 90\% MBU while delivering half its responses late loses half its useful output. This lecture adds service-level objective (SLO) goodput on top of ML goodput.}
 
-  \notecue{Next}{The goals slide outlines the five segments of the lecture, moving from one replica out to a full serving fleet.}
+  \notecue{Teach}{Give 45 seconds for recall before revealing the equation and the SLO filter diagram.}
+
+  \notecue{Next}{Next, preview the five segments of the lecture, moving from one replica out to a full serving fleet.}
 }
 \end{frame}
 
@@ -165,7 +171,9 @@
   \fleetterm{$T_{\text{compute}}/N$ and $T_{\text{sync}}(N)$}{Compute ($C_1$) and Coordination ($C_3$)}
   \note{%
   \mlsysnotemeta{1 min}{Core}%
-  State today's driving question: how many requests meet their latency contract, and at what cost? The five goals map one-to-one onto today's five segments in the Runtime and Serving layer (shown on the right). The first four segments analyze one eight-GPU reference replica; the final segment routes, isolates, and scales a fleet of replicas. Read the Fleet Law and $C^3$ line aloud once: today acts primarily on $T_{\text{compute}}/N$ and $T_{\text{sync}}(N)$ across Compute ($C_1$) and Coordination ($C_3$).
+  Adding deadlines on top of ML goodput raises the driving question of how many requests meet their latency contract, and at what cost. The five goals map one-to-one onto the lecture's five segments in the Runtime and Serving layer. The first four segments analyze one eight-GPU reference replica, and the final segment routes, isolates, and scales a fleet of replicas. In the Fleet Law and C$^3$ taxonomy, this lecture acts primarily on $T_{\text{compute}}/N$ and $T_{\text{sync}}(N)$ across Compute ($C_1$) and Coordination ($C_3$).
+
+  \notecue{Teach}{Read the Fleet Law and C$^3$ line aloud once.}
 
   \notecue{Next}{Section 1 defines the latency contract that determines when a completed request counts as useful capacity.}
 }
@@ -176,9 +184,9 @@
 % =============================================================================
 \mlsysnote{%
   \mlsysnotemeta{0.5 min}{Core}%
-  Begin with what counts as a served request: every request carries explicit latency deadlines, and serving capacity is defined strictly against them.
+  To turn deadlines into a capacity measure, Section 1 answers what counts as a served request. It splits first-token and per-token budgets, defines SLO goodput and the serving tax, and reads a measured throughput-latency frontier.
 
-  \notecue{Next}{The first slide decomposes a single streamed LLM request into its first-token budget and per-token cadence budget.}
+  \notecue{Next}{Next, decompose a single streamed LLM request into its first-token budget and per-token cadence budget.}
 }
 \mlsysdivider{What counts as a served request?}{Serving at Scale, \S10.1 to \S10.4}
 \section{Contract}
@@ -192,11 +200,11 @@
   \mlsyscredit{Serving at Scale, \S10.1 (figure 1) and \S10.2. Log: Azure LLM inference trace 2023 (Patel et al., ISCA 2024), CC BY. Explore: Inference Lifecycle (mlsysbook.ai).}
   \note{%
   \mlsysnotemeta{2 min}{Core}%
-  Trace one streamed request across three steps. Step 1: routing, queueing, and prefill (one forward pass over the prompt that populates the KV cache) produce the first token; that total delay is time to first token (TTFT), so queue wait directly spends TTFT. Step 2: decode emits one token per iteration; time per output token (TPOT) is the mean interval between tokens, spent by other concurrent requests sharing the step. Step 3: time between tokens (TBT) measures each individual gap, catching a single visible stall that a healthy mean TPOT hides. The real Azure log row at the bottom shows arrival time, 374 prompt tokens (setting prefill work and TTFT), and 44 generated tokens (setting decode slot residency).
+  Because a user judges both when an answer starts and how smoothly it streams, one request spends separate first-token and cadence budgets. First, routing, queueing, and prefill produce the first token, where prefill runs one forward pass over the prompt to populate the KV cache of stored key and value vectors (Lecture 7). That total wait is time to first token (TTFT), so queueing spends TTFT directly. Next, decode emits one token per iteration. Time per output token (TPOT) is the mean gap between tokens, lengthened by concurrent requests sharing each step, whereas time between tokens (TBT) measures each individual gap and catches a visible stall that a healthy mean TPOT hides. The Azure log row records an arrival timestamp, 374 prompt tokens setting prefill work and TTFT, and 44 generated tokens setting how long the request holds a decode slot.
 
   \notecue{Watch for}{A faster decode kernel shrinks neither queueing delay before prefill nor TBT stalls caused when another request's long prefill enters the batch.}
 
-  \notecue{Next}{A peer-instruction Vote tests why raw completed throughput misranks serving configurations when deadlines matter.}
+  \notecue{Next}{Next, compare two serving configurations to see why raw completed throughput misranks systems when deadlines matter.}
 }
 \end{frame}
 
@@ -225,11 +233,13 @@
   \mlsyscredit{Serving at Scale, \S10.3.1 and its self-check.}
   \note{%
   \mlsysnotemeta{2.5 min}{Core}%
-  Run a one-minute pair vote comparing two configurations under identical traffic and latency targets: X completes 1,200 req/s with 70\% on time, while Y completes 1,000 req/s with 95\% on time. Reveal step 2: Y wins with 950 on-time req/s versus X's 840. Step 3 formalizes SLO goodput: the rate of completed requests meeting stated TTFT and TPOT targets for a fixed request mix. The mix must stay fixed because a 2,000-token prompt requires far more work than a 20-token prompt. Sitting directly atop Lecture 9's ML goodput, SLO goodput is the capacity yardstick for every mechanism in this lecture.
+  With TTFT and TPOT targets set, raw completion rate can misrank systems. On the same request mix and targets, configuration X completes 1,200 req/s with 70\% on time, whereas configuration Y completes 1,000 req/s with 95\% on time. Before reading on, choose A, B, or C for higher capacity.
 
-  \notecue{Check}{Ask students to vote A, B, or C. Answer B holds because late requests earn zero useful capacity no matter how busy the GPUs stayed. Distractor A reflects the training habit of maximizing raw throughput without deadlines.}
+  \notecue{Check}{The answer is B. Configuration Y delivers 950 on-time req/s, compared with 840 for X, and late requests earn zero useful capacity no matter how busy the GPUs stayed. A tempting answer is A, which reflects the training habit of maximizing raw throughput without deadlines. This defines SLO goodput, the rate of completed requests meeting stated TTFT and TPOT targets for a fixed request mix. The mix must stay fixed because a 2,000-token prompt requires far more work than a 20-token prompt. Sitting atop Lecture 9's ML goodput, SLO goodput is the capacity yardstick for every mechanism ahead.}
 
-  \notecue{Next}{The next slide breaks down the serving tax that consumes latency outside the model forward pass.}
+  \notecue{Teach}{Run a one-minute pair vote on A, B, or C before revealing the calculation and definition.}
+
+  \notecue{Next}{Next, break down the serving tax that consumes latency outside the model forward pass.}
 }
 \end{frame}
 
@@ -240,11 +250,11 @@
   \mlsyscredit{Serving at Scale, \S10.3.2 and equation 1 (illustrative budget).}
   \note{%
   \mlsysnotemeta{1.5 min}{Core}%
-  Step 1 presents the chapter's illustrative interactive budget: a 100 ms end-to-end target with a 70 ms model forward pass leaves only 30 ms for everything else, called the serving tax. Step 2 unpacks the equation: four sequential network hops at 50 to 500 $\mu$s each cost 0.2 to 2 ms (Lecture 3's $\alpha + \text{bytes}/\beta$), serialization, routing, and multi-backend fan-in add further overhead, and queueing grows rapidly as utilization approaches capacity. Adding replicas shrinks queueing, whereas co-locating adjacent services shrinks network hops.
+  Meeting an SLO requires budgeting the full request path rather than model execution alone. Inside an illustrative 100 ms end-to-end target, a 70 ms model forward pass leaves only 30 ms for everything else, called the serving tax, split into four non-model terms. Four sequential network hops at 50 to 500 $\mu$s each cost 0.2 to 2 ms under Lecture 3's $\alpha$-$\beta$ model ($\alpha + \text{bytes}/\beta$). Serialization (converting structured payloads into wire format and back), routing, and collecting replies across multiple backends add further overhead, and queueing delay grows steeply as utilization approaches capacity. Adding replicas shrinks queueing, whereas colocating adjacent services on one host removes network hops.
 
-  \notecue{Watch for}{Microbenchmarks of model kernels measure only $T_{\text{model}}$; users experience the full sum along the request path.}
+  \notecue{Watch for}{Microbenchmarks of model kernels measure only $T_{\text{model}}$, whereas users experience the full sum along the request path.}
 
-  \notecue{Next}{Real InferenceX benchmark data now shows how sharply tightening the per-user speed contract reduces per-GPU output.}
+  \notecue{Next}{Next, measured InferenceX benchmark data shows how sharply tightening the per-user speed contract reduces per-GPU output.}
 }
 \end{frame}
 
@@ -264,11 +274,11 @@
   \mlsyscredit{InferenceX (SemiAnalysis), DeepSeek-R1, FP8, 1,024 tokens in and out, snapshot 2026-10-12, via MLSysIM; Serving at Scale, \S10.6.2. Photo: Pokiiri, CC BY-SA 4.0, Wikimedia Commons.}
   \note{%
   \mlsysnotemeta{2.5 min}{Core}%
-  Explain the axes of this measured InferenceX frontier for DeepSeek-R1 at FP8 (1,024 tokens in and out): user token rate ($1/\text{TPOT}$) horizontally versus per-GPU output vertically on a log scale. Each faint dot is a measured run (illustrated by the raw B200 SGLang row at concurrency 512: 17.84 tok/s/user and 1,073.49 tok/s/GPU). Step 1: on B200, moving the contract from 13 to 100+ tok/s/user drops top per-GPU output from 6,256 to 208 tok/s, a 30$\times$ swing from the latency target alone, because faster streams permit fewer concurrent sequences per decode step. Step 2: every accelerator follows the same downward curve. Step 3: at 50 tok/s/user, GB200 NVL72 delivers 3,653 tok/s/GPU versus H100's 82 (44.5$\times$ higher, despite only about 2.3$\times$ higher peak FP8).
+  How steeply does the latency contract move real throughput? SemiAnalysis's open InferenceX benchmark tests production serving stacks across frameworks, parallel layouts, and accelerators using DeepSeek-R1, a mixture-of-experts reasoning model, at FP8 with 1,024 input and 1,024 output tokens. Plotting per-user speed ($1/\text{TPOT}$) against per-GPU output, one SGLang serving-engine run on B200 at concurrency 512 reaches 17.84 tok/s/user and 1,073.49 tok/s/GPU. On B200, tightening the target from 13 to 100+ tok/s/user cuts top per-GPU output from 6,256 to 208 tok/s, a 30$\times$ swing, because faster streams permit fewer concurrent sequences per decode step. At 50 tok/s/user, NVIDIA's GB200 NVL72, a 72-GPU rack sharing one NVLink domain, reaches 3,653 tok/s/GPU versus 82 on H100, a 44.5$\times$ gap despite only about 2.3$\times$ higher peak FP8 compute. Capacity is therefore SLO goodput inside a stated contract.
 
   \notecue{Watch for}{Never compare two serving throughput numbers without stating their per-user latency target.}
 
-  \notecue{Next}{Because the contract determines how many sequences can share a step, Section 2 examines batching and concurrency.}
+  \notecue{Next}{Because the latency contract sets how many sequences can share a step, Section 2 examines batching and concurrency.}
 }
 \end{frame}
 
@@ -277,9 +287,9 @@
 % =============================================================================
 \mlsysnote{%
   \mlsysnotemeta{0.5 min}{Core}%
-  With serving capacity anchored to latency targets, this section examines how batching trades waiting time for weight reuse and how Little's law determines concurrency in flight.
+  Section 2 answers how long requests should wait to share a step. It derives the batching knee where weight reuse saturates, uses Little's law to size requests in flight, and removes fixed-batch slot waste with iteration-level batching.
 
-  \notecue{Next}{The first slide derives the batching knee where fixed per-batch work matches marginal per-request work.}
+  \notecue{Next}{Next, derive the batching knee where fixed per-batch work matches marginal per-request work.}
 }
 \mlsysdivider{How long should a request wait to share a step?}{Serving at Scale, \S10.6}
 \section{Batching}
@@ -300,11 +310,11 @@
   \mlsyscredit{Serving at Scale, \S10.6.2 and Napkin Math 10.2 (assumed service times).}
   \note{%
   \mlsysnotemeta{2 min}{Core}%
-  Walk through the linear batch service model: each batch pays a fixed cost $t_0$ once (weight reads and kernel launches) plus $t_{\text{req}}$ per request, giving throughput $X(B) = B / (t_0 + B t_{\text{req}})$. Throughput climbs steeply while $t_0$ dominates and saturates toward $1 / t_{\text{req}}$. The knee at $B = t_0 / t_{\text{req}}$ marks half peak throughput where fixed and variable costs match: vision (2 ms fixed, 1 ms per image) hits its knee at $B = 2$, whereas LLM decode (about 40 ms fixed, 41.8 ms computed to stream 140 GB across one H100's 3.35 TB/s, plus 0.5 ms per sequence for KV reads) hits its knee near 80. Spreading weights across 8 GPUs divides both terms by 8, leaving the knee unchanged.
+  Grouping requests amortizes one-time step costs across more outputs, yet larger batches eventually stop paying off. In this linear batch service model, each batch pays a fixed cost $t_0$ once for weight reads and kernel launches, plus $t_{\text{req}}$ per request. Throughput is $X(B) = B / (t_0 + B t_{\text{req}})$, climbing steeply while $t_0$ dominates and saturating toward $1 / t_{\text{req}}$. The knee at $B = t_0 / t_{\text{req}}$ marks half peak throughput, where fixed and variable costs match. A vision model with 2 ms fixed cost and 1 ms per image hits its knee at $B = 2$. For LLM decode, streaming 140 GB across one H100's 3.35 TB/s memory takes 41.8 ms, or about 40 ms fixed. Adding 0.5 ms per sequence for KV reads puts its knee near 80. Spreading weights across 8 GPUs divides both terms by 8, leaving the knee unchanged.
 
-  \notecue{Watch for}{The knee is only a candidate operating point; real batches also wait to form and must fit inside the latency budget remaining after queueing.}
+  \notecue{Watch for}{The knee is only a candidate operating point. Production batches also wait to form and must fit inside the latency budget remaining after queueing.}
 
-  \notecue{Next}{An optional measured chart verifies this batch-size versus per-user speed curve on B200 hardware.}
+  \notecue{Next}{Next, measured B200 data tests how rising concurrency trades per-GPU output against per-user speed.}
 }
 \end{frame}
 
@@ -314,13 +324,13 @@
   \mlsyscredit{InferenceX (SemiAnalysis), DeepSeek-R1, FP8, B200 with SGLang, colocated; snapshot 2026-10-12, via MLSysIM.}
   \note{%
   \mlsysnotemeta{1.5 min}{Optional}%
-  Real InferenceX data for SGLang running DeepSeek-R1 (FP8) on eight B200 GPUs tracks concurrency from 1 to 512. In the top panel, per-GPU output climbs 63$\times$ from 17 to 1,073 tok/s; in the bottom panel, each user's stream slows 7.8$\times$ from 139 to 18 tok/s (paired points at one concurrency reflect different parallel layouts). A product requiring at least 50 tok/s per user caps concurrency near 64, well before per-GPU throughput saturates.
+  Does production hardware obey that batching curve? Sweeping concurrency from 1 to 512 in InferenceX data for SGLang running DeepSeek-R1 in FP8 on eight B200 GPUs confirms the trade-off. Per-GPU output climbs 63$\times$, from 17 to 1,073 tok/s, while each user's stream slows 7.8$\times$, from 139 to 18 tok/s. Paired points at the same concurrency reflect different parallel layouts. A product requiring at least 50 tok/s per user caps concurrency near 64, well before per-GPU throughput saturates.
 
-  \notecue{Watch for}{On real accelerators, the per-user latency target typically caps concurrency long before the throughput curve flattens.}
+  \notecue{Watch for}{On hardware in production, the per-user latency target typically caps concurrency long before the throughput curve flattens.}
 
-  \notecue{Optional}{For a 50-minute class, skip this slide because the analytical knee model already established the trade-off.}
+  \notecue{Teach}{For a 50-minute class, skip this slide and note that measured B200 runs confirm the analytical knee trade-off.}
 
-  \notecue{Next}{Students now apply Little's law to compare concurrency in flight for vision versus streamed chat.}
+  \notecue{Next}{Next, apply Little's law to compare requests in flight for vision against streamed chat.}
 }
 \end{frame}
 
@@ -358,13 +368,15 @@
   \mlsyscredit{Serving at Scale, Theorem 10.1. Chat line derived: Azure trace 2023 mean answer, 50 ms TPOT target of \S10.15.1 (illustrative).}
   \note{%
   \mlsysnotemeta{2.5 min}{Core}%
-  Give pairs two minutes to apply Little's law (requests in flight equal arrival rate times mean residence time) before revealing step 2. For vision at 1,000 req/s and 0.10 s mean latency, 100 requests are in flight; one replica serves batch 8 in 80 ms (100 req/s), requiring $\lceil 1{,}000 / 80 \rceil = 13$ replicas at 80\% utilization (10 at full utilization). In step 3, chat at the same 1,000 req/s with the Azure trace's 211-token mean answer at 50 ms TPOT takes 10.55 s of decoding alone, keeping 10,550 requests in flight simultaneously (derived, excluding prefill and queueing), each holding its KV cache the entire time.
+  How many requests occupy a fleet at once? Little's law multiplies arrival rate by mean time in the system. At 1,000 req/s, vision averages 0.10 s, and one replica runs batch 8 in 80 ms at 80\% utilization. Chat averages 211 Azure output tokens at 50 ms TPOT. Before reading on, estimate requests in flight for both and the vision replica count.
 
-  \notecue{Check}{Ask pairs why chat keeps over 100$\times$ more requests in flight at identical QPS. Answering 100 forgets that streamed responses occupy slots for seconds rather than tenths of a second.}
+  \notecue{Check}{Vision keeps 100 requests in flight. One replica serves 100 req/s, needing $\lceil 1{,}000 / 80 \rceil = 13$ replicas at 80\% utilization (10 at full utilization). Chat spends 10.55 s decoding alone, excluding prefill and queueing, keeping 10,550 requests in flight (derived), each holding KV state. A tempting answer is 100 at equal queries per second (QPS), overlooking that streamed answers hold slots for seconds rather than tenths of a second, keeping over 100$\times$ more requests in flight.}
 
-  \notecue{Watch for}{Little's law relates means only and says nothing about p99 tail latency.}
+  \notecue{Watch for}{Little's law relates means only and says nothing about 99th-percentile (p99) tail latency.}
 
-  \notecue{Next}{The next slide uses the measured Azure answer-length distribution to quantify how much slot time fixed batches waste.}
+  \notecue{Teach}{Give pairs two minutes before revealing the table and bars.}
+
+  \notecue{Next}{Next, Azure answer lengths quantify how much slot time fixed batches waste.}
 }
 \end{frame}
 
@@ -384,11 +396,11 @@
   \mlsyscredit{Azure LLM inference trace 2023 (Patel et al., ISCA 2024), CC BY; batches of 8 consecutive requests (derived). Serving at Scale, eq.~4, Napkin Math 10.3. Photo: Tedder, CC BY 4.0, Wikimedia Commons.}
   \note{%
   \mlsysnotemeta{2 min}{Core}%
-  Left: the 19,366 measured answer lengths in the Azure conversation trace show a median of 129 tokens, mean of 211, maximum of 1,000, and two modes (short replies and replies near 400). Right: when a static batch holds all slots until its longest sequence finishes, the idle slot fraction equals $1 - \text{mean}/\text{max}$ (equation 4). While the chapter's four-request illustration wastes 37.5\%, grouping consecutive Azure conversation requests into fixed batches of 8 idles 50\% of slot time, and the more heavy-tailed code trace idles 63\% (both derived from measured lengths) because its max-to-mean ratio is even larger.
+  Keeping so many chats in flight would be straightforward if every answer had the same length, yet real outputs vary widely. Across 19,366 measured answers in the Azure conversation trace, the median is 129 tokens, the mean is 211, and the maximum is 1,000, with two modes for short replies and replies near 400 tokens. Because a static batch holds every slot until its longest sequence finishes, the idle slot fraction equals $1 - \text{mean}/\text{max}$ (equation 4). The chapter's four-request illustration wastes 37.5\%. Grouping consecutive Azure conversation requests into fixed batches of 8 idles 50\% of slot time (derived). Azure's companion coding trace is even more heavy-tailed, with a larger maximum-to-mean ratio that leaves fixed batches of 8 idling 63\% (derived).
 
-  \notecue{Watch for}{Idle share bounds the opportunity; how much a scheduler actually recovers depends on queued demand and available KV memory.}
+  \notecue{Watch for}{Idle share bounds the opportunity. How much a scheduler recovers depends on queued demand and available KV memory.}
 
-  \notecue{Next}{Iteration-level batching eliminates this synchronization waste by refilling slots the moment any sequence finishes.}
+  \notecue{Next}{Next, see how iteration-level batching eliminates this synchronization waste by refilling slots the moment any sequence finishes.}
 }
 \end{frame}
 
@@ -399,11 +411,11 @@
   \mlsyscredit{Serving at Scale, Napkin Math 10.3 and \S10.6.5; Yu et al., OSDI 2022 (Orca); Kwon et al., SOSP 2023 (vLLM). Explore: Continuous Batching Comparison (mlsysbook.ai).}
   \note{%
   \mlsysnotemeta{2 min}{Core}%
-  Follow four requests with 50, 200, 100, and 150 output tokens running at 20 ms per iteration. Step 1: fixed batching holds every slot until R2 ends at iteration 200, idling 300 of 800 slot-iterations (37.5\%). Step 2: iteration-level (continuous) batching rebuilds the batch every iteration, so when R1 finishes at iteration 50, R5 immediately takes slot 1 while R2, R3, and R4 continue decoding. Step 3: R6 enters at iteration 100 and R7 at iteration 150, advancing seven requests in the same 200 iterations. Introduced by Orca (Yu et al. 2022) and paired with paged KV memory in vLLM (Kwon et al. 2023), this whole-system approach reports 2 to 4$\times$ higher throughput at matched latency, provided waiting requests have completed prefill and free KV blocks exist.
+  To reclaim those idle slots, iteration-level (continuous) batching updates batch membership after every token step. Consider four requests with 50, 200, 100, and 150 output tokens at 20 ms per iteration. Fixed batching holds every slot until R2 ends at iteration 200, idling 300 of 800 slot-iterations, or 37.5\%. Under iteration-level batching, when R1 finishes at iteration 50, R5 takes slot 1 at once while R2, R3, and R4 continue decoding; R6 enters at iteration 100 and R7 at iteration 150, advancing seven requests in the same 200 iterations. Orca (Yu et al., OSDI 2022) introduced this iteration-level scheduler, and vLLM (Kwon et al., SOSP 2023) paired it with paged KV memory, reporting 2 to 4$\times$ higher throughput than earlier baselines (FasterTransformer and Orca) at matched latency when waiting requests have completed prefill and free KV blocks exist.
 
   \notecue{Watch for}{Returning R1's output early helps R1's latency, yet throughput rises only when another request refills the vacated slot.}
 
-  \notecue{Next}{An optional comparison table broadens the view beyond LLMs to show how each model class selects its own batching primitive.}
+  \notecue{Next}{Next, broaden the view beyond LLMs to see how each model class selects its own batching primitive.}
 }
 \end{frame}
 
@@ -428,11 +440,11 @@
   \mlsyscredit{Serving at Scale, \S10.5.1 (tables 4 and 9); Gupta et al., HPCA 2020; Hazelwood et al., HPCA 2018. Photo: Pittigrilli, CC BY-SA 4.0, Wikimedia Commons.}
   \note{%
   \mlsysnotemeta{1.5 min}{Optional}%
-  Avoid the fallacy that serving at scale means only LLM serving: on large consumer platforms, recommendation and ranking consume most inference cycles (Gupta et al. 2020; Hazelwood et al. 2018). Each workload's limiting resource dictates its batching primitive: fixed-shape vision CNNs use dynamic time windows (batches 32 to 256), variable-length LLM decode uses iteration-level batching, recommendation uses feature-parallel batching to coalesce sparse embedding lookups by destination shard under 10 ms (Archetype B), and speech endpoints stream 10 to 20 ms frames under real-time deadlines that keep batches tiny. Paged KV memory adds no value to vision or recommendation.
+  Iteration-level batching solves variable-length LLM decode, yet serving at scale does not mean LLMs alone. On large consumer platforms, recommendation and ranking consume most inference cycles (Gupta et al. 2020; Hazelwood et al. 2018). Each workload's limiting resource dictates its batching primitive. Fixed-shape vision convolutional neural networks (CNNs) use dynamic time windows with batches of 32 to 256, whereas variable-length LLM decode uses iteration-level batching. Recommendation (Archetype B, Lecture 1's recommender workload) uses feature-parallel batching to group sparse embedding-table lookups, where each query fetches specific user and item rows by destination shard, under 10 ms. Speech endpoints stream 10 to 20 ms audio frames under real-time deadlines that keep batches small. Paged KV memory adds no value to vision or recommendation.
 
-  \notecue{Optional}{For a 50-minute class, skip this table after noting that batching primitives follow each workload's limiting resource.}
+  \notecue{Teach}{For a 50-minute class, skip this table after noting that batching primitives follow each workload's limiting resource.}
 
-  \notecue{Next}{An optional slide examines how test-time reasoning tokens multiply both latency and KV cache occupancy.}
+  \notecue{Next}{Next, examine how test-time reasoning tokens multiply both latency and KV cache occupancy.}
 }
 \end{frame}
 
@@ -444,9 +456,9 @@
   \mlsyscredit{Serving at Scale, \S10.6.9 and Napkin Math 10.4 (100 ms per token, a round figure).}
   \note{%
   \mlsysnotemeta{1 min}{Optional}%
-  Test-time compute spends extra tokens per request to improve answer quality, multiplying both latency and memory residency. In the chapter's round-number illustration (100 ms per token), prepending 128 serial reasoning tokens stretches a one-token response to 12.8 s (128$\times$); faster hardware scales both down together, leaving the ratio unchanged while KV state stays occupied throughout. Sampling 8 candidates in parallel trades lower added latency for higher compute and KV footprint. Every reasoning deployment therefore needs an explicit per-request compute budget in both time and capacity, backed by measured quality gains.
+  Whereas continuous batching absorbs natural output-length variation, test-time compute chooses to spend extra tokens per request to improve answer quality, multiplying both latency and memory residency. At the chapter's round figure of 100 ms per token, generating 128 serial reasoning tokens stretches a one-token response to 12.8 s, a 128$\times$ increase. Faster hardware scales both times down together, leaving that ratio unchanged while KV state stays occupied throughout. Sampling 8 candidates in parallel trades lower added latency for higher compute and KV footprint. Every reasoning deployment therefore needs an explicit per-request compute budget in both time and capacity, backed by measured quality gains. Batching and iteration-level admission thus keep decode slots full, leaving KV memory as the limit on how many requests fit.
 
-  \notecue{Optional}{For a 50-minute class, skip this slide and move directly to Section 3 on KV memory.}
+  \notecue{Teach}{For a 50-minute class, skip this slide and note that reasoning tokens multiply both latency and KV occupancy before moving to Section 3.}
 
   \notecue{Next}{Section 3 prices the KV memory that every active request holds until completion.}
 }
@@ -457,9 +469,9 @@
 % =============================================================================
 \mlsysnote{%
   \mlsysnotemeta{0.5 min}{Core}%
-  Batching raised reuse up to a knee and iteration-level admission filled idle slots, yet every in-flight request holds KV memory until it finishes. This section calculates how many requests fit on one replica.
+  Section 2 showed that batching raises weight reuse up to a knee and iteration-level admission refills idle slots, yet every active request holds KV memory until it finishes. Section 3 answers how many requests fit on one replica by dividing free HBM by per-request KV state and mapping each memory lever to one factor.
 
-  \notecue{Next}{Start with the exact byte formula for one cached token across all layers of the 70B reference model.}
+  \notecue{Next}{Next, compute the exact byte cost of one cached token across all layers of the 70B reference model.}
 }
 \mlsysdivider{How many requests can one replica hold?}{Serving at Scale, \S10.7 and \S10.9}
 \section{KV Memory}
@@ -492,11 +504,11 @@
   \mlsyscredit{Serving at Scale, equation 5 and Napkin Math 10.5. Config: Llama 3.1 70B config.json (Hugging Face mirror unsloth/Meta-Llama-3.1-70B, read 2026-10-18).}
   \note{%
   \mlsysnotemeta{2 min}{Core}%
-  Every cached token stores a key and value vector (factor of 2) across all layers and KV heads so later tokens attend without recomputing history. Reading the real Llama 3.1 70B \texttt{config.json} on the left gives 80 layers, 8 KV heads, head width $8192/64 = 128$, and 2 FP16 bytes per element, totaling 327,680 B (about 0.33 MB) per token (with \texttt{max\_position\_embeddings} = 131,072). Step 1 shows the admission ratio: free HBM divided by context length times $m_{\text{token}}$. Step 2 maps each lever to one factor: grouped-query attention shrinks KV heads (64 to 8 cuts 8$\times$, requiring model training or adaptation), KV quantization shrinks bytes per element, context caps shorten admitted tokens, and paging leaves bytes unchanged while removing reservation waste.
+  To budget how many sequences fit on one replica, start with the byte footprint of a single token. Every cached token stores both a key vector and a value vector (the factor of 2) across all layers and KV heads so later tokens attend without recomputing history. Meta's Llama 3.1 70B \texttt{config.json} specifies 80 layers, 64 query attention heads sharing 8 KV heads, head width $8192/64 = 128$, and a maximum context length (\texttt{max\_position\_embeddings}) of 131,072 tokens. At 2 FP16 bytes per element, one token costs 327,680 B, or about 0.33 MB. Maximum batch size then divides free HBM by context length times $m_{\text{token}}$, and every memory lever moves one factor. Grouped-query attention cuts KV heads from 64 to 8 (an 8$\times$ reduction requiring training or adaptation), KV quantization stores fewer bytes per element, context caps shorten admitted tokens, and paging removes reservation waste without changing bytes per token.
 
   \notecue{Watch for}{Model weights are shared across all concurrent requests, whereas KV state multiplies linearly with every admitted request.}
 
-  \notecue{Next}{Students now use this formula to estimate how many 128K-context versus median-chat requests fit in 526 GB of free HBM.}
+  \notecue{Next}{Next, estimate how many 128K-context requests and how many median chat requests fit in 526 GB of free HBM.}
 }
 \end{frame}
 
@@ -523,11 +535,13 @@
   \mlsyscredit{Serving at Scale, Napkin Math 10.5 (registered byte capacity). Median chat from the Azure trace 2023 (prompt 1,020 + answer 129).}
   \note{%
   \mlsysnotemeta{3 min}{Core}%
-  Give pairs two minutes before revealing step 2. The reference node holds $8 \times 85.9 = 687.2$ decimal GB of HBM; subtracting 141.2 GB of FP16 weights and 20 GB of system reserve leaves 526.0 GB for KV caches. One 128K-token (131,072) request occupies 42.9 GB, so at most 12 fit. Reveal step 3: a median Azure chat request holds 1,149 tokens (1,020 prompt plus 129 answer), costing 376.5 MB, so 1,397 fit (derived), a 116$\times$ concurrency swing. Linking back to Little's law, 10,550 in-flight chat requests (mean 1,167 prompt plus half of 211 answer tokens, about 417 MB each) require roughly 4.4 TB, or 8.3 replicas of KV memory before any batch cap (derived).
+  Apply that admission ratio to the reference node, which holds $8 \times 85.9 = 687.2$ decimal GB of HBM, with 141.2 GB in FP16 weights and 20 GB reserved for the system. At 0.33 MB per token, estimate how many 128K-token (131,072) requests and median Azure chats fit before reading on.
 
-  \notecue{Check}{Ask pairs how many 128K requests fit. Starting from 640 GB ($8 \times 80$) mixes binary nameplate GiB with decimal GB; an 80 GiB card holds 85.9 decimal GB.}
+  \notecue{Check}{Subtracting weights and reserve leaves 526.0 GB for KV caches. One 128K-token request takes 42.9 GB, so 12 fit. A median Azure chat holds 1,149 tokens (1,020 prompt plus 129 answer) for 376.5 MB, so 1,397 fit (derived), a 116$\times$ swing. Linking to Little's law, 10,550 in-flight chats average 1,167 prompt tokens plus half of 211 answer tokens, about 417 MB each, needing roughly 4.4 TB or 8.3 replicas of KV memory before any batch cap (derived). A tempting error starts from 640 GB ($8 \times 80$), mixing binary gigabytes (GiB) with decimal GB, whereas an 80 GiB card holds 85.9 decimal GB.}
 
-  \notecue{Next}{The next slide shows how paged KV allocation reclaims the memory stranded by worst-case contiguous reservations.}
+  \notecue{Teach}{Give pairs two minutes before revealing the 128K and chat counts.}
+
+  \notecue{Next}{Next, see how paged KV allocation reclaims memory stranded by worst-case contiguous reservations.}
 }
 \end{frame}
 
@@ -539,11 +553,11 @@
   \mlsyscredit{Serving at Scale, \S10.7.2 to \S10.7.4 and Napkin Math 10.6 (64-head attention); Kwon et al., SOSP 2023. Explore: Paged Attention (mlsysbook.ai).}
   \note{%
   \mlsysnotemeta{2 min}{Core}%
-  Follow three steps showing how OS-style paging recovers stranded HBM. Step 1: contiguous allocation forces the server to reserve each request's maximum allowed context up front because answer length is unknown; reserving 8 slots when requests use 3 and 5 leaves half empty, matching vLLM's measurement that earlier systems left 60 to 80\% of reserved KV memory unused (Kwon et al. 2023). Step 2: PagedAttention divides the KV cache into fixed blocks mapped by a per-request block table anywhere in HBM, capping internal waste at one partly filled final block per sequence. Step 3: paging enables prefix sharing across requests; in Napkin Math 10.6, 1,000 users sharing a 2,000-token system prompt drop KV usage from 6.6 TB to 1.3 TB (79.9\% less), provided prefix sharing stays strictly within one tenant boundary.
+  Reaching that full KV budget requires eliminating reservation waste. Contiguous allocation forces a server to reserve each request's maximum allowed context up front because answer length is unknown. Reserving 8 slots when requests use 3 and 5 leaves half empty, matching vLLM's measurement that earlier systems left 60 to 80\% of reserved KV memory unused (Kwon et al. 2023). Borrowing virtual-memory paging from operating systems, where fixed-size blocks sit anywhere in physical memory tracked by a lookup table, PagedAttention splits the KV cache into fixed blocks mapped by a per-request block table, capping waste at one partly filled final block per sequence. Paging also enables prefix sharing across requests. In Napkin Math 10.6, 1,000 users sharing a 2,000-token system prompt cut KV usage from 6.6 TB to 1.3 TB, or 79.9\% less, provided shared prefixes stay within one customer tenant boundary.
 
-  \notecue{Watch for}{Paging does not accelerate arithmetic; it raises capacity by admitting more requests into the same HBM.}
+  \notecue{Watch for}{Paging does not accelerate arithmetic. It raises capacity by admitting more requests into the same HBM.}
 
-  \notecue{Next}{An optional slide examines how lower precision shrinks weights once and KV state for every active request.}
+  \notecue{Next}{Next, examine how lower numeric precision shrinks weights once and KV state for every active request.}
 }
 \end{frame}
 
@@ -554,13 +568,13 @@
   \mlsyscredit{Serving at Scale, \S10.9, Napkin Math 10.7 (decimal 80 GB per GPU, runtime reserves omitted), table 11.}
   \note{%
   \mlsysnotemeta{2 min}{Optional}%
-  Left: 4-bit weights shrink a 70B model from 140 GB to 35 GB (using the chapter's round 70B count on decimal 80 GB GPUs), fitting one card, whereas a 175B model still needs 87.5 GB at 4 bits. Right: combining INT4 weights with an INT8 KV cache lifts the replica's maximum batch from roughly 372 at FP16 to 901 (2.4$\times$). Shrinking weights once enlarges the free KV pool by 1.21$\times$, whereas halving per-request KV bytes doubles admitted sequences directly. Match format to phase: bandwidth-bound decode benefits from low-bit weights, while compute-bound prefill needs 8-bit arithmetic (W8A8 or FP8).
+  Paging recovers wasted reservations without changing bytes per token, whereas lower numeric precision shrinks the stored bytes themselves. Using the chapter's round 70B count on decimal 80 GB GPUs, 4-bit weights shrink a 70B model from 140 GB to 35 GB so it fits one card, while a 175B model still needs 87.5 GB at 4 bits. Combining 4-bit integer (INT4) weights with an 8-bit integer (INT8) KV cache lifts the replica's maximum batch from roughly 372 at FP16 to 901, a 2.4$\times$ gain. Shrinking weights once enlarges the free KV pool by 1.21$\times$, whereas halving per-request KV bytes doubles admitted sequences directly. Format should match phase, with low-bit weights aiding bandwidth-bound decode and 8-bit arithmetic such as W8A8 or FP8 serving compute-bound prefill.
 
-  \notecue{Watch for}{Perplexity can move under 1\% while rare languages or reasoning degrade sharply, so always evaluate task quality beside throughput.}
+  \notecue{Watch for}{Perplexity, a measure of language prediction quality, can shift under 1\% while rare languages or reasoning degrade sharply, so evaluate task quality beside throughput.}
 
-  \notecue{Optional}{For a 50-minute class, skip this slide and go directly to the True-or-False memory check.}
+  \notecue{Teach}{For a 50-minute class, skip this slide after noting that shrinking KV bytes multiplies batch size more than shrinking weights alone.}
 
-  \notecue{Next}{A four-statement Vote tests common fallacies about what extra HBM and paging actually buy.}
+  \notecue{Next}{Next, test four common fallacies about what extra HBM and paging buy.}
 }
 \end{frame}
 
@@ -583,11 +597,13 @@
   \mlsyscredit{Serving at Scale, \S10.16 (fallacies), \S10.7.3, \S10.7.6. Photo: Geekerwan, CC BY 3.0, Wikimedia Commons.}
   \note{%
   \mlsysnotemeta{2 min}{Core}%
-  Have students vote on all four statements, discuss with a neighbor, and vote again before revealing step 2. Statement 1 is false: more HBM admits more sequences, yet each added sequence adds KV reads until TPOT or compute caps step time. Statement 2 is false: paging adds slight block-table indirection and buys admission capacity, not faster steps. Statement 3 is false: stopping speculative draft execution frees zero memory until draft weights and per-request draft caches are unloaded. Statement 4 is true: the 70B weights fit easily while 128K context caps the node at 12 sequences. Just as Lecture 2 separated capacity from bandwidth, serving must pass both tests on every step.
+  Before moving from memory sizing to step time, judge all four statements on what HBM and paging buy. As Lecture 2 separated memory capacity from bandwidth, serving must pass both tests on every step.
 
-  \notecue{Check}{Ask which false claim caught the most votes. Claim 1 is the frequent distractor because it ignores that memory buys admission while TPOT limits execution rate.}
+  \notecue{Check}{Statements 1, 2, and 3 are false, and Statement 4 is true. Statement 1 is tempting because extra HBM admits more sequences, yet each adds KV reads until TPOT or compute caps step time. Statement 2 fails because paging adds slight block-table indirection and buys admission rather than faster steps. Statement 3 fails because halting a speculative draft model, a small helper proposing candidate tokens (developed in Section 4), frees zero memory until its weights and draft caches unload. Statement 4 holds because 70B weights fit easily while 128K context caps the node at 12 sequences. Memory thus buys admission, leaving step time to Section 4.}
 
-  \notecue{Next}{Section 4 addresses the two distinct phases inside each request and how sharding splits a replica across GPUs.}
+  \notecue{Teach}{Have the class vote on all four statements, discuss with a neighbor, and vote again before revealing the answers.}
+
+  \notecue{Next}{Section 4 addresses the two phases inside each request and how sharding splits a replica across GPUs.}
 }
 \end{frame}
 
@@ -596,9 +612,9 @@
 % =============================================================================
 \mlsysnote{%
   \mlsysnotemeta{0.5 min}{Core}%
-  Prefill and decode place opposite demands on hardware, and large replicas span multiple GPUs. This section examines phase interference, disaggregation, sharding, and step-time budgets.
+  Section 3 established how many requests fit in HBM; Section 4 asks whether they run fast enough, specifically whether prefill and decode should share a worker and how many GPUs one replica should span. It examines phase interference, separate phase pools (disaggregation), tensor-parallel sharding, and step-time budgets.
 
-  \notecue{Next}{Start by plotting prefill and decode on the H100 roofline to expose their opposite bottlenecks.}
+  \notecue{Next}{Next, plot prefill and decode on the H100 roofline to expose their opposite bottlenecks.}
 }
 \mlsysdivider{Should prefill and decode share a worker, and how many GPUs per replica?}{Serving at Scale, \S10.8, \S10.10, \S10.15.1}
 \section{Phases and Shards}
@@ -618,11 +634,11 @@
   \mlsyscredit{Serving at Scale, \S10.8.1 (weight-traffic approximation); ridge derived. Photo: Geekerwan, CC BY 3.0, Wikimedia Commons.}
   \note{%
   \mlsysnotemeta{1.5 min}{Core}%
-  Review the H100 roofline: 989 TFLOP/s dense FP16 divided by 3.35 TB/s HBM gives a ridge point of 295 FLOP per byte (derived). Step 1: batch-one decode operates near 1 FLOP per byte of weights read, deep in the memory-bandwidth region. Step 2: batching lifts decode intensity roughly to the batch size, yet even the knee near 80 remains below the ridge once KV reads are counted. Step 3: prefill amortizes one weight read across all prompt tokens, so its intensity tracks prompt length; the Azure median prompt of 1,020 tokens sits well into the compute-bound ceiling, where faster tensor cores help prefill directly.
+  Why do prefill and decode pull one worker in opposite directions? Recall from Lectures 2 and 9 that an H100's 989 TFLOP/s of dense FP16 compute over 3.35 TB/s of HBM bandwidth sets a ridge point of 295 FLOP per byte (derived). Batch-one decode starts near 1 FLOP per byte of weights read, deep in the memory-bandwidth region. Batching decode lifts arithmetic intensity roughly to the batch size, yet even the batching knee near 80 remains below the ridge once KV reads are counted. Prefill amortizes one weight read across all prompt tokens, so its intensity tracks prompt length. The Azure median prompt of 1,020 tokens sits well into the compute-bound ceiling, where faster tensor cores accelerate prefill directly.
 
   \notecue{Watch for}{Because the same weights run both compute-bound prefill and bandwidth-bound decode, placing both phases on one worker forces a hardware mismatch.}
 
-  \notecue{Next}{The next slide shows how colocating an unchunked long prefill stalls every active decode stream.}
+  \notecue{Next}{Next, see how colocating an unchunked long prefill stalls every active decode stream.}
 }
 \end{frame}
 
@@ -633,11 +649,11 @@
   \mlsyscredit{Serving at Scale, \S10.8.2 and Example 10.5; Agrawal et al., OSDI 2024 (Sarathi-Serve). Timing illustrative.}
   \note{%
   \mlsysnotemeta{2.5 min}{Core}%
-  Step 1: under continuous batching, admitting a 10,000-token prompt and running its full prefill at once forces every active decode stream to wait, stretching their individual token gaps (TBT) to hundreds of milliseconds. Step 2: chunked prefill (Sarathi-Serve, Agrawal et al. 2024) splits the prompt into 512-token chunks scheduled alongside decode tokens under one per-iteration token budget. Active streams now wait at most one hybrid iteration, and the prefill chunk piggybacks on decode's weight read to utilize idle arithmetic, while the long prompt pays at least $\lceil 10{,}000 / 512 \rceil = 20$ iterations in TTFT. Making chunks too tiny (such as 32 tokens) reintroduces kernel overhead and extra weight reads.
+  When both phases share one worker under continuous batching, running a 10,000-token prompt's full prefill at once stalls every active decode stream, stretching individual token gaps (TBT) to hundreds of milliseconds. Chunked prefill, used by Sarathi-Serve (Agrawal et al., OSDI 2024) to curb this interference, splits the prompt into 512-token chunks scheduled alongside decode tokens under one per-iteration token budget. Active streams then wait at most one hybrid iteration, and each prefill chunk piggybacks on decode's weight read to use idle arithmetic. The arriving prompt pays at least $\lceil 10{,}000 / 512 \rceil = 20$ iterations in TTFT. Making chunks too small, such as 32 tokens, reintroduces kernel launch overhead and extra weight reads.
 
-  \notecue{Watch for}{Chunking relocates latency rather than erasing it: chunk size trades active streams' TBT against the arriving prompt's TTFT.}
+  \notecue{Watch for}{Chunking relocates latency rather than erasing it, because chunk size trades active streams' TBT against the arriving prompt's TTFT.}
 
-  \notecue{Next}{Rather than interleaving phases on one node, the next slide separates prefill and decode into dedicated pools.}
+  \notecue{Next}{Next, instead of interleaving phases on one node, separate prefill and decode into dedicated pools.}
 }
 \end{frame}
 
@@ -659,11 +675,11 @@
   \mlsyscredit{Serving at Scale, \S10.8.3 and eq.~10; Zhong et al., OSDI 2024. Bars: InferenceX, DeepSeek-R1, FP8. Photo: Jesseschulman, CC BY-SA 3.0, Wikimedia Commons.}
   \note{%
   \mlsysnotemeta{2 min}{Core}%
-  Disaggregation (DistServe, Zhong et al. 2024) assigns prefill and decode to separate GPU pools so each buys its preferred resource, at the price of transferring the prompt's KV cache via $T = \alpha + M_{\text{KV}} / \beta$ (Lectures 2 and 3). Left: at NVLink 450 GB/s versus InfiniBand 50 GB/s per direction, a 377 MB median chat cache crosses in 0.8 ms or 7.5 ms, whereas a 128K request's 42.9 GB takes 95 ms even over NVLink, charged directly to TTFT (all derived). Right: measured InferenceX bars for DeepSeek-R1 FP8 show split pools beating colocated pools by 1.7 to 2.9$\times$ at 25 and 50 tok/s/user on B200 and H200, yet tying (51 vs 52 on H200) or losing (148 vs 208 on B200) at 100 tok/s/user where tiny batches leave little interference to eliminate while handoff overhead remains.
+  Chunked prefill limits interference on one worker, yet hybrid steps still compromise hardware layout. Prefill-decode disaggregation, introduced by DistServe (Zhong et al., OSDI 2024), assigns each phase to its own GPU pool and pays a KV handoff of $T = \alpha + M_{\text{KV}} / \beta$ (Lecture 3's $\alpha$-$\beta$ model on Lecture 2's bandwidth staircase). At 450 GB/s per direction over NVLink versus 50 GB/s over cross-node InfiniBand, a 377 MB median chat cache crosses in 0.8 ms or 7.5 ms, while a 128K request's 42.9 GB adds 95 ms to TTFT even over NVLink (all derived). In InferenceX measurements for DeepSeek-R1 FP8, split pools beat colocated pools by 1.7 to 2.9$\times$ at 25 and 50 tok/s/user on B200 and H200, yet tie at 100 tok/s/user on H200 (51 versus 52) and lose on B200 (148 versus 208) when small batches leave little interference.
 
-  \notecue{Watch for}{The benchmark bars do not isolate disaggregation alone because software stacks also vary; choose split versus colocated by measured SLO goodput.}
+  \notecue{Watch for}{The measurements do not isolate disaggregation alone because software stacks also vary. Choose split or colocated pools by measured SLO goodput.}
 
-  \notecue{Next}{Apply the Fleet Law to tensor-parallel sharding across the eight GPUs of a replica.}
+  \notecue{Next}{Next, apply the Fleet Law to tensor-parallel sharding across the eight GPUs of a replica.}
 }
 \end{frame}
 
@@ -675,11 +691,11 @@
   \mlsyscredit{Serving at Scale, equations 12 and 13, Example 10.6 (assumed 30 ms serial layer, 0.3 ms per AllReduce).}
   \note{%
   \mlsysnotemeta{2 min}{Core}%
-  Apply Lecture 1's Fleet Law to one serving replica: sharding divides compute by $N$ while adding collectives and synchronization. Step 1: the chapter's long-prompt prefill reference takes 30 ms serially per layer (12 ms attention, 18 ms feed-forward). Step 2: 8-way tensor parallelism (Lecture 6) reduces compute to 3.75 ms per layer plus two 0.3 ms AllReduces (4.35 ms total), cutting 80 layers from 2,400 ms to 348 ms (6.9$\times$ speedup). Weight size sets the minimum shard floor (140 GB requires at least two 80 GiB / 85.9 decimal GB GPUs), while latency contracts choose the serving degree. During decode, layer compute is tiny, so fixed collective latency dominates.
+  Whether phases share a pool or split, Lecture 1's Fleet Law sets how many GPUs one replica spans, dividing compute by $N$ while adding collectives and synchronization. In the chapter's long-prompt prefill reference, one serial layer takes 30 ms (12 ms attention, 18 ms feed-forward). Applying 8-way tensor parallelism (Lecture 6) cuts compute to 3.75 ms and adds two 0.3 ms AllReduce collectives summing partial outputs, giving 4.35 ms per layer. Across 80 layers, latency drops from 2,400 ms to 348 ms, a 6.9$\times$ speedup. Weights set the minimum shard floor (140 GB requires at least two 80 GiB, or 85.9 decimal GB, GPUs), whereas the SLO sets the serving degree. During decode, small layer compute lets collective latency dominate.
 
-  \notecue{Watch for}{Because tensor parallelism runs 160 collectives per token on an 80-layer model, it must stay inside one NVLink domain; slower cross-node links multiply latency 160 times. MoE expert parallelism adds AllToAll collectives (\S10.10.4).}
+  \notecue{Watch for}{Tensor parallelism runs 160 collectives per token on an 80-layer model and must stay inside one NVLink domain, because slower cross-node links multiply latency 160 times. MoE expert parallelism adds AllToAll collectives (Lecture 5; \S10.10.4).}
 
-  \notecue{Next}{An optional slide shows how a real vLLM launch command exposes these memory and scheduling levers as flags.}
+  \notecue{Next}{Next, inspect a vLLM launch command to see these memory and scheduling levers as engine flags.}
 }
 \end{frame}
 
@@ -703,13 +719,13 @@
   \mlsyscredit{vLLM engine arguments (vllm/engine/arg\_utils.py, github.com/vllm-project/vllm, read 2026-10-18). Values are an untuned example.}
   \note{%
   \mlsysnotemeta{1.5 min}{Optional}%
-  Inspect a real vLLM command line (from \texttt{arg\_utils.py}) to connect equations directly to production controls. Step 1 highlights the six shard and KV admission flags: \texttt{--tensor-parallel-size} and \texttt{--gpu-memory-utilization} govern the 526 GB KV budget, \texttt{--block-size} and \texttt{--enable-prefix-caching} govern paging and sharing, and \texttt{--max-model-len} plus \texttt{--kv-cache-dtype} govern per-request bytes. Step 2 adds the three iteration-scheduling flags: \texttt{--enable-chunked-prefill}, \texttt{--max-num-batched-tokens}, and \texttt{--max-num-seqs} control token cadence.
+  Every memory and phase lever from Sections 3 and 4 surfaces directly as a launch flag in vLLM's \texttt{arg\_utils.py}. The first six flags govern sharding and KV admission. Specifically, \texttt{--tensor-parallel-size} and \texttt{--gpu-memory-utilization} shape the 526 GB KV budget, \texttt{--block-size} and \texttt{--enable-prefix-caching} control paging and prefix sharing, and \texttt{--max-model-len} with \texttt{--kv-cache-dtype} set per-request bytes. Three iteration-scheduling flags, \texttt{--enable-chunked-prefill}, \texttt{--max-num-batched-tokens}, and \texttt{--max-num-seqs}, govern token cadence.
 
-  \notecue{Watch for}{The printed numbers are an untuned example; every production flag must be calibrated against measured SLO goodput.}
+  \notecue{Watch for}{The printed values are an untuned example. Every production flag must be calibrated against measured SLO goodput.}
 
-  \notecue{Optional}{For a 50-minute class, skip this command listing and move directly to the 50 ms TPOT budget prediction.}
+  \notecue{Teach}{For a 50-minute class, skip this listing after noting that serving engines expose each memory and cadence lever directly as a launch flag.}
 
-  \notecue{Next}{Students now predict whether INT4 weight quantization alone brings our reference replica under a 50 ms TPOT target.}
+  \notecue{Next}{Next, predict whether INT4 weight quantization alone brings the reference replica under a 50 ms TPOT target.}
 }
 \end{frame}
 
@@ -721,11 +737,13 @@
   \mlsyscredit{Serving at Scale, \S10.15.1 and table 26 (constructed budget); speculation: equation 6, $K = 5$, acceptance 0.78.}
   \note{%
   \mlsysnotemeta{2.5 min}{Core}%
-  Walk through the reference replica's batch-one decode budget against an illustrative 50 ms TPOT target. Step 1: the constructed baseline step takes 85 ms, 16$\times$ above the 5.2 ms weight-streaming floor. Ask whether cutting GEMM time by 45\% with INT4 weights reaches 50 ms, then reveal step 2: step time drops only to 69.7 ms because non-GEMM intervals total 51 ms. Step 3: fused decode attention, element-wise fusion, and CUDA graph replay reach 49.6 ms, just inside budget, leaving 10.2 ms in AllReduce (about 64 $\mu$s across 160 collectives, the cost Lecture 9 flagged). Step 4: speculative decoding reaches 15.2 ms mean TPOT (3.26$\times$ better), yet emits bursts every 53.6 ms, violating a strict 50 ms TBT limit.
+  Putting memory, sharding, and kernel costs together, test a batch-one decode step on the reference replica against an illustrative 50 ms TPOT target. The constructed baseline takes 85 ms, or 16$\times$ above the 5.2 ms weight-streaming floor. Before reading on, predict whether cutting GEMM time 45\% with low-precision INT4 weights reaches 50 ms.
 
-  \notecue{Check}{Ask students why INT4 weights alone miss 50 ms. Even cutting GEMM nearly in half cannot cross 50 ms when attention, element-wise kernels, launch overhead, and AllReduces already sum to 51 ms.}
+  \notecue{Check}{The answer is no, because step time drops only to 69.7 ms. A tempting answer is yes, because matrix-multiply time nearly halves, yet attention, element-wise kernels (normalization and activations), launch overhead, and AllReduces already sum to 51 ms. Applying Lecture 9's operator fusion to decode attention and element-wise kernels plus CUDA graph replay reaches 49.6 ms, leaving 10.2 ms in AllReduce (about 64 $\mu$s each across 160 collectives, reflecting the small-collective launch and synchronization overhead Lecture 9 flagged). Finally, speculative decoding (examined next) reaches 15.2 ms mean TPOT (3.26$\times$ better), yet emits bursts every 53.6 ms, missing a 50 ms TBT limit.}
 
-  \notecue{Next}{The next slide opens up speculative decoding to show how it achieves 15.2 ms mean TPOT with exact target quality.}
+  \notecue{Teach}{Pause for a brief vote on whether INT4 weights reach 50 ms before revealing the remaining bars.}
+
+  \notecue{Next}{Next, inspect speculative decoding to see how it reaches 15.2 ms mean TPOT with exact target quality.}
 }
 \end{frame}
 
@@ -736,11 +754,11 @@
   \mlsyscredit{Serving at Scale, \S10.15.1 and equation 6 (constructed budget). Explore: Speculative Decoding (mlsysbook.ai).}
   \note{%
   \mlsysnotemeta{2 min}{Core}%
-  Trace how speculative decoding bypasses the low-batch weight-bandwidth ceiling in three steps. Step 1: a lightweight draft model generates $K = 5$ candidate tokens serially in 4.0 ms total. Step 2: the 70B target model verifies all 5 positions in one parallel forward pass (49.6 ms), reading weights once instead of five times (248 ms serially) and spending decode's unused arithmetic. Step 3: rejection sampling accepts the matching prefix (here 3 tokens), draws one exact bonus token at the first mismatch from the target distribution, and discards the remaining drafts, guaranteeing mathematically unchanged output quality. At acceptance probability $p = 0.78$, each 53.6 ms round yields $E = 3.52$ tokens, giving 15.2 ms mean TPOT (3.26$\times$ faster) alongside a 53.6 ms burst TBT.
+  How does speculative decoding cut mean TPOT without altering output quality? It bypasses the low-batch weight-bandwidth ceiling in three stages. First, a lightweight draft model generates $K = 5$ candidate tokens serially in 4.0 ms. Second, the 70B target model verifies all 5 positions in one 49.6 ms parallel pass, reading weights once instead of five times (248 ms serially) using decode's spare arithmetic. Third, rejection sampling accepts the matching prefix of 3 tokens, draws one exact bonus token at the first mismatch from the target distribution, and discards remaining drafts, leaving output quality unchanged. At acceptance probability $p = 0.78$, each 53.6 ms round yields $E = 3.52$ tokens, giving 15.2 ms mean TPOT (3.26$\times$ faster) alongside a 53.6 ms burst TBT. Phases, sharding, kernels, and speculation now budget one replica's step time.
 
   \notecue{Watch for}{Speculative gains shrink as batch size grows because larger batches already consume the spare arithmetic that parallel verification relies on.}
 
-  \notecue{Next}{With one replica fully sized and budgeted, Section 5 scales out to routing, tail containment, and autoscaling across a fleet of replicas.}
+  \notecue{Next}{With one replica sized and budgeted, Section 5 scales out to routing, tail containment, and autoscaling across a fleet.}
 }
 \end{frame}
 
@@ -749,9 +767,9 @@
 % =============================================================================
 \mlsysnote{%
   \mlsysnotemeta{0.5 min}{Core}%
-  One replica is now budgeted from HBM to collectives. This final section manages a fleet of replicas: routing requests, budgeting fan-out tails, absorbing bursts, and isolating tenants.
+  Sections 1 through 4 sized and budgeted one replica from HBM to collectives. Section 5 scales to a fleet of replicas, asking how routing on remaining work, budgeting parallel fan-out tails, absorbing traffic bursts, and isolating tenants keep tail latency inside the contract.
 
-  \notecue{Next}{Start with randomized load balancing and the work signals an LLM router actually needs.}
+  \notecue{Next}{Next, examine randomized load balancing and the work signals an LLM router needs.}
 }
 \mlsysdivider{How does a fleet of replicas keep the tail inside the contract?}{Serving at Scale, \S10.11 to \S10.13}
 \section{Fleet}
@@ -772,11 +790,11 @@
   \mlsyscredit{Simulated here (balls into bins). Serving at Scale, \S10.11.2 and \S10.11.3; Mitzenmacher 2001. Photo: Theodore Christopher, CC0, Wikimedia Commons.}
   \note{%
   \mlsysnotemeta{2 min}{Core}%
-  In a large serving region like Ashburn (US-East), a router distributes traffic across thousands of replicas without polling every one. In the static balls-into-bins model (Mitzenmacher 2001), pure random placement leaves the busiest of 100,000 replicas with 7.6 jobs in simulation ($\Theta(\log n / \log\log n)$), whereas probing two random replicas and choosing the lighter cuts max load in half to 3.6 ($\Theta(\log\log n)$). For LLMs, request count is too coarse because remaining decode length varies fiftyfold; routers instead compare active tokens, estimated remaining decode, and KV pressure, while respecting KV prefix affinity on multi-turn chats and verifying admission atomically against stale probes. Heterogeneous fleets weight probes by capacity (10 H100s at 1,000 and 20 A100s at 600 req/s balance at 68.2\% under 15,000 req/s).
+  In a large region such as Ashburn (US-East), a router spreads traffic across thousands of replicas without polling every one. Mitzenmacher's load-balancing theorem (``The Power of Two Choices,'' IEEE TPDS 2001) analyzes a static balls-into-bins model placing $n$ equal-size jobs sequentially into $n$ empty bins without departures. Random placement leaves the busiest of 100,000 simulated replicas with 7.6 jobs ($\Theta(\log n / \log\log n)$), whereas probing two random replicas and picking the lighter halves that peak to 3.6 jobs ($\Theta(\log\log n)$). Because remaining LLM decode varies fiftyfold, routers compare active tokens, remaining decode, and KV pressure, preserve KV prefix affinity for multi-turn chats, and admit atomically against stale probes. Mixed fleets weight probes by capacity; at 15,000 req/s, 10 H100s at 1,000 req/s and 20 A100s at 600 req/s balance at 68.2\% utilization.
 
   \notecue{Watch for}{The two-choices bound models static placement and does not by itself bound p99 tail latency.}
 
-  \notecue{Next}{A Diagnose activity shows how fan-out turns modest per-shard tail latency into frequent request-level slowdowns.}
+  \notecue{Next}{Next, diagnose how fan-out turns modest per-shard tail latency into frequent request-level slowdowns.}
 }
 \end{frame}
 
@@ -801,13 +819,15 @@
   \mlsyscredit{Serving at Scale, \S10.11.1 and Lighthouse 10.2 (independence assumed).}
   \note{%
   \mlsysnotemeta{2.5 min}{Core}%
-  Give students one minute to calculate how often a 100-shard ranking request exceeds shard p99 latency before revealing step 2. Because the parent waits for its slowest leaf, the request is slow if any of 100 independent leaves hits its 1\% tail: $1 - 0.99^{100} = 63\%$. Holding the parent request at p99 requires each leaf to stay near p99.99 (0.01\% slow). At Archetype B's scale of $10^7$ queries per second, a one-in-10,000 event still fires 1,000 times per second. Engineering levers attack different terms: fewer shards lower $N$, queue-aware routing and isolation lower leaf tail rate $q$, deadlines with partial results cap damage, and hedged requests (Lecture 4) trade duplicate work for lower $q$.
+  Balancing traffic across replicas is not enough when one request fans out across many shards at once. A ranking request queries 100 independent shards and waits for all of them, with each shard meeting p99 (1\% slow). Before reading on, calculate how often the parent request is slow.
 
-  \notecue{Check}{Ask students for the slow-request probability. Answering 1\% wrongly averages the leaves instead of taking their maximum; waiting for all 100 compounds tail probability to 63\%.}
+  \notecue{Check}{The answer is 63\%. Waiting for the slowest of 100 leaves compounds the 1\% tail to $1 - 0.99^{100} = 63\%$. A tempting answer is 1\%, which averages leaves instead of taking their maximum. Keeping the parent at p99 requires each leaf near p99.99 (0.01\% slow). At Archetype B's $10^7$ queries per second, that one-in-10,000 event still fires 1,000 times per second. Fewer shards lower $N$, queue-aware routing and isolation lower leaf tail rate $q$, deadlines with partial results cap damage, and hedged requests (Lecture 4's tail-triggered backup duplicates) trade duplicate work for lower $q$.}
 
-  \notecue{Watch for}{Independence is optimistic; shared switches or hot keys slow many leaves simultaneously.}
+  \notecue{Watch for}{Independence is optimistic, because shared switches or heavily queried hot keys slow many leaves at once.}
 
-  \notecue{Next}{Measured Azure traffic traces next reveal two distinct timescales that autoscaling must handle.}
+  \notecue{Teach}{Give one minute for the calculation before revealing the formula and curve.}
+
+  \notecue{Next}{Next, measured Azure traces reveal two timescales that autoscaling must handle.}
 }
 \end{frame}
 
@@ -824,11 +844,11 @@
   \mlsyscredit{Azure LLM inference traces 2024 (Stojkovic et al., HPCA 2025) and 2023 (Patel et al.), CC BY. Photo: H100 node of TSUBAME 4.0, Fukumoto, CC BY-SA 4.0. Example 10.11.}
   \note{%
   \mlsysnotemeta{2.5 min}{Core}%
-  Compare the two real Azure LLM traces. Top: one week of conversation traffic in 10-minute means swings roughly 2.2$\times$ daily (25 to 38 req/s nightly troughs to 62 to 80 req/s weekday peaks, quieter on weekends). Bottom: one hour of code traffic at 1-second resolution averages 2.6 req/s yet spikes to 67 req/s in the busiest second. Meanwhile, spinning up one 70B H100 node (like the TSUBAME 4.0 node shown) takes 6.7 minutes cold start: 1 min provisioning, 4.7 min fetching 140 GB at 0.5 GB/s, and 1 min loading and warmup. Diurnal ramps are forecastable, so starting replicas 30 minutes early cuts peak needs from 45 to 30 in the chapter's predictive example; second-scale bursts must be absorbed by ready headroom or admission control, and scale-down must wait longer than scale-up because draining takes time and rebuilding costs minutes.
+  Routing assumes ready replicas exist, yet real demand moves on two timescales. Microsoft's 2024 Azure LLM trace (Stojkovic et al., HPCA 2025) logs one week of conversation traffic in 10-minute averages swinging roughly 2.2$\times$ daily, from 25 to 38 req/s nightly troughs to 62 to 80 req/s weekday peaks, quieter on weekends. By contrast, the 2023 one-hour coding trace (Patel et al.) at 1-second resolution averages 2.6 req/s yet spikes to 67 req/s in the busiest second. Cold-starting one 70B H100 node (illustrated by a TSUBAME 4.0 H100 node) takes 6.7 minutes, combining 1 min provisioning, 4.7 min fetching 140 GB at 0.5 GB/s, and 1 min warmup. Forecastable daily (diurnal) ramps let predictive scaling start replicas 30 minutes early, cutting peak count from 45 to 30. Second-scale bursts require ready headroom or admission control, and scale-down waits longer because draining and rebuilding cost minutes.
 
-  \notecue{Watch for}{Never autoscale on average GPU utilization; scale on outstanding work relative to per-phase service rates.}
+  \notecue{Watch for}{Never autoscale on average GPU utilization. Scale on outstanding work relative to per-phase service rates.}
 
-  \notecue{Next}{An optional slide shows how retries turn one slow replica into a fleet-wide cascade unless circuit breakers and backpressure intervene.}
+  \notecue{Next}{Next, see how retries turn one slow replica into a fleet-wide cascade without circuit breakers and backpressure.}
 }
 \end{frame}
 
@@ -840,11 +860,11 @@
   \mlsyscredit{Serving at Scale, \S10.11.10 (illustrative 50 ms to 500 ms slowdown); Nygard 2007.}
   \note{%
   \mlsysnotemeta{1.5 min}{Optional}%
-  In the chapter's illustration, one replica slowing from 50 to 500 ms builds a queue, triggers client timeouts and retries, and pushes overload onto healthy neighbors. Step 1: a circuit breaker starts closed, then trips open once errors or latencies breach a threshold so requests fail fast or reroute within a retry budget. Step 2: after a cooldown interval, a half-open state sends probes and closes again upon recovery. Opening a breaker only shifts load without adding capacity; when every replica is saturated, HTTP 503 backpressure converts routing into edge admission control alongside Lecture 7's graceful degradation fallbacks. Deadlines must travel with each request so canceled work leaves continuous batches immediately instead of holding zombie KV pages.
+  When a burst or fault outpaces ready headroom, retries can turn one slow replica into a fleet-wide cascade. In the chapter's illustration, one replica slowing from 50 to 500 ms builds a queue, triggers client timeouts and retries, and pushes overload onto healthy neighbors. Recall Lecture 7's circuit breaker, which begins closed and trips open once errors or latencies cross a threshold, letting requests fail fast or reroute within a retry budget. After a cooldown interval, a half-open state sends probes and closes again once the replica recovers. Opening a breaker shifts load without adding capacity. When every replica is saturated, HTTP 503 (Service Unavailable) overload backpressure turns routing into edge admission control alongside Lecture 7's graceful degradation fallbacks. Deadlines must travel with each request so canceled work leaves continuous batches immediately instead of holding abandoned KV pages.
 
-  \notecue{Optional}{For a 50-minute class, skip this slide and the next quota slide to move straight to the cost synthesis.}
+  \notecue{Teach}{For a 50-minute class, skip this slide and the next quota slide, noting that circuit breakers and HTTP 503 backpressure stop retry cascades, then move to the cost synthesis.}
 
-  \notecue{Next}{An optional slide defines token-based tenant quotas that prevent one bursting tenant from exhausting shared KV pools.}
+  \notecue{Next}{Next, examine token-based tenant quotas that prevent one bursting tenant from exhausting shared KV pools.}
 }
 \end{frame}
 
@@ -871,11 +891,11 @@ class TenantQuota:
   \mlsyscredit{Serving at Scale, \S10.12, listing 1, Example 10.9 (scenario values).}
   \note{%
   \mlsysnotemeta{1.5 min}{Optional}%
-  Sharing replicas across tenants raises utilization only with enforced isolation. In Example 10.9, ten tenants normally send 100 QPS each under a 50 ms p99; when tenant 3 bursts to 500 QPS without quotas, everyone's p99 degrades from 15 ms to 22--45 ms, whereas capping tenant 3 at 120 QPS keeps all other tenants at 15 ms. Similarly, in a shared 60 GB KV pool (3 tenants, 20 GB each), one tenant grabbing 45 GB cuts the others from 200 sequences down to 75. Because request sizes span 20 to 100,000 tokens, \texttt{TenantQuota} meters input/output tokens, KV MB, batch tokens, and concurrency atomically inside Lecture 8's serving envelope. As the March 20, 2023 ChatGPT cache-leak incident demonstrated, caches are also security isolation boundaries (Lecture 13).
+  Healthy replicas still fail isolation when one bursting tenant crowds out shared pools. In Example 10.9, ten tenants send 100 QPS each under a 50 ms p99 target. When tenant 3 bursts to 500 QPS without quotas, every tenant's p99 rises from 15 ms to between 22 and 45 ms, whereas capping tenant 3 at 120 QPS keeps others at 15 ms. In a shared 60 GB KV pool (3 tenants at 20 GB each), one taking 45 GB cuts the others from 200 sequences to 75. Because requests span 20 to 100,000 tokens, \texttt{TenantQuota} meters input and output tokens, KV MB, batch tokens, and concurrency atomically inside Lecture 8's fleet quotas. On March 20, 2023, OpenAI took ChatGPT offline when a Redis connection-pooling race returned canceled cache responses to other users, exposing conversation titles and proving caches are security isolation boundaries (Lecture 13). Work-aware routing, headroom, and isolation together protect fleet tails.
 
-  \notecue{Optional}{For a 50-minute class, skip this slide and proceed to the closing Retrieval synthesis.}
+  \notecue{Teach}{For a 50-minute class, skip this slide after noting that token-denominated quotas isolate both latency and KV capacity across tenants.}
 
-  \notecue{Next}{The closing Retrieval slide returns to the opening cost question using measured H100 pricing.}
+  \notecue{Next}{Next, return to the opening cost question using measured H100 pricing.}
 }
 \end{frame}
 
@@ -902,13 +922,15 @@ class TenantQuota:
   \mlsyscredit{Derived: InferenceX H100 frontier (DeepSeek-R1, FP8) and Serving at Scale table 25 (hypothetical price).}
   \note{%
   \mlsysnotemeta{3 min}{Core}%
-  Return to the hook's \$0.001 per request. Give students one minute in step 1 to list four factors setting serving cost before revealing step 2. Pricing InferenceX's top H100 runs (479, 82, and 13.8 output tok/s/GPU at 13, 50, and 100 tok/s/user) at the chapter's hypothetical \$4.00/GPU-hour gives \$2.32, \$13.53, and \$80.46 per million output tokens, a 35$\times$ spread (derived). At 50 tok/s/user, a 211-token answer costs roughly \$0.003 in output tokens alone. The right list ties all five segments together: contract sets batch, iteration-level batching keeps slots full, KV memory caps admission, phase handling and NVLink sharding shape steps, and fleet controls protect the tail. Halving the serving bill starts with the lever that raises SLO goodput at the product's real latency target.
+  The opening hook assumed \$0.001 per request; now answer the driving question from measured data. Before reading on, name four drivers setting one served request's cost.
 
-  \notecue{Check}{Ask students to name four cost drivers before the reveal. Missing the per-user latency contract overlooks the single biggest multiplier (35$\times$) in the measured chart.}
+  \notecue{Check}{Each of the five segments supplies one driver. Contract sets batch size, iteration-level batching keeps slots full, KV memory caps admission, phase handling and NVLink sharding shape step time, and fleet controls protect the tail. Omitting the latency contract misses the largest multiplier, a 35$\times$ spread. Pricing top InferenceX H100 runs at the chapter's hypothetical \$4.00/GPU-hour yields \$2.32 per million output tokens at 13 tok/s/user (479 output tok/s/GPU), \$13.53 at 50 tok/s/user (82 tok/s/GPU), and \$80.46 at 100 tok/s/user (13.8 tok/s/GPU), all derived. At 50 tok/s/user, a 211-token answer costs roughly \$0.003 in output tokens alone. Halving the bill starts with whichever lever raises SLO goodput at the target.}
 
-  \notecue{Watch for}{DeepSeek-R1 differs from the reference 70B model, so the steep scaling trend transfers even though exact dollar rates vary.}
+  \notecue{Watch for}{DeepSeek-R1 differs from the reference 70B model, so the steep scaling trend transfers while exact dollar rates vary.}
 
-  \notecue{Next}{The takeaways slide condenses each segment into one actionable rule.}
+  \notecue{Teach}{Give one minute to list four cost drivers before revealing the five-segment list.}
+
+  \notecue{Next}{Next, condense each segment into one takeaway rule.}
 }
 \end{frame}
 
@@ -923,9 +945,11 @@ class TenantQuota:
   \end{itemize}
   \note{%
   \mlsysnotemeta{1 min}{Core}%
-  Review the five takeaways, one per segment: define capacity as SLO goodput, batch to the knee with iteration-level refill, budget KV memory explicitly (12 long vs 1,397 chat), manage prefill-decode interference and NVLink sharding, and route on work with tail headroom. If time is tight, emphasize the first and third items.
+  These five takeaways summarize one rule per segment. Define capacity as SLO goodput, batch to the knee with iteration-level refill, and budget KV memory explicitly (12 long requests versus 1,397 chats). Manage prefill-decode interference alongside NVLink sharding, and route on remaining work while keeping tail headroom.
 
-  \notecue{Next}{An optional slide offers three open design questions for discussion or written reflection.}
+  \notecue{Teach}{If time is tight, emphasize the first and third items.}
+
+  \notecue{Next}{Next, consider three open design questions for discussion or written reflection.}
 }
 \end{frame}
 
@@ -938,11 +962,11 @@ class TenantQuota:
   \end{itemize}
   \note{%
   \mlsysnotemeta{1 min}{Optional}%
-  These three open questions have no single right answer and work well for brief discussion or homework prompts: who owns per-request reasoning budgets (\S10.6.9), whether fleets should dynamically toggle between colocated and split pools as traffic shifts (from the InferenceX bars), and when routing to a smaller fallback model beats paying recurring frontier serving costs.
+  These three open questions have no single right answer. Consider who should set per-request reasoning budgets (\S10.6.9), whether fleets should switch dynamically between colocated and split pools as traffic shifts across the InferenceX bars, and when routing to a smaller fallback model beats paying recurring frontier serving costs.
 
-  \notecue{Optional}{For a 50-minute class, skip this slide and display the reading list.}
+  \notecue{Teach}{Use these for brief discussion or homework prompts. For a 50-minute class, skip this slide and move to the reading list.}
 
-  \notecue{Next}{The reading slide maps today's mechanisms to the book sections and five foundational systems papers.}
+  \notecue{Next}{Next, review the chapter sections and five foundational systems papers behind this lecture's mechanisms.}
 }
 \end{frame}
 
@@ -959,9 +983,9 @@ class TenantQuota:
   \end{itemize}
   \note{%
   \mlsysnotemeta{0.5 min}{Core}%
-  Point students to Chapter 10 (\S10.3, \S10.6--\S10.8, \S10.11, \S10.15.1), working Napkin Math 10.5 by hand, and the four interactive figures on mlsysbook.ai. Pair each mechanism with its source paper: Orca (iteration-level batching), vLLM (PagedAttention block tables), Sarathi-Serve (chunked prefill), DistServe (disaggregated pools), and Mitzenmacher (power of two choices). Both Azure traces and InferenceX datasets are open for course projects.
+  Read Chapter 10 (\S10.3, \S10.6 to \S10.8, \S10.11, and \S10.15.1), work Napkin Math 10.5 by hand, and explore the four interactive figures on mlsysbook.ai. Each mechanism traces to a source paper, including Orca for iteration-level batching, vLLM for PagedAttention block tables, Sarathi-Serve for chunked prefill, DistServe for disaggregated pools, and Mitzenmacher for the power of two choices. Both the Azure traces and the InferenceX datasets are openly available for course projects.
 
-  \notecue{Next}{The final slide bridges from data-center HBM replicas to millions of power-constrained phones in Lecture 11.}
+  \notecue{Next}{Next, bridge from data-center HBM replicas to millions of power-constrained phones in Lecture 11.}
 }
 \end{frame}
 
@@ -978,7 +1002,7 @@ class TenantQuota:
   \mlsyscredit{Photo: Dennis Cort\'es, CC0, Wikimedia Commons.}
   \note{%
   \mlsysnotemeta{0.5 min}{Core}%
-  Today's replicas lived in data centers with hundreds of gigabytes of HBM and kilowatt racks. Lecture 11 moves to user phones constrained to a few watts and memory shared with foreground apps, asking when models should learn locally and which devices a federated fleet actually learns from.
+  This lecture's replicas ran in data centers with hundreds of gigabytes of HBM and kilowatt racks. Lecture 11 moves to user phones constrained to a few watts and memory shared with foreground apps, asking when models should learn locally and how a federated fleet (a population improving a shared model without collecting raw examples) chooses which devices contribute.
 
   \notecue{Next}{Continue to Lecture 11, Edge Intelligence, to analyze on-device learning budgets and federated fleets.}
 }
