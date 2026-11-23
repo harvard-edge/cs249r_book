@@ -1,0 +1,144 @@
+name: '📝 Study Sheets · ✅ Validate (Dev)'
+
+# =============================================================================
+# Chapter Study Sheets — Build & Validation
+# =============================================================================
+#
+# Builds every chapter study sheet (books/volN/<chapter>/<stem>_studysheet.tex)
+# and runs its checks, then stages the release files as an artifact.
+#
+# Flow:
+#   1. BUILD  — books/shared/studysheet/build.py: regenerate each sheet's
+#               numbers from mlsysim, compile with lualatex, and fail any sheet
+#               that is not two pages, leaves < 24 pt at a column foot, runs a
+#               key idea past three lines, or has an overfull box
+#   2. TEST   — binder/tests/test_studysheet.py (every \val computed, no typed
+#               digits in answers, 3-4 Check-yourself questions, ...)
+#   3. STAGE  — build.py --stage: flat volN_<stem>_studysheet.pdf files plus a
+#               combined MLSysBook-StudySheets-VolN.pdf per volume, uploaded as
+#               the `studysheets-release` artifact (all four volumes)
+#
+# Runs in the book's own TeX container (quarto-linux), so the sheets compile
+# with the same TeX Live and fonts as the printed volumes. mlsysim is read from
+# the checkout (build.py sets PYTHONPATH); it is never pip-installed.
+#
+# Triggers:
+#   - push: dev branch, study-sheet sources, mlsysim (the numbers come from it)
+#   - pull_request: same paths
+#   - workflow_call: studysheets-preview-dev.yml gates its release on this
+#   - workflow_dispatch: manual
+#
+# Deploys to: N/A (validate only; artifact `studysheets-release`)
+#
+# Related:
+#   - studysheets-preview-dev.yml — all volumes to the studysheets-dev prerelease
+#   - studysheets-publish-live.yml — live volumes to the studysheets-latest release
+#
+# =============================================================================
+
+on:
+  workflow_dispatch:
+  workflow_call:
+  pull_request:
+    paths:
+      - 'books/shared/studysheet/**'
+      - 'books/vol*/**/*_studysheet.tex'
+      - 'books/vol*/**/*_studysheet_numbers.py'
+      - 'books/vol*/tex/theme-colors.tex'
+      - 'books/config/_quarto-pdf-vol*.yml'
+      - 'mlsysim/mlsysim/**'
+      - 'tools/build_notation.py'
+      - 'binder/tests/test_studysheet.py'
+      - '.github/workflows/studysheets-*.yml'
+  push:
+    branches: [dev]
+    paths:
+      - 'books/shared/studysheet/**'
+      - 'books/vol*/**/*_studysheet.tex'
+      - 'books/vol*/**/*_studysheet_numbers.py'
+      - 'books/vol*/tex/theme-colors.tex'
+      - 'books/config/_quarto-pdf-vol*.yml'
+      - 'mlsysim/mlsysim/**'
+      - 'tools/build_notation.py'
+      - 'binder/tests/test_studysheet.py'
+      - '.github/workflows/studysheets-*.yml'
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  # Unique per run for push and workflow_call (see slides-validate-dev.yml), so
+  # the standalone push run and Preview's `uses:` call never cancel each other.
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: '📝 Build & Check Study Sheets'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    container:
+      image: ghcr.io/${{ github.repository }}/quarto-linux:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    defaults:
+      run:
+        shell: bash   # bash -eo pipefail, so `build.py | tee` fails when a sheet fails
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v6
+
+      - name: 📝 Build every sheet
+        run: |
+          python3 books/shared/studysheet/build.py | tee studysheets-build.log
+
+      - name: 🧪 Study-sheet tests
+        run: |
+          python3 -m pytest --version >/dev/null 2>&1 || python3 -m pip install --quiet --break-system-packages pytest
+          python3 -m pytest -q binder/tests/test_studysheet.py
+
+      - name: 📦 Stage release files
+        run: python3 books/shared/studysheet/build.py --stage books/_build/studysheets/release
+
+      - name: 📦 Upload release files
+        uses: actions/upload-artifact@v7
+        with:
+          name: studysheets-release
+          path: books/_build/studysheets/release/
+          retention-days: 30
+
+      # On failure, keep the LaTeX logs so a broken sheet is readable here.
+      - name: 📦 Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: studysheets-logs
+          path: |
+            studysheets-build.log
+            books/_build/studysheets/vol*/*.log
+          retention-days: 7
+
+      - name: 📊 Summary
+        if: always()
+        run: |
+          {
+            echo "## 📝 Study Sheet Build"
+            echo ""
+            echo "| Volume | Built ✓ | Failed ✗ |"
+            echo "|--------|---------|----------|"
+            for v in 1 2 3 4; do
+              ok=$(grep -c "^✓ books/vol$v/" studysheets-build.log 2>/dev/null || true)
+              bad=$(grep -c "^✗ books/vol$v/" studysheets-build.log 2>/dev/null || true)
+              echo "| Vol $v | ${ok:-0} | ${bad:-0} |"
+            done
+            if grep -q "^✗" studysheets-build.log 2>/dev/null; then
+              echo ""
+              echo "### Failing sheets"
+              echo '```'
+              grep -A6 "^✗" studysheets-build.log
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
