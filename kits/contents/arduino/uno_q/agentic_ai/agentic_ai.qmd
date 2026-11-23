@@ -230,12 +230,12 @@ Read the default again: **no tools**. Nothing is exposed unless it is named on t
 
 ### Step 2: Start the Server with Read-Only Tools Only {#sec-uno-q-agentic-step-2-start-server-readonly-tools-9756}
 
-This section needs a *different* server from the rest of the lab: the same command with one flag added, `--tools`. Stop the running server first, since only one process can hold port 8081:
+This section needs a *different* server from the rest of the lab: the same command with one flag added, `--tools`, and bound to `127.0.0.1` instead of `0.0.0.0`, so only the board itself can reach it. Stop the running server first, since only one process can hold port 8081:
 
 ```bash
 ~/llama.cpp/build/bin/llama-server \
   --model ~/models/Qwen_Qwen3.5-0.8B-Q8_0.gguf \
-  --host 0.0.0.0 --port 8081 \
+  --host 127.0.0.1 --port 8081 \
   --jinja \
   --reasoning off --reasoning-budget 0 \
   --ctx-size 8192 --parallel 1 --threads 4 \
@@ -244,6 +244,15 @@ This section needs a *different* server from the rest of the lab: the same comma
   --tools read_file,file_glob_search,grep_search,get_info \
   --alias qwen3.5-0.8b
 ```
+
+Then, on the laptop, open an SSH tunnel and browse through it:
+
+```bash
+ssh -L 8081:127.0.0.1:8081 arduino@<UNO_Q_IP>
+# then open http://localhost:8081/ on the laptop
+```
+
+@sec-uno-q-agentic-safety-note-9ce7 explains why a server with file tools stays off the network.
 
 > In the WebUI, also turn reasoning **Off** in the `+` menu.
 
@@ -278,7 +287,7 @@ The server now exposes **only those four**, all of them read-only. The others ar
 
 > **Warning:** `--tools all` exposes all seven tools, including `exec_shell_command`. Each one can be switched off in the WebUI, but that is a browser setting, not a boundary. This lab names the active tools explicitly on the command line instead.
 
-> **If the WebUI stops working after adding `--tools`**, it is the CORS default. Several builds clamp `--cors-origins` to localhost when tools are enabled, on the reasoning that a server handing out file access should not accept requests from arbitrary origins. The board is reached at its LAN address, not at localhost, so the origins do not match. Either name the origin explicitly (`--cors-origins http://<UNO_Q_IP>:8081`) or use the SSH tunnel from the safety note below and browse `http://localhost:8081`. The tunnel is the better habit.
+> **The tunnel also keeps the WebUI working with `--tools`.** Several builds clamp `--cors-origins` to localhost when tools are enabled, on the reasoning that a server handing out file access should not accept requests from arbitrary origins. Through the tunnel the browser is at `http://localhost:8081`, so the origins match. Browsing the board's LAN address instead fails on those builds.
 
 ### Step 3: Open the WebUI and Read the Tools Panel {#sec-uno-q-agentic-step-3-open-webui-read-tools-panel-5ec8}
 
@@ -391,12 +400,7 @@ Three things to be clear-eyed about:
 
 1. **These tools have no directory restriction.** `read_file` reads anything the `arduino` user can read: no root, no allow-list of paths. That is the sharpest contrast with the tools built in @sec-uno-q-agentic-implementing-tools-43e8, where the file tools resolve every path against a fixed workspace.
 2. **`exec_shell_command` runs with the user's full permissions.** Nothing stands between a confused model and a destructive command except the confirmation card. It has a place in an advanced demo; it has no place in a first workshop.
-3. **`--host 0.0.0.0` is fine on a trusted network.** The board is headless, so there is no other way to reach the WebUI from a laptop browser. On an untrusted network it stops being safe: anyone who can reach `/v1/chat/completions` can drive the same tools through the raw API, and the confirmation card only exists in the WebUI. A script calling the API directly gets no such prompt. There, bind to `127.0.0.1` and tunnel:
-
-```bash
-ssh -L 8081:127.0.0.1:8081 arduino@<UNO_Q_IP>
-# then open http://localhost:8081/ on the laptop
-```
+3. **That is why this section binds to `127.0.0.1` and tunnels.** On `0.0.0.0`, anyone on the same network who can reach `/v1/chat/completions` can drive the same tools through the raw API, and the confirmation card only exists in the WebUI. A script calling the API directly gets no such prompt, so with `write_file` enabled in Step 6, a classmate's script could overwrite `~/.bashrc` or `~/.ssh/authorized_keys` without anyone clicking anything. The rest of the lab goes back to `0.0.0.0` because the Python agent runs in a container and must reach the server across the container gateway; that server has no `--tools`, so it exposes generation, not files.
 
 ### A Note on the Model {#sec-uno-q-agentic-note-model-06f9}
 
@@ -465,7 +469,7 @@ A tool with no model-supplied arguments needs no boundary, regardless of what it
 Two consequences shape the code in @sec-uno-q-agentic-implementing-tools-43e8:
 
 - **The file tools work inside a fixed workspace directory**, not the whole filesystem. `list_files` and `read_file` resolve every path against a fixed root and reject anything that lands outside it. To be clear about what this does and does not buy: it protects nothing *from the board's owner*, who has a shell and can read any file in the next terminal window. The boundary is there because the *model* now chooses that path argument, and the model is influenced by text its owner did not write. It is the same reason MCP filesystem servers take a root directory and coding agents work within a project folder.
-- **`calculate` walks a restricted AST; it does not `eval()`.** A tempting shortcut is `eval(expression)`. Do not take it. Walking a restricted AST (numbers, `+ - * / **`, parentheses, unary minus, nothing else) gives a real calculator with no code-execution surface. The code also caps the exponent, for a reason worth seeing fail before reading the fix.
+- **`calculate` walks a restricted AST; it does not `eval()`.** A tempting shortcut is `eval(expression)`. Do not take it. Walking a restricted AST (numbers, `+ - * / **`, parentheses, unary minus, nothing else) gives a real calculator with no code-execution surface. The code also caps the exponent and the size of every integer result, for a reason worth seeing fail before reading the fix.
 
 This is the JSON Schema the model actually sees for two of the tools (the full list is in @sec-uno-q-agentic-building-agent-loop-78e7):
 
@@ -753,6 +757,26 @@ _ALLOWED_OPS = {
 }
 
 MAX_EXPONENT = 64
+MAX_RESULT_BITS = 4096  # about 1,200 decimal digits
+
+
+def _check_size(op, left, right):
+    """Refuse an integer result too large to build cheaply."""
+    if isinstance(op, ast.Pow) and abs(right) > MAX_EXPONENT:
+        raise ValueError(
+            f"exponent {right} is above the limit of {MAX_EXPONENT}")
+    if not (isinstance(left, int) and isinstance(right, int)):
+        return  # float results overflow to an error, not to a huge number
+    if isinstance(op, ast.Pow) and right > 0:
+        bits = left.bit_length() * right
+    elif isinstance(op, ast.Mult):
+        bits = left.bit_length() + right.bit_length()
+    else:
+        return
+    if bits > MAX_RESULT_BITS:
+        raise ValueError(
+            f"result would need about {bits} bits; "
+            f"the limit is {MAX_RESULT_BITS}")
 
 
 def _eval_node(node):
@@ -761,9 +785,7 @@ def _eval_node(node):
         return node.value
     if isinstance(node, ast.BinOp) and type(node.op) in _ALLOWED_OPS:
         left, right = _eval_node(node.left), _eval_node(node.right)
-        if isinstance(node.op, ast.Pow) and abs(right) > MAX_EXPONENT:
-            raise ValueError(
-                f"exponent {right} is above the limit of {MAX_EXPONENT}")
+        _check_size(node.op, left, right)
         return _ALLOWED_OPS[type(node.op)](left, right)
     if isinstance(node, ast.UnaryOp) and type(node.op) in _ALLOWED_OPS:
         return _ALLOWED_OPS[type(node.op)](_eval_node(node.operand))
@@ -818,13 +840,15 @@ rm ~/ArduinoApps/board-agent/workspace/escape.txt
 \noindent
 ![](images/png/error-test.png){width=85% fig-align="center"}
 
-**Why `calculate` caps the exponent.** "No `eval()`" and "safe" are not the same claim, and the gap between them is worth feeling directly. Comment out the `MAX_EXPONENT` check and run this, with a second SSH session open, because it will be needed:
+**Why `calculate` caps the result size.** "No `eval()`" and "safe" are not the same claim, and the gap between them is worth feeling directly. Comment out the `_check_size(...)` call in `_eval_node` and run this, with a second SSH session open, because it will be needed:
 
 ```bash
 python3 -c "import tools; print(tools.calculate('9**9**9'))"
 ```
 
 Nothing executes that should not. The AST walk works exactly as advertised. The board just stops responding while Python tries to build a number with 370 million digits. A restricted grammar closed the code-execution hole; it did nothing about resource exhaustion, and on a 2 GB board with four Cortex-A53 cores that is not a theoretical concern. Put the check back.
+
+Notice why the check bounds the *result* rather than only the exponent. An exponent cap alone rejects `9**9**9`, but `(((10**64)**64)**64)**64` keeps every exponent at 64 and still builds a number with more than sixteen million digits, because each step raises the previous result. Bounding the size of each intermediate integer closes that path too: the expression now fails at its second step with an error the model can read.
 
 **The general lesson**: when writing a tool, ask what a *hostile* argument costs, not just what a *malicious* one does. Cost comes in more flavors than code execution: CPU, memory, disk, wall-clock time, and money, if the tool calls a paid API.
 
