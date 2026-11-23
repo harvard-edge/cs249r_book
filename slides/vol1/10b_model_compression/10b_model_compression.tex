@@ -99,11 +99,11 @@
 
     \notecue{Check}{The answer is D, 0.1 percent, random chance on 1,000 classes (replicated by Nagel et al. 2019 at 71.72 to 0.12 percent). A tempting answer is A or B, expecting roughly a 0.2-point drop like ResNet-50. Too few parameters, only 256 levels, or poor calibration images (sample inputs setting ranges) do not explain it; Section 3 gives the cause.}
 
-    \notecue{Watch for}{Here MobileNetV2 runs ImageNet classification as the blur model's backbone. Do not compare Krishnamoorthi's 75.2 percent ResNet-50 baseline against the chapter's 76.1 percent checkpoint shown later.}
+    \notecue{Watch for}{These are ImageNet classification results for MobileNetV2 (the blur model's backbone), not blur-task scores. Do not compare Krishnamoorthi's 75.2 percent ResNet-50 baseline against the chapter's 76.1 percent checkpoint shown later.}
 
     \notecue{Teach}{Give one minute to vote A through D before revealing D. Collect hypotheses and hold the cause until Section 3.}
 
-    \notecue{Next}{Recall which compression tier Part 1 left untouched and which gaps remain open.}
+    \notecue{Next}{Turn to Part 1's unfinished compression gaps to see why precision cannot be skipped.}
   }
 \end{frame}
 
@@ -126,7 +126,7 @@
     \mlsysnotemeta{1.5 min}{Core}%
     That collapse shows why precision is delicate, yet Part 1's open gaps still demand it. Recall which compression tier Part 1 left untouched and which term of the deployment budget (memory, latency, or energy) each case still breaks.
 
-    \notecue{Check}{The untouched tier is numerical precision. On the left, decoding GPT-2 XL on a smartphone still streams all 3 GB of FP16 weights per token, taking 59 ms over the 51.2 GB/s bus and breaking token time. On the right, channel pruning trimmed the blur model from 125 to roughly 87 ms per frame, still above the 33 ms budget while leaving the phone's integer accelerator idle because it cannot run FP32. A tempting answer is that structured pruning cut memory traffic, yet it kept bytes per value unchanged.}
+    \notecue{Check}{The untouched tier is numerical precision. On the left, decoding GPT-2 XL on a smartphone still streams all 3 GB of FP16 weights per token, taking 59 ms over the 51.2 GB/s bus and breaking token time. On the right, channel pruning trimmed the blur model from 125 to roughly 87 ms per frame, still above the 33 ms budget while leaving the phone's integer accelerator idle because it cannot run FP32. A tempting answer is that Part 1's structural methods already resolved memory traffic, yet they kept bytes per value unchanged.}
 
     \notecue{Watch for}{The blur frame times come from the chapter's illustrative composite scenario; the Google Pixel 2 smartphone measurement in Section 5 closes the real hardware story.}
 
@@ -170,7 +170,7 @@
   \mlsyscredit{Model Compression, \S10.3.1 and table 7; FP8 limits: Micikevicius et al. 2022, Table 1. Bit fields drawn to scale.}
   \note{%
     \mlsysnotemeta{2 min}{Core}%
-    To see what shrinking bit width gives up, recall from Lecture 8b that FP32 spends 1 sign bit, 8 exponent bits on range, and 23 mantissa bits on precision within each power of two, while BF16 keeps that 8-bit exponent range and FP16 widens the mantissa at a 65,504 cap. Moving to 8 bits, Micikevicius et al. (2022) defined two 8-bit floating-point (FP8) formats that still keep an exponent. E4M3 trades range for finer steps up to 448 for weights and activations, while E5M2 reaches 57,344 for wider-range gradients. Below them, integers drop the exponent altogether. INT8 holds 256 evenly spaced levels at 4 times smaller storage than FP32, and 4-bit integer (INT4) holds 16 levels at 8 times smaller storage. Without an exponent, integers require a shared scale alongside the codes to span both 0.003 weights and 40 activations. Microscaling formats (one exponent per 32-value block) are left to reading, and Lecture 13 owns runtime precision selection.
+    To see what shrinking bit width gives up, recall from Lecture 8b that FP32 spends 1 sign bit, 8 exponent bits on range, and 23 mantissa bits on precision within each power of two, while BF16 keeps that 8-bit exponent range and FP16 keeps a wider mantissa than BF16 at a 65,504 cap. Moving to 8 bits, Micikevicius et al. (2022) defined two 8-bit floating-point (FP8) formats that still keep an exponent. E4M3 trades range for finer steps up to 448 for weights and activations, while E5M2 reaches 57,344 for wider-range gradients. Below them, integers drop the exponent altogether. INT8 holds 256 evenly spaced levels at 4 times smaller storage than FP32, and 4-bit integer (INT4) holds 16 levels at 8 times smaller storage. Without an exponent, integers require a shared scale alongside the codes to span both 0.003 weights and 40 activations. Microscaling formats (one exponent per 32-value block) are left to reading, and Lecture 13 owns runtime precision selection.
 
     \notecue{Next}{Examine a real 4-bit model file to see how many bits those shared scales actually add.}
   }
@@ -215,15 +215,15 @@ typedef struct \{
   \mlsyscredit{Table: huggingface.co/TheBloke/Llama-2-7B-GGUF, Provided files (commit b4e04e1); Bits/wt: Hub byte sizes over 6.74 B weights. Code: github.com/ggml-org/llama.cpp v0.7.0 (MIT).}
   \note{%
     \mlsysnotemeta{2.5 min}{Optional}%
-    Shared scales add real storage overhead. These Hugging Face GGUF files from llama.cpp (an open-source quantized inference engine) store Llama 2 7B's 6.74 billion weights. Before reading on, estimate the bits per weight in Q4\_0's 3.83 GB file.
+    To protect low-bit accuracy, real files share one scale per weight block rather than per tensor (a granularity trade-off detailed in the Range section), adding storage overhead. These Hugging Face GGUF files (the model file format of llama.cpp, an open-source inference engine) hold Llama 2 7B's 6.74 billion weights. Estimate bits per weight in Q4\_0's 3.83 GB file.
 
-    \notecue{Check}{Dividing $3.83\text{ GB}\times 8$ by $6.74\text{B}$ gives 4.54 bits per weight for Q4\_0, 3.35 for Q2\_K, and 8.50 for Q8\_0, so every file exceeds its nominal bits. A tempting estimate is 4 bits ($P/2$ bytes), omitting block scales (12.5 percent overhead at Q4\_0). The struct \texttt{block\_q4\_0} packs one 2-byte FP16 scale \texttt{d} with 16 bytes of 4-bit codes (nibbles) for 32 weights, totaling 18 bytes or 4.5 bits per weight. Q2\_K blocks take 2.5625 bits; other tensors and metadata bring it to 3.35.}
+    \notecue{Check}{Dividing $3.83\text{ GB}\times 8$ by $6.74\text{B}$ gives 4.54 bits per weight for Q4\_0, 3.35 for Q2\_K, and 8.50 for Q8\_0. A tempting estimate is 4 bits ($P/2$ bytes), omitting block scales (12.5 percent overhead at Q4\_0). \texttt{block\_q4\_0} packs one 2-byte FP16 scale \texttt{d} and 16 bytes of 4-bit codes (nibbles) for 32 weights, totaling 18 bytes or 4.5 bits per weight. Q2\_K blocks take 2.5625 bits; remaining tensors and metadata bring the file to 3.35.}
 
-    \notecue{Watch for}{For tight device RAM, budget from the quantized file size rather than raw parameters times nominal bits.}
+    \notecue{Watch for}{For tight RAM, budget from quantized file size, not raw parameters times nominal bits.}
 
-    \notecue{Teach}{Give 30 seconds to estimate Q4\_0 bits per weight before showing the last column and struct. In a 50-minute class, skip this slide; the closing 7B synthesis notes scale overhead.}
+    \notecue{Teach}{Give 30 seconds to estimate Q4\_0 before revealing the last column and struct. In a 50-minute class, skip; the closing 7B synthesis notes scale overhead.}
 
-    \notecue{Next}{Compare how FP8 and INT8 distribute their 8-bit levels across five orders of magnitude.}
+    \notecue{Next}{Compare how FP8 and INT8 place their 8-bit levels across five orders of magnitude.}
   }
 \end{frame}
 
@@ -261,11 +261,11 @@ typedef struct \{
   \mlsyscredit{Horowitz 2014 (45 nm), via Model Compression, table 8 and \S10.3.2. Spotter: Lighthouse 10.2. Photo: MegaMegaAndOmega (CC BY-SA 4.0).}
   \note{%
     \mlsysnotemeta{2.5 min}{Core}%
-    Turning to what narrower formats save, recall Horowitz's 2014 45 nm chip-process measurements (Lecture 6; developed in Lecture 11). Against FP32, INT8 cuts add energy 30 times (0.90 to 0.03 picojoules, or pJ), multiply 18.5 times, and MAC 15.3 times. On the right, quantizing Part 1's keyword spotter on an Arduino Nano shrinks weights from 800 KB to 200 KB inside 512 KB of SRAM, with activations still to verify. Predict which costs more, an INT8 MAC or a 32-bit DRAM read.
+    Turning to what narrower formats save, recall Horowitz's 2014 45 nm chip-process measurements (Lecture 6; developed in Lecture 11). Against FP32, INT8 cuts add energy 30 times (0.90 to 0.03 picojoules, or pJ), multiply 18.5 times, and MAC 15.3 times. On the right, quantizing Part 1's keyword spotter shrinks weights from 800 KB to 200 KB inside a 512 KB microcontroller SRAM class (whereas the pictured Arduino Nano has smaller SRAM, Lecture 6), with activations still to verify. Predict which costs more, an INT8 MAC or a 32-bit DRAM read.
 
     \notecue{Check}{The 32-bit DRAM read costs 640 pJ, roughly 2,100 times an INT8 MAC (0.3 pJ), so moving one-quarter the bytes drives most energy savings. A tempting answer is arithmetic, understating off-chip traffic by three orders of magnitude. Closing Section 1, fewer bits save bytes, energy, and sometimes capacity.}
 
-    \notecue{Watch for}{These are 45 nm reference numbers; absolute energies fall on newer chip generations while DRAM dominance remains.}
+    \notecue{Watch for}{These 45 nm reference energies fall on newer chip generations, while DRAM dominance remains.}
 
     \notecue{Teach}{Take a show of hands on INT8 MAC versus 32-bit DRAM read before revealing the DRAM bar.}
 
@@ -287,7 +287,7 @@ typedef struct \{
 
 \mlsysnote{%
   \mlsysnotemeta{1 min}{Core}%
-  Affine quantization uses a linear scaling plus an offset, captured in the lecture's central equation, $x \approx s(x_q - z)$. Each clipping range $[\alpha, \beta]$ stores a scale $s = (\beta - \alpha)/(2^b - 1)$, which is the real spacing between adjacent codes, and a zero-point $z = \operatorname{round}(-\alpha/s)$, the integer representing real zero. In plain words, to invert an integer code back to a real value, subtract the zero-point and multiply by the step. Every calibration and granularity choice that follows comes down to choosing $\alpha$ and $\beta$ well.
+  Affine quantization maps a real clipping range $[\alpha, \beta]$ onto unsigned $b$-bit integer codes $[0, 2^b - 1]$ using two parameters. The scale $s = (\beta - \alpha)/(2^b - 1)$ is the real spacing between adjacent codes, and the zero-point $z = \operatorname{round}(-\alpha/s)$ is the integer representing real zero. Forward quantization divides by $s$, adds $z$, rounds, and clamps, $x_q = \operatorname{clamp}(\operatorname{round}(x/s) + z, 0, 2^b - 1)$; dequantization inverts it via $x \approx s(x_q - z)$. Signed grids shift those codes down by $2^{b-1}$ onto $[-2^{b-1}, 2^{b-1} - 1]$ (or symmetric $[-2^{b-1} + 1, 2^{b-1} - 1]$ with zero-point zero, dividing peak magnitude by $2^{b-1} - 1$). Every calibration and granularity choice that follows comes down to choosing $\alpha$ and $\beta$ well.
 
   \notecue{Next}{Visualize this mapping on a 3-bit toy grid.}
 }
@@ -305,7 +305,7 @@ typedef struct \{
   \mlsyscredit{3-bit toy, derived from Model Compression, equations 1 to 3. INT8 draws 256 levels the same way.}
   \note{%
     \mlsysnotemeta{2 min}{Core}%
-    To see those equations in action, place a 3-bit grid with 8 codes from 0 to 7 over real values; INT8 works identically with 256 codes. First, five real values appear against the blue clipping range $\alpha = -1$ and $\beta = 2.5$, with two outliers outside. Next, the formulas give $s = 3.5/7 = 0.5$ and $z = \operatorname{round}(1/0.5) = 2$. Code 0 therefore equals $-1$, code 2 equals 0, and code 7 equals 2.5. Finally, interior values snap to the nearest level, sending $0.8 \to$ code 4 at 1.0 and $-0.3 \to$ code 1 at $-0.5$. Likewise, $1.6 \to$ code 5 at 1.5, and $2.2 \to$ code 6 at 2.0 with an error of 0.2. Outliers clamp to the endpoints, mapping $2.9 \to$ code 7 and $-1.4 \to$ code 0.
+    To see those equations in action, place a 3-bit grid with 8 codes from 0 to 7 over real values; INT8 works identically with 256 codes. First, five real values appear against the blue clipping range $\alpha = -1$ and $\beta = 2.5$, with two outliers outside. Next, the formulas give $s = 3.5/7 = 0.5$ and $z = \operatorname{round}(1/0.5) = 2$. Code 0 therefore equals $-1$, code 2 equals 0, and code 7 equals 2.5. Finally, the three plotted interior values snap to the nearest level, sending $-0.3 \to$ code 1 at $-0.5$, $0.8 \to$ code 4 at 1.0, and $1.6 \to$ code 5 at 1.5, while the two plotted outliers clamp to the endpoints ($-1.4 \to$ code 0 and $2.9 \to$ code 7). An extra off-slide value such as 2.2 would snap to code 6 at 2.0 with an error of 0.2.
 
     \notecue{Watch for}{Do not mistake the zero-point for the code of the smallest real value. Code 0 represents $\alpha$, whereas $z$ is the integer code representing real zero.}
 
@@ -339,7 +339,7 @@ typedef struct \{
     \mlsysnotemeta{3 min}{Core}%
     Moving to full 8-bit precision, Napkin Math 10.1 applies those equations to unsigned 8-bit integers (UINT8, $b = 8$, 255 steps) over $[-1, 3]$. Before reading on, compute $s$, $z$, and the quantized matrix $X_q$.
 
-    \notecue{Check}{The scale is $s = 4/255 \approx 0.0157$, and the zero-point is $z = \operatorname{round}(1/(4/255)) = \operatorname{round}(63.75) = 64$. Dividing by $s$, adding 64, rounding, and clamping maps $-1 \to 0$, $1 \to 128$, $0 \to 64$, and $3 \to 255$, giving $X_q = [[0, 128], [64, 255]]$. A tempting shortcut is truncating 63.75 or skipping clamping, yet rounding 63.75 to 64 keeps real zero exact while nudging $-1$ back to $-1.004$, and omitting clamping breaks out-of-range inputs. Making real zero exact at code 64 matters because convolutions pad image borders with zeros and ReLU emits exact zeros, so an inexact zero injects bias everywhere.}
+    \notecue{Check}{The scale is $s = 4/255 \approx 0.0157$, and the zero-point is $z = \operatorname{round}(1/(4/255)) = \operatorname{round}(63.75) = 64$. Dividing by $s$, adding 64, rounding, and clamping maps $-1 \to 0$, $1 \to 128$, $0 \to 64$, and $3 \to 255$, giving $X_q = [[0, 128], [64, 255]]$. A tempting mistake is leaving $z$ unrounded or skipping clamping, yet rounding 63.75 to 64 keeps real zero exact while nudging $-1$ back to $-1.004$, and omitting clamping breaks out-of-range inputs. Making real zero exact at code 64 matters because convolutions pad image borders with zeros and ReLU emits exact zeros, so an inexact zero injects bias everywhere.}
 
     \notecue{Teach}{Give two minutes in pairs to compute $s$, $z$, and $X_q$ before revealing the worked steps.}
 
@@ -415,7 +415,7 @@ tensor([[-1.0039,  1.0039],
   \mlsyscredit{Model Compression, \S10.3.3 and listing 2; errors derived. Left: the 3-bit toy grid.}
   \note{%
     \mlsysnotemeta{1.5 min}{Core}%
-    Now that the scale and zero-point place the grid, ask how large the round-trip error (the difference between an input and its dequantized value) can grow. Inside the green clipping band $[\alpha, \beta]$, snapping to the nearest code produces a sawtooth bounded by half a step, or $s/2 = 0.25$ on the 3-bit toy grid. Outside $[\alpha, \beta]$ in red, clipping error grows linearly without bound. On the right, Listing 2 quantizes four weights with symmetric INT8, centered on zero ($z = 0$) with scale $s = 0.392/127 = 0.00309$. The codes are 41, $-27$, 127, and $-66$, with every derived error below $s/2 = 0.00154$. Doubling the range to cover an outlier at 0.784 doubles $s$ and doubles the rounding bound for every normal weight, setting up Section 3's central trade-off.
+    Now that the scale and zero-point place the grid, ask how large the round-trip error (the difference between an input and its dequantized value) can grow. Inside the green clipping band $[\alpha, \beta]$, snapping to the nearest code produces a sawtooth bounded by half a step, or $s/2 = 0.25$ on the 3-bit toy grid. Outside $[\alpha, \beta]$ in red, clipping error grows linearly without bound. On the right, Listing 2 quantizes four weights with symmetric signed INT8, centered on zero ($z = 0$) and dividing by the largest positive code 127 to get $s = 0.392/127 = 0.00309$. The codes are 41, $-27$, 127, and $-66$, with every derived error below $s/2 = 0.00154$. Doubling the range to cover an outlier at 0.784 doubles $s$ and doubles the rounding bound for every normal weight, setting up Section 3's central trade-off.
 
     \notecue{Next}{Compare symmetric and asymmetric grids on skewed and one-sided ReLU6 distributions.}
   }
@@ -430,7 +430,7 @@ tensor([[-1.0039,  1.0039],
   \mlsyscredit{Model Compression, \S10.3.3 (interactive Explore figure: Symmetric vs.\ Asymmetric Ranges). Bars: Krishnamoorthi 2018, Table 3.}
   \note{%
     \mlsysnotemeta{2 min}{Optional}%
-    Listing 2 used a symmetric grid with $z = 0$, so ask when paying for a nonzero zero-point is worth it on skewed tensors. Symmetric INT8 maps $[-1, 1]$ onto $[-127, 127]$ with $z = 0$, whereas asymmetric INT8 maps $[-0.5, 1.5]$ onto $[-128, 127]$ with $z = -64$. Testing $x = 1.2$ clips to 1.0 symmetrically (error 0.20) while reconstructing at code 89 (1.20) asymmetrically. For one-sided ReLU6 activations (ReLU capped over $[0, 6]$), asymmetric quantization spends all 255 steps on non-negative values, halving the step from 0.047 to 0.024. Below, Krishnamoorthi (2018, Table 3) measured per-channel PTQ (one scale per output channel) on MobileNet-v1 (the original MobileNet from Lecture 6) at 59.1 percent symmetric versus 70.3 percent asymmetric against 70.9 float. Many runtimes therefore use symmetric weights, skipping extra zero-point cross-terms while quantization-aware training (QAT, Section 4) closes any gap, and asymmetric activations after ReLU.
+    Listing 2 used a symmetric grid with $z = 0$, so ask when a nonzero zero-point pays off on skewed tensors. Symmetric INT8 maps $[-1, 1]$ onto $[-127, 127]$ with $z = 0$, whereas asymmetric signed INT8 shifts unsigned codes down by 128, mapping $[-0.5, 1.5]$ onto $[-128, 127]$ with $z = -64$. Testing $x = 1.2$ clips to 1.0 symmetrically (error 0.20) while landing at code 89 (1.20) asymmetrically. For one-sided ReLU6 activations (ReLU capped over $[0, 6]$), asymmetric quantization spends all 255 steps on non-negative values, halving the step from 0.047 to 0.024. Below, Krishnamoorthi (2018, Table 3) measured per-channel PTQ (one scale per output channel) on MobileNet-v1 (the original MobileNet from Lecture 6) at 59.1 percent symmetric versus 70.3 percent asymmetric against 70.9 float. Even with that PTQ gap, many runtimes keep symmetric weights ($z_w = 0$) and asymmetric activations after ReLU, because $z_w = 0$ drops the runtime sum $z_w \sum x_q$ in $(w_q - z_w)(x_q - z_x)$ while quantization-aware training (QAT, Section 4) closes the gap.
 
     \notecue{Teach}{In a 50-minute class, skip this comparison and move straight to tracing an integer dot product.}
 
@@ -465,7 +465,7 @@ tensor([[-1.0039,  1.0039],
   \mlsyscredit{Model Compression, \S10.3.3 (interactive Explore figure: Integer Layer Pipeline; requantization scale $M$). Worked numbers derived; $s_y = 1/127$.}
   \note{%
     \mlsysnotemeta{3 min}{Core}%
-    With individual values mapped and bounded, how does a full layer compute in integers without overflowing? Trace one output across four stages. Inputs $w$ and $x$ quantize to INT8 with symmetric scales $s_w = 0.75/127$ and $s_x = 2/127$, giving $w_q = [85, -42, 127]$ and $x_q = [64, 127, 32]$. The layer multiplies pairs and accumulates the 32-bit integer (INT32) products ($5{,}440$, $-5{,}334$, and $4{,}064$) to 4,170. An 8-bit sum would overflow because 15 to 16 bits are needed, whereas INT32 holds about 133,000 worst-case $127\times 127$ products ($2^{31}/127^2$, derived). Rescaling once by $M = s_w s_x / s_y$ yields $4{,}170\,s_w s_x = 0.388$ against the exact 0.375, and multiplying by $M = 0.0118$ rounds to $y_q = 49$. Closing Section 2, two numbers fix the grid, interior error stays under half a step, and integer layers accumulate in INT32 and rescale once.
+    With individual values mapped and bounded, how does a full layer compute in integers without overflowing? Trace one output across four stages. Inputs $w$ and $x$ quantize to INT8 with symmetric scales $s_w = 0.75/127$ and $s_x = 2/127$, giving $w_q = [85, -42, 127]$ and $x_q = [64, 127, 32]$. The layer multiplies pairs and accumulates the 32-bit integer (INT32) products ($5{,}440$, $-5{,}334$, and $4{,}064$) to 4,170. Even a single INT8 product needs 15 to 16 bits, so an 8-bit sum overflows immediately, whereas INT32 holds about 133,000 worst-case $127\times 127$ products ($2^{31}/127^2$, derived). As a float readback, $4{,}170\,s_w s_x = 0.388$ versus the exact 0.375. To return to INT8 with output scale $s_y = 1/127$, the layer rescales once by $M = s_w s_x / s_y = 0.0118$, rounding $4{,}170\,M$ to $y_q = 49$. Closing Section 2, two numbers fix the grid, interior error stays under half a step, and integer layers accumulate in INT32 and rescale once.
 
     \notecue{Watch for}{Applying the scale once per output rather than per multiply is what keeps integer layers fast.}
 
@@ -533,7 +533,7 @@ tensor([[-1.0039,  1.0039],
   \mlsyscredit{Wu, Judd, Zhang, Isaev, Micikevicius 2020 (arXiv 2004.09602): RMSE curve derived from ResNet-50 profile; Table 5 excerpt (weights per-channel max).}
   \note{%
     \mlsysnotemeta{2 min}{Optional}%
-    Separating rounding from clipping explains why total RMSE forms a U shape, and why no single calibration rule wins across architectures. Tightening $\beta$ lowers rounding error linearly (blue dashed) until tail clipping (orange dotted) rises sharply, placing KL-entropy ($1.39$) at the minimum. Right, Wu et al. Table 5 compares max, entropy, and 99.99th percentile activation calibration across five networks with per-channel weights. Max collapses vision classifiers Inception v4 to 0.12 percent and EfficientNet-B0 (from Lecture 1) to 22.3 percent. By contrast, entropy drops the BERT Large language model's question-answering F1 score (harmonic mean of precision and recall) to 37.40, where 99.99 percent reaches 89.59 and 99.999 reaches 90.20. Calibrate each model individually and validate on the task metric.
+    Separating rounding from clipping explains why total RMSE forms a U shape, and why no single calibration rule wins across architectures. Tightening $\beta$ lowers rounding error linearly (blue dashed) until tail clipping (orange dotted) rises sharply, placing KL-entropy ($1.39$) at the minimum. Right, Wu et al. Table 5 compares max, entropy, and 99.99th percentile activation calibration across five networks with per-channel weights. Max collapses vision classifiers Inception v4 to 0.12 percent and EfficientNet-B0 to 22.3 percent. By contrast, entropy drops the BERT Large language model's F1 score (harmonic mean of precision and recall) to 37.40, where 99.99 percent reaches 89.59 and 99.999 reaches 90.20. Calibrate each model individually and validate on the task metric.
 
     \notecue{Watch for}{This table uses ResNet-50 v1.5 at 76.16 percent FP32, so compare calibration rules only within this table.}
 
@@ -583,7 +583,7 @@ tensor([[-1.0039,  1.0039],
     \mlsysnotemeta{2 min}{Core}%
     If one shared scale wrecks narrow channels, giving each output channel its own scale should let narrow filters keep fine steps. In Krishnamoorthi (2018, Tables 3 and 4), MobileNetV2 rebounds without retraining from 0.1 percent per-tensor to 69.8 percent per-channel, compared with 71.9 percent in float. ResNet-50 stays steady at 75.0 to 75.2 percent. Adding quantization-aware training (QAT), covered in Section 4, recovers another 1.3 points to 71.1 percent, solving the opening puzzle whose answer was D.
 
-    \notecue{Watch for}{Per-channel scales add small scale metadata and one rescale per output channel. They are standard for weights, whereas activations usually stay per-tensor. LLMs go finer still, using one scale per group of 128 weights in Activation-aware Weight Quantization (AWQ, Section 4) or 32 weights in GGUF (llama.cpp's quantized file format).}
+    \notecue{Watch for}{Per-channel scales add small scale metadata and one rescale per output channel. They are standard for weights, whereas activations usually stay per-tensor. LLMs go finer still, using one scale per group of 128 weights in Activation-aware Weight Quantization (AWQ, Section 4) or 32 weights in GGUF (llama.cpp's model file format).}
 
     \notecue{Next}{Examine whether large language models suffer the same wide-range breakdown along activation dimensions.}
   }
@@ -632,7 +632,7 @@ tensor([[-1.0039,  1.0039],
     \mlsysnotemeta{1.5 min}{Optional}%
     Why did absmax scaling hold near 6.7B and break abruptly at 13B? Dettmers et al. Figure 3(a) tracks hidden dimensions (the internal feature coordinates of each token vector) whose activation magnitudes reach 6 or more across layers. Below roughly 6 billion parameters, outlier features appear sporadically across layers (blue) and tokens (orange). Near 6.7B parameters, an abrupt phase shift hits every layer and roughly 75 percent of token positions, with magnitudes up to 20 times normal features concentrated in about 6 hidden dimensions. Because those outliers live in activations rather than weights, per-channel weight scales cannot fix them, so LLM.int8() isolates those few columns in FP16.
 
-    \notecue{Watch for}{The smooth curves interpolate between discrete measured model sizes, so focus on the sudden jump near 6.7B rather than the curve shape.}
+    \notecue{Watch for}{The smooth curves are spline fits across discrete measured model sizes, so focus on the sudden jump near 6.7B rather than the curve shape.}
 
     \notecue{Teach}{In a 50-minute class, skip this figure and move directly to diagnosing calibration distribution shift.}
 
@@ -662,13 +662,13 @@ tensor([[-1.0039,  1.0039],
   \mlsyscredit{Scenario illustrative; Model Compression, \S10.3.3 and Checkpoint 10.2. Anchor: Wu et al.\ 2020. Photo: Dodro (CC BY 4.0), Wikimedia Commons.}
   \note{%
     \mlsysnotemeta{2.5 min}{Core}%
-    Even with per-channel weights, static activation ranges fail when live inputs shift. In this illustrative camera-trap case (anchored by Wu et al. and Lecture 12's wildlife infrared, or IR, shift), static INT8 calibrated on 500 daytime RGB frames loses 6 points at night while FP32 loses 1. Name two causes and two fixes.
+    Even when weights are well scaled, static quantization (freezing activation ranges offline during calibration) can fail when live inputs shift. In this illustrative camera-trap case (anchored by Wu et al. and previewing Lecture 12's wildlife infrared, or IR, shift), static INT8 calibrated on 500 daytime RGB frames loses 6 points at night while FP32 loses 1. Name two causes and two fixes.
 
-    \notecue{Check}{Frozen daytime ranges misfit night IR statistics, clipping activations or collapsing them onto few codes, whereas FP32 has no fixed grid. A tempting fix is ``use more bits,'' ignoring calibration coverage. In ascending cost, recalibrate on day-plus-night frames, compute dynamic per-input ranges (scanning each tensor at runtime for min and max), or add per-channel scales and QAT. Closing Section 3, widest values set each scale, so clip tails, use per-channel scales, and treat calibration data as part of the model.}
+    \notecue{Check}{Frozen daytime ranges misfit night IR statistics, clipping activations or collapsing them onto few codes, whereas FP32 has no fixed grid. A tempting fix is ``use more bits,'' ignoring calibration coverage. In ascending cost, recalibrate on day-plus-night frames, switch to dynamic quantization (scanning each activation tensor at runtime for min and max), or add per-channel scales and QAT. Closing Section 3, widest values set the scale, so clip tails, scale per channel, and treat calibration data as part of the model.}
 
     \notecue{Watch for}{The 6-point versus 1-point drop is illustrative, built on real IR domain shift (distribution shift, Lecture 3).}
 
-    \notecue{Teach}{Give two minutes in pairs for causes before fixes, and state aloud that the 6-point versus 1-point drop is illustrative.}
+    \notecue{Teach}{Give two minutes in pairs for causes before fixes; note aloud that the 6-point versus 1-point drop is illustrative.}
 
     \notecue{Next}{Enter Section 4 to push below 8 bits and recover accuracy past the 4-bit cliff.}
   }
@@ -738,7 +738,7 @@ tensor([[-1.0039,  1.0039],
   \mlsyscredit{Frantar et al. 2023 (GPTQ), Table 5 (OPT-175B, WikiText2, weights only).}
   \note{%
     \mlsysnotemeta{2 min}{Optional}%
-    At 175 billion parameters, QAT is too expensive, so LLMs rely on smarter post-training rounding. In 2023, Frantar et al. (Table 5) introduced GPTQ, testing weight-only quantization on Meta's OPT-175B (Lecture 8) using WikiText2 perplexity (Lecture 9, lower is better). Plain round-to-nearest raises 4-bit perplexity from 8.34 to 10.54 and explodes at 3 bits to roughly 7,300, producing nonsense output. GPTQ instead rounds weights sequentially while adjusting remaining unrounded weights to cancel layer-output error, which works because each output sums products across weights. That holds perplexity to 8.37 at 4 bits and 8.68 at 3 bits.
+    At 175 billion parameters, QAT is too expensive, so LLMs rely on smarter post-training rounding. In 2023, Frantar et al. (Table 5) introduced GPTQ, testing weight-only quantization on OPT-175B (Lecture 8) using WikiText2 perplexity (Lecture 9, lower is better). Plain round-to-nearest raises 4-bit perplexity from 8.34 to 10.54 and explodes at 3 bits to roughly 7,300, producing nonsense output. GPTQ instead rounds weights sequentially while adjusting remaining unrounded weights to cancel layer-output error, which works because each output sums products across weights. That holds perplexity to 8.37 at 4 bits and 8.68 at 3 bits.
 
     \notecue{Watch for}{The 7,300 round-to-nearest bar is truncated off scale, and perplexity that high indicates total output collapse.}
 
@@ -758,13 +758,13 @@ tensor([[-1.0039,  1.0039],
   \mlsyscredit{Lin et al. 2024 (AWQ), Table 1 (INT3, groups of 128, WikiText perplexity).}
   \note{%
     \mlsysnotemeta{2 min}{Core}%
-    When a language model is too large for QAT, post-training methods must decide which weights matter most. In 2024, Lin et al. (Table 1) introduced Activation-aware Weight Quantization (AWQ), quantizing Meta's OPT-6.7B (OPT family, Lecture 8) to 3-bit weights in groups of 128, where plain rounding worsens perplexity (prediction uncertainty, lower is better) from 10.86 to 23.54. Keeping 1 percent in FP16, predict whether the largest weights or largest-activation channels protect accuracy better.
+    When QAT is too costly for an LLM, post-training methods must protect the most sensitive weights. In 2024, Lin et al. (Table 1) introduced Activation-aware Weight Quantization (AWQ), quantizing OPT-6.7B (OPT family, Lecture 8) to 3-bit weights in groups of 128; plain rounding worsens perplexity (prediction uncertainty, lower is better) from 10.86 to 23.54. Keeping 1 percent in FP16, predict whether the largest weights or largest-activation channels win.
 
-    \notecue{Check}{Channels with the largest activations win, restoring perplexity to 11.39, whereas keeping the largest weights scores 22.37. Because each output multiplies weight by activation, error equals $\Delta w \cdot x$, so large activations amplify rounding error. A tempting answer is the largest weights, ignoring $x$. AWQ scales salient channels up before uniform rounding instead of leaving mixed-precision FP16 columns. Closing Section 4, 8 bits hold the plateau; 4 bits and below need QAT or activation-aware weight quantization with FP16 activations.}
+    \notecue{Check}{Largest-activation channels win, restoring perplexity to 11.39 against 22.37 for the largest weights. Since output error equals $\Delta w \cdot x$, large activations amplify rounding error; a tempting answer picks the largest weights, ignoring $x$. AWQ scales salient weight channels up before uniform rounding and divides the paired activations by the same factor so the dot product stays unchanged, cutting rounding error without mixed-precision FP16 columns. Closing Section 4, 8 bits hold the plateau; 4 bits and below need QAT or activation-aware quantization with FP16 activations.}
 
-    \notecue{Teach}{Give one minute to predict which 1 percent of weights wins before revealing the perplexity bars.}
+    \notecue{Teach}{Give one minute to predict which 1 percent wins before revealing the perplexity bars.}
 
-    \notecue{Next}{Enter Section 5 to test when fewer bits actually make the hardware run faster.}
+    \notecue{Next}{Enter Section 5 to test when fewer bits actually make hardware run faster.}
   }
 \end{frame}
 
@@ -773,7 +773,7 @@ tensor([[-1.0039,  1.0039],
 % =============================================================================
 \mlsysnote{%
   \mlsysnotemeta{0.5 min}{Core}%
-  Smaller checkpoints only save disk space until kernels turn fewer bits into fewer milliseconds. Section 5 traces where quantization speeds up execution, where it slows execution down, and what evidence clears a quantized model to ship.
+  Smaller checkpoints sit on disk until kernels turn fewer bits into fewer milliseconds. Section 5 traces where quantization speeds up execution, where it slows execution down, and what evidence clears a quantized model to ship.
 
   \notecue{Next}{Place weight-only INT4 decode and INT8 compute onto Lecture 2's roofline.}
 }
@@ -806,13 +806,13 @@ tensor([[-1.0039,  1.0039],
     \mlsysnotemeta{3.5 min}{Core}%
     Whether fewer bits cut latency depends on Lecture 2's roofline (developed in Lecture 11), where bandwidth sets the slope and compute the roof. On the slope, batch-one GPT-2 XL phone decode (a) reads 3 GB of FP16 weights plus 0.31 GB of KV cache (Lecture 6b; 3.31 GB, 65 ms). On the 989 TFLOP/s FP16 roof sits a large-batch H100 MLP (b). Predict how INT4 weights move (a) and INT8 moves (b).
 
-    \notecue{Check}{INT4 cuts decode traffic to 1.06 GB, sliding (a) to 21 ms (3.1 times faster). A tempting answer is 4 times, overlooking the FP16 KV cache. INT8 doubles the H100 roof to 1,979 tera-ops/s, lifting (b) about 2 times while leaving 16-bit weight-only decode unmoved. Similarly, 3-bit GPTQ (error-corrected) OPT-175B takes 71 ms per token on one A100 versus 230 ms FP16 on five A100s (3.24 times, shifting GPU count).}
+    \notecue{Check}{INT4 cuts decode traffic to 1.06 GB, sliding (a) to 21 ms (3.1 times faster); a tempting guess is 4 times, overlooking the FP16 KV cache. INT8 doubles the H100 roof to 1,979 tera-ops/s, lifting (b) about 2 times while leaving weight-only INT4 decode (whose math stays FP16) unmoved. Similarly, 3-bit GPTQ (error-corrected) OPT-175B takes 71 ms per token on one A100 versus 230 ms FP16 on five A100s (3.24 times, shifting GPU count).}
 
     \notecue{Watch for}{Without a faster integer datapath, compute-bound case (b) gains zero speedup.}
 
-    \notecue{Teach}{Give one minute to predict how INT4 moves (a) and INT8 moves (b) before revealing the answers.}
+    \notecue{Teach}{Give one minute to predict (a) and (b) before revealing.}
 
-    \notecue{Next}{Test that decode-versus-prefill split on real GPU hardware with llama-bench.}
+    \notecue{Next}{Test that memory-versus-compute split on real hardware by comparing decode against compute-bound prompt prefill in llama-bench (llama.cpp's benchmark).}
   }
 \end{frame}
 
@@ -825,7 +825,7 @@ tensor([[-1.0039,  1.0039],
   \mlsyscredit{github.com/ggml-org/llama.cpp, discussion 4167 (M2 Ultra post, @ggerganov), llama-bench output (t/s column) redrawn (every row: 6.74 B weights, Metal, ngl 99). Ratios derived.}
   \note{%
     \mlsysnotemeta{2.5 min}{Core}%
-    Real hardware confirms that roofline split. Here \texttt{llama-bench}, the throughput benchmark in the \texttt{llama.cpp} quantized inference engine, runs Llama 2 7B (6.74B weights) on an Apple M2 Ultra desktop chip (800 GB/s memory bandwidth) via Apple's Metal GPU interface (Lecture 0). It compares batch-one memory-bound generation (\texttt{tg128}) against compute-bound prompt processing, or prefill (\texttt{pp512}, Lecture 6b). Generation speeds up 2.30 times with block-quantized Q4\_0 (4-bit) and 1.62 times with Q8\_0 from a file 3.53 times smaller; other Apple Silicon chips (M1 Pro, M3 Max, M4 Max) reach 2.63 to 2.86 times. By contrast, compute-bound prefill slows to 0.88 times F16 (FP16), 0.88 to 0.98 across chips, because 4-bit weights add unpacking arithmetic without raising the compute ceiling.
+    Real hardware confirms that roofline split. Here \texttt{llama-bench}, the throughput benchmark in the \texttt{llama.cpp} inference engine, runs Llama 2 7B (6.74B weights) on an Apple M2 Ultra desktop chip (800 GB/s memory bandwidth) via Apple's Metal GPU interface (Lecture 0). It compares batch-one memory-bound generation (\texttt{tg128}) against compute-bound prompt processing, or prefill (\texttt{pp512}, Lecture 6b). Generation speeds up 2.30 times with block-quantized Q4\_0 (4-bit) from a file 3.53 times smaller (and 1.62 times with Q8\_0); other Apple Silicon chips (M1 Pro, M3 Max, M4 Max) reach 2.63 to 2.86 times (derived). By contrast, compute-bound prefill slows to 0.88 times F16 (FP16), 0.88 to 0.98 across chips, because 4-bit weights add unpacking arithmetic without raising the compute ceiling.
 
     \notecue{Watch for}{Generation falls short of the 3.53 times file ratio because effective weight bandwidth drops from roughly 553 GB/s at F16 to 360 GB/s at Q4\_0 (derived from tokens/s times file size) as on-the-fly unpacking adds overhead.}
 
@@ -865,7 +865,7 @@ tensor([[-1.0039,  1.0039],
   \mlsyscredit{Krishnamoorthi 2018, Table 7 (one large CPU core; DSP via Android NN-API). Photo: Tinh t\'{\^e} Photo, CC0, Wikimedia Commons. Snapdragon 835: Wikipedia, ``Pixel 2''.}
   \note{%
     \mlsysnotemeta{2.5 min}{Core}%
-    LLM decode showed the bandwidth side; now return to MobileNetV2, where compute broke Part 1's camera frame. Krishnamoorthi (Table 7) timed it on a Google Pixel 2 smartphone using the Snapdragon 835 chip, pairing CPU cores with an integer-only Hexagon digital signal processor (DSP) that cannot run FP32. One CPU core takes 105 ms in FP32 and 63 ms in INT8 (1.7 times faster), since a 512-bit vector register (an on-chip slot feeding parallel lanes, Lecture 11) holds 64 INT8 values instead of 16 FP32 values and moves fewer bytes. Moving INT8 to the Hexagon DSP reaches 15.5 ms, 6.8 times faster and below the 33 ms frame, by unlocking an integer processor rather than capping at 1.7 times on the CPU. The illustrative blur pipeline mirrors this drop from 125 to 87 ms via pruning, then about 20 ms on the integer unit.
+    LLM decode showed the bandwidth side; now return to MobileNetV2, where compute broke Part 1's camera frame. Krishnamoorthi (Table 7) timed it on a Google Pixel 2 smartphone using the Snapdragon 835 chip, pairing CPU cores with an integer-only Hexagon digital signal processor (DSP) that cannot run FP32. One CPU core takes 105 ms in FP32 and 63 ms in INT8 (1.7 times faster), since mobile vector registers (parallel on-chip slots, Lecture 11) pack four times as many INT8 as FP32 values, like a 512-bit server register (64 INT8 versus 16 FP32), while moving fewer bytes. Moving INT8 to the Hexagon DSP reaches 15.5 ms, 6.8 times faster and below the 33 ms frame, by unlocking an integer processor rather than capping at 1.7 times on the CPU. The illustrative blur pipeline mirrors this drop from 125 to 87 ms via pruning, then about 20 ms on the integer unit.
 
     \notecue{Watch for}{These Pixel 2 timings measure the 224x224 classifier; nobody measured the chapter's segmentation blur model on this phone.}
 
@@ -967,7 +967,7 @@ tensor([[-1.0039,  1.0039],
   \mlsyscredit{Krishnamoorthi 2018, Tables 3, 4, 7. 7B sizes derived: 7 billion $\times$ 0.5 B; at Q4\_0's 4.5 bits per weight, 3.9 GB.}
   \note{%
     \mlsysnotemeta{1.5 min}{Core}%
-    Returning to the opening puzzle and today's driving question closes both compression lectures. On accuracy, MobileNetV2 recovered from 0.1 percent per-tensor to 69.8 percent with per-channel scales (finer range granularity) and reached 71.1 percent with QAT. On speed, Pixel 2 latency fell from 105 ms on the FP32 CPU to 63 ms on the INT8 CPU, then to 15.5 ms on the INT8 DSP by unlocking the integer processor. On capacity and bandwidth, Part 1's 7B model shrinks from 14 GB in FP16 to 3.5 GB of 4-bit codes, or 3.9 GB including Q4\_0 block scales (derived), fitting inside 8 GB of phone DRAM and cutting per-token weight traffic fourfold when unpacking stays fused inside the kernel.
+    Returning to the opening puzzle and today's driving question closes both compression lectures. On accuracy, MobileNetV2 recovered from 0.1 percent per-tensor to 69.8 percent with per-channel scales (finer range granularity) and reached 71.1 percent with QAT. On speed, Pixel 2 latency fell from 105 ms on the FP32 CPU to 63 ms on the INT8 CPU, then to 15.5 ms on the INT8 DSP by unlocking the integer processor. On capacity and bandwidth, Part 1's 7B model shrinks from 14 GB in FP16 to 3.5 GB of 4-bit codes, or 3.9 GB including Q4\_0 block scales (derived), fitting inside 8 GB of phone DRAM and cutting per-token weight traffic 3.6 times with block scales when unpacking stays fused inside the kernel.
 
     \notecue{Next}{Distill Part 2 into five core takeaways.}
   }
@@ -1043,9 +1043,9 @@ tensor([[-1.0039,  1.0039],
   \mlsyscredit{Photo: Geekerwan (CC BY 3.0), Wikimedia Commons.}
   \note{%
     \mlsysnotemeta{0.5 min}{Core}%
-    Both compression lectures point to one hardware question behind today's speed measurements. Why did INT8 speed up ResNet-50 by 1.3 times at batch one and 5.9 times at large batch on one H100, and why did decode speedup track bytes moved?
+    Both compression lectures point to one hardware question behind today's speed numbers. Why did INT8 speed up ResNet-50 by only 1.3 times at batch one on one H100 while the large-batch gap (pairing measured MLPerf INT8 with modeled float) reached 5.9 times, and why did decode speedup track bytes moved?
 
-    \notecue{Next}{Lecture 11 (Hardware Acceleration, Part 1) opens the accelerator to explain the energy ladder (from arithmetic to DRAM), the roofline, and the integer and sparse datapaths behind both compression lectures.}
+    \notecue{Next}{Lecture 11 (Hardware Acceleration, Part 1) opens the accelerator to explain the energy ladder (from arithmetic to DRAM), the roofline, and the integer and sparse datapaths (specialized circuits for narrow integers and structured zeros) behind both compression lectures.}
   }
 \end{frame}
 

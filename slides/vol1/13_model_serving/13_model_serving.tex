@@ -55,7 +55,7 @@
 % =============================================================================
 \mlsysnote{%
   \mlsysnotemeta{0.5 min}{Core}%
-  Serving shifts focus from offline benchmarking to live traffic. In Lecture 12, models ran under a controlled load generator, a benchmark harness such as MLPerf's LoadGen that schedules when queries arrive, whereas in live serving users decide when requests arrive. Every request must finish before its deadline, so a service is sized by its latency budget and its queue's idle headroom. This lecture follows one ResNet-50 image-classification service across its latency budget, queue, batching policy, cold-start behavior, and hardware cost per request. Part 2 (Lecture 13b) turns to autoregressive token streams, where a language model generates one output token at a time.
+  Serving shifts focus from offline benchmarking to live traffic. In Lecture 12, models ran under a controlled load generator that schedules when queries arrive, whereas in live serving users decide when requests arrive. Every request must finish before its deadline, so a service is sized by its latency budget and its queue's idle headroom. This lecture follows one ResNet-50 image-classification service across its latency budget, queue, batching policy, cold-start behavior, and hardware cost per request. Part 2 (Lecture 13b) turns to autoregressive token streams, where a language model generates one output token at a time.
 
   \notecue{Teach}{Read the thesis aloud once to mark the shift from benchmarking to live serving. The full lecture totals 71 minutes, and skipping the slides marked Optional leaves a complete 49.5-minute Core lecture.}
 
@@ -75,7 +75,7 @@
     \mlsysnotemeta{3 min}{Core}%
     Serving one image at a time avoids batch wait at a steep hardware price. In the chapter's ResNet-50 profile on one H100 at \$4/hour (Example 13.1, modeled rather than measured), batch 1 takes 3.5 ms (283 requests/s) at \$3.92 per million requests. Batch 8 takes 3.8 ms, about 0.23 ms longer ($8/2{,}129$ versus $1/283$ s, though rounded labels suggest 0.3). Predict how much more batch 1 costs per million requests.
 
-    \notecue{Check}{The answer is C (7.5x). Batch 8 reaches 2,129 requests/s at \$0.52 per million, so batch 1 costs 7.5 times more ($3.92 / 0.52$) for 0.2 ms. Eight images share one weight read and 174 GPU kernel launches (Lecture 7). Answer A tempts by tracking the 6 percent latency rise (0.23 ms) rather than the 7.5x throughput jump. The synthesis later scales this to 36-GPU versus 3-GPU fleets.}
+    \notecue{Check}{The answer is C (7.5x). Batch 8 reaches 2,129 requests/s at \$0.52 per million, so batch 1 costs 7.5 times more ($3.92 / 0.52$) for 0.2 ms. Eight images share one weight read and 174 GPU kernel launches (Lecture 7). Answer A tempts by tracking the 6 percent latency rise (0.23 ms) rather than the 7.5x throughput jump. The closing synthesis scales this single-GPU cost gap to a full production fleet.}
 
     \notecue{Watch for}{Do not conclude ``always batch.'' Later sections price waiting to form a batch for interactive requests.}
 
@@ -125,7 +125,7 @@
   \mlsyscredit{Model Serving, \S13.1 and \S13.5; ResNet-50 on one H100 (table 8, modeled). The 67.5\% bound is this lecture's fleet estimate.}
   \note{%
     \mlsysnotemeta{1.5 min}{Core}%
-    That Server-versus-Offline split explains why live serving reverses every priority of training. Training (Lecture 8, analogous to MLPerf Offline) maximizes whole-run throughput with large batches, reaching 7,040 img/s at batch 32 on an H100, and keeps utilization near 100 percent. If one step runs slow, the job only finishes slightly later. Live serving (analogous to MLPerf Server) inverts every axis. The objective becomes keeping each request's p99 tail latency (Lecture 12) under its deadline. Deadlines force smaller batches, down to 283/s at batch 1. Queues also cap safe utilization at 67.5 percent for a 50 ms p99 target, a bound derived in Section 2, because failure now means live users wait past their deadline. Running a serving GPU near 100 percent busy is the worst training habit to carry over.
+    That Server-versus-Offline split explains why live serving reverses every priority of training. Training (Lecture 8, analogous to MLPerf Offline) maximizes whole-run throughput with large batches and keeps utilization near 100 percent; if one step runs slow, the job finishes slightly later. The slide contrasts that large-batch regime using ResNet-50's modeled 7,040 img/s batch-32 forward-pass rate on an H100, noting that full training steps also run backward and parameter-update passes. Live serving (analogous to MLPerf Server) inverts every axis. The objective becomes keeping each request's p99 tail latency (Lecture 12) under its deadline. Deadlines force smaller batches, down to 283/s at batch 1, and queues cap safe utilization at 67.5 percent for a 50 ms p99 target (derived in Section 2), because failure now means live users wait past their deadline. Running a serving GPU near 100 percent busy is the worst training habit to carry over.
 
     \notecue{Next}{Next, compare precomputed static inference against live dynamic serving.}
   }
@@ -140,7 +140,7 @@
     \mlsysnotemeta{1.5 min}{Optional}%
     Before paying that serving inversion on every query, an engineer first asks whether answers must be computed live at all, a choice mirroring MLPerf Offline versus Server. Static inference precomputes ResNet-50 labels overnight for a 10,000-photo library and stores them for fast lookup. At MLPerf's 89,500 images/s for a compiled INT8 engine, all 10,000 images take 0.11 s of H100 time. Dynamic inference must answer live uploads within a 100 ms moderation deadline. At 3.5 ms batch-1 latency, 10,000 images take 35 s, which is 316 times more GPU time (rounded to about 320 in the chapter). Precomputation cannot handle fresh inputs, changing users, or frequent model updates, so production systems precompute frequent queries and serve the rest dynamically. Dynamic serving is the focus of this lecture.
 
-    \notecue{Teach}{For a 50-minute class, skip this static-versus-dynamic slide and say in one sentence that precomputing labels overnight can be over 300 times cheaper than answering live uploads.}
+    \notecue{Teach}{For a 50-minute class, skip this static-versus-dynamic slide and say in one sentence that precomputing labels overnight can take over 300 times less GPU time than answering live uploads.}
 
     \notecue{Next}{Next, frame the lecture's driving question and four learning outcomes.}
   }
@@ -154,7 +154,7 @@
   \threadstrip{0}{1}{0}{0}{1}
   \note{%
     \mlsysnotemeta{1 min}{Core}%
-    Dynamic serving raises the driving question of this lecture, asking when every request must finish and what that guarantee costs. Four segments answer it in sequence, tracking one request's latency budget, queue headroom, batching policy, and startup time for each new replica, a single running copy of the model and its server, before pricing the fleet. Two metrics govern every decision. Latency is how long one request takes from arrival to reply, and throughput is how many requests finish per second. Training optimized throughput alone, whereas serving must satisfy both metrics at once for every user. Along the bottom, the course strip marks the machine factor of the iron law and the fast-enough half of the dual mandate.
+    Answering live requests dynamically raises the driving question of this lecture, asking when every request must finish and what that guarantee costs. Four segments answer it in sequence, tracking one request's latency budget, queue headroom, batching policy, and startup time for each new replica (a single running copy of the model and its server) before pricing the fleet. Every decision balances two familiar metrics at once, per-request latency from arrival to reply and aggregate throughput in requests per second, whereas training optimized throughput alone. Along the bottom, the course strip marks the machine factor of the iron law and the fast-enough half of the dual mandate.
 
     \notecue{Next}{Next, enter Section 1 to split a single request's latency budget stage by stage.}
   }
@@ -165,7 +165,7 @@
 % =============================================================================
 \mlsysnote{%
   \mlsysnotemeta{0.5 min}{Core}%
-  Section 1 answers where one request's milliseconds go before concurrent users and queues enter the picture. Tracing a single request on an idle server reveals which stages consume the budget and limits how much a faster model alone can help.
+  Section 1 answers where one request's milliseconds go before concurrent users and queues enter the picture. Tracing a single request on an idle server reveals which stages consume the budget and what limits how much a faster model alone can help.
 
   \notecue{Next}{Next, follow one compressed JPEG image across the host CPU, the PCIe link connecting CPU to GPU, and the H100 GPU.}
 }
@@ -205,7 +205,7 @@
   \mlsyscredit{Model Serving, table 3 (ResNet-50) and Lighthouse 13.1, table 4 (DLRM, 10 ms p99 budget). Photo: Theodore Christopher, CC0, Wikimedia Commons.}
   \note{%
     \mlsysnotemeta{1.5 min}{Optional}%
-    The non-model bottleneck is not unique to image decoding, because the dominant stage depends on the workload. For ResNet-50's 8.6 ms request, the model is 41 percent and host preprocessing dominates, so faster host CPUs or GPU decoding help most. Comparing DLRM, the recommendation lighthouse from Lecture 6b, under a 10 ms p99 budget (Lighthouse 13.1) reveals a different bottleneck. Request parsing takes 0.5 ms. Fetching over 100 learned vector embeddings from roughly 100 GB of tables takes 6 ms, bound by memory bandwidth and capacity (Lecture 6b). The dense MLP takes 1.5 ms, or 17 percent, and final ranking takes 1 ms. Adding GPU arithmetic barely moves DLRM latency, whereas serving its tables faster does.
+    Bottlenecks outside dense neural-network arithmetic are not unique to image decoding, because the dominant stage depends on the workload. For ResNet-50's 8.6 ms request, the model is 41 percent and host preprocessing dominates, so faster host CPUs or GPU decoding help most. Comparing DLRM, the recommendation lighthouse from Lecture 6b, under a 10 ms p99 budget (Lighthouse 13.1) reveals a different bottleneck. Request parsing takes 0.5 ms. Fetching over 100 learned vector embeddings from roughly 100 GB of tables takes 6 ms, bound by memory bandwidth and capacity (Lecture 6b). The dense MLP takes 1.5 ms, or 17 percent, and final ranking takes 1 ms. Adding GPU arithmetic barely moves DLRM latency, whereas serving its tables faster does.
 
     \notecue{Watch for}{In both services, the neural network is not the largest stage. Always profile every stage before optimizing.}
 
@@ -240,13 +240,13 @@
   \mlsyscredit{Model Serving, table 3 and Systems Perspective 13.2. Measured bar: Richins et al., ``AI Tax,'' arXiv 2007.10571, Fig.~6 (exact printed means, 351.2 ms total; AI 59\%, brokers 36\%).}
   \note{%
     \mlsysnotemeta{2.5 min}{Core}%
-    If pipelining leaves single-request latency at 8.6 ms, Amdahl's law (Lectures 1 and 11) limits what a faster model alone buys. Suppose the 3.5 ms model speeds up 10x to 0.35 ms while other stages stay fixed. Predict the new total before reading on. In a measured 351.2 ms ``AI Tax'' face-recognition pipeline (Richins et al. 2020), ingestion takes 18.8 ms, face detection 74.8 ms, and identification 131.5 ms (59 percent AI), while message-broker queues passing data between stages add 126.1 ms (36 percent).
+    If pipelining leaves single-request latency at 8.6 ms, Amdahl's law (Lectures 1 and 11) limits what a faster model buys. Suppose the 3.5 ms model speeds up 10x to 0.35 ms while other stages stay fixed. Predict the new total before reading on.
 
-    \notecue{Check}{The new total is $5.1 + 0.35 \approx 5.5$ ms, only 1.6x faster because 5 ms of host preprocessing and PCIe transfer stay fixed. A tempting answer is 0.86 ms, dividing all 8.6 ms by 10. Every stage thus shares one budget, capping model-only speedups.}
+    \notecue{Check}{The new total is $5.1 + 0.35 \approx 5.5$ ms, only 1.6x faster because 5.1 ms stays fixed (4.5 ms preprocessing, 0.5 ms PCIe copy, and 0.1 ms postprocessing). A tempting answer is 0.86 ms, dividing all 8.6 ms by 10. Measured systems confirm this tax. Richins et al. (2020) profiled a data-center face-recognition service (``AI Tax,'' 351.2 ms total) where ingestion took 18.8 ms, face detection (74.8 ms) and identification (131.5 ms) were 59 percent AI combined, and message-broker queues passing data between stages added 126.1 ms (36 percent). Closing Section 1, every stage shares one budget, capping model-only speedups.}
 
     \notecue{Watch for}{Faster next-generation accelerators worsen this imbalance by shrinking the model slice while host stages stay fixed.}
 
-    \notecue{Teach}{Have everyone write down the new total latency before revealing 5.5 ms and the measured bar.}
+    \notecue{Teach}{Have everyone write the new total before revealing 5.5 ms and the measured bar.}
 
     \notecue{Next}{Next, enter Section 2 to add concurrent arrivals and model the queueing knee.}
   }
@@ -315,11 +315,11 @@
   \end{columns}
   \note{%
     \mlsysnotemeta{4 min}{Core}%
-    To see why waiting climbs near capacity, model one server as an M/M/1 queue with Poisson arrivals, service time $S = 3.5$ ms, and utilization $\rho = \lambda S$. By $W = S/(1 - \rho)$, mean time in system doubles to 7.1 ms at 50 percent busy and hits 17.6 ms at 80 percent. Predict $W$ at 90 percent before reading on. Because M/M/1 total time is exponentially distributed, p99 is $\ln 100 \approx 4.6$ times the mean ($W_{99} \approx 4.6\,S/(1 - \rho)$). At 70 percent, an 11.8 ms mean hides a 54.1 ms p99, breaking a 50 ms deadline.
+    Averages cannot show how waiting climbs near capacity. Model an M/M/1 queue (Poisson arrivals at rate $\lambda$, exponentially varying service times with mean $S = 3.5$ ms, unrounded 3.528 ms, and one server with utilization $\rho = \lambda S$). Mean time in system $W$ doubles to 7.1 ms at 50 percent busy and reaches 17.6 ms at 80 percent. Predict $W$ at 90 percent before reading on.
 
-    \notecue{Check}{At 90 percent busy, $W$ hits 35.3 ms, then 70.6 ms at 95 percent. Linear extrapolation tempts a 25 ms guess, missing the steep curve.}
+    \notecue{Check}{At 90 percent, $W$ hits 35.3 ms, then 70.6 ms at 95 percent, by $W = S/(1 - \rho)$. Linear extrapolation tempts a 25 ms guess, missing that steep curve. Because M/M/1 total time is exponential, p99 is $\ln 100 \approx 4.6$ times the mean ($W_{99} \approx 4.6\,S/(1 - \rho)$), so at 70 percent an 11.8 ms mean hides a 54.1 ms p99, breaking a 50 ms deadline.}
 
-    \notecue{Watch for}{The 70 percent knee is a heuristic, not a law. Compiled models vary less than M/M/1 assumes, so validate with a load test driving realistic traffic.}
+    \notecue{Watch for}{The 70 percent knee is a planning heuristic, not a law. Compiled models vary less than M/M/1 assumes, so validate with a realistic load test.}
 
     \notecue{Teach}{At 80 percent, pause for written predictions of $W$ at 90 percent before revealing.}
 
@@ -436,9 +436,9 @@
   \mlsyscredit{Model Serving, \S13.5.4 and \S13.5.5 (independent servers assumed); Dean and Barroso, ``The Tail at Scale,'' CACM 2013, Table 1.}
   \note{%
     \mlsysnotemeta{2.5 min}{Core}%
-    Headroom protects one replica, yet search shards and ensembles rely on fan-out (Lecture 12), waiting for all replies at once. If each replica finishes on time 99 percent of the time, 10 servers succeed $0.99^{10} = 90.4$ percent of the time. Predict the share for 100 servers before reading on. Hedging softens this tail by resending any request still pending at 95th-percentile latency (p95) and keeping the first reply, adding about 5 percent load.
+    Headroom protects one replica, yet search shards and ensembles rely on fan-out (Lecture 12), waiting for all replies at once. If each replica finishes on time 99 percent of the time, 10 servers succeed $0.99^{10} = 90.4$ percent of the time. Predict the share for 100 servers before reading on.
 
-    \notecue{Check}{The answer is $0.99^{100} = 36.6$ percent. Recall from Lecture 12 that Dean and Barroso (2013) saw Google's 10 ms leaf p99 reach 140 ms across leaves, forcing tight per-server tails. Answer 99 percent wrongly applies one server's tail to 100. Closing Section 2, tail targets cap safe utilization, size fleets, and compound under fan-out.}
+    \notecue{Check}{The answer is $0.99^{100} = 36.6$ percent, whereas answering 99 percent wrongly applies one server's tail to 100. Recall from Lecture 12 that Dean and Barroso (2013) saw Google's 10 ms leaf p99 reach 140 ms across leaves, forcing tight per-server tails. Hedging mitigates that collapse by resending any request still pending at 95th-percentile latency (p95) and keeping the first reply, adding about 5 percent load. Closing Section 2, tail targets cap safe utilization, size fleets, and compound under fan-out.}
 
     \notecue{Watch for}{Launched GPU kernels cannot be canceled cheaply, so under overload hedged duplicates deepen the queue they try to bypass.}
 
@@ -494,7 +494,7 @@ Request concurrency: 1
   \mlsyscredit{Triton perf\_analyzer docs, quick\_start.md, github.com/triton-inference-server/perf\_analyzer (main @ 93ba37f). Lines quoted exactly; long lines wrapped.}
   \note{%
     \mlsysnotemeta{1.5 min}{Core}%
-    To see what unbatched serving looks like in practice, examine a live run on NVIDIA Triton Inference Server, NVIDIA's serving runtime that decouples network handling and dynamic batching from model code across frameworks (distinct from Lecture 0's Triton kernel language). Its client load-testing tool, \texttt{perf\_analyzer}, drives the quick-start ``simple'' model at concurrency 1 (one request in flight) and splits client from server time. Client latency averages 708 microseconds ($\mu$s), while server latency is 382 $\mu$s and model inference takes only 257 $\mu$s (36 percent). The remaining 326 $\mu$s sit outside the server in network transfer, payload encoding (text JSON versus compact binary gRPC), and client OS jitter (unpredictable operating-system interruptions), confirming Section 1's budget. All 25,348 inferences took 25,348 executions at batch 1, and Little's law holds directly, since $1{,}407.84/\text{s} \times 708\ \mu\text{s} = 1.00$ request in flight.
+    To see what unbatched serving looks like in practice, examine published \texttt{perf\_analyzer} output from NVIDIA Triton Inference Server's quick-start guide. Triton is NVIDIA's serving runtime that decouples network handling and dynamic batching from model code across frameworks. Its load-testing tool drives the quick-start ``simple'' model at concurrency 1 (one request in flight) and splits client from server time. Client latency averages 708 microseconds ($\mu$s), while server latency is 382 $\mu$s and model inference takes only 257 $\mu$s (36 percent). The remaining 326 $\mu$s sit outside the server in network transfer, serialization (text JSON versus gRPC, a remote procedure call framework using binary Protocol Buffers), and client OS jitter (unpredictable operating-system interruptions), confirming Section 1's budget. All 25,348 inferences took 25,348 executions at batch 1, and Little's law holds directly, since $1{,}407.84/\text{s} \times 708\ \mu\text{s} = 1.00$ request in flight.
 
     \notecue{Next}{Next, break down why 99 percent of a batch-1 ResNet-50 forward pass is fixed cost.}
   }
@@ -521,11 +521,11 @@ Request concurrency: 1
   \mlsyscredit{Model Serving, Example 13.6, table 14 (the reference profile, modeled, one term changed per row).}
   \note{%
     \mlsysnotemeta{2 min}{Optional}%
-    When tight deadlines restrict batching, compiled runtimes attack that batch-1 dispatch floor directly (Example 13.6, modeled on one H100). Eager PyTorch takes 3.53 ms. TorchScript, PyTorch's serialized graph executor, removes per-operation Python dispatch to reach 1.79 ms. ONNX Runtime (Lecture 7) fuses convolution, batch normalization, and ReLU layers (Conv-BN-ReLU), cutting 174 kernels to 56 and reaching 0.61 ms. TensorRT, NVIDIA's ahead-of-time inference compiler, specializes fused kernels for one GPU microarchitecture and replays the graph as one launch, reaching 0.38 ms in FP32, a 9.3x speedup without changing precision (extending Lecture 7's CUDA Graphs). Lowering precision trims FP16 to 0.33 ms and INT8 to 0.30 ms, only 1.3x beyond FP32. Per-kernel device floors dominate batch 1, whereas lower precision pays off at large batch (Lecture 10b).
+    When tight deadlines forbid waiting for a batch, cutting batch-1 latency means shrinking host dispatch and kernel count directly (Example 13.6, modeled on one H100). Eager PyTorch takes 3.53 ms. TorchScript, PyTorch's serialized graph executor, removes Python per-op dispatch to reach 1.79 ms. ONNX Runtime (Lecture 7) fuses convolution, batch normalization, and ReLU layers, cutting 174 kernels to 56 (0.61 ms). TensorRT, NVIDIA's ahead-of-time inference compiler, specializes fused kernels for one GPU architecture and replays one captured graph (Lecture 7's CUDA Graphs), reaching 0.38 ms in FP32 (9.3x faster without changing precision). Lowering precision trims FP16 to 0.33 ms and INT8 to 0.30 ms (1.3x beyond FP32). Because ResNet-50's weights are small on an H100, per-kernel floors dominate batch 1, so precision pays off at large compute-bound batches, unlike Lecture 10b's bandwidth-bound LLMs.
 
     \notecue{Watch for}{INT8 needs calibration data and ties deployment to vendor-specific engine versions.}
 
-    \notecue{Teach}{For a 50-minute class, skip this slide and say in one sentence that removing dispatch overhead speeds up batch 1 far more than lowering precision.}
+    \notecue{Teach}{For a 50-minute class, skip this slide and say in one sentence that removing dispatch speeds up batch 1 far more than lowering precision.}
 
     \notecue{Next}{Next, examine the batching throughput-latency trade-off measured on an NVIDIA L4 edge GPU in MLPerf.}
   }
@@ -540,13 +540,13 @@ Request concurrency: 1
   \mlsyscredit{Left: Model Serving, \S13.6.4 (modeled). Right: MLPerf Inference v5.0, edge, 3$\times$ L4 (5.0-0047); rates per GPU derived from p90 and p99 latencies and Offline/3.}
   \note{%
     \mlsysnotemeta{2.5 min}{Optional}%
-    Even after compiled engines shrink dispatch overhead, batching still trades modest latency for multi-fold throughput. Under the H100 linear service model ($3.495 + 0.0329 B$ ms), throughput scales nearly linearly before flattening near batch 128 (7.7 ms, 16,600 img/s). Measured MLPerf v5.0 runs on an NVIDIA L4 edge GPU test this trade on real hardware, where SingleStream (batch 1) takes 0.414 ms (2,415 img/s) and MultiStream (Lecture 12's batch-8 stream) takes 0.770 ms. Predict the throughput gain before reading on.
+    Batching trades modest latency for multi-fold throughput in both the chapter's model and measured hardware. Under the chapter's modeled eager H100 linear service profile ($3.495 + 0.0329 B$ ms), throughput climbs nearly linearly before flattening near batch 128 (7.7 ms, 16,600 img/s). Measured MLPerf v5.0 runs on an NVIDIA L4 (edge division) test this trade on hardware, where SingleStream (batch 1) takes 0.414 ms (2,415 img/s) and MultiStream (Lecture 12's batch-8 stream) takes 0.770 ms. Before reading on, verify why those latencies yield 4.3x throughput rather than 8x.
 
-    \notecue{Check}{The answer is 4.3x (10,390 img/s), trading 1.9x latency for 4.3x throughput, while Offline reaches 12,855 img/s per GPU. Eight images finish in 1.86x the time, giving $8 / 1.86 = 4.3\times$. A tempting answer is 8x, assuming latency does not grow with batch size.}
+    \notecue{Check}{Eight images take 1.86x (about 1.9x) longer, giving $8 / 1.86 = 4.3\times$ throughput (10,390 img/s), while Offline reaches 12,855 img/s per GPU. A tempting guess is 8x, assuming latency stays flat with batch size.}
 
     \notecue{Watch for}{SingleStream reports p90 latency and MultiStream reports p99, so these per-GPU rates are derived comparisons.}
 
-    \notecue{Teach}{Ask for the throughput gain before showing the L4 points. For a 50-minute class, skip this slide or show only the L4 panel briefly.}
+    \notecue{Teach}{State 0.414 ms and 0.770 ms aloud on overlay 1 and ask pairs to derive 4.3x before revealing the L4 panel. For a 50-minute class, skip this slide.}
 
     \notecue{Next}{Next, price the batch-formation wait that requests pay inside a fixed time window.}
   }
@@ -559,7 +559,7 @@ Request concurrency: 1
   \mlsyscredit{Model Serving, \S13.6.4, equations 8, 9, and 12; window arrivals illustrative, counts Poisson.}
   \note{%
     \mlsysnotemeta{2.5 min}{Core}%
-    Those curves count GPU execution time alone, omitting the time requests spend waiting for a batch to form. Under random Poisson arrivals in a 10 ms batch-formation window, the first arrival waits nearly 10 ms and the last waits zero, so mean wait equals window/2. A 20 ms window thus spends 10 ms waiting, or 20 percent of a 50 ms budget. Realized batch sizes in a 10 ms window also fluctuate with arrival rate. At 50 QPS, the mean count is 0.5, leaving 61 percent of windows empty and making batching barely worthwhile. At 200 QPS, counts swing widely around 2, whereas at 1,000 QPS they cluster near 10. At 500 QPS, an arriving request sees a mean batch of 6 and a p99 batch of 12. Pairing a timeout with a maximum batch size creates a dual-trigger policy, dispatching as soon as either limit fires.
+    Those curves count GPU execution time alone, omitting the wait for a batch to form. Under Poisson arrivals in a 10 ms batch-formation window, the first arrival waits nearly 10 ms and the last waits zero, so mean wait equals window/2. A 20 ms window thus spends 10 ms waiting, or 20 percent of a 50 ms budget. Batch counts in a 10 ms window also fluctuate with rate. At 50 QPS, the mean count is 0.5, leaving 61 percent of windows empty, making batching marginal. At 200 QPS, counts swing widely around 2, whereas at 1,000 QPS they cluster near 10. At 500 QPS, a random window averages 5 arrivals, so an arriving request (itself plus 5 others on average) sees a mean batch of 6 and a p99 batch of 12. Pairing a timeout with a maximum batch size forms a dual-trigger policy that dispatches when either limit fires.
 
     \notecue{Watch for}{Size latency budgets against the tail of the batch-size distribution, not the mean.}
 
@@ -703,11 +703,11 @@ Request concurrency: 1
   \mlsyscredit{Left: Model Serving, Example 13.9, table 17 (representative); Example 13.10. Right: Fu et al., ``ServerlessLLM,'' OSDI 2024, \S2.3 (download at 5 GB/s).}
   \note{%
     \mlsysnotemeta{2.5 min}{Core}%
-    A new replica cannot serve until initialization finishes. Loading weights takes 0.5 s from local SSD versus 3 to 5 s from S3 (Lecture 4b). Creating a CUDA context takes 0.3 to 0.5 s, followed by warm-up passes for lazy initialization (setup otherwise deferred to the first query). First deploy also builds a compiled TensorRT engine in 15 to 30 s, giving about 1.5 s precompiled in a warm container (an already running software environment) versus about 35 s cold. ServerlessLLM (Fu et al. 2024) measured PyTorch loads of 34 s for Meta's OPT-30B on 4 GPUs and 84 s for Llama 2 70B on 8 GPUs, after a 130 GB download taking 26+ s at 5 GB/s. File format matters too (Example 13.10). A 5 GB checkpoint takes 15 s with Python's pickle format, which reconstructs objects on CPU, versus 1.5 s in safetensors, a raw-array format memory-mapped directly into RAM without parsing.
+    Before serving, a new replica loads weights (0.5 s from SSD, 3 to 5 s from S3, Lecture 4b), builds a CUDA context (0.3 to 0.5 s), and spends 0.6 s on runtime setup and warm-up passes for lazy initialization (deferred setup), totaling about 1.5 s precompiled in a warm container (an already running software environment). First deploy adds 15 to 30 s to build a TensorRT engine, reaching about 35 s cold. ServerlessLLM (Fu et al., OSDI 2024), a study of serverless LLM loading, measured PyTorch loads of 34 s for OPT-30B on 4 GPUs and 84 s for Llama 2 70B on 8 GPUs, with a 130 GB download taking 26 s or more at 5 GB/s before loading starts. Format matters too (Example 13.10). A 5 GB checkpoint takes 15 s in Python pickle (CPU object parsing) versus 1.5 s in safetensors, memory-mapped into virtual address space, bypassing CPU parsing.
 
-    \notecue{Watch for}{Cold starts strike during traffic spikes, rollouts, and crash recovery, when capacity is scarce, not only on the first request.}
+    \notecue{Watch for}{Cold starts strike during spikes, rollouts, and crash recovery, when capacity is scarce, not only on the first request.}
 
-    \notecue{Next}{Next, inspect a recorded startup log where compilation dominates cold start.}
+    \notecue{Next}{Next, inspect a recorded startup log to see which phase dominates a real cold start.}
   }
 \end{frame}
 
@@ -754,13 +754,13 @@ Request concurrency: 1
   \mlsyscredit{Run for this course: images/coldstart\_log.py, PyTorch 2.13.0 on an Apple arm64 CPU, 4 threads, random weights. Key lines quoted from images/coldstart\_log.txt.}
   \note{%
     \mlsysnotemeta{2 min}{Optional}%
-    A real startup trace confirms that compilation dominates cold start. Recorded via images/coldstart\_log.py, these two runs start ResNet-50 in PyTorch 2.13.0 on an Apple arm64 CPU with 4 threads; spot which interval shrank between Run 1 and Run 2. Reading 102 MB from the OS page cache (main memory caching recent disk reads) takes 18 to 21 ms with pickle and 2 to 3 ms with safetensors. In Run 1, \texttt{torch.compile} (Lecture 7's PyTorch graph compiler) takes 10.7 of 12.4 seconds (86 percent). Run 2 reuses the compile cache, cutting compile time to 1.0 s and ready time to 2.7 s (4.6x sooner), so deployments ship precompiled artifacts or warm caches.
+    Measuring two back-to-back ResNet-50 launches tests how much of startup compilation actually consumes. Recorded for this course, these runs start ResNet-50 in PyTorch 2.13.0 on an Apple Silicon (arm64) CPU with 4 threads; spot which interval shrank between Run 1 and Run 2. Reading 102 MB from the OS page cache (main memory caching recent disk reads) takes 18 to 21 ms with pickle and 2 to 3 ms with safetensors. In Run 1, \texttt{torch.compile} (Lecture 7's PyTorch graph compiler) takes 10.7 of 12.4 seconds (86 percent). Run 2 reuses the compile cache, cutting compile time to 1.0 s and ready time to 2.7 s (4.6x sooner), so deployments ship precompiled artifacts or warm caches.
 
     \notecue{Watch for}{Compiled engines match one exact GPU, driver, and library version. Any upgrade silently reverts to Run 1's cold compile.}
 
     \notecue{Teach}{Ask which interval shrank before showing the bottom callouts. For a 50-minute class, skip this log, since the prior slide already contrasts 1.5 s precompiled against 35 s cold.}
 
-    \notecue{Next}{Next, calculate why swapping a 10 GB model over PCIe on demand breaks interactive deadlines.}
+    \notecue{Next}{Next, test whether swapping a 10 GB model from host RAM over PCIe on demand avoids cold starts.}
   }
 \end{frame}
 
@@ -817,7 +817,7 @@ Request concurrency: 1
     \mlsysnotemeta{2.5 min}{Core}%
     In the chapter's Black Friday surge (Example 13.3), traffic jumps from 1,000 to 10,000 QPS on a fleet sized for 1,000. Utilization pins at 100 percent, queues grow to 10 s, and clients time out while cold replicas take 35 s to start. Before reading on, decide what to change in the first minute and what to report.
 
-    \notecue{Check}{Four levers span distinct timescales. In milliseconds, admission control (load shedding) returns HTTP 503 (Service Unavailable) rather than queueing doomed work, while graceful degradation serves a warm smaller model or shorter output. In about 1.5 s, warm precompiled pools absorb load, and predictive pre-scaling handles known peaks. Report rejection rate and fallback quality beside latency. Closing Section 4, waiting for autoscaling (adding replicas automatically under load) fails because cold starts strike during spikes.}
+    \notecue{Check}{Four levers span distinct timescales. In milliseconds, admission control (load shedding) returns HTTP 503 (Service Unavailable) rather than queueing doomed work, while graceful degradation serves a warm smaller model or shorter output. In about 1.5 s, warm precompiled pools absorb load; ahead of known peaks, predictive pre-scaling adds replicas early. Report rejection rate and fallback quality beside latency. Closing Section 4, waiting for reactive autoscaling (adding replicas automatically) lags sudden spikes while cold starts run, so startup latency belongs in capacity plans.}
 
     \notecue{Watch for}{Load shedding can make latency dashboards look falsely green by dropping slow requests. Always display rejection rate beside latency.}
 
@@ -841,9 +841,9 @@ Request concurrency: 1
   \mlsyscredit{Model Serving, Example 13.13, table 18 (illustrative cloud prices; H100 at the batch-32 rate). Curves derived: T4 count rounded up to the load.}
   \note{%
     \mlsysnotemeta{3 min}{Core}%
-    Turning to serving economics, compare Example 13.13's illustrative cloud prices on a CPU (\$0.17/h at 50/s), a smaller NVIDIA T4 GPU (Lecture 11, \$0.53/h at 400/s), and a batch-32 H100 (\$4/h at 7,040/s). Compute each chip's cost per million images at full saturation and the load below which T4s beat one H100.
+    Sections 1 to 4 assumed H100s, leaving the driving question's cost half and when cheaper hardware wins. Compare Example 13.13's illustrative cloud prices for CPU (\$0.17/h, 50/s), NVIDIA T4 (Lecture 11, \$0.53/h, 400/s), and batch-32 H100 (\$4/h, 7,040/s). Estimate saturated cost per million images and where T4s beat one H100.
 
-    \notecue{Check}{At saturation, costs are \$0.94/M on CPU, \$0.37/M on T4, and \$0.16/M on H100. Below about 3,000 img/s, T4s win. One H100 bills \$4/h even partly idle, whereas T4s scale in \$0.53 steps, so 7 T4s cost \$3.71/h for 2,800 img/s and an 8th exceeds \$4/h near 3,000 img/s. Picking H100 at every load ignores idle billing. Above 3,000 img/s, H100 wins, and 35 s cold starts also favor fewer large machines.}
+    \notecue{Check}{Dividing hourly rate by hourly images, as in \$0.17 / $(50 \times 3{,}600) \times 10^6 =$ \$0.94, gives \$0.94/M on CPU, \$0.37/M on T4, and \$0.16/M on H100. Below about 3,000 img/s sustained load, T4s win because one H100 bills \$4/h even partly idle, whereas 7 T4s cost \$3.71/h for 2,800 img/s and an 8th, needed above 2,800 img/s, raises the bill to \$4.24/h. Picking H100 everywhere ignores idle billing. Above 3,000 img/s, H100 wins, and 35 s cold starts also favor keeping fewer large machines warm.}
 
     \notecue{Watch for}{Cost per inference counts only SLO-compliant requests, and cloud prices shift across regions and contracts.}
 
@@ -870,13 +870,13 @@ Request concurrency: 1
   \mlsyscredit{Model Serving, Example 13.1, Napkin Math 13.3, \S13.11.2 (a plan, to be load-tested). Cost: derived, \$4 per H100-hour at 5,000 requests/s. Photo: four H100 PCIe cards, Geekerwan, CC BY 3.0, Wikimedia Commons.}
   \note{%
     \mlsysnotemeta{3 min}{Core}%
-    Returning to the opening cost puzzle closes the driving question of what meeting every deadline costs at fleet scale. Four H100 cards fill only one-ninth of the batch-1 fleet. Before reading on, write from memory the three quantities that determine how many accelerators this service needs.
+    Returning to the opening puzzle closes the driving question at fleet scale; four H100 cards fill only one-ninth of the batch-1 fleet. Before reading on, write from memory the three quantities that determine how many accelerators this service needs.
 
-    \notecue{Check}{The three quantities are service time per request (set by batching and runtime), maximum safe utilization (set by the p99 deadline), and peak arrival rate plus headroom. At 5,000 QPS, those yield 36 H100s at batch 1 versus 3 H100s applying the same utilization cap to batched 7,040 img/s. At \$4/GPU-h, 36 GPUs cost \$8.00/M requests versus \$0.67/M for 3 GPUs (derived), widening the opening 7.5x gap to 12x because batch 1 needs extra queueing headroom. A tempting shortcut omits safe utilization and severely undercounts the fleet.}
+    \notecue{Check}{The three quantities are service time per request, maximum safe utilization from the p99 deadline, and peak rate plus headroom. At 5,000 QPS, Section 2 sized 36 H100s at batch 1. Applying the same cap (7,403/s required) to batch 32's 7,040 img/s gives $7{,}403 / 7{,}040 = 1.05 \rightarrow 2$ GPUs, or 3 with 30 percent headroom. At \$4/GPU-h, 36 GPUs cost \$8.00/M requests versus \$0.67/M for 3 (derived). Switching from the hook's batch 8 (7.5x) to batch 32 (25x) widens the gap to 12x after whole-GPU rounding. Omitting safe utilization severely undercounts the fleet.}
 
     \notecue{Watch for}{The 3-GPU batched plan still requires load verification because batch formation alters the waiting distribution.}
 
-    \notecue{Teach}{Give 90 seconds of closed-note retrieval to list the three quantities before revealing the GPU and dollar bars.}
+    \notecue{Teach}{Give 90 seconds of closed-note retrieval for the three quantities before revealing the GPU and dollar bars.}
 
     \notecue{Next}{Next, consolidate the five core takeaways from Part 1.}
   }
@@ -890,7 +890,7 @@ Request concurrency: 1
   \thumbline{thumb_cost.pdf}{Cost per inference counts only requests that meet the SLO; the cheapest chip at saturation wins only above its crossover load.}
   \note{%
     \mlsysnotemeta{1.5 min}{Core}%
-    The five takeaways follow the lecture in section order and close with serving economics. As you read each line, recall which slide and number established that rule. Pay special attention to the second takeaway, where the queueing knee places p99 at 4.6x the mean, and the fifth, where cost per inference counts only SLO-compliant requests and hardware choice flips at a crossover load.
+    The five takeaways follow the lecture in section order and close with serving economics. As you read each line, recall which slide and number established that rule. Pay special attention to the second takeaway, where waiting rises sharply at the queueing knee and the M/M/1 model puts p99 at 4.6x the mean, and the fifth, where cost per inference counts only SLO-compliant requests and hardware choice flips at a crossover load.
 
     \notecue{Teach}{Ask the class which slide taught each rule. If short on time, emphasize the second takeaway (queueing knee and 4.6x p99) and the fifth (SLO-compliant cost and hardware crossover).}
 
