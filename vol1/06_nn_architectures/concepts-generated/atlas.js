@@ -53,9 +53,33 @@ window.MLSysVolume = (() => {
         el?.classList.toggle("chapter-focus", n.chapter === chapter);
         el?.classList.toggle("chapter-reference", n.chapter !== chapter && referenced.has(n.teaching_goal));
       }
-      $("chapter-context").textContent = ch
-        ? `${ch.title}: ${matches.length} concepts taught here (teal); ${revisited.length} revisited or previewed here (blue outline).`
-        : "Click a concept to follow its labeled connections across chapter boundaries.";
+      // A chapter's concepts are spread across the volume map, so at a readable
+      // size they rarely fit in one view. Naming them, each a link that pans to
+      // it, keeps every one a click away without rearranging the map.
+      const context = $("chapter-context");
+      if (ch) {
+        const names = matches
+          .map((n) => `<button type="button" class="locate-concept" data-concept="${esc(n.id)}">${esc(n.label)}</button>`)
+          .join(", ");
+        const taughtText = matches.length
+          ? `${esc(ch.title)} teaches ${matches.length === 1 ? "one concept" : `${matches.length} concepts`} here (teal): ${names}.`
+          : `${esc(ch.title)} introduces no concepts of its own in this map.`;
+        const revisitedText = revisited.length
+          ? ` It revisits or previews ${revisited.length} more (blue outline).`
+          : "";
+        context.innerHTML = taughtText + revisitedText;
+        context.querySelectorAll(".locate-concept").forEach((b) => {
+          b.onclick = () => {
+            focusNodes([b.dataset.concept], null, true);
+            const el = document.getElementById("concept-" + b.dataset.concept);
+            el?.classList.remove("located");
+            void el?.getBoundingClientRect();
+            el?.classList.add("located");
+          };
+        });
+      } else {
+        context.textContent = "Click a concept to follow its labeled connections across chapter boundaries.";
+      }
       $("focus-chapter").disabled = !matches.length && !revisited.length;
       saveSelection();
     }
@@ -63,13 +87,22 @@ window.MLSysVolume = (() => {
       chapter = $("chapter-selector").value;
       highlight();
     };
-    $("focus-chapter").onclick = () =>
-      focusNodes(
-        data.nodes.filter((n) => {
-          const ch = catalog.volumes.flatMap((v) => v.chapters).find((c) => c.id === chapter);
-          return n.chapter === chapter || (ch?.references || []).some((r) => r.concept === n.teaching_goal);
-        }).map((n) => n.id),
-      );
+    // The chapter's concepts: those it teaches, and those it revisits or previews.
+    function chapterNodes() {
+      const ch = catalog.volumes.flatMap((v) => v.chapters).find((c) => c.id === chapter);
+      const referenced = new Set((ch?.references || []).map((r) => r.concept));
+      const taught = data.nodes.filter((n) => n.chapter === chapter).map((n) => n.id);
+      const revisited = data.nodes
+        .filter((n) => n.chapter !== chapter && referenced.has(n.teaching_goal))
+        .map((n) => n.id);
+      return { taught, all: [...taught, ...revisited] };
+    }
+    // Fit everything the chapter touches; when that would shrink labels below
+    // readable size, open on the part of the map with the most taught concepts.
+    $("focus-chapter").onclick = () => {
+      const { taught, all } = chapterNodes();
+      focusNodes(all.length ? all : taught, taught);
+    };
     return {
       chapter: () => chapter,
       mapLoaded(next) {
@@ -92,14 +125,13 @@ window.MLSysVolume = (() => {
             b.setAttribute("aria-pressed", String(b.dataset.volume === volume)),
           );
         highlight();
-        // Inside a chapter, open on that chapter's concepts rather than the
-        // whole volume, which is unreadable at the embed's size.
-        if (!autoFocused && chapter && document.body.classList.contains("embedded-map")) {
+        // Opened for a chapter (inside it, or from its "Open the full map"
+        // link), start on that chapter's concepts rather than the whole
+        // volume, which is unreadable at a chapter's size. focusNodes keeps
+        // labels readable and favors the concepts the chapter teaches.
+        if (!autoFocused && chapter) {
           autoFocused = true;
-          // Only the concepts this chapter teaches: adding the ones it revisits
-          // spreads the view across the volume and shrinks every label.
-          const taught = data.nodes.filter((n) => n.chapter === chapter).map((n) => n.id);
-          setTimeout(() => (taught.length ? focusNodes(taught) : $("focus-chapter").click()), 60);
+          setTimeout(() => $("focus-chapter").click(), 60);
         }
       },
     };

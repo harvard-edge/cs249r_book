@@ -1,10 +1,9 @@
 (async () => {
   "use strict";
   const $ = (id) => document.getElementById(id);
+  // Inside a chapter the taxonomy link must be absolute; on the site it stays as authored.
   const fieldEntry = document.querySelector(".field-entry");
-  if (fieldEntry) fieldEntry.href = window.parent !== window
-    ? "https://mlsysbook.ai/taxonomy/field.html"
-    : location.pathname.endsWith("/atlas.html") ? "field-preview.html" : "field.html";
+  if (fieldEntry && window.parent !== window) fieldEntry.href = "https://mlsysbook.ai/taxonomy/";
   if (window.parent !== window) {
     document.body.classList.add("embedded-map");
     // Inside a chapter, follow the book page's light/dark theme (same origin).
@@ -47,7 +46,8 @@
     selected = null,
     overviewReturn = null,
     loadVersion = 0,
-    zoom = 1;
+    zoom = 1,
+    zoomMode = "initial";
   let embedded;
   try {
     embedded = $("concept-data")
@@ -64,8 +64,18 @@
       "The concept catalog could not load. Please reload the page.";
     return;
   }
+  // Options carry short names; the full focus question stays in the heading
+  // (long option text overflows the page in WebKit at phone widths).
+  const shortTitle = (m) => {
+    if (m.scope === "volume") {
+      const v = catalog.volumes.find((x) => m.chapter.startsWith(x.id + "/"));
+      return `Volume ${v?.label || m.chapter.split("/")[0].slice(3)} · whole-volume map`;
+    }
+    const t = m.title.replace(/\?$/, "");
+    return t.length <= 44 ? t : t.slice(0, 44).replace(/\s+\S*$/, "") + "…";
+  };
   $("map-selector").innerHTML = catalog.maps
-    .map((m) => `<option value="${esc(m.id)}">${esc(m.title)}</option>`)
+    .map((m) => `<option value="${esc(m.id)}" title="${esc(m.title)}">${esc(shortTitle(m))}</option>`)
     .join("");
   function nodeElement(id) {
     return $("concept-map").querySelector(`[id="concept-${CSS.escape(id)}"]`);
@@ -101,18 +111,63 @@
       el.classList.toggle("active", activeEdges.has(e.id));
     });
   }
-  function setZoom(value) {
-    const svg = $("concept-map").querySelector("svg");
-    if (!svg) return;
-    zoom = Math.min(8, Math.max(0.5, value));
+  // zoom is the real scale: rendered pixels per SVG user unit (100% = the
+  // map's authored size). fits() gives the scales that fit the frame.
+  function fits() {
+    const svg = $("concept-map")?.querySelector("svg");
     const frame = document.querySelector(".map-frame");
-    const available = Math.max(200, frame.clientWidth - 22);
-    svg.style.width = `${Math.round(available * zoom)}px`;
+    if (!svg || !frame) return null;
+    const view = svg.viewBox.baseVal;
+    const w = view?.width || svg.getBBox().width || 1,
+      h = view?.height || svg.getBBox().height || 1;
+    const cs = getComputedStyle(frame);
+    const padX = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight),
+      padY = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
+    const availW = Math.max(200, frame.clientWidth - padX - 2),
+      availH = Math.max(150, frame.clientHeight - padY - 18);
+    const width = availW / w,
+      contain = Math.min(width, availH / h);
+    return { w, h, width, contain, cover: Math.max(width, availH / h) };
+  }
+  function initialZoom(f) {
+    // Open on the whole-map overview, fitted to the frame's width, so a first
+    // visit shows the shape of the volume; readers zoom in from there.
+    return f.width;
+  }
+  function setZoom(value, mode = "manual") {
+    const svg = $("concept-map")?.querySelector("svg");
+    const f = fits();
+    if (!svg || !f) return;
+    zoomMode = mode;
+    const lo = Math.min(f.contain, 1) * 0.75,
+      hi = Math.max(4, f.width * 8);
+    zoom = Math.min(hi, Math.max(lo, value));
+    // On the standalone page the frame hugs the overview instead of leaving a
+    // blank band under a short, wide map; any other zoom restores the full frame.
+    const frame = document.querySelector(".map-frame");
+    if (frame && !document.body.classList.contains("embedded-map")) {
+      frame.style.height = "";
+      if (mode === "initial") {
+        const cs = getComputedStyle(frame);
+        const want = Math.round(f.h * zoom + parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom) + 20);
+        if (want < frame.clientHeight) frame.style.height = `${want}px`;
+      }
+    }
+    svg.style.width = `${Math.round(f.w * zoom)}px`;
+    svg.style.height = `${Math.round(f.h * zoom)}px`;
     svg.style.minWidth = "0";
     svg.style.maxWidth = "none";
     $("zoom-status").textContent = `${Math.round(zoom * 100)}%`;
-    $("zoom-out").disabled = zoom <= 0.5;
-    $("zoom-in").disabled = zoom >= 8;
+    $("zoom-out").disabled = zoom <= lo + 1e-6;
+    $("zoom-in").disabled = zoom >= hi - 1e-6;
+  }
+  function refit() {
+    const f = fits();
+    if (!f) return;
+    if (zoomMode === "initial") setZoom(initialZoom(f), "initial");
+    else if (zoomMode === "fit") setZoom(document.body.classList.contains("embedded-map") ? f.width : f.contain, "fit");
+    else setZoom(zoom, "manual");
+    if (pendingFocus) focusNodes(...pendingFocus);
   }
   function saveSelection() {
     const url = new URL(location.href);
@@ -251,22 +306,90 @@
   panFrame.addEventListener("pointerup", endPan);
   panFrame.addEventListener("pointercancel", endPan);
   panFrame.addEventListener("lostpointercapture", endPan);
-  function focusNodes(ids) {
-    const elements = ids.map(nodeElement).filter(Boolean);
-    if (!elements.length) return;
-    const bounds = elements.map((el) => el.getBBox());
-    const left = Math.min(...bounds.map((b) => b.x)),
-      top = Math.min(...bounds.map((b) => b.y));
-    const right = Math.max(...bounds.map((b) => b.x + b.width)),
-      bottom = Math.max(...bounds.map((b) => b.y + b.height));
+  // Concept labels stay between these rendered sizes when the view focuses on
+  // a set of concepts. The zoom percentage alone cannot promise this: the
+  // volume maps are laid out at different scales, so 500% gave 14 px labels in
+  // one volume and 22 px in another (measured 2026-11-16).
+  const LABEL_MIN_PX = 12,
+    LABEL_MAX_PX = 15;
+  let pendingFocus = null;
+  // Show the concepts in `ids`. When they all fit with readable labels, fit
+  // them. When they do not, stay at the smallest readable size and open on the
+  // part of the map holding the most `priority` concepts (a chapter's taught
+  // ones), counting the rest of `ids` as a tiebreaker. Centering on the whole
+  // set instead can land between two clusters and show none of them.
+  // With keepZoom, only pan: used to locate one concept at the current size.
+  function focusNodes(ids, priority = null, keepZoom = false) {
     const svg = $("concept-map").querySelector("svg"),
       frame = document.querySelector(".map-frame");
+    if (!svg || !frame) return;
+    // A folded chapter box has no size yet; focus once the reader opens it.
+    if (!frame.clientWidth || !svg.getBoundingClientRect().width) {
+      pendingFocus = [ids, priority, keepZoom];
+      return;
+    }
+    pendingFocus = null;
+    const nodes = ids
+      .map((id) => ({ id, el: nodeElement(id) }))
+      .filter((n) => n.el)
+      .map((n) => ({ ...n, b: n.el.getBBox() }));
+    if (!nodes.length) return;
+    // Rendered pixels per SVG unit at zoom 1, and the label size those give.
     const view = svg.viewBox.baseVal;
-    const target = Math.min(
-      5,
-      Math.max(1.5, view.width / Math.max(300, right - left + 180)),
-    );
-    setZoom(target);
+    const unitPx = svg.getBoundingClientRect().width / view.width / zoom;
+    const fontUnits = parseFloat(svg.querySelector("g.node text")?.getAttribute("font-size")) || 16;
+    const lo = LABEL_MIN_PX / (fontUnits * unitPx),
+      hi = LABEL_MAX_PX / (fontUnits * unitPx);
+    const availW = frame.clientWidth - 24,
+      availH = frame.clientHeight - 24;
+    const pad = 32 / (unitPx * lo); // about 32 px of margin at the readable floor
+    const boundsAll = (list) => ({
+      left: Math.min(...list.map((n) => n.b.x)),
+      top: Math.min(...list.map((n) => n.b.y)),
+      right: Math.max(...list.map((n) => n.b.x + n.b.width)),
+      bottom: Math.max(...list.map((n) => n.b.y + n.b.height)),
+    });
+    const fitOf = (b) =>
+      Math.min(
+        availW / ((b.right - b.left + 2 * pad) * unitPx),
+        availH / ((b.bottom - b.top + 2 * pad) * unitPx),
+      );
+    let box = boundsAll(nodes);
+    const fit = fitOf(box);
+    if (keepZoom) {
+      // pan only
+    } else if (fit >= lo) {
+      setZoom(Math.min(hi, fit));
+    } else {
+      setZoom(lo);
+      // The window the frame shows at this zoom, in SVG units.
+      const winW = availW / (unitPx * zoom) - 2 * pad,
+        winH = availH / (unitPx * zoom) - 2 * pad;
+      const first = new Set(priority?.length ? priority : ids);
+      const inside = (n, cx, cy) =>
+        n.b.x >= cx - winW / 2 && n.b.x + n.b.width <= cx + winW / 2 &&
+        n.b.y >= cy - winH / 2 && n.b.y + n.b.height <= cy + winH / 2;
+      let best = null;
+      // Try windows anchored on each concept, at its center and with it at
+      // each corner, so a cluster can sit wholly inside one window.
+      for (const n of nodes) {
+        const cx0 = n.b.x + n.b.width / 2,
+          cy0 = n.b.y + n.b.height / 2;
+        const dx = winW / 2 - n.b.width / 2,
+          dy = winH / 2 - n.b.height / 2;
+        for (const [cx, cy] of [[cx0, cy0], [cx0 + dx, cy0 + dy], [cx0 - dx, cy0 + dy], [cx0 + dx, cy0 - dy], [cx0 - dx, cy0 - dy]]) {
+          const shown = nodes.filter((m) => inside(m, cx, cy));
+          const score = shown.reduce((s, m) => s + (first.has(m.id) ? 1000 : 1), 0);
+          if (!best || score > best.score) best = { score, shown };
+        }
+      }
+      // Center on the priority concepts in that window, not on everything in
+      // it, so they open mid-frame rather than at an edge.
+      const core = best.shown.filter((m) => first.has(m.id));
+      box = boundsAll(core.length ? core : best.shown.length ? best.shown : nodes);
+    }
+    const { left, top, right, bottom } = box;
+    const elements = nodes.map((n) => n.el);
     const frameBox = frame.getBoundingClientRect();
     const matrix = elements[0].getScreenCTM();
     const point = svg.createSVGPoint();
@@ -359,8 +482,14 @@
           }
         };
       });
-      zoom = 1;
-      setZoom(zoom);
+      zoomMode = "initial";
+      refit();
+      const frame0 = document.querySelector(".map-frame");
+      // Open on the middle of the map, where the volume's hub concepts sit.
+      frame0.scrollTo({
+        left: Math.max(0, (frame0.scrollWidth - frame0.clientWidth) / 2),
+        top: Math.max(0, (frame0.scrollHeight - frame0.clientHeight) / 2),
+      });
       renderIndex();
       renderChecks();
       renderCoverage();
@@ -378,14 +507,15 @@
     }
   }
   $("return-overview").onclick = () => { const back = returnDestination(); if (back) loadMap(back.map, back.concept); };
-  $("zoom-in").onclick = () => setZoom(zoom + 0.25);
-  $("zoom-out").onclick = () => setZoom(zoom - 0.25);
+  $("zoom-in").onclick = () => setZoom(zoom * 1.25);
+  $("zoom-out").onclick = () => setZoom(zoom / 1.25);
   $("zoom-fit").onclick = () => {
-    setZoom(1);
+    zoomMode = "fit";
+    refit();
     document.querySelector(".map-frame").scrollTo({ left: 0, top: 0 });
   };
   $("expand-map").hidden = window.parent === window;
-  new ResizeObserver(() => setZoom(zoom)).observe(
+  new ResizeObserver(refit).observe(
     document.querySelector(".map-frame"),
   );
   $("map-selector").onchange = () => navigateMap($("map-selector").value);
