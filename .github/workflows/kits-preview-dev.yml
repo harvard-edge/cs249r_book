@@ -8,12 +8,12 @@ name: '📦 Kits · 👁️ Preview (Dev)'
 # preview site via SSH.
 #
 # Flow:
-#   1. BUILD_PDF    — Compile Hardware Kits PDF (reusable workflow)
+#   1. VALIDATE     — kits-validate-dev.yml, which also builds the PDF artifact
 #   2. BUILD_SITE   — Quarto render + inject PDF into site
 #   3. DEPLOY       — Push to dev preview repo via SSH
 #
 # Triggers:
-#   - push: dev branch, kits/** paths
+#   - push: dev branch, kits/** paths or this workflow file
 #   - workflow_dispatch: manual
 #
 # Deploys to: harvard-edge.github.io/{DEV_REPO}/{DEV_KITS_PATH}/
@@ -33,6 +33,7 @@ on:
     branches: [dev]
     paths:
       - 'kits/**'
+      - '.github/workflows/kits-preview-dev.yml'
 
 permissions:
   contents: read
@@ -46,23 +47,25 @@ jobs:
   # Run the full validate-dev workflow inline. Deploy depends on it so
   # Preview can never deploy on a SHA where validate failed (the bug
   # this gating closes is the screenshot pattern of "Preview ✅ but
-  # Validate ❌ on the same SHA"). Validate runs in parallel with
-  # build-pdf, so wall-clock impact is small.
+  # Validate ❌ on the same SHA").
+  #
+  # Validate also builds the PDF (its build-pdf job calls
+  # kits-build-pdfs.yml) and uploads the Kits-PDF artifact into this
+  # run, so deploy downloads that artifact instead of building it again.
+  # 2026-11-23: a second, separate build-pdf job here was cancelled on
+  # every run since at least 2026-10-24. Inside workflow_call,
+  # kits-build-pdfs.yml's concurrency group `${{ github.workflow }}-
+  # ${{ github.ref }}` resolves to the caller's name, so both PDF calls
+  # in one Preview run shared a group and one always cancelled the other,
+  # which cancelled the run and skipped the deploy.
   validate:
     name: '✅ Validate (Dev)'
     uses: ./.github/workflows/kits-validate-dev.yml
 
-  # Build PDF first
-  build-pdf:
-    name: '📚 Build PDF'
-    uses: ./.github/workflows/kits-build-pdfs.yml
-    with:
-      ref: ${{ github.ref }}
-
   build-and-deploy:
     name: '📦 Build & Deploy Kits (Dev)'
     runs-on: ubuntu-latest
-    needs: [validate, build-pdf]
+    needs: [validate]
 
     steps:
       - name: 📥 Checkout
