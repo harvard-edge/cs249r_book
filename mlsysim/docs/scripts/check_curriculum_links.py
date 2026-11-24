@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate all textbook chapter, interactive lab, slide, and solver links in mlsysim/docs/.
+"""Validate all textbook chapter, study sheet, slide, and solver links in mlsysim/docs/.
 
 Checks:
   1. Every volume/chapter entry in ``config/curriculum_links.yml`` matches the
