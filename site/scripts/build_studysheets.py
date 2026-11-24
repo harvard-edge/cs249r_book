@@ -3,12 +3,16 @@
 
 The list comes from the study-sheet manifest (books/shared/studysheet/build.py --manifest),
 so the page lists exactly the volumes and chapters published to the studysheets-latest
-release. Only LIVE_VOLUMES appear. Output: site/studysheets/_sheets.md (generated, gitignored).
+release. Only LIVE_VOLUMES appear. Output: site/studysheets/_sheets.md.
+
+The output is committed as well as regenerated: Quarto resolves {{< include >}} before
+pre-render runs, so a clean checkout without the file fails to render (2026-11-24).
 """
 
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -61,4 +65,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    if os.environ.get("TAXONOMY_ONLY") != "1":
+        main()
