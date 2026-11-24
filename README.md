@@ -476,7 +476,7 @@ What a textbook provides is perspective and a coherent mental model: the order i
 
 Bruce Davie made this point in his essay [“Textbooks in Tokenland”](https://systemsapproach.org/2026/06/01/textbooks-in-tokenland/) (Systems Approach). A language model generates text without communicative intent, he writes, while a textbook is a deliberate path from a teacher to a student toward a shared understanding of how the world works.
 
-The two are not in opposition. The book provides the structure and the quantitative argument, and interactive tools let a reader test that understanding. The Marimo labs ask a reader to predict an outcome and then check it, and the SocratiQ tutor answers questions about the page being read.
+The two are not in opposition. The book provides the structure and the quantitative argument, and interactive tools let a reader test that understanding. The study sheets give each chapter practice questions with answers to check against, and the SocratiQ tutor answers questions about the page being read.
 
 </details>
 
