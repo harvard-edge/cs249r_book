@@ -62,7 +62,6 @@ const SITES = [
   ["vol2",        "book/vol2/",      "vol2/",           true],
   ["tinytorch",   "tinytorch/",      "tinytorch/",      true],
   ["kits",        "kits/",           "kits/",           true],
-  ["labs",        "labs/",           "labs/",           true],
   ["mlsysim",     "mlsysim/",        "mlsysim/",        true],
   ["slides",      "slides/",         "slides/",         false],
   ["instructors", "instructors/",    "instructors/",    true],

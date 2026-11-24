@@ -51,7 +51,6 @@
   <br>
   <b><a href="https://mlsysbook.ai/tinytorch/">🔥 TinyTorch</a></b> •
   <b><a href="https://mlsysbook.ai/mlsysim/">🔮 MLSys·im</a></b> •
-  <b><a href="https://mlsysbook.ai/labs/">🔬 Labs</a></b> •
   <b><a href="https://mlsysbook.ai/kits/">🧰 Kits</a></b>
   <br>
   <b><a href="https://mlsysbook.ai/slides/">📊 Slides</a></b> •
@@ -264,11 +263,11 @@ Around the textbook sit the companion tools that let students build, measure, an
       <td><a href="https://mlsysbook.ai/kits/">Browse kits</a> · <a href="kits/README.md">Repo guide</a></td>
     </tr>
     <tr>
-      <td align="center">🔬</td>
-      <td><b>Labs</b></td>
-      <td>Interactive Marimo notebooks, run in the browser, that pair with textbook chapters. A student predicts an outcome, changes a parameter, and sees what breaks.</td>
-      <td>Early release, built in the open</td>
-      <td><a href="https://mlsysbook.ai/labs/">Try labs</a> · <a href="labs/README.md">Repo guide</a></td>
+      <td align="center">📝</td>
+      <td><b>Study Sheets</b></td>
+      <td>A two-page printable sheet for every chapter: the key ideas on the front, practice on the back.</td>
+      <td>Volumes I and II</td>
+      <td><a href="https://mlsysbook.ai/vol1/backmatter/studysheets.html">Volume I</a> · <a href="https://mlsysbook.ai/vol2/backmatter/studysheets.html">Volume II</a></td>
     </tr>
     <tr>
       <td align="center">💼</td>
@@ -323,7 +322,7 @@ Where to begin depends on what you want from the curriculum.
       <td align="center">📖</td>
       <td><b>A student or self-learner</b></td>
       <td><a href="https://mlsysbook.ai/vol1/">Read Volume I</a></td>
-      <td>Build <a href="https://mlsysbook.ai/tinytorch/">TinyTorch</a>, model systems with <a href="https://mlsysbook.ai/mlsysim/">MLSys·im</a>, try the <a href="https://mlsysbook.ai/labs/">labs</a> (early release), and practice with <a href="https://mlsysbook.ai/staffml/">StaffML</a></td>
+      <td>Build <a href="https://mlsysbook.ai/tinytorch/">TinyTorch</a>, model systems with <a href="https://mlsysbook.ai/mlsysim/">MLSys·im</a>, review each chapter with the <a href="https://mlsysbook.ai/vol1/backmatter/studysheets.html">study sheets</a>, and practice with <a href="https://mlsysbook.ai/staffml/">StaffML</a></td>
     </tr>
     <tr>
       <td align="center">🎓</td>
@@ -562,9 +561,9 @@ If this curriculum has helped you, there are two simple ways to help it grow.
     </tr>
     <tr>
       <td align="center">🔬</td>
-      <td><b>Labs and MLSys·im</b></td>
-      <td>Improve the interactive labs or the simulator&#39;s hardware and model data.</td>
-      <td><a href="labs/README.md">Labs guide</a> · <a href="mlsysim/README.md">MLSys·im guide</a></td>
+      <td><b>MLSys·im</b></td>
+      <td>Improve the simulator&#39;s hardware and model data.</td>
+      <td><a href="mlsysim/README.md">MLSys·im guide</a></td>
     </tr>
     <tr>
       <td align="center">💼</td>

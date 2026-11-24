@@ -1,4 +1,4 @@
-"""Render validated cross-chapter, lab, and slide links for MLSys·im docs.
+"""Render validated cross-chapter, study-sheet, and slide links for MLSys·im docs.
 
 Reads ``mlsysim/docs/config/curriculum_links.yml`` and emits clean HTML/Markdown
 components that respect the ecosystem ``.mls-unreleased`` release gate:
@@ -52,8 +52,13 @@ def resolve_chapter(ref: str) -> dict[str, Any]:
         "num": num,
         "title": ch["title"],
         "book_url": f"{vol['book_base']}/{slug}/{slug}.html",
-        "lab_slug": ch["lab"],
-        "lab_url": f"{vol['labs_base']}/{ch['lab']}/",
+        # Labs retired from the live site on 2026-11-24; each chapter now
+        # points at its study sheet, the same release file the book links.
+        "sheet_url": (
+            "https://github.com/harvard-edge/cs249r_book/releases/download/"
+            f"{'studysheets-latest' if vol['released'] else 'studysheets-dev'}/"
+            f"{vol_key}_{slug.split('_', 1)[1]}_studysheet.pdf"
+        ),
         "slides_url": f"{vol['slides_page']}#ch-{num:02d}",
     }
 
@@ -121,7 +126,7 @@ def render_tutorial_links(tutorial_key: str, *, map_href: str = "../curriculum-m
             f'<div class="sim-curr-actions">'
             f'<a href="{ch["book_url"]}">Read Chapter →</a>'
             f'<span class="sim-curr-dot">·</span>'
-            f'<a href="{ch["lab_url"]}">Interactive Lab</a>'
+            f'<a href="{ch["sheet_url"]}">Study Sheet</a>'
             f'<span class="sim-curr-dot">·</span>'
             f'<a href="{ch["slides_url"]}">Slides</a>'
             f"</div>"
@@ -173,7 +178,7 @@ def render_threads_cards(*, docs_prefix: str = "") -> str:
                 f'<div class="sim-curr-actions">'
                 f'<a href="{ch["book_url"]}">Chapter</a>'
                 f'<span class="sim-curr-dot">·</span>'
-                f'<a href="{ch["lab_url"]}">Lab</a>'
+                f'<a href="{ch["sheet_url"]}">Study sheet</a>'
                 f'<span class="sim-curr-dot">·</span>'
                 f'<a href="{ch["slides_url"]}">Slides</a>'
                 f"</div>"
@@ -298,7 +303,7 @@ def render_volume_tables(*, docs_prefix: str = "") -> str:
                 f"<tr>"
                 f"<td><code>{ch['num']:02d}</code></td>"
                 f'<td><a href="{ch["book_url"]}"><strong>{html.escape(ch["title"])}</strong></a></td>'
-                f'<td><a href="{ch["lab_url"]}">Lab {ch["num"]:02d}</a> · '
+                f'<td><a href="{ch["sheet_url"]}">Study sheet</a> · '
                 f'<a href="{ch["slides_url"]}">Slides</a></td>'
                 f"<td>{solver_links}</td>"
                 f"<td>{guide_links}</td>"
@@ -308,7 +313,7 @@ def render_volume_tables(*, docs_prefix: str = "") -> str:
             f'<h3>{html.escape(vol_data["full_title"])}</h3>\n'
             '<table class="table table-sm">\n'
             "<thead><tr>"
-            "<th>Ch</th><th>Textbook Chapter</th><th>Lab &amp; Slides</th>"
+            "<th>Ch</th><th>Textbook Chapter</th><th>Study Sheet &amp; Slides</th>"
             "<th>Key Solvers</th><th>MLSys·im Guide / Zoo</th>"
             "</tr></thead>\n"
             "<tbody>\n" + "\n".join(rows) + "\n</tbody>\n</table>"
