@@ -1,1 +1,0 @@
-import{t as e}from"./factor-ZZBBZpXK.js";export{e as factor};

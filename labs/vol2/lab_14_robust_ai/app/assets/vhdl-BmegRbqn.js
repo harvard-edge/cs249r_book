@@ -1,1 +1,0 @@
-import{t as e}from"./vhdl-sLYad3YP.js";export{e as vhdl};

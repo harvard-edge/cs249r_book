@@ -1,1 +1,0 @@
-import{t as e}from"./objects-snlMn4yk.js";function t(e){if(typeof e==`object`&&e){if(`width`in e)return e.width;if(`spec`in e)return t(e.spec)}}function n(t,{parseDates:n=!1}={}){return!t||Object.keys(t).length===0?`auto`:e.mapValues(t,e=>e===`geometry`?`string`:e===`date`?n?`date`:`string`:e===`time`?`string`:e===`datetime`?`date`:e)}export{n,t};

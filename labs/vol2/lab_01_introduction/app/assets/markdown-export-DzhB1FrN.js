@@ -1,1 +1,0 @@
-var e={pymdown:`md`,qmd:`qmd`,mystmd:`myst.md`,mdx:`mdx`},t=[`.myst.md`,`.markdown`,`.qmd`,`.mdx`,`.md`],n=`pymdown`;export{e as n,t as r,n as t};

@@ -1,1 +1,0 @@
-import{t as e}from"./pascal-DBfxUwpj.js";export{e as pascal};

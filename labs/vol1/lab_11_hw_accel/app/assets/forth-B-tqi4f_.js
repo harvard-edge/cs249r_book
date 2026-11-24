@@ -1,1 +1,0 @@
-import{t as e}from"./forth-DUDizG3o.js";export{e as forth};

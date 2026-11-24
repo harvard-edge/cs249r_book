@@ -1,1 +1,0 @@
-import{t as e}from"./coffeescript-CcHmp8ZW.js";export{e as coffeeScript};

@@ -1,1 +1,0 @@
-import{t as e}from"./mumps-BNg2Yq-1.js";export{e as mumps};

@@ -1,1 +1,0 @@
-import{t as e}from"./gas-mybzrfIH.js";export{e as gas};

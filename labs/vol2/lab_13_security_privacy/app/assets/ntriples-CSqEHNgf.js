@@ -1,1 +1,0 @@
-import{t as e}from"./ntriples-Ck5rp6GE.js";export{e as ntriples};

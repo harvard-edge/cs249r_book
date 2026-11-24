@@ -1,1 +1,0 @@
-import{f as e}from"./useEvent-Dfcbgjhg.js";import{P as t,j as n}from"./schemas-Dv42wLFq.js";var r=n({command:t(),templates:n({prompt:t(),session:t(),token_file:t(),token:t()})}),i=e(void 0);export{r as n,i as t};

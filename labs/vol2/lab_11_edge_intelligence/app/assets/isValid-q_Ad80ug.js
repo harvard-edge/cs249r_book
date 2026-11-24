@@ -1,1 +1,0 @@
-import{t as e}from"./toDate-DOj9Q6uC.js";function t(e){return e instanceof Date||typeof e==`object`&&Object.prototype.toString.call(e)===`[object Date]`}function n(n){return!(!t(n)&&typeof n!=`number`||isNaN(+e(n)))}export{n as t};

@@ -1,1 +1,0 @@
-import{t as e}from"./webidl-CNY2gQL0.js";export{e as webIDL};
