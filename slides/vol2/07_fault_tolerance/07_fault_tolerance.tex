@@ -550,7 +550,7 @@
   \mlsyscredit{Code: PyTorch 2.11, torch/distributed/checkpoint/filesystem.py, abridged. Trace: dcp\_trace.py in this deck's images folder, 4 CPU ranks, gloo; file times relative to the first shard.}
   \note{%
     \mlsysnotemeta{2.5 min}{Optional}%
-    Production frameworks enforce that two-phase rule directly in the file system. In Lecture 4's PyTorch Distributed Checkpoint, \texttt{FileSystemWriter.finish} writes \texttt{.metadata.tmp}, calls \texttt{os.fsync} to flush bytes to durable storage, and only then executes a POSIX-atomic \texttt{rename} (an all-or-nothing operating-system rename) to \texttt{.metadata}. Readers therefore see either no manifest or a complete one. A measured four-rank CPU trace confirms that ordering, with all four 12.6 MB shard files finishing within 3.3 ms and the 2,280-byte \texttt{.metadata} manifest landing last at 24.4 ms. Killing the job at 10 ms leaves four shard files without a manifest, so restore safely rejects the incomplete generation.
+    Production frameworks enforce that two-phase rule directly in the file system. In Lecture 4's PyTorch Distributed Checkpoint (DCP), \texttt{FileSystemWriter.finish} writes \texttt{.metadata.tmp}, calls \texttt{os.fsync} to flush bytes to durable storage, and only then executes a POSIX-atomic \texttt{rename} (an all-or-nothing operating-system rename) to \texttt{.metadata}. Readers therefore see either no manifest or a complete one. A measured four-rank CPU trace confirms that ordering, with all four 12.6 MB shard files finishing within 3.3 ms and the 2,280-byte \texttt{.metadata} manifest landing last at 24.4 ms. The trace coordinates those CPU ranks with \texttt{gloo}, PyTorch's CPU collective communication backend. Killing the job at 10 ms leaves four shard files without a manifest, so restore safely rejects the incomplete generation.
 
     \notecue{Watch for}{This laptop trace proves ordering only. A real 2.45 TB fleet save is bounded by shared storage bandwidth.}
 
@@ -665,13 +665,13 @@
   \mlsyssteps[width=0.92\textwidth,height=3.45cm,keepaspectratio]{straggler_step}{2}\\[0.08cm]
   {\normalsize\only<1|handout:0>{\choice{A}{99.9\%}\quad\choice{B}{90\%}\quad\choice{C}{50\%}\quad\choice{D}{0\%}}%
   \uncover<2->{\textbf{C.} 1 step per 2 s: \textbf{50\%}, about \$1,024 per hour idle at \$2 per GPU-hour.}}\\[0.1cm]
-  {\small\uncover<3->{Replace when $n\,(T_{\text{slow}} - T_{\text{healthy}}) > T_{\text{restart}} + T_{\text{replay}}$ for the $n$ steps the slowdown lasts.}}
+  {\small\uncover<3->{Replace when $n\,(T_{\text{slow}} - T_{\text{healthy}}) > T_{\text{restart}} + T_{\text{load}} + T_{\text{warmup}} + T_{\text{replay}}$ ($n$ slow steps).}}
   \mlsyscredit{Fault Tolerance, Napkin Math 7.4 (1,024 GPUs, 1 s step, compute-bound) and \S7.9.5.}
   \note{%
     \mlsysnotemeta{2.5 min}{Core}%
     Recall from Lecture 3 that a gray failure is slow or erratic degradation escaping liveness checks. In Napkin Math 7.4, one GPU of 1,024 thermally throttles (cuts clock speed from heat) to half speed while still answering heartbeats. Predict the job's throughput from A through D.
 
-    \notecue{Check}{The answer is C, 50\% throughput. Because synchronous collectives wait for the slowest rank, each 1-second step takes 2 seconds as 1,023 healthy GPUs idle at AllReduce, burning about \$1,024/hour in idle compute at \$2/GPU-hour (Lecture 6's barrier math). A tempting answer is A (99.9\%) because one GPU is 0.1\% of the hardware, yet tight coupling turns a 2$\times$ local slowdown into a 2$\times$ fleet slowdown. Replace when $n(T_{\text{slow}} - T_{\text{healthy}})$ exceeds $T_{\text{restart}} + T_{\text{replay}}$, where $T_{\text{restart}}$ stands for post-detection $T_{\text{recovery}}$ (restart, load, warmup) and $T_{\text{replay}}$ is checkpoint rework, avoiding premature restarts on brief stalls.}
+    \notecue{Check}{The answer is C, 50\% throughput. Because synchronous collectives wait for the slowest rank, each 1-second step takes 2 seconds as 1,023 healthy GPUs idle at AllReduce, burning about \$1,024/hour in idle compute at \$2/GPU-hour (Lecture 6's barrier math). A tempting answer is A (99.9\%) because one GPU is 0.1\% of the hardware, yet tight coupling turns a 2$\times$ local slowdown into a 2$\times$ fleet slowdown. Replace when $n(T_{\text{slow}} - T_{\text{healthy}})$ exceeds $T_{\text{restart}} + T_{\text{load}} + T_{\text{warmup}} + T_{\text{replay}}$, combining the post-detection terms of $T_{\text{recovery}}$ with checkpoint rework $T_{\text{replay}}$, avoiding premature restarts on brief stalls.}
 
     \notecue{Watch for}{Heartbeats miss gray failures. Operators must monitor per-rank step progress alongside liveness.}
 
